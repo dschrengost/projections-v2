@@ -1,0 +1,1 @@
+Before delivering work: ensure relevant unit tests pass via `uv run pytest`; run `uv run ruff check` if you touched Python files; summarize changes and mention any follow-up steps. Keep datasets/configs untouched unless required.

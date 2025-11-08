@@ -1,0 +1,44 @@
+[project]
+name = "projections-v2"
+version = "0.1.0"
+description = "Maintainable NBA minutes prediction pipeline scaffolding."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Daniel Schrengost" }
+]
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "scikit-learn>=1.5",
+  "xgboost>=2.0",
+  "torch>=2.2",
+  "pyyaml>=6.0",
+  "pydantic>=2.7",
+  "typer>=0.12",
+  "rich>=13.7"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.5"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["projections"]
+
+[tool.uv]
+dev-dependencies = [
+  "pytest>=8.2",
+  "ruff>=0.5"
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["."]
+testpaths = ["tests"]

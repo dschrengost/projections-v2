@@ -1,0 +1,4 @@
+- Code uses modern Python typing (PEP 604 unions, typed dicts) and dataclasses where helpful; docstrings are short triple-quoted summaries atop functions/classes.
+- Utilities prefer pathlib `Path`, explicit errors, and UTF-8 file handling.
+- Tests use pytest with deterministic, fast-running units; keep dependencies light.
+- Follow Ruff/PEP 8 defaults; keep modules small and purpose-driven (data ops in `projections/data.py`, etc.).

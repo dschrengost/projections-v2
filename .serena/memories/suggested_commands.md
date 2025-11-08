@@ -1,0 +1,6 @@
+- `uv sync`: create/refresh the virtualenv and install deps.
+- `source .venv/bin/activate` (or the shell hint uv prints) to enter the env.
+- `uv run pytest`: run the unit suite.
+- `uv run ruff check`: lint/format check.
+- `uv run python -m projections.train classical-minutes --raw-filename <csv>`: run classical pipeline.
+- `uv run python -m projections.train deep-minutes --input-size <n>`: run deep-learning pipeline.

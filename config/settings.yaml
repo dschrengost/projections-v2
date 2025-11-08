@@ -1,0 +1,45 @@
+# Default configuration for the projections training pipeline.
+
+seed: 42
+data_dir: data
+data:
+  raw_dir: data/raw
+  external_dir: data/external
+  interim_dir: data/interim
+  processed_dir: data/processed
+
+pipeline:
+  columns_to_keep:
+    - player_id
+    - player_name
+    - team
+    - opponent
+    - game_date
+    - minutes
+  interim_filename: clean_minutes.csv
+
+features:
+  group_by:
+    - player_id
+  rolling_windows: [3, 5, 10]
+  drop_columns:
+    - player_name
+    - team
+    - opponent
+    - game_date
+
+targets:
+  minutes_col: minutes
+
+training:
+  validation_size: 0.2
+  xgboost:
+    n_estimators: 400
+    max_depth: 6
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+  deep:
+    hidden_size: 64
+    num_layers: 1
+    dropout: 0.1

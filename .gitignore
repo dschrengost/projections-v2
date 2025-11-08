@@ -1,0 +1,30 @@
+# Bytecode / caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Environments
+.venv/
+.env
+.env.*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Data + model artifacts (retain placeholders)
+data/raw/*
+data/external/*
+data/interim/*
+data/processed/*
+!data/raw/.gitkeep
+!data/external/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
+models/*
+!models/.gitkeep
+
+notebooks/.ipynb_checkpoints/

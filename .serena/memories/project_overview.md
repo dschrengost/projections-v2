@@ -1,0 +1,4 @@
+- Purpose: maintainable NBA player minutes prediction pipeline with clear DS-style separation between configs, data tiers, reusable Python modules, notebooks, and tests.
+- Stack: Python 3.11+, numpy/pandas/scikit-learn/xgboost/torch for modeling, Typer CLI entry points, Pydantic for config validation; uv manages dependencies; pytest and ruff for dev tooling.
+- Layout: `projections/` package holds reusable code (data, features, models, train/evaluate CLIs, utils). `config/` contains YAML/TOML experiment settings, `data/` hosts raw/external/interim/processed tiers, `models/` stores artifacts, `notebooks/` for EDA, `tests/` mirrors package structure, `scrapers/` (new work) for data ingestion. Repo root has `pyproject.toml`, `uv.lock`, README.
+- Entry CLI: `uv run python -m projections.train <command>` for pipelines (e.g., `classical-minutes`, `deep-minutes`).
