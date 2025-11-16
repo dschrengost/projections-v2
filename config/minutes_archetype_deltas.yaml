@@ -1,0 +1,4 @@
+# Default thresholds for archetype delta aggregation.
+min_present_games: 50
+min_missing_games: 15
+max_abs_delta_per_missing: 12.0

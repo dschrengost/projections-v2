@@ -1,0 +1,13 @@
+date: 2025-11-14T00:00:00+00:00
+end_date: 2025-11-15T00:00:00+00:00
+mode: live
+run_id: 20251115T043815Z
+features_path: data/live/features_minutes_v1/2025-11-14/run=20251115T043815Z/features.parquet
+bundle_config: config/minutes_current_run.json
+artifact_root: artifacts/minutes_v1/daily
+minutes_output: both
+promotion_prior_enabled: true
+promotion_prior_debug: false
+reconcile_team_minutes: p50
+reconcile_config: config/minutes_l2_reconcile.yaml
+reconcile_debug: false
