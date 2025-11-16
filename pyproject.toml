@@ -21,6 +21,10 @@ dependencies = [
   "pandera>=0.26.1",
   "cvxpy>=1.7.3",
   "pyarrow>=10.0.1",
+  "tabula>=1.0.5",
+  "httpx>=0.28.1",
+  "tabula-py>=2.10.0",
+  "pypdf2>=3.0.1",
 ]
 
 [project.optional-dependencies]
