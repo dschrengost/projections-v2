@@ -770,7 +770,6 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
     { name = "scikit-learn" },
-    { name = "tabula" },
     { name = "tabula-py" },
     { name = "torch" },
     { name = "typer" },
@@ -805,7 +804,6 @@ requires-dist = [
     { name = "rich", specifier = ">=13.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
     { name = "scikit-learn", specifier = ">=1.5" },
-    { name = "tabula", specifier = ">=1.0.5" },
     { name = "tabula-py", specifier = ">=2.10.0" },
     { name = "torch", specifier = ">=2.2" },
     { name = "typer", specifier = ">=0.12" },
@@ -1333,16 +1331,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
 ]
-
-[[package]]
-name = "tabula"
-version = "1.0.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "setuptools" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/bf/b2084620900655a8c080af9873cc654a8a2b0d7a5a111ca4ba947cd9717d/tabula-1.0.5.tar.gz", hash = "sha256:b48ddacac12934a0d316ccb27d51b0895caa766ab312053587d6de5f495fe288", size = 9490, upload-time = "2012-11-01T20:50:21.685Z" }
 
 [[package]]
 name = "tabula-py"
