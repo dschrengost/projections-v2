@@ -18,6 +18,7 @@ dependencies = [
   "typer>=0.12",
   "rich>=13.7",
   "lightgbm>=4.6.0",
+  "pandera>=0.26.1",
 ]
 
 [project.optional-dependencies]
