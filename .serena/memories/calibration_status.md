@@ -1,0 +1,5 @@
+- Added strict physical support clamps (0 <= minutes <= 48) in `apply_conformal` for all modes; the clamp re-runs final non-crossing and is also honored during the two-sided grid search so coverage/winkler are evaluated on the same bounded intervals that get served.
+- Two fresh walks were run with the clamps:
+  - `wf_2024-12_fold2_twoS_10d_k600_clamped2` (train 12/8-12/24, cal 10d, starter×p50 buckets, k=600, two-sided) now reports overall p10≈0.411, p90≈0.935, Winkler≈18.6. Bench|<8 p10 surged to ≈0.79 because 39% of validation rows truly have minutes=0 once OUT/DNP players are included, so bounding p10 at 0 reveals the underlying play-prob mismatch.
+  - `wf_2024-12_fold2_twoS_10d_k600_clamped` (same config, earlier bundle) shows the same phenomenon.
+- Key takeaway: with the physical clamp enforced, the current single-head quantile model cannot hit the 0.10/0.90 targets because ~39% of validation rows are deterministic zeros. Hitting the guardrails now requires either filtering OUT players before calibration/validation or adding a play-prob × minutes-given-play head; penalty tuning alone cannot overcome the support constraint.

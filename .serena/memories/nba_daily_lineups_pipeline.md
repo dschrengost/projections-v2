@@ -1,0 +1,4 @@
+# NBA daily lineups integration (Nov 2025)
+- Added a stats.nba.com lineup scraper + CLI: `uv run python -m projections.scrape nba-daily-lineups --date YYYY-MM-DD --out data/raw/nba_daily_lineups/<date>.json`. The normalized parquet default lives under `data/silver/nba_daily_lineups/season=YYYY/date=YYYY-MM-DD/lineups.parquet`.
+- `projections.etl.roster_nightly` now accepts `--lineups-dir` (defaults to `data/silver/nba_daily_lineups`) and merges lineup records onto the nightly snapshot, producing `lineup_role/lineup_status/lineup_roster_status/lineup_timestamp` plus booleans `is_projected_starter` and `is_confirmed_starter`.
+- `projections/features/depth.attach_depth_features` carries these lineup fields into gold features; the roster & features schemas/tests expect the new columns.
