@@ -2,32 +2,37 @@
 
 Status snapshot of the current scrapers/ingestors, how they persist bronze/silver/gold data, and how the existing minutes pipeline consumes those artifacts.
 
+## Bronze storage contract
+
+- **Layout:** Every bronze dataset writes to `<data_root>/bronze/<dataset>/season=<season>/date=<YYYY-MM-DD>/<filename>.parquet`.
+- **Filenames:** Defaults live in `projections/etl/storage.py` (e.g., `injuries.parquet`, `odds.parquet`, `roster.parquet`, `daily_lineups_raw.parquet`, `boxscores_raw.parquet`).
+- **Metadata:** Partition DataFrames always contain `date`, `season_start` (or `season`), `ingested_ts`, and `source` columns in addition to dataset-specific fields or JSON payloads (`payload_json` for scrapers that persist the raw API response). Callers can override the bronze root per ETL via `--bronze-root`.
+
 ## Boxscore scraper (NBA.com liveData)
 
 - **Implementation:** `scrapers/nba_boxscore.py` defines `NbaComBoxScoreScraper`, which uses `scrapers.nba_schedule.NbaScheduleScraper` to locate completed games and normalizes each game's team/player JSON payloads into dataclasses.
 - **CLI / entrypoint:** `uv run python -m projections.etl.boxscores --start YYYY-MM-DD --end YYYY-MM-DD --season 2025 [--data-root PATH] [--timeout SECONDS]` (`projections/etl/boxscores.py` via Typer).
 - **Arguments:** start/end date window, `--season` label (partition + hash naming), optional `--data-root` (defaults to `paths.get_data_root()`), and an HTTP timeout.
-- **Outputs / storage:** Instead of a bronze table, the ETL converts the scraped data directly into `boxscore_labels` and writes Parquet to `<data_root>/labels/season=<season>/boxscore_labels.parquet`, updating the immutability hash through `freeze_boxscore_labels`. Format = Parquet partitioned by season.
+- **Outputs / storage:** Bronze JSON snapshots at `<data_root>/bronze/boxscores_raw/season=<season>/date=<YYYY-MM-DD>/boxscores_raw.parquet` (one row per day storing the serialized NBA.com payload). Silver/gold labels at `<data_root>/labels/season=<season>/boxscore_labels.parquet`, updated via `freeze_boxscore_labels`.
 - **Downstream usage:** `projections/cli/build_minutes_live.py` loads these labels for live minutes inference (`labels_default = data_root / "labels" / f"season={season}/boxscore_labels.parquet"`). `projections/cli/build_minutes_roles.py`, archetype delta builders, and `projections/minutes_v1/smoke_dataset.py` also expect the frozen labels. This file is effectively the “gold” label set for both live predictions and offline training.
 - **Notes / assumptions:** There is no persisted “bronze” layer for raw box score JSON. The scraper always queries NBA.com live, so historical backfills must be re-scraped (or supplied via saved JSON to `SmokeDatasetBuilder`). Pipeline callers must ensure they run this after games finish to keep labels fresh.
 
 ## Injury scraper (NBA.com PDF reports)
 
 - **Implementation:** `scrapers/nba_injuries.py` exposes `NBAInjuryScraper`, which downloads the league-issued PDF injury grids every 30 minutes, parses them with Tabula (`TabulaTableReader`), and yields `InjuryRecord` rows. `projections/etl/injuries.py` is the bronze/silver builder.
-- **CLI / entrypoint:** `uv run python -m projections.etl.injuries --injuries-json PATH --schedule 'glob' --start YYYY-MM-DD --end YYYY-MM-DD --season 2025 --month 11 [--data-root PATH] [...]`
-  - There is *not* currently a Typer command wired up for `python -m projections.scrape injuries`; the README references this but `projections/scrape.py` only exposes the Oddstrader command. Today we either run a one-off script that calls `NBAInjuryScraper` and saves JSON, or rely on the historical JSON that `SmokeDatasetBuilder` consumes under `data/raw/`.
-- **Arguments:** JSON input path, optional schedule parquet glob(s) (falls back to live NBA API), start/end, season/month partitions, destination overrides, and timeout knobs for both roster enrichment and schedule fetches.
-- **Outputs / storage:** Bronze Parquet at `<data_root>/bronze/injuries_raw/season=<season>/injuries_<mon>.parquet` (month slugged filename). Silver snapshot at `<data_root>/silver/injuries_snapshot/season=<season>/month=<MM>/injuries_snapshot.parquet`.
+- **CLI / entrypoint:** `uv run python -m projections.etl.injuries --start YYYY-MM-DD --end YYYY-MM-DD --season 2025 --month 11 [--data-root PATH] [--schedule 'glob'] [--use-scraper/--no-use-scraper] [--injuries-json PATH] [--timeout SECONDS] [--injury-timeout SECONDS]`
+- **Arguments:** Optional schedule parquet glob(s) (falls back to live NBA API), date window, season/month partitions, destination overrides, Typer flags for `NBAInjuryScraper` (`--use-scraper` + `--injury-timeout`), and optional `--injuries-json` overrides for debugging/offline sources.
+- **Outputs / storage:** Bronze Parquets partitioned by day at `<data_root>/bronze/injuries_raw/season=<season>/date=<YYYY-MM-DD>/injuries.parquet`. Silver snapshot at `<data_root>/silver/injuries_snapshot/season=<season>/month=<MM>/injuries_snapshot.parquet`.
 - **Downstream usage:** Live minutes builder expects the silver snapshot per season (`projections/cli/build_minutes_live.py` loads `<data_root>/silver/injuries_snapshot/season=<season>`). `SmokeDatasetBuilder` writes/reads the same schema. Any gold features that touch `injury_as_of_ts` or availability flags depend on this bronze→silver pipeline being current.
-- **Notes / assumptions:** Manual JSON step breaks the “single command” flow, and Tabula requires Java + `jpype1`. `TeamResolver` uses schedule parquet (or API fallback) to normalize team IDs before writing. Bronze is month-partitioned while silver is season/month folders with fixed filenames.
+- **Notes / assumptions:** Default behavior scrapes directly (no JSON prerequisite). `--injuries-json` provides a manual override path when re-processing historical outputs or debugging. Tabula requires Java + `jpype1`. Bronze is idempotent per day, while silver remains season/month folders with fixed filenames.
 
 ## Daily lineup scraper (NBA.com probable/confirmed starters)
 
-- **Implementation:** `scrapers/nba_daily_lineups.py` provides `NbaDailyLineupsScraper` plus `normalize_daily_lineups()` that flattens the JSON feed into player-level records with lineup role/status flags and timestamps.
-- **CLI / entrypoint:** README shows an example `uv run python -m projections.scrape nba-daily-lineups --date ... --out ...`, but that Typer command is not currently implemented in `projections/scrape.py`. There is no packaged CLI; to scrape today we must call the scraper module directly (e.g., via a notebook or ad-hoc script) and manually persist the JSON/Parquet.
-- **Outputs / storage:** Normalized DataFrame contains columns such as `game_id`, `team_id`, `player_id`, lineup role/status, and timestamps. README indicates the intended default `silver` location is `<data_root>/silver/nba_daily_lineups/season=<season_start>/date=<YYYY-MM-DD>/lineups.parquet`, with optional raw JSON saved elsewhere if `--out` is provided.
-- **Downstream usage:** `projections/etl/roster_nightly.py` can ingest these Parquets through `--lineups-dir` to enrich roster snapshots with `is_projected_starter`/`is_confirmed_starter` metadata. No other module reads them today because the scraper is not wired into any official ETL.
-- **Notes / assumptions:** Missing CLI + orchestrator = no automated way to guarantee `silver/nba_daily_lineups` exists. The roster ETL tolerates their absence, defaulting to empty columns. This dataset should be treated as bronze (raw JSON) + silver (normalized Parquet) but only the normalization helper exists right now.
+- **Implementation:** `scrapers/nba_daily_lineups.py` provides `NbaDailyLineupsScraper` plus `normalize_daily_lineups()` that flattens the JSON feed into player-level records with lineup role/status flags and timestamps. `projections/etl/daily_lineups.py` runs the bronze→silver ETL.
+- **CLI / entrypoint:** `uv run python -m projections.etl.daily_lineups run --start YYYY-MM-DD --end YYYY-MM-DD --season 2025 [--data-root PATH] [--timeout SECONDS]` writes bronze/silver partitions. For ad-hoc JSON dumps plus ETL, `uv run python -m projections.scrape nba-daily-lineups --start YYYY-MM-DD --end YYYY-MM-DD --season 2025 [--data-root PATH] [--out PATH] [--pretty]`.
+- **Outputs / storage:** Bronze JSON snapshots at `<data_root>/bronze/daily_lineups/season=<season>/date=<YYYY-MM-DD>/daily_lineups_raw.parquet` (one row per day storing payload + metadata). Silver normalization at `<data_root>/silver/nba_daily_lineups/season=<season>/date=<YYYY-MM-DD>/lineups.parquet`.
+- **Downstream usage:** `projections/etl/roster_nightly.py` inspects `<data_root>/silver/nba_daily_lineups` by default to enrich roster snapshots with projected/confirmed starter flags. Other minutes builders can point at the same directory.
+- **Notes / assumptions:** The ETL writes day-level partitions and is idempotent per day. CLI handles fetching/logging; `--out` is optional for debugging payloads while keeping bronze/silver current.
 
 ## Odds scraper (Oddstrader)
 
@@ -36,7 +41,7 @@ Status snapshot of the current scrapers/ingestors, how they persist bronze/silve
   - `uv run python -m projections.scrape oddstrader --start YYYY-MM-DD --end YYYY-MM-DD [--out PATH] [--pretty]` writes optional JSON dumps for inspection.
   - `uv run python -m projections.etl.odds --start ... --end ... --season 2025 --month 11 [--schedule 'glob'] [--data-root PATH] [...]` (`projections/etl/odds.py`) performs the bronze/silver writes directly (it calls the scraper internally, so no JSON prerequisite).
 - **Arguments:** Date window, season/month partitions, optional schedule globs (with API fallback), destination overrides, Oddstrader timeout, and schedule timeout.
-- **Outputs / storage:** Bronze Parquet `<data_root>/bronze/odds_raw/season=<season>/odds_<mon>.parquet`. Silver snapshot `<data_root>/silver/odds_snapshot/season=<season>/month=<MM>/odds_snapshot.parquet`.
+- **Outputs / storage:** Bronze `<data_root>/bronze/odds_raw/season=<season>/date=<YYYY-MM-DD>/odds.parquet` (rows partitioned by the normalized `as_of_ts`). Silver snapshot `<data_root>/silver/odds_snapshot/season=<season>/month=<MM>/odds_snapshot.parquet`.
 - **Downstream usage:** Live minutes builder loads `<data_root>/silver/odds_snapshot/season=<season>` for per-game betting context. Bronze feeds `SmokeDatasetBuilder` and any backfill jobs. CLI also returns JSON when `--out` is set (debug only).
 - **Notes / assumptions:** Bronze files are month-sliced but live builder expects whole-season directories when loading silver data, so the ETL must be idempotent and append-safe. There is no explicit ingestion of other sportsbooks yet—Oddstrader is the single source.
 
@@ -45,9 +50,41 @@ Status snapshot of the current scrapers/ingestors, how they persist bronze/silve
 - **Implementation:** `scrapers/nba_players.py` defines `NbaPlayersScraper`, which scrapes the NBA players landing page (`__NEXT_DATA__`) and returns `PlayerProfile` rows. `projections/etl/roster_nightly.py` orchestrates: it loads schedule parquet, optional bronze roster polls, optional daily lineup Parquets, and can fall back to live `NbaPlayersScraper` when no bronze inputs exist.
 - **CLI / entrypoint:** `uv run python -m projections.etl.roster_nightly --schedule 'glob' --start YYYY-MM-DD --end YYYY-MM-DD --season 2025 --month 11 [--data-root PATH] [--roster 'glob'] [--lineups-dir PATH] [--scrape-missing/--no-scrape-missing] [--roster-timeout SECONDS] ...`.
 - **Arguments:** Schedule inputs (globs or API fallback), optional roster bronze globs, date window, season/month, destination overrides, optional lineup directory (defaults to `<data_root>/silver/nba_daily_lineups`), and timeouts for roster + schedule fetches. `--scrape-missing` controls whether it polls the live NBA players page when parquet inputs are empty.
-- **Outputs / storage:** Bronze `<data_root>/bronze/roster_nightly/season=<season>/month=<MM>/roster_raw.parquet`. Silver `<data_root>/silver/roster_nightly/season=<season>/month=<MM>/roster.parquet`. Schema tracked by `ROSTER_NIGHTLY_RAW_SCHEMA` and validated before write.
+- **Outputs / storage:** Bronze `<data_root>/bronze/roster_nightly_raw/season=<season>/date=<YYYY-MM-DD>/roster.parquet`. Silver `<data_root>/silver/roster_nightly/season=<season>/month=<MM>/roster.parquet`. Schema tracked by `ROSTER_NIGHTLY_RAW_SCHEMA` and validated before write.
 - **Downstream usage:** Live minutes builder loads season directories under `silver/roster_nightly/` (with fallback windows) to build the `roster_slice` for a slate. `SmokeDatasetBuilder` writes the same schema when building offline smoke slices. Lineup metadata (projected starters) only appears when the `nba_daily_lineups` normalization step has populated the corresponding silver folder.
 - **Notes / assumptions:** Bronze is partitioned by season/month but not by day, so daily reruns overwrite the same `roster_raw.parquet`. The ETL enforces `as_of_ts <= tip_ts` and merges daily lineup info when available. Scraper requires schedule parquet for the window to know which teams to poll.
+
+## Live pipeline quick commands
+
+Reference commands for a single slate (assumes `/home/daniel/projections-data` is mounted and schedule parquet globs are available when needed):
+
+```bash
+# Orchestrator (runs all stages sequentially)
+uv run python -m projections.cli.live_pipeline run \
+  --start 2025-11-16 --end 2025-11-16 \
+  --season 2025 --month 11 \
+  --data-root /home/daniel/projections-data
+
+# Injuries ETL (scrape mode, bronze+silver)
+uv run python -m projections.etl.injuries \
+  --start 2025-11-16 --end 2025-11-16 \
+  --season 2025 --month 11 \
+  --data-root /home/daniel/projections-data \
+  --use-scraper
+
+# Daily lineups ETL (bronze+silver per day)
+uv run python -m projections.etl.daily_lineups run \
+  --start 2025-11-16 --end 2025-11-16 \
+  --season 2025 \
+  --data-root /home/daniel/projections-data
+
+# Roster nightly with lineup enrichment, schedule parquet fallback optional
+uv run python -m projections.etl.roster_nightly \
+  --start 2025-11-16 --end 2025-11-16 \
+  --season 2025 --month 11 \
+  --data-root /home/daniel/projections-data \
+  --schedule "/home/daniel/projections-data/silver/schedule/season=2025/*.parquet"
+```
 
 ## Shared schedule + config context
 
@@ -63,20 +100,16 @@ Status snapshot of the current scrapers/ingestors, how they persist bronze/silve
 
 2. **Ad-hoc “live” updates**
    - Operators manually run each ETL in sequence:
-     1. (Missing) Run a script or notebook that instantiates `NBAInjuryScraper` and saves JSON for the target day (expected by `--injuries-json`).
-     2. `uv run python -m projections.etl.injuries ...` to convert that JSON into bronze/silver.
-     3. `uv run python -m projections.etl.odds ...` to refresh odds bronze/silver for the slate window.
-     4. `uv run python -m projections.etl.roster_nightly ...` (optionally pointing at `silver/nba_daily_lineups` if that data exists).
-     5. `uv run python -m projections.etl.boxscores ...` (typically for yesterday) to keep `boxscore_labels.parquet` up to date.
-     6. `uv run python -m projections.cli.build_minutes_live --date YYYY-MM-DD [--data-root ... --out-root ...]` to generate live features / minutes for the slate. This command reads the silver tables produced above and writes outputs under `<out_root>/minutes_live/<YYYY-MM-DD>/`.
-   - There is no single “live pipeline” CLI; each step is triggered manually, and some required scrapers (injuries, daily lineups) lack packaged commands altogether.
+  1. `uv run python -m projections.etl.injuries ...` (scrapes directly, optional `--injuries-json` override).
+  2. `uv run python -m projections.etl.daily_lineups run ...` (or `python -m projections.scrape nba-daily-lineups ...` when a JSON dump is desired).
+  3. `uv run python -m projections.etl.odds ...` to refresh odds bronze/silver for the slate window.
+  4. `uv run python -m projections.etl.roster_nightly ...` (defaults to ingesting `silver/nba_daily_lineups`).
+  5. `uv run python -m projections.etl.boxscores ...` (typically for yesterday) to keep `boxscore_labels.parquet` up to date.
+  6. `uv run python -m projections.cli.build_minutes_live --date YYYY-MM-DD [--data-root ... --out-root ...]` to generate live features / minutes for the slate. This command reads the silver tables produced above and writes outputs under `<out_root>/minutes_live/<YYYY-MM-DD>/`.
+   - There is no single “live pipeline” CLI; each step is triggered manually even though dedicated ETLs now exist for injuries, daily lineups, odds, roster, etc.
 
 ## Pain points & inconsistencies
 
-1. **No turnkey injury or lineup scrapers:** `projections/scrape.py` only exposes the Oddstrader command; the README instructions for `python -m projections.scrape injuries|nba-daily-lineups` do not match the code, forcing ad-hoc scripts for those data sources.
-2. **Manual JSON dependency for injuries:** `projections/etl.injuries` requires `--injuries-json`, while other ETLs fetch data directly. This breaks the “single CLI” story and prevents a straight scrape→bronze run.
-3. **Lineups data is optional/undefined:** There is an expectation of `<data_root>/silver/nba_daily_lineups/...`, but no official CLI produces it. As a result, `roster_nightly` usually runs without projected/confirmed starter info.
-4. **Boxscore “bronze” is missing:** `projections/etl.boxscores` writes straight into the season-level `labels` folder, so we cannot re-derive labels from a canonical bronze dataset or re-run transforms without hitting NBA.com again.
-5. **Data root defaults still point inside the repo:** All CLIs fall back to `<repo>/data` unless `PROJECTIONS_DATA_ROOT` is set or `--data-root` is passed. The desired `/home/daniel/projections-data` location is not codified anywhere yet.
-6. **No single live pipeline orchestrator:** Operators must run 5–6 commands (plus a bespoke injury scrape) in the right order. `projections/cli/build_month` orchestrates smoke/backfill builds but still assumes pre-scraped JSON rather than calling the live scrapers.
-7. **Bronze partitioning varies by source:** injuries/odds write `season=<season>/file_per_month`, roster writes `season=<season>/month=<MM>/roster_raw.parquet`, and there is no bronze folder at all for boxscores/lineups. We'll need to normalize layouts when we standardize on `/home/daniel/projections-data`.
+1. **No single live pipeline orchestrator:** Operators must run several ETLs manually (injuries, daily lineups, odds, roster, etc.). `projections/cli/build_month` handles smoke/backfill flows but still assumes pre-cached JSON and does not call the live scrapers.
+2. **Data root defaults still point inside the repo:** All CLIs fall back to `<repo>/data` unless `PROJECTIONS_DATA_ROOT` is set or `--data-root` is passed. The desired `/home/daniel/projections-data` location is not codified anywhere yet.
+3. **Bronze partitioning was unified for the primary scrapers, but historical backfills still need to be reprocessed to conform to the contract (and boxscore payloads only include the NBA.com JSON today). We'll need to run a one-time migration against `/home/daniel/projections-data` and ensure future “gold rebuilds” rely on bronze rather than cached JSON.**

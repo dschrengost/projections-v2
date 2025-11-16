@@ -19,7 +19,14 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
-import tabula
+try:  # pragma: no cover - import shim
+    from tabula.io import read_pdf as tabula_read_pdf
+except ImportError as exc:  # pragma: no cover - handled at runtime
+    import tabula as _tabula
+
+    if not hasattr(_tabula, "read_pdf"):
+        raise ImportError("tabula-py is required for NBA injury scraping.") from exc
+    tabula_read_pdf = _tabula.read_pdf
 from PyPDF2 import PdfReader
 
 # Expected columns inside the PDF tables.
@@ -134,7 +141,7 @@ class TabulaTableReader:
         with NamedTemporaryFile(suffix=".pdf", delete=True) as handle:
             handle.write(pdf_bytes)
             handle.flush()
-            head_tables = tabula.read_pdf(
+            head_tables = tabula_read_pdf(
                 handle.name,
                 pages=1,
                 stream=True,
@@ -145,7 +152,7 @@ class TabulaTableReader:
                 raise RuntimeError("tabula did not return any tables for page 1")
             other_tables: List[pd.DataFrame] = []
             if num_pages >= 2:
-                other_tables = tabula.read_pdf(
+                other_tables = tabula_read_pdf(
                     handle.name,
                     pages=f"2-{num_pages}",
                     stream=True,

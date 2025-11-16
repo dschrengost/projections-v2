@@ -11,6 +11,7 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.etl import storage
 from projections.etl.common import load_schedule_data
 from projections.minutes_v1.schemas import (
     ROSTER_NIGHTLY_RAW_SCHEMA,
@@ -366,17 +367,6 @@ def _default_silver_path(data_root: Path, season: int, month: int) -> Path:
     return dest / "roster.parquet"
 
 
-def _default_bronze_path(data_root: Path, season: int, month: int) -> Path:
-    dest = ensure_directory(
-        data_root
-        / "bronze"
-        / "roster_nightly"
-        / f"season={season}"
-        / f"month={month:02d}"
-    )
-    return dest / "roster_raw.parquet"
-
-
 @app.command()
 def main(
     roster: List[str] = typer.Option(
@@ -397,12 +387,21 @@ def main(
         paths.get_data_root(),
         help="Data root containing silver outputs (defaults to PROJECTIONS_DATA_ROOT or ./data).",
     ),
-    bronze_out: Path | None = typer.Option(None, help="Optional explicit roster_raw parquet path."),
+    bronze_root: Path | None = typer.Option(
+        None,
+        "--bronze-root",
+        help="Optional override for roster_nightly_raw bronze root (defaults to the standard contract).",
+    ),
+    bronze_out: Path | None = typer.Option(
+        None,
+        "--bronze-out",
+        help="[deprecated] Write a single parquet instead of partitioned bronze outputs.",
+    ),
     out: Path | None = typer.Option(None, help="Optional explicit roster snapshot parquet path."),
     lineups_dir: Path | None = typer.Option(
         None,
         "--lineups-dir",
-        help="Optional override for normalized nba_daily_lineups parquet root.",
+        help="Optional override for normalized nba_daily_lineups parquet root (defaults to <data_root>/silver/nba_daily_lineups).",
     ),
     scrape_missing: bool = typer.Option(
         True,
@@ -432,23 +431,50 @@ def main(
     validate_with_pandera(roster_raw, ROSTER_NIGHTLY_RAW_SCHEMA)
     cfg = SnapshotConfig(start_date=start_day, end_date=end_day)
     schedule_slice = schedule_df.loc[:, ["game_id", "game_date", "tip_ts"]]
-    lineup_root = lineups_dir or (data_root / "silver" / "nba_daily_lineups")
-    lineup_df = (
-        _load_lineups_tree(lineup_root, season=season, start=start_day, end=end_day)
-        if lineup_root.exists()
-        else pd.DataFrame()
-    )
+    lineup_root = (lineups_dir or (data_root / "silver" / "nba_daily_lineups")).resolve()
+    if lineup_root.exists():
+        lineup_df = _load_lineups_tree(lineup_root, season=season, start=start_day, end=end_day)
+        typer.echo(
+            f"[roster] loaded {len(lineup_df):,} lineup rows from {lineup_root}"
+            if not lineup_df.empty
+            else f"[roster] lineup partitions present at {lineup_root} but no rows matched window"
+        )
+    else:
+        typer.echo(f"[roster] lineup directory {lineup_root} not found; continuing without lineup metadata.")
+        lineup_df = pd.DataFrame()
     snapshot = build_roster_snapshot(roster_raw.copy(), schedule_slice, config=cfg, lineups=lineup_df)
 
     silver_path = out or _default_silver_path(data_root, season, month)
-    bronze_path = bronze_out or _default_bronze_path(data_root, season, month)
-    bronze_path.parent.mkdir(parents=True, exist_ok=True)
     silver_path.parent.mkdir(parents=True, exist_ok=True)
-    roster_raw.to_parquet(bronze_path, index=False)
+    bronze_root_path = (bronze_root or storage.default_bronze_root("roster_nightly_raw", data_root)).resolve()
+    if bronze_out:
+        bronze_out.parent.mkdir(parents=True, exist_ok=True)
+        roster_raw.to_parquet(bronze_out, index=False)
+        typer.echo(
+            f"[roster] wrote {len(roster_raw):,} raw rows -> {bronze_out} (legacy bronze_out path)."
+        )
+    else:
+        normalized_dates = pd.to_datetime(roster_raw["game_date"]).dt.normalize()
+        for cursor in storage.iter_days(start_day, end_day):
+            mask = normalized_dates == cursor
+            if not mask.any():
+                continue
+            day_frame = roster_raw.loc[mask].copy()
+            result = storage.write_bronze_partition(
+                day_frame,
+                dataset="roster_nightly_raw",
+                data_root=data_root,
+                season=season,
+                target_date=cursor.date(),
+                bronze_root=bronze_root_path,
+            )
+            typer.echo(
+                f"[roster] bronze partition {result.target_date}: "
+                f"{result.rows} rows -> {result.path}"
+            )
     snapshot.to_parquet(silver_path, index=False)
     typer.echo(
-        f"[roster] wrote {len(roster_raw):,} raw rows -> {bronze_path} "
-        f"and {len(snapshot):,} snapshot rows -> {silver_path}"
+        f"[roster] wrote {len(snapshot):,} snapshot rows -> {silver_path}"
     )
 
 

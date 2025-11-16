@@ -165,6 +165,34 @@ Quick Start unit tests live under `tests/test_minutes_v1_*.py`; run them via:
 uv run pytest tests/test_minutes_v1_quickstart.py tests/test_minutes_v1_modeling.py tests/test_minutes_v1_monitoring.py -q
 ```
 
+### Environment prerequisites
+
+Live scrapers require a few system-level dependencies in addition to the Python packages captured in `pyproject.toml`:
+
+- Python ≥ 3.11 with this repo’s virtual environment (`uv sync`).
+- Java 11+ (OpenJDK is fine) so `tabula-py` can parse the NBA injury PDFs.
+- `PROJECTIONS_DATA_ROOT` pointing at the external data volume (default `/home/daniel/projections-data`).
+
+Before scheduling ETLs via cron/systemd, run the environment check helper:
+
+```bash
+uv run python scripts/check_live_env.py
+```
+
+See `docs/pipeline/live_pipeline_setup.md` for the full setup guide.
+
+### Live pipeline orchestrator
+
+Once the environment is ready you can run the full scrape → bronze → silver loop with a single command:
+
+```bash
+uv run python -m projections.cli.live_pipeline run \
+  --start 2025-11-16 --end 2025-11-16 \
+  --season 2025 --month 11
+```
+
+Flags such as `--skip-injuries`, `--skip-lineups`, or `--run-roster/--skip-roster` let you toggle individual stages. Use `--schedule`/`--roster` globs when you already have parquet sources on disk; otherwise the ETLs fall back to the live NBA APIs.
+
 ### Real-Data Smoke Slice (Dec 2024)
 
 To materialize the architect's reference slice (Dec‑2024), run:
@@ -175,8 +203,8 @@ uv run python -m projections.minutes_v1.smoke_dataset --start 2024-12-01 --end 2
 
 This command loads the season JSON dumps under `data/`, and emits:
 
-- Bronze: `data/bronze/injuries_raw/season=2024/injuries_dec.parquet`, `data/bronze/odds_raw/season=2024/odds_dec.parquet`
-- Bronze (roster): `data/bronze/roster_nightly/season=2024/roster_raw.parquet`
+- Bronze: `data/bronze/injuries_raw/season=2024/date=YYYY-MM-DD/injuries.parquet`, `data/bronze/odds_raw/season=2024/date=YYYY-MM-DD/odds.parquet`
+- Bronze (roster): `data/bronze/roster_nightly_raw/season=2024/date=YYYY-MM-DD/roster.parquet`
 - Silver: schedule/injuries/odds/roster snapshots under `data/silver/*/season=2024/month=12/`
 - Immutable labels + hash: `data/labels/season=2024/boxscore_labels.parquet` and `boxscore_labels.hash`
 - Coverage report: `reports/minutes_v1/2024-12/coverage.csv` (injuries+odds snapshot coverage, roster player counts, etc.)
@@ -226,7 +254,7 @@ uv run python -m projections.etl.roster_nightly \
   --season 2025 --month 11
 ```
 
-Add one or more `--roster` globs when you already have bronze polling parquets; otherwise the CLI will scrape the live NBA.com active roster index for every scheduled team in the window. The command selects the latest `as_of_ts` ≤ `tip_ts` for each (`game_id`,`team_id`,`player_id`) pair using the same guardrails enforced during smoke-slice generation, then writes both `data/bronze/roster_nightly/season=YYYY/month=MM/roster_raw.parquet` and the normalized silver snapshot under `data/silver/roster_nightly/season=YYYY/month=MM/roster.parquet`.
+Add one or more `--roster` globs when you already have bronze polling parquets; otherwise the CLI will scrape the live NBA.com active roster index for every scheduled team in the window. The command selects the latest `as_of_ts` ≤ `tip_ts` for each (`game_id`,`team_id`,`player_id`) pair using the same guardrails enforced during smoke-slice generation, then writes both `data/bronze/roster_nightly_raw/season=YYYY/date=YYYY-MM-DD/roster.parquet` and the normalized silver snapshot under `data/silver/roster_nightly/season=YYYY/month=MM/roster.parquet`.
 
 ### Standalone Injury Snapshot Builder
 
@@ -247,7 +275,7 @@ Add one or more `--roster` globs when you already have bronze polling parquets; 
 
 Outputs land under the standard partitions:
 
-- `data/bronze/injuries_raw/season=YYYY/injuries_<mon>.parquet`
+- `data/bronze/injuries_raw/season=YYYY/date=YYYY-MM-DD/injuries.parquet`
 - `data/silver/injuries_snapshot/season=YYYY/month=MM/injuries_snapshot.parquet`
 
 The ETL automatically enriches player IDs via the NBA.com roster scraper and normalizes game IDs / team IDs so the live builder can consume the snapshots immediately.
@@ -263,19 +291,20 @@ uv run python -m projections.etl.odds \
   --schedule 'data/silver/schedule/season=2025/month=11/*.parquet'
 ```
 
-The ETL normalizes game IDs via `TeamResolver`, caps `as_of_ts` at `tip_ts`, and writes `data/bronze/odds_raw/season=YYYY/odds_<mon>.parquet` plus `data/silver/odds_snapshot/season=YYYY/month=MM/odds_snapshot.parquet`. Like the injury ETL, it falls back to the live NBA schedule API when your parquet slice is stale or missing.
+The ETL normalizes game IDs via `TeamResolver`, caps `as_of_ts` at `tip_ts`, and writes `data/bronze/odds_raw/season=YYYY/date=YYYY-MM-DD/odds.parquet` plus `data/silver/odds_snapshot/season=YYYY/month=MM/odds_snapshot.parquet`. Like the injury ETL, it falls back to the live NBA schedule API when your parquet slice is stale or missing.
 
 ### Standalone Daily Lineup Scraper
 
-Pull the NBA.com lineup feed for a single slate, persist the raw JSON, and build a normalized parquet in one shot:
+Pull the NBA.com lineup feed for a single slate, persist the raw JSON, and build bronze+silver Parquets in one shot:
 
 ```bash
 uv run python -m projections.scrape nba-daily-lineups \
-  --date 2025-11-14 \
+  --start 2025-11-14 --end 2025-11-14 \
+  --season 2025 \
   --out data/raw/nba_daily_lineups/2025-11-14.json
 ```
 
-When `--silver-out` is omitted the CLI writes the normalized dataset to `data/silver/nba_daily_lineups/season=2025/date=2025-11-14/lineups.parquet`. These records power roster starter flags: use them to seed `data/silver/roster_nightly` and live features with `is_projected_starter` / `is_confirmed_starter`.
+The command materializes `data/bronze/daily_lineups/season=2025/date=2025-11-14/daily_lineups_raw.parquet` plus `data/silver/nba_daily_lineups/season=2025/date=2025-11-14/lineups.parquet`. These records power roster starter flags: use them to seed `data/silver/roster_nightly` and live features with `is_projected_starter` / `is_confirmed_starter`.
 
 ### Box Score Label Freezer
 

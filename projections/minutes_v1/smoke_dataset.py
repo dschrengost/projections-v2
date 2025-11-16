@@ -14,6 +14,7 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.etl import storage
 
 from .constants import AvailabilityStatus
 from .labels import freeze_boxscore_labels
@@ -567,8 +568,6 @@ class SmokeDatasetBuilder:
         labels_df: pd.DataFrame,
         ) -> None:
         month_token = f"month={self.start_date.month:02d}"
-        bronze_injuries_dir = _ensure_dir(self.data_dir / "bronze" / "injuries_raw" / f"season={self.season_label}")
-        bronze_odds_dir = _ensure_dir(self.data_dir / "bronze" / "odds_raw" / f"season={self.season_label}")
         silver_schedule_dir = _ensure_dir(
             self.data_dir / "silver" / "schedule" / f"season={self.season_label}" / month_token
         )
@@ -577,9 +576,6 @@ class SmokeDatasetBuilder:
         )
         silver_odds_dir = _ensure_dir(
             self.data_dir / "silver" / "odds_snapshot" / f"season={self.season_label}" / month_token
-        )
-        bronze_roster_dir = _ensure_dir(
-            self.data_dir / "bronze" / "roster_nightly" / f"season={self.season_label}" / month_token
         )
         silver_roster_dir = _ensure_dir(
             self.data_dir / "silver" / "roster_nightly" / f"season={self.season_label}" / month_token
@@ -602,10 +598,57 @@ class SmokeDatasetBuilder:
         validate_with_pandera(odds_snapshot, ODDS_SNAPSHOT_SCHEMA)
 
         schedule_df.to_parquet(silver_schedule_dir / "schedule.parquet", index=False)
-        month_slug = self._month_slug()
-        injuries_raw.to_parquet(bronze_injuries_dir / f"injuries_{month_slug}.parquet", index=False)
-        odds_raw.to_parquet(bronze_odds_dir / f"odds_{month_slug}.parquet", index=False)
-        roster_raw.to_parquet(bronze_roster_dir / "roster_raw.parquet", index=False)
+        season_value = self.season_label
+        start_day = self.start_date.normalize()
+        end_day = self.end_date.normalize()
+
+        if not injuries_raw.empty:
+            normalized_injuries = injuries_raw["report_date"].dt.normalize()
+            for cursor in storage.iter_days(start_day, end_day):
+                mask = normalized_injuries == cursor
+                if not mask.any():
+                    continue
+                result = storage.write_bronze_partition(
+                    injuries_raw.loc[mask].copy(),
+                    dataset="injuries_raw",
+                    data_root=self.data_dir,
+                    season=season_value,
+                    target_date=cursor.date(),
+                )
+                typer.echo(
+                    f"[smoke] injuries bronze {result.target_date}: {result.rows} rows -> {result.path}"
+                )
+        if not odds_raw.empty:
+            normalized_odds = odds_raw["as_of_ts"].dt.tz_convert("UTC").dt.normalize()
+            for cursor in storage.iter_days(start_day, end_day):
+                mask = normalized_odds == cursor.tz_localize("UTC")
+                if not mask.any():
+                    continue
+                result = storage.write_bronze_partition(
+                    odds_raw.loc[mask].copy(),
+                    dataset="odds_raw",
+                    data_root=self.data_dir,
+                    season=season_value,
+                    target_date=cursor.date(),
+                )
+                typer.echo(f"[smoke] odds bronze {result.target_date}: {result.rows} rows -> {result.path}")
+        if not roster_raw.empty:
+            normalized_roster = pd.to_datetime(roster_raw["game_date"]).dt.normalize()
+            for cursor in storage.iter_days(start_day, end_day):
+                mask = normalized_roster == cursor
+                if not mask.any():
+                    continue
+                result = storage.write_bronze_partition(
+                    roster_raw.loc[mask].copy(),
+                    dataset="roster_nightly_raw",
+                    data_root=self.data_dir,
+                    season=season_value,
+                    target_date=cursor.date(),
+                )
+                typer.echo(
+                    f"[smoke] roster bronze {result.target_date}: {result.rows} rows -> {result.path}"
+                )
+
         roster_snapshot.to_parquet(silver_roster_dir / "roster.parquet", index=False)
         injuries_snapshot.to_parquet(silver_injuries_dir / "injuries_snapshot.parquet", index=False)
         odds_snapshot.to_parquet(silver_odds_dir / "odds_snapshot.parquet", index=False)

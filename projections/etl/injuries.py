@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 import pandas as pd
 import typer
 
 from projections import paths
+from projections.etl import storage
 from projections.etl.common import load_schedule_data, month_slug as _month_slug
 from projections.minutes_v1.schemas import (
     INJURIES_RAW_SCHEMA,
@@ -28,7 +29,9 @@ from projections.minutes_v1.smoke_dataset import (
     _ramp_flag,
     _status_from_raw,
 )
+from scrapers.nba_injuries import InjuryRecord, NBAInjuryScraper
 from scrapers.nba_players import NbaPlayersScraper
+
 app = typer.Typer(help=__doc__)
 
 
@@ -151,13 +154,86 @@ def _build_injury_snapshot(injuries_raw: pd.DataFrame, schedule_df: pd.DataFrame
     return snapshot
 
 
+def _records_from_scraper_payload(records: list[InjuryRecord]) -> list[dict[str, Any]]:
+    """Convert dataclass records to dictionaries compatible with _build_injuries_raw."""
+    payload: list[dict[str, Any]] = []
+    for record in records:
+        raw = asdict(record)
+        raw["report_time"] = record.report_time.isoformat()
+        raw["game_date"] = record.game_date.isoformat()
+        payload.append(raw)
+    return payload
+
+
+def _scrape_injury_records(
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    timeout: float,
+) -> list[dict[str, Any]]:
+    """Scrape NBA injury PDFs for the requested window and return normalized records."""
+    # Fetch through the last minute of the requested end day to ensure complete coverage.
+    start_dt = start.to_pydatetime()
+    end_dt = (end + pd.Timedelta(days=1) - pd.Timedelta(minutes=1)).to_pydatetime()
+    with NBAInjuryScraper(timeout=timeout) as scraper:
+        typer.echo(
+            f"[injuries] scraping NBA reports from {start_dt.date()} to {end_dt.date()} (ET)."
+        )
+        records = scraper.fetch_range(start_dt, end_dt)
+    return _records_from_scraper_payload(records)
+
+
+def _load_injury_records(
+    *,
+    injuries_json: Path | None,
+    use_scraper: bool,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    timeout: float,
+) -> list[dict[str, Any]]:
+    if injuries_json is not None:
+        typer.echo(f"[injuries] loading JSON override from {injuries_json}")
+        return _read_json(injuries_json)
+    if not use_scraper:
+        raise typer.BadParameter(
+            "Provide --injuries-json or enable --use-scraper to fetch data."
+        )
+    return _scrape_injury_records(start=start, end=end, timeout=timeout)
+
+
+def _snapshot_partition_key(target_day: pd.Timestamp, month_override: int | None = None) -> str:
+    """Return the folder token for snapshots (month buckets for now, hook for day partitions)."""
+    partition_month = month_override or target_day.month
+    return f"month={partition_month:02d}"
+
+
+def _default_silver_path(data_root: Path, season: int, partition_key: str) -> Path:
+    return (
+        data_root
+        / "silver"
+        / "injuries_snapshot"
+        / f"season={season}"
+        / partition_key
+        / "injuries_snapshot.parquet"
+    )
+
+
 @app.command()
 def main(
-    injuries_json: Path = typer.Option(..., "--injuries-json", help="JSON file from `projections.scrape injuries --out`."),
+    injuries_json: Path | None = typer.Option(
+        None,
+        "--injuries-json",
+        help="Optional JSON override (e.g., from an older scrape) when bypassing the scraper.",
+    ),
     schedule: List[str] = typer.Option(
         [],
         "--schedule",
         help="Optional parquet glob(s) for schedule data (silver). When omitted or empty, falls back to live NBA API.",
+    ),
+    use_scraper: bool = typer.Option(
+        True,
+        "--use-scraper/--no-use-scraper",
+        help="Scrape NBA.com injury PDFs directly (default). Disable to rely solely on --injuries-json.",
     ),
     start: datetime = typer.Option(..., "--start", help="Inclusive start date (YYYY-MM-DD)."),
     end: datetime = typer.Option(..., "--end", help="Inclusive end date (YYYY-MM-DD)."),
@@ -168,25 +244,43 @@ def main(
         "--data-root",
         help="Base data directory (defaults to PROJECTIONS_DATA_ROOT or ./data).",
     ),
+    bronze_root: Path | None = typer.Option(
+        None,
+        "--bronze-root",
+        help="Optional override for injuries_raw bronze root (defaults to the standard contract).",
+    ),
     bronze_out: Path | None = typer.Option(
         None,
         "--bronze-out",
-        help="Optional explicit path for injuries_raw parquet.",
+        help="[deprecated] Write a single parquet instead of date partitions.",
     ),
     silver_out: Path | None = typer.Option(
         None,
         "--silver-out",
         help="Optional explicit path for injuries_snapshot parquet.",
     ),
-    scraper_timeout: float = typer.Option(10.0, "--timeout", help="NBA roster scraper timeout (seconds)."),
+    scraper_timeout: float = typer.Option(10.0, "--timeout", help="NBA player resolver scraper timeout (seconds)."),
     schedule_timeout: float = typer.Option(10.0, "--schedule-timeout", help="Timeout (seconds) for NBA schedule API fallback."),
+    injury_timeout: float = typer.Option(
+        15.0,
+        "--injury-timeout",
+        help="HTTP timeout (seconds) for NBA injury PDF scraping.",
+    ),
 ) -> None:
+    """Main injuries ETL entry point; intended usage relies on the live scraper + bronze/silver sinks."""
     start_day = pd.Timestamp(start).normalize()
     end_day = pd.Timestamp(end).normalize()
     if end_day < start_day:
         raise typer.BadParameter("--end must be on/after --start.")
 
-    records = _read_json(injuries_json)
+    data_root = data_root.resolve()
+    records = _load_injury_records(
+        injuries_json=injuries_json,
+        use_scraper=use_scraper,
+        start=start_day,
+        end=end_day,
+        timeout=injury_timeout,
+    )
     schedule_df = load_schedule_data(schedule, start_day, end_day, schedule_timeout)
     resolver = TeamResolver(schedule_df)
     player_resolver = _build_player_resolver(scraper_timeout)
@@ -206,31 +300,54 @@ def main(
     validate_with_pandera(injuries_snapshot, INJURIES_SNAPSHOT_SCHEMA)
 
     month_slug = _month_slug(start_day)
-    default_bronze = (
-        data_root
-        / "bronze"
-        / "injuries_raw"
-        / f"season={season}"
-        / f"injuries_{month_slug}.parquet"
-    )
-    default_silver = (
-        data_root
-        / "silver"
-        / "injuries_snapshot"
-        / f"season={season}"
-        / f"month={month:02d}"
-        / "injuries_snapshot.parquet"
-    )
-    bronze_path = bronze_out or default_bronze
+    partition_key = _snapshot_partition_key(start_day, month_override=month)
+    default_silver = _default_silver_path(data_root, season, partition_key)
     silver_path = silver_out or default_silver
-    bronze_path.parent.mkdir(parents=True, exist_ok=True)
     silver_path.parent.mkdir(parents=True, exist_ok=True)
-    injuries_raw.to_parquet(bronze_path, index=False)
+
+    bronze_rows_written = 0
+    bronze_partitions = 0
+    bronze_root_path = (bronze_root or storage.default_bronze_root("injuries_raw", data_root)).resolve()
+    if bronze_out:
+        bronze_out.parent.mkdir(parents=True, exist_ok=True)
+        injuries_raw.to_parquet(bronze_out, index=False)
+        bronze_rows_written = len(injuries_raw)
+        bronze_partitions = 1
+        typer.echo(
+            f"[injuries] wrote {len(injuries_raw):,} rows to legacy bronze_out={bronze_out} "
+            "(consider using --bronze-root for partitioned writes)."
+        )
+    else:
+        if injuries_raw.empty:
+            typer.echo("[injuries] no rows to persist for the requested window.")
+        else:
+            normalized_dates = injuries_raw["report_date"].dt.normalize()
+            for cursor in storage.iter_days(start_day, end_day):
+                mask = normalized_dates == cursor
+                if not mask.any():
+                    continue
+                day_frame = injuries_raw.loc[mask].copy()
+                result = storage.write_bronze_partition(
+                    day_frame,
+                    dataset="injuries_raw",
+                    data_root=data_root,
+                    season=season,
+                    target_date=cursor.date(),
+                    bronze_root=bronze_root_path,
+                )
+                bronze_rows_written += result.rows
+                bronze_partitions += 1
+                typer.echo(
+                    f"[injuries] bronze partition {result.target_date}: "
+                    f"{result.rows} rows -> {result.path}"
+                )
+
     injuries_snapshot.to_parquet(silver_path, index=False)
 
     typer.echo(
-        f"[injuries] wrote {len(injuries_raw):,} raw rows -> {bronze_path} "
-        f"and {len(injuries_snapshot):,} snapshot rows -> {silver_path}"
+        f"[injuries] window={start_day.date()}->{end_day.date()} "
+        f"bronze_partitions={bronze_partitions} bronze_rows={bronze_rows_written} "
+        f"silver_rows={len(injuries_snapshot)} -> {silver_path}"
     )
 
 

@@ -280,7 +280,11 @@ def _cached_player_name_map(root: str, seasons_key: tuple[int, ...]) -> dict[int
         season_dir = root_path / f"season={season}"
         if not season_dir.exists():
             continue
-        for file in sorted(season_dir.glob("*.parquet")):
+        parquet_files = list(season_dir.glob("*.parquet"))
+        parquet_files.extend(season_dir.glob("date=*/*.parquet"))
+        for file in sorted(parquet_files):
+            if not file.is_file():
+                continue
             df = pd.read_parquet(file, columns=["player_id", "player_name", "as_of_ts"])
             frames.append(df)
     if not frames:

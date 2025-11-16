@@ -1,0 +1,19 @@
+[Unit]
+Description=Run live pipeline (evening cadence)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+Environment=LIVE_SEASON=2025
+Environment=LIVE_MONTH=11
+Environment=LIVE_EXTRA_FLAGS=
+ExecStart=/home/daniel/projects/projections-v2/scripts/run_live_pipeline.sh
+StandardOutput=journal
+StandardError=journal
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

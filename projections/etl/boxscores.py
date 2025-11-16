@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List
@@ -10,6 +12,7 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.etl import storage
 from projections.minutes_v1.labels import freeze_boxscore_labels
 from projections.minutes_v1.schemas import BOX_SCORE_LABELS_SCHEMA, enforce_schema, validate_with_pandera
 from projections.minutes_v1.smoke_dataset import _parse_minutes_iso
@@ -81,6 +84,26 @@ def _games_to_labels(games: List[NbaComGameBoxScore], *, season_label: str) -> p
     return pd.DataFrame(records, columns=columns)
 
 
+def _json_ready(value):
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, datetime):
+        return pd.Timestamp(value).isoformat()
+    if is_dataclass(value):
+        return {k: _json_ready(v) for k, v in asdict(value).items()}
+    if isinstance(value, dict):
+        return {k: _json_ready(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_ready(v) for v in value]
+    return value
+
+
+def _serialize_games(games: List[NbaComGameBoxScore]) -> str:
+    """Return a JSON string representing the raw boxscore payload."""
+    normalized = [_json_ready(game) for game in games]
+    return json.dumps(normalized, sort_keys=True)
+
+
 @app.command()
 def main(
     start: datetime = typer.Option(..., help="Inclusive start date (YYYY-MM-DD)."),
@@ -91,6 +114,11 @@ def main(
         help="Base data directory containing labels/ (defaults to PROJECTIONS_DATA_ROOT or ./data).",
     ),
     timeout: float = typer.Option(10.0, "--timeout", help="HTTP timeout for NBA.com requests."),
+    bronze_root: Path | None = typer.Option(
+        None,
+        "--bronze-root",
+        help="Optional override for boxscores_raw bronze root (defaults to the standard contract).",
+    ),
 ) -> None:
     start_day = pd.Timestamp(start).normalize()
     end_day = pd.Timestamp(end).normalize()
@@ -99,8 +127,11 @@ def main(
 
     scraper = NbaComBoxScoreScraper(timeout=timeout)
     games: list[NbaComGameBoxScore] = []
-    for cursor in _iter_dates(start_day, end_day):
-        games.extend(scraper.fetch_daily_box_scores(cursor.date()))
+    daily_payloads: dict[datetime.date, List[NbaComGameBoxScore]] = {}
+    for cursor in storage.iter_days(start_day, end_day):
+        fetched = scraper.fetch_daily_box_scores(cursor.date())
+        daily_payloads[cursor.date()] = fetched
+        games.extend(fetched)
     if not games:
         raise RuntimeError("NBA.com box score scraper returned zero games for requested window.")
 
@@ -114,6 +145,37 @@ def main(
 
     labels_df = enforce_schema(labels_df, BOX_SCORE_LABELS_SCHEMA)
     validate_with_pandera(labels_df, BOX_SCORE_LABELS_SCHEMA)
+
+    data_root = data_root.resolve()
+    bronze_root_path = (bronze_root or storage.default_bronze_root("boxscores_raw", data_root)).resolve()
+    for day in sorted(daily_payloads.keys()):
+        games_for_day = daily_payloads.get(day) or []
+        if not games_for_day:
+            continue
+        payload_json = _serialize_games(games_for_day)
+        bronze_df = pd.DataFrame.from_records(
+            [
+                {
+                    "date": pd.Timestamp(day),
+                    "season_start": season,
+                    "payload_json": payload_json,
+                    "ingested_ts": pd.Timestamp.utcnow(),
+                    "source": "nba.com/boxscore",
+                }
+            ]
+        )
+        result = storage.write_bronze_partition(
+            bronze_df,
+            dataset="boxscores_raw",
+            data_root=data_root,
+            season=season,
+            target_date=day,
+            bronze_root=bronze_root_path,
+        )
+        typer.echo(
+            f"[boxscores] bronze partition {result.target_date}: "
+            f"{result.rows} row -> {result.path}"
+        )
 
     labels_root = data_root / "labels"
     season_dir = labels_root / f"season={season_label}"

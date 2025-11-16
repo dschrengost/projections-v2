@@ -1,0 +1,10 @@
+[Unit]
+Description=Run live pipeline every 10 minutes during evening slate
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 16..23:00/10
+RandomizedDelaySec=15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

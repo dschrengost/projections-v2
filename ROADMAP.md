@@ -24,7 +24,7 @@ Owner: projections‑v2
 **Motivation:** Synthetic is fine for unit tests, not for provenance/leakage. This PR proves the pipeline works on real data for a bounded month.
 
 ### Deliverables
-- **Bronze:** `data/bronze/injuries_raw/season=2024/*.parquet`, `data/bronze/odds_raw/season=2024/*.parquet`
+- **Bronze:** `data/bronze/injuries_raw/season=2024/date=YYYY-MM-DD/injuries.parquet`, `data/bronze/odds_raw/season=2024/date=YYYY-MM-DD/odds.parquet`
 - **Silver:**  
   - `data/silver/schedule/*.parquet`  
   - `data/silver/injuries_snapshot/season=2024/month=12/*.parquet` (latest `as_of_ts ≤ tip_ts`)  
