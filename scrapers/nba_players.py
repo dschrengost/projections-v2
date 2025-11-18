@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from time import sleep
 from typing import Iterable, List
 
 import httpx
@@ -45,6 +46,7 @@ class NbaPlayersScraper:
         timeout: float = 10.0,
         user_agent: str | None = None,
         players_url: str = PLAYER_PAGE_URL,
+        retries: int = 3,
     ) -> None:
         self.timeout = timeout
         self.players_url = players_url
@@ -53,6 +55,7 @@ class NbaPlayersScraper:
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/124.0.0.0 Safari/537.36"
         )
+        self.retries = max(1, retries)
 
     def fetch_players(self, *, active_only: bool = True) -> List[PlayerProfile]:
         """Fetch league-wide player profiles from NBA.com."""
@@ -75,10 +78,24 @@ class NbaPlayersScraper:
             "Accept-Language": "en-US,en;q=0.9",
             "Connection": "close",
         }
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.get(url, headers=headers)
-            response.raise_for_status()
-            return response.text
+        timeout = httpx.Timeout(self.timeout, connect=self.timeout)
+        last_exc: httpx.HTTPError | None = None
+        for attempt in range(self.retries):
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    response = client.get(url, headers=headers)
+                    response.raise_for_status()
+                    return response.text
+            except httpx.HTTPError as exc:  # pragma: no cover - network failures
+                last_exc = exc
+                if attempt + 1 == self.retries:
+                    raise RuntimeError(
+                        f"Failed to fetch NBA players page after {self.retries} attempt(s)."
+                    ) from exc
+                backoff = min(2 ** attempt, 5.0)
+                sleep(backoff)
+        assert last_exc is not None  # for type checkers
+        raise last_exc
 
     def _extract_next_data(self, html: str) -> dict:
         match = NEXT_DATA_PATTERN.search(html)

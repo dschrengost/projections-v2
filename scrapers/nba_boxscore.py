@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
+import time
 from typing import Any, Dict, List
 
 import httpx
@@ -115,6 +116,7 @@ class NbaComBoxScoreScraper:
         user_agent: str | None = None,
         box_score_url_template: str = BOX_SCORE_URL_TEMPLATE,
         schedule_scraper: NbaScheduleScraper | None = None,
+        request_delay: float = 0.5,
     ) -> None:
         self.timeout = timeout
         self.user_agent = user_agent or (
@@ -126,6 +128,7 @@ class NbaComBoxScoreScraper:
         self.schedule_scraper = schedule_scraper or NbaScheduleScraper(
             timeout=timeout, user_agent=self.user_agent
         )
+        self.request_delay = request_delay
 
     def fetch_daily_box_scores(
         self, target_date: date, *, season: str | None = None
@@ -139,7 +142,17 @@ class NbaComBoxScoreScraper:
         for game in scheduled_games:
             if not game.game_id:
                 continue
-            box_score = self.fetch_box_score(game.game_id)
+            box_score = None
+            for attempt in range(3):
+                try:
+                    box_score = self.fetch_box_score(game.game_id)
+                    break
+                except RuntimeError as exc:
+                    if attempt == 2:
+                        print(f"[boxscores] warning: {exc}; skipping {game.game_id}")
+                    else:
+                        time.sleep(0.25)
+                        continue
             if box_score:
                 results.append(box_score)
         return results
@@ -177,6 +190,7 @@ class NbaComBoxScoreScraper:
             "Accept-Language": "en-US,en;q=0.9",
             "Connection": "close",
         }
+        print(f"[boxscores] GET {url}")
         with httpx.Client(timeout=self.timeout) as client:
             response = client.get(url, headers=headers)
             response.raise_for_status()

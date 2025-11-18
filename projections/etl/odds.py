@@ -11,7 +11,8 @@ import typer
 from zoneinfo import ZoneInfo
 
 from projections import paths
-from projections.etl.common import load_schedule_data, month_slug
+from projections.etl import storage
+from projections.etl.common import load_schedule_data
 from projections.minutes_v1.schemas import (
     ODDS_RAW_SCHEMA,
     ODDS_SNAPSHOT_SCHEMA,
@@ -128,10 +129,15 @@ def main(
         paths.get_data_root(),
         help="Base data directory (defaults to PROJECTIONS_DATA_ROOT or ./data).",
     ),
+    bronze_root: Path | None = typer.Option(
+        None,
+        "--bronze-root",
+        help="Optional override for odds_raw bronze root (defaults to the standard contract).",
+    ),
     bronze_out: Path | None = typer.Option(
         None,
         "--bronze-out",
-        help="Optional explicit output path for odds_raw parquet.",
+        help="[deprecated] Write a single parquet instead of partitioned bronze outputs.",
     ),
     silver_out: Path | None = typer.Option(
         None,
@@ -166,10 +172,7 @@ def main(
     odds_snapshot = enforce_schema(odds_snapshot, ODDS_SNAPSHOT_SCHEMA, allow_missing_optional=True)
     validate_with_pandera(odds_snapshot, ODDS_SNAPSHOT_SCHEMA)
 
-    month_token = month_slug(start_day)
-    bronze_default = (
-        data_root / "bronze" / "odds_raw" / f"season={season}" / f"odds_{month_token}.parquet"
-    )
+    data_root = data_root.resolve()
     silver_default = (
         data_root
         / "silver"
@@ -179,17 +182,42 @@ def main(
         / "odds_snapshot.parquet"
     )
 
-    bronze_path = bronze_out or bronze_default
+    bronze_root_path = (bronze_root or storage.default_bronze_root("odds_raw", data_root)).resolve()
+    if bronze_out:
+        bronze_out.parent.mkdir(parents=True, exist_ok=True)
+        odds_raw.to_parquet(bronze_out, index=False)
+        typer.echo(
+            f"[odds] wrote {len(odds_raw):,} raw rows -> {bronze_out} (legacy bronze_out path)."
+        )
+    else:
+        if odds_raw.empty:
+            typer.echo("[odds] no raw rows to persist for the requested window.")
+        else:
+            normalized = odds_raw["as_of_ts"].dt.tz_convert("UTC").dt.normalize()
+            for cursor in storage.iter_days(start_day, end_day):
+                cursor_utc = cursor.tz_localize("UTC")
+                mask = normalized == cursor_utc
+                if not mask.any():
+                    continue
+                day_frame = odds_raw.loc[mask].copy()
+                result = storage.write_bronze_partition(
+                    day_frame,
+                    dataset="odds_raw",
+                    data_root=data_root,
+                    season=season,
+                    target_date=cursor.date(),
+                    bronze_root=bronze_root_path,
+                )
+                typer.echo(
+                    f"[odds] bronze partition {result.target_date}: "
+                    f"{result.rows} rows -> {result.path}"
+                )
+
     silver_path = silver_out or silver_default
-    bronze_path.parent.mkdir(parents=True, exist_ok=True)
     silver_path.parent.mkdir(parents=True, exist_ok=True)
-    odds_raw.to_parquet(bronze_path, index=False)
     odds_snapshot.to_parquet(silver_path, index=False)
 
-    typer.echo(
-        f"[odds] wrote {len(odds_raw):,} raw rows -> {bronze_path} "
-        f"and {len(odds_snapshot):,} snapshot rows -> {silver_path}"
-    )
+    typer.echo(f"[odds] wrote {len(odds_snapshot):,} snapshot rows -> {silver_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover

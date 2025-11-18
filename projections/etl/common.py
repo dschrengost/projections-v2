@@ -67,10 +67,11 @@ def schedule_from_api(start: pd.Timestamp, end: pd.Timestamp, timeout: float) ->
     """Fetch schedule rows from the live NBA API for the requested window."""
 
     scraper = NbaScheduleScraper(timeout=timeout)
+    season_label = f"{start.year}-{(start.year + 1) % 100:02d}"
     records: list[dict] = []
     current = start
     while current <= end:
-        games = scraper.fetch_daily_schedule(current.date())
+        games = scraper.fetch_daily_schedule(current.date(), season=season_label)
         for game in games:
             if not game.game_id:
                 continue

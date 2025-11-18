@@ -1,0 +1,11 @@
+[Unit]
+Description=Run live pipeline every 15 minutes on weekends (matinees)
+
+[Timer]
+OnCalendar=Sat,Sun *-*-* 12..23:00/15
+Unit=live-pipeline-weekend.service
+RandomizedDelaySec=15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

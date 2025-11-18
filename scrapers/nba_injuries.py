@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
-import tabula
+from tabula.io import read_pdf
 from PyPDF2 import PdfReader
 
 # Expected columns inside the PDF tables.
@@ -134,7 +134,7 @@ class TabulaTableReader:
         with NamedTemporaryFile(suffix=".pdf", delete=True) as handle:
             handle.write(pdf_bytes)
             handle.flush()
-            head_tables = tabula.read_pdf(
+            head_tables = read_pdf(
                 handle.name,
                 pages=1,
                 stream=True,
@@ -145,7 +145,7 @@ class TabulaTableReader:
                 raise RuntimeError("tabula did not return any tables for page 1")
             other_tables: List[pd.DataFrame] = []
             if num_pages >= 2:
-                other_tables = tabula.read_pdf(
+                other_tables = read_pdf(
                     handle.name,
                     pages=f"2-{num_pages}",
                     stream=True,

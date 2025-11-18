@@ -1,0 +1,10 @@
+[Unit]
+Description=Run boxscore backfill every morning (03:30 local) for prior slate
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+Unit=live-boxscores.service
+
+[Install]
+WantedBy=timers.target

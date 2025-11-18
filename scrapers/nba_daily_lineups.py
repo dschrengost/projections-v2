@@ -103,10 +103,15 @@ class NbaDailyLineupsScraper:
         session = self.client
         close_session = False
         if session is None:
-            session = httpx.Client(timeout=self.timeout)
+            session = httpx.Client(timeout=self.timeout, follow_redirects=True)
             close_session = True
         try:
-            response = session.get(url, headers=headers, timeout=self.timeout)
+            response = session.get(
+                url,
+                headers=headers,
+                timeout=self.timeout,
+                follow_redirects=True,
+            )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:  # pragma: no cover - HTTP error path
             raise RuntimeError(

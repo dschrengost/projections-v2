@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Sequence, Optional
+from typing import List, Sequence
 
 import pandas as pd
 import typer
 
 from projections import paths
+from projections.etl import storage
 from projections.etl.common import load_schedule_data
 from projections.minutes_v1.schemas import (
     ROSTER_NIGHTLY_RAW_SCHEMA,
@@ -32,11 +33,7 @@ REQUIRED_ROSTER_COLUMNS: tuple[str, ...] = (
     "active_flag",
 )
 
-SCHEDULE_COLUMNS: tuple[str, ...] = (
-    "game_id",
-    "game_date",
-    "tip_ts",
-)
+SCHEDULE_COLUMNS: tuple[str, ...] = ("game_id", "game_date", "tip_ts")
 
 OUTPUT_COLUMNS: tuple[str, ...] = (
     "game_id",
@@ -198,161 +195,58 @@ def build_roster_snapshot(
 ) -> pd.DataFrame:
     working = _attach_schedule(roster_raw, schedule)
     working["game_date"] = pd.to_datetime(working["game_date"]).dt.normalize()
-
+    lineup_frame = lineups.copy() if lineups is not None else pd.DataFrame()
+    if not lineup_frame.empty:
+        if "game_date" in lineup_frame.columns:
+            date_series = lineup_frame["game_date"]
+        elif "date" in lineup_frame.columns:
+            date_series = lineup_frame["date"]
+        else:
+            raise KeyError("Lineup snapshot missing required date column (expected 'game_date' or 'date').")
+        lineup_frame["game_date"] = pd.to_datetime(date_series).dt.normalize()
+        if "as_of_ts" in lineup_frame.columns:
+            asof_series = lineup_frame["as_of_ts"]
+        elif "lineup_timestamp" in lineup_frame.columns:
+            asof_series = lineup_frame["lineup_timestamp"]
+        else:
+            raise KeyError("Lineup snapshot missing as-of column (expected 'as_of_ts' or 'lineup_timestamp').")
+        lineup_frame["as_of_ts"] = pd.to_datetime(asof_series, utc=True, errors="coerce")
+        for column in ("game_id", "team_id", "player_id"):
+            lineup_frame[column] = lineup_frame[column].astype("Int64")
+            if column in working.columns:
+                working[column] = working[column].astype("Int64")
+        lineup_frame.sort_values(["game_id", "as_of_ts"], inplace=True)
+        working = asof_left_join(
+            working,
+            lineup_frame,
+            on=["game_id", "team_id", "player_id"],
+            left_time_col="as_of_ts",
+            right_time_col="as_of_ts",
+        )
+    else:
+        missing_cols = set(OUTPUT_COLUMNS) - set(working.columns)
+        for col in missing_cols:
+            working[col] = pd.NA
     if config.start_date is not None:
         working = working[working["game_date"] >= config.start_date]
     if config.end_date is not None:
         working = working[working["game_date"] <= config.end_date]
-    if working.empty:
-        raise ValueError("No roster rows remain after date filtering.")
-
-    working["tip_ts"] = pd.to_datetime(working["tip_ts"], utc=True)
-    working["as_of_ts"] = pd.to_datetime(working["as_of_ts"], utc=True, errors="coerce")
-    working["ingested_ts"] = pd.to_datetime(working.get("ingested_ts"), utc=True, errors="coerce")
-
-    left = (
-        working[["game_id", "team_id", "player_id", "player_name", "tip_ts"]]
-        .drop_duplicates(subset=["game_id", "team_id", "player_id"], keep="last")
-        .reset_index(drop=True)
-    )
-    snapshot = asof_left_join(
-        left,
-        working.drop(columns=["tip_ts"]),
-        on=["game_id", "team_id", "player_id"],
-        left_time_col="tip_ts",
-        right_time_col="as_of_ts",
-    )
-    snapshot = snapshot.dropna(subset=["as_of_ts"]).copy()
-
-    snapshot["game_date"] = pd.to_datetime(snapshot["game_date"]).dt.normalize()
-    snapshot["active_flag"] = snapshot["active_flag"].astype(bool)
-    if "starter_flag" in snapshot:
-        snapshot["starter_flag"] = snapshot["starter_flag"].fillna(False).astype(bool)
-    else:
-        snapshot["starter_flag"] = False
-
-    for column in ("listed_pos", "source"):
-        if column not in snapshot:
-            snapshot[column] = pd.NA
-    for numeric in ("height_in", "weight_lb", "age"):
-        if numeric not in snapshot:
-            snapshot[numeric] = pd.NA
-
-    enriched = _attach_lineup_metadata(snapshot, lineups)
-    ordered = enriched.loc[:, [col for col in OUTPUT_COLUMNS if col in enriched.columns]].copy()
-    ordered.sort_values(["game_id", "team_id", "player_id"], inplace=True)
-    enforced = enforce_schema(ordered.reset_index(drop=True), ROSTER_NIGHTLY_SCHEMA)
-    validate_with_pandera(enforced, ROSTER_NIGHTLY_SCHEMA)
-    return enforced
+    working = enforce_schema(working, ROSTER_NIGHTLY_SCHEMA, allow_missing_optional=True)
+    validate_with_pandera(working, ROSTER_NIGHTLY_SCHEMA)
+    return working
 
 
-def _attach_lineup_metadata(
-    snapshot: pd.DataFrame,
-    lineups: pd.DataFrame | None,
-) -> pd.DataFrame:
-    result = snapshot.copy()
-    index = result.index
-    if "lineup_role" not in result.columns:
-        result["lineup_role"] = pd.Series(pd.NA, index=index, dtype="string")
-    else:
-        result["lineup_role"] = result["lineup_role"].astype("string")
-    for column in ("lineup_status", "lineup_roster_status"):
-        if column not in result.columns:
-            result[column] = pd.Series(pd.NA, index=index, dtype="string")
-        else:
-            result[column] = result[column].astype("string")
-    if "lineup_timestamp" in result.columns:
-        result["lineup_timestamp"] = pd.to_datetime(
-            result["lineup_timestamp"], utc=True, errors="coerce"
-        )
-    else:
-        result["lineup_timestamp"] = pd.NaT
-    for column in ("is_projected_starter", "is_confirmed_starter"):
-        if column not in result.columns:
-            result[column] = False
-        result[column] = result[column].fillna(False).astype(bool)
-
-    if lineups is None or lineups.empty:
-        return result
-
-    working = lineups.copy()
-    required = {"team_id", "player_id"}
-    if not required.issubset(working.columns):
-        return result
-    working["team_id"] = pd.to_numeric(working["team_id"], errors="coerce")
-    working["player_id"] = pd.to_numeric(working["player_id"], errors="coerce")
-    working = working.dropna(subset=["team_id", "player_id"])
-    if working.empty:
-        return result
-    working["team_id"] = working["team_id"].astype(int)
-    working["player_id"] = working["player_id"].astype(int)
-    date_col = "date" if "date" in working.columns else "game_date"
-    working["date"] = pd.to_datetime(working[date_col], errors="coerce").dt.normalize()
-    working = working.dropna(subset=["date"])
-    if working.empty:
-        return result
-    if "lineup_roster_status" not in working.columns and "roster_status" in working.columns:
-        working = working.rename(columns={"roster_status": "lineup_roster_status"})
-    rename_map = {
-        "lineup_role": "_lineup_role",
-        "lineup_status": "_lineup_status",
-        "lineup_roster_status": "_lineup_roster_status",
-        "lineup_timestamp": "_lineup_timestamp",
-    }
-    working = working.rename(columns=rename_map)
-    if "_lineup_timestamp" in working.columns:
-        working["_lineup_timestamp"] = pd.to_datetime(
-            working["_lineup_timestamp"], utc=True, errors="coerce"
-        )
-    merge_cols = ["team_id", "player_id", "date"] + [
-        col for col in rename_map.values() if col in working.columns
-    ]
-    merged = result.merge(
-        working[merge_cols],
-        left_on=["team_id", "player_id", "game_date"],
-        right_on=["team_id", "player_id", "date"],
-        how="left",
-    )
-    merged.drop(columns=["date"], inplace=True, errors="ignore")
-    for column, renamed in rename_map.items():
-        if renamed not in merged.columns:
-            continue
-        merged[column] = merged[column].where(merged[renamed].isna(), merged[renamed])
-        merged.drop(columns=[renamed], inplace=True)
-
-    role_series = merged["lineup_role"].fillna("").str.lower()
-    merged["is_projected_starter"] = role_series.isin({"projected_starter", "confirmed_starter"})
-    merged["is_confirmed_starter"] = role_series == "confirmed_starter"
-    merged["lineup_timestamp"] = pd.to_datetime(
-        merged["lineup_timestamp"], utc=True, errors="coerce"
-    )
-    return merged
-
-
-def _load_lineups_tree(
-    root: Path,
-    *,
-    season: int,
-    start: pd.Timestamp,
-    end: pd.Timestamp,
-) -> pd.DataFrame:
-    season_dir = root / f"season={season}"
-    if not season_dir.exists():
-        return pd.DataFrame()
+def _load_lineups_tree(root: Path, *, season: int, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    start_norm = start.normalize()
+    end_norm = end.normalize()
     frames: list[pd.DataFrame] = []
-    cursor = start
-    while cursor <= end:
-        day_dir = season_dir / f"date={cursor.date().isoformat()}"
-        parquet_path = day_dir / "lineups.parquet"
-        if parquet_path.exists():
-            frames.append(pd.read_parquet(parquet_path))
-        cursor += pd.Timedelta(days=1)
+    for cursor in storage.iter_days(start_norm, end_norm):
+        partition = root / f"season={season}" / f"date={cursor.date():%Y-%m-%d}" / "lineups.parquet"
+        if partition.exists():
+            frames.append(pd.read_parquet(partition))
     if not frames:
         return pd.DataFrame()
-    frame = pd.concat(frames, ignore_index=True)
-    if "date" in frame.columns:
-        frame["date"] = pd.to_datetime(frame["date"]).dt.normalize()
-    return frame
+    return pd.concat(frames, ignore_index=True)
 
 
 def _default_silver_path(data_root: Path, season: int, month: int) -> Path:
@@ -364,17 +258,6 @@ def _default_silver_path(data_root: Path, season: int, month: int) -> Path:
         / f"month={month:02d}"
     )
     return dest / "roster.parquet"
-
-
-def _default_bronze_path(data_root: Path, season: int, month: int) -> Path:
-    dest = ensure_directory(
-        data_root
-        / "bronze"
-        / "roster_nightly"
-        / f"season={season}"
-        / f"month={month:02d}"
-    )
-    return dest / "roster_raw.parquet"
 
 
 @app.command()
@@ -397,12 +280,21 @@ def main(
         paths.get_data_root(),
         help="Data root containing silver outputs (defaults to PROJECTIONS_DATA_ROOT or ./data).",
     ),
-    bronze_out: Path | None = typer.Option(None, help="Optional explicit roster_raw parquet path."),
+    bronze_root: Path | None = typer.Option(
+        None,
+        "--bronze-root",
+        help="Optional override for roster_nightly_raw bronze root (defaults to the standard contract).",
+    ),
+    bronze_out: Path | None = typer.Option(
+        None,
+        "--bronze-out",
+        help="[deprecated] Write a single parquet instead of partitioned bronze outputs.",
+    ),
     out: Path | None = typer.Option(None, help="Optional explicit roster snapshot parquet path."),
     lineups_dir: Path | None = typer.Option(
         None,
         "--lineups-dir",
-        help="Optional override for normalized nba_daily_lineups parquet root.",
+        help="Optional override for normalized nba_daily_lineups parquet root (defaults to <data_root>/silver/nba_daily_lineups).",
     ),
     scrape_missing: bool = typer.Option(
         True,
@@ -432,23 +324,50 @@ def main(
     validate_with_pandera(roster_raw, ROSTER_NIGHTLY_RAW_SCHEMA)
     cfg = SnapshotConfig(start_date=start_day, end_date=end_day)
     schedule_slice = schedule_df.loc[:, ["game_id", "game_date", "tip_ts"]]
-    lineup_root = lineups_dir or (data_root / "silver" / "nba_daily_lineups")
-    lineup_df = (
-        _load_lineups_tree(lineup_root, season=season, start=start_day, end=end_day)
-        if lineup_root.exists()
-        else pd.DataFrame()
-    )
+    lineup_root = (lineups_dir or (data_root / "silver" / "nba_daily_lineups")).resolve()
+    if lineup_root.exists():
+        lineup_df = _load_lineups_tree(lineup_root, season=season, start=start_day, end=end_day)
+        typer.echo(
+            f"[roster] loaded {len(lineup_df):,} lineup rows from {lineup_root}"
+            if not lineup_df.empty
+            else f"[roster] lineup partitions present at {lineup_root} but no rows matched window"
+        )
+    else:
+        typer.echo(f"[roster] lineup directory {lineup_root} not found; continuing without lineup metadata.")
+        lineup_df = pd.DataFrame()
     snapshot = build_roster_snapshot(roster_raw.copy(), schedule_slice, config=cfg, lineups=lineup_df)
 
     silver_path = out or _default_silver_path(data_root, season, month)
-    bronze_path = bronze_out or _default_bronze_path(data_root, season, month)
-    bronze_path.parent.mkdir(parents=True, exist_ok=True)
     silver_path.parent.mkdir(parents=True, exist_ok=True)
-    roster_raw.to_parquet(bronze_path, index=False)
+    bronze_root_path = (bronze_root or storage.default_bronze_root("roster_nightly_raw", data_root)).resolve()
+    if bronze_out:
+        bronze_out.parent.mkdir(parents=True, exist_ok=True)
+        roster_raw.to_parquet(bronze_out, index=False)
+        typer.echo(
+            f"[roster] wrote {len(roster_raw):,} raw rows -> {bronze_out} (legacy bronze_out path)."
+        )
+    else:
+        normalized_dates = pd.to_datetime(roster_raw["game_date"]).dt.normalize()
+        for cursor in storage.iter_days(start_day, end_day):
+            mask = normalized_dates == cursor
+            if not mask.any():
+                continue
+            day_frame = roster_raw.loc[mask].copy()
+            result = storage.write_bronze_partition(
+                day_frame,
+                dataset="roster_nightly_raw",
+                data_root=data_root,
+                season=season,
+                target_date=cursor.date(),
+                bronze_root=bronze_root_path,
+            )
+            typer.echo(
+                f"[roster] bronze partition {result.target_date}: "
+                f"{result.rows} rows -> {result.path}"
+            )
     snapshot.to_parquet(silver_path, index=False)
     typer.echo(
-        f"[roster] wrote {len(roster_raw):,} raw rows -> {bronze_path} "
-        f"and {len(snapshot):,} snapshot rows -> {silver_path}"
+        f"[roster] wrote {len(snapshot):,} snapshot rows -> {silver_path}"
     )
 
 

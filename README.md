@@ -289,6 +289,20 @@ uv run python -m projections.etl.boxscores \
 
 The CLI pulls every completed box score for the requested window, converts player stat lines into `boxscore_labels`, merges them with any existing season file, and reruns `freeze_boxscore_labels` so downstream jobs can read `data/labels/season=YYYY/boxscore_labels.parquet` without risking mutation.
 
+To automate the nightly refresh, run `scripts/run_boxscores.sh` (defaults to “yesterday” in `America/New_York`) or enable the accompanying systemd unit/timer:
+
+```bash
+# one-off run (optional env overrides: BOX_START_DATE, BOX_END_DATE, BOX_SEASON, BOX_TIMEOUT)
+PROJECTIONS_DATA_ROOT=/home/daniel/projections-data ./scripts/run_boxscores.sh
+
+# install the automation (runs daily at 03:30 local)
+sudo cp systemd/live-boxscores.* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now live-boxscores.service live-boxscores.timer
+```
+
+The service executes under the `daniel` account and writes bronze partitions to `data/bronze/boxscores_raw/season=YYYY/date=YYYY-MM-DD/boxscores_raw.parquet` plus season-level `data/labels/season=YYYY/boxscore_labels.parquet`.
+
 ### Schedule Refresh
 
 Use the dedicated ETL to rebuild silver schedule partitions directly from the NBA API (no more manual parquet edits):

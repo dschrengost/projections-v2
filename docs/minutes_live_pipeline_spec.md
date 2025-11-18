@@ -129,7 +129,8 @@ uv run python -m projections.cli.score_minutes_v1 \
 
 3. **Overnight batch (~03:00 ET)**  
    - Ingest box scores, freeze labels, rebuild historical gold features.  
-   - Optionally run the live builder in parity mode (run_as_of_ts = nightly freeze) to ensure schema parity vs gold partitions.
+   - Optionally run the live builder in parity mode (run_as_of_ts = nightly freeze) to ensure schema parity vs gold partitions.  
+   - Automation: `systemd/live-boxscores.service` + `systemd/live-boxscores.timer` call `scripts/run_boxscores.sh`, which defaults to `date -I -d 'yesterday'` and runs `python -m projections.etl.boxscores`. The timer fires daily at 03:30 local and runs as the `daniel` user so bronze/labels remain writable without chown fixes.
 
 Scheduling can be handled via the existing orchestration layer (e.g., cron + bash runner or Prefect). Each job writes a small registry entry summarizing `{date, run_as_of_ts, dataset paths, warnings}`.
 

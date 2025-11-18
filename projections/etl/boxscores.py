@@ -10,6 +10,7 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.etl.common import load_schedule_data
 from projections.minutes_v1.labels import freeze_boxscore_labels
 from projections.minutes_v1.schemas import BOX_SCORE_LABELS_SCHEMA, enforce_schema, validate_with_pandera
 from projections.minutes_v1.smoke_dataset import _parse_minutes_iso
@@ -86,6 +87,11 @@ def main(
     start: datetime = typer.Option(..., help="Inclusive start date (YYYY-MM-DD)."),
     end: datetime = typer.Option(..., help="Inclusive end date (YYYY-MM-DD)."),
     season: int = typer.Option(..., help="Season label used for output partitions (e.g., 2025)."),
+    schedule: List[str] = typer.Option(
+        [],
+        "--schedule",
+        help="Optional schedule parquet glob(s). Defaults to the silver schedule for the requested season.",
+    ),
     data_root: Path = typer.Option(
         paths.get_data_root(),
         help="Base data directory containing labels/ (defaults to PROJECTIONS_DATA_ROOT or ./data).",
@@ -97,12 +103,50 @@ def main(
     if end_day < start_day:
         raise typer.BadParameter("--end must be on/after --start.")
 
-    scraper = NbaComBoxScoreScraper(timeout=timeout)
+    scraper = NbaComBoxScoreScraper(timeout=timeout, request_delay=0.0)
+    default_schedule = schedule or [
+        str(
+            data_root
+            / "silver"
+            / "schedule"
+            / f"season={season}"
+            / "month=*"
+            / "schedule.parquet"
+        )
+    ]
+    schedule_df = load_schedule_data(default_schedule, start_day, end_day, timeout)
+    schedule_df["game_date"] = pd.to_datetime(schedule_df["game_date"]).dt.normalize()
+
     games: list[NbaComGameBoxScore] = []
+    skipped_days: list[pd.Timestamp] = []
+    season_dir = data_root / "bronze" / "boxscores_raw" / f"season={season}"
+    season_dir.mkdir(parents=True, exist_ok=True)
     for cursor in _iter_dates(start_day, end_day):
-        games.extend(scraper.fetch_daily_box_scores(cursor.date()))
+        typer.echo(f"[boxscores] fetching {cursor.date()}...")
+        day_games = schedule_df.loc[schedule_df["game_date"] == cursor]
+        if day_games.empty:
+            skipped_days.append(cursor)
+            continue
+        for gid in day_games["game_id"].dropna().unique():
+            typer.echo(f"[boxscores] fetching boxscore for game_id={gid}")
+            box_score = None
+            for attempt in range(3):
+                try:
+                    box_score = scraper.fetch_box_score(str(int(gid)))
+                    break
+                except RuntimeError as exc:
+                    if attempt == 2:
+                        typer.echo(f"[boxscores] warning: {exc}; skipping {gid}")
+                    else:
+                        time.sleep(0.25)
+                        continue
+            if box_score:
+                games.append(box_score)
     if not games:
-        raise RuntimeError("NBA.com box score scraper returned zero games for requested window.")
+        typer.echo(
+            "[boxscores] warning: no boxscores were fetched for this window; skipping write."
+        )
+        return
 
     season_label = str(season)
     labels_df = _games_to_labels(games, season_label=season_label)
@@ -111,6 +155,12 @@ def main(
     ].copy()
     if labels_df.empty:
         raise RuntimeError("No label rows matched the requested date window.")
+
+    bronze_df = pd.DataFrame([game.__dict__ for game in games])
+    bronze_df.to_parquet(
+        season_dir / f"date={start_day.date()}" / "boxscores_raw.parquet",
+        index=False,
+    )
 
     labels_df = enforce_schema(labels_df, BOX_SCORE_LABELS_SCHEMA)
     validate_with_pandera(labels_df, BOX_SCORE_LABELS_SCHEMA)
