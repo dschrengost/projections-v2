@@ -429,12 +429,12 @@ def apply_play_probability_mixture(
     df: pd.DataFrame,
     play_prob: np.ndarray,
 ) -> pd.DataFrame:
-    """Attach unconditional (p_play-weighted) minutes without mutating conditional quantiles.
+    """Attach p_play-weighted minutes without mutating conditional quantiles.
 
     The minutes stack strictly models conditional minutes—i.e., distributions given the player
     checks into the game. Downstream consumers (and DFS tooling) sometimes need an expectation
-    that folds in availability. Rather than overwriting the conditional quantiles, we expose
-    separate *_uncond columns so callers can choose explicitly.
+    that folds in availability. When this helper is invoked, it writes additional columns rather
+    than overwriting the conditional quantiles so callers can choose explicitly.
     """
 
     probs = np.clip(play_prob, 0.0, 1.0)
@@ -637,13 +637,13 @@ def _fit_two_sided_params_for_group(
     for shift in a_grid:
         p50_shifted = p50 + shift
         for scale_lo in slo_grid:
-                candidate_p10 = p50_shifted - scale_lo * left
-                for scale_hi in shi_grid:
-                    candidate_p90 = p50_shifted + scale_hi * right
-                    eval_p10, eval_p50, eval_p90 = _clip_quantiles(candidate_p10, p50_shifted, candidate_p90)
-                    cov10 = _coverage_fraction(y, eval_p10)
-                    cov90 = _coverage_fraction(y, eval_p90)
-                    winkler = float(np.mean(_winkler_score(y, eval_p10, eval_p90, alpha=alpha)))
+            candidate_p10 = p50_shifted - scale_lo * left
+            for scale_hi in shi_grid:
+                candidate_p90 = p50_shifted + scale_hi * right
+                eval_p10, eval_p50, eval_p90 = _clip_quantiles(candidate_p10, p50_shifted, candidate_p90)
+                cov10 = _coverage_fraction(y, eval_p10)
+                cov90 = _coverage_fraction(y, eval_p90)
+                winkler = float(np.mean(_winkler_score(y, eval_p10, eval_p90, alpha=alpha)))
                 if abs(cov10 - ALPHA_TARGET) <= tol and abs(cov90 - (1.0 - ALPHA_TARGET)) <= tol:
                     if best_feasible is None or winkler < best_feasible[0]:
                         best_feasible = (winkler, shift, scale_lo, scale_hi)
@@ -1391,7 +1391,7 @@ def main(
     else:
         val_play_prob = np.ones(len(val_df), dtype=float)
     val_eval["play_prob"] = val_play_prob
-    val_eval = apply_play_probability_mixture(val_eval, val_play_prob)
+    val_eval["will_play_flag"] = (val_play_prob >= 0.5).astype(int)
     val_eval["p10"] = val_eval["minutes_p10"]
     val_eval["p90"] = val_eval["minutes_p90"]
     val_eval["p50"] = val_eval["minutes_p50"]
@@ -1423,7 +1423,7 @@ def main(
         )
 
     # Coverage + MAE calculations intentionally use the conditional minutes columns.
-    # Never substitute the *_uncond variants here—calibration is evaluated on the
+    # Never substitute any play-probability-adjusted variant here—calibration is evaluated on the
     # "if active" distribution only.
     val_mae = float(mean_absolute_error(y_val_unique, val_unique["p50"]))
     val_mae_raw = float(mean_absolute_error(y_val_unique, val_unique["p50_raw"]))
@@ -1571,6 +1571,8 @@ def main(
         "val_play_prob_brier": play_brier,
         "val_play_prob_ece": play_ece,
         "val_play_prob_mean": float(np.mean(play_prob_array)),
+        "val_play_prob_threshold": 0.5,
+        "val_will_play_rate": float(np.mean(val_unique["will_play_flag"].to_numpy(dtype=float))),
         "inside_cov": inside_cov,
         "mpiwn": mpiwn,
         "winkler_alpha_0_2": winkler_mean,
