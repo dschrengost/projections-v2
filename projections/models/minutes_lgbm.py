@@ -301,10 +301,13 @@ def _bucket_key(df: pd.DataFrame, bucket_mode: str = "starter,p50bins") -> pd.Se
 
 
 def _filter_out_players(df: pd.DataFrame) -> pd.DataFrame:
-    if "status" not in df.columns:
+    required_cols = {"status", "injury_snapshot_missing"}
+    if not required_cols.issubset(df.columns):
         return df
     status_col = df["status"].astype(str).str.upper()
-    filtered = df.loc[status_col != AvailabilityStatus.OUT.value].copy()
+    injuries_missing = df["injury_snapshot_missing"].fillna(1).astype(int)
+    keep_mask = (status_col != AvailabilityStatus.OUT.value) | (injuries_missing == 1)
+    filtered = df.loc[keep_mask].copy()
     if filtered.empty:
         raise ValueError("Filtering OUT players removed all rows; cannot proceed.")
     return filtered
