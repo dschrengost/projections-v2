@@ -332,6 +332,8 @@ For each month in the requested range, the command:
 1. Runs the `SmokeDatasetBuilder` (unless you pass `--skip-bronze`).
 2. Invokes `projections.pipelines.build_features_minutes_v1` to populate `data/gold/features_minutes_v1/season=YYYY/month=MM/` (unless you pass `--skip-gold`).
 
+> **Status (Nov 18, 2025):** Gold features are rebuilt and backfilled from the start of the 2022-23 season through the current date (2025-11-18) at `/home/daniel/projections-data/gold/features_minutes_v1/`.
+
 Use `--data-root`, `--season`, or the various `--*-json` options to override defaults when targeting different seasons or custom raw paths.
 
 These commands write predictions to `data/preds/minutes_v1/2024-12/` and diagnostics (rolling offsets, daily coverage, summary JSON) to `reports/minutes_v1/2024-12/`. Adjust the hysteresis/cap flags cautiously—CI guardrails expect month-level p10 in [0.09, 0.11], ≤3 low days after day 7, and width deltas under 15%.
