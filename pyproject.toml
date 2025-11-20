@@ -25,6 +25,8 @@ dependencies = [
   "httpx>=0.28.1",
   "tabula-py>=2.10.0",
   "pypdf2>=3.0.1",
+  "fastapi>=0.115.5",
+  "uvicorn>=0.38.0",
 ]
 
 [project.optional-dependencies]

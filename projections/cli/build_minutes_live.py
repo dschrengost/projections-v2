@@ -183,6 +183,23 @@ def _load_label_history(
     run_as_of_ts: pd.Timestamp,
 ) -> pd.DataFrame:
     labels = pd.read_parquet(labels_path)
+
+    minutes_col = labels.get("minutes")
+    if minutes_col is not None and minutes_col.dtype == object:
+        parsed = pd.to_timedelta(minutes_col, errors="coerce")
+        labels["minutes"] = (parsed.dt.total_seconds() / 60.0).astype("Float64")
+
+    # Older label snapshots may be missing newer required fields; backfill sensible defaults
+    # so schema enforcement passes for live builds.
+    if "starter_flag_label" not in labels.columns:
+        starter_series = labels.get("starter_flag")
+        starter_bool = starter_series.astype("boolean", copy=False).fillna(False) if starter_series is not None else pd.Series(
+            False, index=labels.index, dtype="boolean"
+        )
+        labels["starter_flag_label"] = starter_bool.astype("Int64")
+    if "label_frozen_ts" not in labels.columns:
+        labels["label_frozen_ts"] = pd.NaT
+
     labels = enforce_schema(labels, BOX_SCORE_LABELS_SCHEMA, allow_missing_optional=True)
     labels["game_date"] = pd.to_datetime(labels["game_date"]).dt.normalize()
     mask = labels["game_date"] < target_day
@@ -438,6 +455,12 @@ def main(
         "--enforce-active-roster",
         help="Drop players that are not present on the NBA.com active roster snapshot.",
     ),
+    lock_buffer_minutes: int = typer.Option(
+        0,
+        "--lock-buffer-minutes",
+        min=0,
+        help="Skip games whose tip_ts is more than this many minutes before run_as_of_ts (avoid re-scoring locked games).",
+    ),
     scraper_timeout: float = typer.Option(
         10.0,
         "--scraper-timeout",
@@ -526,6 +549,27 @@ def main(
     schedule_slice = _filter_by_game_ids(schedule_df, all_game_ids)
     if schedule_slice.empty:
         raise RuntimeError("Schedule slice is empty after filtering by requested game_ids.")
+
+    if lock_buffer_minutes > 0:
+        tips = pd.to_datetime(schedule_slice["tip_ts"], utc=True, errors="coerce")
+        cutoff = run_ts - pd.Timedelta(minutes=lock_buffer_minutes)
+        allowed_mask = tips.isna() | (tips >= cutoff)
+        locked_games = schedule_slice.loc[~allowed_mask, "game_id"].dropna().unique().tolist()
+        schedule_slice = schedule_slice.loc[allowed_mask].copy()
+        if schedule_slice.empty:
+            raise RuntimeError("All games are past the lock cutoff; nothing to score.")
+        if locked_games:
+            warnings.append(
+                f"[lock-guard] Skipping {len(locked_games)} game(s) with tip_ts before {cutoff.isoformat()}."
+            )
+        else:
+            warnings.append("[lock-guard] No games skipped; cutoff not triggered.")
+        allowed_ids = (
+            pd.to_numeric(schedule_slice["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
+        )
+        combined_labels = combined_labels[combined_labels["game_id"].isin(allowed_ids)].copy()
+        all_game_ids = combined_labels["game_id"].dropna().astype(int).unique().tolist()
+
     tip_lookup = _per_game_tip_lookup(schedule_slice)
 
     injuries_slice = _filter_snapshot_by_asof(
@@ -536,6 +580,14 @@ def main(
         dataset_name="injuries_snapshot",
         warnings=warnings,
     )
+    if injuries_slice.empty:
+        latest_inj_ts = pd.to_datetime(injuries_df.get("as_of_ts"), utc=True, errors="coerce")
+        latest_ts_str = latest_inj_ts.max().isoformat() if not latest_inj_ts.dropna().empty else "NA"
+        raise RuntimeError(
+            "Injury snapshot is empty after as-of filtering; refusing to score. "
+            f"run_as_of_ts={run_ts.isoformat()} latest_injury_as_of_ts={latest_ts_str}. "
+            "Run build_minutes_live after the injury scrape completes or pass a run_as_of_ts at/after the snapshot time."
+        )
     odds_slice = _filter_snapshot_by_asof(
         _filter_by_game_ids(odds_df, all_game_ids),
         time_col="as_of_ts",

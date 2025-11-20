@@ -46,9 +46,17 @@ type SummaryResponse = {
   }
   model_run_id?: string
   bundle_dir?: string
+  run_id?: string | null
+  run_as_of_ts?: string | null
 }
 
 type SortKey = 'player_id' | 'team_id' | 'minutes_p10' | 'minutes_p50' | 'minutes_p90' | 'play_prob'
+
+type RunOption = {
+  run_id: string
+  run_as_of_ts?: string | null
+  generated_at?: string | null
+}
 
 const SORT_LABELS: Record<SortKey, string> = {
   player_id: 'Player',
@@ -136,14 +144,18 @@ function App() {
   const [sortKey, setSortKey] = useState<SortKey>('minutes_p50')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [runId, setRunId] = useState<string | null>(null)
+  const [runOptions, setRunOptions] = useState<RunOption[]>([])
+  const [latestRunId, setLatestRunId] = useState<string | null>(null)
 
   const fetchData = useCallback(
-    async (date: string) => {
+    async (date: string, currentRunId: string | null) => {
       setLoading(true)
       setError(null)
       setStatusMessage(null)
       try {
-        const minutesRes = await fetch(`/api/minutes?date=${date}`)
+        const runParam = currentRunId ? `&run_id=${encodeURIComponent(currentRunId)}` : ''
+        const minutesRes = await fetch(`/api/minutes?date=${date}${runParam}`)
         if (minutesRes.status === 404) {
           let detail = 'No artifact for selected date.'
           try {
@@ -163,7 +175,7 @@ function App() {
           setStatusMessage(null)
         }
 
-        const summaryRes = await fetch(`/api/minutes/meta?date=${date}`)
+        const summaryRes = await fetch(`/api/minutes/meta?date=${date}${runParam}`)
         if (summaryRes.status === 404) {
           setSummary(null)
         } else if (summaryRes.ok) {
@@ -184,8 +196,41 @@ function App() {
   )
 
   useEffect(() => {
-    void fetchData(selectedDate)
-  }, [selectedDate, fetchData])
+    const controller = new AbortController()
+    const loadRuns = async () => {
+      try {
+        const res = await fetch(`/api/minutes/runs?date=${selectedDate}`, {
+          signal: controller.signal,
+        })
+        if (!res.ok) {
+          setRunOptions([])
+          setLatestRunId(null)
+          setRunId(null)
+          return
+        }
+        const data = await res.json()
+        const runs: RunOption[] = data?.runs ?? []
+        setRunOptions(runs)
+        setLatestRunId(data?.latest ?? null)
+        setRunId((prev) => {
+          if (prev && runs.some((run) => run.run_id === prev)) {
+            return prev
+          }
+          return data?.latest ?? null
+        })
+      } catch {
+        setRunOptions([])
+        setLatestRunId(null)
+        setRunId(null)
+      }
+    }
+    void loadRuns()
+    return () => controller.abort()
+  }, [selectedDate])
+
+  useEffect(() => {
+    void fetchData(selectedDate, runId)
+  }, [selectedDate, runId, fetchData])
 
   const filteredRows = useMemo(() => {
     const text = filter.trim().toLowerCase()
@@ -269,7 +314,32 @@ function App() {
               onChange={(event) => setSelectedDate(event.target.value)}
             />
           </label>
-          <button onClick={() => fetchData(selectedDate)} disabled={loading}>
+          <label>
+            Run
+            <select
+              value={runId ?? latestRunId ?? ''}
+              onChange={(event) => {
+                const value = event.target.value
+                setRunId(value || null)
+              }}
+            >
+              {latestRunId && (
+                <option value={latestRunId}>
+                  {`Latest (${latestRunId})`}
+                </option>
+              )}
+              {runOptions
+                .filter((option) => option.run_id !== latestRunId)
+                .map((option) => (
+                  <option key={option.run_id} value={option.run_id}>
+                    {option.run_id}
+                    {option.run_as_of_ts ? ` · ${option.run_as_of_ts}` : ''}
+                  </option>
+                ))}
+              {!latestRunId && !runOptions.length && <option value="">No runs</option>}
+            </select>
+          </label>
+          <button onClick={() => fetchData(selectedDate, runId)} disabled={loading}>
             Refresh
           </button>
         </div>
@@ -285,7 +355,9 @@ function App() {
           <span>
             Rows: {summary.counts.rows} · Players: {summary.counts.players} ·
             Teams: {summary.counts.teams}{' '}
-            {summary.model_run_id && `· Run: ${summary.model_run_id}`}
+            {summary.model_run_id && `· Model run: ${summary.model_run_id}`}{' '}
+            {summary.run_id && `· Artifact: ${summary.run_id}`}{' '}
+            {summary.run_as_of_ts && `· As of: ${summary.run_as_of_ts}`}
           </span>
         )}
       </section>
