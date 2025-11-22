@@ -126,15 +126,18 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
 
     if lineups:
         _echo_stage("running daily lineups ETL")
-        daily_lineups_etl.run(
-            start=start_dt,
-            end=end_dt,
-            season=season_value,
-            data_root=data_root,
-            bronze_root=None,
-            silver_root=None,
-            timeout=lineups_timeout,
-        )
+        try:
+            daily_lineups_etl.run(
+                start=start_dt,
+                end=end_dt,
+                season=season_value,
+                data_root=data_root,
+                bronze_root=None,
+                silver_root=None,
+                timeout=lineups_timeout,
+            )
+        except Exception as exc:  # pragma: no cover - keep pipeline alive when NBA feed lags
+            typer.echo(f"[live] warning: daily lineups failed ({exc}); continuing without lineups", err=True)
     else:
         _echo_stage("skipping daily lineups stage")
 

@@ -48,6 +48,7 @@ DEFAULT_STARTER_PRIORS = paths.data_path("gold", "minutes_priors", "starter_slot
 DEFAULT_STARTER_HISTORY = paths.data_path("gold", "minutes_priors", "player_starter_history.parquet")
 DEFAULT_PROMOTION_CONFIG = Path("config/minutes_promotion.yaml")
 DEFAULT_RECONCILE_CONFIG = Path("config/minutes_l2_reconcile.yaml")
+DEFAULT_PREDICTION_LOGS_ROOT = paths.data_path("gold", "prediction_logs_minutes_v1")
 OUTPUT_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
 LATEST_POINTER = "latest_run.json"
@@ -234,10 +235,10 @@ def _load_promotion_context(
     config_path = config_path.expanduser()
     if not priors_path.exists() or not history_path.exists():
         typer.echo(
-            "[promotion-prior] Missing priors or history parquet; skipping promotion calibration.",
+            f"[promotion-prior] ERROR: missing priors/history ({priors_path}, {history_path}); aborting.",
             err=True,
         )
-        return None
+        raise typer.Exit(code=1)
     priors_df = pd.read_parquet(priors_path)
     history_df = pd.read_parquet(history_path)
     if "starter_history_games" not in history_df.columns:
@@ -363,12 +364,35 @@ def _prepare_features(df: pd.DataFrame, *, mode: Mode = "historical") -> pd.Data
     if mode == "live":
         working = df.copy()
         if "starter_flag_label" not in working.columns:
+            candidate = None
             if "starter_flag" in working.columns:
-                working["starter_flag_label"] = pd.to_numeric(
-                    working["starter_flag"], errors="coerce"
-                ).fillna(0).astype(int)
-            else:
+                candidate = pd.to_numeric(working["starter_flag"], errors="coerce")
+            elif "is_projected_starter" in working.columns or "is_confirmed_starter" in working.columns:
+                # Heuristic: use projected/confirmed starter flags if present.
+                starter_series = pd.Series(0, index=working.index, dtype=int)
+                if "is_projected_starter" in working.columns:
+                    starter_series |= (
+                        working["is_projected_starter"].astype("boolean", copy=False).fillna(False).astype(int)
+                    )
+                if "is_confirmed_starter" in working.columns:
+                    starter_series |= (
+                        working["is_confirmed_starter"].astype("boolean", copy=False).fillna(False).astype(int)
+                    )
+                if "lineup_status" in working.columns:
+                    starter_series |= (
+                        working["lineup_status"]
+                        .astype(str)
+                        .str.lower()
+                        .eq("expected")
+                        .fillna(False)
+                        .astype(int)
+                    )
+                candidate = starter_series
+
+            if candidate is None:
                 working["starter_flag_label"] = 0
+            else:
+                working["starter_flag_label"] = candidate.fillna(0).astype(int)
     else:
         try:
             working = derive_starter_flag_labels(df)
@@ -393,6 +417,7 @@ def _score_rows(
     df: pd.DataFrame,
     bundle: dict,
     *,
+    disable_play_prob: bool = False,
     promotion_ctx: PromotionPriorContext | None = None,
     promotion_debug: bool = False,
 ) -> pd.DataFrame:
@@ -438,13 +463,14 @@ def _score_rows(
     working["p50_cond"] = working["minutes_p50"]
     working["p90_cond"] = working["minutes_p90"]
 
-    play_prob_artifacts = bundle.get("play_probability")
+    play_prob_artifacts = None if disable_play_prob else bundle.get("play_probability")
     if play_prob_artifacts is not None:
         play_prob = predict_play_probability(play_prob_artifacts, feature_matrix)
     else:
         play_prob = np.ones(len(working), dtype=float)
     working["play_prob"] = play_prob
-    working = apply_play_probability_mixture(working, play_prob)
+    if not disable_play_prob:
+        working = apply_play_probability_mixture(working, play_prob)
 
     if "pos_bucket" not in working.columns:
         base_series = working.get("archetype")
@@ -714,6 +740,53 @@ def _write_daily_outputs(
     typer.echo(f"[minutes] {day.isoformat()}: wrote {len(df)} rows to {parquet_path}")
 
 
+def _log_predictions(
+    df: pd.DataFrame,
+    *,
+    logs_root: Path,
+    run_id: str | None,
+    run_as_of_ts: datetime | None,
+    model_run_id: str,
+) -> None:
+    """Append predictions and features to the long-term log."""
+    if df.empty:
+        return
+
+    # Ensure directory exists
+    logs_root = logs_root.expanduser()
+    logs_root.mkdir(parents=True, exist_ok=True)
+
+    # Add metadata
+    log_df = df.copy()
+    log_df["log_timestamp"] = datetime.now(tz=UTC)
+    log_df["run_id"] = run_id
+    log_df["run_as_of_ts"] = run_as_of_ts
+    log_df["model_run_id"] = model_run_id
+    
+    # Partition by season/month (derived from game_date)
+    # We can't easily append to parquet files in a thread-safe way without a proper engine (like Delta/Iceberg).
+    # For now, we will write a unique file per run to avoid concurrency issues, 
+    # and rely on downstream compaction if needed.
+    # Or, since this is a single box, we can just write a file named by run_id.
+    
+    # Filename: {game_date}_{run_id}.parquet
+    # If multiple dates in df, we group.
+    
+    for game_date, group in log_df.groupby("game_date"):
+        season = _season_from_date(game_date)
+        month = game_date.month
+        partition_dir = logs_root / f"season={season}" / f"month={month:02d}"
+        partition_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Use a unique name to prevent overwrites
+        safe_run_id = run_id or "manual"
+        filename = f"{game_date}_{safe_run_id}.parquet"
+        path = partition_dir / filename
+        
+        group.to_parquet(path, index=False)
+        # typer.echo(f"[logging] Wrote prediction log to {path}")
+
+
 @app.command()
 def main(
     ctx: typer.Context,
@@ -835,6 +908,17 @@ def main(
         "--reconcile-debug",
         help="Log per-team reconciliation summaries and top deltas.",
     ),
+    prediction_logs_root: Path = typer.Option(
+        DEFAULT_PREDICTION_LOGS_ROOT,
+        "--prediction-logs-root",
+        help="Root directory for long-term prediction logs.",
+    ),
+    disable_play_prob: bool = typer.Option(
+        False,
+        "--disable-play-prob",
+        help="Skip play probability usage; emit only conditional minutes (uncond columns unchanged).",
+        is_flag=True,
+    ),
 ) -> None:
     cli_params: dict[str, Any] = {
         "date": date,
@@ -859,6 +943,8 @@ def main(
         "reconcile_team_minutes": reconcile_team_minutes,
         "reconcile_config": reconcile_config,
         "reconcile_debug": reconcile_debug,
+        "prediction_logs_root": prediction_logs_root,
+        "disable_play_prob": disable_play_prob,
     }
     resolved_params = _apply_scoring_overrides(ctx, cli_params, config_path)
     date = resolved_params["date"]
@@ -882,7 +968,10 @@ def main(
     promotion_prior_debug = resolved_params["promotion_prior_debug"]
     reconcile_team_minutes = resolved_params["reconcile_team_minutes"]
     reconcile_config = resolved_params["reconcile_config"]
+    reconcile_config = resolved_params["reconcile_config"]
     reconcile_debug = resolved_params["reconcile_debug"]
+    prediction_logs_root = cli_params.get("prediction_logs_root", DEFAULT_PREDICTION_LOGS_ROOT)
+    disable_play_prob = resolved_params.get("disable_play_prob", False)
 
     if date is None:
         raise typer.BadParameter("--date is required (set via CLI or config file).")
@@ -894,6 +983,12 @@ def main(
 
     resolved_bundle_dir, config_run_id = _resolve_bundle_dir(bundle_dir, bundle_config)
     resolved_bundle_dir = resolved_bundle_dir.expanduser()
+    if not resolved_bundle_dir.exists():
+        typer.echo(
+            f"[minutes] ERROR: bundle directory not found at {resolved_bundle_dir}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
     bundle = _load_bundle(resolved_bundle_dir)
     model_meta = _load_meta(resolved_bundle_dir)
     model_run_id = config_run_id or resolved_bundle_dir.name
@@ -944,22 +1039,33 @@ def main(
 
     run_as_of_datetime = run_as_of_ts_value.to_pydatetime() if run_as_of_ts_value is not None else None
 
-    raw_features = _load_feature_slice(
-        start_day,
-        final_day,
-        features_root=features_root,
-        features_path=features_path,
-        run_id=run_id if normalized_mode == "live" else None,
-    )
+    try:
+        raw_features = _load_feature_slice(
+            start_day,
+            final_day,
+            features_root=features_root,
+            features_path=features_path,
+            run_id=run_id if normalized_mode == "live" else None,
+        )
+    except FileNotFoundError as exc:
+        typer.echo(f"[minutes] ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+    if raw_features.empty:
+        typer.echo(
+            "[minutes] ERROR: no feature rows available for requested date range.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
     prepared = _prepare_features(raw_features, mode=normalized_mode)
     if prepared.empty:
-        typer.echo("[minutes] No eligible rows found for requested date range.", err=True)
+        typer.echo("[minutes] ERROR: no eligible rows found for requested date range.", err=True)
         raise typer.Exit(code=1)
     if limit_rows is not None:
         prepared = prepared.head(limit_rows).copy()
     scored = _score_rows(
         prepared,
         bundle,
+        disable_play_prob=disable_play_prob,
         promotion_ctx=promotion_ctx,
         promotion_debug=promotion_prior_debug,
     )
@@ -1001,6 +1107,16 @@ def main(
         scored = apply_play_probability_mixture(
             scored,
             scored["play_prob"].to_numpy(dtype=float),
+        )
+
+    # Log predictions (Phase 3 Hardening)
+    if normalized_mode == "live":
+        _log_predictions(
+            scored,
+            logs_root=prediction_logs_root,
+            run_id=run_id,
+            run_as_of_ts=run_as_of_datetime,
+            model_run_id=model_run_id,
         )
 
     for day in _iter_days(start_day, final_day):

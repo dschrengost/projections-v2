@@ -2,16 +2,18 @@ minutes_training:
   run_id: v1_dec_smoke_lgbm
   data_root: data
   artifact_root: artifacts/minutes_v1
-  train_start: 2024-12-01T00:00:00+00:00
-  train_end: 2024-12-18T23:59:59+00:00
-  cal_end: 2024-12-24T23:59:59+00:00
-  val_end: 2024-12-31T23:59:59+00:00
-  season: 2024
-  month: 12
+  train_start: 2022-10-01T00:00:00+00:00
+  train_end: 2025-02-28T23:59:59+00:00
+  cal_start: 2025-03-01T00:00:00+00:00
+  cal_end: 2025-04-30T23:59:59+00:00
+  val_start: 2025-10-01T00:00:00+00:00
+  val_end: 2025-11-14T23:59:59+00:00
   conformal_mode: two-sided
   conformal_buckets: starter,p50bins
   conformal_k: 200
   playable_min_p50: 10.0
+  tolerance_relaxed: false
+  allow_guard_failure: true
 
 calibration_window:
   start: 2024-12-01

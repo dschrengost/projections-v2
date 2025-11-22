@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 import typer
 from rich.console import Console
 
-from . import data, features, utils
+from projections import data, features, paths, utils
 from .models import classical, deep
 
 console = Console()
@@ -33,42 +34,81 @@ def classical_minutes(
     utils.set_seeds(int(cfg.get("seed", 42)))
     data_paths = utils.resolve_data_paths(cfg)
 
-    raw_df = data.load_raw_minutes(data_paths, raw_filename)
-    cleaned = data.clean_minutes(
-        raw_df, columns=cfg.get("pipeline", {}).get("columns_to_keep")
-    )
-    interim_name = cfg.get("pipeline", {}).get("interim_filename", "clean_minutes.csv")
-    data.write_interim(cleaned, data_paths, interim_name)
+    # New logic: Load Gold Features (Parquet)
+    features_root = paths.data_path("gold", "features_minutes_v1")
+    if not features_root.exists():
+        console.print(f"[red]Features root not found at {features_root}. Run backfill_features first![/red]")
+        raise typer.Exit(code=1)
 
-    rolling_windows = cfg.get("features", {}).get("rolling_windows", [3, 5, 10])
-    feat_df = features.add_rolling_features(
-        cleaned,
-        group_cols=cfg.get("features", {}).get("group_by", ["player_id"]),
-        target_col=cfg.get("targets", {}).get("minutes_col", "minutes"),
-        windows=rolling_windows,
-    )
+    # Load all available seasons
+    files = sorted(features_root.rglob("*.parquet"))
+    if not files:
+        console.print(f"[red]No feature parquet files found in {features_root}.[/red]")
+        raise typer.Exit(code=1)
+    
+    console.print(f"Loading features from {len(files)} parquet files...")
+    feat_df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+    console.print(f"Loaded {len(feat_df)} rows.")
 
-    drop_cols = cfg.get("features", {}).get(
-        "drop_columns",
-        ["player_name", "team", "opponent", "game_date"],
-    )
+    # Define metadata columns to drop (non-features)
+    # We keep 'minutes' as target, but drop it from X later
+    metadata_cols = [
+        "game_id", "player_id", "team_id", "player_name", "team_name", "team_tricode",
+        "season", "game_date", "tip_ts", "home_team_id", "away_team_id", 
+        "opponent_team_id", "opponent_team_name", "opponent_team_tricode",
+        "injury_as_of_ts", "odds_as_of_ts", "roster_as_of_ts", "lineup_timestamp", 
+        "feature_as_of_ts", "archetype", "pos_bucket", "lineup_role", 
+        "lineup_status", "lineup_roster_status", "status", "home_flag",
+        "injury_snapshot_missing", "is_confirmed_starter", # maybe keep is_projected_starter?
+        "available_B", "available_G", "available_W" # keep these? they are features.
+    ]
+    # Refine drop list: keep numeric/boolean features. 
+    # The schema has many columns. Let's drop the obvious metadata.
+    drop_cols = [
+        "game_id", "player_id", "team_id", "player_name", "team_name", "team_tricode",
+        "season", "game_date", "tip_ts", "home_team_id", "away_team_id",
+        "opponent_team_id", "opponent_team_name", "opponent_team_tricode",
+        "injury_as_of_ts", "odds_as_of_ts", "roster_as_of_ts", "lineup_timestamp",
+        "feature_as_of_ts", "archetype", "lineup_role", "lineup_status", 
+        "lineup_roster_status", "status"
+    ]
+    
+    # Handle categorical columns if needed (e.g. pos_bucket). 
+    # For now, let's drop pos_bucket if we aren't encoding it, or keep it if XGBoost handles it.
+    # XGBoost can handle categoricals but needs config. Let's drop for simplicity or assume numeric.
+    # pos_bucket is string. Let's drop it for this first pass or one-hot it?
+    # The original pipeline didn't use it. Let's drop it to be safe.
+    drop_cols.append("pos_bucket")
+
+    # Drop rows where target is missing (e.g. future games)
+    target_col = cfg.get("targets", {}).get("minutes_col", "minutes")
+    initial_len = len(feat_df)
+    feat_df = feat_df.dropna(subset=[target_col])
+    dropped_len = initial_len - len(feat_df)
+    if dropped_len > 0:
+        console.print(f"Dropped {dropped_len} rows with missing target '{target_col}'.")
+
     X, y = features.build_feature_target_split(
         feat_df,
-        target_col=cfg.get("targets", {}).get("minutes_col", "minutes"),
+        target_col=target_col,
         drop_cols=drop_cols,
     )
+    
+    # Ensure X only has numeric columns (basic safeguard)
+    X = X.select_dtypes(include=["number", "bool"])
+
     X_train, X_valid, y_train, y_valid = features.stratified_split(
         X,
         y,
         test_size=float(cfg.get("training", {}).get("validation_size", 0.2)),
         random_state=int(cfg.get("seed", 42)),
     )
-    result = classical.train_xgboost_model(
+    result = classical.train_lightgbm_model(
         X_train,
         y_train,
         X_valid=X_valid,
         y_valid=y_valid,
-        params=cfg.get("training", {}).get("xgboost", {}),
+        params=cfg.get("training", {}).get("lightgbm", {}),
     )
 
     if result.metrics:

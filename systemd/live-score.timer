@@ -1,0 +1,13 @@
+[Unit]
+Description=Run live scoring every 30 minutes (staggered)
+After=network-online.target
+
+[Timer]
+# Run at :10 and :40 past the hour (5 mins after scrape)
+OnCalendar=*-*-* 08..23:10,40:00
+Unit=live-score.service
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1151,6 +1151,27 @@ def main(
         "--playable-winkler-tolerance",
         help="Allowed absolute increase relative to the playable Winkler baseline.",
     ),
+    disable_play_prob: bool = typer.Option(
+        False,
+        "--disable-play-prob",
+        help="Skip training and using the play probability model; only conditional minutes are produced.",
+        is_flag=True,
+    ),
+    lgbm_n_estimators: int | None = typer.Option(
+        None,
+        "--lgbm-n-estimators",
+        help="Override LightGBM n_estimators (quantile trees).",
+    ),
+    lgbm_max_depth: int | None = typer.Option(
+        None,
+        "--lgbm-max-depth",
+        help="Override LightGBM max_depth (quantile trees).",
+    ),
+    lgbm_learning_rate: float | None = typer.Option(
+        None,
+        "--lgbm-learning-rate",
+        help="Override LightGBM learning_rate (quantile trees).",
+    ),
 ) -> None:
     """Train LightGBM quantile models with a dedicated calibration window."""
 
@@ -1180,6 +1201,10 @@ def main(
         "playable_min_p50": playable_min_p50,
         "playable_winkler_baseline": playable_winkler_baseline,
         "playable_winkler_tolerance": playable_winkler_tolerance,
+        "disable_play_prob": disable_play_prob,
+        "lgbm_n_estimators": lgbm_n_estimators,
+        "lgbm_max_depth": lgbm_max_depth,
+        "lgbm_learning_rate": lgbm_learning_rate,
     }
     resolved_params = _apply_training_overrides(ctx, cli_params, config_path)
     train_start = resolved_params["train_start"]
@@ -1207,6 +1232,10 @@ def main(
     playable_min_p50 = resolved_params["playable_min_p50"]
     playable_winkler_baseline = resolved_params["playable_winkler_baseline"]
     playable_winkler_tolerance = resolved_params["playable_winkler_tolerance"]
+    disable_play_prob = resolved_params.get("disable_play_prob", False)
+    lgbm_n_estimators = resolved_params.get("lgbm_n_estimators")
+    lgbm_max_depth = resolved_params.get("lgbm_max_depth")
+    lgbm_learning_rate = resolved_params.get("lgbm_learning_rate")
 
     if run_id is None:
         raise typer.BadParameter("--run-id is required (set via CLI flag or config file).")
@@ -1267,17 +1296,20 @@ def main(
         f"(cal={len(cal_df):,}, val={len(val_df):,}) with {len(feature_columns)} features"
     )
 
-    X_train_play_prob = train_df[feature_columns]
-    y_train_play_prob = (train_df[target_col] > 0).astype(int)
     play_prob_artifacts: PlayProbabilityArtifacts | None = None
-    if y_train_play_prob.nunique() >= 2:
-        play_prob_artifacts = _train_play_probability_model(
-            X_train_play_prob,
-            y_train_play_prob,
-            random_state=random_state,
-        )
+    if disable_play_prob:
+        typer.echo("Play probability disabled; emitting conditional minutes only.", err=True)
     else:
-        typer.echo("Play probability training skipped (single class).", err=True)
+        X_train_play_prob = train_df[feature_columns]
+        y_train_play_prob = (train_df[target_col] > 0).astype(int)
+        if y_train_play_prob.nunique() >= 2:
+            play_prob_artifacts = _train_play_probability_model(
+                X_train_play_prob,
+                y_train_play_prob,
+                random_state=random_state,
+            )
+        else:
+            typer.echo("Play probability training skipped (single class).", err=True)
 
     train_cond_df = train_df[train_df[target_col] > 0]
     cal_cond_df = cal_df[cal_df[target_col] > 0]
@@ -1290,10 +1322,20 @@ def main(
     y_cal = cal_cond_df[target_col]
     X_val = val_df[feature_columns]
 
+    lgbm_params: dict[str, float | int] = {}
+    if lgbm_n_estimators is not None:
+        lgbm_params["n_estimators"] = int(lgbm_n_estimators)
+    if lgbm_max_depth is not None:
+        lgbm_params["max_depth"] = int(lgbm_max_depth)
+    if lgbm_learning_rate is not None:
+        lgbm_params["learning_rate"] = float(lgbm_learning_rate)
+    params_arg = lgbm_params or None
+
     quantiles = modeling.train_lightgbm_quantiles(
         X_train,
         y_train,
         random_state=random_state,
+        params=params_arg,
     )
     cal_preds = modeling.predict_quantiles(quantiles, X_cal)
     cal_p10_raw = cal_preds[0.1]
@@ -1552,6 +1594,9 @@ def main(
 
     write_ids_csv(val_unique, run_dir / "val_ids.csv")
 
+    if disable_play_prob:
+        play_brier = None
+        play_ece = None
     metrics = {
         "run_id": run_id,
         "fold_id": fold_id,

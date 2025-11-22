@@ -1,0 +1,21 @@
+[Unit]
+Description=Run projections live scraping
+After=network-online.target
+Wants=network-online.target
+OnFailure=status-email-user@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+Environment=LIVE_SEASON=2025
+Environment=LIVE_MONTH=11
+User=daniel
+Group=daniel
+ExecStart=/home/daniel/projects/projections-v2/scripts/run_live_scrape.sh
+StandardOutput=journal
+StandardError=journal
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

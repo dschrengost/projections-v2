@@ -10,6 +10,7 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.etl.storage import iter_days
 from projections.minutes_v1.datasets import (
     KEY_COLUMNS,
     deduplicate_latest,
@@ -25,6 +26,9 @@ from projections.minutes_v1.schemas import (
 )
 
 app = typer.Typer(help=__doc__)
+LABELS_FILENAME = "labels.parquet"
+LEGACY_LABEL_FILENAME = "boxscore_labels.parquet"
+REQUIRED_FEATURE_COLUMNS = {"player_id", "game_date", "team_id", "starter_flag", "status"}
 
 
 def _normalize_date(value: datetime) -> pd.Timestamp:
@@ -96,9 +100,48 @@ def _coerce_minutes_column(df: pd.DataFrame) -> None:
     )
 
 
+def _label_partition_path(root: Path, day: pd.Timestamp) -> Path:
+    return root / f"game_date={day.date().isoformat()}" / LABELS_FILENAME
+
+
 def _load_labels(data_root: Path, season: int, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    labels_path = data_root / "labels" / f"season={season}" / "boxscore_labels.parquet"
-    labels = pd.read_parquet(labels_path)
+    gold_root = data_root / "gold" / "labels_minutes_v1" / f"season={season}"
+    legacy_path = data_root / "labels" / f"season={season}" / LEGACY_LABEL_FILENAME
+
+    frames: list[pd.DataFrame] = []
+    missing_dates: list[str] = []
+
+    if gold_root.exists():
+        # Prefer granular gold partitions; fall back to legacy if any requested day is absent.
+        for day in iter_days(start, end):
+            path = _label_partition_path(gold_root, day)
+            if not path.exists():
+                missing_dates.append(day.date().isoformat())
+                continue
+            frames.append(pd.read_parquet(path))
+
+    if missing_dates and legacy_path.exists():
+        # Warn (via echo) but carry on with legacy labels to keep pipeline unblocked.
+        typer.echo(
+            f"[features] warning: missing gold labels for {', '.join(sorted(missing_dates))}; using legacy labels at {legacy_path}",
+            err=True,
+        )
+        frames = [pd.read_parquet(legacy_path)]
+        missing_dates = []
+    elif gold_root.exists() and missing_dates:
+        raise FileNotFoundError(
+            f"Missing label partitions for dates: {', '.join(sorted(missing_dates))} under {gold_root}"
+        )
+
+    if not frames:
+        if legacy_path.exists():
+            frames = [pd.read_parquet(legacy_path)]
+        else:
+            raise FileNotFoundError(
+                f"No label source found at {gold_root} or legacy path {legacy_path}"
+            )
+
+    labels = pd.concat(frames, ignore_index=True)
     labels["game_date"] = pd.to_datetime(labels["game_date"]).dt.normalize()
     mask = (labels["game_date"] >= start) & (labels["game_date"] <= end)
     sliced = labels.loc[mask].copy()
@@ -218,8 +261,18 @@ def _load_archetype_deltas(root: Path | None, season: int | str) -> pd.DataFrame
 
 @app.command()
 def main(
-    start: datetime = typer.Option(..., help="Start date (inclusive) in YYYY-MM-DD"),
-    end: datetime = typer.Option(..., help="End date (inclusive) in YYYY-MM-DD"),
+    start_date: datetime = typer.Option(
+        ...,
+        "--start-date",
+        "--start",
+        help="Start date (inclusive) in YYYY-MM-DD",
+    ),
+    end_date: datetime = typer.Option(
+        ...,
+        "--end-date",
+        "--end",
+        help="End date (inclusive) in YYYY-MM-DD",
+    ),
     data_root: Path = typer.Option(
         paths.get_data_root(),
         "--data-root",
@@ -253,19 +306,19 @@ def main(
 ) -> None:
     """Entry point executed via `python -m projections.pipelines.build_features_minutes_v1`."""
 
-    start_date = _normalize_date(start)
-    end_date = _normalize_date(end)
-    if start_date > end_date:
+    start_day = _normalize_date(start_date)
+    end_day = _normalize_date(end_date)
+    if start_day > end_day:
         raise typer.BadParameter("start date must be on/before end date.")
 
-    season_value = season or start_date.year
-    month_value = month or start_date.month
+    season_value = season or start_day.year
+    month_value = month or start_day.month
 
     typer.echo(
-        f"Building Minutes V1 features for {start_date.date()} → {end_date.date()} (season={season_value}, month={month_value:02d})"
+        f"Building Minutes V1 features for {start_day.date()} → {end_day.date()} (season={season_value}, month={month_value:02d})"
     )
 
-    labels = _load_labels(data_root, season_value, start_date, end_date)
+    labels = _load_labels(data_root, season_value, start_day, end_day)
     game_ids = labels["game_id"].unique().tolist()
     # Keep only regular-season game_ids (prefix 002) so we ignore preseason (001) and playoffs (004).
     regular_game_ids = [gid for gid in game_ids if _is_regular_season_game(gid)]
@@ -288,7 +341,7 @@ def main(
     )
     if odds.empty:
         raise ValueError("Odds snapshot slice is empty for requested games.")
-    roster = _load_roster(data_root, start_date, end_date)
+    roster = _load_roster(data_root, start_day, end_day)
     if roster.empty:
         raise ValueError("Roster nightly slice is empty for requested window.")
     coach = _load_coach_static(data_root)
@@ -317,6 +370,20 @@ def main(
     )
     features = builder.build(labels)
 
+    # Backward-compat: if builder did not emit starter_flag, reuse label column.
+    if "starter_flag" not in features.columns and "starter_flag_label" in features.columns:
+        features["starter_flag"] = features["starter_flag_label"]
+    if "starter_flag" not in features.columns:
+        # Merge from labels as last resort.
+        label_flags = labels[["game_id", "player_id", "starter_flag"]].drop_duplicates()
+        features = features.merge(label_flags, on=["game_id", "player_id"], how="left")
+
+    missing_required = REQUIRED_FEATURE_COLUMNS - set(features.columns)
+    if missing_required:
+        raise ValueError(
+            "[features] missing required columns: " + ", ".join(sorted(missing_required))
+        )
+
     features = deduplicate_latest(features, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
     features = enforce_schema(features, FEATURES_MINUTES_V1_SCHEMA)
     validate_with_pandera(features, FEATURES_MINUTES_V1_SCHEMA)
@@ -324,8 +391,8 @@ def main(
     expected_games = set(
         schedule_game_ids_in_range(
             schedule,
-            start=start_date,
-            end=end_date,
+            start=start_day,
+            end=end_day,
         ).astype(str)
     )
     actual_games = set(features["game_id"].astype(str).str.zfill(10).unique())

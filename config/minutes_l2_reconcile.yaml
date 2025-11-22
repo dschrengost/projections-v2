@@ -1,6 +1,8 @@
 l2_reconcile:
+  # Reconciliation disabled by request; keep defaults here for future use.
   p_play_min_rotation: 0.05
   min_minutes_for_rotation: 4.0
+  max_rotation_size: 10
   clamp_tails: true
   team_minutes:
     target: 240.0

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -208,10 +208,48 @@ def create_app(
         payload = {"date": slate_day.isoformat(), "latest": latest, "runs": runs}
         return JSONResponse(payload)
 
+    @app.post("/api/trigger")
+    def trigger_pipeline(background_tasks: BackgroundTasks) -> JSONResponse:
+        """Manually trigger the live pipeline (scrape -> score)."""
+        background_tasks.add_task(_run_pipeline_background)
+        return JSONResponse({"status": "triggered", "message": "Pipeline started in background."})
+
     if dist_dir.exists():
         app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
 
     return app
+
+
+def _run_pipeline_background() -> None:
+    """Execute scrape and score scripts sequentially."""
+    import subprocess
+    
+    # 1. Scrape
+    print("[api] Triggering scrape...")
+    scrape_res = subprocess.run(
+        ["/bin/bash", "scripts/run_live_scrape.sh"],
+        cwd=os.getcwd(),
+        capture_output=True,
+        text=True
+    )
+    if scrape_res.returncode != 0:
+        print(f"[api] Scrape failed: {scrape_res.stderr}")
+        return
+
+    # 2. Score
+    print("[api] Triggering score...")
+    score_res = subprocess.run(
+        ["/bin/bash", "scripts/run_live_score.sh"],
+        cwd=os.getcwd(),
+        capture_output=True,
+        text=True
+    )
+    if score_res.returncode != 0:
+        print(f"[api] Score failed: {score_res.stderr}")
+        return
+        
+    print("[api] Manual pipeline run complete.")
+
 
 
 app = create_app()

@@ -1,0 +1,78 @@
+{
+  "buckets": "starter,p50bins,injury_snapshot",
+  "cal_rows": 6629,
+  "cal_window": {
+    "end": "2025-04-13T00:00:00Z",
+    "start": "2025-04-01T00:00:00Z"
+  },
+  "calibrator": {
+    "alpha_high": 0.1,
+    "alpha_low": 0.1,
+    "high_adjustment": -0.003512844441412709,
+    "low_adjustment": -0.0013996955623006874
+  },
+  "k": 150,
+  "mode": "two-sided",
+  "offsets": {
+    "__global__": {
+      "a": 0.0,
+      "n": 4413,
+      "s_hi": 1.0,
+      "s_lo": 0.95
+    },
+    "bench|8-18|injury_missing": {
+      "a": 0.0,
+      "n": 490,
+      "s_hi": 0.96171875,
+      "s_lo": 0.98828125
+    },
+    "bench|8-18|injury_present": {
+      "a": 0.0,
+      "n": 19,
+      "s_hi": 1.0,
+      "s_lo": 0.95
+    },
+    "bench|<8|injury_missing": {
+      "a": 0.0,
+      "n": 430,
+      "s_hi": 0.9258620689655173,
+      "s_lo": 1.1724137931034482
+    },
+    "bench|<8|injury_present": {
+      "a": 0.0,
+      "n": 19,
+      "s_hi": 1.0,
+      "s_lo": 0.95
+    },
+    "bench|>18|injury_missing": {
+      "a": 0.0,
+      "n": 1317,
+      "s_hi": 0.5511247443762781,
+      "s_lo": 1.1295501022494887
+    },
+    "bench|>18|injury_present": {
+      "a": 0.0,
+      "n": 38,
+      "s_hi": 1.0,
+      "s_lo": 0.95
+    },
+    "starter|8-18|injury_missing": {
+      "a": 0.0,
+      "n": 4,
+      "s_hi": 1.0,
+      "s_lo": 0.95
+    },
+    "starter|>18|injury_missing": {
+      "a": 0.0,
+      "n": 2005,
+      "s_hi": 1.1395591647331784,
+      "s_lo": 0.6243619489559163
+    },
+    "starter|>18|injury_present": {
+      "a": 0.0,
+      "n": 91,
+      "s_hi": 0.8678423236514523,
+      "s_lo": 0.8744813278008299
+    }
+  }
+}

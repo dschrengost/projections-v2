@@ -46,6 +46,7 @@ class ReconcileConfig:
     team_minutes: TeamMinutesConfig = field(default_factory=TeamMinutesConfig)
     p_play_min_rotation: float = 0.05
     min_minutes_for_rotation: float = 4.0
+    max_rotation_size: int | None = 10
     bounds: BoundsConfig = field(default_factory=BoundsConfig)
     weights: WeightsConfig = field(default_factory=WeightsConfig)
     clamp_tails: bool = True
@@ -76,6 +77,7 @@ def load_reconcile_config(path: Path | str) -> ReconcileConfig:
         team_minutes=team_minutes,
         p_play_min_rotation=float(root.get("p_play_min_rotation", 0.05)),
         min_minutes_for_rotation=float(root.get("min_minutes_for_rotation", 4.0)),
+        max_rotation_size=int(root["max_rotation_size"]) if "max_rotation_size" in root else 10,
         bounds=bounds,
         weights=weights,
         clamp_tails=bool(root.get("clamp_tails", True)),
@@ -106,7 +108,30 @@ def _rotation_mask(df: pd.DataFrame, config: ReconcileConfig) -> pd.Series:
     rotation = (probs >= config.p_play_min_rotation) & (
         minutes >= config.min_minutes_for_rotation
     )
-    return rotation | starters
+    base_mask = rotation | starters
+    if not base_mask.any():
+        return base_mask
+    if config.max_rotation_size is None or config.max_rotation_size <= 0:
+        return base_mask
+    # Enforce a hard cap on rotation size: always keep starters, then highest minutes_p50.
+    mask = base_mask.to_numpy()
+    if mask.sum() <= config.max_rotation_size:
+        return base_mask
+    # Keep starters, fill remaining slots by descending minutes.
+    minutes_arr = minutes.to_numpy()
+    starter_idx = np.where(starters.to_numpy())[0]
+    keep = set(starter_idx.tolist())
+    # Candidates excluding starters
+    candidate_idx = [i for i in np.argsort(-minutes_arr) if i not in keep]
+    slots = config.max_rotation_size - len(keep)
+    for idx in candidate_idx:
+        if slots <= 0:
+            break
+        keep.add(int(idx))
+        slots -= 1
+    capped_mask = np.zeros_like(mask, dtype=bool)
+    capped_mask[list(keep)] = True
+    return pd.Series(capped_mask, index=df.index)
 
 
 def _compute_lower_bounds(
@@ -260,7 +285,7 @@ def _solve_team_qp(
         LOGGER.warning("QP solver failed for team %s: %s", df_team.get("team_id", "unknown"), exc)
         return df_team["minutes_p50"].to_numpy(dtype=float), False
 
-    reconciled = df_team["minutes_p50"].to_numpy(dtype=float).copy()
+    reconciled = np.zeros(len(df_team), dtype=float)
     reconciled[rotation_mask] = solution
     return reconciled, True
 

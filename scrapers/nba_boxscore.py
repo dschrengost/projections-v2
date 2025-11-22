@@ -160,7 +160,8 @@ class NbaComBoxScoreScraper:
     def fetch_box_score(self, game_id: str) -> NbaComGameBoxScore | None:
         """Fetch and normalize a single box score by game id."""
 
-        url = self.box_score_url_template.format(game_id=game_id)
+        normalized_gid = str(game_id).zfill(10)
+        url = self.box_score_url_template.format(game_id=normalized_gid)
         try:
             payload = self._http_json(url)
         except httpx.HTTPStatusError as exc:

@@ -1,0 +1,129 @@
+{
+  "cal_rows": 6629,
+  "conformal_buckets": "starter,p50bins",
+  "conformal_k": 200,
+  "conformal_mode": "two-sided",
+  "fold_id": null,
+  "inside_cov": 0.4424430059104982,
+  "mpiwn": 15.615050803316683,
+  "nonmono_clip_rate": 0.0,
+  "nonmono_rate_final": 0.0,
+  "nonmono_rate_raw": 0.0,
+  "per_bucket": {
+    "bench|8-18": {
+      "cond_inside_cov": 0.6679841897233202,
+      "cond_n": 253,
+      "cond_p10_cov": 0.23715415019762845,
+      "cond_p90_cov": 0.9051383399209486,
+      "inside_cov": 0.5767918088737201,
+      "n": 293,
+      "p10_cov": 0.3412969283276451,
+      "p90_cov": 0.9180887372013652
+    },
+    "bench|<8": {
+      "cond_inside_cov": 0.7537688442211056,
+      "cond_n": 199,
+      "cond_p10_cov": 0.04020100502512563,
+      "cond_p90_cov": 0.7939698492462312,
+      "inside_cov": 0.30549898167006106,
+      "n": 491,
+      "p10_cov": 0.6109979633401222,
+      "p90_cov": 0.9164969450101833
+    },
+    "bench|>18": {
+      "cond_inside_cov": 0.8017366136034733,
+      "cond_n": 691,
+      "cond_p10_cov": 0.15195369030390737,
+      "cond_p90_cov": 0.9536903039073806,
+      "inside_cov": 0.34218653489808526,
+      "n": 1619,
+      "p10_cov": 0.6380481778875849,
+      "p90_cov": 0.9802347127856702
+    },
+    "starter|8-18": {
+      "cond_inside_cov": 0.15384615384615385,
+      "cond_n": 26,
+      "cond_p10_cov": 0.0,
+      "cond_p90_cov": 0.15384615384615385,
+      "inside_cov": 0.15384615384615385,
+      "n": 26,
+      "p10_cov": 0.0,
+      "p90_cov": 0.15384615384615385
+    },
+    "starter|<8": {
+      "cond_inside_cov": 0.0,
+      "cond_n": 5,
+      "cond_p10_cov": 0.0,
+      "cond_p90_cov": 0.0,
+      "inside_cov": 0.0,
+      "n": 5,
+      "p10_cov": 0.0,
+      "p90_cov": 0.0
+    },
+    "starter|>18": {
+      "cond_inside_cov": 0.7808988764044944,
+      "cond_n": 890,
+      "cond_p10_cov": 0.10786516853932585,
+      "cond_p90_cov": 0.8887640449438202,
+      "inside_cov": 0.6210902591599643,
+      "n": 1119,
+      "p10_cov": 0.290437890974084,
+      "p90_cov": 0.9115281501340483
+    }
+  },
+  "playable_acceptance": {
+    "p10_bounds": {
+      "hi": 0.12,
+      "lo": 0.08
+    },
+    "p90_bounds": {
+      "hi": 0.94,
+      "lo": 0.87
+    },
+    "passed": false,
+    "playable_cond_count": 1818,
+    "playable_count": 2999,
+    "reasons": [
+      "p10_cond_playable=0.13916391639163916 outside (0.08, 0.12)"
+    ],
+    "winkler_baseline": null,
+    "winkler_tolerance": 1.0
+  },
+  "playable_cond_count": 1818,
+  "playable_count": 2999,
+  "playable_minutes_threshold": 10.0,
+  "run_id": "v1_full_history_noplayoff_noplayprob_20251121",
+  "target_col": "minutes",
+  "train_rows": 192220,
+  "val_excess_p10": 0.22085310407308323,
+  "val_excess_p90": 0.031871566517166494,
+  "val_floor_p10": 0.2739400284909472,
+  "val_floor_p90": 0.9053645719573621,
+  "val_inside_cond_playable": 0.7673267326732673,
+  "val_mae_0_10": 17.543100568732708,
+  "val_mae_10_20": 6.206495588468893,
+  "val_mae_20_30": 4.177329312937075,
+  "val_mae_30_plus": 6.890180255290659,
+  "val_mae_overall": 11.81846137004805,
+  "val_mae_p50": 11.81846137004805,
+  "val_mae_p50_raw": 11.81846137004805,
+  "val_p10_cond_playable": 0.13916391639163916,
+  "val_p10_conditional": 0.1303294573643411,
+  "val_p10_coverage": 0.4947931325640304,
+  "val_p10_raw_coverage": 0.49676329862088375,
+  "val_p90_cond_playable": 0.9064906490649065,
+  "val_p90_conditional": 0.8919573643410853,
+  "val_p90_coverage": 0.9372361384745286,
+  "val_p90_raw_coverage": 0.9313256403039685,
+  "val_play_prob_brier": 0.31458628775067,
+  "val_play_prob_brier_playable": 0.31911320034062185,
+  "val_play_prob_ece": 0.053471871192680036,
+  "val_play_prob_ece_playable": 0.025135331854382808,
+  "val_play_prob_mean": 0.7720811383600976,
+  "val_play_prob_threshold": 0.5,
+  "val_rows": 3665,
+  "val_rows_unique": 3553,
+  "val_will_play_rate": 0.9425837320574163,
+  "val_winkler_cond_playable": 25.03509835644205,
+  "winkler_alpha_0_2": 64.07147383617881
+}

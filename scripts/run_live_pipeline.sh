@@ -10,6 +10,9 @@ FLAGS="${LIVE_FLAGS:-}"  # additional CLI flags
 TIP_LEAD_MINUTES="${LIVE_TIP_LEAD_MINUTES:-60}"   # start scoring this many minutes before first tip
 TIP_TAIL_MINUTES="${LIVE_TIP_TAIL_MINUTES:-180}"  # keep running this many minutes after last tip
 LOCK_BUFFER_MINUTES="${LIVE_LOCK_BUFFER_MINUTES:-15}"
+DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-0}"
+RECONCILE_MODE="${LIVE_RECONCILE_MODE:-none}"   # default off per operator request
+MINUTES_OUTPUT_MODE="${LIVE_MINUTES_OUTPUT:-conditional}"
 
 cd /home/daniel/projects/projections-v2
 
@@ -17,7 +20,11 @@ cd /home/daniel/projects/projections-v2
 NOW_UTC=$(date -u +%s)
 SCHEDULE_PATH="${DATA_ROOT}/silver/schedule/season=${SEASON}/month=$(printf "%02d" "${MONTH}")/schedule.parquet"
 if [[ -f "${SCHEDULE_PATH}" ]]; then
-  TIP_WINDOW=$(SCHEDULE_PATH="${SCHEDULE_PATH}" START_DATE="${START_DATE}" TIP_LEAD_MINUTES="${TIP_LEAD_MINUTES}" TIP_TAIL_MINUTES="${TIP_TAIL_MINUTES}" /home/daniel/.local/bin/uv run python - <<'PY'
+  if [[ "${DISABLE_TIP_WINDOW}" == "1" ]]; then
+    TIP_WINDOW="DISABLED"
+    echo "[live] Tip window gating disabled via LIVE_DISABLE_TIP_WINDOW=1 (lead=${TIP_LEAD_MINUTES}m tail=${TIP_TAIL_MINUTES}m for logging)."
+  else
+    TIP_WINDOW=$(SCHEDULE_PATH="${SCHEDULE_PATH}" START_DATE="${START_DATE}" TIP_LEAD_MINUTES="${TIP_LEAD_MINUTES}" TIP_TAIL_MINUTES="${TIP_TAIL_MINUTES}" /home/daniel/.local/bin/uv run python - <<'PY'
 import os, sys
 import pandas as pd
 from datetime import datetime, timezone
@@ -44,15 +51,16 @@ end_ts = last_tip + pd.Timedelta(minutes=tail)
 print(start_ts.timestamp(), end_ts.timestamp(), flush=True)
 PY
 )
-  if [[ "${TIP_WINDOW}" != "MISSING" ]]; then
+  fi
+  if [[ "${TIP_WINDOW}" != "MISSING" && "${TIP_WINDOW}" != "DISABLED" ]]; then
     START_TS=$(echo "${TIP_WINDOW}" | awk '{print $1}')
-END_TS=$(echo "${TIP_WINDOW}" | awk '{print $2}')
+    END_TS=$(echo "${TIP_WINDOW}" | awk '{print $2}')
     if (( $(echo "${NOW_UTC} < ${START_TS}" | bc -l) )); then
       echo "[live] Skipping run: before pre-tip window (first tip lead ${TIP_LEAD_MINUTES}m)."
       exit 0
     fi
   else
-    echo "[live] Schedule missing; proceeding without tip window gating."
+    echo "[live] Schedule missing or gating disabled; proceeding without tip window gating."
   fi
 else
   echo "[live] Schedule parquet not found at ${SCHEDULE_PATH}; proceeding without tip window gating."
@@ -108,5 +116,5 @@ PY
   --mode live \
   --run-id "$(date -u -d "${RUN_AS_OF_TS}" +%Y%m%dT%H%M%SZ)" \
   --bundle-dir "${LIVE_BUNDLE_DIR:-artifacts/minutes_v1/v1_full_calibration}" \
-  --reconcile-team-minutes p50 \
-  --minutes-output conditional
+  --reconcile-team-minutes "${RECONCILE_MODE}" \
+  --minutes-output "${MINUTES_OUTPUT_MODE}"

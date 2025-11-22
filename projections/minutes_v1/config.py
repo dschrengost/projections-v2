@@ -49,6 +49,10 @@ class MinutesTrainingConfig(BaseModel):
     playable_min_p50: float | None = None
     playable_winkler_baseline: float | None = None
     playable_winkler_tolerance: float | None = None
+    disable_play_prob: bool | None = None
+    lgbm_n_estimators: int | None = None
+    lgbm_max_depth: int | None = None
+    lgbm_learning_rate: float | None = None
 
 
 class MinutesScoringConfig(BaseModel):

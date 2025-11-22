@@ -223,6 +223,11 @@ def build_roster_snapshot(
             left_time_col="as_of_ts",
             right_time_col="as_of_ts",
         )
+        # Fallback: if projected starter flags are missing, treat `lineup_status == 'Expected'` as projected.
+        if "is_projected_starter" in working.columns and "lineup_status" in working.columns:
+            proj = working["is_projected_starter"].astype("boolean", copy=False)
+            expected = working["lineup_status"].astype(str).str.lower().eq("expected")
+            working["is_projected_starter"] = proj.fillna(False) | expected.fillna(False)
     else:
         missing_cols = set(OUTPUT_COLUMNS) - set(working.columns)
         for col in missing_cols:
@@ -232,6 +237,25 @@ def build_roster_snapshot(
     if config.end_date is not None:
         working = working[working["game_date"] <= config.end_date]
     working = enforce_schema(working, ROSTER_NIGHTLY_SCHEMA, allow_missing_optional=True)
+    # Post-validate heuristics for starter signals.
+    if "is_projected_starter" in working.columns and "lineup_status" in working.columns:
+        proj = working["is_projected_starter"].astype("boolean", copy=False)
+        expected = working["lineup_status"].astype(str).str.lower().eq("expected")
+        working["is_projected_starter"] = proj.fillna(False) | expected.fillna(False)
+    if "starter_flag" in working.columns:
+        starter_base = working["starter_flag"].astype("boolean", copy=False)
+        proj = working.get("is_projected_starter")
+        confirm = working.get("is_confirmed_starter")
+        expected = working.get("lineup_status")
+        expected_bool = (
+            expected.astype(str).str.lower().eq("expected").fillna(False) if expected is not None else False
+        )
+        working["starter_flag"] = (
+            starter_base.fillna(False)
+            | (proj.astype("boolean", copy=False).fillna(False) if proj is not None else False)
+            | (confirm.astype("boolean", copy=False).fillna(False) if confirm is not None else False)
+            | expected_bool
+        )
     validate_with_pandera(working, ROSTER_NIGHTLY_SCHEMA)
     return working
 
@@ -365,9 +389,25 @@ def main(
                 f"[roster] bronze partition {result.target_date}: "
                 f"{result.rows} rows -> {result.path}"
             )
-    snapshot.to_parquet(silver_path, index=False)
+    existing = pd.DataFrame()
+    if silver_path.exists():
+        try:
+            existing = pd.read_parquet(silver_path)
+        except Exception as exc:  # pragma: no cover - defensive read
+            typer.echo(f"[roster] warning: failed to read existing silver file {silver_path}: {exc}", err=True)
+    combined = pd.concat([existing, snapshot], ignore_index=True, sort=False)
+    combined.sort_values(
+        ["game_id", "team_id", "player_id", "as_of_ts"],
+        inplace=True,
+        kind="mergesort",
+    )
+    combined = combined.drop_duplicates(
+        subset=["game_id", "team_id", "player_id", "as_of_ts"],
+        keep="last",
+    )
+    combined.to_parquet(silver_path, index=False)
     typer.echo(
-        f"[roster] wrote {len(snapshot):,} snapshot rows -> {silver_path}"
+        f"[roster] wrote {len(snapshot):,} snapshot rows -> {silver_path} (total {len(combined):,})"
     )
 
 

@@ -1,0 +1,131 @@
+{
+  "run_id": "v1_full_history_noplayoff_20251121",
+  "feature_source": "/home/daniel/projections-data/gold/features_minutes_v1",
+  "date_range": {
+    "start": "2025-10-21",
+    "end": "2025-11-18"
+  },
+  "global_deltas": {
+    "delta_p10": -3.0157024930604418e-05,
+    "delta_p90": -0.0007022637051029674
+  },
+  "rolling_params": {
+    "window_days": 21,
+    "min_n": 400,
+    "tau": 150.0,
+    "tau_bucket": 150.0,
+    "use_buckets": false,
+    "min_n_bucket": 250,
+    "use_spread_buckets": false,
+    "cold_start_min_n": 400,
+    "p10_floor_guard": 0.1,
+    "p90_floor_guard": 0.9,
+    "bucket_delta_cap": 0.3,
+    "bucket_floor_relief": 0.06,
+    "max_abs_delta_p10": null,
+    "max_abs_delta_p90": null,
+    "max_abs_delta_p10_lo": 0.2,
+    "max_abs_delta_p10_hi": 0.4,
+    "max_abs_delta_p90_lo": 0.15,
+    "max_abs_delta_p90_hi": 0.3,
+    "max_abs_delta_p10_lo_down": 0.1,
+    "max_abs_delta_p10_hi_down": 0.15,
+    "max_abs_delta_p90_lo_down": 0.1,
+    "max_abs_delta_p90_hi_down": 0.2,
+    "max_abs_delta_p10_hi_early": 0.4,
+    "recent_target_rows": 300,
+    "recency_window_days": 14,
+    "recency_half_life_days": 12.0,
+    "history_months": 1,
+    "use_global_p10_delta": false,
+    "use_global_p90_delta": true,
+    "warmup_days_p10": 0,
+    "warmup_days_p90": 0,
+    "global_recent_target_rows": 300,
+    "global_recent_target_rows_p10": 180,
+    "global_recent_target_rows_p90": 300,
+    "global_min_n": 200,
+    "global_baseline_months": 2,
+    "global_delta_cap": 0.3,
+    "global_strata_cols": "injury_snapshot_missing",
+    "bucket_min_effective_sample_size": 360.0,
+    "bucket_inherit_if_low_n": true,
+    "cap_guardrail_day": 7,
+    "cap_guardrail_rate": null,
+    "monotonicity_repair_threshold": 0.005,
+    "max_width_delta_pct": null,
+    "apply_center_width_projection": true,
+    "min_quantile_half_width": 0.05,
+    "one_sided_days": 0,
+    "hysteresis_lower": 0.09,
+    "hysteresis_upper": 0.11,
+    "delta_smoothing_alpha_p10": 0.0,
+    "delta_smoothing_alpha_p90": 0.3,
+    "early_cap_days": 7,
+    "max_abs_delta_p90_hi_early": 0.2
+  },
+  "meta": {
+    "feature_hash": "ac92bebab5ccfcd74e7a788d859f382bae61f4021f4cd9dc099d3889f79e10ff",
+    "fold_id": null,
+    "model": "lightgbm_quantiles",
+    "params": {
+      "cal_days": null,
+      "conformal_buckets": "starter,p50bins",
+      "conformal_k": 200,
+      "conformal_mode": "two-sided",
+      "coverage_tolerance": 0.02,
+      "playable_min_p50": 10.0,
+      "playable_winkler_baseline": null,
+      "playable_winkler_tolerance": 1.0,
+      "quantiles": [
+        0.1,
+        0.5,
+        0.9
+      ],
+      "random_state": 42,
+      "winkler_baseline": null
+    },
+    "target_col": "minutes",
+    "windows": {
+      "cal": {
+        "end": "2025-04-13T00:00:00Z",
+        "start": "2025-04-01T00:00:00Z"
+      },
+      "train": {
+        "end": "2025-03-31T00:00:00Z",
+        "start": "2022-10-01T00:00:00Z"
+      },
+      "val": {
+        "end": "2025-11-18T00:00:00Z",
+        "start": "2025-10-21T00:00:00Z"
+      }
+    }
+  },
+  "p10": {
+    "overall": 0.4449244060475162,
+    "overall_global": 0.4483184202406665,
+    "overall_raw": 0.4483184202406665,
+    "daily": {
+      "min": 0.39166666666666666,
+      "median": 0.45454545454545453,
+      "max": 0.49411764705882355,
+      "mean": 0.4501484972011617,
+      "target": 0.1,
+      "days_below_floor": 0
+    },
+    "guardrail_pass": false
+  },
+  "p90": {
+    "overall": 0.9228633137920395,
+    "overall_global": 0.9247145942610305,
+    "overall_raw": 0.9247145942610305,
+    "daily": {
+      "min": 0.7142857142857143,
+      "median": 0.9257001784158334,
+      "max": 0.9717741935483871,
+      "mean": 0.9064584250581053,
+      "target": 0.9
+    },
+    "guardrail_pass": true
+  }
+}

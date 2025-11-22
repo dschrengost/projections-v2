@@ -77,47 +77,47 @@ const STATUS_BADGE_DEFINITIONS: Array<{
   matcher: (value: string) => boolean
   badge: StatusBadge
 }> = [
-  {
-    matcher: (value) => value === 'q' || value === 'questionable',
-    badge: {
-      label: 'Q',
-      title: 'Questionable',
-      className: 'status-questionable',
+    {
+      matcher: (value) => value === 'q' || value === 'questionable',
+      badge: {
+        label: 'Q',
+        title: 'Questionable',
+        className: 'status-questionable',
+      },
     },
-  },
-  {
-    matcher: (value) => value.startsWith('prob'),
-    badge: {
-      label: 'Prob',
-      title: 'Probable',
-      className: 'status-probable',
+    {
+      matcher: (value) => value.startsWith('prob'),
+      badge: {
+        label: 'Prob',
+        title: 'Probable',
+        className: 'status-probable',
+      },
     },
-  },
-  {
-    matcher: (value) => value.includes('doubt'),
-    badge: {
-      label: 'D',
-      title: 'Doubtful',
-      className: 'status-doubtful',
+    {
+      matcher: (value) => value.includes('doubt'),
+      badge: {
+        label: 'D',
+        title: 'Doubtful',
+        className: 'status-doubtful',
+      },
     },
-  },
-  {
-    matcher: (value) => value.includes('gtd') || value.includes('game time'),
-    badge: {
-      label: 'GTD',
-      title: 'Game time decision',
-      className: 'status-gtd',
+    {
+      matcher: (value) => value.includes('gtd') || value.includes('game time'),
+      badge: {
+        label: 'GTD',
+        title: 'Game time decision',
+        className: 'status-gtd',
+      },
     },
-  },
-  {
-    matcher: (value) => value === 'out',
-    badge: {
-      label: 'Out',
-      title: 'Out',
-      className: 'status-out',
+    {
+      matcher: (value) => value === 'out',
+      badge: {
+        label: 'Out',
+        title: 'Out',
+        className: 'status-out',
+      },
     },
-  },
-]
+  ]
 
 const getStatusBadge = (status?: string): StatusBadge | null => {
   const normalized = status?.trim().toLowerCase()
@@ -236,21 +236,21 @@ function App() {
     const text = filter.trim().toLowerCase()
     const filtered = text
       ? rows.filter((row) => {
-          const values = [
-            row.player_name,
-            row.player_id,
-            row.team_tricode,
-            row.team_name,
-            row.team_id,
-            row.opponent_team_tricode,
-            row.opponent_team_name,
-            row.opponent_team_id,
-            row.game_id,
-          ]
-            .filter(Boolean)
-            .map((value) => String(value).toLowerCase())
-          return values.some((value) => value.includes(text))
-        })
+        const values = [
+          row.player_name,
+          row.player_id,
+          row.team_tricode,
+          row.team_name,
+          row.team_id,
+          row.opponent_team_tricode,
+          row.opponent_team_name,
+          row.opponent_team_id,
+          row.game_id,
+        ]
+          .filter(Boolean)
+          .map((value) => String(value).toLowerCase())
+        return values.some((value) => value.includes(text))
+      })
       : rows.slice()
 
     const sorted = filtered.sort((a, b) => {
@@ -341,6 +341,24 @@ function App() {
           </label>
           <button onClick={() => fetchData(selectedDate, runId)} disabled={loading}>
             Refresh
+          </button>
+          <button
+            className="trigger-btn"
+            onClick={async () => {
+              if (!confirm('Trigger manual pipeline run? This will take a few minutes.')) return
+              try {
+                const res = await fetch('/api/trigger', { method: 'POST' })
+                if (res.ok) {
+                  alert('Pipeline triggered! Check back in a few minutes.')
+                } else {
+                  alert('Failed to trigger pipeline.')
+                }
+              } catch (err) {
+                alert('Error triggering pipeline.')
+              }
+            }}
+          >
+            Run Pipeline
           </button>
         </div>
       </header>
@@ -433,10 +451,10 @@ function App() {
                     </td>
                     <td>{teamLabel}</td>
                     <td>{opponentLabel}</td>
-                  <td>{formatMinutes(row.minutes_p10)}</td>
-                  <td>{formatMinutes(row.minutes_p50)}</td>
-                  <td>{formatMinutes(row.minutes_p90)}</td>
-                  <td>{formatPercent(row.play_prob)}</td>
+                    <td>{formatMinutes(row.minutes_p10)}</td>
+                    <td>{formatMinutes(row.minutes_p50)}</td>
+                    <td>{formatMinutes(row.minutes_p90)}</td>
+                    <td>{formatPercent(row.play_prob)}</td>
                   </tr>
                 )
               })}

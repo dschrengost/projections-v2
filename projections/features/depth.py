@@ -54,7 +54,8 @@ def attach_depth_features(
     base_cols = ["team_id", "game_date", "player_id", "archetype", "as_of_ts"] + extra_lineup_cols
     player_positions = (
         roster[base_cols]
-        .drop_duplicates(subset=["team_id", "game_date", "player_id"])
+        .sort_values("as_of_ts")
+        .drop_duplicates(subset=["team_id", "game_date", "player_id"], keep="last")
         .rename(columns={"as_of_ts": "roster_as_of_ts"})
     )
     merged = merged.merge(
@@ -62,6 +63,43 @@ def attach_depth_features(
         on=["team_id", "game_date", "player_id"],
         how="left",
     )
+    # Fallback: always merge lineup metadata directly on (game_id, team_id, player_id) if any values are missing.
+    if {"game_id", "team_id", "player_id"}.issubset(roster.columns):
+        alt_cols = [
+            col
+            for col in (
+                "game_id",
+                "team_id",
+                "player_id",
+                "lineup_status",
+                "is_projected_starter",
+                "is_confirmed_starter",
+                "as_of_ts",
+            )
+            if col in roster.columns
+        ]
+        alt_positions = roster[alt_cols].drop_duplicates(subset=["game_id", "team_id", "player_id"])
+        alt_positions = alt_positions.rename(columns={"as_of_ts": "roster_as_of_ts_alt"})
+        merged = merged.merge(
+            alt_positions,
+            on=["game_id", "team_id", "player_id"],
+            how="left",
+            suffixes=("", "_alt"),
+        )
+        # Only apply fallback if we are missing lineup metadata after the merge.
+        missing_meta = merged[["lineup_status", "is_projected_starter", "is_confirmed_starter"]].isna().any(axis=None)
+        if missing_meta:
+            for col in ("lineup_status", "is_projected_starter", "is_confirmed_starter"):
+                alt_col = f"{col}_alt"
+                if alt_col in merged.columns:
+                    merged[col] = merged[col].combine_first(merged[alt_col])
+            if "roster_as_of_ts_alt" in merged.columns:
+                merged["roster_as_of_ts"] = merged["roster_as_of_ts"].combine_first(merged["roster_as_of_ts_alt"])
+        # Clean up alt columns
+        for col in ("lineup_status", "is_projected_starter", "is_confirmed_starter", "roster_as_of_ts"):
+            alt_col = f"{col}_alt"
+            if alt_col in merged.columns:
+                merged.drop(columns=[alt_col], inplace=True)
     if "tip_ts" in merged:
         tip_ts = pd.to_datetime(merged["tip_ts"], utc=True, errors="coerce")
         roster_ts = pd.to_datetime(merged["roster_as_of_ts"], utc=True, errors="coerce")
@@ -82,6 +120,12 @@ def attach_depth_features(
         if column not in merged.columns:
             merged[column] = False
         merged[column] = merged[column].fillna(False).astype(bool)
+
+    # Derive starter hints from lineup_status when flags are missing.
+    if "lineup_status" in merged.columns:
+        status_norm = merged["lineup_status"].astype(str).str.lower()
+        merged["is_confirmed_starter"] = merged["is_confirmed_starter"] | status_norm.eq("confirmed")
+        merged["is_projected_starter"] = merged["is_projected_starter"] | status_norm.isin(["expected", "confirmed"])
 
     archetype = merged["archetype"].fillna("W")
     archetype_counts_arr = np.select(

@@ -106,7 +106,7 @@ def _filter_by_game_ids(df: pd.DataFrame, game_ids: Iterable[int]) -> pd.DataFra
     normalized = pd.Series(game_ids, dtype="Int64").dropna().astype(int).tolist()
     if not normalized:
         return df.iloc[0:0].copy()
-    return df[df["game_id"].astype(int).isin(normalized)].copy()
+    return df[pd.to_numeric(df["game_id"], errors="coerce").astype("Int64").isin(normalized)].copy()
 
 
 def _player_profiles_to_frame(players: List[PlayerProfile]) -> pd.DataFrame:
@@ -175,19 +175,67 @@ def _minutes_between(later: pd.Timestamp, earlier: pd.Timestamp | None) -> float
     return round(delta.total_seconds() / 60.0, 2)
 
 
+def _load_label_sources(
+    *,
+    data_root: Path,
+    season_value: int,
+    override_path: Path | None,
+    warnings: list[str],
+) -> tuple[pd.DataFrame, str]:
+    """Load label sources preferring gold daily labels, falling back to legacy."""
+
+    if override_path:
+        labels = _read_parquet_tree(override_path)
+        return labels, str(override_path)
+
+    frames: list[pd.DataFrame] = []
+    sources: list[str] = []
+    gold_dir = data_root / "gold" / "labels_minutes_v1" / f"season={season_value}"
+    legacy_path = data_root / "labels" / f"season={season_value}" / "boxscore_labels.parquet"
+
+    if gold_dir.exists():
+        try:
+            frames.append(_read_parquet_tree(gold_dir))
+            sources.append(str(gold_dir))
+        except FileNotFoundError:
+            warnings.append(f"Gold label directory {gold_dir} is empty; falling back to legacy labels.")
+    if legacy_path.exists():
+        frames.append(pd.read_parquet(legacy_path))
+        sources.append(str(legacy_path))
+    if not frames:
+        raise FileNotFoundError(
+            f"No label sources found. Expected gold labels at {gold_dir} or legacy labels at {legacy_path}."
+        )
+
+    labels = pd.concat(frames, ignore_index=True, sort=False)
+    if "label_frozen_ts" in labels.columns:
+        labels["label_frozen_ts"] = pd.to_datetime(labels["label_frozen_ts"], utc=True, errors="coerce")
+    else:
+        labels["label_frozen_ts"] = pd.NaT
+    labels.sort_values(
+        ["game_id", "team_id", "player_id", "label_frozen_ts"],
+        inplace=True,
+        kind="mergesort",
+    )
+    labels = labels.drop_duplicates(subset=["game_id", "team_id", "player_id"], keep="last")
+    return labels, " + ".join(sources)
+
+
 def _load_label_history(
-    labels_path: Path,
+    labels: pd.DataFrame,
     *,
     target_day: pd.Timestamp,
     history_days: int | None,
     run_as_of_ts: pd.Timestamp,
+    label_source: str,
 ) -> pd.DataFrame:
-    labels = pd.read_parquet(labels_path)
-
+    labels = labels.copy()
     minutes_col = labels.get("minutes")
     if minutes_col is not None and minutes_col.dtype == object:
         parsed = pd.to_timedelta(minutes_col, errors="coerce")
         labels["minutes"] = (parsed.dt.total_seconds() / 60.0).astype("Float64")
+    if "minutes" in labels.columns:
+        labels["minutes"] = pd.to_numeric(labels["minutes"], errors="coerce")
 
     # Older label snapshots may be missing newer required fields; backfill sensible defaults
     # so schema enforcement passes for live builds.
@@ -208,12 +256,23 @@ def _load_label_history(
         mask &= labels["game_date"] >= cutoff
     if "label_frozen_ts" in labels.columns:
         frozen = pd.to_datetime(labels["label_frozen_ts"], utc=True, errors="coerce")
-        mask &= frozen.isna() | (frozen <= run_as_of_ts)
+        mask &= frozen.isna() | (frozen <= run_as_of_ts) | (labels["game_date"] < target_day)
         labels["label_frozen_ts"] = frozen
     history = labels.loc[mask].copy()
+    # Drop rows with missing minutes to avoid NaNs in trend/roll features; warn if many get dropped.
+    if "minutes" in history.columns:
+        before = len(history)
+        history = history.dropna(subset=["minutes"])
+        dropped = before - len(history)
+        if dropped > 0:
+            typer.echo(
+                f"[live] warning: dropped {dropped} label rows with NaN minutes from history ({before} -> {len(history)}).",
+                err=True,
+    )
+    # If history still empty, bail explicitly to avoid silent flat features.
     if history.empty:
         raise RuntimeError(
-            f"No historical label rows found before {target_day.date()} (season partition: {labels_path})."
+            f"No historical label rows found before {target_day.date()} (labels={label_source})."
         )
     return history
 
@@ -235,11 +294,22 @@ def _build_live_labels(
         raise RuntimeError("Roster snapshot does not include any rows for the target date.")
 
     starter_col = working.get("starter_flag")
+    projected = working.get("is_projected_starter")
+    confirmed = working.get("is_confirmed_starter")
+    lineup_status = working.get("lineup_status")
+
+    starter_series = pd.Series(0, index=working.index, dtype=int)
     if starter_col is not None:
-        starter_bool = starter_col.astype("boolean", copy=False).fillna(False)
-        starter_series = starter_bool.astype(int)
-    else:
-        starter_series = pd.Series(0, index=working.index, dtype=int)
+        starter_series |= starter_col.astype("boolean", copy=False).fillna(False).astype(int)
+
+    # Heuristic boost: if no starters marked yet, incorporate projected/confirmed/expected flags.
+    if starter_series.sum() == 0:
+        if projected is not None:
+            starter_series |= projected.astype("boolean", copy=False).fillna(False).astype(int)
+        if confirmed is not None:
+            starter_series |= confirmed.astype("boolean", copy=False).fillna(False).astype(int)
+        if lineup_status is not None:
+            starter_series |= lineup_status.str.lower().eq("expected").fillna(False).astype(int)
     timestamp = pd.Timestamp.now(tz=UTC)
 
     live_df = pd.DataFrame(
@@ -325,9 +395,19 @@ def _filter_snapshot_by_asof(
         return df
 
     working = df.copy()
+    working["game_id"] = pd.to_numeric(working["game_id"], errors="coerce").astype("Int64")
     working[time_col] = pd.to_datetime(working[time_col], utc=True, errors="coerce")
-    game_ids = pd.to_numeric(working["game_id"], errors="coerce").astype("Int64")
-    tip_ts = game_ids.map(tip_lookup)
+
+    # For roster, keep the latest snapshot per game_id (no gating); as-of gating is handled downstream via feature_as_of_ts.
+    if dataset_name == "roster_nightly":
+        latest = (
+            working.sort_values(time_col)
+            .groupby("game_id", as_index=False)
+            .tail(1)
+        )
+        return latest
+
+    tip_ts = working["game_id"].map(tip_lookup)
     limit_ts = tip_ts.fillna(run_as_of_ts)
     allowed = working[time_col].isna() | (working[time_col] <= run_as_of_ts)
     allowed &= working[time_col].isna() | (working[time_col] <= limit_ts)
@@ -495,12 +575,18 @@ def main(
                 }
                 active_pairs_set = _active_roster_pairs(active_roster_df)
 
-    labels_default = data_root / "labels" / f"season={season_value}" / "boxscore_labels.parquet"
+    labels_source_df, label_source = _load_label_sources(
+        data_root=data_root,
+        season_value=season_value,
+        override_path=labels_path,
+        warnings=warnings,
+    )
     labels_frame = _load_label_history(
-        labels_path or labels_default,
+        labels_source_df,
         target_day=target_day,
         history_days=history_days,
         run_as_of_ts=run_ts,
+        label_source=label_source,
     )
 
     schedule_default = data_root / "silver" / "schedule" / f"season={season_value}"
@@ -532,6 +618,19 @@ def main(
         raise RuntimeError(
             f"Roster snapshot does not include rows for {target_day.date()} and no fallback within {roster_fallback_days} day(s) was found."
         )
+    # Normalize starter flags from lineup_status for downstream merges.
+    if "lineup_status" in roster_slice.columns:
+        status_norm = roster_slice["lineup_status"].astype(str).str.lower()
+        if "is_projected_starter" in roster_slice.columns:
+            roster_slice["is_projected_starter"] = (
+                roster_slice["is_projected_starter"].astype("boolean", copy=False).fillna(False)
+                | status_norm.isin(["expected", "confirmed"])
+            )
+        if "is_confirmed_starter" in roster_slice.columns:
+            roster_slice["is_confirmed_starter"] = (
+                roster_slice["is_confirmed_starter"].astype("boolean", copy=False).fillna(False)
+                | status_norm.eq("confirmed")
+            )
     if roster_source_day is not None and roster_source_day != target_day:
         warnings.append(
             f"Roster fallback: using snapshot from {roster_source_day.date()} for {target_day.date()} (max {roster_fallback_days}d)."
@@ -541,22 +640,26 @@ def main(
         )
     live_labels = _build_live_labels(roster_slice, target_day=target_day, season_label=season_label)
 
-    combined_labels = pd.concat([labels_frame, live_labels], ignore_index=True, sort=False)
-    all_game_ids = combined_labels["game_id"].dropna().astype(int).unique().tolist()
-    if not all_game_ids:
-        raise RuntimeError("No game_ids available after combining historical labels and live stubs.")
+    # History is always retained; live labels may be pruned by lock gating.
+    history_labels = labels_frame.copy()
+    live_labels_working = live_labels.copy()
 
-    schedule_slice = _filter_by_game_ids(schedule_df, all_game_ids)
+    all_game_ids = pd.to_numeric(history_labels["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
+    live_game_ids = pd.to_numeric(live_labels_working["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
+    schedule_slice = _filter_by_game_ids(schedule_df, all_game_ids + live_game_ids)
     if schedule_slice.empty:
         raise RuntimeError("Schedule slice is empty after filtering by requested game_ids.")
+    schedule_for_builder = schedule_slice.copy()
 
+    allowed_live_ids = live_game_ids
+    schedule_live = schedule_slice.copy()
     if lock_buffer_minutes > 0:
-        tips = pd.to_datetime(schedule_slice["tip_ts"], utc=True, errors="coerce")
+        tips = pd.to_datetime(schedule_live["tip_ts"], utc=True, errors="coerce")
         cutoff = run_ts - pd.Timedelta(minutes=lock_buffer_minutes)
         allowed_mask = tips.isna() | (tips >= cutoff)
-        locked_games = schedule_slice.loc[~allowed_mask, "game_id"].dropna().unique().tolist()
-        schedule_slice = schedule_slice.loc[allowed_mask].copy()
-        if schedule_slice.empty:
+        locked_games = schedule_live.loc[~allowed_mask, "game_id"].dropna().unique().tolist()
+        schedule_live = schedule_live.loc[allowed_mask].copy()
+        if schedule_live.empty:
             raise RuntimeError("All games are past the lock cutoff; nothing to score.")
         if locked_games:
             warnings.append(
@@ -564,16 +667,18 @@ def main(
             )
         else:
             warnings.append("[lock-guard] No games skipped; cutoff not triggered.")
-        allowed_ids = (
-            pd.to_numeric(schedule_slice["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
-        )
-        combined_labels = combined_labels[combined_labels["game_id"].isin(allowed_ids)].copy()
-        all_game_ids = combined_labels["game_id"].dropna().astype(int).unique().tolist()
+        allowed_live_ids = pd.to_numeric(schedule_live["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
+        live_labels_working = live_labels_working[live_labels_working["game_id"].isin(allowed_live_ids)].copy()
 
-    tip_lookup = _per_game_tip_lookup(schedule_slice)
+    combined_labels = pd.concat([history_labels, live_labels_working], ignore_index=True, sort=False)
+    all_game_ids = pd.to_numeric(combined_labels["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
+    if not all_game_ids:
+        raise RuntimeError("No game_ids available after combining historical labels and live stubs.")
+
+    tip_lookup = _per_game_tip_lookup(schedule_live)
 
     injuries_slice = _filter_snapshot_by_asof(
-        _filter_by_game_ids(injuries_df, all_game_ids),
+        _filter_by_game_ids(injuries_df, allowed_live_ids),
         time_col="as_of_ts",
         run_as_of_ts=run_ts,
         tip_lookup=tip_lookup,
@@ -587,9 +692,9 @@ def main(
             "Injury snapshot is empty after as-of filtering; refusing to score. "
             f"run_as_of_ts={run_ts.isoformat()} latest_injury_as_of_ts={latest_ts_str}. "
             "Run build_minutes_live after the injury scrape completes or pass a run_as_of_ts at/after the snapshot time."
-        )
+    )
     odds_slice = _filter_snapshot_by_asof(
-        _filter_by_game_ids(odds_df, all_game_ids),
+        _filter_by_game_ids(odds_df, allowed_live_ids),
         time_col="as_of_ts",
         run_as_of_ts=run_ts,
         tip_lookup=tip_lookup,
@@ -597,7 +702,7 @@ def main(
         warnings=warnings,
     )
     roster_builder_slice = _filter_snapshot_by_asof(
-        _filter_by_game_ids(roster_df.copy(), all_game_ids),
+        _filter_by_game_ids(roster_df.copy(), allowed_live_ids),
         time_col="as_of_ts",
         run_as_of_ts=run_ts,
         tip_lookup=tip_lookup,
@@ -620,7 +725,7 @@ def main(
         )
 
     builder = MinutesFeatureBuilder(
-        schedule=schedule_slice,
+        schedule=schedule_for_builder,
         injuries_snapshot=injuries_slice,
         odds_snapshot=odds_slice,
         roster_nightly=roster_builder_slice,
@@ -638,6 +743,91 @@ def main(
     if live_slice.empty:
         raise RuntimeError(f"No feature rows produced for {target_day.date()}.")
     live_slice.sort_values(["game_id", "player_id"], inplace=True)
+    # Guard against duplicate rows per player-game (multiple snapshots); keep latest feature_as_of_ts.
+    live_slice = deduplicate_latest(live_slice, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
+    live_slice = live_slice.drop_duplicates(subset=list(KEY_COLUMNS), keep="last").copy()
+
+    # Recompute core trend features using history only (prior to target_day).
+    trend_cols = [
+        "min_last1",
+        "min_last3",
+        "min_last5",
+        "sum_min_7d",
+        "roll_mean_3",
+        "roll_mean_5",
+        "roll_mean_10",
+        "roll_iqr_5",
+        "z_vs_10",
+    ]
+    try:
+        history_work = history_labels.copy()
+        history_work["game_date"] = pd.to_datetime(history_work["game_date"]).dt.normalize()
+        history_work.sort_values(["player_id", "game_date"], inplace=True)
+        latest_by_player: list[dict[str, object]] = []
+        cutoff_7d = target_day - pd.Timedelta(days=7)
+        for pid, group in history_work.groupby("player_id"):
+            minutes = pd.to_numeric(group["minutes"], errors="coerce")
+            dates = pd.to_datetime(group["game_date"]).dt.normalize()
+            if minutes.empty:
+                continue
+            last_minutes = minutes.iloc[-1]
+            last3 = minutes.tail(3).mean()
+            last5 = minutes.tail(5).mean()
+            mean3 = last3
+            mean5 = last5
+            mean10 = minutes.tail(10).mean()
+            iqr5 = minutes.tail(5).quantile(0.75) - minutes.tail(5).quantile(0.25) if len(minutes.tail(5)) >= 2 else 0.0
+            recent_window = minutes[dates >= cutoff_7d]
+            sum7 = float(recent_window.sum()) if not recent_window.empty else 0.0
+            last10 = minutes.tail(10)
+            mu10 = last10.mean()
+            std10 = last10.std(ddof=0)
+            z10 = float((last_minutes - mu10) / std10) if std10 and std10 > 0 else 0.0
+            latest_by_player.append(
+                {
+                    "player_id": pid,
+                    "min_last1": float(last_minutes),
+                    "min_last3": float(last3) if pd.notna(last3) else pd.NA,
+                    "min_last5": float(last5) if pd.notna(last5) else pd.NA,
+                    "sum_min_7d": float(sum7),
+                    "roll_mean_3": float(mean3) if pd.notna(mean3) else pd.NA,
+                    "roll_mean_5": float(mean5) if pd.notna(mean5) else pd.NA,
+                    "roll_mean_10": float(mean10) if pd.notna(mean10) else pd.NA,
+                    "roll_iqr_5": float(iqr5) if pd.notna(iqr5) else 0.0,
+                    "z_vs_10": z10,
+                }
+            )
+        trend_frame = pd.DataFrame(latest_by_player)
+        if not trend_frame.empty:
+            live_slice = live_slice.merge(trend_frame, on="player_id", how="left", suffixes=("", "_recomp"))
+            for col in trend_cols:
+                recomputed = f"{col}_recomp"
+                if recomputed in live_slice.columns:
+                    live_slice[col] = live_slice[recomputed].combine_first(live_slice.get(col))
+                    live_slice.drop(columns=[recomputed], inplace=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        warnings.append(f"trend recompute failed: {exc}")
+
+    # Reinstate starter signals from roster slice if the builder dropped them.
+    starter_cols = ["is_projected_starter", "is_confirmed_starter"]
+    if not roster_slice.empty and set(starter_cols).issubset(roster_slice.columns):
+        starter_hint = roster_slice[["game_id", "player_id"] + starter_cols].copy()
+        starter_hint = starter_hint.drop_duplicates(subset=["game_id", "player_id"], keep="last")
+        for col in starter_cols:
+            starter_hint[col] = starter_hint[col].astype("boolean", copy=False)
+        live_slice = live_slice.merge(
+            starter_hint,
+            on=["game_id", "player_id"],
+            how="left",
+            suffixes=("", "_roster"),
+        )
+        for col in starter_cols:
+            roster_col = f"{col}_roster"
+            base = live_slice[col] if col in live_slice.columns else pd.Series(False, index=live_slice.index)
+            roster_vals = live_slice[roster_col] if roster_col in live_slice.columns else pd.Series(False, index=live_slice.index)
+            live_slice[col] = base.fillna(False) | roster_vals.fillna(False)
+            if roster_col in live_slice.columns:
+                live_slice.drop(columns=[roster_col], inplace=True)
 
     active_validation: dict | None = None
     if active_roster_df is not None and not active_roster_df.empty and active_pairs_set:

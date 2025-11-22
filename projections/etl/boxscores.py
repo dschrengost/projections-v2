@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
 from datetime import datetime
+import time
 from pathlib import Path
 from typing import Iterable, List
 
@@ -46,13 +49,20 @@ def _games_to_labels(games: List[NbaComGameBoxScore], *, season_label: str) -> p
             game_id = int(game.game_id)
         except (TypeError, ValueError):
             continue
-        tip_ts = pd.Timestamp(game.game_time_utc) if game.game_time_utc else pd.NaT
-        if pd.isna(tip_ts) and game.game_time_local:
-            tip_ts = pd.Timestamp(game.game_time_local)
-        if pd.isna(tip_ts):
+        tip_ts = None
+        for candidate in (
+            game.game_time_local,
+            game.game_time_home,
+            game.game_time_away,
+            game.game_time_utc,
+        ):
+            if candidate:
+                tip_ts = pd.Timestamp(candidate)
+                break
+        if tip_ts is None or pd.isna(tip_ts):
             continue
-        tip_ts = tip_ts.tz_localize("UTC") if tip_ts.tzinfo is None else tip_ts.tz_convert("UTC")
-        game_date = tip_ts.tz_convert(None).normalize()
+        tip_ts_local = tip_ts.tz_localize("UTC") if tip_ts.tzinfo is None else tip_ts
+        game_date = tip_ts_local.tz_localize(None).normalize() if tip_ts_local.tzinfo else tip_ts_local.normalize()
         for team in (game.home, game.away):
             if team is None or team.team_id is None:
                 continue
@@ -117,7 +127,8 @@ def main(
     schedule_df = load_schedule_data(default_schedule, start_day, end_day, timeout)
     schedule_df["game_date"] = pd.to_datetime(schedule_df["game_date"]).dt.normalize()
 
-    games: list[NbaComGameBoxScore] = []
+    season_label = str(season)
+    all_labels: list[pd.DataFrame] = []
     skipped_days: list[pd.Timestamp] = []
     season_dir = data_root / "bronze" / "boxscores_raw" / f"season={season}"
     season_dir.mkdir(parents=True, exist_ok=True)
@@ -127,6 +138,7 @@ def main(
         if day_games.empty:
             skipped_days.append(cursor)
             continue
+        fetched_games: list[NbaComGameBoxScore] = []
         for gid in day_games["game_id"].dropna().unique():
             typer.echo(f"[boxscores] fetching boxscore for game_id={gid}")
             box_score = None
@@ -141,26 +153,50 @@ def main(
                         time.sleep(0.25)
                         continue
             if box_score:
-                games.append(box_score)
-    if not games:
+                fetched_games.append(box_score)
+        if not fetched_games:
+            typer.echo(f"[boxscores] warning: no boxscores pulled for {cursor.date()}; skipping write.")
+            continue
+
+        day_dir = season_dir / f"date={cursor.date()}"
+        day_dir.mkdir(parents=True, exist_ok=True)
+        bronze_records: list[dict[str, object]] = []
+        for game in fetched_games:
+            payload = asdict(game)
+            bronze_records.append(
+                {
+                    "game_id": game.game_id,
+                    "payload": json.dumps(payload, default=str),
+                    "tip_ts": payload.get("game_time_utc") or payload.get("game_time_local"),
+                }
+            )
+        bronze_df = pd.DataFrame(bronze_records, columns=["game_id", "payload", "tip_ts"])
+        bronze_path = day_dir / "boxscores_raw.parquet"
+        bronze_df.to_parquet(bronze_path, index=False)
+        typer.echo(f"[boxscores] wrote {len(bronze_df):,} raw rows -> {bronze_path}")
+
+        labels_df = _games_to_labels(fetched_games, season_label=season_label)
+        labels_df = labels_df[
+            (labels_df["game_date"] >= start_day) & (labels_df["game_date"] <= end_day)
+        ].copy()
+        if labels_df.empty:
+            typer.echo(f"[boxscores] warning: no label rows for {cursor.date()}; skipping label write.")
+        else:
+            all_labels.append(labels_df)
+
+    if not all_labels:
         typer.echo(
             "[boxscores] warning: no boxscores were fetched for this window; skipping write."
         )
         return
 
-    season_label = str(season)
-    labels_df = _games_to_labels(games, season_label=season_label)
-    labels_df = labels_df[
-        (labels_df["game_date"] >= start_day) & (labels_df["game_date"] <= end_day)
-    ].copy()
+    labels_df = pd.concat(all_labels, ignore_index=True, sort=False)
     if labels_df.empty:
         raise RuntimeError("No label rows matched the requested date window.")
 
-    bronze_df = pd.DataFrame([game.__dict__ for game in games])
-    bronze_df.to_parquet(
-        season_dir / f"date={start_day.date()}" / "boxscores_raw.parquet",
-        index=False,
-    )
+    if skipped_days:
+        skipped_str = ", ".join(day.date().isoformat() for day in skipped_days)
+        typer.echo(f"[boxscores] warning: no scheduled games found for {skipped_str}", err=True)
 
     labels_df = enforce_schema(labels_df, BOX_SCORE_LABELS_SCHEMA)
     validate_with_pandera(labels_df, BOX_SCORE_LABELS_SCHEMA)

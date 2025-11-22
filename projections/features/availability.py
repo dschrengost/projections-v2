@@ -14,6 +14,7 @@ _STATUS_ALIASES: dict[str, AvailabilityStatus] = {
     "Q": AvailabilityStatus.QUESTIONABLE,
     "PROBABLE": AvailabilityStatus.PROBABLE,
     "PROB": AvailabilityStatus.PROBABLE,
+    "AVAIL": AvailabilityStatus.AVAILABLE,
     "AVAILABLE": AvailabilityStatus.AVAILABLE,
     "ACTIVE": AvailabilityStatus.AVAILABLE,
     "A": AvailabilityStatus.AVAILABLE,
@@ -66,6 +67,7 @@ def attach_availability_features(
             enriched["is_q"] = 0
             enriched["is_prob"] = 0
             enriched["injury_as_of_ts"] = pd.NaT
+            enriched["injury_snapshot_missing"] = 1
             return enriched
         prepared_injuries = prepare_injuries_snapshot(injuries_snapshot)
 
@@ -90,8 +92,17 @@ def attach_availability_features(
     merged["is_out"] = (merged["status"] == AvailabilityStatus.OUT).astype(int)
     merged["is_q"] = (merged["status"] == AvailabilityStatus.QUESTIONABLE).astype(int)
     merged["is_prob"] = (merged["status"] == AvailabilityStatus.PROBABLE).astype(int)
+    # Fill missing return/ramp metadata to avoid NaNs at inference.
+    for col in ("restriction_flag", "ramp_flag"):
+        if col in merged.columns:
+            merged[col] = merged[col].fillna(False).astype(bool)
+    for col in ("games_since_return", "days_since_return"):
+        if col in merged.columns:
+            merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0).astype("Int64")
+
     merged.rename(columns={"as_of_ts": "injury_as_of_ts"}, inplace=True)
     if "snapshot_missing" in merged.columns:
+        # Treat missing snapshot indicator as missing (conservative).
         merged["injury_snapshot_missing"] = merged["snapshot_missing"].fillna(1).astype(int)
         merged.drop(columns=["snapshot_missing"], inplace=True)
     else:
