@@ -18,7 +18,9 @@ from projections import paths
 from projections.labels import derive_starter_flag_labels
 from projections.minutes_v1 import modeling
 from projections.minutes_v1.config import load_scoring_config
+from projections.minutes_v1.production import load_production_minutes_bundle
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
+from projections.minutes_v1.logs import prediction_logs_base
 from projections.minutes_v1.promotion_calibrator import (
     PromotionPriorContext,
     apply_promotion_prior,
@@ -29,6 +31,11 @@ from projections.minutes_v1.reconcile import (
     TeamReconcileDebug,
     load_reconcile_config,
     reconcile_minutes_p50_all,
+)
+from projections.minutes_v1.starter_flags import (
+    StarterFlagResult,
+    derive_starter_flag_label,
+    normalize_starter_signals,
 )
 from projections.models.minutes_lgbm import (
     _filter_out_players,
@@ -48,7 +55,7 @@ DEFAULT_STARTER_PRIORS = paths.data_path("gold", "minutes_priors", "starter_slot
 DEFAULT_STARTER_HISTORY = paths.data_path("gold", "minutes_priors", "player_starter_history.parquet")
 DEFAULT_PROMOTION_CONFIG = Path("config/minutes_promotion.yaml")
 DEFAULT_RECONCILE_CONFIG = Path("config/minutes_l2_reconcile.yaml")
-DEFAULT_PREDICTION_LOGS_ROOT = paths.data_path("gold", "prediction_logs_minutes_v1")
+DEFAULT_PREDICTION_LOGS_ROOT = prediction_logs_base()
 OUTPUT_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
 LATEST_POINTER = "latest_run.json"
@@ -121,26 +128,6 @@ def _make_reconcile_debugger(
     return _log
 
 
-def _resolve_bundle_dir(bundle_dir: Path | None, config_path: Path) -> tuple[Path, str | None]:
-    if bundle_dir:
-        return bundle_dir, None
-    config_path = config_path.expanduser()
-    if not config_path.exists():
-        raise typer.BadParameter(
-            f"No bundle provided and default config {config_path} does not exist.",
-            param_name="bundle_dir",
-        )
-    with config_path.open("r", encoding="utf-8") as handle:
-        config = json.load(handle)
-    raw_path = config.get("bundle_dir")
-    if not raw_path:
-        raise typer.BadParameter("Config file missing 'bundle_dir'.", param_name="bundle_dir")
-    resolved = Path(raw_path).expanduser()
-    if not resolved.is_absolute():
-        resolved = (Path.cwd() / resolved).resolve()
-    return resolved, config.get("run_id")
-
-
 def _write_latest_pointer(day_dir: Path, *, run_id: str, run_as_of_ts: datetime | None) -> None:
     pointer = day_dir / LATEST_POINTER
     payload = {
@@ -150,11 +137,7 @@ def _write_latest_pointer(day_dir: Path, *, run_id: str, run_as_of_ts: datetime 
     pointer.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _load_bundle(bundle_dir: Path) -> dict:
-    model_path = bundle_dir / "lgbm_quantiles.joblib"
-    if not model_path.exists():
-        raise typer.BadParameter(f"Bundle missing {model_path}", param_name="bundle_dir")
-    bundle = joblib.load(model_path)
+def _ensure_bundle_defaults(bundle: dict) -> dict:
     bundle.setdefault("bucket_mode", "none")
     bundle.setdefault(
         "bucket_offsets",
@@ -164,12 +147,44 @@ def _load_bundle(bundle_dir: Path) -> dict:
     return bundle
 
 
+def _load_bundle(bundle_dir: Path) -> dict:
+    model_path = bundle_dir / "lgbm_quantiles.joblib"
+    if not model_path.exists():
+        raise typer.BadParameter(f"Bundle missing {model_path}", param_name="bundle_dir")
+    bundle = joblib.load(model_path)
+    return _ensure_bundle_defaults(bundle)
+
+
 def _load_meta(bundle_dir: Path) -> dict:
     meta_path = bundle_dir / "meta.json"
     if not meta_path.exists():
         return {}
     with meta_path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _resolve_bundle_artifacts(
+    bundle_dir: Path | None,
+    config_path: Path,
+) -> tuple[dict, Path, dict, str]:
+    if bundle_dir is not None:
+        resolved = bundle_dir.expanduser()
+        if not resolved.exists():
+            raise FileNotFoundError(f"Bundle directory not found at {resolved}")
+        bundle = _load_bundle(resolved)
+        model_meta = _load_meta(resolved)
+        run_id = resolved.name
+        return bundle, resolved, model_meta, run_id
+
+    production_bundle = load_production_minutes_bundle(config_path=config_path)
+    bundle = _ensure_bundle_defaults(dict(production_bundle))
+    run_dir_str = bundle.get("run_dir")
+    if not run_dir_str:
+        raise RuntimeError("Production bundle missing run_dir metadata.")
+    resolved = Path(run_dir_str).expanduser()
+    model_meta = bundle.get("meta", {})
+    run_id = bundle.get("run_id") or resolved.name
+    return bundle, resolved, model_meta, run_id
 
 
 def _read_parquet_source(path: Path) -> pd.DataFrame:
@@ -364,35 +379,18 @@ def _prepare_features(df: pd.DataFrame, *, mode: Mode = "historical") -> pd.Data
     if mode == "live":
         working = df.copy()
         if "starter_flag_label" not in working.columns:
-            candidate = None
-            if "starter_flag" in working.columns:
-                candidate = pd.to_numeric(working["starter_flag"], errors="coerce")
-            elif "is_projected_starter" in working.columns or "is_confirmed_starter" in working.columns:
-                # Heuristic: use projected/confirmed starter flags if present.
-                starter_series = pd.Series(0, index=working.index, dtype=int)
-                if "is_projected_starter" in working.columns:
-                    starter_series |= (
-                        working["is_projected_starter"].astype("boolean", copy=False).fillna(False).astype(int)
+            working = normalize_starter_signals(working)
+            starter_result: StarterFlagResult = derive_starter_flag_label(
+                working,
+                group_cols=("game_id", "team_id"),
+            )
+            if starter_result.overflow:
+                for game_id, team_id, count in starter_result.overflow:
+                    typer.echo(
+                        f"[live] warning: starter_flag_label derived {count} starters for game {game_id} team {team_id}; expected <=5.",
+                        err=True,
                     )
-                if "is_confirmed_starter" in working.columns:
-                    starter_series |= (
-                        working["is_confirmed_starter"].astype("boolean", copy=False).fillna(False).astype(int)
-                    )
-                if "lineup_status" in working.columns:
-                    starter_series |= (
-                        working["lineup_status"]
-                        .astype(str)
-                        .str.lower()
-                        .eq("expected")
-                        .fillna(False)
-                        .astype(int)
-                    )
-                candidate = starter_series
-
-            if candidate is None:
-                working["starter_flag_label"] = 0
-            else:
-                working["starter_flag_label"] = candidate.fillna(0).astype(int)
+            working["starter_flag_label"] = starter_result.values.fillna(0).astype(int)
     else:
         try:
             working = derive_starter_flag_labels(df)
@@ -752,8 +750,10 @@ def _log_predictions(
     if df.empty:
         return
 
-    # Ensure directory exists
+    # Ensure directory exists (partition by minutes run when available)
     logs_root = logs_root.expanduser()
+    if run_id:
+        logs_root = logs_root / f"run={run_id}"
     logs_root.mkdir(parents=True, exist_ok=True)
 
     # Add metadata
@@ -981,17 +981,13 @@ def main(
     if final_day < start_day:
         raise typer.BadParameter("--end-date cannot be before --date")
 
-    resolved_bundle_dir, config_run_id = _resolve_bundle_dir(bundle_dir, bundle_config)
-    resolved_bundle_dir = resolved_bundle_dir.expanduser()
-    if not resolved_bundle_dir.exists():
-        typer.echo(
-            f"[minutes] ERROR: bundle directory not found at {resolved_bundle_dir}",
-            err=True,
+    try:
+        bundle, resolved_bundle_dir, model_meta, model_run_id = _resolve_bundle_artifacts(
+            bundle_dir, bundle_config
         )
+    except FileNotFoundError as exc:
+        typer.echo(f"[minutes] ERROR: {exc}", err=True)
         raise typer.Exit(code=1)
-    bundle = _load_bundle(resolved_bundle_dir)
-    model_meta = _load_meta(resolved_bundle_dir)
-    model_run_id = config_run_id or resolved_bundle_dir.name
 
     features_root = features_root.expanduser()
     features_path = features_path.expanduser() if features_path else None
@@ -1135,7 +1131,15 @@ def main(
             "opponent_team_name",
             "opponent_team_tricode",
             "starter_flag",
+            "is_projected_starter",
+            "is_confirmed_starter",
             "pos_bucket",
+            "spread_home",
+            "total",
+            "odds_as_of_ts",
+            "blowout_index",
+            "blowout_risk_score",
+            "close_game_score",
             "play_prob",
             "minutes_p10",
             "minutes_p50",

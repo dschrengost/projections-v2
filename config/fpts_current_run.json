@@ -1,0 +1,6 @@
+{
+  "run_id": "fpts_lgbm_v2",
+  "artifact_root": "artifacts/fpts_lgbm",
+  "scoring_system": "dk",
+  "minutes_source": "actual"
+}

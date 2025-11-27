@@ -31,4 +31,9 @@ def attach_game_environment_features(
     merged["blowout_index"] = compute_blowout_index(
         merged["spread_home"].fillna(0), merged["total"].fillna(220)
     )
+    spread_abs = merged["spread_home"].abs()
+    blowout_risk = ((spread_abs - 8.0).clip(lower=0) / 12.0).clip(upper=1.0)
+    close_score = ((8.0 - spread_abs).clip(lower=0) / 8.0).clip(upper=1.0)
+    merged["blowout_risk_score"] = blowout_risk.fillna(0.5)
+    merged["close_game_score"] = close_score.fillna(0.5)
     return merged

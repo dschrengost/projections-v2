@@ -28,3 +28,4 @@ models/*
 !models/.gitkeep
 
 notebooks/.ipynb_checkpoints/
+.env

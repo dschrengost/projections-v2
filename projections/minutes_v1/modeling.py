@@ -15,16 +15,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-EXCLUDED_FEATURE_COLUMNS = {
-    "game_id",
-    "player_id",
-    "team_id",
-    "opponent_team_id",
-    "season",
-    "game_date",
-    "tip_ts",
-    "feature_as_of_ts",
-}
+from projections.models.minutes_features import infer_feature_columns
 
 
 @dataclass
@@ -97,22 +88,6 @@ class ConformalIntervalCalibrator:
         if fitted_flag is None:
             return has_offsets
         return bool(fitted_flag)
-
-
-def infer_feature_columns(df: pd.DataFrame, *, target_col: str) -> list[str]:
-    """Infer candidate feature columns by dtype."""
-
-    candidates: list[str] = []
-    for col in df.columns:
-        if col == target_col or col in EXCLUDED_FEATURE_COLUMNS:
-            continue
-        if pd.api.types.is_numeric_dtype(df[col]):
-            candidates.append(col)
-    if not candidates:
-        raise ValueError("Unable to infer feature columns — provide them explicitly.")
-    return sorted(candidates)
-
-
 def train_ridge_baseline(
     X_train: pd.DataFrame,
     y_train: pd.Series,

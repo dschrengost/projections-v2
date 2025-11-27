@@ -14,11 +14,15 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from projections import paths
+
 DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
+DEFAULT_FPTS_ROOT = paths.data_path("gold", "projections_fpts_v1")
 LATEST_POINTER = "latest_run.json"
 PARQUET_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
+FPTS_FILENAME = "fpts.parquet"
 
 # Only expose conditional minutes fields to the UI.
 PLAYER_COLUMNS: tuple[str, ...] = (
@@ -35,6 +39,8 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "opponent_team_name",
     "opponent_team_tricode",
     "starter_flag",
+    "is_projected_starter",
+    "is_confirmed_starter",
     "pos_bucket",
     "play_prob",
     "minutes_p10",
@@ -43,6 +49,17 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "minutes_p10_cond",
     "minutes_p50_cond",
     "minutes_p90_cond",
+    "fpts_per_min_pred",
+    "proj_fpts",
+    "scoring_system",
+    "spread_home",
+    "total",
+    "odds_as_of_ts",
+    "blowout_index",
+    "blowout_risk_score",
+    "close_game_score",
+    "team_implied_total",
+    "opponent_implied_total",
 )
 
 
@@ -115,6 +132,26 @@ def _load_summary(run_dir: Path) -> dict[str, Any] | None:
         return None
 
 
+def _extract_run_name(run_dir: Path) -> str | None:
+    if run_dir.name.startswith("run="):
+        return run_dir.name.split("=", 1)[1]
+    return None
+
+
+def _load_fpts(day: date, run_name: str | None, root: Path) -> pd.DataFrame | None:
+    if run_name is None:
+        return None
+    day_dir = root / day.isoformat()
+    run_dir = day_dir / f"run={run_name}"
+    parquet_path = run_dir / FPTS_FILENAME
+    if not parquet_path.exists():
+        return None
+    try:
+        return pd.read_parquet(parquet_path)
+    except Exception:
+        return None
+
+
 def _serialize_players(df: pd.DataFrame) -> list[dict[str, Any]]:
     available_cols = [col for col in PLAYER_COLUMNS if col in df.columns]
     trimmed = df.loc[:, available_cols].copy()
@@ -136,11 +173,13 @@ def create_app(
     *,
     daily_root: Path | None = None,
     dashboard_dist: Path | None = None,
+    fpts_root: Path | None = None,
 ) -> FastAPI:
     """Construct the FastAPI app."""
 
     minutes_root = (daily_root or _env_path("MINUTES_DAILY_ROOT", DEFAULT_DAILY_ROOT)).resolve()
     dist_dir = (dashboard_dist or _env_path("MINUTES_DASHBOARD_DIST", DEFAULT_DASHBOARD_DIST)).resolve()
+    fpts_root = (fpts_root or _env_path("MINUTES_FPTS_ROOT", DEFAULT_FPTS_ROOT)).resolve()
 
     app = FastAPI(title="Minutes API", version="0.1.0")
 
@@ -150,6 +189,24 @@ def create_app(
         day_dir = minutes_root / slate_day.isoformat()
         run_dir = _resolve_run_dir(day_dir, run_id)
         df = _load_minutes(run_dir)
+        fpts_df = _load_fpts(slate_day, _extract_run_name(run_dir), fpts_root)
+        if fpts_df is not None and {"game_id", "player_id"}.issubset(fpts_df.columns):
+            join_candidates = (
+                "game_id",
+                "player_id",
+                "fpts_per_min_pred",
+                "proj_fpts",
+                "scoring_system",
+                "team_implied_total",
+                "opponent_implied_total",
+            )
+            join_cols = [col for col in join_candidates if col in fpts_df.columns]
+            if len(join_cols) > 2:
+                df = df.merge(
+                    fpts_df.loc[:, join_cols],
+                    on=["game_id", "player_id"],
+                    how="left",
+                )
         players = _serialize_players(df)
         payload = {"date": slate_day.isoformat(), "count": len(players), "players": players}
         return JSONResponse(payload)
@@ -171,9 +228,18 @@ def create_app(
                 "run_as_of_ts": None,
             }
         # Ensure generated_at always present for operators.
-        summary.setdefault("generated_at", datetime.utcnow().isoformat() + "Z")
-        summary.setdefault("date", slate_day.isoformat())
-        summary.setdefault("counts", _build_counts(pd.DataFrame()))
+            summary.setdefault("generated_at", datetime.utcnow().isoformat() + "Z")
+            summary.setdefault("date", slate_day.isoformat())
+            summary.setdefault("counts", _build_counts(pd.DataFrame()))
+        fpts_run_name = _extract_run_name(run_dir)
+        fpts_summary = None
+        if fpts_run_name:
+            fpts_run_dir = fpts_root / slate_day.isoformat() / f"run={fpts_run_name}"
+            if fpts_run_dir.exists():
+                fpts_summary = _load_summary(fpts_run_dir)
+        summary["fpts_available"] = fpts_summary is not None
+        if fpts_summary:
+            summary["fpts_meta"] = fpts_summary
         return JSONResponse(summary)
 
     @app.get("/api/minutes/runs")

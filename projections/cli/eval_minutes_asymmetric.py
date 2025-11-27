@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import typer
 
-from projections.minutes_v1.calibration.asymmetric_scaling import (
+from projections.minutes_v1.calibration_utils.asymmetric_scaling import (
     AsymmetricK,
     apply_asymmetric_k,
     compute_coverage,

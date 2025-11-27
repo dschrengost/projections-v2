@@ -1,0 +1,1 @@
+2024-???: Backfill test now creates stub minutes + fake bundle data instead of invoking the full dataset builder, docs updated to describe dashboard/APIs exposing proj_fpts + fpts_per_min_pred and to include an FPTS v1 quick reference/operator commands, and code now relies on projections.minutes_v1.logs helpers (score_minutes default path, dataset builder, tests).

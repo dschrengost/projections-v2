@@ -20,6 +20,11 @@ from projections.minutes_v1.schemas import (
     enforce_schema,
     validate_with_pandera,
 )
+from projections.minutes_v1.starter_flags import (
+    StarterFlagResult,
+    derive_starter_flag_label,
+    normalize_starter_signals,
+)
 from scrapers.nba_players import NbaPlayersScraper, PlayerProfile
 
 UTC = timezone.utc
@@ -293,23 +298,24 @@ def _build_live_labels(
     if working.empty:
         raise RuntimeError("Roster snapshot does not include any rows for the target date.")
 
-    starter_col = working.get("starter_flag")
-    projected = working.get("is_projected_starter")
-    confirmed = working.get("is_confirmed_starter")
-    lineup_status = working.get("lineup_status")
-
-    starter_series = pd.Series(0, index=working.index, dtype=int)
-    if starter_col is not None:
-        starter_series |= starter_col.astype("boolean", copy=False).fillna(False).astype(int)
-
-    # Heuristic boost: if no starters marked yet, incorporate projected/confirmed/expected flags.
-    if starter_series.sum() == 0:
-        if projected is not None:
-            starter_series |= projected.astype("boolean", copy=False).fillna(False).astype(int)
-        if confirmed is not None:
-            starter_series |= confirmed.astype("boolean", copy=False).fillna(False).astype(int)
-        if lineup_status is not None:
-            starter_series |= lineup_status.str.lower().eq("expected").fillna(False).astype(int)
+    if "as_of_ts" in working.columns:
+        working["as_of_ts"] = pd.to_datetime(working["as_of_ts"], utc=True, errors="coerce")
+        working = working.sort_values(["game_id", "team_id", "player_id", "as_of_ts"])
+    else:
+        working = working.sort_values(["game_id", "team_id", "player_id"])
+    working = working.drop_duplicates(subset=["game_id", "team_id", "player_id"], keep="last")
+    working = normalize_starter_signals(working)
+    starter_result: StarterFlagResult = derive_starter_flag_label(
+        working,
+        group_cols=("game_id", "team_id"),
+    )
+    if starter_result.overflow:
+        for game_id, team_id, count in starter_result.overflow:
+            typer.echo(
+                f"[live] warning: derived {count} starters for game {game_id} team {team_id}; expected <=5.",
+                err=True,
+            )
+    starter_series = starter_result.values.reindex(working.index).fillna(0).astype("Int64")
     timestamp = pd.Timestamp.now(tz=UTC)
 
     live_df = pd.DataFrame(
@@ -321,8 +327,8 @@ def _build_live_labels(
             "season": season_label,
             "game_date": working["game_date"],
             "minutes": pd.Series(pd.NA, index=working.index, dtype="Float64"),
-            "starter_flag": starter_series.astype("Int64"),
-            "starter_flag_label": starter_series.astype("Int64"),
+            "starter_flag": starter_series,
+            "starter_flag_label": starter_series,
             "source": LIVE_SOURCE_NAME,
             "label_frozen_ts": timestamp,
         }
@@ -618,19 +624,7 @@ def main(
         raise RuntimeError(
             f"Roster snapshot does not include rows for {target_day.date()} and no fallback within {roster_fallback_days} day(s) was found."
         )
-    # Normalize starter flags from lineup_status for downstream merges.
-    if "lineup_status" in roster_slice.columns:
-        status_norm = roster_slice["lineup_status"].astype(str).str.lower()
-        if "is_projected_starter" in roster_slice.columns:
-            roster_slice["is_projected_starter"] = (
-                roster_slice["is_projected_starter"].astype("boolean", copy=False).fillna(False)
-                | status_norm.isin(["expected", "confirmed"])
-            )
-        if "is_confirmed_starter" in roster_slice.columns:
-            roster_slice["is_confirmed_starter"] = (
-                roster_slice["is_confirmed_starter"].astype("boolean", copy=False).fillna(False)
-                | status_norm.eq("confirmed")
-            )
+    roster_slice = normalize_starter_signals(roster_slice)
     if roster_source_day is not None and roster_source_day != target_day:
         warnings.append(
             f"Roster fallback: using snapshot from {roster_source_day.date()} for {target_day.date()} (max {roster_fallback_days}d)."
@@ -734,6 +728,15 @@ def main(
         archetype_deltas=archetype_deltas_df,
     )
     raw_features = builder.build(combined_labels)
+    if "starter_flag" not in raw_features.columns and "starter_flag_label" in raw_features.columns:
+        raw_features["starter_flag"] = raw_features["starter_flag_label"]
+    if "starter_flag" not in raw_features.columns and {"game_id", "player_id", "starter_flag"}.issubset(combined_labels.columns):
+        label_flags = (
+            combined_labels.loc[:, ["game_id", "player_id", "starter_flag"]]
+            .dropna(subset=["game_id", "player_id"])
+            .drop_duplicates(subset=["game_id", "player_id"], keep="last")
+        )
+        raw_features = raw_features.merge(label_flags, on=["game_id", "player_id"], how="left")
     deduped = deduplicate_latest(raw_features, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
     aligned = enforce_schema(deduped, FEATURES_MINUTES_V1_SCHEMA)
     validate_with_pandera(aligned, FEATURES_MINUTES_V1_SCHEMA)

@@ -7,6 +7,7 @@ import pandas as pd
 
 from projections.minutes_v1.constants import ARCHETYPE_MAP
 from projections.minutes_v1.snapshots import ensure_as_of_column
+from projections.minutes_v1.starter_flags import normalize_starter_signals
 
 ARCHETYPE_BUCKETS: tuple[str, ...] = ("G", "W", "B")
 
@@ -116,16 +117,7 @@ def attach_depth_features(
     for column in ("lineup_role", "lineup_status", "lineup_roster_status"):
         if column not in merged.columns:
             merged[column] = pd.NA
-    for column in ("is_projected_starter", "is_confirmed_starter"):
-        if column not in merged.columns:
-            merged[column] = False
-        merged[column] = merged[column].fillna(False).astype(bool)
-
-    # Derive starter hints from lineup_status when flags are missing.
-    if "lineup_status" in merged.columns:
-        status_norm = merged["lineup_status"].astype(str).str.lower()
-        merged["is_confirmed_starter"] = merged["is_confirmed_starter"] | status_norm.eq("confirmed")
-        merged["is_projected_starter"] = merged["is_projected_starter"] | status_norm.isin(["expected", "confirmed"])
+    merged = normalize_starter_signals(merged)
 
     archetype = merged["archetype"].fillna("W")
     archetype_counts_arr = np.select(
@@ -142,4 +134,6 @@ def attach_depth_features(
         default=0,
     )
     merged["same_archetype_overlap"] = np.where(archetype_counts_arr > 1, 1, 0)
+    depth_counts = np.maximum(archetype_counts_arr - 1, 0)
+    merged["depth_same_pos_active"] = depth_counts.astype(int)
     return merged

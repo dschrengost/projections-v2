@@ -25,12 +25,29 @@ class ReconciliationConfig:
     beta: float = 0.08  # bench boost on blowouts
 
 
-def _minutes_caps(row: pd.Series) -> float:
-    if bool(row.get("ramp_flag")):
-        return ROLE_MINUTES_CAPS["ramp"]
-    if bool(row.get("starter_flag")):
-        return ROLE_MINUTES_CAPS["starter"]
-    return ROLE_MINUTES_CAPS["bench"]
+def _starter_series(df: pd.DataFrame, preferred_col: str) -> pd.Series:
+    """Return a boolean starter indicator, falling back to alternate columns."""
+
+    candidates = [preferred_col, "starter_flag", "starter_flag_label", "is_projected_starter", "starter_prev_game_asof"]
+    for column in candidates:
+        if column not in df.columns:
+            continue
+        values = df[column]
+        if column == "starter_prev_game_asof":
+            return pd.to_numeric(values, errors="coerce").fillna(0.0) > 0.5
+        if pd.api.types.is_bool_dtype(values):
+            return values.fillna(False)
+        return pd.to_numeric(values, errors="coerce").fillna(0).astype(int).astype(bool)
+    return pd.Series(False, index=df.index)
+
+
+def _caps_from_masks(starter_mask: np.ndarray, ramp_mask: np.ndarray) -> np.ndarray:
+    caps = np.where(
+        ramp_mask,
+        ROLE_MINUTES_CAPS["ramp"],
+        np.where(starter_mask, ROLE_MINUTES_CAPS["starter"], ROLE_MINUTES_CAPS["bench"]),
+    )
+    return caps.astype(float, copy=False)
 
 
 def _weights_from_width(width: np.ndarray) -> np.ndarray:
@@ -109,8 +126,9 @@ def reconcile_team_minutes(
         return np.array([])
 
     minutes = team_df[cfg.minutes_col].to_numpy(dtype=float)
-    starter_mask = team_df[cfg.starter_col].astype(bool).to_numpy()
-    caps = team_df.apply(_minutes_caps, axis=1).to_numpy(dtype=float)
+    starter_mask = _starter_series(team_df, cfg.starter_col).to_numpy(dtype=bool, copy=False)
+    ramp_mask = pd.to_numeric(team_df.get(cfg.ramp_col, 0), errors="coerce").fillna(0).astype(bool).to_numpy()
+    caps = _caps_from_masks(starter_mask, ramp_mask)
     blowout_index = team_df[cfg.blowout_index_col].iloc[0] if cfg.blowout_index_col in team_df else None
 
     if cfg.quantile_width_col in team_df:

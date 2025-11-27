@@ -111,10 +111,26 @@ PY
   --run-as-of-ts "${RUN_AS_OF_TS}" \
   --lock-buffer-minutes "${LOCK_BUFFER_MINUTES}"
 
-/home/daniel/.local/bin/uv run python -m projections.cli.score_minutes_v1 \
-  --date "${START_DATE}" \
-  --mode live \
-  --run-id "$(date -u -d "${RUN_AS_OF_TS}" +%Y%m%dT%H%M%SZ)" \
-  --bundle-dir "${LIVE_BUNDLE_DIR:-artifacts/minutes_v1/v1_full_calibration}" \
-  --reconcile-team-minutes "${RECONCILE_MODE}" \
+RUN_ID=$(date -u -d "${RUN_AS_OF_TS}" +%Y%m%dT%H%M%SZ)
+
+SCORE_ARGS=(
+  --date "${START_DATE}"
+  --mode live
+  --run-id "${RUN_ID}"
+  --reconcile-team-minutes "${RECONCILE_MODE}"
   --minutes-output "${MINUTES_OUTPUT_MODE}"
+)
+if [[ -n "${LIVE_BUNDLE_DIR:-}" ]]; then
+  SCORE_ARGS+=(--bundle-dir "${LIVE_BUNDLE_DIR}")
+fi
+
+/home/daniel/.local/bin/uv run python -m projections.cli.score_minutes_v1 "${SCORE_ARGS[@]}"
+
+echo "[live] scoring FPTS for ${START_DATE} using production bundle (minutes_run=${RUN_ID})."
+if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_fpts_v1 \
+  --date "${START_DATE}" \
+  --run-id "${RUN_ID}" \
+  --data-root "${DATA_ROOT}"
+then
+  echo "[live] warning: FPTS scoring failed; continuing without FPTS outputs." >&2
+fi

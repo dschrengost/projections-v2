@@ -159,7 +159,7 @@ For any promising bundle:
 
 1. **Shadow mode**
    - Wire a new bundle (e.g., `v2_minutes_...`) into a shadow scoring path:
-     - Run alongside `v1_full_calibration` and write outputs to a separate `prediction_logs_minutes_v1` path or additional columns.
+     - Run alongside `v1_full_calibration` and write outputs to a separate `prediction_logs_minutes/run=<minutes_run>` partition (legacy `prediction_logs_minutes_v1` remains a fallback) or additional columns.
    - Compare daily distributions, per-game team totals, and key players vs current live.
 
 2. **Promotion**

@@ -140,7 +140,18 @@ The `minutes_v1` bundle ships with a repeatable daily scoring CLI plus a lightwe
    derivation when `--mode live` is set. `latest_run.json` under each date records which run the
    dashboard should surface. The FastAPI minutes API automatically reads this pointer (unless you
    pass `?run_id=` explicitly) so `/api/minutes` and `/api/minutes/meta` always return the newest run
-   for the requested date—no manual file copying needed.
+   for the requested date—no manual file copying needed. When the new FPTS pipeline writes under
+   `data/gold/projections_fpts_v1`, those per-player totals are automatically joined onto the API
+   responses as `fpts_per_min_pred` and `proj_fpts` with metadata surfaced in `/api/minutes/meta`.
+   `/api/minutes` now includes:
+
+   - `fpts_per_min_pred` — nullable projected DK FPTS per minute.
+   - `proj_fpts` — nullable total projected DK FPTS per player.
+   - `fpts_meta` — run metadata (e.g., `run_id`, `scoring_system`) describing the bundle that produced the scores.
+
+   Set `PROJECTIONS_DATA_ROOT=/path/to/projections-data` so both the API and CLI resolve gold outputs from the right
+   tree. Override `MINUTES_FPTS_ROOT` if you store FPTS gold in a non-standard location; when unset it defaults to
+   `$PROJECTIONS_DATA_ROOT/gold/projections_fpts_v1`.
 
 2. **Develop locally** (FastAPI + Vite with hot reload):
    ```bash
@@ -164,6 +175,36 @@ Quick Start unit tests live under `tests/test_minutes_v1_*.py`; run them via:
 ```bash
 uv run pytest tests/test_minutes_v1_quickstart.py tests/test_minutes_v1_modeling.py tests/test_minutes_v1_monitoring.py -q
 ```
+
+### FPTS v1 quick reference
+
+- **Train a run** (fills `artifacts/fpts_lgbm/<run_id>`):
+
+  ```bash
+  PROJECTIONS_DATA_ROOT=/home/daniel/projections-data \
+  uv run python -m projections.models.fpts_lgbm \
+    --run-id fpts_lgbm_v1 \
+    --data-root /home/daniel/projections-data \
+    --artifact-root artifacts/fpts_lgbm \
+    --train-start 2022-10-01 --train-end 2024-02-28 \
+    --cal-start 2024-03-01 --cal-end 2024-06-30 \
+    --val-start 2024-07-01 --val-end 2024-12-31 \
+    --minutes-source predicted --scoring-system dk
+  ```
+
+- **Set production**: edit `config/fpts_current_run.json` with the promoted `run_id`, `artifact_root`, and `scoring_system`.
+
+- **Backfill gold outputs**:
+
+  ```bash
+  PROJECTIONS_DATA_ROOT=/home/daniel/projections-data \
+  uv run python -m projections.cli.backfill_fpts_v1 \
+    --start-date 2023-10-01 \
+    --end-date 2024-04-15 \
+    --minutes-run-id <minutes_run_id> \
+    --fpts-run-id fpts_lgbm_v1 \
+    --overwrite false
+  ```
 
 ### Real-Data Smoke Slice (Dec 2024)
 
@@ -265,6 +306,22 @@ uv run python -m projections.etl.odds \
 
 The ETL normalizes game IDs via `TeamResolver`, caps `as_of_ts` at `tip_ts`, and writes `data/bronze/odds_raw/season=YYYY/odds_<mon>.parquet` plus `data/silver/odds_snapshot/season=YYYY/month=MM/odds_snapshot.parquet`. Like the injury ETL, it falls back to the live NBA schedule API when your parquet slice is stale or missing.
 
+### Tracking Bronze Scraper
+
+Ingest stats.nba.com player tracking payloads (the `leaguedashptstats` endpoint) into bronze partitions for reporting and downstream silver jobs:
+
+```bash
+PROJECTIONS_DATA_ROOT=/home/daniel/projections-data \
+uv run python scripts/tracking/scrape_tracking_raw.py backfill \
+  --season 2024-25 \
+  --season-type "Regular Season" \
+  --start-date 2024-10-21 \
+  --end-date 2024-10-23 \
+  --pt-measure-type Possessions --pt-measure-type Passing
+```
+
+Each `(season, season_type, game_date, PtMeasureType)` tuple lands under `bronze/nba/tracking/season=YYYY-YY/season_type=Regular+Season/game_date=YYYY-MM-DD/pt_measure_type=<Type>/part-00000.parquet`. Re-run the CLI nightly with `run-day` to append the latest slate or point it at historical windows with `backfill`. The command handles retries, throttling, and idempotent writes so backfills can span entire seasons without manual cleanup.
+
 ### Standalone Daily Lineup Scraper
 
 Pull the NBA.com lineup feed for a single slate, persist the raw JSON, and build a normalized parquet in one shot:
@@ -331,6 +388,8 @@ For each month in the requested range, the command:
 
 1. Runs the `SmokeDatasetBuilder` (unless you pass `--skip-bronze`).
 2. Invokes `projections.pipelines.build_features_minutes_v1` to populate `data/gold/features_minutes_v1/season=YYYY/month=MM/` (unless you pass `--skip-gold`).
+
+> **Live vs. Gold:** the live minutes pipeline writes per-run snapshots to `data/live/features_minutes_v1/<YYYY-MM-DD>/run=<timestamp>/`, which power the dashboards and APIs (including rolling metrics like `min_last3`, `min_last5`, etc.). The gold partitions under `data/gold/features_minutes_v1/season=YYYY/month=MM/` are only refreshed through backfills/month builds. If gold lags behind, live predictions continue to use the freshest snapshots, but schedule a daily promotion if you rely on the gold tree for analytics or downstream jobs.
 
 > **Status (Nov 18, 2025):** Gold features are rebuilt and backfilled from the start of the 2022-23 season through the current date (2025-11-18) at `/home/daniel/projections-data/gold/features_minutes_v1/`.
 

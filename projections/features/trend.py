@@ -6,6 +6,10 @@ import numpy as np
 import pandas as pd
 
 
+def _team_player_groups(df: pd.DataFrame) -> pd.core.groupby.generic.DataFrameGroupBy:
+    return df.groupby(["player_id", "team_id", "season"], group_keys=False)
+
+
 def clip_minutes(series: pd.Series) -> pd.Series:
     """Clamp minute-based features to NBA-legal bounds."""
 
@@ -95,5 +99,33 @@ def attach_trend_features(df: pd.DataFrame) -> pd.DataFrame:
         (working["min_last1"] - mean10) / std10,
         0.0,
     )
+
+    team_groups = _team_player_groups(working)
+    rotation_std = team_groups["minutes"].apply(
+        lambda s: s.shift(1).rolling(window=5, min_periods=3).std(ddof=0)
+    )
+    working["rotation_minutes_std_5g"] = rotation_std.reindex(working.index).fillna(0.0)
+
+    starter_series = working.get("starter_flag")
+    if starter_series is None:
+        starter_series = pd.Series(False, index=working.index)
+    starter_series = starter_series.fillna(False).astype(int)
+    working["starter_flag"] = starter_series
+
+    def _role_change(window: pd.Series) -> pd.Series:
+        values = window.fillna(0).astype(int)
+        changed = values.ne(values.shift(1)).astype(float)
+        return changed.rolling(window=10, min_periods=2).mean().fillna(0.0)
+
+    role_change = team_groups["starter_flag"].apply(_role_change)
+    working["role_change_rate_10g"] = role_change.reindex(working.index).fillna(0.0)
+
+    if {"season", "game_date"}.issubset(working.columns):
+        game_dates = pd.to_datetime(working["game_date"]).dt.normalize()
+        season_start = game_dates.groupby(working["season"]).transform("min")
+        days_since = (game_dates - season_start).dt.days.clip(lower=0)
+        working["season_phase"] = (days_since / 180.0).clip(0.0, 1.0).fillna(0.0)
+    else:
+        working["season_phase"] = 0.0
 
     return working
