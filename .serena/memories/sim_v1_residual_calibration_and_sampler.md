@@ -1,0 +1,7 @@
+Implemented initial sim_v1 tooling.
+
+- Added `projections/sim_v1/residuals.py` with default residual buckets (starters: <16/16-24/24-32/32+, bench: <12/12-20/20-28/28+), bucket assignment helpers, and `fit_residual_model` that computes per-bucket std and global fallback (nu default 5). JSON serialization helpers included.
+- Added `projections/sim_v1/sampler.py` + package __init__ exporting a Student-t residual sampler with optional lognormal game-factor multiplicative noise. Provides `FptsResidualSampler.from_json_file` and `sample_worlds`, returning long-format worlds with dk_fpts_mean/world columns.
+- New CLI `scripts/sim_v1/calibrate_residuals.py`: loads gold/fpts_training_base over a date window, scores current fpts_v2 bundle, ensures minutes_pred_p50 via minutes_for_rates or minutes_actual fallback, fits residual model on train+cal splits, logs metrics, writes JSON to <data_root>/artifacts/sim_v1/fpts_residual_model.json (default). Uses season-from-date helper matching minutes code.
+- New CLI `scripts/sim_v1/run_sim_simple.py`: loads residual model + current fpts bundle, per-day loads fpts_training_base and minutes_for_rates, ensures minutes/is_starter, scores preds if missing, samples worlds (n_worlds configurable, optional game_factor_std), and writes to <data_root>/artifacts/sim_v1/worlds/season=YYYY/game_date=YYYY-MM-DD/worlds.parquet with per-game mean/std logging.
+- Ruff check passes for new files (`uv run ruff check projections/sim_v1 scripts/sim_v1`).

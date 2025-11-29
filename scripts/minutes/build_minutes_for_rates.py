@@ -1,23 +1,27 @@
 """
 Materialize minutes model predictions for rates training.
 
-Reads existing minutes projections (production bundle outputs) per game_date and writes a
-thin table keyed for rates joins:
+Reads existing minutes projections (production bundle outputs) **per game_date** from
+``gold/projections_minutes_v1/game_date=YYYY-MM-DD/minutes.parquet`` and writes a thin
+table keyed for rates joins:
 - season, game_id, game_date, team_id, player_id
 - minutes_pred_p10, minutes_pred_p50, minutes_pred_p90, minutes_pred_play_prob
-
-Source assumptions:
-- Uses gold/projections_minutes_v1/game_date=YYYY-MM-DD/minutes.parquet if present.
-  (These are production minutes_v1 projections with minutes_p10/p50/p90 and play_prob.)
 
 Output (default):
 - gold/minutes_for_rates/season=YYYY/game_date=YYYY-MM-DD/minutes_for_rates.parquet
 
+Behavior:
+- Loop every date in [start_date, end_date].
+- When the per-date projections parquet exists, select the minutes/play_prob columns and
+  write the matching ``minutes_for_rates`` partition.
+- When the projections parquet is missing, log a warning and continue (do not crash).
+- At the end, log how many dates were written vs. skipped due to missing projections.
+
 Example:
-    uv run python -m scripts.minutes.build_minutes_for_rates \
-        --start-date 2023-10-01 \
-        --end-date   2025-11-26 \
-        --data-root  /home/daniel/projections-data \
+    uv run python -m scripts.minutes.build_minutes_for_rates \\
+        --start-date 2023-10-01 \\
+        --end-date   2025-11-26 \\
+        --data-root  /home/daniel/projections-data \\
         --output-root /home/daniel/projections-data/gold/minutes_for_rates
 """
 
@@ -110,18 +114,30 @@ def main(
         f"[minutes_for_rates] scoring window {start.date()} to {end.date()} "
         f"from projections_minutes_v1 into {out_root}"
     )
-    frames = []
+    written_dates = 0
+    skipped_missing = 0
+    total_rows = 0
     for day in _iter_days(start, end):
         df = _load_minutes(root, day)
         if df is None:
+            typer.echo(
+                f"[minutes_for_rates] {day.date()}: missing gold/projections_minutes_v1 parquet; skipping.",
+                err=True,
+            )
+            skipped_missing += 1
             continue
-        frames.append(df)
-    if not frames:
+        _write_partition(df, out_root)
+        written_dates += 1
+        total_rows += len(df)
+    if written_dates == 0:
         typer.echo("[minutes_for_rates] no source minutes found; nothing written.")
         return
-    all_df = pd.concat(frames, ignore_index=True)
-    _write_partition(all_df, out_root)
-    typer.echo(f"[minutes_for_rates] wrote {len(all_df):,} rows into {out_root}")
+    typer.echo(
+        f"[minutes_for_rates] wrote {total_rows:,} rows across {written_dates} dates into {out_root}"
+    )
+    typer.echo(
+        f"[minutes_for_rates] summary written_dates={written_dates} skipped_missing_projections={skipped_missing}"
+    )
 
 
 if __name__ == "__main__":

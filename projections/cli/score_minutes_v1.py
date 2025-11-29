@@ -1,11 +1,14 @@
-"""Score the minutes_v1 LightGBM bundle for a daily slate."""
+"""Score the minutes_v1 LightGBM bundle for a daily slate.
+
+Outputs include minutes quantiles, play_prob, and now a canonical ``is_starter`` column derived from the feature slice.
+"""
 
 from __future__ import annotations
 
 import json
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Callable, Iterable, Literal, Optional, Set
 from functools import lru_cache
 
 import joblib
@@ -93,9 +96,9 @@ def _apply_scoring_overrides(
 
 
 def _season_from_date(day: date) -> int:
-    """Feature partitions are organized by calendar year (season=YYYY)."""
+    """Season is keyed by start year (Aug–Jul)."""
 
-    return day.year
+    return day.year if day.month >= 8 else day.year - 1
 
 
 def _iter_days(start: date, end: date) -> Iterable[date]:
@@ -508,6 +511,19 @@ def _score_rows(
                     )
     if "starter_flag" not in working.columns and "starter_flag_label" in working.columns:
         working["starter_flag"] = working["starter_flag_label"].astype(bool)
+
+    # Propagate a canonical is_starter flag into outputs.
+    if "starter_flag" in working.columns:
+        working["is_starter"] = pd.to_numeric(working["starter_flag"], errors="coerce").fillna(0).astype("int8")
+    elif {"is_confirmed_starter", "is_projected_starter"}.issubset(working.columns):
+        tmp = (
+            pd.to_numeric(working["is_confirmed_starter"], errors="coerce").fillna(0).astype(int)
+            | pd.to_numeric(working["is_projected_starter"], errors="coerce").fillna(0).astype(int)
+        )
+        working["is_starter"] = tmp.astype("int8")
+    else:
+        working["is_starter"] = 0
+        typer.echo("[minutes] warning: is_starter not found in features; defaulting to 0", err=True)
     return working
 
 
@@ -785,6 +801,159 @@ def _log_predictions(
         
         group.to_parquet(path, index=False)
         # typer.echo(f"[logging] Wrote prediction log to {path}")
+
+
+def score_minutes_range_to_parquet(
+    start_day: date,
+    end_day: date,
+    *,
+    features_root: Path = DEFAULT_FEATURES_ROOT,
+    features_path: Path | None = None,
+    bundle_dir: Path | None = None,
+    bundle_config: Path = DEFAULT_BUNDLE_CONFIG,
+    artifact_root: Path = DEFAULT_DAILY_ROOT,
+    injuries_root: Path = DEFAULT_INJURIES_ROOT,
+    schedule_root: Path = DEFAULT_SCHEDULE_ROOT,
+    limit_rows: int | None = None,
+    mode: Mode = "historical",
+    run_id: str | None = None,
+    live_features_root: Path = DEFAULT_LIVE_FEATURES_ROOT,
+    minutes_output: MinutesOutputMode = "both",
+    starter_priors_path: Path = DEFAULT_STARTER_PRIORS,
+    starter_history_path: Path = DEFAULT_STARTER_HISTORY,
+    promotion_config: Path = DEFAULT_PROMOTION_CONFIG,
+    promotion_prior_enabled: bool = True,
+    promotion_prior_debug: bool = False,
+    reconcile_team_minutes: ReconcileMode = "none",
+    reconcile_config: Path = DEFAULT_RECONCILE_CONFIG,
+    reconcile_debug: bool = False,
+    prediction_logs_root: Path = DEFAULT_PREDICTION_LOGS_ROOT,
+    disable_play_prob: bool = False,
+    target_dates: Optional[Set[date]] = None,
+    debug_describe: bool | None = None,
+) -> pd.DataFrame:
+    """Programmatic wrapper around the scoring flow used by the CLI.
+
+    This mirrors the historical-mode path in ``main``: load bundle, load features,
+    prepare + score rows, annotate metadata, optionally reconcile, then write daily
+    outputs to ``artifact_root``. Returns the full scored dataframe (all days in
+    the requested range).
+    """
+
+    normalized_mode: Mode = mode.lower()  # type: ignore[assignment]
+    if normalized_mode != "historical":
+        raise ValueError("score_minutes_range_to_parquet currently supports historical mode only.")
+    if run_id is not None:
+        raise typer.BadParameter("--run-id is only valid when --mode live.", param_name="run_id")
+
+    promotion_ctx = _load_promotion_context(
+        enabled=promotion_prior_enabled,
+        priors_path=starter_priors_path,
+        history_path=starter_history_path,
+        config_path=promotion_config,
+    )
+
+    bundle, resolved_bundle_dir, model_meta, model_run_id = _resolve_bundle_artifacts(
+        bundle_dir, bundle_config
+    )
+
+    try:
+        raw_features = _load_feature_slice(
+            start_day,
+            end_day,
+            features_root=features_root,
+            features_path=features_path,
+            run_id=None,
+        )
+    except FileNotFoundError as exc:
+        typer.echo(f"[minutes] ERROR: {exc}", err=True)
+        raise
+    if raw_features.empty:
+        raise ValueError("No feature rows available for requested date range.")
+
+    prepared = _prepare_features(raw_features, mode=normalized_mode)
+    if prepared.empty:
+        raise ValueError("No eligible rows found for requested date range.")
+    if limit_rows is not None:
+        prepared = prepared.head(limit_rows).copy()
+    scored = _score_rows(
+        prepared,
+        bundle,
+        disable_play_prob=disable_play_prob,
+        promotion_ctx=promotion_ctx,
+        promotion_debug=promotion_prior_debug,
+    )
+    scored["game_date"] = pd.to_datetime(scored["game_date"]).dt.date
+
+    should_debug = debug_describe if debug_describe is not None else (start_day == end_day)
+    if should_debug and "minutes_p50" in scored.columns:
+        for day in sorted(set(scored["game_date"].tolist())):
+            day_slice = scored.loc[scored["game_date"] == day]
+            typer.echo(f"[minutes_debug] {day} raw minutes_p50 describe():")
+            typer.echo(day_slice["minutes_p50"].describe().to_string())
+
+    seasons: set[int] = set()
+    if "season" in scored.columns:
+        for value in scored["season"].dropna().unique().tolist():
+            text = str(value)
+            try:
+                seasons.add(int(text))
+                continue
+            except ValueError:
+                pass
+            if "-" in text:
+                prefix = text.split("-", 1)[0]
+                try:
+                    seasons.add(int(prefix))
+                except ValueError:
+                    continue
+    if not seasons:
+        seasons = {_season_from_date(start_day)}
+    player_lookup = _player_name_map(injuries_root, seasons)
+    team_meta = _team_metadata(schedule_root, seasons)
+    if player_lookup or not team_meta.empty:
+        scored = _annotate_metadata(scored, player_lookup=player_lookup, team_meta=team_meta)
+
+    normalized_reconcile_mode = reconcile_team_minutes.lower()
+    if normalized_reconcile_mode != "none":
+        if normalized_reconcile_mode == "p50_and_tails":
+            typer.echo(
+                "[l2-reconcile] Tail reconciliation is not yet implemented; clamping only.",
+                err=True,
+            )
+        reconcile_cfg = load_reconcile_config(reconcile_config)
+        debug_hook = _make_reconcile_debugger(reconcile_debug)
+        scored = reconcile_minutes_p50_all(scored, reconcile_cfg, debug_hook=debug_hook)
+        if "play_prob" not in scored.columns:
+            raise ValueError("play_prob column missing after reconciliation.")
+        scored = apply_play_probability_mixture(
+            scored,
+            scored["play_prob"].to_numpy(dtype=float),
+        )
+
+    if should_debug and "minutes_p50" in scored.columns:
+        for day in sorted(set(scored["game_date"].tolist())):
+            day_slice = scored.loc[scored["game_date"] == day]
+            typer.echo(f"[minutes_debug] {day} reconciled minutes_p50 describe():")
+            typer.echo(day_slice["minutes_p50"].describe().to_string())
+
+    for day in _iter_days(start_day, end_day):
+        if target_dates is not None and day not in target_dates:
+            continue
+        day_df = scored.loc[scored["game_date"] == day].copy()
+        _write_daily_outputs(
+            day,
+            day_df,
+            out_root=artifact_root,
+            model_run_id=model_run_id,
+            bundle_dir=resolved_bundle_dir,
+            model_meta=model_meta,
+            run_id=None,
+            run_as_of_ts=None,
+            minutes_output=minutes_output,
+        )
+
+    return scored
 
 
 @app.command()
@@ -1131,6 +1300,7 @@ def main(
             "opponent_team_name",
             "opponent_team_tricode",
             "starter_flag",
+            "is_starter",
             "is_projected_starter",
             "is_confirmed_starter",
             "pos_bucket",

@@ -1,0 +1,8 @@
+Stage 1 rates_v1 wiring and training (2025-11-27)
+- Added stage-aware feature sets in scripts/rates/train_rates_v1.py: Stage 0 uses minutes_actual; Stage 1 uses minutes_pred_p50/minutes_pred_spread/minutes_pred_play_prob with fallback to minutes_actual when predictions missing. run_tag defaults to rates_v1_stage1 and sets run_id prefix.
+- scripts/rates/compare_baselines.py now computes minutes_pred_spread and applies the same fallback before scoring bundles that require predicted minutes.
+- Built minutes_for_rates across 2023-10-01..2025-11-26, but production minutes data currently only exists for 2025-11-20 (115 rows) under gold/minutes_for_rates/season=2025/game_date=2025-11-20/minutes_for_rates.parquet (p50 mean ~16.7, play_prob mean ~0.81).
+- Rebuilt gold/rates_training_base for 2023-10-01..2025-11-26 (12,101 rows). minutes_pred_* mostly NaN except 2025-11-20; Stage 1 training uses fallback to minutes_actual for 12,016 rows.
+- Trained Stage 1 run: rates_v1_stage1_20251127_175935 (train=3,206, cal=2,430, val=6,465). Val metrics roughly match Stage 0; example MAE deltas vs Stage 0: fga2 +0.00010, fga3 +0.00051, ast -0.00022, oreb -0.00012, blk -0.00033.
+- compare_baselines run for Stage 1 saved at artifacts/rates_v1/runs/rates_v1_stage1_20251127_175935/baseline_compare.json. GBM still beats baseline_posrole on all targets; e.g., fga2 MAE 0.0874 vs 0.1057 baseline_posrole, ast 0.0623 vs 0.0705, dreb 0.0695 vs 0.0737.
+- Stage 0 run remains at rates_v1_stage0_20251127_172108 untouched.

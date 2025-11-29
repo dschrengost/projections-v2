@@ -1,6 +1,3 @@
 {
-  "run_id": "fpts_lgbm_v2",
-  "artifact_root": "artifacts/fpts_lgbm",
-  "scoring_system": "dk",
-  "minutes_source": "actual"
+  "run_id": "fpts_v2_stage3_context_20251129_041316"
 }

@@ -27,6 +27,7 @@ import pandas as pd
 import typer
 
 from projections.paths import data_path
+from projections.rates_v1.current import get_rates_current_run_id
 from projections.rates_v1.loader import load_rates_bundle
 from projections.rates_v1.score import predict_rates
 
@@ -102,8 +103,36 @@ def _impute_features(train_df: pd.DataFrame, *others: pd.DataFrame) -> tuple[pd.
         for col in fill_zero_cols:
             if col in out.columns:
                 out[col] = out[col].fillna(0)
+        if "track_role_cluster" in out.columns:
+            out["track_role_cluster"] = out["track_role_cluster"].fillna(-1).astype(int)
+        if "track_role_is_low_minutes" in out.columns:
+            out["track_role_is_low_minutes"] = out["track_role_is_low_minutes"].fillna(True).astype(int)
         return out
     return tuple([_prep(train_df)] + [_prep(df) for df in others])
+
+
+def _prepare_minutes_preds(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
+    out = df.copy()
+    if "minutes_pred_spread" in feature_cols and "minutes_pred_spread" not in out.columns:
+        out["minutes_pred_spread"] = np.nan
+    if "minutes_pred_spread" in feature_cols and {"minutes_pred_p90", "minutes_pred_p10"}.issubset(out.columns):
+        out["minutes_pred_spread"] = out["minutes_pred_p90"] - out["minutes_pred_p10"]
+    if {"minutes_pred_p50", "minutes_pred_spread", "minutes_pred_play_prob"}.issubset(out.columns) and "minutes_pred_spread" in feature_cols:
+        missing = out[["minutes_pred_p50", "minutes_pred_spread", "minutes_pred_play_prob"]].isna().any(axis=1)
+        if missing.any():
+            fallback_count = int(missing.sum())
+            typer.echo(
+                f"[compare] minutes_pred_* missing for {fallback_count:,} rows; "
+                "falling back to minutes_actual (spread=0, play_prob=1)."
+            )
+            out.loc[missing, "minutes_pred_p50"] = out.loc[missing, "minutes_actual"]
+            out.loc[missing, "minutes_pred_spread"] = 0.0
+            out.loc[missing, "minutes_pred_play_prob"] = 1.0
+            if "minutes_pred_p10" in out.columns:
+                out.loc[missing, "minutes_pred_p10"] = out.loc[missing, "minutes_actual"]
+            if "minutes_pred_p90" in out.columns:
+                out.loc[missing, "minutes_pred_p90"] = out.loc[missing, "minutes_actual"]
+    return out
 
 
 def _baseline_season(val_df: pd.DataFrame) -> pd.DataFrame:
@@ -176,7 +205,12 @@ def _metrics(y_true: pd.Series, y_pred: pd.Series) -> dict:
 @app.command()
 def main(
     data_root: Optional[Path] = typer.Option(None, help="Data root (defaults PROJECTIONS_DATA_ROOT or ./data)"),
-    rates_run_id: str = typer.Option("rates_v1_stage0_20251127_172108", help="Trained rates_v1 run id"),
+    rates_run_id: Optional[str] = typer.Option(None, help="Trained rates_v1 run id"),
+    use_current_run: bool = typer.Option(
+        False,
+        "--use-current-run",
+        help="Load run_id from config/rates_current_run.json (overridden by --rates-run-id if provided).",
+    ),
     start_date: str = typer.Option(..., help="Start date (inclusive) for loading base"),
     end_date: str = typer.Option(..., help="End date (inclusive) for loading base"),
     train_end_date: str = typer.Option(..., help="Cutoff: game_date < train_end_date goes to train"),
@@ -196,7 +230,16 @@ def main(
 
     train_df, cal_df, val_df = _impute_features(train_df, cal_df, val_df)
 
+    if rates_run_id is None:
+        if not use_current_run:
+            raise typer.BadParameter("Must supply --rates-run-id or use --use-current-run.")
+        rates_run_id = get_rates_current_run_id()
+        typer.echo(f"[compare] using current rates run from config: {rates_run_id}")
+
     bundle = load_rates_bundle(rates_run_id, base_artifacts_root=root)
+    train_df = _prepare_minutes_preds(train_df, bundle.feature_cols)
+    cal_df = _prepare_minutes_preds(cal_df, bundle.feature_cols)
+    val_df = _prepare_minutes_preds(val_df, bundle.feature_cols)
     val_features = val_df[bundle.feature_cols]
     df_gbm = predict_rates(val_features, bundle)
 

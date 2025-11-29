@@ -1,5 +1,5 @@
 """
-Train rates_v1 stage-0 LightGBM models (one regressor per per-minute target).
+Train rates_v1 LightGBM models (one regressor per per-minute target).
 
 Inputs:
 - gold/rates_training_base/season=YYYY/game_date=YYYY-MM-DD/rates_training_base.parquet
@@ -9,6 +9,7 @@ Outputs (per run_id):
 - artifacts/rates_v1/runs/<run_id>/feature_cols.json
 - artifacts/rates_v1/runs/<run_id>/meta.json
 - artifacts/rates_v1/runs/<run_id>/metrics.json
+- config/rates_current_run.json tracks the provisional production run_id; load via projections.rates_v1.current.
 
 Usage example (multi-season window):
     uv run python -m scripts.rates.train_rates_v1 \
@@ -16,11 +17,13 @@ Usage example (multi-season window):
         --end-date       2025-11-26 \
         --train-end-date 2024-06-30 \
         --cal-end-date   2025-03-01 \
-        --data-root      /home/daniel/projections-data
+        --data-root      /home/daniel/projections-data \
+        --run-tag        rates_v1_stage1
 
-Notes:
-- Uses minutes_actual as a feature (leaky for live). TODO: replace with historical minutes
-  predictions (minutes_expected_p50, minutes_spread, play_prob) in future runs.
+Stage definitions:
+- Stage 0 (leaky upper bound): uses minutes_actual as a feature.
+- Stage 1 (non-leaky): uses minutes_pred_p50/minutes_pred_spread/minutes_pred_play_prob from minutes_for_rates.
+- Stage 2 (tracking): Stage 1 plus tracking rates and role cluster features from tracking_roles.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ import pandas as pd
 import typer
 
 from projections.paths import data_path
+from projections.rates_v1.features import get_rates_feature_sets
 
 app = typer.Typer(add_completion=False)
 
@@ -51,30 +55,15 @@ TARGETS = [
     "blk_per_min",
 ]
 
-FEATURE_COLS = [
-    "minutes_actual",
-    "is_starter",
-    "position_flags_PG",
-    "position_flags_SG",
-    "position_flags_SF",
-    "position_flags_PF",
-    "position_flags_C",
-    "season_fga_per_min",
-    "season_3pa_per_min",
-    "season_fta_per_min",
-    "season_ast_per_min",
-    "season_tov_per_min",
-    "season_reb_per_min",
-    "season_stl_per_min",
-    "season_blk_per_min",
-    "home_flag",
-    "days_rest",
-    "spread_close",
-    "total_close",
-    "team_itt",
-    "opp_itt",
-    "has_odds",
-]
+_FEATURE_SETS = get_rates_feature_sets()
+STAGE0_FEATURES = _FEATURE_SETS["stage0"]
+STAGE1_FEATURES = _FEATURE_SETS["stage1"]
+TRACKING_FEATURES = [c for c in _FEATURE_SETS["stage2_tracking"] if c not in STAGE1_FEATURES]
+FEATURES_STAGE0 = STAGE0_FEATURES
+FEATURES_STAGE1 = STAGE1_FEATURES
+FEATURES_STAGE2_TRACKING = _FEATURE_SETS["stage2_tracking"]
+CONTEXT_FEATURES = [c for c in _FEATURE_SETS["stage3_context"] if c not in FEATURES_STAGE2_TRACKING]
+FEATURES_STAGE3_CONTEXT = _FEATURE_SETS["stage3_context"]
 
 BASE_PARAMS: dict[str, object] = {
     "objective": "regression",
@@ -122,11 +111,16 @@ def _load_training_base(root: Path, start: pd.Timestamp | None, end: pd.Timestam
     return df
 
 
-def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
+def _prepare_features(
+    df: pd.DataFrame,
+    *,
+    use_predicted_minutes: bool,
+    fallback_minutes_with_actual: bool,
+    use_tracking_features: bool,
+) -> pd.DataFrame:
     for col in ("is_starter", "home_flag"):
         if col in df.columns:
             df[col] = df[col].fillna(0).astype(int)
-    odds_cols = ["spread_close", "total_close", "team_itt", "opp_itt"]
     if "has_odds" not in df.columns:
         raise KeyError("has_odds missing from rates_training_base; rebuild base to include it.")
     # Fill season aggregates and rest with zeros when absent (common for early dates)
@@ -144,6 +138,49 @@ def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     for col in fill_zero_cols:
         if col in df.columns:
             df[col] = df[col].fillna(0.0)
+
+        if use_predicted_minutes:
+            if "minutes_pred_spread" not in df.columns:
+                df["minutes_pred_spread"] = np.nan
+            if "minutes_pred_p90" in df.columns and "minutes_pred_p10" in df.columns:
+                df["minutes_pred_spread"] = df["minutes_pred_p90"] - df["minutes_pred_p10"]
+        if fallback_minutes_with_actual:
+            pred_cols = ["minutes_pred_p50", "minutes_pred_spread", "minutes_pred_play_prob"]
+            missing_mask = df[pred_cols].isna().any(axis=1)
+            if missing_mask.any():
+                fallback_count = int(missing_mask.sum())
+                typer.echo(
+                    f"[train] minutes_pred_* missing for {fallback_count:,} rows; "
+                    "falling back to minutes_actual (spread=0, play_prob=1)."
+                )
+                df.loc[missing_mask, "minutes_pred_p50"] = df.loc[missing_mask, "minutes_actual"]
+                df.loc[missing_mask, "minutes_pred_spread"] = 0.0
+                df.loc[missing_mask, "minutes_pred_play_prob"] = 1.0
+                if "minutes_pred_p10" in df.columns:
+                    df.loc[missing_mask, "minutes_pred_p10"] = df.loc[missing_mask, "minutes_actual"]
+                if "minutes_pred_p90" in df.columns:
+                    df.loc[missing_mask, "minutes_pred_p90"] = df.loc[missing_mask, "minutes_actual"]
+    if use_tracking_features:
+        tracking_cols = [
+            "track_touches_per_min_szn",
+            "track_sec_per_touch_szn",
+            "track_pot_ast_per_min_szn",
+            "track_drives_per_min_szn",
+        ]
+        for col in tracking_cols:
+            if col not in df.columns:
+                df[col] = np.nan
+            mean_val = df[col].mean(skipna=True)
+            fill_val = 0.0 if pd.isna(mean_val) else mean_val
+            df[col] = df[col].fillna(fill_val)
+        if "track_role_cluster" in df.columns:
+            df["track_role_cluster"] = df["track_role_cluster"].fillna(-1).astype(int)
+        else:
+            df["track_role_cluster"] = -1
+        if "track_role_is_low_minutes" in df.columns:
+            df["track_role_is_low_minutes"] = df["track_role_is_low_minutes"].fillna(True).astype(int)
+        else:
+            df["track_role_is_low_minutes"] = 1
     return df
 
 
@@ -236,26 +273,57 @@ def main(
     cal_end_date: str = typer.Option("2025-03-01", help="Cutoff: train_end_date <= date < cal_end_date goes to cal; rest to val."),
     data_root: Optional[Path] = typer.Option(None, help="Root containing gold/rates_training_base."),
     output_root: Optional[Path] = typer.Option(None, help="Base artifacts root (defaults to data_root/artifacts/rates_v1/runs)."),
-    run_id: Optional[str] = typer.Option(None, help="Override run id; defaults to rates_v1_stage0_<timestamp>."),
+    run_id: Optional[str] = typer.Option(None, help="Override run id; defaults to <run_tag>_<timestamp>."),
+    run_tag: str = typer.Option(
+        "rates_v1_stage1",
+        help="Run tag determines feature set and default run_id prefix (use stage0 for legacy minutes_actual).",
+    ),
+    feature_set: str = typer.Option(
+        "stage1",
+        help="Feature set to use: stage0, stage1 (minutes_pred), stage2_tracking (minutes_pred + tracking roles), or stage3_context (tracking + pace/injury context).",
+        case_sensitive=False,
+    ),
 ) -> None:
     root = data_root or data_path()
     start = pd.Timestamp(start_date).normalize() if start_date else None
     end = pd.Timestamp(end_date).normalize() if end_date else None
     train_cutoff = pd.Timestamp(train_end_date).normalize()
     cal_cutoff = pd.Timestamp(cal_end_date).normalize()
-    default_run_id = f"rates_v1_stage0_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    prefix = run_tag if run_tag.startswith("rates_v1_") else f"rates_v1_{run_tag}"
+    default_run_id = f"{prefix}_{timestamp}"
     resolved_run_id = run_id or default_run_id
     base_output = output_root or (root / "artifacts" / "rates_v1" / "runs")
     run_dir = base_output / resolved_run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    feature_set_key = feature_set.lower()
+    feature_map = {
+        "stage0": FEATURES_STAGE0,
+        "stage1": FEATURES_STAGE1,
+        "stage2_tracking": FEATURES_STAGE2_TRACKING,
+        "stage3_context": FEATURES_STAGE3_CONTEXT,
+    }
+    if feature_set_key not in feature_map:
+        raise typer.BadParameter(f"feature_set must be one of {list(feature_map.keys())}")
+    feature_cols = feature_map[feature_set_key]
+    use_predicted_minutes = feature_set_key in {"stage1", "stage2_tracking", "stage3_context"}
+    fallback_minutes = use_predicted_minutes
+    use_tracking_features = feature_set_key in {"stage2_tracking", "stage3_context"}
+
     typer.echo(
         f"[train] run_id={resolved_run_id} data_root={root} "
-        f"date_window=({start_date} to {end_date}) train_end={train_cutoff.date()} cal_end={cal_cutoff.date()}"
+        f"date_window=({start_date} to {end_date}) train_end={train_cutoff.date()} cal_end={cal_cutoff.date()} "
+        f"features={feature_set_key}"
     )
 
     df = _load_training_base(root, start, end)
-    df = _prepare_features(df)
+    df = _prepare_features(
+        df,
+        use_predicted_minutes=use_predicted_minutes,
+        fallback_minutes_with_actual=fallback_minutes,
+        use_tracking_features=use_tracking_features,
+    )
 
     train_df, cal_df, val_df = _split_by_date(df, train_cutoff, cal_cutoff)
     if train_df.empty or cal_df.empty or val_df.empty:
@@ -263,17 +331,17 @@ def main(
             f"[train] warning: split sizes train={len(train_df)}, cal={len(cal_df)}, val={len(val_df)}"
         )
     train_df, cal_df, val_df = _impute_odds(train_df, cal_df, val_df)
-    train_df = _clean_frame(train_df, TARGETS, FEATURE_COLS)
-    cal_df = _clean_frame(cal_df, TARGETS, FEATURE_COLS)
-    val_df = _clean_frame(val_df, TARGETS, FEATURE_COLS)
+    train_df = _clean_frame(train_df, TARGETS, feature_cols)
+    cal_df = _clean_frame(cal_df, TARGETS, feature_cols)
+    val_df = _clean_frame(val_df, TARGETS, feature_cols)
 
     metrics: dict[str, dict] = {}
     model_paths: dict[str, str] = {}
     for target in TARGETS:
         typer.echo(f"[train] training target={target}")
-        booster, train_metrics = _train_one(target, train_df, cal_df, FEATURE_COLS)
-        cal_metrics = _eval_split(booster, cal_df, FEATURE_COLS, target)
-        val_metrics = _eval_split(booster, val_df, FEATURE_COLS, target)
+        booster, train_metrics = _train_one(target, train_df, cal_df, feature_cols)
+        cal_metrics = _eval_split(booster, cal_df, feature_cols, target)
+        val_metrics = _eval_split(booster, val_df, feature_cols, target)
         metrics[target] = {
             **train_metrics,
             **{f"cal_{k}": v for k, v in cal_metrics.items()},
@@ -283,11 +351,13 @@ def main(
         booster.save_model(str(model_path))
         model_paths[target] = str(model_path)
 
-    _write_json(run_dir / "feature_cols.json", {"feature_cols": FEATURE_COLS})
+    _write_json(run_dir / "feature_cols.json", {"feature_cols": feature_cols})
     meta = {
         "run_id": resolved_run_id,
+        "run_tag": run_tag,
+        "feature_set": feature_set_key,
         "targets": TARGETS,
-        "feature_cols": FEATURE_COLS,
+        "feature_cols": feature_cols,
         "params": BASE_PARAMS,
         "train_rows": len(train_df),
         "cal_rows": len(cal_df),
@@ -299,7 +369,9 @@ def main(
             "cal_end": cal_end_date,
         },
         "notes": [
-            "Stage 0 uses minutes_actual (leaky); replace with minutes model predictions in future runs."
+            "Stage 0 uses minutes_actual (leaky upper bound).",
+            "Stage 1 uses minutes_pred_* from minutes_for_rates (non-leaky); missing preds fall back to minutes_actual.",
+            "Stage 2 adds tracking-based rates and role cluster features on top of Stage 1.",
         ],
         "models": model_paths,
     }

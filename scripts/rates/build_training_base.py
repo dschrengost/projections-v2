@@ -32,6 +32,14 @@ Usage examples:
         --end-date   2025-11-26 \
         --data-root  /home/daniel/projections-data \
         --output-root /home/daniel/projections-data/gold/rates_training_base
+
+- Build while dropping feature-desert dates (from find_feature_desert_dates):
+    uv run python -m scripts.rates.build_training_base \
+        --start-date 2023-10-01 \
+        --end-date   2025-11-26 \
+        --data-root  /home/daniel/projections-data \
+        --output-root /home/daniel/projections-data/gold/rates_training_base \
+        --desert-csv /home/daniel/projections-data/artifacts/minutes_v1/feature_deserts.csv
 """
 
 from __future__ import annotations
@@ -158,6 +166,7 @@ def load_boxscores(data_root: Path, start: pd.Timestamp, end: pd.Timestamp) -> p
                 for player in team_payload.get("players", []):
                     stats = player.get("statistics") or {}
                     minutes = _parse_minutes_iso(stats.get("minutes"))
+                    points = float(stats.get("points") or 0.0)
                     fga = float(stats.get("fieldGoalsAttempted") or 0.0)
                     fta = float(stats.get("freeThrowsAttempted") or 0.0)
                     three_pa = float(stats.get("threePointersAttempted") or 0.0)
@@ -180,6 +189,7 @@ def load_boxscores(data_root: Path, start: pd.Timestamp, end: pd.Timestamp) -> p
                             "tip_ts": tip_ts,
                             "season": season,
                             "minutes_played": minutes,
+                            "points": points,
                             "fga": fga,
                             "three_pa": three_pa,
                             "fta": fta,
@@ -281,6 +291,33 @@ def load_minutes_predictions(data_root: Path, start: pd.Timestamp, end: pd.Times
     return df
 
 
+def load_tracking_roles(data_root: Path, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """
+    Optional tracking role features built from player tracking data.
+    Expected columns: season, game_date, game_id, team_id, player_id, track_* features.
+    """
+
+    root = data_root / "gold" / "tracking_roles"
+    if not root.exists():
+        return pd.DataFrame()
+    frames: list[pd.DataFrame] = []
+    for season_dir in root.glob("season=*"):
+        for day_dir in season_dir.glob("game_date=*"):
+            try:
+                day = pd.Timestamp(day_dir.name.split("=", 1)[1]).normalize()
+            except ValueError:
+                continue
+            if start <= day <= end:
+                path = day_dir / "tracking_roles.parquet"
+                if path.exists():
+                    frames.append(pd.read_parquet(path))
+    if not frames:
+        return pd.DataFrame()
+    df = pd.concat(frames, ignore_index=True)
+    df["game_date"] = pd.to_datetime(df["game_date"]).dt.normalize()
+    return df
+
+
 def _seasonal_cumulative_avg(
     values: pd.Series, weights: pd.Series, player_ids: pd.Series, seasons: pd.Series, *, min_weight: float
 ) -> pd.Series:
@@ -296,13 +333,211 @@ def _seasonal_cumulative_avg(
     return avg.where(cum_weights >= min_weight)
 
 
+def _prepare_roster_latest(roster: pd.DataFrame) -> pd.DataFrame:
+    roster_cols = [
+        "game_id",
+        "team_id",
+        "player_id",
+        "starter_flag",
+        "is_confirmed_starter",
+        "is_projected_starter",
+        "listed_pos",
+        "as_of_ts",
+        "lineup_role",
+        "game_date",
+    ]
+    roster_cols = [c for c in roster_cols if c in roster.columns]
+    if not roster_cols:
+        return pd.DataFrame(columns=["game_id", "team_id", "player_id"])
+    roster_sub = roster[roster_cols].copy()
+    if "as_of_ts" in roster_sub.columns:
+        roster_sub["as_of_ts"] = pd.to_datetime(roster_sub["as_of_ts"], errors="coerce", utc=True)
+        roster_sub.sort_values("as_of_ts", inplace=True)
+    return roster_sub.drop_duplicates(subset=["game_id", "team_id", "player_id"], keep="last")
+
+
+def _player_history_totals(stats: pd.DataFrame, labels: pd.DataFrame) -> pd.DataFrame:
+    """Season-to-date cumulative totals per player (excluding current game)."""
+
+    label_minutes = labels[["game_id", "player_id", "minutes_actual"]] if "minutes_actual" in labels.columns else pd.DataFrame()
+    hist = stats.merge(label_minutes, on=["game_id", "player_id"], how="left", suffixes=("", "_label"))
+    hist["minutes_hist"] = hist["minutes_actual"].fillna(hist["minutes_played"]).astype(float)
+    hist.sort_values(["season", "player_id", "tip_ts"], inplace=True)
+
+    hist["hist_minutes_szn"] = hist.groupby(["season", "player_id"])["minutes_hist"].cumsum().shift(1)
+    hist["hist_fga_szn"] = hist.groupby(["season", "player_id"])["fga"].cumsum().shift(1)
+    hist["hist_3pa_szn"] = hist.groupby(["season", "player_id"])["three_pa"].cumsum().shift(1)
+    hist["hist_fta_szn"] = hist.groupby(["season", "player_id"])["fta"].cumsum().shift(1)
+    hist["hist_ast_szn"] = hist.groupby(["season", "player_id"])["assists"].cumsum().shift(1)
+    hist_cols = ["hist_minutes_szn", "hist_fga_szn", "hist_3pa_szn", "hist_fta_szn", "hist_ast_szn"]
+    hist[hist_cols] = hist[hist_cols].fillna(0.0)
+    return hist[
+        [
+            "season",
+            "game_id",
+            "team_id",
+            "player_id",
+            "game_date",
+            "tip_ts",
+            "hist_minutes_szn",
+            "hist_fga_szn",
+            "hist_3pa_szn",
+            "hist_fta_szn",
+            "hist_ast_szn",
+        ]
+    ]
+
+
+def _compute_vacated_team_features(
+    stats: pd.DataFrame, labels: pd.DataFrame, roster_sub: pd.DataFrame, injuries: pd.DataFrame
+) -> pd.DataFrame:
+    """Aggregate season-to-date totals for players flagged OUT-like for each team/game."""
+
+    if injuries.empty or stats.empty:
+        return pd.DataFrame()
+
+    tips = (
+        stats.drop_duplicates(subset=["game_id"])[["game_id", "tip_ts", "season", "game_date"]]
+        .dropna(subset=["tip_ts"])
+        .copy()
+    )
+    injuries_norm = injuries.copy()
+    injuries_norm["as_of_ts"] = pd.to_datetime(injuries_norm["as_of_ts"], errors="coerce", utc=True)
+    injuries_norm["game_id"] = pd.to_numeric(injuries_norm["game_id"], errors="coerce").astype("Int64")
+    injuries_norm["player_id"] = pd.to_numeric(injuries_norm["player_id"], errors="coerce").astype("Int64")
+    if "team_id" in injuries_norm.columns:
+        injuries_norm["team_id"] = pd.to_numeric(injuries_norm["team_id"], errors="coerce").astype("Int64")
+    injuries_norm = injuries_norm.dropna(subset=["game_id", "player_id", "as_of_ts"])
+    injuries_norm["game_id"] = injuries_norm["game_id"].astype(int)
+    injuries_norm["player_id"] = injuries_norm["player_id"].astype(int)
+    injuries_norm = injuries_norm.merge(tips, on="game_id", how="inner")
+    injuries_norm = injuries_norm[injuries_norm["as_of_ts"] <= injuries_norm["tip_ts"]]
+    if injuries_norm.empty:
+        return pd.DataFrame()
+
+    injuries_norm.sort_values(["game_id", "player_id", "as_of_ts"], inplace=True)
+    latest = injuries_norm.groupby(["game_id", "player_id"], as_index=False).tail(1)
+
+    # Attach team + position from roster (if not already present)
+    roster_map_cols = [c for c in ["game_id", "team_id", "player_id", "listed_pos"] if c in roster_sub.columns]
+    roster_map = roster_sub[roster_map_cols].drop_duplicates(subset=["game_id", "player_id"]) if roster_map_cols else pd.DataFrame()
+    if "team_id" not in latest.columns or latest["team_id"].isna().any():
+        latest = latest.merge(roster_map, on=["game_id", "player_id"], how="left", suffixes=("", "_roster"))
+        if "team_id" not in latest.columns and "team_id_roster" in latest.columns:
+            latest.rename(columns={"team_id_roster": "team_id"}, inplace=True)
+        elif "team_id_roster" in latest.columns:
+            latest["team_id"] = latest["team_id"].fillna(latest["team_id_roster"])
+        latest.drop(columns=[c for c in ["team_id_roster"] if c in latest.columns], inplace=True)
+    if "listed_pos" not in latest.columns and not roster_map.empty:
+        latest = latest.merge(roster_map[["game_id", "player_id", "listed_pos"]], on=["game_id", "player_id"], how="left")
+    latest = latest.dropna(subset=["team_id"])
+    if latest.empty:
+        return pd.DataFrame()
+    latest["team_id"] = latest["team_id"].astype(int)
+
+    latest["status_norm"] = latest["status"].astype(str).str.upper().str.strip()
+    out_like_values = {"OUT", "DOUBTFUL", "QUESTIONABLE", "INACTIVE"}
+    latest["is_out_like"] = latest["status_norm"].isin(out_like_values)
+    latest = latest[latest["is_out_like"]]
+    if latest.empty:
+        return pd.DataFrame()
+
+    player_hist = _player_history_totals(stats, labels)
+    hist_cols = [
+        "hist_minutes_szn",
+        "hist_fga_szn",
+        "hist_3pa_szn",
+        "hist_fta_szn",
+        "hist_ast_szn",
+    ]
+    player_hist = player_hist.sort_values(["tip_ts", "season", "player_id"]).reset_index(drop=True)
+    latest = latest.sort_values(["tip_ts", "season", "player_id"]).reset_index(drop=True)
+    latest = pd.merge_asof(
+        latest,
+        player_hist[["season", "player_id", "tip_ts"] + hist_cols],
+        by=["season", "player_id"],
+        left_on="tip_ts",
+        right_on="tip_ts",
+        direction="backward",
+        allow_exact_matches=True,
+    )
+    for col in hist_cols:
+        latest[col] = latest[col].fillna(0.0)
+
+    if "listed_pos" in latest.columns:
+        latest["pos_bucket"] = latest["listed_pos"].fillna("UNK").apply(canonical_pos_bucket)
+    else:
+        latest["pos_bucket"] = "UNK"
+    latest["pos_group"] = latest["pos_bucket"].map({"G": "G", "W": "W", "BIG": "B"}).fillna("UNK")
+
+    group_cols = ["season", "game_id", "team_id"]
+    grouped = latest.groupby(group_cols).agg(
+        vac_min_szn=("hist_minutes_szn", "sum"),
+        vac_fga_szn=("hist_fga_szn", "sum"),
+        vac_ast_szn=("hist_ast_szn", "sum"),
+    )
+    grouped = grouped.reset_index()
+
+    for bucket, col_name in [("G", "vac_min_guard_szn"), ("W", "vac_min_wing_szn"), ("B", "vac_min_big_szn")]:
+        pos_agg = (
+            latest[latest["pos_group"] == bucket]
+            .groupby(group_cols)["hist_minutes_szn"]
+            .sum()
+            .reset_index(name=col_name)
+        )
+        grouped = grouped.merge(pos_agg, on=group_cols, how="left")
+
+    for col in ["vac_min_szn", "vac_fga_szn", "vac_ast_szn", "vac_min_guard_szn", "vac_min_wing_szn", "vac_min_big_szn"]:
+        if col not in grouped.columns:
+            grouped[col] = 0.0
+        grouped[col] = grouped[col].fillna(0.0)
+
+    return grouped
+
+
+def _compute_team_context(stats: pd.DataFrame) -> pd.DataFrame:
+    """Season-to-date pace/off/def context per team/game (excluding current game)."""
+
+    if stats.empty:
+        return pd.DataFrame()
+
+    agg_cols = ["season", "game_id", "team_id", "opponent_id", "game_date", "tip_ts"]
+    team_game = (
+        stats.groupby(agg_cols, as_index=False)
+        .agg(points=("points", "sum"), fga=("fga", "sum"), fta=("fta", "sum"), tov=("turnovers", "sum"))
+        .rename(columns={"points": "pts_for", "tov": "tov"})
+    )
+    team_game["poss"] = team_game["fga"] + 0.44 * team_game["fta"] + team_game["tov"]
+
+    opp_map = team_game[["season", "game_id", "team_id", "pts_for", "poss"]].rename(
+        columns={"team_id": "opponent_id", "pts_for": "pts_against", "poss": "opp_poss"}
+    )
+    team_game = team_game.merge(opp_map, on=["season", "game_id", "opponent_id"], how="left")
+
+    team_game.sort_values(["season", "team_id", "tip_ts"], inplace=True)
+    team_game["games_played_prior"] = team_game.groupby(["season", "team_id"]).cumcount()
+    team_game["cum_poss"] = team_game.groupby(["season", "team_id"])["poss"].cumsum().shift(1)
+    team_game["cum_pts_for"] = team_game.groupby(["season", "team_id"])["pts_for"].cumsum().shift(1)
+    team_game["cum_pts_against"] = team_game.groupby(["season", "team_id"])["pts_against"].cumsum().shift(1)
+
+    games = team_game["games_played_prior"].replace(0, np.nan)
+    poss_denom = team_game["cum_poss"].replace(0.0, np.nan)
+    team_game["team_pace_szn"] = team_game["cum_poss"] / games
+    team_game["team_off_rtg_szn"] = 100.0 * (team_game["cum_pts_for"] / poss_denom)
+    team_game["team_def_rtg_szn"] = 100.0 * (team_game["cum_pts_against"] / poss_denom)
+
+    return team_game[["season", "game_id", "team_id", "team_pace_szn", "team_off_rtg_szn", "team_def_rtg_szn"]]
+
+
 def build_features(
     labels: pd.DataFrame,
     stats: pd.DataFrame,
     roster: pd.DataFrame,
     odds: pd.DataFrame,
     minutes_preds: pd.DataFrame,
+    injuries: pd.DataFrame,
 ) -> pd.DataFrame:
+    roster_sub = _prepare_roster_latest(roster)
     label_cols = [c for c in ["game_id", "player_id", "team_id", "minutes_actual", "starter_flag", "listed_pos"] if c in labels.columns]
     df = stats.merge(
         labels[label_cols],
@@ -317,24 +552,6 @@ def build_features(
     # Missing roster rows default to bench (0).
     if "starter_flag" in df.columns:
         df.rename(columns={"starter_flag": "starter_flag_label"}, inplace=True)
-    if not roster.empty:
-        roster_cols = [
-            "game_id",
-            "team_id",
-            "player_id",
-            "starter_flag",
-            "is_confirmed_starter",
-            "is_projected_starter",
-            "listed_pos",
-            "as_of_ts",
-            "lineup_role",
-        ]
-        roster_cols = [c for c in roster_cols if c in roster.columns]
-        roster_sub = roster[roster_cols].copy()
-        if "as_of_ts" in roster_sub.columns:
-            roster_sub["as_of_ts"] = pd.to_datetime(roster_sub["as_of_ts"], errors="coerce", utc=True)
-            roster_sub.sort_values("as_of_ts", inplace=True)
-        roster_sub = roster_sub.drop_duplicates(subset=["game_id", "team_id", "player_id"], keep="last")
     df = df.merge(roster_sub, on=["game_id", "team_id", "player_id"], how="left")
     if "lineup_role" in df.columns:
         df["starter_flag_lineup"] = df["lineup_role"].isin({"confirmed_starter", "projected_starter"}).astype("Int64")
@@ -364,9 +581,9 @@ def build_features(
     # Position features
     if "listed_pos" in df.columns:
         df["position_primary"] = df["listed_pos"].fillna("UNK").apply(canonical_pos_bucket)
-    elif "listed_pos" in roster.columns:
+    elif "listed_pos" in roster_sub.columns:
         df = df.merge(
-            roster[["game_id", "player_id", "listed_pos"]],
+            roster_sub[["game_id", "player_id", "listed_pos"]],
             on=["game_id", "player_id"],
             how="left",
         )
@@ -443,21 +660,79 @@ def build_features(
     df["team_itt"] = np.where(df["home_flag"] == 1, implied[0], implied[1])
     df["opp_itt"] = np.where(df["home_flag"] == 1, implied[1], implied[0])
 
-    # Injury/vacated placeholders (feature columns exist; logic TODO)
-    df["num_rotation_players_out"] = pd.NA
-    df["team_minutes_vacated"] = pd.NA
-    df["team_usage_vacated"] = pd.NA
-    df["star_scorer_out_flag"] = pd.NA
-    df["primary_ballhandler_out_flag"] = pd.NA
-    df["starting_center_out_flag"] = pd.NA
+    # Team-level vacated minutes/usage from injuries
+    vacated_team = _compute_vacated_team_features(stats, labels, roster_sub, injuries)
+    if vacated_team.empty:
+        df["vac_min_szn"] = 0.0
+        df["vac_fga_szn"] = 0.0
+        df["vac_ast_szn"] = 0.0
+        df["vac_min_guard_szn"] = 0.0
+        df["vac_min_wing_szn"] = 0.0
+        df["vac_min_big_szn"] = 0.0
+    else:
+        df = df.merge(vacated_team, on=["season", "game_id", "team_id"], how="left")
+        vac_cols = [
+            "vac_min_szn",
+            "vac_fga_szn",
+            "vac_ast_szn",
+            "vac_min_guard_szn",
+            "vac_min_wing_szn",
+            "vac_min_big_szn",
+        ]
+        for col in vac_cols:
+            if col not in df.columns:
+                df[col] = 0.0
+            df[col] = df[col].fillna(0.0)
+        # Legacy aliases for backward compatibility
+        df["team_minutes_vacated"] = df["vac_min_szn"]
+        df["team_usage_vacated"] = df["vac_fga_szn"]
+    if "team_minutes_vacated" not in df.columns:
+        df["team_minutes_vacated"] = df["vac_min_szn"]
+    if "team_usage_vacated" not in df.columns:
+        df["team_usage_vacated"] = df["vac_fga_szn"]
 
-    # Pace/defensive placeholders (TODO: join team-level metrics)
-    df["season_pace_team"] = pd.NA
-    df["season_pace_opp"] = pd.NA
-    df["opp_def_rating"] = pd.NA
+    # Pace and defensive context
+    team_context = _compute_team_context(stats)
+    if team_context.empty:
+        df["team_pace_szn"] = np.nan
+        df["team_off_rtg_szn"] = np.nan
+        df["team_def_rtg_szn"] = np.nan
+        df["opp_pace_szn"] = np.nan
+        df["opp_def_rtg_szn"] = np.nan
+        pace_non_null = 0.0
+        def_non_null = 0.0
+    else:
+        df = df.merge(team_context, on=["season", "game_id", "team_id"], how="left")
+        opp_context = team_context.rename(
+            columns={
+                "team_id": "opponent_id",
+                "team_pace_szn": "opp_pace_szn",
+                "team_off_rtg_szn": "opp_off_rtg_szn",
+                "team_def_rtg_szn": "opp_def_rtg_szn",
+            }
+        )
+        df = df.merge(opp_context[["season", "game_id", "opponent_id", "opp_pace_szn", "opp_def_rtg_szn"]], on=["season", "game_id", "opponent_id"], how="left")
+        pace_non_null = 1.0 - df["team_pace_szn"].isna().mean()
+        def_non_null = 1.0 - df["team_def_rtg_szn"].isna().mean()
+    typer.echo(f"[rates_base] team_pace_szn coverage: {pace_non_null:.3%}; team_def_rtg_szn coverage: {def_non_null:.3%}")
+    pace_fill_cols = ["team_pace_szn", "team_off_rtg_szn", "team_def_rtg_szn", "opp_pace_szn", "opp_def_rtg_szn"]
+    for col in pace_fill_cols:
+        if col not in df.columns:
+            df[col] = np.nan
+        mean_val = df[col].mean(skipna=True)
+        fill_val = 0.0 if pd.isna(mean_val) else mean_val
+        df[col] = df[col].fillna(fill_val)
+    # Legacy placeholders retained for compatibility
+    df["season_pace_team"] = df["team_pace_szn"]
+    df["season_pace_opp"] = df["opp_pace_szn"]
+    df["opp_def_rating"] = df["opp_def_rtg_szn"]
     df["opp_def_3pa_allowed"] = pd.NA
     df["opp_def_reb_rate"] = pd.NA
     df["opp_def_ast_rate"] = pd.NA
+    df["num_rotation_players_out"] = pd.NA
+    df["star_scorer_out_flag"] = pd.NA
+    df["primary_ballhandler_out_flag"] = pd.NA
+    df["starting_center_out_flag"] = pd.NA
 
     # Optional minutes predictions (future Stage 1). Keep minutes_actual for Stage 0.
     if not minutes_preds.empty:
@@ -473,7 +748,10 @@ def build_features(
             "minutes_pred_play_prob",
         ]
         cols = [c for c in cols if c in minutes_preds.columns]
-        df = df.merge(minutes_preds[cols], on=["season", "game_id", "game_date", "team_id", "player_id"], how="left")
+        join_keys = ["season", "game_id", "team_id", "player_id"]
+        if "game_date" in minutes_preds.columns and "game_date" in df.columns:
+            join_keys.append("game_date")
+        df = df.merge(minutes_preds[cols], on=join_keys, how="left")
     else:
         df["minutes_pred_p10"] = pd.NA
         df["minutes_pred_p50"] = pd.NA
@@ -523,6 +801,19 @@ def build_features(
         "team_itt",
         "opp_itt",
         "has_odds",
+        "team_pace_szn",
+        "team_off_rtg_szn",
+        "team_def_rtg_szn",
+        "opp_pace_szn",
+        "opp_def_rtg_szn",
+        "vac_min_szn",
+        "vac_fga_szn",
+        "vac_ast_szn",
+        "vac_min_guard_szn",
+        "vac_min_wing_szn",
+        "vac_min_big_szn",
+        "team_minutes_vacated",
+        "team_usage_vacated",
         "season_pace_team",
         "season_pace_opp",
         "opp_def_rating",
@@ -530,8 +821,6 @@ def build_features(
         "opp_def_reb_rate",
         "opp_def_ast_rate",
         "num_rotation_players_out",
-        "team_minutes_vacated",
-        "team_usage_vacated",
         "star_scorer_out_flag",
         "primary_ballhandler_out_flag",
         "starting_center_out_flag",
@@ -572,6 +861,10 @@ def main(
         None,
         help="Output root for gold/rates_training_base (defaults under data_root/gold).",
     ),
+    desert_csv: Optional[Path] = typer.Option(
+        None,
+        help="Optional CSV of feature-desert dates; rows for those game_dates will be dropped.",
+    ),
 ) -> None:
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
@@ -594,16 +887,103 @@ def main(
         stats.drop_duplicates(subset=["game_id"]).set_index("game_id")["tip_ts"],
     )
     minutes_preds = load_minutes_predictions(root, start, end)
+    tracking_roles = load_tracking_roles(root, start, end)
     injuries = load_injuries(root)  # reserved for future vacated usage features
     if injuries.empty:
         typer.echo("[rates] injuries snapshot empty; vacated usage features will remain placeholders.")
 
-    features = build_features(labels, stats, roster, odds, minutes_preds)
+    features = build_features(labels, stats, roster, odds, minutes_preds, injuries)
+    if desert_csv:
+        desert_df = pd.read_csv(desert_csv)
+        if "game_date" in desert_df.columns:
+            desert_df["game_date"] = pd.to_datetime(desert_df["game_date"]).dt.normalize()
+            desert_col = desert_df.get("is_desert")
+            partial_col = desert_df.get("is_partial_desert")
+            mask = (
+                (desert_col.fillna(False).astype(bool) if desert_col is not None else False)
+                | (partial_col.fillna(False).astype(bool) if partial_col is not None else False)
+            )
+            desert_dates = set(desert_df.loc[mask, "game_date"].dt.date.tolist())
+            if desert_dates:
+                before = len(features)
+                features["game_date"] = pd.to_datetime(features["game_date"]).dt.normalize()
+                drop_mask = features["game_date"].dt.date.isin(desert_dates)
+                features = features[~drop_mask].copy()
+                dropped = before - len(features)
+                typer.echo(
+                    f"[rates] dropped {dropped} rows from feature-desert dates ({len(desert_dates)} dates)"
+                )
+    # Ensure datetime dtype before joins
+    features["game_date"] = pd.to_datetime(features["game_date"]).dt.normalize()
+    if not tracking_roles.empty:
+        track_cols = [
+            "season",
+            "game_date",
+            "game_id",
+            "team_id",
+            "player_id",
+            "track_touches_per_min_szn",
+            "track_sec_per_touch_szn",
+            "track_pot_ast_per_min_szn",
+            "track_drives_per_min_szn",
+            "track_role_cluster",
+            "track_role_is_low_minutes",
+        ]
+        track_cols = [c for c in track_cols if c in tracking_roles.columns]
+        features = features.merge(
+            tracking_roles[track_cols],
+            on=["season", "game_date", "game_id", "team_id", "player_id"],
+            how="left",
+        )
+    else:
+        features["track_touches_per_min_szn"] = np.nan
+        features["track_sec_per_touch_szn"] = np.nan
+        features["track_pot_ast_per_min_szn"] = np.nan
+        features["track_drives_per_min_szn"] = np.nan
+        features["track_role_cluster"] = np.nan
+        features["track_role_is_low_minutes"] = np.nan
+    n_total = len(features)
+    if "minutes_pred_p50" in features.columns:
+        n_missing_pred = features["minutes_pred_p50"].isna().sum()
+    else:
+        n_missing_pred = n_total
+    typer.echo(f"[rates_base] minutes_pred_p50 missing for {n_missing_pred}/{n_total} rows")
+    track_missing = (
+        features["track_touches_per_min_szn"].isna().sum()
+        if "track_touches_per_min_szn" in features.columns
+        else len(features)
+    )
+    typer.echo(f"[rates_base] tracking features missing for {track_missing}/{len(features)} rows")
+    track_fill_cols = [
+        "track_touches_per_min_szn",
+        "track_sec_per_touch_szn",
+        "track_pot_ast_per_min_szn",
+        "track_drives_per_min_szn",
+    ]
+    for col in track_fill_cols:
+        if col not in features.columns:
+            features[col] = np.nan
+        mean_val = features[col].mean(skipna=True)
+        fill_val = 0.0 if pd.isna(mean_val) else mean_val
+        features[col] = features[col].fillna(fill_val)
+    if "track_role_cluster" in features.columns:
+        features["track_role_cluster"] = features["track_role_cluster"].fillna(-1).astype(int)
+    else:
+        features["track_role_cluster"] = -1
+    if "track_role_is_low_minutes" in features.columns:
+        features["track_role_is_low_minutes"] = (
+            features["track_role_is_low_minutes"].fillna(True).astype(bool)
+        )
+    else:
+        features["track_role_is_low_minutes"] = True
+    vac_frac = (features["vac_min_szn"] > 0).mean() if "vac_min_szn" in features.columns else 0.0
+    typer.echo(f"[rates_base] vacated_minutes>0 for {vac_frac:.3%} of rows")
     _write_partitions(features, out_root)
 
+    min_date = pd.to_datetime(features["game_date"]).min()
+    max_date = pd.to_datetime(features["game_date"]).max()
     typer.echo(
-        f"[rates] wrote {len(features):,} rows across "
-        f"{features['game_date'].min().date()}–{features['game_date'].max().date()}"
+        f"[rates] wrote {len(features):,} rows across {min_date.date()}–{max_date.date()}"
     )
     sample_cols = [
         "season",
