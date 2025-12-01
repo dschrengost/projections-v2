@@ -8,7 +8,6 @@ Type=oneshot
 WorkingDirectory=/home/daniel/projects/projections-v2
 Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
 Environment=LIVE_SEASON=2025
-Environment=LIVE_MONTH=11
 User=daniel
 Group=daniel
 ExecStart=/home/daniel/projects/projections-v2/scripts/run_live_pipeline.sh

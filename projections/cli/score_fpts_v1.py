@@ -22,7 +22,10 @@ from projections.fpts_v1.production import (
     load_production_fpts_bundle,
     predict_fpts,
 )
+from projections.rates_v1.current import load_current_rates_bundle
+from projections.rates_v1.score import predict_rates
 from projections.minutes_v1.pos import canonical_pos_bucket_series
+from projections.pipeline.status import JobStatus, write_status
 
 DEFAULT_MINUTES_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_FEATURES_ROOT = paths.data_path("live", "features_minutes_v1")
@@ -129,6 +132,76 @@ def resolve_features_path(
     """Public helper for resolving the features parquet path."""
 
     return _load_features_path(live_features_root, slate_day, run_id, explicit_path)
+
+
+def _nan_rate(df: pd.DataFrame, cols: list[str]) -> float | None:
+    present = [col for col in cols if col in df.columns]
+    if not present or df.empty:
+        return 0.0
+    return float(df[present].isna().mean().mean())
+
+
+def _attach_rate_predictions(
+    slate_day: date,
+    merged: pd.DataFrame,
+    data_root: Path,
+    *,
+    enabled: bool,
+) -> pd.DataFrame:
+    """Optionally attach rates_v1 predictions needed by fpts_v2 bundles.
+
+    For fpts_v2 runs, the model expects columns like ``pred_fga2_per_min`` etc.
+    We can derive these by scoring the current rates_v1 bundle against the
+    rates_training_base features for the slate date when available.
+    """
+
+    if not enabled:
+        return merged
+
+    try:
+        rates_bundle = load_current_rates_bundle()
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"[fpts-live] warning: unable to load rates bundle ({exc}); skipping rate preds.", err=True)
+        return merged
+
+    season = slate_day.year
+    rates_path = (
+        data_root
+        / "gold"
+        / "rates_training_base"
+        / f"season={season}"
+        / f"game_date={slate_day.isoformat()}"
+        / "rates_training_base.parquet"
+    )
+    if not rates_path.exists():
+        typer.echo(
+            f"[fpts-live] warning: missing rates features at {rates_path}; skipping rate preds.",
+            err=True,
+        )
+        return merged
+
+    rates_df = pd.read_parquet(rates_path)
+    rates_df = rates_df.copy()
+    for key in ("game_id", "player_id", "team_id"):
+        if key in rates_df.columns:
+            rates_df[key] = pd.to_numeric(rates_df[key], errors="coerce")
+
+    missing = [c for c in rates_bundle.feature_cols if c not in rates_df.columns]
+    if missing:
+        typer.echo(
+            f"[fpts-live] warning: rates features missing columns {missing}; filling with 0.",
+            err=True,
+        )
+        for col in missing:
+            rates_df[col] = 0.0
+
+    rate_features = rates_df[rates_bundle.feature_cols].copy()
+    preds = predict_rates(rate_features, rates_bundle)
+    preds = preds.rename(columns={col: f"pred_{col}" for col in preds.columns})
+    rates_df = pd.concat([rates_df[["game_id", "player_id", "team_id"]], preds], axis=1)
+
+    merged = merged.merge(rates_df, on=["game_id", "player_id", "team_id"], how="left")
+    return merged
 
 
 def _augment_minutes_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -243,6 +316,7 @@ def score_fpts_for_date(
     features_path: Path | None,
     out_root: Path,
     bundle_ctx: ProductionFptsBundle,
+    data_root: Path,
     resolved_minutes_dir: Path | None = None,
     resolved_run_id: str | None = None,
     resolved_features_path: Path | None = None,
@@ -275,7 +349,7 @@ def score_fpts_for_date(
     features_df = builder.enrich_live_features(slate_day, features_df)
     features_df["_fpts_feature_present"] = 1
 
-    for col in ("game_id", "player_id"):
+    for col in ("game_id", "player_id", "team_id"):
         minutes_df[col] = pd.to_numeric(minutes_df[col], errors="coerce").astype("Int64")
         features_df[col] = pd.to_numeric(features_df[col], errors="coerce").astype("Int64")
     merged = minutes_df.merge(
@@ -296,6 +370,15 @@ def score_fpts_for_date(
     if merged.empty:
         raise RuntimeError(f"[fpts-live] {slate_day.isoformat()}: no rows remaining after join.")
     merged = _augment_minutes_features(merged)
+
+    # Attach rate predictions when using fpts_v2 bundles (total-FPTS head).
+    is_fpts_v2 = str(bundle_ctx.run_id).lower().startswith("fpts_v2")
+    merged = _attach_rate_predictions(
+        slate_day,
+        merged,
+        data_root,
+        enabled=is_fpts_v2,
+    )
 
     preds = predict_fpts(bundle_ctx.bundle, merged)
     enriched = merged.copy()
@@ -430,33 +513,100 @@ def main(
     out_root = out_root.expanduser().resolve()
     data_root = data_root.expanduser().resolve()
 
+    target_date = slate_day.isoformat()
+    run_ts_iso = datetime.now(tz=UTC).isoformat()
+    rows_written = 0
+    nan_rate = None
     try:
-        bundle_ctx = load_fpts_bundle_context(fpts_run_id, fpts_artifact_root, bundle_config)
-    except (RuntimeError, FileNotFoundError) as exc:
-        typer.echo(f"[fpts-live] warning: {exc}; skipping FPTS scoring.", err=True)
-        raise typer.Exit(code=0)
-    metadata = bundle_ctx.bundle.metadata or {}
-    bundle_minutes_source = str(metadata.get("minutes_source") or "actual").strip().lower()
-    if bundle_minutes_source not in ("predicted", "actual"):
-        bundle_minutes_source = "actual"
-    builder = FptsDatasetBuilder(
-        data_root=data_root,
-        minutes_source=bundle_minutes_source,
-    )
-    try:
-        score_fpts_for_date(
-            slate_day=slate_day,
-            run_id=run_id,
-            minutes_root=minutes_root,
-            live_features_root=live_features_root,
-            features_path=features_path,
-            out_root=out_root,
-            bundle_ctx=bundle_ctx,
-            builder=builder,
+        try:
+            bundle_ctx = load_fpts_bundle_context(fpts_run_id, fpts_artifact_root, bundle_config)
+        except (RuntimeError, FileNotFoundError) as exc:
+            typer.echo(f"[fpts-live] warning: {exc}; skipping FPTS scoring.", err=True)
+            raise typer.Exit(code=0)
+        metadata = bundle_ctx.bundle.metadata or {}
+        bundle_minutes_source = str(metadata.get("minutes_source") or "actual").strip().lower()
+        if bundle_minutes_source not in ("predicted", "actual"):
+            bundle_minutes_source = "actual"
+        builder = FptsDatasetBuilder(
+            data_root=data_root,
+            minutes_source=bundle_minutes_source,
         )
-    except RuntimeError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=0)
+        try:
+            output_path = score_fpts_for_date(
+                slate_day=slate_day,
+                run_id=run_id,
+                minutes_root=minutes_root,
+                live_features_root=live_features_root,
+                features_path=features_path,
+                out_root=out_root,
+                bundle_ctx=bundle_ctx,
+                data_root=data_root,
+                builder=builder,
+            )
+        except RuntimeError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=0)
+        run_dir = output_path.parent
+        summary_path = run_dir / SUMMARY_FILENAME
+        if summary_path.exists():
+            try:
+                summary_data = json.loads(summary_path.read_text(encoding="utf-8"))
+                rows_written = int(summary_data.get("counts", {}).get("rows", 0))
+            except Exception:
+                rows_written = 0
+        if rows_written == 0:
+            try:
+                df = pd.read_parquet(output_path, columns=["proj_fpts", "fpts_per_min_pred"])
+                rows_written = len(df)
+                nan_rate = _nan_rate(df, ["proj_fpts", "fpts_per_min_pred"])
+            except Exception:
+                rows_written = 0
+        if nan_rate is None and output_path.exists():
+            try:
+                df = pd.read_parquet(output_path, columns=["proj_fpts", "fpts_per_min_pred"])
+                nan_rate = _nan_rate(df, ["proj_fpts", "fpts_per_min_pred"])
+            except Exception:
+                nan_rate = None
+        write_status(
+            JobStatus(
+                job_name="score_fpts_live",
+                stage="projections",
+                target_date=target_date,
+                run_ts=run_ts_iso,
+                status="success",
+                rows_written=rows_written,
+                expected_rows=rows_written if rows_written else None,
+                nan_rate_key_cols=nan_rate,
+            )
+        )
+    except typer.Exit as exc:
+        write_status(
+            JobStatus(
+                job_name="score_fpts_live",
+                stage="projections",
+                target_date=target_date,
+                run_ts=run_ts_iso,
+                status="error",
+                rows_written=rows_written,
+                expected_rows=None,
+                message=str(exc),
+            )
+        )
+        raise
+    except Exception as exc:  # noqa: BLE001
+        write_status(
+            JobStatus(
+                job_name="score_fpts_live",
+                stage="projections",
+                target_date=target_date,
+                run_ts=run_ts_iso,
+                status="error",
+                rows_written=rows_written,
+                expected_rows=None,
+                message=str(exc),
+            )
+        )
+        raise
 
 
 if __name__ == "__main__":

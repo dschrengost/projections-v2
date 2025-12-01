@@ -234,6 +234,20 @@ def _load_feature_slice(
         features["feature_as_of_ts"] = pd.to_datetime(features["feature_as_of_ts"])
     mask = (features["game_date"] >= start) & (features["game_date"] <= end)
     filtered = features.loc[mask].copy()
+
+    # Fallback: if the seasonal feature parquet does not include the requested date(s),
+    # try pulling per-day deduped features from the daily artifacts directory. This keeps
+    # historical backfills working even when seasonal feature compaction lags behind.
+    if filtered.empty and features_path is None:
+        fallback_frames = []
+        for day in _iter_days(start, end):
+            fallback_path = DEFAULT_DAILY_ROOT / day.isoformat() / "dedup_features.parquet"
+            if fallback_path.exists():
+                fallback_frames.append(pd.read_parquet(fallback_path))
+        if fallback_frames:
+            filtered = pd.concat(fallback_frames, ignore_index=True)
+            filtered["game_date"] = pd.to_datetime(filtered["game_date"]).dt.date
+
     if run_id is not None:
         filtered["run_id"] = run_id
     return filtered

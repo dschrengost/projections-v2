@@ -8,6 +8,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { apiUrl } from './api/client'
+import PipelinePage from './pages/PipelinePage'
 
 type PlayerRow = {
   game_date?: string
@@ -157,9 +159,14 @@ const getStatusBadge = (status?: string): StatusBadge | null => {
   return null
 }
 
-const API_BASE = (import.meta.env.VITE_MINUTES_API || '').replace(/\/$/, '')
-const apiUrl = (path: string) => `${API_BASE}${path}`
 const todayISO = () => new Date().toISOString().slice(0, 10)
+
+const initialTab = () => {
+  if (typeof window === 'undefined') {
+    return 'minutes'
+  }
+  return window.location.pathname.includes('pipeline') ? 'pipeline' : 'minutes'
+}
 
 const formatTime = (ts?: string, dateContext?: string) => {
   if (!ts) return ''
@@ -186,6 +193,7 @@ const formatTime = (ts?: string, dateContext?: string) => {
 }
 
 function App() {
+  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline'>(initialTab)
   const [selectedDate, setSelectedDate] = useState(todayISO())
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
@@ -200,6 +208,12 @@ function App() {
   const [latestRunId, setLatestRunId] = useState<string | null>(null)
   const [showFpts, setShowFpts] = useState(true)
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const path = activeTab === 'pipeline' ? '/pipeline' : '/'
+    window.history.replaceState({}, '', path)
+  }, [activeTab])
 
   const fetchData = useCallback(
     async (date: string, currentRunId: string | null) => {
@@ -388,8 +402,35 @@ function App() {
   const formatFpts = (value?: number) =>
     typeof value === 'number' ? value.toFixed(1) : '—'
 
+  const nav = (
+    <nav className="app-nav">
+      <button
+        className={activeTab === 'minutes' ? 'active' : ''}
+        onClick={() => setActiveTab('minutes')}
+      >
+        Minutes
+      </button>
+      <button
+        className={activeTab === 'pipeline' ? 'active' : ''}
+        onClick={() => setActiveTab('pipeline')}
+      >
+        Pipeline
+      </button>
+    </nav>
+  )
+
+  if (activeTab === 'pipeline') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <PipelinePage />
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
+      {nav}
       <header className="app-header">
         <div>
           <h1>Minutes Dashboard</h1>

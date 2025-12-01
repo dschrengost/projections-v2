@@ -25,6 +25,7 @@ from projections.minutes_v1.starter_flags import (
     derive_starter_flag_label,
     normalize_starter_signals,
 )
+from projections.pipeline.status import JobStatus, write_status
 from scrapers.nba_players import NbaPlayersScraper, PlayerProfile
 
 UTC = timezone.utc
@@ -39,6 +40,13 @@ ACTIVE_ROSTER_FILENAME = "active_roster.parquet"
 INACTIVE_PLAYERS_FILENAME = "inactive_players.csv"
 
 app = typer.Typer(help=__doc__)
+
+
+def _nan_rate(df: pd.DataFrame, cols: list[str]) -> float | None:
+    present = [col for col in cols if col in df.columns]
+    if not present or df.empty:
+        return 0.0
+    return float(df[present].isna().mean().mean())
 
 
 def _normalize_day(value: datetime | str | pd.Timestamp) -> pd.Timestamp:
@@ -467,8 +475,7 @@ def _write_summary(
     path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
 
-@app.command()
-def main(
+def _build_minutes_live_logic(
     date: datetime = typer.Option(..., "--date", help="Target slate date (YYYY-MM-DD)."),
     run_as_of_ts: datetime | None = typer.Option(
         None,
@@ -897,6 +904,151 @@ def main(
     _write_latest_pointer(day_dir, run_id=run_id, run_as_of_ts=run_ts)
 
     typer.echo(f"[minutes-live] run={run_id} wrote {len(live_slice):,} rows to {feature_path}")
+    return len(live_slice), _nan_rate(live_slice, ["minutes_p50", "minutes_p90", "proj_minutes"])
+
+
+@app.command()
+def main(
+    date: datetime = typer.Option(..., "--date", help="Target slate date (YYYY-MM-DD)."),
+    run_as_of_ts: datetime | None = typer.Option(
+        None,
+        "--run-as-of-ts",
+        help="Timestamp representing the information state for this run. Defaults to now (UTC).",
+    ),
+    data_root: Path = typer.Option(
+        DEFAULT_DATA_ROOT,
+        "--data-root",
+        help="Root containing data partitions (defaults to PROJECTIONS_DATA_ROOT or ./data).",
+    ),
+    out_root: Path = typer.Option(
+        DEFAULT_OUTPUT_ROOT,
+        "--out-root",
+        help="Directory where live features will be written (per-day subfolders).",
+    ),
+    labels_path: Path | None = typer.Option(
+        None,
+        "--labels-path",
+        help=(
+            "Optional explicit boxscore labels parquet. Defaults to "
+            "<data_root>/labels/season=YYYY/boxscore_labels.parquet."
+        ),
+    ),
+    schedule_path: Path | None = typer.Option(None, help="Optional override for schedule parquet directory."),
+    injuries_path: Path | None = typer.Option(None, help="Optional override for injuries_snapshot parquet."),
+    odds_path: Path | None = typer.Option(None, help="Optional override for odds_snapshot parquet."),
+    roster_path: Path | None = typer.Option(None, help="Optional override for roster_nightly parquet."),
+    roles_path: Path | None = typer.Option(
+        None,
+        "--roles-path",
+        help="Optional override for minutes roles parquet (season partition).",
+    ),
+    archetype_path: Path | None = typer.Option(
+        None,
+        "--archetype-path",
+        help="Optional override for archetype deltas parquet (season partition).",
+    ),
+    coach_path: Path | None = typer.Option(None, help="Optional CSV override for coach_tenure metadata."),
+    history_days: int | None = typer.Option(
+        None,
+        "--history-days",
+        min=1,
+        help="Optional rolling history window (in days) for label context. Defaults to full season.",
+    ),
+    season_start: int | None = typer.Option(
+        None,
+        "--season-start",
+        help="Season start year override (e.g., 2024 for 2024-25). Defaults based on --date.",
+    ),
+    roster_fallback_days: int = typer.Option(
+        0,
+        "--roster-fallback-days",
+        min=0,
+        help="Allow using the most recent roster snapshot within this many days before --date when same-day data is missing.",
+    ),
+    roster_max_age_hours: int = typer.Option(
+        18,
+        "--roster-max-age-hours",
+        min=1,
+        help="Maximum allowed age (in hours) of the roster snapshot relative to run_as_of_ts.",
+    ),
+    validate_active_roster: bool = typer.Option(
+        True,
+        "--validate-active-roster/--skip-active-roster",
+        help="Fetch NBA.com active roster snapshot and compare against live players.",
+    ),
+    enforce_active_roster: bool = typer.Option(
+        False,
+        "--enforce-active-roster",
+        help="Drop players that are not present on the NBA.com active roster snapshot.",
+    ),
+    lock_buffer_minutes: int = typer.Option(
+        0,
+        "--lock-buffer-minutes",
+        min=0,
+        help="Skip games whose tip_ts is more than this many minutes before run_as_of_ts (avoid re-scoring locked games).",
+    ),
+    scraper_timeout: float = typer.Option(
+        10.0,
+        "--scraper-timeout",
+        help="HTTP timeout (seconds) for NBA.com roster scraping.",
+    ),
+) -> None:
+    target_day = _normalize_day(date)
+    run_ts = _normalize_run_timestamp(run_as_of_ts)
+    target_date = target_day.date().isoformat()
+    run_ts_iso = run_ts.isoformat()
+
+    rows_written = 0
+    nan_rate = None
+    try:
+        rows_written, nan_rate = _build_minutes_live_logic(
+            date=target_day.to_pydatetime(),
+            run_as_of_ts=run_ts.to_pydatetime(),
+            data_root=data_root,
+            out_root=out_root,
+            labels_path=labels_path,
+            schedule_path=schedule_path,
+            injuries_path=injuries_path,
+            odds_path=odds_path,
+            roster_path=roster_path,
+            roles_path=roles_path,
+            archetype_path=archetype_path,
+            coach_path=coach_path,
+            history_days=history_days,
+            season_start=season_start,
+            roster_fallback_days=roster_fallback_days,
+            roster_max_age_hours=roster_max_age_hours,
+            validate_active_roster=validate_active_roster,
+            enforce_active_roster=enforce_active_roster,
+            lock_buffer_minutes=lock_buffer_minutes,
+            scraper_timeout=scraper_timeout,
+        )
+        write_status(
+            JobStatus(
+                job_name="build_minutes_live",
+                stage="gold",
+                target_date=target_date,
+                run_ts=run_ts_iso,
+                status="success",
+                rows_written=rows_written,
+                expected_rows=rows_written,
+                nan_rate_key_cols=nan_rate,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        write_status(
+            JobStatus(
+                job_name="build_minutes_live",
+                stage="gold",
+                target_date=target_date,
+                run_ts=run_ts_iso,
+                status="error",
+                rows_written=rows_written,
+                expected_rows=None,
+                message=str(exc),
+            )
+        )
+        raise
 
 
 if __name__ == "__main__":  # pragma: no cover

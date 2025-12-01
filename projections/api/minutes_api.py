@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from projections import paths
+from projections.api.pipeline_status_api import router as pipeline_status_router
 
 DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
@@ -155,6 +156,10 @@ def _load_fpts(day: date, run_name: str | None, root: Path) -> pd.DataFrame | No
 def _serialize_players(df: pd.DataFrame) -> list[dict[str, Any]]:
     available_cols = [col for col in PLAYER_COLUMNS if col in df.columns]
     trimmed = df.loc[:, available_cols].copy()
+    # Replace NaN/inf so JSON serialization doesn’t explode.
+    trimmed = trimmed.replace([float("inf"), float("-inf")], pd.NA)
+    trimmed = trimmed.astype(object).where(pd.notna(trimmed), None)
+    trimmed = trimmed.replace({pd.NA: None, float("inf"): None, float("-inf"): None})
     # Prefer the conditional minutes; drop any unconditional columns to keep the UI focused.
     return list(jsonable_encoder(trimmed.to_dict(orient="records")))
 
@@ -182,6 +187,7 @@ def create_app(
     fpts_root = (fpts_root or _env_path("MINUTES_FPTS_ROOT", DEFAULT_FPTS_ROOT)).resolve()
 
     app = FastAPI(title="Minutes API", version="0.1.0")
+    app.include_router(pipeline_status_router, prefix="/api")
 
     @app.get("/api/minutes")
     def get_minutes(date: str | None = None, run_id: str | None = None) -> JSONResponse:

@@ -1,4 +1,11 @@
-"""Inference helpers for the fantasy points per minute model."""
+"""Inference helpers for FPTS models.
+
+This module supports legacy fpts_v1 models that predict fantasy points **per
+minute** as well as fpts_v2 LightGBM bundles trained to predict **total DK
+fantasy points per game** (target = ``dk_fpts_actual`` in training). The
+``predict_fpts`` helper detects fpts_v2-style bundles and skips the extra
+minutes multiplication so totals are not double-scaled.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +16,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import json
 import joblib
+import pandas as pd
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
@@ -67,21 +77,66 @@ def load_fpts_model(
     else:
         root = artifact_root or DEFAULT_ARTIFACT_ROOT
         run_dir = _run_dir(run_id, root)
-    payload = joblib.load(run_dir / "model.joblib")
-    return FptsModelBundle(
-        model=payload["model"],
-        imputer=payload["imputer"],
-        feature_columns=payload["feature_columns"],
-        metadata=payload.get("metadata"),
+    joblib_path = run_dir / "model.joblib"
+    if joblib_path.exists():
+        payload = joblib.load(joblib_path)
+        return FptsModelBundle(
+            model=payload["model"],
+            imputer=payload["imputer"],
+            feature_columns=payload["feature_columns"],
+            metadata=payload.get("metadata"),
+        )
+
+    # Fallback: fpts_v2-style LightGBM bundle (model.txt + feature_cols.json/meta.json)
+    txt_path = run_dir / "model.txt"
+    if txt_path.exists():
+        model = lgb.Booster(model_file=str(txt_path))
+        meta_path = run_dir / "meta.json"
+        feature_cols_path = run_dir / "feature_cols.json"
+        metadata = {}
+        feature_columns: list[str] = []
+        try:
+            if meta_path.exists():
+                metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            metadata = {}
+        try:
+            if feature_cols_path.exists():
+                payload = json.loads(feature_cols_path.read_text(encoding="utf-8"))
+                feature_columns = list(payload.get("feature_cols") or [])
+        except Exception:
+            feature_columns = []
+        if not feature_columns:
+            feature_columns = list(metadata.get("feature_cols") or [])
+        if not feature_columns:
+            raise FileNotFoundError(
+                f"feature columns not found for bundle {run_id} under {run_dir}"
+            )
+
+        class _PassthroughImputer:
+            def transform(self, X):
+                df = pd.DataFrame(X, columns=feature_columns)
+                return df.fillna(0).to_numpy()
+
+        return FptsModelBundle(
+            model=model,
+            imputer=_PassthroughImputer(),
+            feature_columns=feature_columns,
+            metadata=metadata,
+        )
+
+    raise FileNotFoundError(
+        f"Run directory {run_dir} is missing both model.joblib and model.txt"
     )
 
 
 def _prepare_features(bundle: FptsModelBundle, features: pd.DataFrame) -> np.ndarray:
     missing = [col for col in bundle.feature_columns if col not in features.columns]
     if missing:
-        raise KeyError(
-            f"Feature frame missing required columns: {', '.join(sorted(missing))}"
-        )
+        # Backward-compat: tolerate missing engineered features by filling zeros.
+        features = features.copy()
+        for col in missing:
+            features[col] = 0.0
     matrix = features[bundle.feature_columns]
     return bundle.imputer.transform(matrix)
 
@@ -90,8 +145,33 @@ def predict_fpts_per_min(bundle: FptsModelBundle, features: pd.DataFrame) -> pd.
     """Return per-minute FPTS predictions for the provided slate dataframe."""
 
     transformed = _prepare_features(bundle, features)
-    preds = bundle.model.predict(transformed)
+    num_iter = getattr(bundle.model, "best_iteration", None)
+    num_iter = num_iter if num_iter and num_iter > 0 else None
+    preds = bundle.model.predict(transformed, num_iteration=num_iter)
     return pd.Series(preds, index=features.index, name="fpts_per_min_pred")
+
+
+def _predict_total_fpts(bundle: FptsModelBundle, features: pd.DataFrame) -> pd.Series:
+    """Return total FPTS predictions for bundles trained on total DK FPTS."""
+
+    transformed = _prepare_features(bundle, features)
+    num_iter = getattr(bundle.model, "best_iteration", None)
+    num_iter = num_iter if num_iter and num_iter > 0 else None
+    preds = bundle.model.predict(transformed, num_iteration=num_iter)
+    return pd.Series(preds, index=features.index, name="proj_fpts")
+
+
+def _is_total_fpts_bundle(bundle: FptsModelBundle) -> bool:
+    """Heuristic to detect fpts_v2 bundles that output total FPTS.
+
+    Current fpts_v2 meta.json uses run_tag like ``fpts_v2_*`` and the training
+    target is ``dk_fpts_actual`` (total fantasy points). Any bundle whose
+    metadata/run_id/run_tag contains ``fpts_v2`` is treated as total-FPTS.
+    """
+
+    meta = bundle.metadata or {}
+    tag = str(meta.get("run_tag") or meta.get("run_id") or "").lower()
+    return "fpts_v2" in tag
 
 
 def predict_fpts(
@@ -100,11 +180,23 @@ def predict_fpts(
     *,
     minutes_col: str = "minutes_p50",
 ) -> pd.DataFrame:
-    """Predict per-minute + total fantasy points for a slate DataFrame."""
+    """Predict fantasy points for a slate DataFrame.
 
-    per_min = predict_fpts_per_min(bundle, slate_df)
+    - For legacy fpts_v1 bundles (per-minute head), total = per_min * minutes.
+    - For fpts_v2 bundles (total-FPTS head), total comes directly from the
+      model and per-minute is derived as total / minutes when available.
+    """
+
     minutes = pd.to_numeric(slate_df.get(minutes_col), errors="coerce").fillna(0.0)
-    total = per_min * minutes
+    if _is_total_fpts_bundle(bundle):
+        total = _predict_total_fpts(bundle, slate_df)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            per_min = total / minutes.replace({0.0: np.nan})
+        per_min = per_min.fillna(0.0)
+    else:
+        per_min = predict_fpts_per_min(bundle, slate_df)
+        total = per_min * minutes
+
     return pd.DataFrame(
         {
             "fpts_per_min_pred": per_min,

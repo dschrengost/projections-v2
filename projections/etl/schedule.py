@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -10,8 +10,22 @@ import typer
 
 from projections import paths
 from projections.etl.common import month_slug, normalize_schedule_frame, schedule_from_api
+from projections.pipeline.status import JobStatus, write_status
 
 app = typer.Typer(help=__doc__)
+
+
+def _status_target(start_day: pd.Timestamp, end_day: pd.Timestamp) -> str:
+    if start_day == end_day:
+        return start_day.date().isoformat()
+    return f"{start_day.date()}_{end_day.date()}"
+
+
+def _nan_rate(df: pd.DataFrame, cols: list[str]) -> float | None:
+    present = [col for col in cols if col in df.columns]
+    if not present or df.empty:
+        return 0.0
+    return float(df[present].isna().mean().mean())
 
 
 def _normalize_day(value: datetime) -> pd.Timestamp:
@@ -68,34 +82,66 @@ def main(
     if end_day < start_day:
         raise typer.BadParameter("--end must be on/after --start.")
 
-    typer.echo(f"[schedule] Fetching games between {start_day.date()} and {end_day.date()}...")
-    raw = schedule_from_api(start_day, end_day, timeout)
-    normalized = normalize_schedule_frame(raw)
-    mask = (normalized["game_date"] >= start_day) & (normalized["game_date"] <= end_day)
-    filtered = normalized.loc[mask].copy()
-    if filtered.empty:
-        raise RuntimeError("NBA schedule API returned zero games for requested window.")
+    target_date = _status_target(start_day, end_day)
+    run_ts = datetime.now(timezone.utc).isoformat()
 
-    filtered = filtered.drop_duplicates(subset="game_id", keep="last")
-    filtered.sort_values("tip_ts", inplace=True)
-    filtered.reset_index(drop=True, inplace=True)
+    rows_written = 0
+    try:
+        typer.echo(f"[schedule] Fetching games between {start_day.date()} and {end_day.date()}...")
+        raw = schedule_from_api(start_day, end_day, timeout)
+        normalized = normalize_schedule_frame(raw)
+        mask = (normalized["game_date"] >= start_day) & (normalized["game_date"] <= end_day)
+        filtered = normalized.loc[mask].copy()
+        if filtered.empty:
+            raise RuntimeError("NBA schedule API returned zero games for requested window.")
 
-    if out is not None:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        filtered.to_parquet(out, index=False)
-        typer.echo(f"[schedule] wrote {len(filtered):,} rows -> {out}")
-        return
+        filtered = filtered.drop_duplicates(subset="game_id", keep="last")
+        filtered.sort_values("tip_ts", inplace=True)
+        filtered.reset_index(drop=True, inplace=True)
+        rows_written = len(filtered)
 
-    grouped = filtered.groupby(filtered["game_date"].dt.to_period("M"))
-    total = 0
-    for period, frame in grouped:
-        month_value = period.month
-        out_path = _write_month_partition(frame, season=season, month=month_value, data_root=data_root)
-        total += len(frame)
-        typer.echo(
-            f"[schedule] month={period.strftime('%Y-%m')} wrote {len(frame):,} rows -> {out_path}"
+        if out is not None:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            filtered.to_parquet(out, index=False)
+            typer.echo(f"[schedule] wrote {len(filtered):,} rows -> {out}")
+        else:
+            grouped = filtered.groupby(filtered["game_date"].dt.to_period("M"))
+            total = 0
+            for period, frame in grouped:
+                month_value = period.month
+                out_path = _write_month_partition(frame, season=season, month=month_value, data_root=data_root)
+                total += len(frame)
+                typer.echo(
+                    f"[schedule] month={period.strftime('%Y-%m')} wrote {len(frame):,} rows -> {out_path}"
+                )
+            typer.echo(f"[schedule] completed {len(grouped)} partition(s), {total:,} total rows.")
+
+        write_status(
+            JobStatus(
+                job_name="schedule_live",
+                stage="silver",
+                target_date=target_date,
+                run_ts=run_ts,
+                status="success",
+                rows_written=rows_written,
+                expected_rows=rows_written,
+                nan_rate_key_cols=_nan_rate(filtered, ["game_id", "tip_ts"]),
+            )
         )
-    typer.echo(f"[schedule] completed {len(grouped)} partition(s), {total:,} total rows.")
+    except Exception as exc:  # noqa: BLE001
+        write_status(
+            JobStatus(
+                job_name="schedule_live",
+                stage="silver",
+                target_date=target_date,
+                run_ts=run_ts,
+                status="error",
+                rows_written=rows_written,
+                expected_rows=None,
+                message=str(exc),
+            )
+        )
+        raise
 
 
 if __name__ == "__main__":  # pragma: no cover

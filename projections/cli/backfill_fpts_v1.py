@@ -25,6 +25,8 @@ from projections.cli.score_fpts_v1 import (
 from projections.fpts_v1.production import (
     DEFAULT_PRODUCTION_CONFIG as DEFAULT_FPTS_CONFIG,
 )
+from projections.fpts_v1.datasets import FptsDatasetBuilder
+from projections import paths
 from projections.minutes_v1.production import (
     DEFAULT_PRODUCTION_CONFIG as DEFAULT_MINUTES_CONFIG,
     resolve_production_run_dir,
@@ -152,6 +154,13 @@ def main(
     else:
         typer.echo("[fpts-backfill] no minutes model run specified; using latest pointer per day.")
 
+    data_root = paths.get_data_root()
+    builder = FptsDatasetBuilder(
+        data_root=data_root,
+        scoring_system=bundle_ctx.scoring_system,
+        minutes_source="predicted",
+    )
+
     for day in _iter_days(start_day, end_day):
         day_dir = minutes_root / day.isoformat()
         run_hint = _select_minutes_run(day_dir, target_minutes_model)
@@ -187,9 +196,11 @@ def main(
                 features_path=None,
                 out_root=out_root,
                 bundle_ctx=bundle_ctx,
+                data_root=data_root,
                 resolved_minutes_dir=minutes_run_dir,
                 resolved_run_id=resolved_run_id,
                 resolved_features_path=features_file,
+                builder=builder,
                 quiet=False,
             )
         except RuntimeError as exc:

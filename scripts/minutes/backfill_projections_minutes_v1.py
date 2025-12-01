@@ -26,6 +26,7 @@ Skip known feature-desert dates (from find_feature_desert_dates):
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
@@ -81,6 +82,37 @@ def _mirror_partition(day_df: pd.DataFrame, out_root: Path, day: date) -> None:
     partition_dir.mkdir(parents=True, exist_ok=True)
     partition_path = partition_dir / score_minutes_v1.OUTPUT_FILENAME
     day_df.to_parquet(partition_path, index=False)
+
+
+def _copy_daily_minutes_into_gold(day: date, out_root: Path) -> Optional[pd.DataFrame]:
+    """Fallback: mirror an existing daily minutes run into gold when scoring fails."""
+
+    daily_dir = score_minutes_v1.DEFAULT_DAILY_ROOT / day.isoformat()
+    if not daily_dir.exists():
+        return None
+
+    run_id: str | None = None
+    latest_pointer = daily_dir / score_minutes_v1.LATEST_POINTER
+    if latest_pointer.exists():
+        try:
+            payload = json.loads(latest_pointer.read_text(encoding="utf-8"))
+            run_id = payload.get("run_id")
+        except json.JSONDecodeError:
+            run_id = None
+    if run_id is None:
+        runs = sorted(daily_dir.glob("run=*"))
+        if runs:
+            run_id = runs[-1].name.split("=", 1)[1]
+    if run_id is None:
+        return None
+
+    minutes_path = daily_dir / f"run={run_id}" / score_minutes_v1.OUTPUT_FILENAME
+    if not minutes_path.exists():
+        return None
+
+    df = pd.read_parquet(minutes_path)
+    _mirror_partition(df, out_root, day)
+    return df
 
 
 @app.command()
@@ -185,44 +217,58 @@ def main(
         f"overwrite_existing={overwrite_existing} debug_describe={debug_describe}"
     )
 
-    scored = score_minutes_v1.score_minutes_range_to_parquet(
-        min_day,
-        max_day,
-        features_root=features_root,
-        features_path=None,
-        bundle_dir=resolved_bundle_dir,
-        bundle_config=score_minutes_v1.DEFAULT_BUNDLE_CONFIG,
-        artifact_root=out_root,
-        injuries_root=injuries_root,
-        schedule_root=schedule_root,
-        limit_rows=None,
-        mode="historical",
-        run_id=None,
-        live_features_root=score_minutes_v1.DEFAULT_LIVE_FEATURES_ROOT,
-        minutes_output="both",
-        starter_priors_path=score_minutes_v1.DEFAULT_STARTER_PRIORS,
-        starter_history_path=score_minutes_v1.DEFAULT_STARTER_HISTORY,
-        promotion_config=score_minutes_v1.DEFAULT_PROMOTION_CONFIG,
-        promotion_prior_enabled=True,
-        promotion_prior_debug=False,
-        reconcile_team_minutes="none",
-        reconcile_config=score_minutes_v1.DEFAULT_RECONCILE_CONFIG,
-        reconcile_debug=False,
-        prediction_logs_root=score_minutes_v1.DEFAULT_PREDICTION_LOGS_ROOT,
-        disable_play_prob=False,
-        target_dates=set(target_days),
-        debug_describe=debug_describe if debug_describe is not None else (len(target_days) == 1),
-    )
-
     written_frames: list[pd.DataFrame] = []
-    for day in target_days:
-        day_path = out_root / day.isoformat() / score_minutes_v1.OUTPUT_FILENAME
-        if not day_path.exists():
-            typer.echo(f"[backfill] warning: expected output missing at {day_path}", err=True)
-            continue
-        day_df = pd.read_parquet(day_path)
-        _mirror_partition(day_df, out_root, day)
-        written_frames.append(day_df)
+    try:
+        score_minutes_v1.score_minutes_range_to_parquet(
+            min_day,
+            max_day,
+            features_root=features_root,
+            features_path=None,
+            bundle_dir=resolved_bundle_dir,
+            bundle_config=score_minutes_v1.DEFAULT_BUNDLE_CONFIG,
+            artifact_root=out_root,
+            injuries_root=injuries_root,
+            schedule_root=schedule_root,
+            limit_rows=None,
+            mode="historical",
+            run_id=None,
+            live_features_root=score_minutes_v1.DEFAULT_LIVE_FEATURES_ROOT,
+            minutes_output="both",
+            starter_priors_path=score_minutes_v1.DEFAULT_STARTER_PRIORS,
+            starter_history_path=score_minutes_v1.DEFAULT_STARTER_HISTORY,
+            promotion_config=score_minutes_v1.DEFAULT_PROMOTION_CONFIG,
+            promotion_prior_enabled=True,
+            promotion_prior_debug=False,
+            reconcile_team_minutes="none",
+            reconcile_config=score_minutes_v1.DEFAULT_RECONCILE_CONFIG,
+            reconcile_debug=False,
+            prediction_logs_root=score_minutes_v1.DEFAULT_PREDICTION_LOGS_ROOT,
+            disable_play_prob=False,
+            target_dates=set(target_days),
+            debug_describe=debug_describe if debug_describe is not None else (len(target_days) == 1),
+        )
+        for day in target_days:
+            day_path = out_root / day.isoformat() / score_minutes_v1.OUTPUT_FILENAME
+            if not day_path.exists():
+                typer.echo(f"[backfill] warning: expected output missing at {day_path}", err=True)
+                continue
+            day_df = pd.read_parquet(day_path)
+            _mirror_partition(day_df, out_root, day)
+            written_frames.append(day_df)
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(
+            f"[backfill] scoring failed ({exc}); attempting fallback copy from daily artifacts.",
+            err=True,
+        )
+        for day in target_days:
+            fallback_df = _copy_daily_minutes_into_gold(day, out_root)
+            if fallback_df is not None:
+                typer.echo(
+                    f"[backfill] {day}: mirrored minutes from {score_minutes_v1.DEFAULT_DAILY_ROOT / day.isoformat()} into gold."
+                )
+                written_frames.append(fallback_df)
+        if not written_frames:
+            raise
 
     typer.echo(
         f"[backfill] complete. dates_scored={len(target_days)} written={len(written_frames)} "

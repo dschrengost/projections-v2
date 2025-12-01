@@ -10,7 +10,7 @@ FLAGS="${LIVE_FLAGS:-}"  # additional CLI flags
 TIP_LEAD_MINUTES="${LIVE_TIP_LEAD_MINUTES:-60}"   # start scoring this many minutes before first tip
 TIP_TAIL_MINUTES="${LIVE_TIP_TAIL_MINUTES:-180}"  # keep running this many minutes after last tip
 LOCK_BUFFER_MINUTES="${LIVE_LOCK_BUFFER_MINUTES:-15}"
-DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-0}"
+DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-1}"
 RECONCILE_MODE="${LIVE_RECONCILE_MODE:-none}"   # default off per operator request
 MINUTES_OUTPUT_MODE="${LIVE_MINUTES_OUTPUT:-conditional}"
 

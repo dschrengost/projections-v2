@@ -81,6 +81,7 @@ def _ensure_boxscores(
             season=season,
             schedule=[],
             data_root=data_root,
+            timeout=10.0,  # Explicit to avoid Typer Option default when called programmatically
         )
     except Exception as exc:  # pragma: no cover - surfaced via summary + tests
         return False, str(exc)
@@ -202,4 +203,3 @@ def main(
 
 if __name__ == "__main__":  # pragma: no cover
     app()
-
