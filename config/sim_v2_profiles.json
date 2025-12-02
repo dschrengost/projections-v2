@@ -1,0 +1,40 @@
+{
+  "profiles": {
+    "baseline": {
+      "fpts_run_id": "fpts_v2_stage3_context_20251129_041316",
+      "rates_run_id": "rates_v1_stage3_clean_20251202_144334",
+      "rates_noise": {
+        "enabled": true,
+        "split": "val"
+      },
+      "minutes_run_id": "lgbm_full_v1_no_p_play_20251202",
+      "minutes_noise": {
+        "enabled": true,
+        "sigma_min": 1.0
+      },
+      "worlds_per_chunk": 2000,
+      "seed": 12345,
+      "min_play_prob": 0.05,
+      "team_factor_sigma": 0.0,
+      "team_factor_gamma": 1.0
+    },
+    "debug": {
+      "fpts_run_id": "fpts_v2_stage3_context_20251129_041316",
+      "rates_run_id": "rates_v1_stage3_clean_20251202_144334",
+      "rates_noise": {
+        "enabled": false,
+        "split": "val"
+      },
+      "minutes_run_id": "lgbm_full_v1_no_p_play_20251202",
+      "minutes_noise": {
+        "enabled": false,
+        "sigma_min": 1.0
+      },
+      "worlds_per_chunk": 500,
+      "seed": 12345,
+      "min_play_prob": 0.05,
+      "team_factor_sigma": 0.0,
+      "team_factor_gamma": 1.0
+    }
+  }
+}

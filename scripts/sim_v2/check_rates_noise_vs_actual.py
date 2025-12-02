@@ -36,6 +36,47 @@ STATS = [
 ]
 
 
+def _dk_from_components(
+    fga2: np.ndarray,
+    fga3: np.ndarray,
+    fta: np.ndarray,
+    ast: np.ndarray,
+    tov: np.ndarray,
+    oreb: np.ndarray,
+    dreb: np.ndarray,
+    stl: np.ndarray,
+    blk: np.ndarray,
+) -> np.ndarray:
+    reb = oreb + dreb
+    ftm = 0.75 * fta
+    pts = 2.0 * fga2 + 3.0 * fga3 + ftm
+    fgm = fga2 + fga3
+    fga = fga2 + fga3
+    fg3m = fga3
+    fg3a = fga3
+    df = pd.DataFrame(
+        {
+            "pts": pts,
+            "fgm": fgm,
+            "fga": fga,
+            "fg3m": fg3m,
+            "fg3a": fg3a,
+            "ftm": ftm,
+            "fta": fta,
+            "reb": reb,
+            "oreb": oreb,
+            "dreb": dreb,
+            "ast": ast,
+            "stl": stl,
+            "blk": blk,
+            "tov": tov,
+            "pf": np.zeros_like(pts),
+            "plus_minus": np.zeros_like(pts),
+        }
+    )
+    return compute_dk_fpts(df).to_numpy()
+
+
 def _parse_date(value: str) -> pd.Timestamp:
     try:
         return pd.Timestamp(datetime.fromisoformat(value).date()).normalize()
@@ -153,11 +194,21 @@ def _prepare_means(base: pd.DataFrame) -> Dict[str, np.ndarray]:
 
 
 def _compute_actual_dk(base: pd.DataFrame) -> np.ndarray:
-    needed = ["pts", "fgm", "fga", "fg3m", "fg3a", "ftm", "fta", "reb", "oreb", "dreb", "ast", "stl", "blk", "tov", "pf", "plus_minus"]
-    if set(needed).issubset(base.columns):
-        return compute_dk_fpts(base).to_numpy()
     if "dk_fpts_actual" in base.columns:
         return pd.to_numeric(base["dk_fpts_actual"], errors="coerce").to_numpy()
+    # Derive using same approximations as the simulator if raw stat totals are available.
+    required_parts = ["fga2", "fga3", "fta", "ast", "tov", "oreb", "dreb", "stl", "blk"]
+    if set(required_parts).issubset(base.columns):
+        fga2 = pd.to_numeric(base["fga2"], errors="coerce").to_numpy()
+        fga3 = pd.to_numeric(base["fga3"], errors="coerce").to_numpy()
+        fta = pd.to_numeric(base["fta"], errors="coerce").to_numpy()
+        ast = pd.to_numeric(base["ast"], errors="coerce").to_numpy()
+        tov = pd.to_numeric(base["tov"], errors="coerce").to_numpy()
+        oreb = pd.to_numeric(base["oreb"], errors="coerce").to_numpy()
+        dreb = pd.to_numeric(base["dreb"], errors="coerce").to_numpy()
+        stl = pd.to_numeric(base["stl"], errors="coerce").to_numpy()
+        blk = pd.to_numeric(base["blk"], errors="coerce").to_numpy()
+        return _dk_from_components(fga2, fga3, fta, ast, tov, oreb, dreb, stl, blk)
     return np.full(len(base), np.nan, dtype=float)
 
 
@@ -188,26 +239,19 @@ def main(
     mean_from_rates = _prepare_means(base_idx.reset_index())
     if "dk_fpts_mean" not in merged_mean or merged_mean["dk_fpts_mean"].isna().all():
         # Compute dk mean from rate means if available.
-        if "reb" in mean_from_rates:
-            mean_stats_for_fpts = {
-                "pts": np.full(len(base_idx), np.nan),
-                "fga": np.full(len(base_idx), np.nan),
-                "fgm": np.full(len(base_idx), np.nan),
-                "fg3m": np.full(len(base_idx), np.nan),
-                "fg3a": np.full(len(base_idx), np.nan),
-                "ftm": np.full(len(base_idx), np.nan),
-                "fta": mean_from_rates.get("fta", np.nan),
-                "reb": mean_from_rates.get("reb", np.nan),
-                "oreb": mean_from_rates.get("oreb", np.nan),
-                "dreb": mean_from_rates.get("dreb", np.nan),
-                "ast": mean_from_rates.get("ast", np.nan),
-                "stl": mean_from_rates.get("stl", np.nan),
-                "blk": mean_from_rates.get("blk", np.nan),
-                "tov": mean_from_rates.get("tov", np.nan),
-                "pf": np.zeros(len(base_idx)),
-                "plus_minus": np.zeros(len(base_idx)),
-            }
-            merged_mean["dk_fpts_mean"] = compute_dk_fpts(pd.DataFrame(mean_stats_for_fpts)).to_numpy()
+        components = ["fga2", "fga3", "fta", "ast", "tov", "oreb", "dreb", "stl", "blk"]
+        if all(c in mean_from_rates for c in components):
+            merged_mean["dk_fpts_mean"] = _dk_from_components(
+                mean_from_rates["fga2"],
+                mean_from_rates["fga3"],
+                mean_from_rates["fta"],
+                mean_from_rates["ast"],
+                mean_from_rates["tov"],
+                mean_from_rates["oreb"],
+                mean_from_rates["dreb"],
+                mean_from_rates["stl"],
+                mean_from_rates["blk"],
+            )
 
     # Actual DK fpts
     base_idx["dk_fpts_actual"] = _compute_actual_dk(base_idx.reset_index())
@@ -215,8 +259,8 @@ def main(
     # Merge actuals and means into worlds
     worlds_idx = worlds.set_index(["game_date", "game_id", "player_id"])
     merged = worlds_idx.join(base_idx, how="inner", lsuffix="_world", rsuffix="_base")
-    if "dk_fpts_mean" not in merged.columns:
-        merged = merged.join(merged_mean[["dk_fpts_mean"]], how="left")
+    merged["dk_fpts_mean"] = merged.get("dk_fpts_mean")
+    merged["dk_fpts_mean"] = merged["dk_fpts_mean"].fillna(merged_mean.get("dk_fpts_mean"))
 
     results: List[Tuple[str, float, float, Optional[float], Optional[float], int, int]] = []
 
@@ -230,7 +274,12 @@ def main(
         actual_col = None
         if stat == "dk_fpts":
             mean_col = "dk_fpts_mean"
-            actual_col = "dk_fpts_actual"
+            if "dk_fpts_actual" in merged.columns:
+                actual_col = "dk_fpts_actual"
+            elif "dk_fpts_actual_base" in merged.columns:
+                actual_col = "dk_fpts_actual_base"
+            else:
+                actual_col = "dk_fpts_actual"
         else:
             mean_col = f"mean_{stat}"
             # build mean column from prepared means if available

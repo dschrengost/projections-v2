@@ -1,6 +1,6 @@
 {
   "date": "2025-12-02",
-  "generated_at": "2025-12-02T17:25:21.602322+00:00",
+  "generated_at": "2025-12-02T18:40:16.863400+00:00",
   "model_run_id": "lgbm_full_v1_no_p_play_20251202",
   "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_lgbm/lgbm_full_v1_no_p_play_20251202",
   "model_meta": {
@@ -40,11 +40,11 @@
       }
     }
   },
-  "run_id": "20251202T163000Z",
-  "run_as_of_ts": "2025-12-02T16:30:00+00:00",
+  "run_id": "20251202T183526Z",
+  "run_as_of_ts": "2025-12-02T18:35:26+00:00",
   "counts": {
-    "rows": 171,
-    "players": 171,
+    "rows": 167,
+    "players": 167,
     "teams": 12
   }
 }
