@@ -1,7 +1,7 @@
 minutes_training:
-  run_id: minutes_full_history_20251117
+  run_id: lgbm_full_v1_play_head_20251209
   data_root: data
-  artifact_root: artifacts/minutes_v1
+  artifact_root: artifacts/minutes_lgbm
   features: data/gold/features_minutes_v1/all_features.parquet
   train_start: 2022-10-01T00:00:00+00:00
   train_end: 2025-02-28T23:59:59+00:00
@@ -15,3 +15,5 @@ minutes_training:
   playable_min_p50: 10.0
   tolerance_relaxed: false
   allow_guard_failure: true
+  enable_play_prob_head: true
+  enable_play_prob_mixing: false

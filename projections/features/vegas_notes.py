@@ -15,9 +15,9 @@ Minutes features & model
 - ``MinutesFeatureBuilder`` calls :func:`projections.features.game_env.attach_game_environment_features`
   inside ``_attach_odds`` which merges the silver odds snapshot onto each player row and emits
   ``spread_home``, ``total`, ``odds_as_of_ts``, ``blowout_index``, ``blowout_risk_score``, and ``close_game_score``.
-  These columns are present in the gold feature parquet (e.g.
+-  These columns are present in the gold feature parquet (e.g.
   ``/home/daniel/projections-data/gold/features_minutes_v1/season=2025/month=10/features.parquet``).
-- The current minutes bundle (``artifacts/minutes_lgbm/lgbm_full_v1_vol``) includes the Vegas signals in
+- The production minutes bundle (``artifacts/minutes_lgbm/lgbm_full_v1_no_p_play_20251202``) includes the Vegas signals in
   ``feature_columns.json``: ``spread_home``, ``total``, ``blowout_index``, ``blowout_risk_score``, ``close_game_score``.
   ``odds_as_of_ts`` is persisted for auditing but excluded from modeling.
 - Minutes gold outputs (``<DATA_ROOT>/gold/projections_minutes_v1/.../minutes.parquet``) do **not** expose any odds fields.

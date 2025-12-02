@@ -192,7 +192,12 @@ def _load_feature_frame_with_schema(
         feature_df,
         [target_col, "game_date", "feature_as_of_ts", *KEY_COLUMNS],
     )
-    feature_columns = modeling.infer_feature_columns(feature_df, target_col=target_col)
+    # NOTE: minutes_v1 is modeling minutes | plays; exclude any probability-to-play features.
+    feature_columns = modeling.infer_feature_columns(
+        feature_df,
+        target_col=target_col,
+        excluded={"prior_play_prob", "play_prob", "play_probability", "p_play"},
+    )
     return feature_df, feature_columns
 
 
@@ -501,7 +506,12 @@ def _compute_playable_subset_metrics(
     playable_mask = val_df["p50"] >= minutes_threshold
     playable = val_df.loc[playable_mask].copy()
     playable_count = int(len(playable))
-    playable_cond = playable[playable[target_col] > 0]
+    play_targets = playable.get("plays_target")
+    if play_targets is not None:
+        play_targets = play_targets.astype(int)
+    else:
+        play_targets = (playable[target_col] > 0).astype(int)
+    playable_cond = playable[play_targets == 1]
     playable_cond_count = int(len(playable_cond))
 
     play_prob_series = playable.get("play_prob")
@@ -510,7 +520,7 @@ def _compute_playable_subset_metrics(
         if play_prob_series is not None
         else np.ones(playable_count, dtype=float)
     )
-    play_labels = (playable[target_col] > 0).astype(int).to_numpy(dtype=float) if playable_count else np.array([])
+    play_labels = play_targets.to_numpy(dtype=float) if playable_count else np.array([])
 
     metrics: dict[str, Any] = {
         "playable_count": playable_count,
@@ -1099,7 +1109,7 @@ def main(
     season: int | None = typer.Option(None, help="Season year for default features path (e.g., 2024)."),
     month: int | None = typer.Option(None, help="Month partition (1-12) for default path."),
     features: Path | None = typer.Option(None, help="Explicit feature parquet path."),
-    artifact_root: Path = typer.Option(Path("artifacts/minutes_v1"), help="Where to store run artifacts."),
+    artifact_root: Path = typer.Option(Path("artifacts/minutes_lgbm"), help="Where to store run artifacts."),
     target_col: str = typer.Option("minutes", help="Target column to predict."),
     random_state: int = typer.Option(42, help="Random seed for LightGBM."),
     conformal_buckets: str = typer.Option(
@@ -1151,10 +1161,21 @@ def main(
         "--playable-winkler-tolerance",
         help="Allowed absolute increase relative to the playable Winkler baseline.",
     ),
+    enable_play_prob_head: bool = typer.Option(
+        True,
+        "--enable-play-prob-head/--disable-play-prob-head",
+        help="Train and persist a dedicated play probability classifier head.",
+    ),
+    enable_play_prob_mixing: bool = typer.Option(
+        False,
+        "--enable-play-prob-mixing",
+        help="(lab only) allow play_prob mixing for unconditional outputs; kept false to preserve conditional semantics.",
+        is_flag=True,
+    ),
     disable_play_prob: bool = typer.Option(
         False,
         "--disable-play-prob",
-        help="Skip training and using the play probability model; only conditional minutes are produced.",
+        help="Deprecated; overrides enable_play_prob_head and skips play probability training/usage.",
         is_flag=True,
     ),
     lgbm_n_estimators: int | None = typer.Option(
@@ -1201,6 +1222,8 @@ def main(
         "playable_min_p50": playable_min_p50,
         "playable_winkler_baseline": playable_winkler_baseline,
         "playable_winkler_tolerance": playable_winkler_tolerance,
+        "enable_play_prob_head": enable_play_prob_head,
+        "enable_play_prob_mixing": enable_play_prob_mixing,
         "disable_play_prob": disable_play_prob,
         "lgbm_n_estimators": lgbm_n_estimators,
         "lgbm_max_depth": lgbm_max_depth,
@@ -1232,7 +1255,11 @@ def main(
     playable_min_p50 = resolved_params["playable_min_p50"]
     playable_winkler_baseline = resolved_params["playable_winkler_baseline"]
     playable_winkler_tolerance = resolved_params["playable_winkler_tolerance"]
+    enable_play_prob_head = resolved_params.get("enable_play_prob_head", True)
+    enable_play_prob_mixing = resolved_params.get("enable_play_prob_mixing", False)
     disable_play_prob = resolved_params.get("disable_play_prob", False)
+    if disable_play_prob:
+        enable_play_prob_head = False
     lgbm_n_estimators = resolved_params.get("lgbm_n_estimators")
     lgbm_max_depth = resolved_params.get("lgbm_max_depth")
     lgbm_learning_rate = resolved_params.get("lgbm_learning_rate")
@@ -1290,6 +1317,8 @@ def main(
     train_df = _filter_out_players(train_window.slice(feature_df))
     cal_df = _filter_out_players(cal_window.slice(feature_df))
     val_df = _filter_out_players(val_window.slice(feature_df))
+    for frame in (train_df, cal_df, val_df):
+        frame["plays_target"] = (frame[target_col] > 0).astype(int)
 
     typer.echo(
         f"Training LightGBM quantiles on {len(train_df):,} rows "
@@ -1297,11 +1326,16 @@ def main(
     )
 
     play_prob_artifacts: PlayProbabilityArtifacts | None = None
-    if disable_play_prob:
-        typer.echo("Play probability disabled; emitting conditional minutes only.", err=True)
+    if enable_play_prob_mixing:
+        typer.echo(
+            "Play probability mixing flag enabled (lab); conditional minutes remain the default output.",
+            err=True,
+        )
+    if not enable_play_prob_head:
+        typer.echo("Play probability head disabled; emitting conditional minutes only.", err=True)
     else:
         X_train_play_prob = train_df[feature_columns]
-        y_train_play_prob = (train_df[target_col] > 0).astype(int)
+        y_train_play_prob = train_df["plays_target"]
         if y_train_play_prob.nunique() >= 2:
             play_prob_artifacts = _train_play_probability_model(
                 X_train_play_prob,
@@ -1311,8 +1345,8 @@ def main(
         else:
             typer.echo("Play probability training skipped (single class).", err=True)
 
-    train_cond_df = train_df[train_df[target_col] > 0]
-    cal_cond_df = cal_df[cal_df[target_col] > 0]
+    train_cond_df = train_df[train_df["plays_target"] == 1]
+    cal_cond_df = cal_df[cal_df["plays_target"] == 1]
     if train_cond_df.empty or cal_cond_df.empty:
         raise ValueError("Positive-minute rows required in both train and calibration windows.")
 
@@ -1350,7 +1384,7 @@ def main(
     cal_p10_cal, cal_p90_cal = calibrator.calibrate(cal_p10_base, cal_p90_base)
 
     if play_prob_artifacts is not None:
-        y_cal_play = (cal_df[target_col] > 0).astype(int)
+        y_cal_play = cal_df["plays_target"]
         if y_cal_play.nunique() >= 2:
             _fit_play_probability_calibrator(play_prob_artifacts, cal_df[feature_columns], y_cal_play)
         else:
@@ -1481,14 +1515,22 @@ def main(
     play_prob_array = (
         play_prob_vals.to_numpy(dtype=float) if play_prob_vals is not None else np.ones(len(val_unique), dtype=float)
     )
-    y_play_val = (y_val_unique > 0).astype(int).to_numpy(dtype=float)
+    play_target_series = val_unique.get("plays_target")
+    y_play_val = (
+        play_target_series.to_numpy(dtype=float)
+        if play_target_series is not None
+        else (y_val_unique > 0).astype(int).to_numpy(dtype=float)
+    )
     play_brier = _brier_score(y_play_val, play_prob_array)
     play_ece = _expected_calibration_error(y_play_val, play_prob_array)
     floor10 = float(np.mean(np.maximum(ALPHA_TARGET, 1.0 - play_prob_array)))
     floor90 = float(np.mean(np.maximum(1.0 - ALPHA_TARGET, 1.0 - play_prob_array)))
     excess10 = val_p10_cov - floor10
     excess90 = val_p90_cov - floor90
-    val_positive = val_unique[y_val_unique > 0]
+    if play_target_series is not None:
+        val_positive = val_unique[val_unique["plays_target"] == 1]
+    else:
+        val_positive = val_unique[y_val_unique > 0]
     if val_positive.empty:
         cond_p10_cov = cond_p90_cov = 0.0
     else:
@@ -1515,6 +1557,9 @@ def main(
         target_col=target_col,
         minutes_threshold=playable_min_p50,
     )
+    if not enable_play_prob_head or play_prob_artifacts is None:
+        playable_metrics["val_play_prob_brier_playable"] = None
+        playable_metrics["val_play_prob_ece_playable"] = None
     acceptance = _evaluate_playable_acceptance(
         playable_metrics,
         winkler_baseline=playable_winkler_baseline,
@@ -1535,7 +1580,11 @@ def main(
         bucket_y = group[target_col]
         bucket_p10_cov, bucket_p90_cov = _coverage_rates(bucket_y, group["p10"], group["p90"])
         bucket_inside = bucket_p90_cov - bucket_p10_cov
-        group_cond = group[group[target_col] > 0]
+        play_targets_group = group.get("plays_target")
+        if play_targets_group is not None:
+            group_cond = group[play_targets_group == 1]
+        else:
+            group_cond = group[group[target_col] > 0]
         if group_cond.empty:
             cond_p10 = cond_p90 = cond_inside = 0.0
         else:
@@ -1587,6 +1636,8 @@ def main(
         "bucket_offsets": offsets,
         "conformal_mode": mode_key,
         "bucket_mode": bucket_mode,
+        "play_prob_enabled": enable_play_prob_head,
+        "play_prob_mixing_enabled": enable_play_prob_mixing,
         "play_probability": play_prob_artifacts,
     }
     joblib.dump(bundle, run_dir / "lgbm_quantiles.joblib")
@@ -1594,12 +1645,13 @@ def main(
 
     write_ids_csv(val_unique, run_dir / "val_ids.csv")
 
-    if disable_play_prob:
+    if not enable_play_prob_head or play_prob_artifacts is None:
         play_brier = None
         play_ece = None
     metrics = {
         "run_id": run_id,
         "fold_id": fold_id,
+        "play_prob_head_enabled": enable_play_prob_head,
         "train_rows": len(train_df),
         "cal_rows": len(cal_df),
         "val_rows": len(val_df),
@@ -1620,7 +1672,7 @@ def main(
         "val_play_prob_ece": play_ece,
         "val_play_prob_mean": float(np.mean(play_prob_array)),
         "val_play_prob_threshold": 0.5,
-        "val_will_play_rate": float(np.mean(val_unique["will_play_flag"].to_numpy(dtype=float))),
+        "val_will_play_rate": float(np.mean(y_play_val)),
         "inside_cov": inside_cov,
         "mpiwn": mpiwn,
         "winkler_alpha_0_2": winkler_mean,
@@ -1649,6 +1701,8 @@ def main(
         "playable_min_p50": playable_min_p50,
         "playable_winkler_baseline": playable_winkler_baseline,
         "playable_winkler_tolerance": playable_winkler_tolerance,
+        "enable_play_prob_head": enable_play_prob_head,
+        "enable_play_prob_mixing": enable_play_prob_mixing,
     }
 
     windows_meta = {

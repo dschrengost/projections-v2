@@ -49,6 +49,8 @@ class MinutesTrainingConfig(BaseModel):
     playable_min_p50: float | None = None
     playable_winkler_baseline: float | None = None
     playable_winkler_tolerance: float | None = None
+    enable_play_prob_head: bool | None = None
+    enable_play_prob_mixing: bool | None = None
     disable_play_prob: bool | None = None
     lgbm_n_estimators: int | None = None
     lgbm_max_depth: int | None = None
@@ -66,6 +68,7 @@ class MinutesScoringConfig(BaseModel):
     features_root: Path | None = None
     features_path: Path | None = None
     bundle_dir: Path | None = None
+    override_run_id: str | None = None
     bundle_config: Path | None = None
     artifact_root: Path | None = None
     injuries_root: Path | None = None
@@ -83,6 +86,9 @@ class MinutesScoringConfig(BaseModel):
     reconcile_team_minutes: Literal["none", "p50", "p50_and_tails"] | None = None
     reconcile_config: Path | None = None
     reconcile_debug: bool | None = None
+    enable_play_prob_head: bool | None = None
+    enable_play_prob_mixing: bool | None = None
+    disable_play_prob: bool | None = None
 
 
 def _load_payload(path: Path) -> dict[str, Any]:

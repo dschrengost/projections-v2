@@ -1,0 +1,20 @@
+{
+  "run_id": "lgbm_full_v1_no_p_play_20251202",
+  "group_keys": [
+    "starter_flag"
+  ],
+  "raw": {
+    "p10_cond_playable": 0.14051841746248295,
+    "p90_cond_playable": 0.8281036834924966,
+    "inside_cond_playable": 0.6875852660300137,
+    "val_mae_p50": 3.9137595531008746,
+    "mpiwn": 10.76408820337572
+  },
+  "calibrated": {
+    "p10_cond_playable": 0.27012278308321963,
+    "p90_cond_playable": 0.7414733969986358,
+    "inside_cond_playable": 0.4713506139154161,
+    "val_mae_p50": 3.9137595531008746,
+    "mpiwn": 5.832140388623921
+  }
+}

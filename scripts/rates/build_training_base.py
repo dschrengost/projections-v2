@@ -865,6 +865,11 @@ def main(
         None,
         help="Optional CSV of feature-desert dates; rows for those game_dates will be dropped.",
     ),
+    require_minutes_pred: bool = typer.Option(
+        False,
+        "--require-minutes-pred/--allow-missing-minutes-pred",
+        help="Fail if minutes_pred_* are missing after the minutes_for_rates join.",
+    ),
 ) -> None:
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
@@ -948,6 +953,8 @@ def main(
     else:
         n_missing_pred = n_total
     typer.echo(f"[rates_base] minutes_pred_p50 missing for {n_missing_pred}/{n_total} rows")
+    if require_minutes_pred and n_missing_pred > 0:
+        raise typer.Exit(code=1)
     track_missing = (
         features["track_touches_per_min_szn"].isna().sum()
         if "track_touches_per_min_szn" in features.columns

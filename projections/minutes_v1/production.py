@@ -10,7 +10,7 @@ from typing import Any
 
 import joblib
 
-DEFAULT_PRODUCTION_RUN_ID = "lgbm_full_v1_vol"
+DEFAULT_PRODUCTION_RUN_ID = "lgbm_full_v1_no_p_play_20251202"
 DEFAULT_PRODUCTION_ROOT = Path("artifacts/minutes_lgbm")
 DEFAULT_PRODUCTION_CONFIG = Path("config/minutes_current_run.json")
 

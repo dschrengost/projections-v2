@@ -283,6 +283,11 @@ def main(
         help="Feature set to use: stage0, stage1 (minutes_pred), stage2_tracking (minutes_pred + tracking roles), or stage3_context (tracking + pace/injury context).",
         case_sensitive=False,
     ),
+    allow_minutes_actual_fallback: bool = typer.Option(
+        True,
+        "--allow-minutes-actual-fallback/--no-minutes-actual-fallback",
+        help="When using predicted minutes, fall back to minutes_actual if minutes_pred_* are missing.",
+    ),
 ) -> None:
     root = data_root or data_path()
     start = pd.Timestamp(start_date).normalize() if start_date else None
@@ -308,7 +313,7 @@ def main(
         raise typer.BadParameter(f"feature_set must be one of {list(feature_map.keys())}")
     feature_cols = feature_map[feature_set_key]
     use_predicted_minutes = feature_set_key in {"stage1", "stage2_tracking", "stage3_context"}
-    fallback_minutes = use_predicted_minutes
+    fallback_minutes = use_predicted_minutes and allow_minutes_actual_fallback
     use_tracking_features = feature_set_key in {"stage2_tracking", "stage3_context"}
 
     typer.echo(

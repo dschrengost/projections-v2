@@ -94,10 +94,13 @@ def score_with_bundle(df: pd.DataFrame, bundle: dict[str, Any]) -> pd.DataFrame:
     if play_prob_artifacts is not None:
         play_prob = ml.predict_play_probability(play_prob_artifacts, feature_matrix)
         working["play_prob"] = play_prob
-        working = ml.apply_play_probability_mixture(working, play_prob)
-        working["minutes_expected_p50"] = working["minutes_p50_cond"] * working["play_prob"]
     else:
-        working["minutes_expected_p50"] = np.nan
+        working["play_prob"] = np.ones(len(working), dtype=float)
+    # p_play mixing removed: minutes quantiles are conditional minutes, not probability-weighted.
+    working["minutes_p10_uncond"] = working["minutes_p10"]
+    working["minutes_p50_uncond"] = working["minutes_p50"]
+    working["minutes_p90_uncond"] = working["minutes_p90"]
+    working["minutes_expected_p50"] = working["minutes_p50"]
     return working
 
 

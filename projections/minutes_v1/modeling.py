@@ -165,7 +165,11 @@ def train_minutes_quickstart_models(
     """End-to-end training for the Quick Start spec."""
 
     if feature_cols is None:
-        feature_columns = infer_feature_columns(df, target_col=target_col)
+        feature_columns = infer_feature_columns(
+            df,
+            target_col=target_col,
+            excluded={"prior_play_prob", "play_prob", "play_probability", "p_play"},
+        )
     else:
         feature_columns = list(feature_cols)
     if not 0 < calibration_size < 0.5:

@@ -1,6 +1,6 @@
 run_id: minutes_archetype_full_20251115
 data_root: data
-artifact_root: artifacts/minutes_v1
+artifact_root: artifacts/minutes_lgbm
 train_start: 2022-10-01T00:00:00+00:00
 train_end: 2025-02-28T23:59:59+00:00
 cal_start: 2025-03-01T00:00:00+00:00
@@ -16,3 +16,5 @@ playable_winkler_baseline: 21.5
 playable_winkler_tolerance: 1.0
 allow_guard_failure: true
 tolerance_relaxed: true
+enable_play_prob_head: true
+enable_play_prob_mixing: false

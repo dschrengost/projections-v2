@@ -218,61 +218,85 @@ def main(
     )
 
     written_frames: list[pd.DataFrame] = []
-    try:
-        score_minutes_v1.score_minutes_range_to_parquet(
-            min_day,
-            max_day,
-            features_root=features_root,
-            features_path=None,
-            bundle_dir=resolved_bundle_dir,
-            bundle_config=score_minutes_v1.DEFAULT_BUNDLE_CONFIG,
-            artifact_root=out_root,
-            injuries_root=injuries_root,
-            schedule_root=schedule_root,
-            limit_rows=None,
-            mode="historical",
-            run_id=None,
-            live_features_root=score_minutes_v1.DEFAULT_LIVE_FEATURES_ROOT,
-            minutes_output="both",
-            starter_priors_path=score_minutes_v1.DEFAULT_STARTER_PRIORS,
-            starter_history_path=score_minutes_v1.DEFAULT_STARTER_HISTORY,
-            promotion_config=score_minutes_v1.DEFAULT_PROMOTION_CONFIG,
-            promotion_prior_enabled=True,
-            promotion_prior_debug=False,
-            reconcile_team_minutes="none",
-            reconcile_config=score_minutes_v1.DEFAULT_RECONCILE_CONFIG,
-            reconcile_debug=False,
-            prediction_logs_root=score_minutes_v1.DEFAULT_PREDICTION_LOGS_ROOT,
-            disable_play_prob=False,
-            target_dates=set(target_days),
-            debug_describe=debug_describe if debug_describe is not None else (len(target_days) == 1),
-        )
-        for day in target_days:
-            day_path = out_root / day.isoformat() / score_minutes_v1.OUTPUT_FILENAME
-            if not day_path.exists():
-                typer.echo(f"[backfill] warning: expected output missing at {day_path}", err=True)
-                continue
-            day_df = pd.read_parquet(day_path)
-            _mirror_partition(day_df, out_root, day)
-            written_frames.append(day_df)
-    except Exception as exc:  # noqa: BLE001
-        typer.echo(
-            f"[backfill] scoring failed ({exc}); attempting fallback copy from daily artifacts.",
-            err=True,
-        )
-        for day in target_days:
+    scored_dates = 0
+    fallback_dates = 0
+    desert_dates = 0
+    for day in target_days:
+        try:
+            score_minutes_v1.score_minutes_range_to_parquet(
+                day,
+                day,
+                features_root=features_root,
+                features_path=None,
+                bundle_dir=resolved_bundle_dir,
+                bundle_config=score_minutes_v1.DEFAULT_BUNDLE_CONFIG,
+                artifact_root=out_root,
+                injuries_root=injuries_root,
+                schedule_root=schedule_root,
+                limit_rows=None,
+                mode="historical",
+                run_id=None,
+                live_features_root=score_minutes_v1.DEFAULT_LIVE_FEATURES_ROOT,
+                minutes_output="both",
+                starter_priors_path=score_minutes_v1.DEFAULT_STARTER_PRIORS,
+                starter_history_path=score_minutes_v1.DEFAULT_STARTER_HISTORY,
+                promotion_config=score_minutes_v1.DEFAULT_PROMOTION_CONFIG,
+                promotion_prior_enabled=True,
+                promotion_prior_debug=False,
+                reconcile_team_minutes="none",
+                reconcile_config=score_minutes_v1.DEFAULT_RECONCILE_CONFIG,
+                reconcile_debug=False,
+                prediction_logs_root=score_minutes_v1.DEFAULT_PREDICTION_LOGS_ROOT,
+                disable_play_prob=False,
+                target_dates={day},
+                debug_describe=debug_describe if debug_describe is not None else (len(target_days) == 1),
+            )
+            scored_dates += 1
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(
+                f"[backfill] {day}: scoring failed ({exc}); attempting fallback copy from daily artifacts.",
+                err=True,
+            )
             fallback_df = _copy_daily_minutes_into_gold(day, out_root)
             if fallback_df is not None:
                 typer.echo(
                     f"[backfill] {day}: mirrored minutes from {score_minutes_v1.DEFAULT_DAILY_ROOT / day.isoformat()} into gold."
                 )
                 written_frames.append(fallback_df)
-        if not written_frames:
-            raise
+                fallback_dates += 1
+                continue
+            typer.echo(f"[backfill] {day}: no daily artifacts found; marking as missing.", err=True)
+            desert_dates += 1
+            continue
+
+        day_path = out_root / day.isoformat() / score_minutes_v1.OUTPUT_FILENAME
+        if not day_path.exists():
+            alt_path = out_root / f"game_date={day.isoformat()}" / score_minutes_v1.OUTPUT_FILENAME
+            day_path = alt_path if alt_path.exists() else day_path
+        if not day_path.exists():
+            fallback_df = _copy_daily_minutes_into_gold(day, out_root)
+            if fallback_df is not None:
+                typer.echo(
+                    f"[backfill] {day}: scoring succeeded but file missing; mirrored minutes from daily artifacts."
+                )
+                written_frames.append(fallback_df)
+                fallback_dates += 1
+                continue
+            typer.echo(
+                f"[backfill] {day}: scoring succeeded but no output file and no fallback available; marking as missing.",
+                err=True,
+            )
+            desert_dates += 1
+            continue
+
+        day_df = pd.read_parquet(day_path)
+        _mirror_partition(day_df, out_root, day)
+        written_frames.append(day_df)
 
     typer.echo(
         f"[backfill] complete. dates_scored={len(target_days)} written={len(written_frames)} "
-        f"skipped_existing={skipped_existing} skipped_desert={skipped_desert} overwritten={overwritten}"
+        f"skipped_existing={skipped_existing} skipped_desert={skipped_desert} overwritten={overwritten} "
+        f"scored_dates={scored_dates} mirrored_fallback={fallback_dates} missing={desert_dates}"
     )
     if written_frames:
         combined = pd.concat(written_frames, ignore_index=True)

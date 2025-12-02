@@ -21,7 +21,7 @@ from projections import paths
 from projections.labels import derive_starter_flag_labels
 from projections.minutes_v1 import modeling
 from projections.minutes_v1.config import load_scoring_config
-from projections.minutes_v1.production import load_production_minutes_bundle
+from projections.minutes_v1.production import DEFAULT_PRODUCTION_ROOT, load_production_minutes_bundle
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.minutes_v1.logs import prediction_logs_base
 from projections.minutes_v1.promotion_calibrator import (
@@ -43,7 +43,6 @@ from projections.minutes_v1.starter_flags import (
 from projections.models.minutes_lgbm import (
     _filter_out_players,
     apply_conformal,
-    apply_play_probability_mixture,
     predict_play_probability,
 )
 
@@ -108,6 +107,15 @@ def _iter_days(start: date, end: date) -> Iterable[date]:
         current += timedelta(days=1)
 
 
+def _attach_unconditional_minutes(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure unconditional minutes columns mirror the conditional quantiles."""
+
+    for base in ("minutes_p10", "minutes_p50", "minutes_p90"):
+        if base in df.columns:
+            df[f"{base}_uncond"] = df[base]
+    return df
+
+
 def _make_reconcile_debugger(
     enabled: bool,
 ) -> Callable[[TeamReconcileDebug], None] | None:
@@ -169,7 +177,21 @@ def _load_meta(bundle_dir: Path) -> dict:
 def _resolve_bundle_artifacts(
     bundle_dir: Path | None,
     config_path: Path,
+    *,
+    override_run_id: str | None = None,
+    artifact_root: Path = DEFAULT_PRODUCTION_ROOT,
 ) -> tuple[dict, Path, dict, str]:
+    if override_run_id is not None and bundle_dir is not None:
+        raise ValueError("Provide only one of bundle_dir or override_run_id.")
+    if override_run_id is not None:
+        resolved_root = artifact_root.expanduser().resolve()
+        candidate_dir = resolved_root / override_run_id
+        if not candidate_dir.exists():
+            raise FileNotFoundError(f"Bundle directory not found for override run_id at {candidate_dir}")
+        bundle = _load_bundle(candidate_dir)
+        model_meta = _load_meta(candidate_dir)
+        return bundle, candidate_dir, model_meta, override_run_id
+
     if bundle_dir is not None:
         resolved = bundle_dir.expanduser()
         if not resolved.exists():
@@ -432,7 +454,8 @@ def _score_rows(
     df: pd.DataFrame,
     bundle: dict,
     *,
-    disable_play_prob: bool = False,
+    enable_play_prob_head: bool = True,
+    enable_play_prob_mixing: bool = False,
     promotion_ctx: PromotionPriorContext | None = None,
     promotion_debug: bool = False,
 ) -> pd.DataFrame:
@@ -478,14 +501,21 @@ def _score_rows(
     working["p50_cond"] = working["minutes_p50"]
     working["p90_cond"] = working["minutes_p90"]
 
-    play_prob_artifacts = None if disable_play_prob else bundle.get("play_probability")
+    bundle_play_prob_enabled = bool(bundle.get("play_prob_enabled", True))
+    play_prob_artifacts = (
+        bundle.get("play_probability") if (enable_play_prob_head and bundle_play_prob_enabled) else None
+    )
     if play_prob_artifacts is not None:
         play_prob = predict_play_probability(play_prob_artifacts, feature_matrix)
     else:
         play_prob = np.ones(len(working), dtype=float)
     working["play_prob"] = play_prob
-    if not disable_play_prob:
-        working = apply_play_probability_mixture(working, play_prob)
+    if enable_play_prob_mixing:
+        typer.echo(
+            "play_prob mixing flag enabled for scoring (lab only); conditional minutes remain unchanged.",
+            err=True,
+        )
+    # p_play mixing removed: minutes quantiles represent minutes | plays, not availability-weighted minutes.
 
     if "pos_bucket" not in working.columns:
         base_series = working.get("archetype")
@@ -538,6 +568,7 @@ def _score_rows(
     else:
         working["is_starter"] = 0
         typer.echo("[minutes] warning: is_starter not found in features; defaulting to 0", err=True)
+    working = _attach_unconditional_minutes(working)
     return working
 
 
@@ -824,6 +855,7 @@ def score_minutes_range_to_parquet(
     features_root: Path = DEFAULT_FEATURES_ROOT,
     features_path: Path | None = None,
     bundle_dir: Path | None = None,
+    override_run_id: str | None = None,
     bundle_config: Path = DEFAULT_BUNDLE_CONFIG,
     artifact_root: Path = DEFAULT_DAILY_ROOT,
     injuries_root: Path = DEFAULT_INJURIES_ROOT,
@@ -842,6 +874,8 @@ def score_minutes_range_to_parquet(
     reconcile_config: Path = DEFAULT_RECONCILE_CONFIG,
     reconcile_debug: bool = False,
     prediction_logs_root: Path = DEFAULT_PREDICTION_LOGS_ROOT,
+    enable_play_prob_head: bool = True,
+    enable_play_prob_mixing: bool = False,
     disable_play_prob: bool = False,
     target_dates: Optional[Set[date]] = None,
     debug_describe: bool | None = None,
@@ -868,7 +902,9 @@ def score_minutes_range_to_parquet(
     )
 
     bundle, resolved_bundle_dir, model_meta, model_run_id = _resolve_bundle_artifacts(
-        bundle_dir, bundle_config
+        bundle_dir,
+        bundle_config,
+        override_run_id=override_run_id,
     )
 
     try:
@@ -890,10 +926,12 @@ def score_minutes_range_to_parquet(
         raise ValueError("No eligible rows found for requested date range.")
     if limit_rows is not None:
         prepared = prepared.head(limit_rows).copy()
+    play_prob_enabled = enable_play_prob_head and not disable_play_prob
     scored = _score_rows(
         prepared,
         bundle,
-        disable_play_prob=disable_play_prob,
+        enable_play_prob_head=play_prob_enabled,
+        enable_play_prob_mixing=enable_play_prob_mixing,
         promotion_ctx=promotion_ctx,
         promotion_debug=promotion_prior_debug,
     )
@@ -939,17 +977,14 @@ def score_minutes_range_to_parquet(
         debug_hook = _make_reconcile_debugger(reconcile_debug)
         scored = reconcile_minutes_p50_all(scored, reconcile_cfg, debug_hook=debug_hook)
         if "play_prob" not in scored.columns:
-            raise ValueError("play_prob column missing after reconciliation.")
-        scored = apply_play_probability_mixture(
-            scored,
-            scored["play_prob"].to_numpy(dtype=float),
-        )
+            scored["play_prob"] = 1.0
 
     if should_debug and "minutes_p50" in scored.columns:
         for day in sorted(set(scored["game_date"].tolist())):
             day_slice = scored.loc[scored["game_date"] == day]
             typer.echo(f"[minutes_debug] {day} reconciled minutes_p50 describe():")
             typer.echo(day_slice["minutes_p50"].describe().to_string())
+    scored = _attach_unconditional_minutes(scored)
 
     for day in _iter_days(start_day, end_day):
         if target_dates is not None and day not in target_dates:
@@ -998,6 +1033,11 @@ def main(
         None,
         "--bundle-dir",
         help="Explicit path to the trained minutes bundle.",
+    ),
+    override_run_id: str | None = typer.Option(
+        None,
+        "--override-run-id",
+        help="Load a bundle by run_id under artifacts/minutes_lgbm without changing production pointer.",
     ),
     bundle_config: Path = typer.Option(
         DEFAULT_BUNDLE_CONFIG,
@@ -1096,6 +1136,17 @@ def main(
         "--prediction-logs-root",
         help="Root directory for long-term prediction logs.",
     ),
+    enable_play_prob_head: bool = typer.Option(
+        True,
+        "--enable-play-prob-head/--disable-play-prob-head",
+        help="Use the play probability head if present in the bundle.",
+    ),
+    enable_play_prob_mixing: bool = typer.Option(
+        False,
+        "--enable-play-prob-mixing",
+        help="(lab only) allow play_prob mixing for unconditional columns; remains off for conditional semantics.",
+        is_flag=True,
+    ),
     disable_play_prob: bool = typer.Option(
         False,
         "--disable-play-prob",
@@ -1109,6 +1160,7 @@ def main(
         "features_root": features_root,
         "features_path": features_path,
         "bundle_dir": bundle_dir,
+        "override_run_id": override_run_id,
         "bundle_config": bundle_config,
         "artifact_root": artifact_root,
         "injuries_root": injuries_root,
@@ -1127,6 +1179,8 @@ def main(
         "reconcile_config": reconcile_config,
         "reconcile_debug": reconcile_debug,
         "prediction_logs_root": prediction_logs_root,
+        "enable_play_prob_head": enable_play_prob_head,
+        "enable_play_prob_mixing": enable_play_prob_mixing,
         "disable_play_prob": disable_play_prob,
     }
     resolved_params = _apply_scoring_overrides(ctx, cli_params, config_path)
@@ -1135,6 +1189,7 @@ def main(
     features_root = resolved_params["features_root"]
     features_path = resolved_params["features_path"]
     bundle_dir = resolved_params["bundle_dir"]
+    override_run_id = resolved_params.get("override_run_id")
     bundle_config = resolved_params["bundle_config"]
     artifact_root = resolved_params["artifact_root"]
     injuries_root = resolved_params["injuries_root"]
@@ -1154,7 +1209,10 @@ def main(
     reconcile_config = resolved_params["reconcile_config"]
     reconcile_debug = resolved_params["reconcile_debug"]
     prediction_logs_root = cli_params.get("prediction_logs_root", DEFAULT_PREDICTION_LOGS_ROOT)
+    enable_play_prob_head = resolved_params.get("enable_play_prob_head", True)
+    enable_play_prob_mixing = resolved_params.get("enable_play_prob_mixing", False)
     disable_play_prob = resolved_params.get("disable_play_prob", False)
+    play_prob_enabled = enable_play_prob_head and not disable_play_prob
 
     if date is None:
         raise typer.BadParameter("--date is required (set via CLI or config file).")
@@ -1166,7 +1224,9 @@ def main(
 
     try:
         bundle, resolved_bundle_dir, model_meta, model_run_id = _resolve_bundle_artifacts(
-            bundle_dir, bundle_config
+            bundle_dir,
+            bundle_config,
+            override_run_id=override_run_id,
         )
     except FileNotFoundError as exc:
         typer.echo(f"[minutes] ERROR: {exc}", err=True)
@@ -1244,7 +1304,8 @@ def main(
     scored = _score_rows(
         prepared,
         bundle,
-        disable_play_prob=disable_play_prob,
+        enable_play_prob_head=play_prob_enabled,
+        enable_play_prob_mixing=enable_play_prob_mixing,
         promotion_ctx=promotion_ctx,
         promotion_debug=promotion_prior_debug,
     )
@@ -1282,11 +1343,8 @@ def main(
         debug_hook = _make_reconcile_debugger(reconcile_debug)
         scored = reconcile_minutes_p50_all(scored, reconcile_cfg, debug_hook=debug_hook)
         if "play_prob" not in scored.columns:
-            raise ValueError("play_prob column missing after reconciliation.")
-        scored = apply_play_probability_mixture(
-            scored,
-            scored["play_prob"].to_numpy(dtype=float),
-        )
+            scored["play_prob"] = 1.0
+    scored = _attach_unconditional_minutes(scored)
 
     # Log predictions (Phase 3 Hardening)
     if normalized_mode == "live":
