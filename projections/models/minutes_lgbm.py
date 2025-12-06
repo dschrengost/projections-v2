@@ -32,6 +32,13 @@ from projections.minutes_v1.datasets import (
     load_feature_frame,
     write_ids_csv,
 )
+from projections.minutes_v1.validation import sample_anti_leak_check
+from projections.validation.data_quality import validate_feature_ranges
+from projections.registry.manifest import (
+    load_manifest,
+    save_manifest,
+    register_model,
+)
 
 
 UTC = timezone.utc
@@ -192,6 +199,21 @@ def _load_feature_frame_with_schema(
         feature_df,
         [target_col, "game_date", "feature_as_of_ts", *KEY_COLUMNS],
     )
+
+    # Anti-leak validation: ensure no feature timestamps exceed tip time
+    if "tip_ts" in feature_df.columns:
+        sample_anti_leak_check(
+            feature_df,
+            tip_col="tip_ts",
+            sample_size=min(2000, len(feature_df)),
+        )
+        typer.echo("[validation] Anti-leak check passed")
+
+    # Data quality validation: check feature value ranges
+    violations = validate_feature_ranges(feature_df, strict=False)
+    if violations:
+        typer.echo(f"[validation] Data quality warnings: {len(violations)} issues detected", err=True)
+
     # NOTE: minutes_v1 is modeling minutes | plays; exclude any probability-to-play features.
     feature_columns = modeling.infer_feature_columns(
         feature_df,
@@ -1742,6 +1764,32 @@ def main(
         f"P10={val_p10_cov:.3f}, "
         f"P90={val_p90_cov:.3f}. Artifacts: {run_dir}"
     )
+
+    # Auto-register model in registry
+    try:
+        manifest = load_manifest()
+        version = register_model(
+            manifest,
+            model_name="minutes_v1_lgbm",
+            version=run_id,
+            run_id=run_id,
+            artifact_path=str(run_dir),
+            training_start=windows_meta["train"]["start"],
+            training_end=windows_meta["train"]["end"],
+            feature_schema_version="v1",
+            feature_hash=feature_hash,
+            metrics={
+                "val_mae": val_mae,
+                "val_p10_coverage": val_p10_cov,
+                "val_p90_coverage": val_p90_cov,
+                "val_winkler": winkler_mean,
+            },
+            description=f"Train {windows_meta['train']['start'][:10]} to {windows_meta['train']['end'][:10]}",
+        )
+        save_manifest(manifest)
+        typer.echo(f"[registry] Registered minutes_v1_lgbm v{run_id} (stage=dev)")
+    except Exception as e:
+        typer.echo(f"[registry] Warning: Failed to register model: {e}", err=True)
 
 
 if __name__ == "__main__":  # pragma: no cover

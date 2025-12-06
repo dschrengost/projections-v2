@@ -1,0 +1,11 @@
+[Unit]
+Description=Run gold features build daily after games conclude
+
+[Timer]
+OnCalendar=*-*-* 10:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=gold-features-daily.service
+
+[Install]
+WantedBy=timers.target

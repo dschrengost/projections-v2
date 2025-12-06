@@ -35,6 +35,10 @@ from projections.minutes_v1.reconcile import (
     load_reconcile_config,
     reconcile_minutes_p50_all,
 )
+from projections.minutes_v1.upside_adjustment import (
+    UpsideConfig,
+    apply_upside_adjustment,
+)
 from projections.minutes_v1.starter_flags import (
     StarterFlagResult,
     derive_starter_flag_label,
@@ -877,6 +881,7 @@ def score_minutes_range_to_parquet(
     enable_play_prob_head: bool = True,
     enable_play_prob_mixing: bool = False,
     disable_play_prob: bool = False,
+    enable_upside_adjustment: bool = True,
     target_dates: Optional[Set[date]] = None,
     debug_describe: bool | None = None,
 ) -> pd.DataFrame:
@@ -966,11 +971,22 @@ def score_minutes_range_to_parquet(
     if player_lookup or not team_meta.empty:
         scored = _annotate_metadata(scored, player_lookup=player_lookup, team_meta=team_meta)
 
+    # Apply upside adjustment before reconciliation (for DFS Monte Carlo coverage)
+    if enable_upside_adjustment:
+        upside_cfg = UpsideConfig()
+        scored = apply_upside_adjustment(scored, config=upside_cfg)
+        # Replace raw columns with adjusted columns for downstream
+        if "minutes_p10_adj" in scored.columns:
+            scored["minutes_p10"] = scored["minutes_p10_adj"]
+            scored["minutes_p50"] = scored["minutes_p50_adj"]
+            scored["minutes_p90"] = scored["minutes_p90_adj"]
+        typer.echo("[upside] Applied upside adjustment for Monte Carlo coverage.", err=True)
+
     normalized_reconcile_mode = reconcile_team_minutes.lower()
     if normalized_reconcile_mode != "none":
         if normalized_reconcile_mode == "p50_and_tails":
             typer.echo(
-                "[l2-reconcile] Tail reconciliation is not yet implemented; clamping only.",
+                "[l2-reconcile] Applying reconciliation with tail clamping.",
                 err=True,
             )
         reconcile_cfg = load_reconcile_config(reconcile_config)
@@ -1153,6 +1169,11 @@ def main(
         help="Skip play probability usage; emit only conditional minutes (uncond columns unchanged).",
         is_flag=True,
     ),
+    enable_upside_adjustment: bool = typer.Option(
+        True,
+        "--enable-upside-adjustment/--disable-upside-adjustment",
+        help="Apply upside adjustment to widen P90 for Monte Carlo (improves DFS coverage).",
+    ),
 ) -> None:
     cli_params: dict[str, Any] = {
         "date": date,
@@ -1332,11 +1353,21 @@ def main(
     if player_lookup or not team_meta.empty:
         scored = _annotate_metadata(scored, player_lookup=player_lookup, team_meta=team_meta)
 
+    # Apply upside adjustment before reconciliation (for DFS Monte Carlo coverage)
+    if enable_upside_adjustment:
+        upside_cfg = UpsideConfig()
+        scored = apply_upside_adjustment(scored, config=upside_cfg)
+        if "minutes_p10_adj" in scored.columns:
+            scored["minutes_p10"] = scored["minutes_p10_adj"]
+            scored["minutes_p50"] = scored["minutes_p50_adj"]
+            scored["minutes_p90"] = scored["minutes_p90_adj"]
+        typer.echo("[upside] Applied upside adjustment for Monte Carlo coverage.", err=True)
+
     normalized_reconcile_mode = reconcile_team_minutes.lower()
     if normalized_reconcile_mode != "none":
         if normalized_reconcile_mode == "p50_and_tails":
             typer.echo(
-                "[l2-reconcile] Tail reconciliation is not yet implemented; clamping only.",
+                "[l2-reconcile] Applying reconciliation with tail clamping.",
                 err=True,
             )
         reconcile_cfg = load_reconcile_config(reconcile_config)

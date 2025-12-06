@@ -8,9 +8,16 @@ MONTH="${LIVE_MONTH:-$(date +%-m)}"
 TIP_LEAD_MINUTES="${LIVE_TIP_LEAD_MINUTES:-60}"   # start scoring this many minutes before first tip
 TIP_TAIL_MINUTES="${LIVE_TIP_TAIL_MINUTES:-180}"  # keep running this many minutes after last tip
 LOCK_BUFFER_MINUTES="${LIVE_LOCK_BUFFER_MINUTES:-15}"
-RECONCILE_MODE="${LIVE_RECONCILE_MODE:-none}"   # default off per operator request
+# Read reconcile mode from config JSON if present, else fall back to env var or default
+CONFIG_RECONCILE=$(jq -r '.reconcile_team_minutes // empty' config/minutes_current_run.json 2>/dev/null || true)
+RECONCILE_MODE="${LIVE_RECONCILE_MODE:-${CONFIG_RECONCILE:-p50}}"
 MINUTES_OUTPUT_MODE="${LIVE_MINUTES_OUTPUT:-conditional}"
-DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-0}" # set to 1 to bypass tip-window gating
+SIM_PROFILE="${LIVE_SIM_PROFILE:-rates_v0}"
+SIM_WORLDS="${LIVE_SIM_WORLDS:-1000}"
+RUN_SIM="${LIVE_RUN_SIM:-1}"
+DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-1}" # default to bypass tip-window gating
+
+export PROJECTIONS_DATA_ROOT="${DATA_ROOT}"
 
 cd /home/daniel/projects/projections-v2
 
@@ -121,13 +128,47 @@ fi
 /home/daniel/.local/bin/uv run python -m projections.cli.score_minutes_v1 "${SCORE_ARGS[@]}"
 
 echo "[live] scoring FPTS for ${START_DATE} using production bundle (minutes_run=${LIVE_RUN_ID})..."
+
+# Build rates features from minutes features + season aggregates
+echo "[live] Building rates features..."
+/home/daniel/.local/bin/uv run python -m projections.cli.build_rates_features_live \
+  --date "${START_DATE}" \
+  --run-id "${LIVE_RUN_ID}" \
+  --data-root "${DATA_ROOT}" \
+  --no-strict
+
+# Score rates_v1 predictions for live slate (required for FPTS).
+/home/daniel/.local/bin/uv run python -m projections.cli.score_rates_live \
+  --date "${START_DATE}" \
+  --run-id "${LIVE_RUN_ID}" \
+  --features-root "${DATA_ROOT}/live/features_rates_v1" \
+  --out-root "${DATA_ROOT}/gold/rates_v1_live" \
+  --no-strict
+
 if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_fpts_v1 \
   --date "${START_DATE}" \
   --run-id "${LIVE_RUN_ID}" \
-  --data-root "${DATA_ROOT}"
+  --data-root "${DATA_ROOT}" \
+  --rates-live-root "${DATA_ROOT}/gold/rates_v1_live" \
+  --use-live-rates
 then
   echo "[live] warning: FPTS scoring failed; continuing without FPTS outputs." >&2
 fi
 
+if [[ "${RUN_SIM}" == "1" ]]; then
+  echo "[live] Running sim_v2 worlds + aggregation (profile=${SIM_PROFILE}, worlds=${SIM_WORLDS})..."
+  if ! /home/daniel/.local/bin/uv run python -m scripts.sim_v2.run_sim_live \
+    --run-date "${START_DATE}" \
+    --profile-name "${SIM_PROFILE}" \
+    --num-worlds "${SIM_WORLDS}" \
+    --data-root "${DATA_ROOT}" \
+    --minutes-run-id "${LIVE_RUN_ID}"
+  then
+    echo "[live] warning: sim_v2 live run failed; continuing without sim_v2 projections." >&2
+  fi
+else
+  echo "[live] Skipping sim_v2 live run (LIVE_RUN_SIM=${RUN_SIM})."
+fi
+
 echo "[live] Running health checks..."
-/home/daniel/.local/bin/uv run python -m projections.cli.check_health
+/home/daniel/.local/bin/uv run python -m projections.cli.check_health check-rates-sanity --date "${START_DATE}"

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from projections.fpts_v2.current import _load_current_run_id as load_current_fpts_run_id
 from projections.minutes_v1.production import resolve_production_run_dir
@@ -29,6 +29,21 @@ class SimV2Profile:
     min_play_prob: float
     team_factor_sigma: float
     team_factor_gamma: float
+    enforce_team_240: bool
+    use_efficiency_scoring: bool = True
+    rates_sigma_scale: float = 1.0
+    team_sigma_scale: float = 1.0
+    player_sigma_scale: float = 1.0
+    mean_source: str = "fpts"
+    minutes_source: Optional[str] = None
+    rates_source: Optional[str] = None
+    noise: dict[str, Any] = field(default_factory=dict)
+    worlds_n: Optional[int] = None
+    worlds_batch_size: Optional[int] = None
+    # Game script adjustments
+    use_game_scripts: bool = False
+    game_script_margin_std: float = 13.4
+    game_script_spread_coef: float = -0.726
 
 
 def _read_json(path: Path) -> dict:
@@ -60,21 +75,44 @@ def load_sim_v2_profile(
         raise KeyError(f"Profile '{profile}' not found in {path}")
 
     fpts_run_id = config.get("fpts_run_id") or load_current_fpts_run_id()
-    rates_run_id = config.get("rates_run_id") or get_rates_current_run_id()
+    mean_source = str(config.get("mean_source", "fpts"))
+    # For rates mean_source, don't auto-resolve rates_run_id - it's determined per-date from rates_v1_live
+    if mean_source == "rates":
+        rates_run_id = config.get("rates_run_id")  # Keep as None if not specified
+    else:
+        rates_run_id = config.get("rates_run_id") or get_rates_current_run_id()
     minutes_run_id = _resolve_minutes_run_id(config.get("minutes_run_id"))
 
     use_rates_noise = bool(config.get("rates_noise", {}).get("enabled", True))
     rates_noise_split = config.get("rates_noise", {}).get("split", "val")
+    rates_sigma_scale = float(config.get("rates_sigma_scale", 1.0))
+    team_sigma_scale = float(config.get("team_sigma_scale", 1.0))
+    player_sigma_scale = float(config.get("player_sigma_scale", 1.0))
 
     use_minutes_noise = bool(config.get("minutes_noise", {}).get("enabled", True))
     minutes_sigma_min = float(config.get("minutes_noise", {}).get("sigma_min", 1.0))
 
-    worlds_per_chunk = int(config.get("worlds_per_chunk", 2000))
+    worlds_cfg = config.get("worlds", {}) or {}
+    worlds_n = worlds_cfg.get("n_worlds")
+    worlds_batch_size_raw = worlds_cfg.get("batch_size")
+    worlds_batch_size = int(worlds_batch_size_raw) if worlds_batch_size_raw is not None else None
+    worlds_per_chunk = int(config.get("worlds_per_chunk", worlds_batch_size or 2000))
     seed = config.get("seed")
     seed = int(seed) if seed is not None else None
     min_play_prob = float(config.get("min_play_prob", 0.05))
     team_factor_sigma = float(config.get("team_factor_sigma", 0.0))
     team_factor_gamma = float(config.get("team_factor_gamma", 1.0))
+    enforce_team_240 = bool(config.get("enforce_team_240", False))
+    minutes_source = config.get("minutes_source")
+    rates_source = config.get("rates_source")
+    noise_cfg = config.get("noise", {}) or {}
+    use_efficiency_scoring = bool(config.get("efficiency_scoring", True))
+    
+    # Game script config
+    game_script_cfg = config.get("game_script", {}) or {}
+    use_game_scripts = bool(game_script_cfg.get("enabled", False))
+    game_script_margin_std = float(game_script_cfg.get("margin_std", 13.4))
+    game_script_spread_coef = float(game_script_cfg.get("spread_coef", -0.726))
 
     return SimV2Profile(
         name=profile,
@@ -83,6 +121,9 @@ def load_sim_v2_profile(
         minutes_run_id=minutes_run_id,
         use_rates_noise=use_rates_noise,
         rates_noise_split=str(rates_noise_split) if rates_noise_split is not None else None,
+        rates_sigma_scale=rates_sigma_scale,
+        team_sigma_scale=team_sigma_scale,
+        player_sigma_scale=player_sigma_scale,
         use_minutes_noise=use_minutes_noise,
         minutes_sigma_min=minutes_sigma_min,
         worlds_per_chunk=worlds_per_chunk,
@@ -90,6 +131,17 @@ def load_sim_v2_profile(
         min_play_prob=min_play_prob,
         team_factor_sigma=team_factor_sigma,
         team_factor_gamma=team_factor_gamma,
+        enforce_team_240=enforce_team_240,
+        use_efficiency_scoring=use_efficiency_scoring,
+        mean_source=mean_source,
+        minutes_source=str(minutes_source) if minutes_source is not None else None,
+        rates_source=str(rates_source) if rates_source is not None else None,
+        noise=noise_cfg,
+        worlds_n=int(worlds_n) if worlds_n is not None else None,
+        worlds_batch_size=worlds_batch_size,
+        use_game_scripts=use_game_scripts,
+        game_script_margin_std=game_script_margin_std,
+        game_script_spread_coef=game_script_spread_coef,
     )
 
 

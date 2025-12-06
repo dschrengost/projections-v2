@@ -22,14 +22,16 @@ from projections.fpts_v1.production import (
     load_production_fpts_bundle,
     predict_fpts,
 )
-from projections.rates_v1.current import load_current_rates_bundle
 from projections.rates_v1.score import predict_rates
+from projections.rates_v1.production import load_production_rates_bundle
 from projections.minutes_v1.pos import canonical_pos_bucket_series
 from projections.pipeline.status import JobStatus, write_status
 
 DEFAULT_MINUTES_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_FEATURES_ROOT = paths.data_path("live", "features_minutes_v1")
 DEFAULT_OUT_ROOT = paths.data_path("gold", "projections_fpts_v1")
+DEFAULT_RATES_LIVE_ROOT = paths.data_path("gold", "rates_v1_live")
+DEFAULT_RATES_TRAIN_ROOT = paths.data_path("gold", "rates_training_base")
 DEFAULT_PRODUCTION_CONFIG = Path("config/fpts_current_run.json")
 MINUTES_FILENAME = "minutes.parquet"
 MINUTES_SUMMARY = "summary.json"
@@ -144,9 +146,11 @@ def _nan_rate(df: pd.DataFrame, cols: list[str]) -> float | None:
 def _attach_rate_predictions(
     slate_day: date,
     merged: pd.DataFrame,
-    data_root: Path,
     *,
     enabled: bool,
+    require_rates: bool,
+    precomputed_path: Path | None,
+    rates_train_root: Path,
 ) -> pd.DataFrame:
     """Optionally attach rates_v1 predictions needed by fpts_v2 bundles.
 
@@ -158,26 +162,62 @@ def _attach_rate_predictions(
     if not enabled:
         return merged
 
+    # Live path: use precomputed rates predictions if provided.
+    if precomputed_path is not None:
+        if not precomputed_path.exists():
+            msg = f"[fpts-live] missing live rates predictions at {precomputed_path}; {'aborting' if require_rates else 'skipping'}."
+            if require_rates:
+                raise RuntimeError(msg)
+            typer.echo(msg, err=True)
+            return merged
+        rates_df = pd.read_parquet(precomputed_path)
+        if rates_df.empty:
+            msg = f"[fpts-live] live rates predictions empty at {precomputed_path}; {'aborting' if require_rates else 'skipping'}."
+            if require_rates:
+                raise RuntimeError(msg)
+            typer.echo(msg, err=True)
+            return merged
+        required_keys = {"game_id", "player_id", "team_id"}
+        if not required_keys.issubset(rates_df.columns):
+            msg = f"[fpts-live] live rates predictions missing keys {required_keys - set(rates_df.columns)}; {'aborting' if require_rates else 'skipping'}."
+            if require_rates:
+                raise RuntimeError(msg)
+            typer.echo(msg, err=True)
+            return merged
+        pred_cols = [c for c in rates_df.columns if c.startswith("pred_")]
+        if not pred_cols:
+            msg = f"[fpts-live] live rates predictions missing pred_* columns at {precomputed_path}; {'aborting' if require_rates else 'skipping'}."
+            if require_rates:
+                raise RuntimeError(msg)
+            typer.echo(msg, err=True)
+            return merged
+        for key in required_keys:
+            rates_df[key] = pd.to_numeric(rates_df[key], errors="coerce")
+        merged = merged.merge(rates_df, on=["game_id", "player_id", "team_id"], how="left")
+        return merged
+
+    # Historical/eval path: score rates features from training base for the date.
     try:
-        rates_bundle = load_current_rates_bundle()
+        rates_bundle = load_production_rates_bundle()
     except Exception as exc:  # noqa: BLE001
-        typer.echo(f"[fpts-live] warning: unable to load rates bundle ({exc}); skipping rate preds.", err=True)
+        msg = f"[fpts-live] unable to load rates bundle ({exc}); {'aborting' if require_rates else 'skipping'} rate preds."
+        if require_rates:
+            raise RuntimeError(msg)
+        typer.echo("[fpts-live] warning: " + msg, err=True)
         return merged
 
     season = slate_day.year
     rates_path = (
-        data_root
-        / "gold"
-        / "rates_training_base"
+        rates_train_root
         / f"season={season}"
         / f"game_date={slate_day.isoformat()}"
         / "rates_training_base.parquet"
     )
     if not rates_path.exists():
-        typer.echo(
-            f"[fpts-live] warning: missing rates features at {rates_path}; skipping rate preds.",
-            err=True,
-        )
+        msg = f"[fpts-live] missing rates features at {rates_path}; {'aborting' if require_rates else 'skipping'} rate preds."
+        if require_rates:
+            raise RuntimeError(msg)
+        typer.echo(msg, err=True)
         return merged
 
     rates_df = pd.read_parquet(rates_path)
@@ -188,10 +228,10 @@ def _attach_rate_predictions(
 
     missing = [c for c in rates_bundle.feature_cols if c not in rates_df.columns]
     if missing:
-        typer.echo(
-            f"[fpts-live] warning: rates features missing columns {missing}; filling with 0.",
-            err=True,
-        )
+        msg = f"[fpts-live] rates features missing columns {missing}; {'aborting' if require_rates else 'filling with 0.'}"
+        if require_rates:
+            raise RuntimeError(msg)
+        typer.echo(msg, err=True)
         for col in missing:
             rates_df[col] = 0.0
 
@@ -322,6 +362,10 @@ def score_fpts_for_date(
     resolved_features_path: Path | None = None,
     builder: FptsDatasetBuilder,
     quiet: bool = False,
+    require_rates: bool = True,
+    rates_live_root: Path | None = None,
+    use_live_rates: bool = True,
+    rates_train_root: Path | None = None,
 ) -> Path:
     """Score FPTS for a single slate date."""
 
@@ -373,11 +417,21 @@ def score_fpts_for_date(
 
     # Attach rate predictions when using fpts_v2 bundles (total-FPTS head).
     is_fpts_v2 = str(bundle_ctx.run_id).lower().startswith("fpts_v2")
+    precomputed_rates = None
+    if use_live_rates and rates_live_root is not None:
+        precomputed_rates = (
+            rates_live_root
+            / slate_day.isoformat()
+            / f"run={resolved_run}"
+            / "rates.parquet"
+        )
     merged = _attach_rate_predictions(
         slate_day,
         merged,
-        data_root,
         enabled=is_fpts_v2,
+        require_rates=require_rates,
+        precomputed_path=precomputed_rates,
+        rates_train_root=rates_train_root or DEFAULT_RATES_TRAIN_ROOT,
     )
 
     preds = predict_fpts(bundle_ctx.bundle, merged)
@@ -506,6 +560,26 @@ def main(
         "--fpts-artifact-root",
         help="Root directory containing FPTS artifacts (used with --fpts-run-id).",
     ),
+    allow_missing_rates: bool = typer.Option(
+        False,
+        "--allow-missing-rates",
+        help="If set, skip rate preds when rates features are missing instead of failing.",
+    ),
+    rates_live_root: Path = typer.Option(
+        DEFAULT_RATES_LIVE_ROOT,
+        "--rates-live-root",
+        help="Root containing live rates predictions (run=<id>/rates.parquet).",
+    ),
+    rates_train_root: Path = typer.Option(
+        DEFAULT_RATES_TRAIN_ROOT,
+        "--rates-train-root",
+        help="Root containing rates training base partitions (for historical/eval scoring).",
+    ),
+    use_live_rates: bool = typer.Option(
+        True,
+        "--use-live-rates/--use-training-rates",
+        help="Use live rates predictions (default) or fall back to training-base scoring.",
+    ),
 ) -> None:
     slate_day = _normalize_day(date_value)
     minutes_root = minutes_root.expanduser().resolve()
@@ -542,6 +616,10 @@ def main(
                 bundle_ctx=bundle_ctx,
                 data_root=data_root,
                 builder=builder,
+                require_rates=not allow_missing_rates,
+                rates_live_root=rates_live_root,
+                use_live_rates=use_live_rates,
+                rates_train_root=rates_train_root,
             )
         except RuntimeError as exc:
             typer.echo(str(exc), err=True)

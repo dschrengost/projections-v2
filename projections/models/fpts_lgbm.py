@@ -23,6 +23,11 @@ from projections.fpts_v1.eval import (
     evaluate_model_vs_baseline,
 )
 from projections.models.minutes_features import infer_feature_columns
+from projections.registry.manifest import (
+    load_manifest,
+    save_manifest,
+    register_model,
+)
 
 app = typer.Typer(help=__doc__)
 BASELINE_PRIOR_COLUMN = DEFAULT_BASELINE_PRIOR
@@ -367,6 +372,35 @@ def main(
         f"(baseline {val_metrics['baseline_mae_per_min']:.4f}). "
         f"Artifacts: {run_dir}"
     )
+
+    # Auto-register model in registry
+    try:
+        manifest = load_manifest()
+        windows_meta = {
+            "train": train_window.to_metadata(),
+            "cal": cal_window.to_metadata(),
+        }
+        register_model(
+            manifest,
+            model_name="fpts_v1_lgbm",
+            version=run_id,
+            run_id=run_id,
+            artifact_path=str(run_dir),
+            training_start=windows_meta["train"]["start"],
+            training_end=windows_meta["train"]["end"],
+            feature_schema_version="v1",
+            metrics={
+                "val_mae_per_min": val_metrics["model_mae_per_min"],
+                "val_mae_fpts": val_metrics["model_mae_fpts"],
+                "baseline_mae_per_min": val_metrics["baseline_mae_per_min"],
+                "delta_mae_fpts": val_metrics["delta_mae_fpts"],
+            },
+            description=f"Train {windows_meta['train']['start']} to {windows_meta['train']['end']} | {scoring_system}",
+        )
+        save_manifest(manifest)
+        typer.echo(f"[registry] Registered fpts_v1_lgbm v{run_id} (stage=dev)")
+    except Exception as e:
+        typer.echo(f"[registry] Warning: Failed to register model: {e}", err=True)
 
 
 if __name__ == "__main__":  # pragma: no cover

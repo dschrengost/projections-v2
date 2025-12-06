@@ -255,7 +255,13 @@ def load_production_fpts_bundle(
     *,
     config_path: Path | None = None,
 ) -> ProductionFptsBundle:
-    """Load the run marked as production in config/fpts_current_run.json."""
+    """
+    Load the run marked as production in config/fpts_current_run.json.
+
+    The repo default currently pins production to the stage0 total-FPTS run
+    (fpts_v2_stage0_20251129_062655) via that config file; override via env or
+    a different config path if needed.
+    """
 
     run_dir, run_id, scoring = _resolve_production_bundle(config_path)
     if not run_dir.exists():

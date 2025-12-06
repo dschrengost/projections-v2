@@ -21,7 +21,7 @@ from projections.minutes_v1.schemas import (
     validate_with_pandera,
 )
 from projections.minutes_v1.snapshots import select_injury_snapshot
-from projections.minutes_v1.smoke_dataset import (
+from projections.minutes_v1.season_dataset import (
     PlayerResolver,
     TeamResolver,
     _normalize_key,

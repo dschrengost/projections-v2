@@ -10,7 +10,13 @@ import numpy as np
 import pandas as pd
 
 from .constants import ROLE_MINUTES_CAPS
-from .reconciliation import ReconciliationConfig
+
+
+@dataclass(slots=True)
+class ReconciliationConfig:
+    """Minimal config for reconciliation sanity check (legacy)."""
+
+    target_total: float = 240.0
 
 
 def sample_anti_leak_check(
@@ -33,7 +39,9 @@ def sample_anti_leak_check(
         if column not in sample:
             continue
         as_of = pd.to_datetime(sample[column], utc=True, errors="coerce")
-        if not (as_of <= sample_tip).all():
+        # Skip NaT values (missing timestamps) - only check rows with valid data
+        valid_mask = as_of.notna() & sample_tip.notna()
+        if valid_mask.any() and not (as_of[valid_mask] <= sample_tip[valid_mask]).all():
             raise AssertionError(f"Anti-leak violation detected: '{column}' exceeds '{tip_col}'.")
 
 

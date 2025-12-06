@@ -16,7 +16,7 @@ from projections import paths
 from projections.etl.common import load_schedule_data
 from projections.minutes_v1.labels import freeze_boxscore_labels
 from projections.minutes_v1.schemas import BOX_SCORE_LABELS_SCHEMA, enforce_schema, validate_with_pandera
-from projections.minutes_v1.smoke_dataset import _parse_minutes_iso
+from projections.minutes_v1.season_dataset import _parse_minutes_iso
 from scrapers.nba_boxscore import (
     NbaComBoxScoreScraper,
     NbaComGameBoxScore,

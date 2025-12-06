@@ -36,6 +36,21 @@ type PlayerRow = {
   proj_fpts?: number
   fpts_per_min_pred?: number
   scoring_system?: string
+  sim_dk_fpts_mean?: number
+  sim_dk_fpts_std?: number
+  sim_dk_fpts_p05?: number
+  sim_dk_fpts_p10?: number
+  sim_dk_fpts_p25?: number
+  sim_dk_fpts_p50?: number
+  sim_dk_fpts_p75?: number
+  sim_dk_fpts_p95?: number
+  sim_pts_mean?: number
+  sim_reb_mean?: number
+  sim_ast_mean?: number
+  sim_stl_mean?: number
+  sim_blk_mean?: number
+  sim_tov_mean?: number
+  sim_minutes_sim_mean?: number
 }
 
 type MinutesResponse = {
@@ -63,6 +78,7 @@ type SummaryResponse = {
   run_as_of_ts?: string | null
   fpts_available?: boolean
   fpts_meta?: FptsMeta
+  sim_available?: boolean
 }
 
 type SortKey =
@@ -75,6 +91,20 @@ type SortKey =
   | 'proj_fpts'
   | 'fpts_per_min_pred'
   | 'starter_status'
+  | 'sim_dk_fpts_mean'
+  | 'sim_dk_fpts_p05'
+  | 'sim_dk_fpts_p10'
+  | 'sim_dk_fpts_p25'
+  | 'sim_dk_fpts_p50'
+  | 'sim_dk_fpts_p75'
+  | 'sim_dk_fpts_p95'
+  | 'sim_pts_mean'
+  | 'sim_reb_mean'
+  | 'sim_ast_mean'
+  | 'sim_stl_mean'
+  | 'sim_blk_mean'
+  | 'sim_tov_mean'
+  | 'sim_minutes_sim_mean'
 
 type RunOption = {
   run_id: string
@@ -92,6 +122,20 @@ const SORT_LABELS: Record<SortKey, string> = {
   proj_fpts: 'FPTS',
   fpts_per_min_pred: 'FPTS/min',
   starter_status: 'Starter',
+  sim_dk_fpts_mean: 'Sim Mean',
+  sim_dk_fpts_p05: 'Sim p05',
+  sim_dk_fpts_p10: 'Sim p10',
+  sim_dk_fpts_p25: 'Sim p25',
+  sim_dk_fpts_p50: 'Sim p50',
+  sim_dk_fpts_p75: 'Sim p75',
+  sim_dk_fpts_p95: 'Sim p95',
+  sim_pts_mean: 'Sim PTS',
+  sim_reb_mean: 'Sim REB',
+  sim_ast_mean: 'Sim AST',
+  sim_stl_mean: 'Sim STL',
+  sim_blk_mean: 'Sim BLK',
+  sim_tov_mean: 'Sim TOV',
+  sim_minutes_sim_mean: 'Sim MIN',
 }
 
 type StatusBadge = {
@@ -207,6 +251,7 @@ function App() {
   const [runOptions, setRunOptions] = useState<RunOption[]>([])
   const [latestRunId, setLatestRunId] = useState<string | null>(null)
   const [showFpts, setShowFpts] = useState(true)
+  const [showSim, setShowSim] = useState(true)
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -401,6 +446,30 @@ function App() {
     typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : '—'
   const formatFpts = (value?: number) =>
     typeof value === 'number' ? value.toFixed(1) : '—'
+  const formatStat = (value?: number) =>
+    typeof value === 'number' ? value.toFixed(1) : '—'
+  const formatMinutesSim = (value?: number) =>
+    typeof value === 'number' ? value.toFixed(1) : '—'
+
+  const simFptsColumns: Array<{ key: SortKey; label: string }> = [
+    { key: 'sim_dk_fpts_p05', label: 'Sim p05' },
+    { key: 'sim_dk_fpts_p10', label: 'Sim p10' },
+    { key: 'sim_dk_fpts_p25', label: 'Sim p25' },
+    { key: 'sim_dk_fpts_p50', label: 'Sim p50' },
+    { key: 'sim_dk_fpts_p75', label: 'Sim p75' },
+    { key: 'sim_dk_fpts_p95', label: 'Sim p95' },
+    { key: 'sim_dk_fpts_mean', label: 'Sim mean' },
+  ]
+
+  const simStatColumns: Array<{ key: SortKey; label: string }> = [
+    { key: 'sim_pts_mean', label: 'Sim PTS' },
+    { key: 'sim_reb_mean', label: 'Sim REB' },
+    { key: 'sim_ast_mean', label: 'Sim AST' },
+    { key: 'sim_stl_mean', label: 'Sim STL' },
+    { key: 'sim_blk_mean', label: 'Sim BLK' },
+    { key: 'sim_tov_mean', label: 'Sim TOV' },
+    { key: 'sim_minutes_sim_mean', label: 'Sim MIN' },
+  ]
 
   const nav = (
     <nav className="app-nav">
@@ -510,6 +579,7 @@ function App() {
             {summary.run_id && `· Artifact: ${summary.run_id}`}{' '}
             {summary.run_as_of_ts && `· As of: ${formatTime(summary.run_as_of_ts)}`}{' '}
             {showFpts && summary.fpts_available === false && '· FPTS unavailable'}
+            {showSim && summary.sim_available === false && '· sim_v2 unavailable'}
             {showFpts && summary.fpts_available && summary.fpts_meta?.fpts_model_run_id && (
               <>· FPTS run: {summary.fpts_meta.fpts_model_run_id}</>
             )}
@@ -554,6 +624,14 @@ function App() {
             onChange={(event) => setShowFpts(event.target.checked)}
           />
           Show FPTS columns
+        </label>
+        <label className="fpts-toggle">
+          <input
+            type="checkbox"
+            checked={showSim}
+            onChange={(event) => setShowSim(event.target.checked)}
+          />
+          Show sim_v2 columns
         </label>
       </section>
 
@@ -601,6 +679,22 @@ function App() {
                     ))}
                   </>
                 )}
+                {showSim && (
+                  <>
+                    {simFptsColumns.map(({ key, label }) => (
+                      <th key={key} onClick={() => toggleSort(key)} className="sortable">
+                        {label}
+                        {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
+                      </th>
+                    ))}
+                        {simStatColumns.map(({ key, label }) => (
+                          <th key={key} onClick={() => toggleSort(key)} className="sortable">
+                            {label}
+                            {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
+                          </th>
+                        ))}
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -645,6 +739,22 @@ function App() {
                       <>
                         <td>{formatFpts(row.proj_fpts)}</td>
                         <td>{formatFpts(row.fpts_per_min_pred)}</td>
+                      </>
+                    )}
+                    {showSim && (
+                      <>
+                        {simFptsColumns.map(({ key }) => (
+                          <td key={key}>
+                            {formatFpts(row[key as keyof PlayerRow] as number | undefined)}
+                          </td>
+                        ))}
+                        {simStatColumns.map(({ key }) => (
+                          <td key={key}>
+                            {key === 'sim_minutes_sim_mean'
+                              ? formatMinutesSim(row[key as keyof PlayerRow] as number | undefined)
+                              : formatStat(row[key as keyof PlayerRow] as number | undefined)}
+                          </td>
+                        ))}
                       </>
                     )}
                   </tr>

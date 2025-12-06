@@ -20,10 +20,12 @@ from projections.api.pipeline_status_api import router as pipeline_status_router
 DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
 DEFAULT_FPTS_ROOT = paths.data_path("gold", "projections_fpts_v1")
+DEFAULT_SIM_ROOT = paths.data_path("artifacts", "sim_v2", "projections")
 LATEST_POINTER = "latest_run.json"
 PARQUET_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
 FPTS_FILENAME = "fpts.parquet"
+SIM_PROJECTIONS_FILENAME = "sim_v2_projections.parquet"
 
 # Only expose conditional minutes fields to the UI.
 PLAYER_COLUMNS: tuple[str, ...] = (
@@ -61,6 +63,21 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "close_game_score",
     "team_implied_total",
     "opponent_implied_total",
+    "sim_dk_fpts_mean",
+    "sim_dk_fpts_std",
+    "sim_dk_fpts_p05",
+    "sim_dk_fpts_p10",
+    "sim_dk_fpts_p25",
+    "sim_dk_fpts_p50",
+    "sim_dk_fpts_p75",
+    "sim_dk_fpts_p95",
+    "sim_pts_mean",
+    "sim_reb_mean",
+    "sim_ast_mean",
+    "sim_stl_mean",
+    "sim_blk_mean",
+    "sim_tov_mean",
+    "sim_minutes_sim_mean",
 )
 
 
@@ -153,6 +170,74 @@ def _load_fpts(day: date, run_name: str | None, root: Path) -> pd.DataFrame | No
         return None
 
 
+def _resolve_sim_run_dir(base_dir: Path) -> Path | None:
+    pointer = base_dir / LATEST_POINTER
+    if pointer.exists():
+        try:
+            payload = json.loads(pointer.read_text(encoding="utf-8"))
+            run_id = payload.get("run_id")
+            if run_id:
+                candidate = base_dir / f"run={run_id}"
+                if candidate.exists():
+                    return candidate
+        except json.JSONDecodeError:
+            pass
+
+    run_dirs = sorted(
+        [path for path in base_dir.iterdir() if path.is_dir() and path.name.startswith("run=")],
+        reverse=True,
+    )
+    if run_dirs:
+        return run_dirs[0]
+    return base_dir if (base_dir / SIM_PROJECTIONS_FILENAME).exists() else None
+
+
+def _load_sim_projections(day: date, root: Path) -> pd.DataFrame | None:
+    candidates = [
+        root / f"date={day.isoformat()}",
+        root / day.isoformat(),
+    ]
+    for base in candidates:
+        if not base.exists():
+            continue
+        if base.is_file() and base.suffix == ".parquet":
+            try:
+                return pd.read_parquet(base)
+            except Exception:
+                continue
+        run_dir = _resolve_sim_run_dir(base) if base.is_dir() else None
+        if run_dir:
+            candidate_path = (
+                run_dir if run_dir.is_file() and run_dir.suffix == ".parquet" else run_dir / SIM_PROJECTIONS_FILENAME
+            )
+            if candidate_path.exists():
+                try:
+                    return pd.read_parquet(candidate_path)
+                except Exception:
+                    continue
+    return None
+
+
+def _sim_projections_available(day: date, root: Path) -> bool:
+    candidates = [
+        root / f"date={day.isoformat()}",
+        root / day.isoformat(),
+    ]
+    for base in candidates:
+        if not base.exists():
+            continue
+        if base.is_file() and base.suffix == ".parquet":
+            return True
+        if base.is_dir():
+            run_dir = _resolve_sim_run_dir(base)
+            if run_dir is None:
+                continue
+            candidate = run_dir if run_dir.is_file() else run_dir / SIM_PROJECTIONS_FILENAME
+            if candidate.exists():
+                return True
+    return False
+
+
 def _serialize_players(df: pd.DataFrame) -> list[dict[str, Any]]:
     available_cols = [col for col in PLAYER_COLUMNS if col in df.columns]
     trimmed = df.loc[:, available_cols].copy()
@@ -179,12 +264,14 @@ def create_app(
     daily_root: Path | None = None,
     dashboard_dist: Path | None = None,
     fpts_root: Path | None = None,
+    sim_root: Path | None = None,
 ) -> FastAPI:
     """Construct the FastAPI app."""
 
     minutes_root = (daily_root or _env_path("MINUTES_DAILY_ROOT", DEFAULT_DAILY_ROOT)).resolve()
     dist_dir = (dashboard_dist or _env_path("MINUTES_DASHBOARD_DIST", DEFAULT_DASHBOARD_DIST)).resolve()
     fpts_root = (fpts_root or _env_path("MINUTES_FPTS_ROOT", DEFAULT_FPTS_ROOT)).resolve()
+    sim_root = (sim_root or _env_path("MINUTES_SIM_ROOT", DEFAULT_SIM_ROOT)).resolve()
 
     app = FastAPI(title="Minutes API", version="0.1.0")
     app.include_router(pipeline_status_router, prefix="/api")
@@ -213,6 +300,24 @@ def create_app(
                     on=["game_id", "player_id"],
                     how="left",
                 )
+        sim_df = _load_sim_projections(slate_day, sim_root)
+        if sim_df is not None:
+            join_keys = ["game_date", "game_id", "team_id", "player_id"]
+            missing_keys = [key for key in join_keys if key not in df.columns or key not in sim_df.columns]
+            if not missing_keys:
+                df["game_date"] = pd.to_datetime(df["game_date"]).dt.normalize()
+                sim_df["game_date"] = pd.to_datetime(sim_df["game_date"]).dt.normalize()
+                rename_map = {}
+                for col in sim_df.columns:
+                    if col in join_keys:
+                        continue
+                    if col == "minutes_sim_mean":
+                        rename_map[col] = "sim_minutes_sim_mean"
+                    elif col.startswith("sim_"):
+                        rename_map[col] = col
+                    else:
+                        rename_map[col] = f"sim_{col}"
+                df = df.merge(sim_df.rename(columns=rename_map), on=join_keys, how="left")
         players = _serialize_players(df)
         payload = {"date": slate_day.isoformat(), "count": len(players), "players": players}
         return JSONResponse(payload)
@@ -233,7 +338,7 @@ def create_app(
                 "model_run_id": None,
                 "run_as_of_ts": None,
             }
-        # Ensure generated_at always present for operators.
+            # Ensure generated_at always present for operators.
             summary.setdefault("generated_at", datetime.utcnow().isoformat() + "Z")
             summary.setdefault("date", slate_day.isoformat())
             summary.setdefault("counts", _build_counts(pd.DataFrame()))
@@ -246,6 +351,7 @@ def create_app(
         summary["fpts_available"] = fpts_summary is not None
         if fpts_summary:
             summary["fpts_meta"] = fpts_summary
+        summary["sim_available"] = _sim_projections_available(slate_day, sim_root)
         return JSONResponse(summary)
 
     @app.get("/api/minutes/runs")

@@ -11,7 +11,9 @@ TIP_LEAD_MINUTES="${LIVE_TIP_LEAD_MINUTES:-60}"   # start scoring this many minu
 TIP_TAIL_MINUTES="${LIVE_TIP_TAIL_MINUTES:-180}"  # keep running this many minutes after last tip
 LOCK_BUFFER_MINUTES="${LIVE_LOCK_BUFFER_MINUTES:-15}"
 DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-1}"
-RECONCILE_MODE="${LIVE_RECONCILE_MODE:-none}"   # default off per operator request
+# Read reconcile mode from config JSON if present, else fall back to env var or default
+CONFIG_RECONCILE=$(jq -r '.reconcile_team_minutes // empty' config/minutes_current_run.json 2>/dev/null || true)
+RECONCILE_MODE="${LIVE_RECONCILE_MODE:-${CONFIG_RECONCILE:-p50}}"
 MINUTES_OUTPUT_MODE="${LIVE_MINUTES_OUTPUT:-conditional}"
 
 cd /home/daniel/projects/projections-v2

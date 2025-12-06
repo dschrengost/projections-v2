@@ -12,7 +12,7 @@ Environment=LIVE_FLAGS=--skip-odds
 Environment=LIVE_DISABLE_TIP_WINDOW=1
 Environment=LIVE_TIP_LEAD_MINUTES=60
 Environment=LIVE_TIP_TAIL_MINUTES=180
-Environment=LIVE_RECONCILE_MODE=none
+Environment=LIVE_SCORE=1
 ExecStart=/home/daniel/projects/projections-v2/scripts/run_live_pipeline.sh
 StandardOutput=journal
 StandardError=journal

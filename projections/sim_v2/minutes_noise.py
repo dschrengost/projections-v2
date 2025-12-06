@@ -235,7 +235,52 @@ __all__ = [
     "MinutesNoiseParams",
     "bin_bounds",
     "build_sigma_per_player",
+    "enforce_team_240_minutes",
     "load_minutes_noise_params",
     "minutes_bin_indices",
     "status_bucket_from_raw",
 ]
+
+
+def enforce_team_240_minutes(
+    minutes_world: np.ndarray,
+    team_indices: np.ndarray,
+    rotation_mask: np.ndarray,
+    bench_mask: np.ndarray,
+    clamp_scale: tuple[float, float] = (0.7, 1.3),
+) -> np.ndarray:
+    """
+    Rescale rotation players per team per world so totals approach 240 minutes.
+
+    minutes_world: (W, P) non-negative minutes after noise
+    team_indices:  (P,) int codes 0..T-1
+    rotation_mask: (P,) bool for rotation players
+    bench_mask:    (P,) bool for deep bench players
+    clamp_scale:   allowable scaling range
+    """
+
+    if minutes_world.size == 0:
+        return minutes_world
+
+    mins = np.maximum(minutes_world, 0.0)
+    team_idx = team_indices.astype(int)
+    n_teams = int(team_idx.max()) + 1 if team_idx.size else 0
+    if n_teams == 0:
+        return mins
+
+    team_one_hot = np.eye(n_teams, dtype=float)[team_idx]  # (P, T)
+    rot_one_hot = team_one_hot * rotation_mask[:, None]
+    bench_one_hot = team_one_hot * bench_mask[:, None]
+
+    bench_sum = mins @ bench_one_hot  # (W, T)
+    rot_sum = mins @ rot_one_hot      # (W, T)
+
+    target_rot = np.clip(240.0 - bench_sum, a_min=0.0, a_max=None)
+    scale = np.ones_like(target_rot)
+    mask_nonzero = rot_sum > 1e-6
+    scale[mask_nonzero] = target_rot[mask_nonzero] / rot_sum[mask_nonzero]
+    scale = np.clip(scale, clamp_scale[0], clamp_scale[1])
+
+    scale_per_player = scale[:, team_idx]  # (W, P)
+    mins_scaled = mins * np.where(rotation_mask[None, :], scale_per_player, 1.0)
+    return mins_scaled

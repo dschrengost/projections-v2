@@ -40,10 +40,16 @@ import typer
 
 from projections.paths import data_path
 from projections.rates_v1.features import get_rates_feature_sets
+from projections.rates_v1.schemas import EFFICIENCY_TARGETS
+from projections.registry.manifest import (
+    load_manifest,
+    save_manifest,
+    register_model,
+)
 
 app = typer.Typer(add_completion=False)
 
-TARGETS = [
+RATE_TARGETS = [
     "fga2_per_min",
     "fga3_per_min",
     "fta_per_min",
@@ -54,6 +60,17 @@ TARGETS = [
     "stl_per_min",
     "blk_per_min",
 ]
+
+TARGETS = RATE_TARGETS + EFFICIENCY_TARGETS
+
+TARGET_LABEL_MAP: dict[str, str] = {target: target for target in RATE_TARGETS}
+TARGET_LABEL_MAP.update(
+    {
+        "fg2_pct": "fg2_pct_label",
+        "fg3_pct": "fg3_pct_label",
+        "ft_pct": "ft_pct_label",
+    }
+)
 
 _FEATURE_SETS = get_rates_feature_sets()
 STAGE0_FEATURES = _FEATURE_SETS["stage0"]
@@ -133,6 +150,9 @@ def _prepare_features(
         "season_reb_per_min",
         "season_stl_per_min",
         "season_blk_per_min",
+        "season_fg2_pct",
+        "season_fg3_pct",
+        "season_ft_pct",
         "days_rest",
     ]
     for col in fill_zero_cols:
@@ -208,29 +228,39 @@ def _impute_odds(train_df: pd.DataFrame, *others: pd.DataFrame) -> tuple[pd.Data
     return tuple(out_frames)
 
 
-def _clean_frame(df: pd.DataFrame, targets: list[str], features: list[str]) -> pd.DataFrame:
+def _clean_frame(df: pd.DataFrame, label_map: dict[str, str], features: list[str]) -> pd.DataFrame:
     df = df.copy()
-    cols_needed = set(targets + features)
+    cols_needed = set(features + list(label_map.values()))
     missing = [c for c in cols_needed if c not in df.columns]
     if missing:
         raise KeyError(f"Missing required columns: {missing}")
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    df = df.dropna(subset=targets + features)
+    # Drop rows with missing features; labels may be NaN for low-attempt games
+    df = df.dropna(subset=features)
     return df
 
 
 def _train_one(
-    target: str, train_df: pd.DataFrame, cal_df: pd.DataFrame, features: list[str]
-) -> tuple[lgb.Booster, dict]:
-    X_train = train_df[features]
-    y_train = train_df[target]
+    target: str,
+    label_col: str,
+    train_df: pd.DataFrame,
+    cal_df: pd.DataFrame,
+    features: list[str],
+) -> tuple[lgb.Booster | None, dict]:
+    train_mask = train_df[label_col].notna()
+    cal_mask = cal_df[label_col].notna()
+    if not train_mask.any():
+        return None, {"best_iteration": None, "cal_l2": None, "train_rows": 0, "cal_rows": int(cal_mask.sum())}
+
+    X_train = train_df.loc[train_mask, features]
+    y_train = train_df.loc[train_mask, label_col]
     train_set = lgb.Dataset(X_train, label=y_train, free_raw_data=False)
 
     callbacks = []
     valid_sets = []
-    if not cal_df.empty:
-        X_cal = cal_df[features]
-        y_cal = cal_df[target]
+    if cal_mask.any():
+        X_cal = cal_df.loc[cal_mask, features]
+        y_cal = cal_df.loc[cal_mask, label_col]
         cal_set = lgb.Dataset(X_cal, label=y_cal, reference=train_set, free_raw_data=False)
         valid_sets = [cal_set]
         callbacks.append(lgb.early_stopping(stopping_rounds=200, verbose=False))
@@ -245,6 +275,8 @@ def _train_one(
     metrics = {
         "best_iteration": booster.best_iteration,
         "cal_l2": booster.best_score.get("valid_0", {}).get("l2") if valid_sets else None,
+        "train_rows": int(train_mask.sum()),
+        "cal_rows": int(cal_mask.sum()),
     }
     return booster, metrics
 
@@ -252,12 +284,15 @@ def _train_one(
 def _eval_split(booster: lgb.Booster, df: pd.DataFrame, features: list[str], target: str) -> dict:
     if df.empty:
         return {"mae": None, "rmse": None, "n": 0}
-    preds = booster.predict(df[features], num_iteration=booster.best_iteration)
-    y_true = df[target].values
+    mask = df[target].notna()
+    if not mask.any():
+        return {"mae": None, "rmse": None, "n": 0}
+    preds = booster.predict(df.loc[mask, features], num_iteration=booster.best_iteration)
+    y_true = df.loc[mask, target].values
     err = preds - y_true
     mae = float(np.abs(err).mean())
     rmse = float(np.sqrt((err ** 2).mean()))
-    return {"mae": mae, "rmse": rmse, "n": int(len(df))}
+    return {"mae": mae, "rmse": rmse, "n": int(mask.sum())}
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -336,17 +371,22 @@ def main(
             f"[train] warning: split sizes train={len(train_df)}, cal={len(cal_df)}, val={len(val_df)}"
         )
     train_df, cal_df, val_df = _impute_odds(train_df, cal_df, val_df)
-    train_df = _clean_frame(train_df, TARGETS, feature_cols)
-    cal_df = _clean_frame(cal_df, TARGETS, feature_cols)
-    val_df = _clean_frame(val_df, TARGETS, feature_cols)
+    train_df = _clean_frame(train_df, TARGET_LABEL_MAP, feature_cols)
+    cal_df = _clean_frame(cal_df, TARGET_LABEL_MAP, feature_cols)
+    val_df = _clean_frame(val_df, TARGET_LABEL_MAP, feature_cols)
 
     metrics: dict[str, dict] = {}
     model_paths: dict[str, str] = {}
     for target in TARGETS:
-        typer.echo(f"[train] training target={target}")
-        booster, train_metrics = _train_one(target, train_df, cal_df, feature_cols)
-        cal_metrics = _eval_split(booster, cal_df, feature_cols, target)
-        val_metrics = _eval_split(booster, val_df, feature_cols, target)
+        label_col = TARGET_LABEL_MAP.get(target, target)
+        typer.echo(f"[train] training target={target} (label={label_col})")
+        booster, train_metrics = _train_one(target, label_col, train_df, cal_df, feature_cols)
+        if booster is None:
+            typer.echo(f"[train] skipping target={target}: no rows with non-null labels", err=True)
+            metrics[target] = {**train_metrics, "cal_mae": None, "cal_rmse": None, "val_mae": None, "val_rmse": None}
+            continue
+        cal_metrics = _eval_split(booster, cal_df, feature_cols, label_col)
+        val_metrics = _eval_split(booster, val_df, feature_cols, label_col)
         metrics[target] = {
             **train_metrics,
             **{f"cal_{k}": v for k, v in cal_metrics.items()},
@@ -362,6 +402,7 @@ def main(
         "run_tag": run_tag,
         "feature_set": feature_set_key,
         "targets": TARGETS,
+        "label_map": TARGET_LABEL_MAP,
         "feature_cols": feature_cols,
         "params": BASE_PARAMS,
         "train_rows": len(train_df),
@@ -394,6 +435,34 @@ def main(
             )
         else:
             typer.echo(f"  {target}: val set empty; no holdout metrics")
+
+    # Auto-register model in registry
+    try:
+        manifest = load_manifest()
+        # Compute aggregate metrics across all targets
+        val_maes = [m.get("val_mae") for m in metrics.values() if m.get("val_mae") is not None]
+        avg_val_mae = float(np.mean(val_maes)) if val_maes else None
+        register_model(
+            manifest,
+            model_name="rates_v1_lgbm",
+            version=resolved_run_id,
+            run_id=resolved_run_id,
+            artifact_path=str(run_dir),
+            training_start=start_date or "2023-10-01",
+            training_end=train_end_date,
+            feature_schema_version=feature_set_key,
+            metrics={
+                "val_mae_avg": avg_val_mae,
+                "train_rows": len(train_df),
+                "val_rows": len(val_df),
+                "num_targets": len(TARGETS),
+            },
+            description=f"Train to {train_end_date} | {feature_set_key} | {len(TARGETS)} targets",
+        )
+        save_manifest(manifest)
+        typer.echo(f"[registry] Registered rates_v1_lgbm v{resolved_run_id} (stage=dev)")
+    except Exception as e:
+        typer.echo(f"[registry] Warning: Failed to register model: {e}", err=True)
 
 
 if __name__ == "__main__":

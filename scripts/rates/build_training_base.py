@@ -66,6 +66,9 @@ app = typer.Typer(add_completion=False)
 
 
 MIN_MINUTES = 4.0
+FG2_MIN_ATT = 3
+FG3_MIN_ATT = 3
+FT_MIN_ATT = 2
 OVERWRITE_PARTITIONS = True  # If True, existing day partitions are replaced; otherwise skipped.
 
 
@@ -167,6 +170,9 @@ def load_boxscores(data_root: Path, start: pd.Timestamp, end: pd.Timestamp) -> p
                     stats = player.get("statistics") or {}
                     minutes = _parse_minutes_iso(stats.get("minutes"))
                     points = float(stats.get("points") or 0.0)
+                    fgm = float(stats.get("fieldGoalsMade") or stats.get("fieldGoalsMade") or 0.0)
+                    three_pm = float(stats.get("threePointersMade") or 0.0)
+                    ftm = float(stats.get("freeThrowsMade") or 0.0)
                     fga = float(stats.get("fieldGoalsAttempted") or 0.0)
                     fta = float(stats.get("freeThrowsAttempted") or 0.0)
                     three_pa = float(stats.get("threePointersAttempted") or 0.0)
@@ -190,6 +196,9 @@ def load_boxscores(data_root: Path, start: pd.Timestamp, end: pd.Timestamp) -> p
                             "season": season,
                             "minutes_played": minutes,
                             "points": points,
+                            "fgm": fgm,
+                            "three_pm": three_pm,
+                            "ftm": ftm,
                             "fga": fga,
                             "three_pa": three_pa,
                             "fta": fta,
@@ -264,13 +273,19 @@ def load_injuries(data_root: Path) -> pd.DataFrame:
     return _read_parquet_tree(injuries_dir)
 
 
-def load_minutes_predictions(data_root: Path, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+def load_minutes_predictions(
+    data_root: Path,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    *,
+    minutes_for_rates_root: Path | None = None,
+) -> pd.DataFrame:
     """
     Optional precomputed minutes predictions for rates (minutes_for_rates).
     Expected columns: season, game_id, game_date, team_id, player_id,
     minutes_pred_p10, minutes_pred_p50, minutes_pred_p90, minutes_pred_play_prob.
     """
-    root = data_root / "gold" / "minutes_for_rates"
+    root = minutes_for_rates_root or (data_root / "gold" / "minutes_for_rates")
     if not root.exists():
         return pd.DataFrame()
     frames: list[pd.DataFrame] = []
@@ -544,6 +559,12 @@ def build_features(
         how="left",
         on=["game_id", "player_id", "team_id"],
     )
+    if "game_date_x" in df.columns and "game_date" not in df.columns:
+        df.rename(columns={"game_date_x": "game_date"}, inplace=True)
+        if "game_date_y" in df.columns:
+            df.drop(columns=["game_date_y"], inplace=True)
+    elif "game_date_y" in df.columns and "game_date" not in df.columns:
+        df.rename(columns={"game_date_y": "game_date"}, inplace=True)
     # Use label minutes if available, otherwise fall back to boxscore minutes.
     df.rename(columns={"minutes_actual": "minutes_actual_label"}, inplace=True)
     df["minutes_actual"] = df["minutes_actual_label"].fillna(df["minutes_played"]).astype(float)
@@ -552,7 +573,8 @@ def build_features(
     # Missing roster rows default to bench (0).
     if "starter_flag" in df.columns:
         df.rename(columns={"starter_flag": "starter_flag_label"}, inplace=True)
-    df = df.merge(roster_sub, on=["game_id", "team_id", "player_id"], how="left")
+    roster_merge = roster_sub.drop(columns=["game_date"], errors="ignore")
+    df = df.merge(roster_merge, on=["game_id", "team_id", "player_id"], how="left")
     if "lineup_role" in df.columns:
         df["starter_flag_lineup"] = df["lineup_role"].isin({"confirmed_starter", "projected_starter"}).astype("Int64")
 
@@ -604,6 +626,69 @@ def build_features(
     df["dreb_per_min"] = df["dreb"] / minutes
     df["stl_per_min"] = df["steals"] / minutes
     df["blk_per_min"] = df["blocks"] / minutes
+
+    # Shooting efficiency labels (per-game)
+    df["fg2_att"] = (df["fga"] - df["three_pa"]).clip(lower=0.0)
+    df["fg2_made"] = (df["fgm"] - df["three_pm"]).clip(lower=0.0)
+    df["fg3_att"] = df["three_pa"].clip(lower=0.0)
+    df["fg3_made"] = df["three_pm"].clip(lower=0.0)
+    df["ft_att"] = df["fta"].clip(lower=0.0)
+    df["ft_made"] = df["ftm"].clip(lower=0.0)
+
+    df["fg2_pct_label"] = np.where(
+        df["fg2_att"] >= FG2_MIN_ATT,
+        df["fg2_made"] / df["fg2_att"],
+        np.nan,
+    )
+    df["fg3_pct_label"] = np.where(
+        df["fg3_att"] >= FG3_MIN_ATT,
+        df["fg3_made"] / df["fg3_att"],
+        np.nan,
+    )
+    df["ft_pct_label"] = np.where(
+        df["ft_att"] >= FT_MIN_ATT,
+        df["ft_made"] / df["ft_att"],
+        np.nan,
+    )
+
+    # Season-to-date shooting pct (exclude current game via shift)
+    df.sort_values(["season", "player_id", "tip_ts"], inplace=True)
+    season_group_keys = ["season", "player_id"]
+    season_cum_cols = [
+        "fg2_made",
+        "fg2_att",
+        "fg3_made",
+        "fg3_att",
+        "ft_made",
+        "ft_att",
+    ]
+    for col in season_cum_cols:
+        df[f"{col}_season_cum"] = df.groupby(season_group_keys)[col].cumsum().shift(1)
+
+    df["season_fg2_pct"] = np.divide(
+        df["fg2_made_season_cum"],
+        df["fg2_att_season_cum"],
+        out=np.full_like(df["fg2_made_season_cum"], np.nan, dtype=float),
+        where=df["fg2_att_season_cum"].to_numpy() != 0,
+    )
+    df["season_fg3_pct"] = np.divide(
+        df["fg3_made_season_cum"],
+        df["fg3_att_season_cum"],
+        out=np.full_like(df["fg3_made_season_cum"], np.nan, dtype=float),
+        where=df["fg3_att_season_cum"].to_numpy() != 0,
+    )
+    df["season_ft_pct"] = np.divide(
+        df["ft_made_season_cum"],
+        df["ft_att_season_cum"],
+        out=np.full_like(df["ft_made_season_cum"], np.nan, dtype=float),
+        where=df["ft_att_season_cum"].to_numpy() != 0,
+    )
+
+    df["season_fg2_pct"] = df["season_fg2_pct"].clip(0.3, 0.75)
+    df["season_fg3_pct"] = df["season_fg3_pct"].clip(0.2, 0.55)
+    df["season_ft_pct"] = df["season_ft_pct"].clip(0.5, 0.95)
+    for col in ["season_fg2_pct", "season_fg3_pct", "season_ft_pct"]:
+        df[col] = df[col].fillna(0.0)
 
     # Season-to-date per-minute averages (exclude current game via shift)
     cumulative_specs = [
@@ -780,6 +865,9 @@ def build_features(
         "dreb_per_min",
         "stl_per_min",
         "blk_per_min",
+        "fg2_pct_label",
+        "fg3_pct_label",
+        "ft_pct_label",
         "position_primary",
         "position_flags_PG",
         "position_flags_SG",
@@ -794,6 +882,9 @@ def build_features(
         "season_reb_per_min",
         "season_stl_per_min",
         "season_blk_per_min",
+        "season_fg2_pct",
+        "season_fg3_pct",
+        "season_ft_pct",
         "is_starter",
         "days_rest",
         "spread_close",
@@ -870,6 +961,21 @@ def main(
         "--require-minutes-pred/--allow-missing-minutes-pred",
         help="Fail if minutes_pred_* are missing after the minutes_for_rates join.",
     ),
+    limit_to_minutes_pred_dates: bool = typer.Option(
+        False,
+        "--limit-to-minutes-pred-dates/--all-dates",
+        help="Drop rows whose game_date is missing from minutes_for_rates before requiring minutes_pred_*.",
+    ),
+    minutes_for_rates_root: Optional[Path] = typer.Option(
+        None,
+        "--minutes-for-rates-root",
+        help="Custom path to minutes_for_rates (defaults to <data_root>/gold/minutes_for_rates).",
+    ),
+    drop_missing_minutes_pred: bool = typer.Option(
+        False,
+        "--drop-missing-minutes-pred/--keep-missing-minutes-pred",
+        help="Drop rows with missing minutes_pred_* after the join (before require-minutes-pred check).",
+    ),
 ) -> None:
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
@@ -891,7 +997,12 @@ def main(
         end,
         stats.drop_duplicates(subset=["game_id"]).set_index("game_id")["tip_ts"],
     )
-    minutes_preds = load_minutes_predictions(root, start, end)
+    minutes_preds = load_minutes_predictions(root, start, end, minutes_for_rates_root=minutes_for_rates_root)
+    if minutes_for_rates_root:
+        typer.echo(f"[rates] using custom minutes_for_rates_root: {minutes_for_rates_root}")
+    minutes_pred_dates: set[pd.Timestamp] | set[pd.Timestamp.date] = set()
+    if not minutes_preds.empty and "game_date" in minutes_preds.columns:
+        minutes_pred_dates = set(pd.to_datetime(minutes_preds["game_date"]).dt.normalize())
     tracking_roles = load_tracking_roles(root, start, end)
     injuries = load_injuries(root)  # reserved for future vacated usage features
     if injuries.empty:
@@ -918,6 +1029,12 @@ def main(
                 typer.echo(
                     f"[rates] dropped {dropped} rows from feature-desert dates ({len(desert_dates)} dates)"
                 )
+    if limit_to_minutes_pred_dates and minutes_pred_dates:
+        before = len(features)
+        features["game_date"] = pd.to_datetime(features["game_date"]).dt.normalize()
+        features = features[features["game_date"].isin(minutes_pred_dates)].copy()
+        dropped = before - len(features)
+        typer.echo(f"[rates] limited to dates with minutes preds; dropped {dropped} rows, kept {len(features)}")
     # Ensure datetime dtype before joins
     features["game_date"] = pd.to_datetime(features["game_date"]).dt.normalize()
     if not tracking_roles.empty:
@@ -953,6 +1070,13 @@ def main(
     else:
         n_missing_pred = n_total
     typer.echo(f"[rates_base] minutes_pred_p50 missing for {n_missing_pred}/{n_total} rows")
+    if drop_missing_minutes_pred and n_missing_pred > 0:
+        before = len(features)
+        features = features[~features["minutes_pred_p50"].isna()].copy()
+        dropped = before - len(features)
+        typer.echo(f"[rates] dropped {dropped} rows missing minutes_pred_* (requested)")
+        n_total = len(features)
+        n_missing_pred = 0
     if require_minutes_pred and n_missing_pred > 0:
         raise typer.Exit(code=1)
     track_missing = (

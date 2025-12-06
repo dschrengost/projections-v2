@@ -34,7 +34,12 @@ ARCHETYPE_MAP: dict[str, str] = {
     "C": "B",
     "F": "W",
     "F/C": "B",
+    "F-C": "B",
+    "C-F": "B",
+    "FC": "B",
     "G/F": "W",
+    "G-F": "W",
+    "F-G": "W",
 }
 
 

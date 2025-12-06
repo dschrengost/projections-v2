@@ -20,7 +20,7 @@ from projections.minutes_v1.schemas import (
     validate_with_pandera,
 )
 from projections.minutes_v1.snapshots import latest_pre_tip_snapshot
-from projections.minutes_v1.smoke_dataset import TeamResolver
+from projections.minutes_v1.season_dataset import TeamResolver
 from projections.pipeline.status import JobStatus, write_status
 from scrapers.oddstrader import EventOdds, OddstraderScraper
 

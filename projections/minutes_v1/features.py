@@ -388,6 +388,11 @@ class MinutesFeatureBuilder:
         )
 
     def _finalize(self, df: pd.DataFrame) -> pd.DataFrame:
+        # Normalize timestamp columns to UTC to avoid mixed tz/naive comparisons.
+        for col in ("injury_as_of_ts", "odds_as_of_ts", "roster_as_of_ts", "tip_ts"):
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
+
         asof_candidates = pd.concat(
             [
                 df.get("injury_as_of_ts"),
@@ -406,6 +411,32 @@ class MinutesFeatureBuilder:
             df["pos_bucket"] = canonical_pos_bucket_series(archetype_series)
         else:
             df["pos_bucket"] = canonical_pos_bucket_series(df["pos_bucket"])
+
+        # Fallback: derive pos_bucket from roster listed_pos when archetype data is missing.
+        if (
+            getattr(self, "roster_nightly", None) is not None
+            and not self.roster_nightly.empty
+            and "listed_pos" in self.roster_nightly.columns
+        ):
+            roster = self.roster_nightly.copy()
+            roster = roster.dropna(subset=["game_id", "player_id", "listed_pos"])
+            if not roster.empty:
+                roster["game_id"] = pd.to_numeric(roster["game_id"], errors="coerce").astype("Int64")
+                roster["player_id"] = pd.to_numeric(roster["player_id"], errors="coerce").astype("Int64")
+                roster = roster.dropna(subset=["game_id", "player_id"])
+                roster = roster.drop_duplicates(subset=["game_id", "player_id"], keep="last")
+                roster["pos_bucket_roster"] = canonical_pos_bucket_series(roster["listed_pos"])
+                df = df.merge(
+                    roster[["game_id", "player_id", "pos_bucket_roster"]],
+                    on=["game_id", "player_id"],
+                    how="left",
+                )
+                mask = df["pos_bucket"].isin(["UNK", None, ""])
+                df.loc[
+                    mask & df["pos_bucket_roster"].notna() & (df["pos_bucket_roster"] != "UNK"),
+                    "pos_bucket",
+                ] = df["pos_bucket_roster"]
+                df.drop(columns=["pos_bucket_roster"], inplace=True, errors="ignore")
         return df
 
 

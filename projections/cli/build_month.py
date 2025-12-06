@@ -11,7 +11,7 @@ import pandas as pd
 import typer
 
 from projections import paths
-from projections.minutes_v1.smoke_dataset import SmokeDatasetBuilder
+from projections.minutes_v1.season_dataset import SeasonDatasetBuilder
 from projections.pipelines import build_features_minutes_v1 as features_cli
 
 app = typer.Typer(help=__doc__)
@@ -85,7 +85,7 @@ def _process_month(
             f"[month-build] ({year_value}-{month_value:02d}) building bronze/silver using "
             f"{injuries_path.name} / {odds_path.name}"
         )
-        builder = SmokeDatasetBuilder(
+        builder = SeasonDatasetBuilder(
             start_date=start_ts,
             end_date=end_ts,
             data_dir=data_root,
@@ -108,9 +108,11 @@ def _process_month(
         f"[month-build] ({year_value}-{month_value:02d}) building gold features (season={season_start}, month={month_value:02d})"
     )
     features_cli.main(
-        start=start_dt,
-        end=end_dt,
+        start_date=start_dt,
+        end_date=end_dt,
         data_root=data_root,
+        roles_root=None,
+        archetype_root=None,
         season=season_start,
         month=month_value,
         out=None,

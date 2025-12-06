@@ -11,18 +11,50 @@ import pandas as pd
 import typer
 
 from projections import paths
-from projections.cli.score_minutes import (
-    _filter_window,
-    _normalize_date,
-    _resolve_feature_source,
-)
 from projections.minutes_v1 import calibration, modeling
 from projections.minutes_v1.datasets import (
     KEY_COLUMNS,
     deduplicate_latest,
+    default_features_path,
     ensure_columns,
     load_feature_frame,
 )
+
+
+# ---------------------------------------------------------------------------
+# Helper utilities (formerly in score_minutes.py)
+# ---------------------------------------------------------------------------
+def _normalize_date(value: datetime) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts.normalize()
+
+
+def _filter_window(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    working = df.copy()
+    working["game_date"] = pd.to_datetime(working["game_date"]).dt.normalize()
+    mask = (working["game_date"] >= start) & (working["game_date"] <= end)
+    sliced = working.loc[mask].copy()
+    if sliced.empty:
+        raise ValueError(
+            f"No feature rows found between {start.date()} and {end.date()} — verify feature inputs."
+        )
+    return sliced
+
+
+def _resolve_feature_source(
+    features_path: Path | None,
+    *,
+    data_root: Path,
+    season: int | None,
+    month: int | None,
+) -> Path | None:
+    if features_path is not None:
+        return features_path
+    if season is not None and month is not None:
+        return default_features_path(data_root, season, month)
+    return None
 
 
 app = typer.Typer(help=__doc__)

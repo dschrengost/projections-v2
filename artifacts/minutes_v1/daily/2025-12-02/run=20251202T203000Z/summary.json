@@ -1,6 +1,6 @@
 {
   "date": "2025-12-02",
-  "generated_at": "2025-12-02T21:10:35.241215+00:00",
+  "generated_at": "2025-12-02T21:25:21.875714+00:00",
   "model_run_id": "lgbm_full_v1_no_p_play_20251202",
   "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_lgbm/lgbm_full_v1_no_p_play_20251202",
   "model_meta": {

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run live simulation every 30 minutes on game days
+
+[Timer]
+# Run at :20 and :50 past each hour from 10am to 11pm
+# Offset from rates timer (:15) to ensure rates complete first
+OnCalendar=*-*-* 10..23:20,50:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

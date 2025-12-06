@@ -10,12 +10,6 @@ from .modeling import (
     train_minutes_quickstart_models,
 )
 from .monitoring import compute_monitoring_snapshot
-try:  # pragma: no cover - legacy shim may be absent in streamlined builds
-    from .reconciliation import ReconciliationConfig, reconcile_minutes, reconcile_team_minutes
-except ImportError:  # pragma: no cover
-    ReconciliationConfig = None
-    reconcile_minutes = None
-    reconcile_team_minutes = None
 from .snapshots import ensure_as_of_column, latest_pre_tip_snapshot
 from .validation import (
     ReconciliationReport,
@@ -35,9 +29,6 @@ __all__ = [
     "predict_minutes",
     "QuickstartModelArtifacts",
     "ConformalIntervalCalibrator",
-    "ReconciliationConfig",
-    "reconcile_team_minutes",
-    "reconcile_minutes",
     "compute_monitoring_snapshot",
     "sample_anti_leak_check",
     "hash_season_labels",

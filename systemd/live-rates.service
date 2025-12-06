@@ -1,0 +1,19 @@
+[Unit]
+Description=Run projections live rates scoring
+After=live-score.service network-online.target
+Wants=network-online.target
+OnFailure=status-email-user@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+User=daniel
+Group=daniel
+ExecStart=/home/daniel/projects/projections-v2/scripts/run_live_rates.sh
+StandardOutput=journal
+StandardError=journal
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

@@ -72,5 +72,120 @@ def check_latest_projections(
     console.print("\n[green]All checks passed![/green]")
 
 
+@app.command()
+def check_rates_sanity(
+    date_str: Optional[str] = typer.Option(None, "--date", help="Date to check (YYYY-MM-DD), defaults to today."),
+    rates_root: Path = typer.Option(
+        paths.data_path("gold", "rates_v1_live"),
+        "--rates-root",
+        help="Root directory for rates predictions.",
+    ),
+    min_fga2_median: float = typer.Option(0.15, help="Minimum pred_fga2_per_min median."),
+    min_top_fpts: float = typer.Option(45.0, help="Minimum expected top FPTS on a slate."),
+) -> None:
+    """Check that rates predictions are plausible."""
+    from projections.pipeline.guardrails import check_rates_output_sanity
+
+    if date_str is None:
+        import datetime
+        date_str = datetime.date.today().isoformat()
+
+    day_dir = rates_root / date_str
+    if not day_dir.exists():
+        console.print(f"[yellow]No rates predictions for {date_str}[/yellow]")
+        raise typer.Exit(code=0)
+
+    # Find latest run
+    runs = sorted(day_dir.glob("run=*"))
+    if not runs:
+        console.print(f"[yellow]No runs found in {day_dir}[/yellow]")
+        raise typer.Exit(code=0)
+
+    latest_run = runs[-1]
+    rates_file = latest_run / "rates.parquet"
+    if not rates_file.exists():
+        console.print(f"[red]Missing rates.parquet in {latest_run}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"Checking rates: [bold]{rates_file}[/bold]")
+    df = pd.read_parquet(rates_file)
+
+    result = check_rates_output_sanity(
+        df,
+        min_fga2_median=min_fga2_median,
+        min_top_fpts=min_top_fpts,
+    )
+
+    console.print(f"\nMetrics: {result.metrics}")
+
+    if result.warnings:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for warn in result.warnings:
+            console.print(f"  - {warn}")
+
+    if result.passed:
+        console.print("\n[green]Rates sanity check passed![/green]")
+    else:
+        console.print("\n[red]Rates sanity check FAILED[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def check_feature_coverage(
+    date_str: Optional[str] = typer.Option(None, "--date", help="Date to check (YYYY-MM-DD), defaults to today."),
+    features_root: Path = typer.Option(
+        paths.data_path("live", "features_rates_v1"),
+        "--features-root",
+        help="Root directory for rates features.",
+    ),
+    expected_rows: Optional[int] = typer.Option(None, help="Expected number of rows (if known)."),
+) -> None:
+    """Check that rates features have adequate coverage."""
+    from projections.pipeline.guardrails import check_feature_coverage as _check_feature_coverage
+
+    if date_str is None:
+        import datetime
+        date_str = datetime.date.today().isoformat()
+
+    day_dir = features_root / date_str
+    if not day_dir.exists():
+        console.print(f"[yellow]No features for {date_str}[/yellow]")
+        raise typer.Exit(code=0)
+
+    runs = sorted(day_dir.glob("run=*"))
+    if not runs:
+        console.print(f"[yellow]No runs found in {day_dir}[/yellow]")
+        raise typer.Exit(code=0)
+
+    latest_run = runs[-1]
+    features_file = latest_run / "features.parquet"
+    if not features_file.exists():
+        console.print(f"[red]Missing features.parquet in {latest_run}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"Checking features: [bold]{features_file}[/bold]")
+    df = pd.read_parquet(features_file)
+
+    critical_cols = ["game_id", "player_id", "team_id", "minutes_pred_p50", "season_fga_per_min"]
+    result = _check_feature_coverage(
+        df,
+        expected_rows=expected_rows,
+        critical_cols=critical_cols,
+    )
+
+    console.print(f"\nMetrics: {result.metrics}")
+
+    if result.warnings:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for warn in result.warnings:
+            console.print(f"  - {warn}")
+
+    if result.passed:
+        console.print("\n[green]Feature coverage check passed![/green]")
+    else:
+        console.print("\n[red]Feature coverage check FAILED[/red]")
+        raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":
     app()

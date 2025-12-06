@@ -18,7 +18,7 @@ from projections.minutes_v1.datasets import (
     write_ids_csv,
 )
 from projections.minutes_v1.features import MinutesFeatureBuilder
-from projections.minutes_v1.smoke_dataset import _parse_minutes_iso
+from projections.minutes_v1.season_dataset import _parse_minutes_iso
 from projections.minutes_v1.schemas import (
     FEATURES_MINUTES_V1_SCHEMA,
     enforce_schema,

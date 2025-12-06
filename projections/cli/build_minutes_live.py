@@ -404,6 +404,7 @@ def _filter_snapshot_by_asof(
     tip_lookup: dict[int, pd.Timestamp],
     dataset_name: str,
     warnings: list[str],
+    backfill_mode: bool = False,
 ) -> pd.DataFrame:
     if df.empty or time_col not in df.columns or "game_id" not in df.columns:
         return df
@@ -412,19 +413,23 @@ def _filter_snapshot_by_asof(
     working["game_id"] = pd.to_numeric(working["game_id"], errors="coerce").astype("Int64")
     working[time_col] = pd.to_datetime(working[time_col], utc=True, errors="coerce")
 
-    # For roster, keep the latest snapshot per game_id (no gating); as-of gating is handled downstream via feature_as_of_ts.
+    # For roster, keep the latest snapshot per player/game (no gating); as-of gating is handled downstream via feature_as_of_ts.
     if dataset_name == "roster_nightly":
         latest = (
             working.sort_values(time_col)
-            .groupby("game_id", as_index=False)
+            .groupby(["game_id", "player_id"], as_index=False)
             .tail(1)
         )
         return latest
 
     tip_ts = working["game_id"].map(tip_lookup)
     limit_ts = tip_ts.fillna(run_as_of_ts)
-    allowed = working[time_col].isna() | (working[time_col] <= run_as_of_ts)
-    allowed &= working[time_col].isna() | (working[time_col] <= limit_ts)
+    if backfill_mode:
+        # Backfill mode: only gate by tip_ts, skip run_as_of_ts check
+        allowed = working[time_col].isna() | (working[time_col] <= limit_ts)
+    else:
+        allowed = working[time_col].isna() | (working[time_col] <= run_as_of_ts)
+        allowed &= working[time_col].isna() | (working[time_col] <= limit_ts)
     filtered = working.loc[allowed].copy()
     dropped = len(working) - len(filtered)
     if dropped > 0:
@@ -559,6 +564,15 @@ def _build_minutes_live_logic(
         "--scraper-timeout",
         help="HTTP timeout (seconds) for NBA.com roster scraping.",
     ),
+    backfill_mode: bool = typer.Option(
+        False,
+        "--backfill-mode",
+        help=(
+            "Enable backfill-friendly settings for historical runs. "
+            "Uses tip-relative injury selection (ignores run_as_of_ts ceiling), "
+            "enables roster fallback, skips active roster validation, and relaxes age checks."
+        ),
+    ),
 ) -> None:
     target_day = _normalize_day(date)
     run_ts = _normalize_run_timestamp(run_as_of_ts)
@@ -570,6 +584,17 @@ def _build_minutes_live_logic(
     active_roster_summary: dict | None = None
     active_pairs_set: set[Tuple[int, int]] = set()
     inactive_details: pd.DataFrame | None = None
+
+    # Apply backfill mode defaults
+    if backfill_mode:
+        if roster_fallback_days == 0:
+            roster_fallback_days = 7
+        if roster_max_age_hours == 18:
+            roster_max_age_hours = 720  # 30 days
+        validate_active_roster = False
+        warnings.append(
+            "[backfill-mode] Using tip-relative injury selection, roster fallback, and relaxed age checks."
+        )
 
     if validate_active_roster:
         players_scraper = NbaPlayersScraper(timeout=scraper_timeout)
@@ -685,6 +710,7 @@ def _build_minutes_live_logic(
         tip_lookup=tip_lookup,
         dataset_name="injuries_snapshot",
         warnings=warnings,
+        backfill_mode=backfill_mode,
     )
     if injuries_slice.empty:
         latest_inj_ts = pd.to_datetime(injuries_df.get("as_of_ts"), utc=True, errors="coerce")
@@ -701,6 +727,7 @@ def _build_minutes_live_logic(
         tip_lookup=tip_lookup,
         dataset_name="odds_snapshot",
         warnings=warnings,
+        backfill_mode=backfill_mode,
     )
     roster_builder_slice = _filter_snapshot_by_asof(
         _filter_by_game_ids(roster_df.copy(), allowed_live_ids),
@@ -709,6 +736,7 @@ def _build_minutes_live_logic(
         tip_lookup=tip_lookup,
         dataset_name="roster_nightly",
         warnings=warnings,
+        backfill_mode=backfill_mode,
     )
 
     coach_df = None
@@ -992,6 +1020,15 @@ def main(
         "--scraper-timeout",
         help="HTTP timeout (seconds) for NBA.com roster scraping.",
     ),
+    backfill_mode: bool = typer.Option(
+        False,
+        "--backfill-mode",
+        help=(
+            "Enable backfill-friendly settings for historical runs. "
+            "Uses tip-relative injury selection (ignores run_as_of_ts ceiling), "
+            "enables roster fallback, skips active roster validation, and relaxes age checks."
+        ),
+    ),
 ) -> None:
     target_day = _normalize_day(date)
     run_ts = _normalize_run_timestamp(run_as_of_ts)
@@ -1022,6 +1059,7 @@ def main(
             enforce_active_roster=enforce_active_roster,
             lock_buffer_minutes=lock_buffer_minutes,
             scraper_timeout=scraper_timeout,
+            backfill_mode=backfill_mode,
         )
         write_status(
             JobStatus(
