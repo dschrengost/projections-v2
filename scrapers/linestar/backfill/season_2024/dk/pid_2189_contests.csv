@@ -1,0 +1,7 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2189,164289,NBA $400K Fadeaway [$100K to 1st],4,31372,15.0,400000.0
+2189,164292,NBA $30K And-One [20 Entry Max],4,35671,1.0,30000.0
+2189,164311,NBA Single Entry $10 Double Up,1,344,10.0,3000.0
+2189,164312,NBA $2 Double Up,1,1724,2.0,3000.0
+2189,164324,NBA Showdown $120K Fadeaway [$30K to 1st] (NOP @ GSW),4,7843,18.0,120000.0
+2189,164331,NBA Showdown $30K Fadeaway [$10K to 1st] (DAL @ MIN),4,2352,15.0,30000.0

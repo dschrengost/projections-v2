@@ -1,0 +1,12 @@
+[Unit]
+Description=Run prediction accuracy evaluation nightly after games conclude
+
+[Timer]
+# Run at 10:30 AM UTC (after gold-features-daily at 10:00)
+OnCalendar=*-*-* 10:30
+RandomizedDelaySec=60
+Persistent=true
+Unit=nightly-eval.service
+
+[Install]
+WantedBy=timers.target

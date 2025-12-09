@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily DK ownership aggregation timer
+Requires=dk-ownership-aggregate.service
+
+[Timer]
+# Run at 2 AM ET (after Mac sync at 1 AM)
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

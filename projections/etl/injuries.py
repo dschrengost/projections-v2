@@ -360,6 +360,17 @@ def main(
                         f"{result.rows} rows -> {result.path}"
                     )
 
+        # Merge with existing silver data to preserve historical games
+        if silver_path.exists():
+            existing = pd.read_parquet(silver_path)
+            # Combine, preferring new data for duplicates (same game_id + player_id)
+            combined = pd.concat([existing, injuries_snapshot], ignore_index=True)
+            # Keep latest as_of_ts per game_id + player_id
+            combined = combined.sort_values("as_of_ts", ascending=True)
+            combined = combined.drop_duplicates(subset=["game_id", "player_id"], keep="last")
+            injuries_snapshot = combined
+            typer.echo(f"[injuries] merged with existing: {len(existing)} existing + {len(injuries_snapshot) - len(existing)} new = {len(injuries_snapshot)} total")
+        
         injuries_snapshot.to_parquet(silver_path, index=False)
         rows_written = len(injuries_snapshot)
 

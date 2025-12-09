@@ -1,0 +1,9 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+1994,147987,NBA $2 Double Up,1,1149,2.0,2000.0
+1994,147991,NBA $5 Double Up,1,919,5.0,4000.0
+1994,147999,NBA $10K Quarter Jukebox [Just $0.25!],4,47562,0.25,10000.0
+1994,148019,NBA $400K Fadeaway [$100K to 1st],4,31372,15.0,400000.0
+1994,148087,NBA Showdown $15K Pull Up Jumper [$5K to 1st] (DAL vs WAS),4,1764,10.0,15000.0
+1994,148094,NBA Showdown $15K Pull Up Jumper [$5K to 1st] (BOS vs PHI),4,1764,10.0,15000.0
+1994,148097,NBA Showdown $10K Pull Up Jumper [$2K to 1st] (MIN vs PHX),4,1176,10.0,10000.0
+1994,148102,NBA Showdown $150K Fadeaway [$50K to 1st] (SAC vs LAL),4,11764,15.0,150000.0

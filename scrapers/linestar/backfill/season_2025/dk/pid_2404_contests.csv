@@ -1,0 +1,23 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2404,178214,NBA Single Entry $10 Double Up,1,459,10.0,4000.0
+2404,178220,NBA $350K Zone Special [$100K to 1st],4,83234,5.0,350000.0
+2404,178222,NBA $2 Double Up,1,1724,2.0,3000.0
+2404,178224,NBA $400K Alley Oop [$100K to 1st],4,800,555.0,400000.0
+2404,178242,NBA $2.1K mini-MAX [150 Entry Max] (Turbo),4,5112,0.5,2150.0
+2404,178244,NBA $10K Pull Up Jumper [$2K to 1st] (Turbo),4,1176,10.0,10000.0
+2404,178248,NBA $10K Pull Up Jumper [$2K to 1st] (Turbo),4,1176,10.0,10000.0
+2404,178249,NBA $2.1K mini-MAX [150 Entry Max] (Turbo),4,5112,0.5,2150.0
+2404,178255,NBA $120K Fadeaway [$30K to 1st] (Night),4,7843,18.0,120000.0
+2404,178259,NBA $10K And-One (Night),4,11890,1.0,10000.0
+2404,178294,NBA Showdown $30K Fadeaway [$10K to 1st] (HOU @ TOR),4,2352,15.0,30000.0
+2404,178297,NBA Showdown $2.1K mini-MAX [150 Entry Max] (HOU @ TOR),4,5112,0.5,2150.0
+2404,178298,NBA Showdown $8K Pull Up Jumper [$2K to 1st] (CLE @ BOS),4,941,10.0,8000.0
+2404,178301,NBA Showdown $200 Dime Time [Just $0.10!] (CLE @ BOS),4,2378,0.1,200.0
+2404,178304,NBA Showdown $8K Pull Up Jumper [$2K to 1st] (ATL @ BKN),4,941,10.0,8000.0
+2404,178305,NBA Showdown $500 Quarter Jukebox [Just $0.25!] (ATL @ BKN),4,2378,0.25,500.0
+2404,178306,NBA Showdown $8K Pull Up Jumper [$2K to 1st] (IND @ DAL),4,941,10.0,8000.0
+2404,178307,NBA Showdown $200 Dime Time [Just $0.10!] (IND @ DAL),4,2378,0.1,200.0
+2404,178310,NBA Showdown $2.5K And-One (LAL @ MIN),4,2972,1.0,2500.0
+2404,178311,NBA Showdown $15K Fadeaway [$5K to 1st] (LAL @ MIN),4,1176,15.0,15000.0
+2404,178314,NBA Showdown $3K mini-MAX [150 Entry Max] (MEM @ PHX),4,7134,0.5,3000.0
+2404,178320,NBA Showdown $80K Fadeaway [$20K to 1st] (MEM @ PHX),4,5228,18.0,80000.0

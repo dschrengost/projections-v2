@@ -422,14 +422,21 @@ def _filter_snapshot_by_asof(
         )
         return latest
 
+    # Backfill mode: skip timestamp filtering entirely, just use latest snapshot per game/player
+    if backfill_mode:
+        group_cols = ["game_id", "player_id"] if "player_id" in working.columns else ["game_id"]
+        latest = (
+            working.sort_values(time_col)
+            .groupby(group_cols, as_index=False)
+            .tail(1)
+        )
+        warnings.append(f"[backfill-mode] {dataset_name}: using latest snapshot per game (no timestamp filtering).")
+        return latest
+
     tip_ts = working["game_id"].map(tip_lookup)
     limit_ts = tip_ts.fillna(run_as_of_ts)
-    if backfill_mode:
-        # Backfill mode: only gate by tip_ts, skip run_as_of_ts check
-        allowed = working[time_col].isna() | (working[time_col] <= limit_ts)
-    else:
-        allowed = working[time_col].isna() | (working[time_col] <= run_as_of_ts)
-        allowed &= working[time_col].isna() | (working[time_col] <= limit_ts)
+    allowed = working[time_col].isna() | (working[time_col] <= run_as_of_ts)
+    allowed &= working[time_col].isna() | (working[time_col] <= limit_ts)
     filtered = working.loc[allowed].copy()
     dropped = len(working) - len(filtered)
     if dropped > 0:
@@ -573,10 +580,15 @@ def _build_minutes_live_logic(
             "enables roster fallback, skips active roster validation, and relaxes age checks."
         ),
     ),
+    run_id_override: str | None = typer.Option(
+        None,
+        "--run-id",
+        help="Optional run ID override. If not provided, derived from run_as_of_ts.",
+    ),
 ) -> None:
     target_day = _normalize_day(date)
     run_ts = _normalize_run_timestamp(run_as_of_ts)
-    run_id = _format_run_id(run_ts)
+    run_id = run_id_override if run_id_override else _format_run_id(run_ts)
     season_value = season_start or _season_start_from_day(target_day)
     season_label = _season_label(season_value)
     warnings: list[str] = []
@@ -641,7 +653,19 @@ def _build_minutes_live_logic(
     )
 
     schedule_df = _load_table(schedule_default, schedule_path)
-    injuries_df = _load_table(injuries_default, injuries_path)
+    
+    # In backfill mode, load injuries from bronze by date (has historical snapshots)
+    if backfill_mode and injuries_path is None:
+        bronze_injuries_path = data_root / "bronze" / "injuries_raw" / f"season={season_value}" / f"date={target_day.strftime('%Y-%m-%d')}"
+        if bronze_injuries_path.exists():
+            injuries_df = _read_parquet_tree(bronze_injuries_path)
+            warnings.append(f"[backfill-mode] Loaded injuries from bronze: {bronze_injuries_path}")
+        else:
+            # Fallback to silver if bronze date partition doesn't exist
+            injuries_df = _load_table(injuries_default, injuries_path)
+    else:
+        injuries_df = _load_table(injuries_default, injuries_path)
+    
     odds_df = _load_table(odds_default, odds_path)
     roster_df = _load_table(roster_default, roster_path)
 
@@ -1029,6 +1053,11 @@ def main(
             "enables roster fallback, skips active roster validation, and relaxes age checks."
         ),
     ),
+    run_id_override: str | None = typer.Option(
+        None,
+        "--run-id",
+        help="Optional run ID override. If not provided, derived from run_as_of_ts.",
+    ),
 ) -> None:
     target_day = _normalize_day(date)
     run_ts = _normalize_run_timestamp(run_as_of_ts)
@@ -1060,6 +1089,7 @@ def main(
             lock_buffer_minutes=lock_buffer_minutes,
             scraper_timeout=scraper_timeout,
             backfill_mode=backfill_mode,
+            run_id_override=run_id_override,
         )
         write_status(
             JobStatus(

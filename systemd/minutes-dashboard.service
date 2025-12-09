@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory=/home/daniel/projects/projections-v2
 Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
 Environment=MINUTES_DAILY_ROOT=/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily
-Environment=MINUTES_FPTS_ROOT=/home/daniel/projections-data/gold/projections_fpts_v1
+# NOTE: MINUTES_FPTS_ROOT removed - sim_v2 provides dk_fpts_mean now
 Environment=MINUTES_DASHBOARD_DIST=/home/daniel/projects/projections-v2/web/minutes-dashboard/dist
 User=daniel
 Group=daniel

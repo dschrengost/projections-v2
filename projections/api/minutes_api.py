@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from projections import paths
 from projections.api.pipeline_status_api import router as pipeline_status_router
+from projections.api.evaluation_api import router as evaluation_router
 
 DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
@@ -70,6 +71,7 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "sim_dk_fpts_p25",
     "sim_dk_fpts_p50",
     "sim_dk_fpts_p75",
+    "sim_dk_fpts_p90",
     "sim_dk_fpts_p95",
     "sim_pts_mean",
     "sim_reb_mean",
@@ -78,6 +80,10 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "sim_blk_mean",
     "sim_tov_mean",
     "sim_minutes_sim_mean",
+    # Ownership/DFS columns
+    "salary",
+    "pred_own_pct",
+    "value",
 )
 
 
@@ -156,6 +162,49 @@ def _extract_run_name(run_dir: Path) -> str | None:
     return None
 
 
+def _load_unified_projections(day: date, run_id: str | None, data_root: Path) -> pd.DataFrame | None:
+    """
+    Load unified projections artifact (contains minutes, sim, ownership in one file).
+    
+    Returns None if not available, allowing fallback to legacy loading.
+    """
+    unified_root = data_root / "artifacts" / "projections" / str(day)
+    
+    if run_id:
+        run_dir = unified_root / f"run={run_id}"
+    else:
+        # Try latest pointer
+        latest_pointer = unified_root / "latest_run.json"
+        if latest_pointer.exists():
+            try:
+                with open(latest_pointer) as f:
+                    latest = json.load(f).get("run_id")
+                if latest:
+                    run_dir = unified_root / f"run={latest}"
+                else:
+                    return None
+            except Exception:
+                return None
+        else:
+            # Fall back to most recent run dir
+            run_dirs = sorted(
+                [p for p in unified_root.iterdir() if p.is_dir() and p.name.startswith("run=")],
+                reverse=True,
+            )
+            run_dir = run_dirs[0] if run_dirs else None
+    
+    if run_dir is None or not run_dir.exists():
+        return None
+    
+    parquet_path = run_dir / "projections.parquet"
+    if not parquet_path.exists():
+        return None
+    
+    try:
+        return pd.read_parquet(parquet_path)
+    except Exception:
+        return None
+
 def _load_fpts(day: date, run_name: str | None, root: Path) -> pd.DataFrame | None:
     if run_name is None:
         return None
@@ -194,7 +243,8 @@ def _resolve_sim_run_dir(base_dir: Path) -> Path | None:
 
 def _load_sim_projections(day: date, root: Path) -> pd.DataFrame | None:
     candidates = [
-        root / f"date={day.isoformat()}",
+        root / f"game_date={day.isoformat()}",  # New format (run_sim_live.py)
+        root / f"date={day.isoformat()}",       # Legacy format
         root / day.isoformat(),
     ]
     for base in candidates:
@@ -205,6 +255,14 @@ def _load_sim_projections(day: date, root: Path) -> pd.DataFrame | None:
                 return pd.read_parquet(base)
             except Exception:
                 continue
+        # Check for projections.parquet directly (new format from run_sim_live.py)
+        direct_path = base / "projections.parquet"
+        if direct_path.exists():
+            try:
+                return pd.read_parquet(direct_path)
+            except Exception:
+                pass
+        # Check for run dirs with sim_v2_projections.parquet (legacy aggregator)
         run_dir = _resolve_sim_run_dir(base) if base.is_dir() else None
         if run_dir:
             candidate_path = (
@@ -220,13 +278,17 @@ def _load_sim_projections(day: date, root: Path) -> pd.DataFrame | None:
 
 def _sim_projections_available(day: date, root: Path) -> bool:
     candidates = [
-        root / f"date={day.isoformat()}",
+        root / f"game_date={day.isoformat()}",  # New format (run_sim_live.py)
+        root / f"date={day.isoformat()}",       # Legacy format
         root / day.isoformat(),
     ]
     for base in candidates:
         if not base.exists():
             continue
         if base.is_file() and base.suffix == ".parquet":
+            return True
+        # Check for projections.parquet directly (new format)
+        if (base / "projections.parquet").exists():
             return True
         if base.is_dir():
             run_dir = _resolve_sim_run_dir(base)
@@ -275,10 +337,32 @@ def create_app(
 
     app = FastAPI(title="Minutes API", version="0.1.0")
     app.include_router(pipeline_status_router, prefix="/api")
+    app.include_router(evaluation_router, prefix="/api")
 
     @app.get("/api/minutes")
     def get_minutes(date: str | None = None, run_id: str | None = None) -> JSONResponse:
         slate_day = _parse_date(date)
+        
+        # Try unified projections artifact first (contains minutes, sim, ownership)
+        data_root = paths.data_path()
+        unified_df = _load_unified_projections(slate_day, run_id, data_root)
+        
+        if unified_df is not None and not unified_df.empty:
+            # Rename sim columns to match expected dashboard format
+            rename_map = {}
+            for col in unified_df.columns:
+                if col in ("minutes_mean",):
+                    rename_map[col] = "sim_minutes_sim_mean"
+                elif col.startswith("dk_fpts_") or col in ("pts_mean", "reb_mean", "ast_mean", "stl_mean", "blk_mean", "tov_mean"):
+                    rename_map[col] = f"sim_{col}"
+            if rename_map:
+                unified_df = unified_df.rename(columns=rename_map)
+            
+            players = _serialize_players(unified_df)
+            payload = {"date": slate_day.isoformat(), "count": len(players), "players": players}
+            return JSONResponse(payload)
+        
+        # Fall back to legacy loading (minutes + fpts + sim joins)
         day_dir = minutes_root / slate_day.isoformat()
         run_dir = _resolve_run_dir(day_dir, run_id)
         df = _load_minutes(run_dir)
@@ -311,7 +395,8 @@ def create_app(
                 for col in sim_df.columns:
                     if col in join_keys:
                         continue
-                    if col == "minutes_sim_mean":
+                    if col in ("minutes_sim_mean", "minutes_mean"):
+                        # Map both old and new column names to the expected dashboard field
                         rename_map[col] = "sim_minutes_sim_mean"
                     elif col.startswith("sim_"):
                         rename_map[col] = col
@@ -385,6 +470,36 @@ def create_app(
                 latest = None
         payload = {"date": slate_day.isoformat(), "latest": latest, "runs": runs}
         return JSONResponse(payload)
+
+    @app.get("/api/ownership")
+    def get_ownership(date: str | None = None) -> JSONResponse:
+        """Return ownership predictions for a date."""
+        slate_day = _parse_date(date)
+        
+        # Load from silver/ownership_predictions
+        data_root = paths.data_path()
+        own_path = data_root / "silver" / "ownership_predictions" / f"{slate_day}.parquet"
+        
+        if not own_path.exists():
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No ownership predictions for {slate_day}"
+            )
+        
+        df = pd.read_parquet(own_path)
+        
+        # Build response with relevant columns
+        output_cols = ["player_id", "player_name", "salary", "pos", "team", "proj_fpts", "pred_own_pct"]
+        available_cols = [c for c in output_cols if c in df.columns]
+        
+        players = df[available_cols].to_dict(orient="records")
+        
+        payload = {
+            "date": slate_day.isoformat(),
+            "count": len(players),
+            "players": players,
+        }
+        return JSONResponse(jsonable_encoder(payload))
 
     @app.post("/api/trigger")
     def trigger_pipeline(background_tasks: BackgroundTasks) -> JSONResponse:

@@ -22,6 +22,7 @@ class SimV2Profile:
     minutes_run_id: Optional[str]
     use_rates_noise: bool
     rates_noise_split: Optional[str]
+    rates_noise_run_id: Optional[str]
     use_minutes_noise: bool
     minutes_sigma_min: float
     worlds_per_chunk: int
@@ -85,6 +86,7 @@ def load_sim_v2_profile(
 
     use_rates_noise = bool(config.get("rates_noise", {}).get("enabled", True))
     rates_noise_split = config.get("rates_noise", {}).get("split", "val")
+    rates_noise_run_id = config.get("rates_noise", {}).get("run_id")
     rates_sigma_scale = float(config.get("rates_sigma_scale", 1.0))
     team_sigma_scale = float(config.get("team_sigma_scale", 1.0))
     player_sigma_scale = float(config.get("player_sigma_scale", 1.0))
@@ -121,6 +123,7 @@ def load_sim_v2_profile(
         minutes_run_id=minutes_run_id,
         use_rates_noise=use_rates_noise,
         rates_noise_split=str(rates_noise_split) if rates_noise_split is not None else None,
+        rates_noise_run_id=str(rates_noise_run_id) if rates_noise_run_id is not None else None,
         rates_sigma_scale=rates_sigma_scale,
         team_sigma_scale=team_sigma_scale,
         player_sigma_scale=player_sigma_scale,

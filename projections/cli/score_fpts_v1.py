@@ -419,12 +419,23 @@ def score_fpts_for_date(
     is_fpts_v2 = str(bundle_ctx.run_id).lower().startswith("fpts_v2")
     precomputed_rates = None
     if use_live_rates and rates_live_root is not None:
-        precomputed_rates = (
-            rates_live_root
-            / slate_day.isoformat()
-            / f"run={resolved_run}"
-            / "rates.parquet"
-        )
+        # Resolve rates run ID from rates' own latest_run.json (not minutes run_id)
+        rates_day_dir = rates_live_root / slate_day.isoformat()
+        rates_pointer = rates_day_dir / LATEST_POINTER
+        rates_run_id = None
+        if rates_pointer.exists():
+            try:
+                payload = json.loads(rates_pointer.read_text(encoding="utf-8"))
+                rates_run_id = payload.get("run_id")
+            except json.JSONDecodeError:
+                rates_run_id = None
+        if rates_run_id:
+            precomputed_rates = rates_day_dir / f"run={rates_run_id}" / "rates.parquet"
+        else:
+            # Fallback: try to find latest run directory
+            run_dirs = sorted(rates_day_dir.glob("run=*"), reverse=True) if rates_day_dir.exists() else []
+            if run_dirs:
+                precomputed_rates = run_dirs[0] / "rates.parquet"
     merged = _attach_rate_predictions(
         slate_day,
         merged,

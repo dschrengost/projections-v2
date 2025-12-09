@@ -561,7 +561,9 @@ def main(
     fpts_run = _resolve(profile_cfg.fpts_run_id, fpts_run_id, "fpts_run_id")
     use_rates_noise_eff = profile_cfg.use_rates_noise if use_rates_noise is None else use_rates_noise
     resolved_rates_run = _resolve(profile_cfg.rates_run_id, rates_run_id, "rates_run_id")
-    rates_run = resolved_rates_run if use_rates_noise_eff else None
+    # For noise, prefer rates_noise_run_id if specified (allows using older residuals with newer model)
+    rates_noise_run_id_eff = getattr(profile_cfg, "rates_noise_run_id", None) or resolved_rates_run
+    rates_run = rates_noise_run_id_eff if use_rates_noise_eff else None
     rates_split = _resolve(profile_cfg.rates_noise_split, rates_noise_split, "rates_noise_split") if use_rates_noise_eff else None
     rates_sigma_scale = float(getattr(profile_cfg, "rates_sigma_scale", 1.0))
     team_sigma_scale_eff = _resolve(getattr(profile_cfg, "team_sigma_scale", 1.0), team_sigma_scale, "team_sigma_scale")
@@ -824,6 +826,7 @@ def main(
                     typer.echo("[sim_v2] warning: partial fg% preds missing; disabling efficiency scoring for this date.", err=True)
                     use_efficiency = False
 
+            stat_world_samples: dict[str, list[np.ndarray]] = {}
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
                 rng = np.random.default_rng(date_seed + chunk_start)
@@ -867,6 +870,10 @@ def main(
                         stat_totals, efficiency_pct=eff_arrays, use_efficiency=use_efficiency
                     )
                 world_fpts_samples.append(fpts_chunk)
+                # Track individual stat worlds for aggregation
+                for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
+                    if stat_name in stat_box:
+                        stat_world_samples.setdefault(stat_name, []).append(stat_box[stat_name])
 
             # Aggregate all worlds in-memory and compute quantiles
             if world_fpts_samples:
@@ -893,6 +900,12 @@ def main(
                 proj_df["dk_fpts_p95"] = fpts_quantiles[6]
                 proj_df["sim_profile"] = profile_cfg.name
                 proj_df["n_worlds"] = n_worlds_eff
+                
+                # Add individual stat means for dashboard diagnostics
+                for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
+                    if stat_name in stat_world_samples and stat_world_samples[stat_name]:
+                        all_stat = np.vstack(stat_world_samples[stat_name])
+                        proj_df[f"{stat_name}_mean"] = all_stat.mean(axis=0)
                 
                 # Add optional columns
                 for extra in ("is_starter", "play_prob"):

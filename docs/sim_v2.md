@@ -219,7 +219,50 @@ Create a new profile in `sim_v2_profiles.json`:
 }
 ```
 
+## Teammate Correlations
+
+### Empirical Findings (Dec 2025)
+
+Analysis of ~6,000 player-games revealed:
+
+| Metric | Correlation | Notes |
+|--------|-------------|-------|
+| Player residual vs Team-mean | **0.31** | When player over/underperforms, team moves together |
+| Pairwise starter correlation | 0.04 | Low direct player-to-player correlation |
+| Mixed (starter + bench) | -0.19 | Negative due to minutes substitution |
+
+### Implementation
+
+The simulator uses a **team shock** approach where all teammates receive the same noise adjustment per world:
+
+```python
+# For each target stat:
+sigma_team = noise_params['sigma_team'] * team_sigma_scale   # ~0.34 from residuals
+sigma_player = noise_params['sigma_player'] * player_sigma_scale
+
+# Team shock (same for all teammates in a world)
+team_shock = rng.normal(0, sigma_team)  
+player_eps = rng.normal(0, sigma_player)  # Independent
+
+stat_total = rate * minutes + team_shock + player_eps
+```
+
+### Tuning Knobs
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `team_sigma_scale` | 1.0 | Scales team-level correlation (reduce to <1 for less correlation) |
+| `player_sigma_scale` | 1.0 | Scales individual variance |
+| `rates_sigma_scale` | 1.0 | Overall noise scaling |
+
+**Note:** The empirical 0.31 team-mean correlation aligns well with the `same_team_corr` values (~0.30-0.35) from rates residuals. Current settings appear well-calibrated. If correlations seem too high in practice, reduce `team_sigma_scale` to 0.7-0.8.
+
 ## Changelog
+
+### 2025-12-07
+- Enabled `rates_noise` in baseline profile (using Dec 5 residuals)
+- Added `rates_noise_run_id` config option for explicit residual specification
+- Documented teammate correlation analysis and calibration
 
 ### 2025-12-06
 - Added game script feature with learned margin effects

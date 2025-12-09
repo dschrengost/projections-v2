@@ -1,0 +1,9 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2238,167740,NBA $25K And-One [20 Entry Max],4,29726,1.0,25000.0
+2238,167751,NBA $50K Four-Point Play [$10K to 1st],4,14863,4.0,50000.0
+2238,167754,NBA $2 Double Up,1,1149,2.0,2000.0
+2238,167790,NBA Showdown $20K Pull Up Jumper [$5K to 1st] (SAS @ NYK),4,2352,10.0,20000.0
+2238,167795,NBA Showdown $15K Pull Up Jumper [$5K to 1st] (MIN @ DAL),4,1764,10.0,15000.0
+2238,167800,NBA Showdown $30K Fadeaway [$10K to 1st] (PHI @ BOS),4,2352,15.0,30000.0
+2238,167803,NBA Showdown $30K Fadeaway [$10K to 1st] (LAL @ GSW),4,2352,15.0,30000.0
+2238,167808,NBA Showdown $200K Shootaround [50K to 1st] (DEN @ PHX),4,11764,20.0,200000.0

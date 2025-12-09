@@ -23,6 +23,7 @@ from projections.minutes_v1 import modeling
 from projections.minutes_v1.config import load_scoring_config
 from projections.minutes_v1.production import DEFAULT_PRODUCTION_ROOT, load_production_minutes_bundle
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
+from projections.minutes_v1.constants import AvailabilityStatus
 from projections.minutes_v1.logs import prediction_logs_base
 from projections.minutes_v1.promotion_calibrator import (
     PromotionPriorContext,
@@ -447,7 +448,8 @@ def _prepare_features(df: pd.DataFrame, *, mode: Mode = "historical") -> pd.Data
             )
             working["starter_flag_label"] = placeholder.astype(int)
     try:
-        working = _filter_out_players(working)
+        if mode != "live":
+            working = _filter_out_players(working)
     except ValueError:
         return pd.DataFrame()
     working = deduplicate_latest(working, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
@@ -514,6 +516,18 @@ def _score_rows(
     else:
         play_prob = np.ones(len(working), dtype=float)
     working["play_prob"] = play_prob
+
+    # Force play_prob to 0.0 for known OUT players (if they were allowed through filtering).
+    # Also zero their minutes quantiles so they don't contribute to team totals.
+    if "status" in working.columns:
+        status_col = working["status"].astype(str).str.upper()
+        out_mask = status_col == AvailabilityStatus.OUT.value
+        if out_mask.any():
+            working.loc[out_mask, "play_prob"] = 0.0
+            # Zero minutes for OUT players - they should not contribute to team totals
+            for min_col in ["minutes_p10", "minutes_p50", "minutes_p90"]:
+                if min_col in working.columns:
+                    working.loc[out_mask, min_col] = 0.0
     if enable_play_prob_mixing:
         typer.echo(
             "play_prob mixing flag enabled for scoring (lab only); conditional minutes remain unchanged.",

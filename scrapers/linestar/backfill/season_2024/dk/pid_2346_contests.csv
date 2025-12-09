@@ -1,0 +1,7 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2346,175075,NBA $20K mini-MAX [150 Max Entry],4,47562,0.5,20000.0
+2346,175079,NBA Single Entry $5 Double Up,1,459,5.0,2000.0
+2346,175082,NBA $400K Play-In Special [$100K to 1st],4,23529,20.0,400000.0
+2346,175083,NBA $2 Double Up,1,574,2.0,1000.0
+2346,175096,NBA Showdown $200K Fadeaway [$50K to 1st] (MEM @ GSW),4,13071,18.0,200000.0
+2346,175106,NBA Showdown $70K Fadeaway [$20K to 1st] (ATL @ ORL),4,5490,15.0,70000.0

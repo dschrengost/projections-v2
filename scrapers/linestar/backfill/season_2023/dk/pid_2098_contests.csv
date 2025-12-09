@@ -1,0 +1,7 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2098,157964,NBA $300K Fadeaway [$100K to 1st],4,23529,15.0,300000.0
+2098,157975,NBA Single Entry $5 Double Up,1,459,5.0,2000.0
+2098,157979,NBA $2 Double Up,1,862,2.0,1500.0
+2098,157980,NBA $20K And-One,4,23781,1.0,20000.0
+2098,158028,NBA Showdown $20K Fadeaway [$5K to 1st] (PHX vs BOS),4,1568,15.0,20000.0
+2098,158041,NBA Showdown $80K Fadeaway [$20K to 1st] (DAL vs OKC),4,6274,15.0,80000.0

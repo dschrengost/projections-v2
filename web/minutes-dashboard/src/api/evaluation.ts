@@ -1,0 +1,62 @@
+import { apiUrl } from './client'
+
+export type EvaluationDayMetrics = {
+  date: string
+  players_matched: number
+  total_players_actual?: number
+  total_players_pred?: number
+  // FPTS metrics
+  fpts_mae: number | null
+  minutes_mae: number | null
+  coverage_80: number | null
+  coverage_90: number | null
+  bias: number | null
+  missed: number
+  false_preds: number
+  // Ownership metrics (optional - may not be available for all dates)
+  own_players_matched?: number | null
+  own_mae?: number | null
+  own_corr?: number | null
+  chalk_top5_acc?: number | null
+  own_bias?: number | null
+  high_own_mae?: number | null
+}
+
+export type EvaluationSummary = {
+  // FPTS aggregates
+  avg_fpts_mae: number | null
+  avg_minutes_mae: number | null
+  avg_coverage_80: number | null
+  avg_coverage_90: number | null
+  avg_bias: number | null
+  total_missed: number
+  total_false_preds: number
+  // Ownership aggregates
+  avg_own_mae?: number | null
+  avg_own_corr?: number | null
+  avg_chalk_top5_acc?: number | null
+  avg_own_bias?: number | null
+  // Counts
+  dates_evaluated: number
+  total_players_matched: number
+}
+
+export type EvaluationResponse = {
+  days: number
+  end_date: string | null
+  metrics: EvaluationDayMetrics[]
+  summary: EvaluationSummary
+}
+
+export async function fetchEvaluation(params?: { days?: number }): Promise<EvaluationResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.days) searchParams.set('days', params.days.toString())
+
+  const query = searchParams.toString()
+  const url = query ? apiUrl(`/api/evaluation?${query}`) : apiUrl('/api/evaluation')
+  const res = await fetch(url)
+  if (!res.ok) {
+    throw new Error(`Failed to fetch evaluation: ${res.status}`)
+  }
+  return res.json()
+}

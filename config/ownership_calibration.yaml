@@ -1,0 +1,61 @@
+# Ownership Calibration Configuration
+# 
+# Controls the softmax-style calibration layer that transforms
+# raw ownership predictions to sum to exactly R (slots per lineup).
+
+calibration:
+  # Enable/disable the calibration layer
+  enabled: false
+  
+  # Path to fitted calibrator parameters (JSON)
+  # Relative to data root (projections-data/)
+  calibrator_path: "artifacts/ownership_v1/calibrator.json"
+  
+  # Target sum R (slots per lineup)
+  # DK NBA classic = 8, FD NBA = 9
+  R: 8.0
+  
+  # Structural zero handling:
+  # Players matching these conditions are excluded from softmax
+  # and set to exactly 0% ownership
+  structural_zeros:
+    # Exclude players marked as OUT in injury status
+    exclude_out: true
+    
+    # Exclude players with 0 predicted minutes
+    exclude_zero_minutes: true
+    
+    # Exclude players with raw pred_own_pct == 0
+    # Set to false if you want softmax to allocate crumbs to low-owned plays
+    exclude_zero_prediction: true
+
+# Playable filter: Zero out ownership for players who are truly unplayable
+# These are players the model assigns ownership to based on salary alone,
+# but who have no realistic chance of being rostered due to low projections
+playable_filter:
+  enabled: true
+  
+  # Minimum projected FPTS to be considered "playable"
+  min_proj_fpts: 8.0
+  
+  # Slate-aware scaling (optional): larger slates have more options,
+  # so we can be more selective about who's playable
+  slate_aware: false
+  # If slate_aware=true: threshold = min_proj_fpts + (slate_size - 80) * scale_per_player
+  # e.g., 100-player slate: 8.0 + (100-80)*0.05 = 9.0
+  scale_per_player: 0.05
+  baseline_slate_size: 80
+
+# Logging configuration for debugging
+logging:
+  # Log per-run metrics (sum before/after, top players, etc.)
+  log_metrics: true
+  
+  # Write histogram bins to JSON for analysis
+  write_histogram: false
+  histogram_bins: [0, 5, 15, 35, 60, 100]
+
+# Lock persistence: preserve ownership for games that have already started
+# Prevents ownership from shifting when feature ranks change as slate shrinks
+lock_persistence:
+  enabled: true

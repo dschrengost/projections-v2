@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily tracking data scrape timer
+Requires=tracking-daily.service
+
+[Timer]
+# Run at 4:00 AM daily (tracking data available after games finish)
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

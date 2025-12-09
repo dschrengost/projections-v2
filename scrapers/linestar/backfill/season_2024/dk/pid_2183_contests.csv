@@ -1,0 +1,8 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2183,163792,NBA $2 Double Up,1,1724,2.0,3000.0
+2183,163804,NBA Single Entry $5 Double Up,1,919,5.0,4000.0
+2183,163806,NBA $500K Zone Special [$100K to 1st],4,118906,5.0,500000.0
+2183,163870,NBA Showdown $15K Pull Up Jumper [$5K to 1st] (MIL @ PHI),4,1764,10.0,15000.0
+2183,163872,NBA Showdown $15K Pull Up Jumper [$5K to 1st] (CHI @ NOP),4,1764,10.0,15000.0
+2183,163877,NBA Showdown $15K Pull Up Jumper [$5K to 1st] (MEM @ UTA),4,1764,10.0,15000.0
+2183,163884,NBA Showdown $150K Fadeaway [$30K to 1st] (PHX @ LAC),4,11764,15.0,150000.0

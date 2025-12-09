@@ -1,0 +1,27 @@
+{
+  "url": "https://googleads.g.doubleclick.net/pagead/id?slf_rd=1",
+  "status": 200,
+  "method": "GET",
+  "headers": {
+    "content-encoding": "gzip",
+    "x-content-type-options": "nosniff",
+    "expires": "Fri, 01 Jan 1990 00:00:00 GMT",
+    "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+    "p3p": "policyref=\"https://googleads.g.doubleclick.net/pagead/gcn_p3p_.xml\", CP=\"CURa ADMa DEVa TAIo PSAo PSDo OUR IND UNI PUR INT DEM STA PRE COM NAV OTC NOI DSP COR\"",
+    "date": "Wed, 17 Sep 2025 21:38:28 GMT",
+    "content-type": "application/json; charset=UTF-8",
+    "content-disposition": "attachment; filename=\"f.txt\"",
+    "cache-control": "no-cache, no-store, must-revalidate",
+    "timing-allow-origin": "*",
+    "pragma": "no-cache",
+    "cross-origin-resource-policy": "cross-origin",
+    "access-control-allow-credentials": "true",
+    "access-control-allow-origin": "https://www.youtube.com",
+    "content-length": "120",
+    "x-xss-protection": "0",
+    "server": "cafe"
+  },
+  "data": {
+    "text": ")]}'\n\n{\"id\":\"ANyPxKq-FG4lMWSoBOW8gSxiFhqXkLNDZc5JCQSApMDLI_kILVoaX1xBNfyBC8LpduIdiGz1tSCs\",\"type\":4}"
+  }
+}

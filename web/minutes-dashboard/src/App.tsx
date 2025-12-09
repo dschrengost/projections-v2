@@ -10,54 +10,22 @@ import {
 } from 'recharts'
 import { apiUrl } from './api/client'
 import PipelinePage from './pages/PipelinePage'
-
-type PlayerRow = {
-  game_date?: string
-  tip_ts?: string
-  game_id?: number | string
-  player_id?: number | string
-  player_name?: string
-  team_id?: number | string
-  status?: string
-  team_name?: string
-  team_tricode?: string
-  opponent_team_id?: number | string
-  opponent_team_name?: string
-  opponent_team_tricode?: string
-  starter_flag?: boolean
-  is_projected_starter?: boolean
-  is_confirmed_starter?: boolean
-  play_prob?: number
-  minutes_p10?: number
-  minutes_p50?: number
-  minutes_p90?: number
-  minutes_p10_cond?: number
-  minutes_p90_cond?: number
-  proj_fpts?: number
-  fpts_per_min_pred?: number
-  scoring_system?: string
-  sim_dk_fpts_mean?: number
-  sim_dk_fpts_std?: number
-  sim_dk_fpts_p05?: number
-  sim_dk_fpts_p10?: number
-  sim_dk_fpts_p25?: number
-  sim_dk_fpts_p50?: number
-  sim_dk_fpts_p75?: number
-  sim_dk_fpts_p95?: number
-  sim_pts_mean?: number
-  sim_reb_mean?: number
-  sim_ast_mean?: number
-  sim_stl_mean?: number
-  sim_blk_mean?: number
-  sim_tov_mean?: number
-  sim_minutes_sim_mean?: number
-}
-
-type MinutesResponse = {
-  date: string
-  count: number
-  players: PlayerRow[]
-}
+import EvaluationPage from './pages/EvaluationPage'
+import { MinutesResponse, PlayerRow } from './types'
+import {
+  formatFpts,
+  formatMinutes,
+  formatMinutesSim,
+  formatOwnership,
+  formatPercent,
+  formatSalary,
+  formatStat,
+  formatTime,
+  formatValue,
+  getStatusBadge,
+  StatusBadge,
+} from './utils'
+import { GameView } from './components/GameView'
 
 type FptsMeta = {
   fpts_model_run_id?: string
@@ -91,6 +59,9 @@ type SortKey =
   | 'proj_fpts'
   | 'fpts_per_min_pred'
   | 'starter_status'
+  | 'salary'
+  | 'pred_own_pct'
+  | 'value'
   | 'sim_dk_fpts_mean'
   | 'sim_dk_fpts_p05'
   | 'sim_dk_fpts_p10'
@@ -122,6 +93,9 @@ const SORT_LABELS: Record<SortKey, string> = {
   proj_fpts: 'FPTS',
   fpts_per_min_pred: 'FPTS/min',
   starter_status: 'Starter',
+  salary: 'Salary',
+  pred_own_pct: 'Own%',
+  value: 'Value',
   sim_dk_fpts_mean: 'Sim Mean',
   sim_dk_fpts_p05: 'Sim p05',
   sim_dk_fpts_p10: 'Sim p10',
@@ -138,106 +112,23 @@ const SORT_LABELS: Record<SortKey, string> = {
   sim_minutes_sim_mean: 'Sim MIN',
 }
 
-type StatusBadge = {
-  label: string
-  title: string
-  className: string
-}
 
-const STATUS_BADGE_DEFINITIONS: Array<{
-  matcher: (value: string) => boolean
-  badge: StatusBadge
-}> = [
-    {
-      matcher: (value) => value === 'q' || value === 'questionable',
-      badge: {
-        label: 'Q',
-        title: 'Questionable',
-        className: 'status-questionable',
-      },
-    },
-    {
-      matcher: (value) => value.startsWith('prob'),
-      badge: {
-        label: 'Prob',
-        title: 'Probable',
-        className: 'status-probable',
-      },
-    },
-    {
-      matcher: (value) => value.includes('doubt'),
-      badge: {
-        label: 'D',
-        title: 'Doubtful',
-        className: 'status-doubtful',
-      },
-    },
-    {
-      matcher: (value) => value.includes('gtd') || value.includes('game time'),
-      badge: {
-        label: 'GTD',
-        title: 'Game time decision',
-        className: 'status-gtd',
-      },
-    },
-    {
-      matcher: (value) => value === 'out',
-      badge: {
-        label: 'Out',
-        title: 'Out',
-        className: 'status-out',
-      },
-    },
-  ]
-
-const getStatusBadge = (status?: string): StatusBadge | null => {
-  const normalized = status?.trim().toLowerCase()
-  if (!normalized) {
-    return null
-  }
-  for (const definition of STATUS_BADGE_DEFINITIONS) {
-    if (definition.matcher(normalized)) {
-      return definition.badge
-    }
-  }
-  return null
-}
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-const initialTab = () => {
+const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' => {
   if (typeof window === 'undefined') {
     return 'minutes'
   }
-  return window.location.pathname.includes('pipeline') ? 'pipeline' : 'minutes'
+  if (window.location.pathname.includes('pipeline')) return 'pipeline'
+  if (window.location.pathname.includes('evaluation')) return 'evaluation'
+  return 'minutes'
 }
 
-const formatTime = (ts?: string, dateContext?: string) => {
-  if (!ts) return ''
-  try {
-    let dateStr = ts
-    // If ts is just a time (HH:MM:SS or HH:MM), append it to the date context
-    if (!ts.includes('T') && !ts.includes(' ') && dateContext) {
-      dateStr = `${dateContext}T${ts}`
-    }
 
-    // Ensure UTC if no timezone specified
-    if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-')) {
-      dateStr = `${dateStr}Z`
-    }
-
-    const date = new Date(dateStr)
-    if (isNaN(date.getTime())) {
-      return ts
-    }
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })
-  } catch (e) {
-    return ts
-  }
-}
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation'>(initialTab)
   const [selectedDate, setSelectedDate] = useState(todayISO())
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
@@ -250,14 +141,14 @@ function App() {
   const [runId, setRunId] = useState<string | null>(null)
   const [runOptions, setRunOptions] = useState<RunOption[]>([])
   const [latestRunId, setLatestRunId] = useState<string | null>(null)
-  const [showFpts, setShowFpts] = useState(true)
+
   const [showSim, setShowSim] = useState(true)
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const path = activeTab === 'pipeline' ? '/pipeline' : '/'
-    window.history.replaceState({}, '', path)
+    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation' }
+    window.history.replaceState({}, '', pathMap[activeTab])
   }, [activeTab])
 
   const fetchData = useCallback(
@@ -440,16 +331,7 @@ function App() {
     }
   }
 
-  const formatMinutes = (value?: number) =>
-    typeof value === 'number' ? value.toFixed(1) : '—'
-  const formatPercent = (value?: number) =>
-    typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : '—'
-  const formatFpts = (value?: number) =>
-    typeof value === 'number' ? value.toFixed(1) : '—'
-  const formatStat = (value?: number) =>
-    typeof value === 'number' ? value.toFixed(1) : '—'
-  const formatMinutesSim = (value?: number) =>
-    typeof value === 'number' ? value.toFixed(1) : '—'
+
 
   const simFptsColumns: Array<{ key: SortKey; label: string }> = [
     { key: 'sim_dk_fpts_p05', label: 'Sim p05' },
@@ -485,6 +367,12 @@ function App() {
       >
         Pipeline
       </button>
+      <button
+        className={activeTab === 'evaluation' ? 'active' : ''}
+        onClick={() => setActiveTab('evaluation')}
+      >
+        Evaluation
+      </button>
     </nav>
   )
 
@@ -493,6 +381,15 @@ function App() {
       <div className="app-shell">
         {nav}
         <PipelinePage />
+      </div>
+    )
+  }
+
+  if (activeTab === 'evaluation') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <EvaluationPage />
       </div>
     )
   }
@@ -578,14 +475,7 @@ function App() {
             {summary.model_run_id && `· Model run: ${summary.model_run_id}`}{' '}
             {summary.run_id && `· Artifact: ${summary.run_id}`}{' '}
             {summary.run_as_of_ts && `· As of: ${formatTime(summary.run_as_of_ts)}`}{' '}
-            {showFpts && summary.fpts_available === false && '· FPTS unavailable'}
             {showSim && summary.sim_available === false && '· sim_v2 unavailable'}
-            {showFpts && summary.fpts_available && summary.fpts_meta?.fpts_model_run_id && (
-              <>· FPTS run: {summary.fpts_meta.fpts_model_run_id}</>
-            )}
-            {showFpts && summary.fpts_available && summary.fpts_meta?.scoring_system && (
-              <> ({summary.fpts_meta.scoring_system.toUpperCase()})</>
-            )}
           </span>
         )}
       </section>
@@ -617,14 +507,7 @@ function App() {
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
         />
-        <label className="fpts-toggle">
-          <input
-            type="checkbox"
-            checked={showFpts}
-            onChange={(event) => setShowFpts(event.target.checked)}
-          />
-          Show FPTS columns
-        </label>
+
         <label className="fpts-toggle">
           <input
             type="checkbox"
@@ -636,140 +519,137 @@ function App() {
       </section>
 
       <section className="content">
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th onClick={() => toggleSort('player_id')} className="sortable">
-                  Player
-                  {sortKey === 'player_id' && (
-                    <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
-                  )}
-                </th>
-                <th onClick={() => toggleSort('team_id')} className="sortable">
-                  Team
-                  {sortKey === 'team_id' && (
-                    <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
-                  )}
-                </th>
-                <th>Opponent</th>
-                {(['minutes_p10', 'minutes_p50', 'minutes_p90', 'play_prob'] as SortKey[]).map(
-                  (key) => (
-                    <th
-                      key={key}
-                      onClick={() => toggleSort(key)}
-                      className="sortable"
-                    >
-                      {SORT_LABELS[key]}
-                      {sortKey === key && (
-                        <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
-                      )}
-                    </th>
-                  ),
-                )}
-                {showFpts && (
-                  <>
-                    {(['proj_fpts', 'fpts_per_min_pred'] as SortKey[]).map((key) => (
-                      <th key={key} onClick={() => toggleSort(key)} className="sortable">
+        {selectedGameId ? (
+          <GameView rows={filteredRows} gameId={selectedGameId} />
+        ) : (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th onClick={() => toggleSort('player_id')} className="sortable">
+                    Player
+                    {sortKey === 'player_id' && (
+                      <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => toggleSort('team_id')} className="sortable">
+                    Team
+                    {sortKey === 'team_id' && (
+                      <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
+                    )}
+                  </th>
+                  <th>Opponent</th>
+                  {(['minutes_p10', 'minutes_p50', 'minutes_p90', 'play_prob'] as SortKey[]).map(
+                    (key) => (
+                      <th
+                        key={key}
+                        onClick={() => toggleSort(key)}
+                        className="sortable"
+                      >
                         {SORT_LABELS[key]}
                         {sortKey === key && (
                           <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
                         )}
                       </th>
-                    ))}
-                  </>
-                )}
-                {showSim && (
-                  <>
-                    {simFptsColumns.map(({ key, label }) => (
-                      <th key={key} onClick={() => toggleSort(key)} className="sortable">
-                        {label}
-                        {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
-                      </th>
-                    ))}
-                        {simStatColumns.map(({ key, label }) => (
-                          <th key={key} onClick={() => toggleSort(key)} className="sortable">
-                            {label}
-                            {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
-                          </th>
-                        ))}
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRows.map((row) => {
-                const playerLabel = row.player_name || row.player_id
-                const teamLabel =
-                  row.team_tricode || row.team_name || row.team_id
-                const opponentLabel =
-                  row.opponent_team_tricode ||
-                  row.opponent_team_name ||
-                  row.opponent_team_id
-                const statusBadge = getStatusBadge(row.status)
-                return (
-                  <tr key={`${row.game_id}-${row.player_id}`}>
-                    <td>
-                      <div className="player-header">
-                        <strong>{playerLabel}</strong>
-                        {statusBadge && (
-                          <span
-                            className={`status-tag ${statusBadge.className}`}
-                            title={statusBadge.title}
-                          >
-                            {statusBadge.label}
-                          </span>
-                        )}
-                        {row.is_confirmed_starter && (
-                          <span className="status-tag badge-confirmed" title="Confirmed Starter">Start</span>
-                        )}
-                        {!row.is_confirmed_starter && row.is_projected_starter && (
-                          <span className="status-tag badge-projected" title="Projected Starter">Proj</span>
-                        )}
-                      </div>
-                      <div className="muted">{formatTime(row.tip_ts, row.game_date)}</div>
-                    </td>
-                    <td>{teamLabel}</td>
-                    <td>{opponentLabel}</td>
-                    <td>{formatMinutes(row.minutes_p10)}</td>
-                    <td>{formatMinutes(row.minutes_p50)}</td>
-                    <td>{formatMinutes(row.minutes_p90)}</td>
-                    <td>{formatPercent(row.play_prob)}</td>
-                    {showFpts && (
-                      <>
-                        <td>{formatFpts(row.proj_fpts)}</td>
-                        <td>{formatFpts(row.fpts_per_min_pred)}</td>
-                      </>
-                    )}
-                    {showSim && (
-                      <>
-                        {simFptsColumns.map(({ key }) => (
-                          <td key={key}>
-                            {formatFpts(row[key as keyof PlayerRow] as number | undefined)}
-                          </td>
-                        ))}
-                        {simStatColumns.map(({ key }) => (
-                          <td key={key}>
-                            {key === 'sim_minutes_sim_mean'
-                              ? formatMinutesSim(row[key as keyof PlayerRow] as number | undefined)
-                              : formatStat(row[key as keyof PlayerRow] as number | undefined)}
-                          </td>
-                        ))}
-                      </>
-                    )}
-                  </tr>
-                )
-              })}
-              {!filteredRows.length && !loading && (
-                <tr>
-                  <td colSpan={7} className="muted">
-                    No rows available for {selectedDate}.
-                  </td>
+                    ),
+                  )}
+                  {/* Ownership Columns */}
+                  {(['salary', 'pred_own_pct', 'value'] as SortKey[]).map((key) => (
+                    <th key={key} onClick={() => toggleSort(key)} className="sortable">
+                      {SORT_LABELS[key]}
+                      {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
+                    </th>
+                  ))}
+                  {showSim && (
+                    <>
+                      {simFptsColumns.map(({ key, label }) => (
+                        <th key={key} onClick={() => toggleSort(key)} className="sortable">
+                          {label}
+                          {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
+                        </th>
+                      ))}
+                      {simStatColumns.map(({ key, label }) => (
+                        <th key={key} onClick={() => toggleSort(key)} className="sortable">
+                          {label}
+                          {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
+                        </th>
+                      ))}
+                    </>
+                  )}
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filteredRows.map((row) => {
+                  const playerLabel = row.player_name || row.player_id
+                  const teamLabel =
+                    row.team_tricode || row.team_name || row.team_id
+                  const opponentLabel =
+                    row.opponent_team_tricode ||
+                    row.opponent_team_name ||
+                    row.opponent_team_id
+                  const statusBadge = getStatusBadge(row.status)
+                  return (
+                    <tr key={`${row.game_id}-${row.player_id}`}>
+                      <td>
+                        <div className="player-header">
+                          <strong>{playerLabel}</strong>
+                          {statusBadge && (
+                            <span
+                              className={`status-tag ${statusBadge.className}`}
+                              title={statusBadge.title}
+                            >
+                              {statusBadge.label}
+                            </span>
+                          )}
+                          {row.is_confirmed_starter && (
+                            <span className="status-tag badge-confirmed" title="Confirmed Starter">Start</span>
+                          )}
+                          {!row.is_confirmed_starter && row.is_projected_starter && (
+                            <span className="status-tag badge-projected" title="Projected Starter">Proj</span>
+                          )}
+                        </div>
+                        <div className="muted">{formatTime(row.tip_ts, row.game_date)}</div>
+                      </td>
+                      <td>{teamLabel}</td>
+                      <td>{opponentLabel}</td>
+                      <td>{formatMinutes(row.minutes_p10)}</td>
+                      <td>{formatMinutes(row.minutes_p50)}</td>
+                      <td>{formatMinutes(row.minutes_p90)}</td>
+                      <td>{formatPercent(row.play_prob)}</td>
+                      {/* Ownership Columns */}
+                      <td>{formatSalary(row.salary)}</td>
+                      <td className="ownership-cell">{formatOwnership(row.pred_own_pct)}</td>
+                      <td className="value-cell">{formatValue(row.value)}</td>
+                      {showSim && (
+                        <>
+                          {simFptsColumns.map(({ key }) => (
+                            <td key={key}>
+                              {formatFpts(row[key as keyof PlayerRow] as number | undefined)}
+                            </td>
+                          ))}
+                          {simStatColumns.map(({ key }) => (
+                            <td key={key}>
+                              {key === 'sim_minutes_sim_mean'
+                                ? formatMinutesSim(row[key as keyof PlayerRow] as number | undefined)
+                                : formatStat(row[key as keyof PlayerRow] as number | undefined)}
+                            </td>
+                          ))}
+                        </>
+                      )}
+                    </tr>
+                  )
+                })}
+                {!filteredRows.length && !loading && (
+                  <tr>
+                    <td colSpan={7} className="muted">
+                      No rows available for {selectedDate}.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
         <div className="chart-wrapper">
           <h2>Team minutes (p50)</h2>
           <ResponsiveContainer width="100%" height={300}>

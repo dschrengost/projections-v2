@@ -18,8 +18,9 @@
         "k_default": 0.65
       },
       "rates_noise": {
-        "enabled": false,
-        "split": "val"
+        "enabled": true,
+        "split": "val",
+        "run_id": "rates_v1_reconciled_20251205_093151"
       },
       "minutes_noise": {
         "enabled": true,

@@ -85,8 +85,8 @@
 }
 
 .content {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 1.25rem;
 }
 
@@ -105,7 +105,7 @@ table {
 
 th,
 td {
-  padding: 0.5rem 0.75rem;
+  padding: 0.35rem 0.5rem;
   border-bottom: 1px solid #334155;
   text-align: left;
 }
@@ -372,4 +372,621 @@ tbody tr:hover {
 
 .job-name {
   font-weight: 600;
+}
+
+/* Game View Styles */
+.game-view {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-top: 1rem;
+}
+
+.team-header {
+  font-size: 1.5rem;
+  border-bottom: 2px solid #334155;
+  padding-bottom: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.player-section {
+  margin-bottom: 1.5rem;
+}
+
+.player-section h3 {
+  font-size: 1rem;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.player-list-table {
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.player-list-table th {
+  color: #64748b;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid #334155;
+}
+
+.player-list-table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #1e293b;
+}
+
+.player-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.player-name {
+  font-weight: 500;
+  color: #e2e8f0;
+}
+
+.empty-section {
+  color: #64748b;
+  font-style: italic;
+  font-size: 0.85rem;
+  padding: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .game-view {
+    grid-template-columns: 1fr;
+  }
+}
+
+.font-bold {
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.text-upside {
+  color: #34d399;
+}
+
+.text-downside {
+  color: #f87171;
+}
+
+/* === Vegas Header === */
+.vegas-header {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.vegas-matchup {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.tip-time {
+  color: #94a3b8;
+  font-weight: 400;
+  margin-left: 0.5rem;
+}
+
+.vegas-lines {
+  display: flex;
+  gap: 1rem;
+}
+
+.vegas-stat {
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.vegas-stat strong {
+  color: #e2e8f0;
+}
+
+.implied-total {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  font-weight: 400;
+  margin-left: 0.75rem;
+}
+
+/* === Teams Container === */
+.teams-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .teams-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* === Expandable Player List === */
+.player-list-table.expandable {
+  width: 100%;
+}
+
+.expand-cell {
+  width: 24px;
+  text-align: center;
+  padding-right: 0 !important;
+}
+
+.expand-icon {
+  color: #64748b;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.expandable-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.expandable-row:hover {
+  background: #1e293b;
+}
+
+.expandable-row:hover .expand-icon {
+  color: #a5b4fc;
+}
+
+.player-row.expanded {
+  background: #1e293b;
+}
+
+.player-row.expanded .expand-icon {
+  color: #a5b4fc;
+}
+
+/* === Expanded Details Panel === */
+.expanded-details {
+  background: #0f172a;
+}
+
+.expanded-details td {
+  padding: 0 !important;
+}
+
+.stats-breakdown {
+  padding: 0.75rem 1rem 0.75rem 2rem;
+  border-left: 3px solid #4f46e5;
+  margin-left: 0.5rem;
+}
+
+.stats-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.stats-row.secondary {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #334155;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  min-width: 50px;
+}
+
+.stat-label {
+  font-size: 0.7rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.stat-item.stat-up .stat-value {
+  color: #34d399;
+}
+
+.stat-item.stat-down .stat-value {
+  color: #f87171;
+}
+
+/* === Game View Container (Sidebar Layout) === */
+.game-view-container {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 1100px) {
+  .game-view-container {
+    grid-template-columns: 1fr;
+  }
+
+  .game-sidebar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+  }
+}
+
+.game-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.game-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* === Sidebar Cards === */
+.sidebar-card {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.sidebar-card-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #94a3b8;
+  margin: 0 0 0.75rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* === Game Environment Panel === */
+.environment-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.env-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.env-label {
+  font-size: 0.7rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.env-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.env-empty {
+  color: #64748b;
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+/* === Team Summary Card === */
+.team-summary .sidebar-card-title {
+  font-size: 1rem;
+  color: #e2e8f0;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+  gap: 0.5rem;
+}
+
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.summary-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.summary-label {
+  font-size: 0.65rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.text-warning {
+  color: #fbbf24;
+}
+
+/* === Minutes Distribution Chart === */
+.minutes-chart {
+  padding: 0.5rem 0;
+}
+
+.minutes-bar-container {
+  position: relative;
+  height: 24px;
+  background: #0f172a;
+  border-radius: 12px;
+  margin-bottom: 0.5rem;
+}
+
+.minutes-range-bar {
+  position: absolute;
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
+  border-radius: 12px;
+  opacity: 0.6;
+}
+
+.minutes-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+}
+
+.minutes-marker.p50 {
+  background: #3b82f6;
+  z-index: 2;
+}
+
+.minutes-marker.sim {
+  background: #10b981;
+  z-index: 3;
+}
+
+.minutes-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.minutes-labels .center {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.minutes-legend {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+  color: #64748b;
+  justify-content: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.p50-dot {
+  background: #3b82f6;
+}
+
+.sim-dot {
+  background: #10b981;
+}
+
+.text-muted {
+  color: #94a3b8;
+}
+
+/* === Ownership & Value Columns === */
+.ownership-cell {
+  font-weight: 600;
+  color: #a78bfa;
+  /* purple for ownership */
+}
+
+.value-cell {
+  font-weight: 600;
+  color: #22d3ee;
+  /* cyan for value */
+}
+
+.salary-cell {
+  color: #f59e0b;
+  /* amber for salary */
+  font-weight: 500;
+}
+
+/* === Evaluation Page === */
+.evaluation-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.evaluation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.evaluation-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.evaluation-header .subtitle {
+  color: #94a3b8;
+  margin: 0.25rem 0 0 0;
+}
+
+.evaluation-days {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #94a3b8;
+}
+
+.evaluation-days select {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #f8fafc;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+}
+
+.evaluation-summary {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.evaluation-summary .card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.evaluation-summary .label {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.evaluation-summary .value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-top: 0.25rem;
+  color: #f8fafc;
+}
+
+.evaluation-section {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.evaluation-section h2 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: #e2e8f0;
+}
+
+.chart-container {
+  width: 100%;
+  min-height: 200px;
+}
+
+.evaluation-table {
+  overflow-x: auto;
+}
+
+.evaluation-table table {
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.evaluation-table th {
+  text-align: right;
+  padding: 0.5rem;
+  color: #64748b;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.evaluation-table th:first-child {
+  text-align: left;
+}
+
+.evaluation-table td {
+  padding: 0.5rem;
+  text-align: right;
+  border-bottom: 1px solid #334155;
+}
+
+.evaluation-table td:first-child {
+  text-align: left;
+}
+
+.evaluation-table .date-cell {
+  font-weight: 500;
+  color: #e2e8f0;
+}
+
+.evaluation-alert {
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #334155;
+}
+
+.evaluation-alert.error {
+  background: #450a0a;
+  border-color: #7f1d1d;
+  color: #fecdd3;
+}
+
+.evaluation-alert.muted {
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+.evaluation-footer {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  color: #64748b;
+  font-size: 0.85rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #334155;
+}
+
+/* Metric color classes */
+.metric-good {
+  color: #22c55e !important;
+}
+
+.metric-warn {
+  color: #facc15 !important;
+}
+
+.metric-bad {
+  color: #ef4444 !important;
 }

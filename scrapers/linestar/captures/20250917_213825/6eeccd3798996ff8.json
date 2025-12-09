@@ -1,0 +1,25 @@
+{
+  "url": "https://jnn-pa.googleapis.com/$rpc/google.internal.waa.v1.Waa/GenerateIT",
+  "status": 200,
+  "method": "POST",
+  "headers": {
+    "access-control-expose-headers": "vary,vary,vary,content-encoding,date,server,content-length",
+    "content-encoding": "gzip",
+    "access-control-allow-credentials": "true",
+    "x-content-type-options": "nosniff",
+    "access-control-allow-origin": "https://www.youtube.com",
+    "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+    "content-length": "114",
+    "date": "Wed, 17 Sep 2025 21:38:28 GMT",
+    "x-xss-protection": "0",
+    "content-type": "application/json+protobuf; charset=UTF-8",
+    "vary": "Origin, X-Origin, Referer",
+    "server": "ESF",
+    "x-frame-options": "SAMEORIGIN"
+  },
+  "data": [
+    "r4sz8pXAY9eLT2xOydgrMpWz+ysB5VhUlUTyR0MUNP/suqUD3bV0VglpMWynwcuh8eMa8DLT5SOhRWQ1",
+    43200,
+    100
+  ]
+}
