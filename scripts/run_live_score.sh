@@ -241,17 +241,6 @@ echo "[live] Building rates features..."
   --out-root "${DATA_ROOT}/gold/rates_v1_live" \
   --no-strict
 
-# NOTE: score_fpts_v1 (GBM model) deprecated - sim_v2 worlds now provides dk_fpts_mean
-# if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_fpts_v1 \
-#   --date "${START_DATE}" \
-#   --run-id "${LIVE_RUN_ID}" \
-#   --data-root "${DATA_ROOT}" \
-#   --rates-live-root "${DATA_ROOT}/gold/rates_v1_live" \
-#   --use-live-rates
-# then
-#   echo "[live] warning: FPTS scoring failed; continuing without FPTS outputs." >&2
-# fi
-
 if [[ "${RUN_SIM}" == "1" ]]; then
   echo "[live] Running sim_v2 worlds + aggregation (profile=${SIM_PROFILE}, worlds=${SIM_WORLDS})..."
   if ! /home/daniel/.local/bin/uv run python -m scripts.sim_v2.run_sim_live \

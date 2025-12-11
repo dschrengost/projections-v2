@@ -11,6 +11,7 @@ import {
 import { apiUrl } from './api/client'
 import PipelinePage from './pages/PipelinePage'
 import EvaluationPage from './pages/EvaluationPage'
+import OptimizerPage from './pages/OptimizerPage'
 import { MinutesResponse, PlayerRow } from './types'
 import {
   formatFpts,
@@ -116,10 +117,11 @@ const SORT_LABELS: Record<SortKey, string> = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' => {
+const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' => {
   if (typeof window === 'undefined') {
     return 'minutes'
   }
+  if (window.location.pathname.includes('optimizer')) return 'optimizer'
   if (window.location.pathname.includes('pipeline')) return 'pipeline'
   if (window.location.pathname.includes('evaluation')) return 'evaluation'
   return 'minutes'
@@ -128,7 +130,7 @@ const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' => {
 
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer'>(initialTab)
   const [selectedDate, setSelectedDate] = useState(todayISO())
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
@@ -147,7 +149,7 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation' }
+    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer' }
     window.history.replaceState({}, '', pathMap[activeTab])
   }, [activeTab])
 
@@ -373,6 +375,12 @@ function App() {
       >
         Evaluation
       </button>
+      <button
+        className={activeTab === 'optimizer' ? 'active' : ''}
+        onClick={() => setActiveTab('optimizer')}
+      >
+        Optimizer
+      </button>
     </nav>
   )
 
@@ -390,6 +398,15 @@ function App() {
       <div className="app-shell">
         {nav}
         <EvaluationPage />
+      </div>
+    )
+  }
+
+  if (activeTab === 'optimizer') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <OptimizerPage />
       </div>
     )
   }

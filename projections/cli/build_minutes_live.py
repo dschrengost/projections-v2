@@ -832,18 +832,32 @@ def _build_minutes_live_logic(
             dates = pd.to_datetime(group["game_date"]).dt.normalize()
             if minutes.empty:
                 continue
-            last_minutes = minutes.iloc[-1]
-            last3 = minutes.tail(3).mean()
-            last5 = minutes.tail(5).mean()
+            
+            # Filter out 0-minute games (DNP/injury) for rolling averages
+            # These should not count toward a player's baseline minutes expectation
+            played_mask = minutes > 0
+            played_minutes = minutes[played_mask]
+            played_dates = dates[played_mask]
+            
+            # Use last played game for min_last1 (not DNP games)
+            last_minutes = played_minutes.iloc[-1] if not played_minutes.empty else 0.0
+            
+            # Rolling averages over games actually played
+            last3 = played_minutes.tail(3).mean() if len(played_minutes) >= 1 else pd.NA
+            last5 = played_minutes.tail(5).mean() if len(played_minutes) >= 1 else pd.NA
             mean3 = last3
             mean5 = last5
-            mean10 = minutes.tail(10).mean()
-            iqr5 = minutes.tail(5).quantile(0.75) - minutes.tail(5).quantile(0.25) if len(minutes.tail(5)) >= 2 else 0.0
+            mean10 = played_minutes.tail(10).mean() if len(played_minutes) >= 1 else pd.NA
+            iqr5 = played_minutes.tail(5).quantile(0.75) - played_minutes.tail(5).quantile(0.25) if len(played_minutes.tail(5)) >= 2 else 0.0
+            
+            # sum_min_7d uses all games in window (including DNPs, as it's schedule-aware)
             recent_window = minutes[dates >= cutoff_7d]
             sum7 = float(recent_window.sum()) if not recent_window.empty else 0.0
-            last10 = minutes.tail(10)
-            mu10 = last10.mean()
-            std10 = last10.std(ddof=0)
+            
+            # z-score over played games
+            last10_played = played_minutes.tail(10)
+            mu10 = last10_played.mean() if not last10_played.empty else 0.0
+            std10 = last10_played.std(ddof=0) if not last10_played.empty else 0.0
             z10 = float((last_minutes - mu10) / std10) if std10 and std10 > 0 else 0.0
             latest_by_player.append(
                 {

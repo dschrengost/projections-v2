@@ -130,13 +130,4 @@ fi
 
 /home/daniel/.local/bin/uv run python -m projections.cli.score_minutes_v1 "${SCORE_ARGS[@]}"
 
-# NOTE: score_fpts_v1 (GBM model) deprecated - sim_v2 worlds now provides dk_fpts_mean
-# echo "[live] scoring FPTS for ${START_DATE} using production bundle (minutes_run=${RUN_ID})."
-# if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_fpts_v1 \
-#   --date "${START_DATE}" \
-#   --run-id "${RUN_ID}" \
-#   --data-root "${DATA_ROOT}"
-# then
-#   echo "[live] warning: FPTS scoring failed; continuing without FPTS outputs." >&2
-# fi
 

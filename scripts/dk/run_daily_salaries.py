@@ -59,11 +59,16 @@ def main(
     ),
     site: str = typer.Option("dk", help="Site identifier (currently only dk)."),
     slate_types: List[str] = typer.Option(
-        ["main"], "--slate-type", help="Slate types to process (repeatable)."
+        ["all"], "--slate-type", help="Slate types to process (repeatable). Use 'all' for all slates.",
     ),
     force_refresh: bool = typer.Option(
         False,
         help="Refetch draftables from API even if bronze JSON exists.",
+    ),
+    single_slate: bool = typer.Option(
+        False,
+        "--single-slate",
+        help="Only process one slate per type (highest contest count). Default: process ALL slates.",
     ),
 ):
     resolved_date = _resolve_game_date(game_date)
@@ -79,6 +84,7 @@ def main(
 
     failures = False
     any_written = False
+    processed_draft_groups = set()
 
     for slate_type in slate_types:
         slate_type_norm = slate_type.lower()
@@ -106,85 +112,97 @@ def main(
             failures = True
             continue
 
-        if "n_contests" in slates_df.columns:
-            chosen = slates_df.sort_values("n_contests", ascending=False).iloc[0]
+        # Process all draft groups (or just the top one if --single-slate)
+        if single_slate:
+            if "n_contests" in slates_df.columns:
+                slates_to_process = [slates_df.sort_values("n_contests", ascending=False).iloc[0]]
+            else:
+                slates_to_process = [slates_df.iloc[0]]
         else:
-            chosen = slates_df.iloc[0]
-        draft_group_id = int(chosen["draft_group_id"])
-        print(
-            f"  draft_group_id={draft_group_id} n_contests={chosen.get('n_contests', 'n/a')}"
-        )
+            slates_to_process = [slates_df.iloc[i] for i in range(len(slates_df))]
 
-        try:
-            payload = _ensure_bronze_draftables(
-                draft_group_id=draft_group_id, data_root=data_root, force_refresh=force_refresh
-            )
-        except Exception as exc:
+        for chosen in slates_to_process:
+            draft_group_id = int(chosen["draft_group_id"])
+            
+            # Skip if already processed (can happen with 'all' slate type)
+            if draft_group_id in processed_draft_groups:
+                continue
+            processed_draft_groups.add(draft_group_id)
+            
             print(
-                f"[dk-salaries] failed to load/fetch draftables for draft_group_id={draft_group_id}: {exc}"
+                f"  draft_group_id={draft_group_id} n_contests={chosen.get('n_contests', 'n/a')} slate_type={chosen.get('slate_type', slate_type_norm)}"
             )
-            failures = True
-            continue
 
-        try:
-            draftables_df = draftables_json_to_df(payload, draft_group_id)
-        except Exception as exc:
+            try:
+                payload = _ensure_bronze_draftables(
+                    draft_group_id=draft_group_id, data_root=data_root, force_refresh=force_refresh
+                )
+            except Exception as exc:
+                print(
+                    f"[dk-salaries] failed to load/fetch draftables for draft_group_id={draft_group_id}: {exc}"
+                )
+                failures = True
+                continue
+
+            try:
+                draftables_df = draftables_json_to_df(payload, draft_group_id)
+            except Exception as exc:
+                print(
+                    f"[dk-salaries] failed to parse draftables for draft_group_id={draft_group_id}: {exc}"
+                )
+                failures = True
+                continue
+
+            if draftables_df.empty:
+                print(
+                    f"[dk-salaries] no draftables rows for draft_group_id={draft_group_id}; skipping"
+                )
+                failures = True
+                continue
+
+            try:
+                salaries_df = normalize_draftables_to_salaries(
+                    root=data_root,
+                    site=site,
+                    game_date=resolved_date.isoformat(),
+                    draft_group_id=draft_group_id,
+                    df=draftables_df,
+                )
+            except Exception as exc:
+                print(
+                    f"[dk-salaries] failed to normalize draftables for draft_group_id={draft_group_id}: {exc}"
+                )
+                failures = True
+                continue
+
+            if salaries_df.empty:
+                print(
+                    f"[dk-salaries] normalization produced zero rows for draft_group_id={draft_group_id}"
+                )
+                failures = True
+                continue
+
+            try:
+                path = write_salaries_gold(
+                    root=data_root,
+                    site=site,
+                    game_date=resolved_date.isoformat(),
+                    draft_group_id=draft_group_id,
+                    salaries_df=salaries_df,
+                )
+            except Exception as exc:
+                print(
+                    f"[dk-salaries] failed to write gold salaries for draft_group_id={draft_group_id}: {exc}"
+                )
+                failures = True
+                continue
+
+            any_written = True
             print(
-                f"[dk-salaries] failed to parse draftables for draft_group_id={draft_group_id}: {exc}"
+                f"    n_raw_rows={len(draftables_df)} n_players={len(salaries_df)} gold_path={path}"
             )
-            failures = True
-            continue
 
-        if draftables_df.empty:
-            print(
-                f"[dk-salaries] no draftables rows for draft_group_id={draft_group_id}; skipping"
-            )
-            failures = True
-            continue
-
-        try:
-            salaries_df = normalize_draftables_to_salaries(
-                root=data_root,
-                site=site,
-                game_date=resolved_date.isoformat(),
-                draft_group_id=draft_group_id,
-                df=draftables_df,
-            )
-        except Exception as exc:
-            print(
-                f"[dk-salaries] failed to normalize draftables for draft_group_id={draft_group_id}: {exc}"
-            )
-            failures = True
-            continue
-
-        if salaries_df.empty:
-            print(
-                f"[dk-salaries] normalization produced zero rows for draft_group_id={draft_group_id}"
-            )
-            failures = True
-            continue
-
-        try:
-            path = write_salaries_gold(
-                root=data_root,
-                site=site,
-                game_date=resolved_date.isoformat(),
-                draft_group_id=draft_group_id,
-                salaries_df=salaries_df,
-            )
-        except Exception as exc:
-            print(
-                f"[dk-salaries] failed to write gold salaries for draft_group_id={draft_group_id}: {exc}"
-            )
-            failures = True
-            continue
-
-        any_written = True
-        print(
-            f"  draft_group_id={draft_group_id} n_raw_rows={len(draftables_df)} n_players={len(salaries_df)}"
-        )
-        print(f"  gold_path={path}")
-
+    print(f"[dk-salaries] processed {len(processed_draft_groups)} draft groups")
     if failures or not any_written:
         raise typer.Exit(code=1)
 

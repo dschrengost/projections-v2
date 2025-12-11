@@ -71,7 +71,8 @@ def schedule_from_api(start: pd.Timestamp, end: pd.Timestamp, timeout: float) ->
     records: list[dict] = []
     current = start
     while current <= end:
-        games = scraper.fetch_daily_schedule(current.date(), season=season_label)
+        # Don't pass season param - that triggers mobile schedule which misses NBA Cup games
+        games = scraper.fetch_daily_schedule(current.date())
         for game in games:
             if not game.game_id:
                 continue

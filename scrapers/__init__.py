@@ -1,11 +1,5 @@
 """Scraper utilities for pulling external betting data."""
 
-from .basketball_reference import (
-    BasketballReferenceScraper,
-    GameBoxScore,
-    PlayerBoxScore,
-    TeamBoxScore,
-)
 from .nba_boxscore import (
     NbaComArena,
     NbaComBoxScoreScraper,
@@ -31,10 +25,8 @@ from .nba_daily_lineups import (
 )
 
 __all__ = [
-    "BasketballReferenceScraper",
     "EventOdds",
     "InjuryRecord",
-    "GameBoxScore",
     "NbaComArena",
     "NbaComBoxScoreScraper",
     "NbaComGameBoxScore",
@@ -43,10 +35,8 @@ __all__ = [
     "NBAInjuryScraper",
     "MarketLine",
     "OddstraderScraper",
-    "PlayerBoxScore",
     "NbaScheduleScraper",
     "NbaPlayersScraper",
-    "TeamBoxScore",
     "ScheduledGame",
     "ScheduledTeam",
     "PlayerProfile",

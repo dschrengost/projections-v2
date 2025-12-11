@@ -14,7 +14,7 @@ The projections pipeline implements a **Medallion Architecture** (Bronze → Sil
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Data Sources | Good | 6 scrapers covering all required inputs |
+| Data Sources | Good | 9 scrapers covering all required inputs |
 | Schema Enforcement | Good | Pandera validation, typed columns |
 | Anti-Leak Controls | Excellent | Strict `as_of_ts ≤ tip_ts` throughout |
 | Bronze Persistence | **GAP** | Daily partitions overwrite, no hourly retention |
@@ -22,6 +22,35 @@ The projections pipeline implements a **Medallion Architecture** (Bronze → Sil
 | Gold Immutability | Good | Labels frozen, features monthly |
 | Orchestration | Functional | systemd works but lacks observability |
 | Reproducibility | **GAP** | Cannot reconstruct pre-tip state reliably |
+| **Training Data** | **CRITICAL** | Historical rates_training_base severely incomplete (see below) |
+
+### Critical Issue: Rates Training Base Incomplete
+
+> [!CAUTION]
+> **The `gold/rates_training_base` for 2022-2024 contains only ~20 rows/day instead of ~150+ expected.**
+> This limits rates model training to ~6,000 rows when ~60,000+ should be available.
+
+**Discovery:** During MLFlow integration, noticed train/cal/val split was 3,206 / 2,430 / 7,584 rows.
+Investigation revealed the historical backfill captured only a fraction of players.
+
+| Season | Rows | Dates | Avg Rows/Date | Expected |
+|--------|------|-------|---------------|----------|
+| 2022 | 2,873 | 144 | **20** | ~150 |
+| 2023 | 3,206 | 163 | **20** | ~150 |
+| 2024 | 3,293 | 166 | **20** | ~150 |
+| 2025 | 6,721 | 44 | **153** | ✅ Correct |
+
+**Root Cause:** The `build_training_base.py` script uses `game_date=` partition lookups, but historical odds/roster data is stored in `month=` partitions. Rows with missing joins were filtered out.
+
+**Impact:**
+- Rates models trained on ~10% of available data
+- Feature distributions may be biased toward complete rows
+- Model performance potentially degraded
+
+**Remediation:**
+1. Re-run `build_training_base.py` for 2023-10-01 to present (skip 2022-23 which lacks odds)
+2. Verify partition path handling for month-partitioned sources
+3. Target: ~60,000+ training rows for 2023-24 + 2024-25 seasons
 
 ---
 

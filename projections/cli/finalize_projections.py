@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import unicodedata
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -15,6 +17,19 @@ from typing import Optional
 import pandas as pd
 
 from projections.paths import data_path
+
+
+def _normalize_name(value: str | None) -> str:
+    """Normalize player name for matching: fold Unicode diacritics, lowercase, strip.
+    
+    Handles European characters like Dončić -> doncic, Jokić -> jokic.
+    """
+    if not value:
+        return ""
+    # Fold Unicode (e.g., Dončić -> Doncic) before stripping non-alphanumerics
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_folded = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]", "", ascii_folded.lower())
 
 
 # Columns to include from each source
@@ -221,18 +236,18 @@ def finalize_projections(
     # Load ownership (join on player_name since DK uses different IDs)
     ownership = _load_ownership(game_date, data_root)
     if ownership is not None and not ownership.empty:
-        # Normalize names for matching
-        unified["_name_lower"] = unified["player_name"].str.lower().str.strip()
-        ownership["_name_lower"] = ownership["player_name"].str.lower().str.strip()
+        # Normalize names for matching (handles Unicode like Dončić -> doncic)
+        unified["_name_norm"] = unified["player_name"].apply(_normalize_name)
+        ownership["_name_norm"] = ownership["player_name"].apply(_normalize_name)
         
-        ownership_cols = ["_name_lower"] + [c for c in OWNERSHIP_COLUMNS if c in ownership.columns]
+        ownership_cols = ["_name_norm"] + [c for c in OWNERSHIP_COLUMNS if c in ownership.columns]
         unified = unified.merge(
             ownership[ownership_cols],
-            on="_name_lower",
+            on="_name_norm",
             how="left",
             suffixes=("", "_own")
         )
-        unified = unified.drop(columns=["_name_lower"])
+        unified = unified.drop(columns=["_name_norm"])
         
         matched = unified["pred_own_pct"].notna().sum() if "pred_own_pct" in unified.columns else 0
         print(f"[finalize] Merged {matched}/{len(unified)} ownership predictions")
@@ -243,15 +258,15 @@ def finalize_projections(
     if "salary" not in unified.columns:
         salaries = _load_salaries(game_date, data_root)
         if salaries is not None:
-            # Join on player_name (normalized)
-            unified["_name_lower"] = unified["player_name"].str.lower().str.strip()
-            salaries["_name_lower"] = salaries["player_name"].str.lower().str.strip()
+            # Join on player_name (normalized handles Unicode like Dončić)
+            unified["_name_norm"] = unified["player_name"].apply(_normalize_name)
+            salaries["_name_norm"] = salaries["player_name"].apply(_normalize_name)
             unified = unified.merge(
-                salaries[["_name_lower", "salary"]],
-                on="_name_lower",
+                salaries[["_name_norm", "salary"]],
+                on="_name_norm",
                 how="left"
             )
-            unified = unified.drop(columns=["_name_lower"])
+            unified = unified.drop(columns=["_name_norm"])
             print(f"[finalize] Merged {unified['salary'].notna().sum()} salaries")
     
     # Compute value (FPTS per $1k salary)

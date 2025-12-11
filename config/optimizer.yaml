@@ -1,0 +1,83 @@
+# QuickBuild Optimizer Configuration
+# ----------------------------------
+# Default settings for the QuickBuild lineup pool generator API.
+
+# Pool generation settings
+pool:
+  # Maximum number of lineups in the pool
+  max_pool: 20000
+  
+  # Number of parallel worker processes
+  builds: 4
+  
+  # Target lineups per worker before stopping
+  per_build: 6000
+  
+  # Minimum unique players between consecutive lineups
+  min_uniq: 1
+  
+  # Projection jitter for lineup diversity (fraction, e.g., 5e-4 = 0.05%)
+  jitter: 0.0005
+  
+  # Near-duplicate Jaccard threshold (0 = disabled, 0.75 = strict)
+  near_dup_jaccard: 0.0
+  
+  # Enumeration phase for quality tiers
+  enum_enable: true
+  enum_time: 20.0
+  enum_warm_time: 5.0
+
+# Solver settings
+solver:
+  # Per-solve timeout in seconds (0 = use default)
+  timeout: 0.6
+  
+  # Solver threads per worker
+  threads: 1
+  
+  # No-good cut rate (add cut every N accepted lineups)
+  nogood_rate: 20
+
+# Default constraints (can be overridden per-request)
+constraints:
+  # DraftKings defaults
+  dk:
+    min_salary: 49000
+    max_salary: 50000
+    global_team_limit: 4
+  
+  # FanDuel defaults
+  fd:
+    min_salary: 59000
+    max_salary: 60000
+    global_team_limit: 4
+
+# Ownership penalty defaults (disabled by default in QuickBuild)
+ownership_penalty:
+  enabled: false
+  mode: "by_percent"  # or "by_points"
+  target_offoptimal_pct: 0.08
+  tol_offoptimal_pct: 0.003
+  weight_lambda: 1.0
+  curve_type: "sigmoid"  # sigmoid, linear, power, neglog
+  pivot_p0: 0.20
+  curve_alpha: 2.0
+  clamp_min: 0.01
+  clamp_max: 0.80
+  shrink_gamma: 1.0
+
+# Job management
+jobs:
+  # How long to keep completed jobs in memory (seconds)
+  retention_seconds: 3600
+  
+  # Maximum concurrent jobs
+  max_concurrent: 4
+  
+  # Progress update interval (seconds)
+  progress_interval: 1.0
+
+# Data paths (relative to PROJECTIONS_DATA_ROOT)
+data:
+  projections_path: "gold/projections_minutes_v1"
+  salaries_path: "gold/dk_salaries"

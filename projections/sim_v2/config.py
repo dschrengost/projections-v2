@@ -75,8 +75,12 @@ def load_sim_v2_profile(
     if config is None:
         raise KeyError(f"Profile '{profile}' not found in {path}")
 
-    fpts_run_id = config.get("fpts_run_id") or load_current_fpts_run_id()
     mean_source = str(config.get("mean_source", "fpts"))
+    # Only resolve fpts_run_id if mean_source is "fpts" - rates mode doesn't need it
+    if mean_source == "fpts":
+        fpts_run_id = config.get("fpts_run_id") or load_current_fpts_run_id()
+    else:
+        fpts_run_id = config.get("fpts_run_id") or "unused"  # Placeholder - not used for rates mode
     # For rates mean_source, don't auto-resolve rates_run_id - it's determined per-date from rates_v1_live
     if mean_source == "rates":
         rates_run_id = config.get("rates_run_id")  # Keep as None if not specified

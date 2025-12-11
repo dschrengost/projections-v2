@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2025-12-06T06:05:21.799499+00:00",
+  "updated_at": "2025-12-09T04:40:32.939488+00:00",
   "models": {
     "rates_v1_lgbm": {
       "name": "rates_v1_lgbm",
@@ -77,6 +77,44 @@
             "val_mae_avg": 0.08860904789777173,
             "train_rows": 6079,
             "val_rows": 1724,
+            "num_targets": 12
+          },
+          "description": "Train to 2024-06-30 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_mlflow_test_20251209_041846",
+          "run_id": "rates_v1_mlflow_test_20251209_041846",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_mlflow_test_20251209_041846",
+          "stage": "dev",
+          "created_at": "2025-12-09T04:18:59.043449+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2024-06-30",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08903198058781607,
+            "train_rows": 3206,
+            "val_rows": 7584,
+            "num_targets": 12
+          },
+          "description": "Train to 2024-06-30 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_mlflow_test_20251209_044003",
+          "run_id": "rates_v1_mlflow_test_20251209_044003",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_mlflow_test_20251209_044003",
+          "stage": "dev",
+          "created_at": "2025-12-09T04:40:32.939466+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2024-06-30",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08903198058781607,
+            "train_rows": 3206,
+            "val_rows": 7584,
             "num_targets": 12
           },
           "description": "Train to 2024-06-30 | stage1 | 12 targets"

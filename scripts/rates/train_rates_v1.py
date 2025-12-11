@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Optional
 
 import lightgbm as lgb
+import mlflow
 import numpy as np
 import pandas as pd
 import typer
@@ -357,6 +358,20 @@ def main(
         f"features={feature_set_key}"
     )
 
+    # Configure MLFlow
+    mlflow.set_tracking_uri("http://localhost:5000")
+    mlflow.set_experiment("rates_v1")
+    mlflow.start_run(run_name=resolved_run_id)
+    mlflow.log_params({
+        "run_tag": run_tag,
+        "feature_set": feature_set_key,
+        "train_end": train_end_date,
+        "cal_end": cal_end_date,
+        "start_date": start_date or "None",
+        "end_date": end_date or "None",
+        **{f"lgb_{k}": v for k, v in BASE_PARAMS.items()},
+    })
+
     df = _load_training_base(root, start, end)
     df = _prepare_features(
         df,
@@ -395,6 +410,9 @@ def main(
         model_path = run_dir / f"model_{target}.txt"
         booster.save_model(str(model_path))
         model_paths[target] = str(model_path)
+        
+        # Log model to MLFlow for registry support
+        mlflow.lightgbm.log_model(booster, artifact_path=f"model_{target}")
 
     _write_json(run_dir / "feature_cols.json", {"feature_cols": feature_cols})
     meta = {
@@ -408,6 +426,14 @@ def main(
         "train_rows": len(train_df),
         "cal_rows": len(cal_df),
         "val_rows": len(val_df),
+    }
+    # Log split sizes to MLFlow
+    mlflow.log_metrics({
+        "train_rows": len(train_df),
+        "cal_rows": len(cal_df),
+        "val_rows": len(val_df),
+    })
+    meta.update({
         "date_window": {
             "start": start_date,
             "end": end_date,
@@ -420,9 +446,30 @@ def main(
             "Stage 2 adds tracking-based rates and role cluster features on top of Stage 1.",
         ],
         "models": model_paths,
-    }
+    })
     _write_json(run_dir / "meta.json", meta)
     _write_json(run_dir / "metrics.json", metrics)
+
+    # Log per-target metrics to MLFlow
+    for target, vals in metrics.items():
+        if vals.get("val_mae") is not None:
+            mlflow.log_metric(f"{target}_val_mae", vals["val_mae"])
+        if vals.get("val_rmse") is not None:
+            mlflow.log_metric(f"{target}_val_rmse", vals["val_rmse"])
+        if vals.get("cal_mae") is not None:
+            mlflow.log_metric(f"{target}_cal_mae", vals["cal_mae"])
+
+    # Log aggregate metrics
+    val_maes = [m.get("val_mae") for m in metrics.values() if m.get("val_mae") is not None]
+    if val_maes:
+        mlflow.log_metric("avg_val_mae", float(np.mean(val_maes)))
+
+    # Log artifacts
+    mlflow.log_artifact(str(run_dir / "meta.json"))
+    mlflow.log_artifact(str(run_dir / "metrics.json"))
+    mlflow.log_artifact(str(run_dir / "feature_cols.json"))
+
+    mlflow.end_run()
 
     typer.echo(f"[train] completed. artifacts at {run_dir}")
     typer.echo(f"[train] rows train={len(train_df):,} cal={len(cal_df):,} val={len(val_df):,}")

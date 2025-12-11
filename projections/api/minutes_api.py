@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from projections import paths
 from projections.api.pipeline_status_api import router as pipeline_status_router
 from projections.api.evaluation_api import router as evaluation_router
+from projections.api.optimizer_api import router as optimizer_router
 
 DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
@@ -187,6 +188,8 @@ def _load_unified_projections(day: date, run_id: str | None, data_root: Path) ->
                 return None
         else:
             # Fall back to most recent run dir
+            if not unified_root.exists():
+                return None
             run_dirs = sorted(
                 [p for p in unified_root.iterdir() if p.is_dir() and p.name.startswith("run=")],
                 reverse=True,
@@ -338,6 +341,7 @@ def create_app(
     app = FastAPI(title="Minutes API", version="0.1.0")
     app.include_router(pipeline_status_router, prefix="/api")
     app.include_router(evaluation_router, prefix="/api")
+    app.include_router(optimizer_router, prefix="/api/optimizer", tags=["optimizer"])
 
     @app.get("/api/minutes")
     def get_minutes(date: str | None = None, run_id: str | None = None) -> JSONResponse:

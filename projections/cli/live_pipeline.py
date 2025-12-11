@@ -20,7 +20,7 @@ app = typer.Typer(help="Run injuries, daily lineups, odds, and roster ETLs seque
 
 def _normalize_day(value: Optional[datetime]) -> pd.Timestamp:
     if value is None:
-        return pd.Timestamp.utcnow().tz_localize("UTC").tz_convert(None).normalize()
+        return pd.Timestamp.utcnow().tz_convert(None).normalize()
     return pd.Timestamp(value).normalize()
 
 

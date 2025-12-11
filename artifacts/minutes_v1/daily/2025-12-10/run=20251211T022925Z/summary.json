@@ -1,0 +1,52 @@
+{
+  "date": "2025-12-10",
+  "generated_at": "2025-12-11T02:29:34.118277+00:00",
+  "model_run_id": "healthy_optimal_split_20251205",
+  "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_lgbm/healthy_optimal_split_20251205",
+  "model_meta": {
+    "feature_hash": "4d0dac9b49f3ab2759fff8e94a7e5341d4222e138e055fb7ce76779f5390d74b",
+    "fold_id": null,
+    "model": "lightgbm_quantiles",
+    "params": {
+      "cal_days": null,
+      "conformal_buckets": "starter,p50bins",
+      "conformal_k": 200,
+      "conformal_mode": "two-sided",
+      "coverage_tolerance": 0.05,
+      "enable_play_prob_head": true,
+      "enable_play_prob_mixing": false,
+      "playable_min_p50": 10.0,
+      "playable_winkler_baseline": null,
+      "playable_winkler_tolerance": 1.0,
+      "quantiles": [
+        0.1,
+        0.5,
+        0.9
+      ],
+      "random_state": 42,
+      "winkler_baseline": null
+    },
+    "target_col": "minutes",
+    "windows": {
+      "cal": {
+        "end": "2025-04-30T00:00:00Z",
+        "start": "2025-04-01T00:00:00Z"
+      },
+      "train": {
+        "end": "2025-03-31T00:00:00Z",
+        "start": "2022-10-01T00:00:00Z"
+      },
+      "val": {
+        "end": "2025-11-30T00:00:00Z",
+        "start": "2025-10-21T00:00:00Z"
+      }
+    }
+  },
+  "run_id": "20251211T022925Z",
+  "run_as_of_ts": "2025-12-11T01:30:00+00:00",
+  "counts": {
+    "rows": 35,
+    "players": 35,
+    "teams": 2
+  }
+}

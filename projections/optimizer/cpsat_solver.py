@@ -602,6 +602,14 @@ def build_cpsat_counts(spec):
         # Centers: at least one, at most two (C slot plus optionally UTIL)
         m.Add(sum(y[pid] for pid in C) >= 1)
         m.Add(sum(y[pid] for pid in C) <= 2)
+        
+        # NEW: Ensure enough coverage for flex slots
+        # Without these, a lineup could have e.g. only 1 PF-eligible player
+        # who must fill C (if also C-eligible), leaving no one for PF slot
+        m.Add(sum(y[pid] for pid in PG) >= 2)  # PG slot + G flex backup
+        m.Add(sum(y[pid] for pid in SG) >= 2)  # SG slot + G flex backup
+        m.Add(sum(y[pid] for pid in SF) >= 2)  # SF slot + F flex backup
+        m.Add(sum(y[pid] for pid in PF) >= 2)  # PF slot + F flex backup
 
     # team limits
     if spec.team_max is not None:

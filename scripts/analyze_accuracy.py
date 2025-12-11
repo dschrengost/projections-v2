@@ -114,13 +114,71 @@ def parse_boxscores(boxscore_path: Path, game_date: str) -> pd.DataFrame:
 
 
 def load_predictions(date_str: str, data_root: Path) -> pd.DataFrame:
-    """Load sim projections for a date."""
-    proj_path = data_root / "artifacts" / "sim_v2" / "projections" / f"game_date={date_str}" / "projections.parquet"
-    if not proj_path.exists():
+    """Load sim projections for a date, merging from best pre-tip runs for each game.
+    
+    The live pipeline filters out games that have already tipped, so the "latest" run
+    may only have the late game(s). This function finds the best (latest) run that
+    includes each game and merges them together.
+    """
+    # First, try the unified projections artifact (includes minutes + sim)
+    # Check both possible locations
+    proj_dir = data_root / "artifacts" / "projections" / date_str
+    if not proj_dir.exists():
+        # Try the sim_v2 path as fallback
+        proj_path = data_root / "artifacts" / "sim_v2" / "projections" / f"game_date={date_str}" / "projections.parquet"
+        if proj_path.exists():
+            return pd.read_parquet(proj_path)
         return pd.DataFrame()
     
-    df = pd.read_parquet(proj_path)
-    return df
+    # Get all runs for this date
+    runs = sorted(proj_dir.glob("run=*/projections.parquet"))
+    if not runs:
+        return pd.DataFrame()
+    
+    # Build a map of game_id -> best (latest) run that has it
+    game_to_best_run: dict[int, Path] = {}
+    
+    for run_path in runs:
+        try:
+            df = pd.read_parquet(run_path)
+            if 'game_id' not in df.columns:
+                continue
+            for gid in df['game_id'].unique():
+                # Later run is better (sorted ascending, so last wins)
+                game_to_best_run[int(gid)] = run_path
+        except Exception:
+            continue
+    
+    if not game_to_best_run:
+        return pd.DataFrame()
+    
+    # Deduplicate: group by run path to minimize reads
+    runs_to_games: dict[Path, list[int]] = {}
+    for gid, run_path in game_to_best_run.items():
+        if run_path not in runs_to_games:
+            runs_to_games[run_path] = []
+        runs_to_games[run_path].append(gid)
+    
+    # Load and merge
+    all_dfs = []
+    for run_path, game_ids in runs_to_games.items():
+        try:
+            df = pd.read_parquet(run_path)
+            # Filter to only the games we want from this run
+            df = df[df['game_id'].isin(game_ids)]
+            all_dfs.append(df)
+        except Exception:
+            continue
+    
+    if not all_dfs:
+        return pd.DataFrame()
+    
+    merged = pd.concat(all_dfs, ignore_index=True)
+    # Drop duplicates (shouldn't happen, but just in case)
+    if 'player_id' in merged.columns and 'game_id' in merged.columns:
+        merged = merged.drop_duplicates(subset=['player_id', 'game_id'], keep='last')
+    
+    return merged
 
 
 def load_actual_ownership(date_str: str, data_root: Path) -> pd.DataFrame:
@@ -198,23 +256,21 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
     actuals['player_id'] = actuals['player_id'].astype(str)
     predictions['player_id'] = predictions['player_id'].astype(str)
     
-    # === Roster Accuracy ===
-    # Players who played 5+ minutes
-    actual_played = set(actuals[actuals['actual_minutes'] >= min_minutes]['player_id'])
-    # Players we predicted to play (minutes_mean >= min_minutes threshold)
-    pred_threshold = min_minutes * 0.5  # More lenient for predictions
-    predicted_play = set(predictions[predictions['minutes_mean'] >= pred_threshold]['player_id'])
-    
-    # Missed players: played but we didn't predict
-    missed = actual_played - predicted_play
-    # False predictions: we predicted but they didn't play 5+ min
-    false_preds = predicted_play - actual_played
-    
     # === Merge for accuracy metrics ===
     merged = actuals.merge(predictions, on='player_id', how='inner', suffixes=('_actual', '_pred'))
     
     if len(merged) == 0:
         return {'players_matched': 0}
+    
+    # === Roster Accuracy (based on merged predictions only) ===
+    # Missed: players who played 5+ min but we predicted < threshold
+    min_pred_threshold = min_minutes * 0.5  # More lenient threshold (2.5 min for 5 min cutoff)
+    played_5plus = merged[merged['actual_minutes'] >= min_minutes]
+    missed = played_5plus[played_5plus['minutes_mean'] < min_pred_threshold] if 'minutes_mean' in merged.columns else pd.DataFrame()
+    
+    # False predictions: we predicted 5+ min but they played < min threshold
+    high_pred = merged[merged['minutes_mean'] >= min_minutes] if 'minutes_mean' in merged.columns else pd.DataFrame()
+    false_preds = high_pred[high_pred['actual_minutes'] < min_minutes]
     
     # Filter to players who played meaningful minutes
     played = merged[merged['actual_minutes'] >= min_minutes].copy()
@@ -393,8 +449,29 @@ def analyze(
             console.print(f"\n[bold]Ownership Overall: MAE = {avg_own_mae:.2f}, Corr = {avg_own_corr:.3f}, Top5 Acc = {avg_chalk:.0%}[/bold]")
         
         if output:
-            pd.DataFrame(all_results).to_json(output, orient='records', indent=2)
-            console.print(f"\n[green]Wrote results to {output}[/green]")
+            # Merge with existing data to persist historical results
+            existing_data = []
+            if output.exists():
+                try:
+                    existing_data = json.loads(output.read_text())
+                    if not isinstance(existing_data, list):
+                        existing_data = []
+                except (json.JSONDecodeError, OSError):
+                    existing_data = []
+            
+            # Build map of date -> metrics for deduplication
+            data_by_date = {r['date']: r for r in existing_data}
+            
+            # Update with new results (overwrites existing for same date)
+            for r in all_results:
+                data_by_date[r['date']] = r
+            
+            # Sort by date and keep last 30 days
+            final_data = sorted(data_by_date.values(), key=lambda x: x['date'])[-30:]
+            
+            with open(output, 'w') as f:
+                json.dump(final_data, f, indent=2)
+            console.print(f"\n[green]Wrote {len(final_data)} day(s) of results to {output}[/green]")
 
 
 if __name__ == "__main__":

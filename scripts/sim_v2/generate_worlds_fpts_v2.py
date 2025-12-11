@@ -666,7 +666,7 @@ def main(
             minutes_mean_arr = minutes_df[minutes_col].to_numpy(dtype=float)
             if enforce_team_240 and minutes_mean_arr.size:
                 team_indices = minutes_df["team_id"].astype("category").cat.codes.to_numpy()
-                rotation_mask = minutes_mean_arr >= 6.0
+                rotation_mask = minutes_mean_arr >= 12.0
                 bench_mask = (~rotation_mask) & (minutes_mean_arr > 0.0)
                 minutes_mean_arr = enforce_team_240_minutes(
                     minutes_world=minutes_mean_arr[None, :],
@@ -1009,7 +1009,7 @@ def main(
                 date_df.get("minutes_pred_p50", date_df[minutes_col]), errors="coerce"
             ).to_numpy(dtype=float)
             role_low = pd.to_numeric(date_df.get("track_role_is_low_minutes", 0), errors="coerce").fillna(0).to_numpy(dtype=float)
-            rotation_mask = (minutes_pred_center >= 6.0) | (role_low == 0)
+            rotation_mask = (minutes_pred_center >= 12.0) | (role_low == 0)
             bench_mask = (~rotation_mask) & (minutes_pred_center > 0.0)
             play_prob_arr = date_df["play_prob"].fillna(1.0).to_numpy(dtype=float)
 

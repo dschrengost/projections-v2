@@ -1,0 +1,22 @@
+[Unit]
+Description=MLFlow Tracking Server
+After=network.target
+
+[Service]
+Type=simple
+User=daniel
+WorkingDirectory=/home/daniel/projects/projections-v2
+ExecStart=/home/daniel/projects/projections-v2/.venv/bin/mlflow server \
+    --host 0.0.0.0 \
+    --port 5000 \
+    --backend-store-uri sqlite:////home/daniel/projections-data/mlflow/mlflow.db \
+    --default-artifact-root /home/daniel/projections-data/mlflow/artifacts \
+    --allowed-hosts "dfsbox.tail27dc61.ts.net,dfsbox.tail27dc61.ts.net:8446,localhost,localhost:5000,127.0.0.1,127.0.0.1:5000"
+Restart=on-failure
+RestartSec=10
+
+Environment="PATH=/home/daniel/projects/projections-v2/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="MLFLOW_ALLOWED_HOST_HEADERS=dfsbox.tail27dc61.ts.net,localhost,127.0.0.1"
+
+[Install]
+WantedBy=multi-user.target

@@ -163,6 +163,10 @@ def _load_dk_salaries(
     if "dk_player_id" in main_slate.columns and "player_id" not in main_slate.columns:
         main_slate["player_id"] = main_slate["dk_player_id"]
     
+    # Ensure salary is numeric (some draft groups may have object dtype from upstream)
+    if "salary" in main_slate.columns:
+        main_slate["salary"] = pd.to_numeric(main_slate["salary"], errors="coerce").fillna(0).astype(int)
+    
     return main_slate
 
 
