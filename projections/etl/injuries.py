@@ -13,7 +13,7 @@ import typer
 
 from projections import paths
 from projections.etl import storage
-from projections.etl.common import load_schedule_data, month_slug as _month_slug
+from projections.etl.common import load_schedule_data
 from projections.minutes_v1.schemas import (
     INJURIES_RAW_SCHEMA,
     INJURIES_SNAPSHOT_SCHEMA,
@@ -99,7 +99,7 @@ def _build_injuries_raw(
     data: list[dict] = []
     for idx, row in enumerate(records):
         report_time = pd.Timestamp(row["report_time"]).tz_convert("UTC")
-        report_day = report_time.tz_convert(None).normalize()
+        report_day = report_time.tz_convert("America/New_York").tz_localize(None).normalize()
         if not (start_pad <= report_day <= end_pad):
             continue
         matchup = row.get("matchup", "")
@@ -317,7 +317,6 @@ def main(
         injuries_snapshot = enforce_schema(injuries_snapshot, INJURIES_SNAPSHOT_SCHEMA)
         validate_with_pandera(injuries_snapshot, INJURIES_SNAPSHOT_SCHEMA)
 
-        month_slug = _month_slug(start_day)
         partition_key = _snapshot_partition_key(start_day, month_override=month)
         default_silver = _default_silver_path(data_root, season, partition_key)
         silver_path = silver_out or default_silver
@@ -325,6 +324,7 @@ def main(
 
         bronze_rows_written = 0
         bronze_partitions = 0
+        bronze_latest_partitions = 0
         bronze_root_path = (bronze_root or storage.default_bronze_root("injuries_raw", data_root)).resolve()
         if bronze_out:
             bronze_out.parent.mkdir(parents=True, exist_ok=True)
@@ -339,25 +339,44 @@ def main(
             if injuries_raw.empty:
                 typer.echo("[injuries] no rows to persist for the requested window.")
             else:
-                normalized_dates = injuries_raw["report_date"].dt.normalize()
-                for cursor in storage.iter_days(start_day, end_day):
-                    mask = normalized_dates == cursor
-                    if not mask.any():
-                        continue
-                    day_frame = injuries_raw.loc[mask].copy()
-                    result = storage.write_bronze_partition(
-                        day_frame,
+                working = injuries_raw.copy()
+                et_ts = working["as_of_ts"].dt.tz_convert("America/New_York")
+                working["_partition_date"] = et_ts.dt.normalize().dt.date
+                working["_partition_hour"] = et_ts.dt.hour
+
+                for partition_date, date_frame in working.groupby("_partition_date"):
+                    for hour, hour_frame in date_frame.groupby("_partition_hour"):
+                        payload = hour_frame.drop(columns=["_partition_date", "_partition_hour"])
+                        result = storage.write_bronze_partition_hourly(
+                            payload,
+                            dataset="injuries_raw",
+                            data_root=data_root,
+                            season=season,
+                            target_date=partition_date,
+                            hour=int(hour),
+                            bronze_root=bronze_root_path,
+                        )
+                        bronze_rows_written += result.rows
+                        bronze_partitions += 1
+                        typer.echo(
+                            f"[injuries] bronze history date={partition_date} hour={int(hour):02d}: "
+                            f"{result.rows} rows -> {result.path}"
+                        )
+
+                    # Transitional: continue writing the flat daily file as a "latest view".
+                    latest_payload = date_frame.drop(columns=["_partition_date", "_partition_hour"])
+                    latest_result = storage.write_bronze_partition(
+                        latest_payload,
                         dataset="injuries_raw",
                         data_root=data_root,
                         season=season,
-                        target_date=cursor.date(),
+                        target_date=partition_date,
                         bronze_root=bronze_root_path,
                     )
-                    bronze_rows_written += result.rows
-                    bronze_partitions += 1
+                    bronze_latest_partitions += 1
                     typer.echo(
-                        f"[injuries] bronze partition {result.target_date}: "
-                        f"{result.rows} rows -> {result.path}"
+                        f"[injuries] bronze latest date={partition_date}: "
+                        f"{latest_result.rows} rows -> {latest_result.path}"
                     )
 
         # Merge with existing silver data to preserve historical games
@@ -377,6 +396,7 @@ def main(
         typer.echo(
             f"[injuries] window={start_day.date()}->{end_day.date()} "
             f"bronze_partitions={bronze_partitions} bronze_rows={bronze_rows_written} "
+            f"bronze_latest_partitions={bronze_latest_partitions} "
             f"silver_rows={len(injuries_snapshot)} -> {silver_path}"
         )
         write_status(

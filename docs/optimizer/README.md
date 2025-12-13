@@ -52,7 +52,8 @@ Base path: `/api/optimizer`
 | POST | `/build` | Start async build job |
 | GET | `/build/{job_id}` | Poll job status |
 | GET | `/build/{job_id}/lineups` | Get completed lineups |
-| GET | `/build/{job_id}/export` | Export as DK-uploadable CSV |
+| GET | `/build/{job_id}/export` | Export as DK-uploadable CSV (uses slot-specific draftableIds) |
+| POST | `/export` | Export arbitrary lineups as DK CSV |
 | GET | `/saved-builds?date=` | List saved builds |
 | GET | `/saved-builds/{job_id}?date=` | Load saved build |
 | DELETE | `/saved-builds/{job_id}?date=` | Delete saved build |

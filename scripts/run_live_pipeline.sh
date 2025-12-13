@@ -81,32 +81,9 @@ if [[ "${LIVE_SCORE:-0}" != "1" ]]; then
   exit 0
 fi
 
-# Derive run_as_of_ts from the latest injury snapshot to avoid anti-leak filters
-# dropping the feed; fallback to current UTC if snapshot missing.
-RUN_AS_OF_TS=$(/home/daniel/.local/bin/uv run python - <<'PY'
-import pandas as pd
-from pathlib import Path
-from datetime import datetime, timezone
-import os
-
-data_root = Path(os.environ.get("PROJECTIONS_DATA_ROOT", "/home/daniel/projections-data"))
-season = os.environ.get("LIVE_SEASON", datetime.now(timezone.utc).year)
-month = os.environ.get("LIVE_MONTH", f"{datetime.now(timezone.utc).month:02d}")
-path = data_root / "silver" / "injuries_snapshot" / f"season={season}" / f"month={month}" / "injuries_snapshot.parquet"
-ts = None
-if path.exists():
-    try:
-        df = pd.read_parquet(path, columns=["as_of_ts"])
-        values = pd.to_datetime(df["as_of_ts"], utc=True, errors="coerce").dropna()
-        if not values.empty:
-            ts = values.max()
-    except Exception:
-        ts = None
-if ts is None:
-    ts = datetime.now(timezone.utc)
-print(ts.strftime("%Y-%m-%d %H:%M:%S"))
-PY
-)
+# Use the current time for run_as_of_ts so faster feeds (odds) aren't filtered out
+# between slower feeds (injuries). build_minutes_live still applies per-game tip_ts bounds.
+RUN_AS_OF_TS="${LIVE_RUN_AS_OF_TS:-$(date -u '+%Y-%m-%d %H:%M:%S')}"
 
 /home/daniel/.local/bin/uv run python -m projections.cli.build_minutes_live \
   --date "${START_DATE}" \
@@ -129,5 +106,4 @@ if [[ -n "${LIVE_BUNDLE_DIR:-}" ]]; then
 fi
 
 /home/daniel/.local/bin/uv run python -m projections.cli.score_minutes_v1 "${SCORE_ARGS[@]}"
-
 

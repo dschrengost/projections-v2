@@ -659,6 +659,23 @@ FEATURES_MINUTES_V1_SCHEMA = TableSchema(
     },
 )
 
+SLATE_FEATURES_MINUTES_V1_SCHEMA = TableSchema(
+    name="slate_features_minutes_v1",
+    columns=FEATURES_MINUTES_V1_SCHEMA.columns
+    + (
+        "snapshot_type",
+        "snapshot_ts",
+        "frozen_at",
+    ),
+    pandas_dtypes={
+        **FEATURES_MINUTES_V1_SCHEMA.pandas_dtypes,
+        "snapshot_type": STRING_DTYPE,
+        "snapshot_ts": UTC_TS,
+        "frozen_at": UTC_TS,
+    },
+    primary_key=("game_id", "player_id", "team_id", "snapshot_type"),
+)
+
 SCHEDULE_STATIC_SCHEMA = TableSchema(
     name="schedule_static",
     columns=(
@@ -735,6 +752,7 @@ __all__ = [
     "BOX_SCORE_LABELS_SCHEMA",
     "COACH_TENURE_SCHEMA",
     "FEATURES_MINUTES_V1_SCHEMA",
+    "SLATE_FEATURES_MINUTES_V1_SCHEMA",
     "INJURIES_RAW_SCHEMA",
     "INJURIES_SNAPSHOT_SCHEMA",
     "ODDS_RAW_SCHEMA",

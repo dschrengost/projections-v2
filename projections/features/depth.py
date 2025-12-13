@@ -17,7 +17,32 @@ def attach_depth_features(
 ) -> pd.DataFrame:
     """Attach roster depth counts and archetype overlap features."""
 
+    if roster_nightly is None or roster_nightly.empty:
+        merged = base_df.copy()
+        for bucket in ARCHETYPE_BUCKETS:
+            col = f"available_{bucket}"
+            if col not in merged.columns:
+                merged[col] = 0
+            merged[col] = merged[col].fillna(0).astype(int)
+        for col, default in (
+            ("lineup_role", pd.NA),
+            ("lineup_status", pd.NA),
+            ("lineup_roster_status", pd.NA),
+            ("lineup_timestamp", pd.NaT),
+            ("is_projected_starter", pd.NA),
+            ("is_confirmed_starter", pd.NA),
+            ("roster_as_of_ts", pd.NaT),
+            ("same_archetype_overlap", 0),
+            ("depth_same_pos_active", 0),
+        ):
+            if col not in merged.columns:
+                merged[col] = default
+        return normalize_starter_signals(merged)
+
     roster = ensure_as_of_column(roster_nightly.copy())
+    required = {"team_id", "game_date", "player_id", "active_flag", "listed_pos"}
+    if not required.issubset(roster.columns):
+        return attach_depth_features(base_df, pd.DataFrame())
     roster["game_date"] = pd.to_datetime(roster["game_date"]).dt.normalize()
     roster["active_flag"] = roster["active_flag"].astype(bool)
     roster["listed_pos"] = roster["listed_pos"].fillna("W").str.upper()

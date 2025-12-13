@@ -18,6 +18,7 @@ from projections import paths
 from projections.api.pipeline_status_api import router as pipeline_status_router
 from projections.api.evaluation_api import router as evaluation_router
 from projections.api.optimizer_api import router as optimizer_router
+from projections.api.contest_api import router as contest_router
 
 DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
@@ -81,10 +82,15 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "sim_blk_mean",
     "sim_tov_mean",
     "sim_minutes_sim_mean",
+    "sim_minutes_sim_p10",
+    "sim_minutes_sim_p50",
+    "sim_minutes_sim_p90",
+    "sim_minutes_sim_std",
     # Ownership/DFS columns
     "salary",
     "pred_own_pct",
     "value",
+    "is_locked",
 )
 
 
@@ -342,6 +348,7 @@ def create_app(
     app.include_router(pipeline_status_router, prefix="/api")
     app.include_router(evaluation_router, prefix="/api")
     app.include_router(optimizer_router, prefix="/api/optimizer", tags=["optimizer"])
+    app.include_router(contest_router, prefix="/api/contest", tags=["contest"])
 
     @app.get("/api/minutes")
     def get_minutes(date: str | None = None, run_id: str | None = None) -> JSONResponse:
@@ -353,10 +360,24 @@ def create_app(
         
         if unified_df is not None and not unified_df.empty:
             # Rename sim columns to match expected dashboard format
+            has_sim_minutes = any(
+                col in unified_df.columns
+                for col in (
+                    "minutes_sim_mean",
+                    "minutes_sim_p50",
+                    "minutes_sim_p10",
+                    "minutes_sim_p90",
+                    "minutes_sim_std",
+                )
+            )
             rename_map = {}
             for col in unified_df.columns:
-                if col in ("minutes_mean",):
+                if col == "minutes_mean":
+                    if has_sim_minutes:
+                        continue
                     rename_map[col] = "sim_minutes_sim_mean"
+                elif col.startswith("minutes_sim_"):
+                    rename_map[col] = f"sim_{col}"
                 elif col.startswith("dk_fpts_") or col in ("pts_mean", "reb_mean", "ast_mean", "stl_mean", "blk_mean", "tov_mean"):
                     rename_map[col] = f"sim_{col}"
             if rename_map:
@@ -396,11 +417,22 @@ def create_app(
                 df["game_date"] = pd.to_datetime(df["game_date"]).dt.normalize()
                 sim_df["game_date"] = pd.to_datetime(sim_df["game_date"]).dt.normalize()
                 rename_map = {}
+                has_sim_minutes = any(
+                    col in sim_df.columns
+                    for col in (
+                        "minutes_sim_mean",
+                        "minutes_sim_p50",
+                        "minutes_sim_p10",
+                        "minutes_sim_p90",
+                        "minutes_sim_std",
+                    )
+                )
                 for col in sim_df.columns:
                     if col in join_keys:
                         continue
-                    if col in ("minutes_sim_mean", "minutes_mean"):
-                        # Map both old and new column names to the expected dashboard field
+                    if col == "minutes_mean":
+                        if has_sim_minutes:
+                            continue
                         rename_map[col] = "sim_minutes_sim_mean"
                     elif col.startswith("sim_"):
                         rename_map[col] = col
@@ -493,8 +525,13 @@ def create_app(
         df = pd.read_parquet(own_path)
         
         # Build response with relevant columns
-        output_cols = ["player_id", "player_name", "salary", "pos", "team", "proj_fpts", "pred_own_pct"]
+        output_cols = ["player_id", "player_name", "salary", "pos", "team", "proj_fpts", "pred_own_pct", "is_locked"]
         available_cols = [c for c in output_cols if c in df.columns]
+        
+        # Ensure is_locked has a default value if missing
+        if "is_locked" not in df.columns:
+            df["is_locked"] = False
+            available_cols.append("is_locked")
         
         players = df[available_cols].to_dict(orient="records")
         

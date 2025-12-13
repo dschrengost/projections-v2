@@ -370,9 +370,15 @@ class MinutesFeatureBuilder:
 
 
     def _team_dispersion(self, df: pd.DataFrame) -> pd.DataFrame:
+        def _nanstd_or_zero(series: pd.Series) -> float:
+            values = pd.to_numeric(series, errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
+            if np.isnan(values).all():
+                return 0.0
+            return float(np.nanstd(values, ddof=0))
+
         team_dispersion = (
             df.groupby(["team_id", "game_id", "game_date"])["minutes"]
-            .agg(lambda s: float(np.nanstd(s.to_numpy(), ddof=0)))
+            .agg(_nanstd_or_zero)
             .reset_index(name="team_minutes_dispersion")
         )
         team_dispersion["team_minutes_dispersion"] = team_dispersion["team_minutes_dispersion"].fillna(0.0)

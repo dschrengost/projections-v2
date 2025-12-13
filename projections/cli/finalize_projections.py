@@ -273,6 +273,16 @@ def finalize_projections(
     if "dk_fpts_mean" in unified.columns and "salary" in unified.columns:
         unified["value"] = (unified["dk_fpts_mean"] / unified["salary"] * 1000).round(2)
     
+    # Compute is_locked based on whether tip_ts has passed
+    if "tip_ts" in unified.columns:
+        now = pd.Timestamp.now(tz="UTC")
+        tip_ts = pd.to_datetime(unified["tip_ts"], utc=True, errors="coerce")
+        unified["is_locked"] = tip_ts.notna() & (tip_ts <= now)
+        locked_count = unified["is_locked"].sum()
+        print(f"[finalize] Marked {locked_count}/{len(unified)} players as locked (tip_ts <= {now.isoformat()})")
+    else:
+        unified["is_locked"] = False
+    
     # Write unified artifact
     out_dir = data_root / "artifacts" / "projections" / str(game_date) / f"run={run_id}"
     out_dir.mkdir(parents=True, exist_ok=True)

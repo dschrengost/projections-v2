@@ -20,8 +20,24 @@ def attach_game_environment_features(
 ) -> pd.DataFrame:
     """Attach spread/total provenance and derived blowout index."""
 
-    odds = ensure_as_of_column(odds_snapshot.copy())
+    if odds_snapshot is None or odds_snapshot.empty:
+        merged = base_df.copy()
+        merged["spread_home"] = pd.NA
+        merged["total"] = pd.NA
+        merged["odds_as_of_ts"] = pd.NaT
+        merged["blowout_index"] = compute_blowout_index(
+            pd.Series(0, index=merged.index), pd.Series(220, index=merged.index)
+        )
+        merged["blowout_risk_score"] = 0.5
+        merged["close_game_score"] = 0.5
+        return merged
+
+    odds = odds_snapshot.copy()
     odds = odds.rename(columns={"home_line": "spread_home"})
+    odds = ensure_as_of_column(odds)
+    for required in ("game_id", "spread_home", "total"):
+        if required not in odds.columns:
+            odds[required] = pd.NA
     merged = base_df.merge(
         odds[["game_id", "spread_home", "total", "as_of_ts"]],
         on="game_id",

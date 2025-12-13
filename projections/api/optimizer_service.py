@@ -11,9 +11,8 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -29,7 +28,10 @@ from projections.optimizer.quick_build import (
     QuickBuildResult,
     quick_build_pool,
 )
-from projections.optimizer.optimizer_types import OwnershipPenaltySettings
+from projections.optimizer.lineup_sim_stats import (
+    compute_lineup_distribution_stats,
+    load_world_fpts_matrix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,21 +88,47 @@ def load_projections_for_date(
     df = None
 
     # Try unified projections artifact first (has sim + ownership)
-    unified_dir = root / "artifacts" / "unified_projections" / f"game_date={game_date}"
+    # Path matches minutes_api: artifacts/projections/{date}/run=...
+    unified_dir = root / "artifacts" / "projections" / game_date
     if unified_dir.exists():
-        runs = sorted(unified_dir.glob("run=*"))
+        run_dir = None
         if run_id:
-            target_run = unified_dir / f"run={run_id}"
-            if target_run.exists():
-                runs = [target_run]
-        if runs:
-            parquet_files = list(runs[-1].glob("*.parquet"))
-            if parquet_files:
-                df = pd.read_parquet(parquet_files[0])
+            run_dir = unified_dir / f"run={run_id}"
+        else:
+            # Try latest_run.json pointer
+            import json
+            latest_pointer = unified_dir / "latest_run.json"
+            if latest_pointer.exists():
+                try:
+                    with open(latest_pointer) as f:
+                        latest_run_id = json.load(f).get("run_id")
+                    if latest_run_id:
+                        run_dir = unified_dir / f"run={latest_run_id}"
+                except Exception:
+                    pass
+            # Fall back to most recent run dir
+            if run_dir is None or not run_dir.exists():
+                run_dirs = sorted(
+                    [p for p in unified_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
+                    reverse=True,
+                )
+                run_dir = run_dirs[0] if run_dirs else None
+        
+        if run_dir and run_dir.exists():
+            parquet_path = run_dir / "projections.parquet"
+            if parquet_path.exists():
+                df = pd.read_parquet(parquet_path)
+                # Normalize column names: dk_fpts_* -> sim_dk_fpts_*
+                rename_map = {}
+                for col in df.columns:
+                    if col.startswith("dk_fpts_") and not col.startswith("sim_"):
+                        rename_map[col] = f"sim_{col}"
+                if rename_map:
+                    df = df.rename(columns=rename_map)
                 logger.info(
                     "Loaded unified projections for %s from %s (%d rows)",
                     game_date,
-                    runs[-1].name,
+                    run_dir.name,
                     len(df),
                 )
 
@@ -113,6 +141,7 @@ def load_projections_for_date(
                 frames = [pd.read_parquet(p) for p in parquet_files]
                 df = pd.concat(frames, ignore_index=True)
                 logger.info("Loaded gold projections for %s (%d rows)", game_date, len(df))
+
 
     if df is None:
         raise FileNotFoundError(f"No projections found for {game_date}")
@@ -172,6 +201,73 @@ def _load_sim_projections(game_date: str, root: Path) -> Optional[pd.DataFrame]:
     return None
 
 
+def _load_game_info_from_draftables(
+    draft_group_id: int,
+    data_root: Path,
+) -> Dict[int, Dict[str, Any]]:
+    """Load game/competition info from bronze draftables.
+    
+    Returns dict mapping competition_id -> {matchup, start_time_utc}.
+    """
+    import json
+    from datetime import datetime
+    
+    bronze_path = data_root / "bronze" / "dk" / "draftables" / f"draftables_raw_{draft_group_id}.json"
+    if not bronze_path.exists():
+        logger.debug("No bronze draftables found at %s", bronze_path)
+        return {}
+    
+    try:
+        with open(bronze_path) as f:
+            payload = json.load(f)
+    except Exception as exc:
+        logger.warning("Failed to load draftables JSON: %s", exc)
+        return {}
+    
+    game_info: Dict[int, Dict[str, Any]] = {}
+    
+    # Parse competitions array
+    competitions = payload.get("competitions", [])
+    for comp in competitions:
+        comp_id = comp.get("competitionId")
+        if comp_id is None:
+            continue
+        
+        # Build matchup from team names
+        away = comp.get("awayTeam", {}).get("abbreviation", "???")
+        home = comp.get("homeTeam", {}).get("abbreviation", "???")
+        matchup = f"{away}@{home}"
+        
+        # Parse start time
+        start_str = comp.get("startTime")
+        start_utc = None
+        if start_str:
+            try:
+                # Format: "2025-12-01T00:00:00.0000000Z"
+                cleaned = start_str.replace("Z", "+00:00")
+                if "." in cleaned:
+                    # Truncate microseconds to 6 digits
+                    base, rest = cleaned.rsplit(".", 1)
+                    tz_idx = rest.find("+")
+                    if tz_idx == -1:
+                        tz_idx = rest.find("-")
+                    if tz_idx > 0:
+                        micros = rest[:min(6, tz_idx)]
+                        tz_part = rest[tz_idx:]
+                        cleaned = f"{base}.{micros}{tz_part}"
+                start_utc = datetime.fromisoformat(cleaned)
+            except Exception:
+                logger.debug("Failed to parse start time: %s", start_str)
+        
+        game_info[comp_id] = {
+            "matchup": matchup,
+            "start_time_utc": start_utc,
+        }
+    
+    logger.debug("Loaded %d games from draftables for dg=%d", len(game_info), draft_group_id)
+    return game_info
+
+
 def load_salaries_for_date(
     game_date: str,
     draft_group_id: int,
@@ -181,7 +277,8 @@ def load_salaries_for_date(
     """Load DK salaries from gold layer.
 
     Returns DataFrame with columns:
-        dk_player_id, display_name, positions, salary, team_abbrev, status
+        dk_player_id, display_name, positions, salary, team_abbrev, status,
+        game_matchup, game_start_utc
     """
     root = data_root or get_data_root()
     salaries_path = dk_salaries_gold_path(root, site, game_date, draft_group_id)
@@ -190,11 +287,45 @@ def load_salaries_for_date(
         raise FileNotFoundError(f"Salaries not found: {salaries_path}")
 
     df = pd.read_parquet(salaries_path)
+    
+    # Load game info from bronze draftables
+    game_info = _load_game_info_from_draftables(draft_group_id, root)
+    
+    # Add game_matchup and game_start_utc columns
+    def get_game_matchup(comp_ids):
+        if not comp_ids or not game_info:
+            return None
+        # Take first competition ID
+        if isinstance(comp_ids, (list, np.ndarray)) and len(comp_ids) > 0:
+            comp_id = int(comp_ids[0])
+        else:
+            return None
+        info = game_info.get(comp_id)
+        return info["matchup"] if info else None
+    
+    def get_game_start(comp_ids):
+        if not comp_ids or not game_info:
+            return None
+        if isinstance(comp_ids, (list, np.ndarray)) and len(comp_ids) > 0:
+            comp_id = int(comp_ids[0])
+        else:
+            return None
+        info = game_info.get(comp_id)
+        return info["start_time_utc"] if info else None
+    
+    if "raw_competition_ids" in df.columns:
+        df["game_matchup"] = df["raw_competition_ids"].apply(get_game_matchup)
+        df["game_start_utc"] = df["raw_competition_ids"].apply(get_game_start)
+    else:
+        df["game_matchup"] = None
+        df["game_start_utc"] = None
+    
     logger.info(
-        "Loaded salaries for %s draft_group=%d (%d players)",
+        "Loaded salaries for %s draft_group=%d (%d players, %d games)",
         game_date,
         draft_group_id,
         len(df),
+        len(game_info),
     )
     return df
 
@@ -225,11 +356,23 @@ def build_player_pool(
     site: str = "dk",
     run_id: Optional[str] = None,
     data_root: Optional[Path] = None,
+    include_games: Optional[List[str]] = None,
+    exclude_games: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Build optimizer-ready player pool by merging projections with salaries.
 
+    Args:
+        game_date: Date in YYYY-MM-DD format
+        draft_group_id: DraftKings draft group ID
+        site: DFS site (dk or fd)
+        run_id: Optional projections run ID
+        data_root: Optional data root override
+        include_games: If set, only include players from these games (e.g., ["MIN@DAL", "LAL@GSW"])
+        exclude_games: If set, exclude players from these games
+
     Returns list of player dicts with required QuickBuild fields:
-        player_id, name, team, positions, salary, proj, own_proj, stddev, dk_id
+        player_id, name, team, positions, salary, proj, own_proj, stddev, dk_id,
+        game_matchup, game_start_utc
     """
     root = data_root or get_data_root()
 
@@ -288,8 +431,41 @@ def build_player_pool(
     if len(merged) == 0:
         raise ValueError("No players matched between projections and salaries")
 
+    # Apply game filters
+    if include_games or exclude_games:
+        include_set = set(g.upper() for g in include_games) if include_games else None
+        exclude_set = set(g.upper() for g in exclude_games) if exclude_games else set()
+        
+        def game_filter(matchup):
+            if pd.isna(matchup) or not matchup:
+                return True  # Keep players with unknown games
+            matchup_upper = str(matchup).upper()
+            if include_set is not None and matchup_upper not in include_set:
+                return False
+            if matchup_upper in exclude_set:
+                return False
+            return True
+        
+        # Get matchup column (prefer _sal suffix from merge if present)
+        matchup_col = "game_matchup_sal" if "game_matchup_sal" in merged.columns else "game_matchup"
+        if matchup_col in merged.columns:
+            before_count = len(merged)
+            merged = merged[merged[matchup_col].apply(game_filter)]
+            logger.info(
+                "Game filter applied: %d → %d players (include=%s, exclude=%s)",
+                before_count,
+                len(merged),
+                include_games,
+                exclude_games,
+            )
+
     # Build player pool list
     pool: List[Dict[str, Any]] = []
+
+    # Prefer salary-derived columns when merge created conflicts
+    salary_col = "salary_sal" if "salary_sal" in merged.columns else "salary"
+    positions_col = "positions_sal" if "positions_sal" in merged.columns else "positions"
+    dk_player_id_col = "dk_player_id_sal" if "dk_player_id_sal" in merged.columns else "dk_player_id"
 
     # Identify projection column
     proj_col = next(
@@ -314,13 +490,25 @@ def build_player_pool(
         (c for c in ["sim_dk_fpts_std", "stddev", "fpts_std"] if c in merged.columns),
         None,
     )
+    
+    # Identify p90 column for upside projection
+    p90_col = next(
+        (c for c in ["sim_dk_fpts_p90", "dk_fpts_p90", "fpts_p90"] if c in merged.columns),
+        None,
+    )
+    
+    # Game info columns (prefer _sal suffix from merge)
+    matchup_col = "game_matchup_sal" if "game_matchup_sal" in merged.columns else "game_matchup"
+    start_col = "game_start_utc_sal" if "game_start_utc_sal" in merged.columns else "game_start_utc"
 
     for _, row in merged.iterrows():
         # Get player_id (prefer projection's player_id, fall back to dk_player_id)
-        player_id = row.get("player_id") or row.get("dk_player_id") or row.get("dk_player_id_sal")
+        player_id = row.get("player_id")
+        if player_id is None or pd.isna(player_id):
+            player_id = row.get(dk_player_id_col)
 
         # Get positions (from salaries - prefer _sal suffix if present from merge)
-        positions_raw = row.get("positions_sal") if "positions_sal" in row else row.get("positions")
+        positions_raw = row.get(positions_col)
         if positions_raw is None:
             positions_raw = []
         
@@ -339,7 +527,7 @@ def build_player_pool(
             continue
 
         # Get salary
-        salary = row.get("salary") or row.get("salary_sal") or 0
+        salary = row.get(salary_col)
         if pd.isna(salary) or salary <= 0:
             logger.warning("Player %s has invalid salary %s, skipping", player_id, salary)
             continue
@@ -350,14 +538,21 @@ def build_player_pool(
             logger.debug("Player %s has no projection, skipping", player_id)
             continue
 
+        dk_player_id = row.get(dk_player_id_col)
+        dk_id = "" if dk_player_id is None or pd.isna(dk_player_id) else str(int(dk_player_id))
+
         player = {
             "player_id": str(player_id),
-            "name": row.get(proj_name_col) or row.get(sal_name_col) or str(player_id),
-            "team": row.get(proj_team_col) or row.get(sal_team_col) or "UNK",
+            "name": (row.get(sal_name_col) if pd.notna(row.get(sal_name_col)) else None)
+            or (row.get(proj_name_col) if pd.notna(row.get(proj_name_col)) else None)
+            or str(player_id),
+            "team": (row.get(sal_team_col) if pd.notna(row.get(sal_team_col)) else None)
+            or (row.get(proj_team_col) if pd.notna(row.get(proj_team_col)) else None)
+            or "UNK",
             "positions": positions,
             "salary": int(salary),
             "proj": float(proj),
-            "dk_id": str(row.get("dk_player_id") or row.get("dk_player_id_sal") or ""),
+            "dk_id": dk_id,
         }
 
         # Optional fields
@@ -365,6 +560,18 @@ def build_player_pool(
             player["own_proj"] = float(row[own_col])
         if stddev_col and pd.notna(row.get(stddev_col)):
             player["stddev"] = float(row[stddev_col])
+        if p90_col and pd.notna(row.get(p90_col)):
+            player["p90"] = float(row[p90_col])
+        
+        # Game info
+        if matchup_col in row and pd.notna(row.get(matchup_col)):
+            player["game_matchup"] = str(row[matchup_col])
+        if start_col in row and pd.notna(row.get(start_col)):
+            game_start = row[start_col]
+            if hasattr(game_start, "isoformat"):
+                player["game_start_utc"] = game_start.isoformat()
+            else:
+                player["game_start_utc"] = str(game_start)
 
         pool.append(player)
 
@@ -398,6 +605,7 @@ class OptimizerJob:
     # Results
     lineups: List[tuple] = field(default_factory=list)
     stats: Dict[str, Any] = field(default_factory=dict)
+    lineup_stats: List[Dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -413,6 +621,7 @@ class OptimizerJob:
             "progress": self.progress,
             "target": self.target,
             "lineups_count": len(self.lineups),
+            "lineup_stats_count": len(self.lineup_stats),
             "wall_time_sec": (
                 (self.completed_at - self.started_at).total_seconds()
                 if self.completed_at and self.started_at
@@ -584,18 +793,54 @@ def run_quick_build(
             run_id=job.job_id[:8],
         )
 
+        lineup_stats: List[Dict[str, Any]] = []
+        try:
+            data_root = get_data_root()
+            worlds_root = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2"
+            worlds_candidates = [
+                worlds_root / f"game_date={job.game_date}",
+                worlds_root / f"date={job.game_date}",
+            ]
+            worlds_dir = next((p for p in worlds_candidates if p.exists()), None)
+            if worlds_dir is None:
+                raise FileNotFoundError(
+                    f"sim_v2 worlds directory not found for {job.game_date} under {worlds_root}"
+                )
+
+            player_ids = sorted(
+                {
+                    int(str(pid))
+                    for lu in result.lineups
+                    for pid in lu
+                    if str(pid).strip() and str(pid).lower() != "nan"
+                }
+            )
+            if player_ids:
+                _, world_player_ids, fpts_by_world = load_world_fpts_matrix(
+                    worlds_dir=worlds_dir, player_ids=player_ids
+                )
+                stats_objs = compute_lineup_distribution_stats(
+                    lineups=result.lineups,
+                    world_player_ids=world_player_ids,
+                    fpts_by_world=fpts_by_world,
+                )
+                lineup_stats = [s.to_dict() for s in stats_objs]
+        except Exception as exc:
+            logger.warning("Failed to compute lineup sim percentiles: %s", exc)
+
         store.update(
             job.job_id,
             status="completed",
             completed_at=datetime.utcnow(),
             lineups=result.lineups,
             stats=result.stats.to_dict(),
+            lineup_stats=lineup_stats,
             progress=len(result.lineups),
         )
 
         # Auto-save build to disk
         try:
-            save_build(job, result.lineups, result.stats.to_dict())
+            save_build(job, result.lineups, result.stats.to_dict(), lineup_stats=lineup_stats)
         except Exception as save_exc:
             logger.warning("Failed to save build %s to disk: %s", job.job_id, save_exc)
 
@@ -661,8 +906,28 @@ def _discover_slates_from_disk(game_date: str, slate_type: str = "all") -> List[
         if not salaries_file.exists():
             continue
         
-        # Try to infer slate type from the bronze draftables if available
+        # Try to infer slate type and get games from the bronze draftables
         inferred_type = "main"  # default
+        games: List[Dict[str, Any]] = []
+        earliest_start = None
+        latest_start = None
+        example_name = f"Draft Group {dg_id}"
+        
+        game_info = _load_game_info_from_draftables(dg_id, root)
+        if game_info:
+            for comp_id, info in game_info.items():
+                game_entry = {"matchup": info["matchup"]}
+                start_time = info.get("start_time_utc")
+                if start_time:
+                    game_entry["start_time"] = start_time.isoformat()
+                    if earliest_start is None or start_time < earliest_start:
+                        earliest_start = start_time
+                    if latest_start is None or start_time > latest_start:
+                        latest_start = start_time
+                games.append(game_entry)
+            # Sort games by start time
+            games.sort(key=lambda g: g.get("start_time", ""))
+        
         bronze_path = root / "bronze" / "dk" / "draftables" / f"draftables_raw_{dg_id}.json"
         if bronze_path.exists():
             try:
@@ -675,6 +940,7 @@ def _discover_slates_from_disk(game_date: str, slate_type: str = "all") -> List[
                     name = contests[0].get("n", contests[0].get("ContestName", ""))
                     if name:
                         inferred_type = _infer_slate_type(name)
+                        example_name = name
             except Exception:
                 pass
         
@@ -683,9 +949,10 @@ def _discover_slates_from_disk(game_date: str, slate_type: str = "all") -> List[
             "slate_type": inferred_type,
             "draft_group_id": dg_id,
             "n_contests": 0,  # Unknown from disk
-            "earliest_start": None,
-            "latest_start": None,
-            "example_contest_name": f"Draft Group {dg_id}",
+            "earliest_start": earliest_start.isoformat() if earliest_start else None,
+            "latest_start": latest_start.isoformat() if latest_start else None,
+            "example_contest_name": example_name,
+            "games": games,
         }
         
         if slate_type == "all" or inferred_type == slate_type:
@@ -718,7 +985,13 @@ def _builds_dir() -> Path:
     return get_data_root() / "builds" / "optimizer"
 
 
-def save_build(job: OptimizerJob, lineups: List[List[str]], stats: Dict[str, Any]) -> Path:
+def save_build(
+    job: OptimizerJob,
+    lineups: List[List[str]],
+    stats: Dict[str, Any],
+    *,
+    lineup_stats: Optional[List[Dict[str, Any]]] = None,
+) -> Path:
     """Save a completed build to disk.
     
     Saves to: projections-data/builds/optimizer/{game_date}/{job_id}.json
@@ -743,7 +1016,13 @@ def save_build(job: OptimizerJob, lineups: List[List[str]], stats: Dict[str, Any
         "lineups_count": len(lineups),
         "config": cfg,
         "stats": stats,
-        "lineups": [{"lineup_id": i, "player_ids": lu} for i, lu in enumerate(lineups)],
+        "lineups": [
+            {
+                **({"lineup_id": i, "player_ids": lu}),
+                **(lineup_stats[i] if lineup_stats and i < len(lineup_stats) else {}),
+            }
+            for i, lu in enumerate(lineups)
+        ],
     }
     
     with open(build_file, "w") as f:

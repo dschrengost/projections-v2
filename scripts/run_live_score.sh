@@ -8,7 +8,7 @@ SEASON="${LIVE_SEASON:-$(date +%Y)}"
 MONTH="${LIVE_MONTH:-$(date +%-m)}"
 TIP_LEAD_MINUTES="${LIVE_TIP_LEAD_MINUTES:-90}"         # start 5-min mode 1.5h before first tip
 PRE_WINDOW_INTERVAL="${LIVE_PRE_WINDOW_INTERVAL:-1800}" # 30 minutes (in seconds) for pre-slate runs
-LOCK_BUFFER_MINUTES="${LIVE_LOCK_BUFFER_MINUTES:-15}"
+LOCK_BUFFER_MINUTES="${LIVE_LOCK_BUFFER_MINUTES:-0}"
 LAST_RUN_FILE="/tmp/live-score-last-run-${START_DATE}"
 # Read reconcile mode from config JSON if present, else fall back to env var or default
 CONFIG_RECONCILE=$(jq -r '.reconcile_team_minutes // empty' config/minutes_current_run.json 2>/dev/null || true)
@@ -118,64 +118,9 @@ else
     ${SCRAPE_FLAGS}
 fi
 
-# Derive run_as_of_ts from the latest injury snapshot BEFORE the last tip time
-RUN_AS_OF_TS=$(/home/daniel/.local/bin/uv run python - <<'PY'
-import pandas as pd
-from pathlib import Path
-from datetime import datetime, timezone, timedelta
-import os
-
-data_root = Path(os.environ.get("PROJECTIONS_DATA_ROOT", "/home/daniel/projections-data"))
-target_date_str = os.environ.get("LIVE_START_DATE", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-schedule_path = os.environ.get("LIVE_SCHEDULE_PATH", str(data_root / "silver" / "schedule" / "schedule.parquet"))
-target_date = datetime.strptime(target_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-season = target_date.year if target_date.month >= 10 else target_date.year
-month = target_date.month
-
-# Load schedule to find last tip time for target date
-try:
-    schedule = pd.read_parquet(schedule_path)
-    schedule["tip_ts"] = pd.to_datetime(schedule["tip_ts"], utc=True)
-    schedule["game_date"] = pd.to_datetime(schedule["game_date"]).dt.date
-    target_games = schedule[schedule["game_date"] == target_date.date()]
-    if not target_games.empty:
-        last_tip = target_games["tip_ts"].max()
-        # Use last tip time as the deadline (games that have tipped shouldn't be included)
-        deadline = last_tip
-    else:
-        # No games found, fallback to end of day
-        deadline = target_date + timedelta(days=1)
-except Exception:
-    # Schedule read failed, fallback to end of day
-    deadline = target_date + timedelta(days=1)
-
-# Find latest injury snapshot before the deadline
-inj_path = data_root / "silver" / "injuries_snapshot" / f"season={season}" / f"month={month:02d}" / "injuries_snapshot.parquet"
-
-def get_latest_ts_before_deadline(path: Path, column: str, deadline: datetime) -> datetime | None:
-    """Get latest timestamp from file that is at or before the deadline."""
-    if not path.exists():
-        return None
-    try:
-        df = pd.read_parquet(path, columns=[column])
-        values = pd.to_datetime(df[column], utc=True, errors="coerce").dropna()
-        # Filter to timestamps on or before the deadline
-        valid = values[values <= deadline]
-        if valid.empty:
-            return None
-        return valid.max().to_pydatetime()
-    except Exception:
-        return None
-
-ts = get_latest_ts_before_deadline(inj_path, "as_of_ts", deadline)
-
-# Fallback to deadline if no injury data found
-if ts is None:
-    ts = deadline
-
-print(ts.strftime("%Y-%m-%d %H:%M:%S"))
-PY
-)
+# Use the current time for run_as_of_ts so faster feeds (odds) aren't filtered out
+# between slower feeds (injuries). build_minutes_live still applies per-game tip_ts bounds.
+RUN_AS_OF_TS="${LIVE_RUN_AS_OF_TS:-$(date -u '+%Y-%m-%d %H:%M:%S')}"
 
 echo "[live] Building features as of ${RUN_AS_OF_TS}..."
 
@@ -256,14 +201,45 @@ else
   echo "[live] Skipping sim_v2 live run (LIVE_RUN_SIM=${RUN_SIM})."
 fi
 
-# === STEP 7: OWNERSHIP PREDICTIONS (after sim, uses sim FPTS) ===
-echo "[live] Scoring ownership predictions for ${START_DATE}..."
-if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_ownership_live \
-  --date "${START_DATE}" \
-  --run-id "${LIVE_RUN_ID}" \
-  --data-root "${DATA_ROOT}"
-then
-  echo "[live] warning: Ownership scoring failed; continuing without ownership predictions." >&2
+# === STEP 7: OWNERSHIP PREDICTIONS (skip if any game has locked) ===
+# Check if the first game on the slate has already tipped
+FIRST_TIP_LOCKED=$(SCHEDULE_PATH="${SCHEDULE_PATH}" START_DATE="${START_DATE}" /home/daniel/.local/bin/uv run python - <<'PY'
+import os, sys
+import pandas as pd
+
+path = os.environ["SCHEDULE_PATH"]
+target = os.environ["START_DATE"]
+
+df = pd.read_parquet(path)
+df["game_date"] = pd.to_datetime(df["game_date"]).dt.date
+df = df[df["game_date"] == pd.to_datetime(target).date()]
+if df.empty or "tip_ts" not in df.columns:
+    print("NO_GAMES", flush=True)
+    sys.exit(0)
+tips = pd.to_datetime(df["tip_ts"], utc=True, errors="coerce").dropna()
+if tips.empty:
+    print("NOT_LOCKED", flush=True)
+    sys.exit(0)
+first_tip = tips.min()
+now = pd.Timestamp.utcnow()
+if now >= first_tip:
+    print("LOCKED", flush=True)
+else:
+    print("NOT_LOCKED", flush=True)
+PY
+)
+
+if [[ "${FIRST_TIP_LOCKED}" == "LOCKED" ]]; then
+  echo "[live] Ownership scoring SKIPPED - first game has locked, using cached predictions"
+else
+  echo "[live] Scoring ownership predictions for ${START_DATE}..."
+  if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_ownership_live \
+    --date "${START_DATE}" \
+    --run-id "${LIVE_RUN_ID}" \
+    --data-root "${DATA_ROOT}"
+  then
+    echo "[live] warning: Ownership scoring failed; continuing without ownership predictions." >&2
+  fi
 fi
 
 # === STEP 8: FINALIZE UNIFIED PROJECTIONS ===

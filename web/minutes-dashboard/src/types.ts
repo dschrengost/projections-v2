@@ -39,6 +39,10 @@ export type PlayerRow = {
     sim_blk_mean?: number
     sim_tov_mean?: number
     sim_minutes_sim_mean?: number
+    sim_minutes_sim_p10?: number
+    sim_minutes_sim_p50?: number
+    sim_minutes_sim_p90?: number
+    sim_minutes_sim_std?: number
     // Vegas lines (game-level, same for all players in game)
     total?: number
     spread_home?: number
@@ -48,6 +52,7 @@ export type PlayerRow = {
     salary?: number
     pred_own_pct?: number
     value?: number
+    is_locked?: boolean
 }
 
 export type MinutesResponse = {

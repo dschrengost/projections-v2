@@ -1,0 +1,18 @@
+[Unit]
+Description=Freeze slate snapshots (lock/pretip)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+User=daniel
+Group=daniel
+ExecStart=/home/daniel/.local/bin/uv run python -m projections.cli.freeze_slates freeze-pending
+StandardOutput=journal
+StandardError=journal
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

@@ -316,7 +316,7 @@ const MinutesDistributionChart: React.FC<MinutesChartProps> = ({ player }) => {
     const p10 = player.minutes_p10 || 0
     const p50 = player.minutes_p50 || 0
     const p90 = player.minutes_p90 || 0
-    const simMean = player.sim_minutes_sim_mean || p50
+    const simP50 = player.sim_minutes_sim_p50 ?? player.sim_minutes_sim_mean ?? p50
 
     const maxMinutes = 48
     const scale = (val: number) => (val / maxMinutes) * 100
@@ -341,11 +341,11 @@ const MinutesDistributionChart: React.FC<MinutesChartProps> = ({ player }) => {
                         title={`p50: ${p50.toFixed(1)} min`}
                     />
                     {/* Sim mean marker */}
-                    {simMean !== p50 && (
+                    {simP50 !== p50 && (
                         <div
                             className="minutes-marker sim"
-                            style={{ left: `${scale(simMean)}%` }}
-                            title={`Sim: ${simMean.toFixed(1)} min`}
+                            style={{ left: `${scale(simP50)}%` }}
+                            title={`Sim p50: ${simP50.toFixed(1)} min`}
                         />
                     )}
                 </div>
@@ -442,7 +442,10 @@ const ExpandablePlayerList: React.FC<{
                                 <td className="salary-cell">{formatSalary(p.salary)}</td>
                                 <td>{formatMinutes(p.minutes_p50)}</td>
                                 <td className="font-bold">{formatFpts(p.sim_dk_fpts_mean)}</td>
-                                <td className="ownership-cell">{formatOwnership(p.pred_own_pct)}</td>
+                                <td className="ownership-cell">
+                                    {p.is_locked && <span className="lock-icon" title="Predictions locked">🔒</span>}
+                                    {formatOwnership(p.pred_own_pct)}
+                                </td>
                                 <td className="value-cell">{formatValue(p.value)}</td>
                                 <td className="text-upside">{formatFpts(p.sim_dk_fpts_p95)}</td>
                                 <td className="text-downside">{formatFpts(p.sim_dk_fpts_p05)}</td>
@@ -461,8 +464,8 @@ const ExpandablePlayerList: React.FC<{
                                             </div>
                                             <div className="stats-row secondary">
                                                 <StatItem
-                                                    label="Sim Min"
-                                                    value={p.sim_minutes_sim_mean}
+                                                    label="Sim Min p50"
+                                                    value={p.sim_minutes_sim_p50 ?? p.sim_minutes_sim_mean}
                                                     compare={p.minutes_p50}
                                                     format="minutes"
                                                 />

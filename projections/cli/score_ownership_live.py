@@ -457,12 +457,9 @@ def score_ownership(
         n_filtered = unplayable_mask.sum()
         
         if n_filtered > 0:
-            filtered_names = output.loc[unplayable_mask, "player_name"].tolist()
-            print(f"[ownership] Playable filter (proj_fpts < {min_fpts:.1f}): zeroed {n_filtered} players")
-            print(f"[ownership]   Filtered: {filtered_names[:5]}{'...' if n_filtered > 5 else ''}")
             output.loc[unplayable_mask, "pred_own_pct"] = 0.0
     
-    # Lock persistence: merge with previously locked predictions for games that have started
+    # Lock persistence: stop re-scoring after first game starts
     lock_cfg = config.get("lock_persistence", {})
     if lock_cfg.get("enabled", True):  # Default to enabled
         current_time = datetime.now()
@@ -474,27 +471,33 @@ def score_ownership(
         # Load previously locked predictions (if exists)
         locked_preds = _load_locked_predictions(game_date, data_root)
         
-        # First run: save the locked file (regardless of whether games are locked)
-        if locked_preds is None:
+        # First run (no games locked yet): save predictions for later use
+        if locked_preds is None and not locked_teams:
+            output["is_locked"] = False
             _save_locked_predictions(output, game_date, data_root)
+            return output
         
-        # If some games are locked and we have a locked file, merge
+        # If ANY game has started, stop re-scoring and return saved predictions
         if locked_teams:
             print(f"[ownership] Locked teams (game started): {sorted(locked_teams)}")
             
             if locked_preds is not None and not locked_preds.empty:
-                # Get predictions for locked teams from the locked file
-                locked_from_file = locked_preds[locked_preds['team'].isin(locked_teams)]
-                
-                # Keep only unlocked teams from current run
-                output = output[~output['team'].isin(locked_teams)]
-                
-                # Merge: locked teams from file + unlocked teams from current run
-                output = pd.concat([locked_from_file, output], ignore_index=True)
-                
-                print(f"[ownership] Merged: {len(locked_from_file)} locked + {len(output) - len(locked_from_file)} unlocked")
+                # Return saved predictions - no more re-scoring
+                locked_preds["is_locked"] = True
+                print(f"[ownership] Returning {len(locked_preds)} saved predictions (re-scoring stopped)")
+                return locked_preds
             else:
-                print(f"[ownership] WARNING: Games locked but no locked file exists. Cannot recover locked predictions.")
+                # Edge case: games locked but no saved file
+                # Save current predictions and mark as locked
+                print(f"[ownership] WARNING: Games locked but no saved file. Saving current predictions.")
+                output["is_locked"] = True
+                _save_locked_predictions(output, game_date, data_root)
+                return output
+        
+        # No games locked yet but we have a saved file - continue with fresh predictions
+        output["is_locked"] = False
+    else:
+        output["is_locked"] = False
     
     return output
 

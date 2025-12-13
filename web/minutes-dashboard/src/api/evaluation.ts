@@ -16,10 +16,12 @@ export type EvaluationDayMetrics = {
   // Ownership metrics (optional - may not be available for all dates)
   own_players_matched?: number | null
   own_mae?: number | null
+  own_smape?: number | null
   own_corr?: number | null
   chalk_top5_acc?: number | null
   own_bias?: number | null
   high_own_mae?: number | null
+  own_top_misses?: Array<{ player: string; actual: number; pred: number; error: number }>
 }
 
 export type EvaluationSummary = {
@@ -28,14 +30,38 @@ export type EvaluationSummary = {
   avg_minutes_mae: number | null
   avg_coverage_80: number | null
   avg_coverage_90: number | null
+  avg_coverage_50?: number | null
   avg_bias: number | null
   total_missed: number
   total_false_preds: number
+
+  // Calibration gaps
+  avg_cal_gap_50?: number | null
+  avg_cal_gap_80?: number | null
+  avg_cal_gap_90?: number | null
+
+  // Salary tier accuracy
+  avg_fpts_mae_elite?: number | null
+  avg_fpts_mae_mid?: number | null
+  avg_fpts_mae_value?: number | null
+  avg_fpts_mae_punt?: number | null
+
+  // Starter/bench splits
+  avg_fpts_mae_starters?: number | null
+  avg_fpts_mae_bench?: number | null
+
+  // Edge cases
+  total_dnp_false_positives?: number
+  total_starter_misses?: number
+  total_blowup_misses?: number
+
   // Ownership aggregates
   avg_own_mae?: number | null
+  avg_own_smape?: number | null
   avg_own_corr?: number | null
   avg_chalk_top5_acc?: number | null
   avg_own_bias?: number | null
+
   // Counts
   dates_evaluated: number
   total_players_matched: number

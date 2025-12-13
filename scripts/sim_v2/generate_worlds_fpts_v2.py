@@ -15,8 +15,8 @@ from projections.fpts_v2.features import CATEGORICAL_FEATURES_DEFAULT, build_fpt
 from projections.fpts_v2.loader import load_fpts_and_residual, load_fpts_bundle
 from projections.fpts_v2.scoring import compute_dk_fpts
 from projections.paths import data_path, get_project_root
-from projections.sim_v2.config import DEFAULT_PROFILES_PATH, SimV2Profile, load_sim_v2_profile
-from projections.sim_v2.game_script import GameScriptConfig, sample_minutes_with_scripts
+from projections.sim_v2.config import DEFAULT_PROFILES_PATH, load_sim_v2_profile
+from projections.sim_v2.game_script import GameScriptConfig, classify_script, sample_minutes_with_scripts
 from projections.sim_v2.minutes_noise import (
     build_sigma_per_player,
     enforce_team_240_minutes,
@@ -206,7 +206,10 @@ def _compute_fpts_and_boxscore(
     fg3a = fga3
 
     shaped_like = sample.shape
-    flat = lambda arr: arr.reshape(-1)
+
+    def flat(arr: np.ndarray) -> np.ndarray:
+        return arr.reshape(-1)
+
     df = pd.DataFrame(
         {
             "pts": flat(pts),
@@ -613,11 +616,10 @@ def main(
         nu = float(noise_cfg.get("nu", 5))
         k_default = float(noise_cfg.get("k_default", 0.35))
         epsilon_dist = str(noise_cfg.get("epsilon_dist", "student_t"))
-        sigma_mode = str(noise_cfg.get("sigma_mode", "k_times_mu"))
         if rates_source != "rates_v1_live":
             raise ValueError(f"Unsupported rates_source for rates mean: {rates_source}")
         output_base = output_root or (root / "artifacts" / "sim_v2" / "worlds_fpts_v2")
-        
+
         # Game script config
         use_game_scripts = profile_cfg.use_game_scripts
         game_script_config = None
@@ -627,7 +629,18 @@ def main(
                 spread_coef=profile_cfg.game_script_spread_coef,
             )
             typer.echo(f"[sim_v2] game_scripts enabled: margin_std={game_script_config.margin_std} spread_coef={game_script_config.spread_coef}")
-        
+        minutes_noise_params = None
+        if use_minutes_noise_eff:
+            try:
+                minutes_noise_params = load_minutes_noise_params(data_root=root, minutes_run_id=minutes_run)
+                typer.echo(
+                    f"[sim_v2] using minutes noise run_id={minutes_noise_params.run_id} "
+                    f"sigma_min={minutes_sigma_min_eff:.3f} path={minutes_noise_params.source_path}"
+                )
+            except FileNotFoundError as exc:
+                typer.echo(f"[sim_v2] warning: minutes noise params not found; disabling minutes noise ({exc})", err=True)
+                minutes_noise_params = None
+
         typer.echo(
             f"[sim_v2] rates mean: minutes_source={minutes_source} rates_source={rates_source} "
             f"rates_run_id={resolved_rates_run or 'latest'} minutes_run_id={resolved_minutes_run or 'latest'} "
@@ -658,6 +671,7 @@ def main(
                 minutes_df.get("is_projected_starter", minutes_df.get("starter_flag")), errors="coerce"
             )
             minutes_df["play_prob"] = pd.to_numeric(minutes_df.get("play_prob"), errors="coerce").fillna(1.0)
+            minutes_df = _ensure_status_bucket(minutes_df)
             minutes_df = minutes_df[minutes_df[minutes_col].notna()]
             minutes_df = minutes_df[minutes_df["play_prob"].fillna(0.0) >= min_play_prob_eff]
             if minutes_df.empty:
@@ -704,6 +718,37 @@ def main(
             mu_df = mu_df.reset_index(drop=True)
             mu_df["dk_fpts_mean"] = mu_df["fpts_mean"]
             mu_df["sim_profile"] = profile_cfg.name
+            if "play_prob" in mu_df.columns:
+                play_prob_arr = (
+                    pd.to_numeric(mu_df["play_prob"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
+                )
+            else:
+                play_prob_arr = np.ones(len(mu_df), dtype=float)
+
+            sigma_minutes_mu: np.ndarray | None = None
+            if use_minutes_noise_eff and minutes_noise_params is not None:
+                try:
+                    sigma_raw = build_sigma_per_player(
+                        minutes_df,
+                        minutes_noise_params,
+                        minutes_col=minutes_col,
+                        starter_col="is_starter",
+                        status_col="status_bucket",
+                    )
+                    if minutes_sigma_min_eff is not None:
+                        sigma_raw = np.maximum(sigma_raw, minutes_sigma_min_eff)
+                    sigma_df = minutes_df[["game_date", "game_id", "team_id", "player_id"]].copy()
+                    sigma_df["sigma_minutes"] = sigma_raw
+                    for key in ("game_id", "team_id", "player_id"):
+                        sigma_df[key] = pd.to_numeric(sigma_df[key], errors="coerce")
+                        mu_df[key] = pd.to_numeric(mu_df[key], errors="coerce")
+                    mu_df = mu_df.merge(sigma_df, on=["game_date", "game_id", "team_id", "player_id"], how="left")
+                    sigma_minutes_mu = pd.to_numeric(mu_df["sigma_minutes"], errors="coerce").to_numpy(dtype=float)
+                    sigma_fallback = float(minutes_sigma_min_eff or minutes_noise_params.sigma_min or 0.5)
+                    sigma_minutes_mu = np.nan_to_num(sigma_minutes_mu, nan=sigma_fallback)
+                except Exception as exc:
+                    typer.echo(f"[sim_v2] warning: failed to build minutes noise sigma; disabling minutes noise ({exc})", err=True)
+                    sigma_minutes_mu = None
 
             stat_targets = [
                 "fga2_per_min",
@@ -752,63 +797,74 @@ def main(
             mu_arr = mu_df["fpts_mean"].to_numpy(dtype=float)
             minutes_sim_base = mu_df["minutes_mean"].to_numpy(dtype=float)
             world_fpts_samples: list[np.ndarray] = []
+            minutes_world_samples: list[np.ndarray] = []
             base_cols = ["game_date", "game_id", "team_id", "player_id", "minutes_mean", "dk_fpts_mean", "sim_profile"]
             for extra in ("minutes_p50_cond", "minutes_p50", "play_prob", "is_starter"):
                 if extra in mu_df.columns and extra not in base_cols:
                     base_cols.append(extra)
             base_cols = list(dict.fromkeys(base_cols))
             stat_defaults = np.full_like(minutes_sim_base, np.nan, dtype=float)
-            
-            # Prepare game script data if enabled
-            gs_game_ids = None
-            gs_team_ids = None
-            gs_is_starter = None
-            gs_spreads_home = None
-            gs_home_team_ids = {}
-            gs_minutes_p10 = None
-            gs_minutes_p50 = None
-            gs_minutes_p90 = None
+
+            # Minutes sampling inputs (for scripts and/or noise)
+            gs_game_ids = mu_df["game_id"].to_numpy()
+            gs_team_ids = mu_df["team_id"].to_numpy()
+            if "is_starter" in mu_df.columns:
+                gs_is_starter = (
+                    pd.to_numeric(mu_df["is_starter"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                )
+            else:
+                gs_is_starter = np.zeros(len(mu_df), dtype=float)
+            gs_minutes_p50 = minutes_sim_base.copy()
+
+            if "minutes_p10" in minutes_df.columns and "minutes_p90" in minutes_df.columns:
+                p10_map = minutes_df.groupby("player_id")["minutes_p10"].first().to_dict()
+                p90_map = minutes_df.groupby("player_id")["minutes_p90"].first().to_dict()
+                p10_raw = mu_df["player_id"].map(p10_map).to_numpy(dtype=float)
+                p90_raw = mu_df["player_id"].map(p90_map).to_numpy(dtype=float)
+                gs_minutes_p10 = np.where(np.isnan(p10_raw), gs_minutes_p50 * 0.7, p10_raw)
+                gs_minutes_p90 = np.where(np.isnan(p90_raw), gs_minutes_p50 * 1.3, p90_raw)
+            else:
+                gs_minutes_p10 = gs_minutes_p50 * 0.7
+                gs_minutes_p90 = gs_minutes_p50 * 1.3
+
+            if sigma_minutes_mu is not None:
+                z90 = 1.2815515655446004
+                sigma = np.maximum(sigma_minutes_mu, 0.1)
+                gs_minutes_p10 = np.maximum(gs_minutes_p50 - z90 * sigma, 0.0)
+                gs_minutes_p90 = np.maximum(gs_minutes_p50 + z90 * sigma, gs_minutes_p10 + 0.01)
+
+            # Spread is optional: if missing, still sample minutes (noise-only scripts).
+            gs_spreads_home = np.full(len(mu_df), np.nan, dtype=float)
+            spread_col = "spread_home"
+            if spread_col in minutes_df.columns:
+                spread_map = minutes_df.groupby("game_id")[spread_col].first().to_dict()
+                gs_spreads_home = mu_df["game_id"].map(spread_map).to_numpy(dtype=float)
+
+            # Build home_team_ids mapping (best-effort).
+            gs_home_team_ids: dict[int, int] = {}
+            try:
+                sched_path = (
+                    root
+                    / "silver"
+                    / "schedule"
+                    / "season=2025"
+                    / f"month={pd.Timestamp(game_date).month:02d}"
+                    / "schedule.parquet"
+                )
+                if sched_path.exists():
+                    sched = pd.read_parquet(sched_path)
+                    date_sched = sched[sched["game_date"] == pd.Timestamp(game_date).normalize()]
+                    gs_home_team_ids = dict(zip(date_sched["game_id"], date_sched["home_team_id"]))
+            except Exception:
+                pass  # Default to treating all as home if schedule unavailable
+
+            team_codes = mu_df["team_id"].astype("category")
+            team_indices = team_codes.cat.codes.to_numpy(dtype=int)
+            n_teams = int(team_indices.max()) + 1 if len(team_indices) else 0
+            rotation_mask = gs_minutes_p50 >= 12.0
+            bench_mask = (~rotation_mask) & (gs_minutes_p50 > 0.0)
             if use_game_scripts and game_script_config is not None:
-                gs_game_ids = mu_df["game_id"].to_numpy()
-                gs_team_ids = mu_df["team_id"].to_numpy()
-                gs_is_starter = mu_df["is_starter"].fillna(0).to_numpy(dtype=float)
-                gs_minutes_p50 = minutes_sim_base.copy()
-                
-                # Get minutes quantiles for distribution sampling
-                # Map from minutes_df which has p10/p50/p90
-                if "minutes_p10" in minutes_df.columns and "minutes_p90" in minutes_df.columns:
-                    p10_map = minutes_df.groupby("player_id")["minutes_p10"].first().to_dict()
-                    p90_map = minutes_df.groupby("player_id")["minutes_p90"].first().to_dict()
-                    p10_raw = mu_df["player_id"].map(p10_map).to_numpy(dtype=float)
-                    p90_raw = mu_df["player_id"].map(p90_map).to_numpy(dtype=float)
-                    # Fill missing with fallback based on p50
-                    gs_minutes_p10 = np.where(np.isnan(p10_raw), gs_minutes_p50 * 0.7, p10_raw)
-                    gs_minutes_p90 = np.where(np.isnan(p90_raw), gs_minutes_p50 * 1.3, p90_raw)
-                else:
-                    # Fallback: estimate quantiles from p50
-                    gs_minutes_p10 = gs_minutes_p50 * 0.7
-                    gs_minutes_p90 = gs_minutes_p50 * 1.3
-                
-                # Get spread from minutes_df (which has spread_home)
-                spread_col = "spread_home"
-                if spread_col in minutes_df.columns:
-                    spread_map = minutes_df.groupby("game_id")[spread_col].first().to_dict()
-                    gs_spreads_home = mu_df["game_id"].map(spread_map).to_numpy(dtype=float)
-                    
-                    # Build home_team_ids mapping by loading schedule
-                    # For live runs, we infer home team from schedule
-                    try:
-                        date_str = pd.Timestamp(game_date).date().isoformat()
-                        sched_path = root / "silver" / "schedule" / f"season=2025" / f"month={game_date.month:02d}" / "schedule.parquet"
-                        if sched_path.exists():
-                            sched = pd.read_parquet(sched_path)
-                            date_sched = sched[sched["game_date"] == pd.Timestamp(game_date).normalize()]
-                            gs_home_team_ids = dict(zip(date_sched["game_id"], date_sched["home_team_id"]))
-                    except Exception:
-                        pass  # Default to treating all as home if schedule unavailable
-                    
-                    if gs_spreads_home is not None and not np.isnan(gs_spreads_home).all():
-                        typer.echo(f"[sim_v2] game_scripts: {len(gs_home_team_ids)} games, using minutes quantile sampling")
+                typer.echo(f"[sim_v2] game_scripts: {len(gs_home_team_ids)} games, sampling minutes via scripts")
 
             eff_arrays: dict[str, np.ndarray] | None = None
             if use_efficiency:
@@ -832,7 +888,7 @@ def main(
                 rng = np.random.default_rng(date_seed + chunk_start)
                 
                 # Sample minutes based on game script (script determines quantile position)
-                if use_game_scripts and game_script_config is not None and gs_spreads_home is not None:
+                if use_game_scripts and game_script_config is not None:
                     minutes_worlds = sample_minutes_with_scripts(
                         minutes_p10=gs_minutes_p10,
                         minutes_p50=gs_minutes_p50,
@@ -847,8 +903,25 @@ def main(
                         rng=rng,
                     )
                 else:
-                    # Fallback: use fixed p50 minutes
-                    minutes_worlds = np.repeat(minutes_sim_base[None, :], chunk_size, axis=0)
+                    # Fallback: sample minutes from per-player distribution.
+                    sigma = np.maximum((gs_minutes_p90 - gs_minutes_p10) / 2.56, 0.5)
+                    eps = rng.standard_normal(size=(chunk_size, len(gs_minutes_p50)))
+                    minutes_worlds = np.maximum(gs_minutes_p50[None, :] + eps * sigma[None, :], 0.0)
+
+                # Apply per-world play_prob as an "active" mask.
+                u_active = rng.random(size=minutes_worlds.shape)
+                active_mask = u_active < play_prob_arr[None, :]
+                minutes_worlds = minutes_worlds * active_mask
+
+                if enforce_team_240 and n_teams > 0:
+                    minutes_worlds = enforce_team_240_minutes(
+                        minutes_world=minutes_worlds,
+                        team_indices=team_indices,
+                        rotation_mask=rotation_mask,
+                        bench_mask=bench_mask,
+                        clamp_scale=(0.7, 1.3),
+                    )
+                minutes_world_samples.append(minutes_worlds)
 
                 stat_totals: dict[str, np.ndarray] = {}
                 for target in stat_targets:
@@ -879,16 +952,28 @@ def main(
             if world_fpts_samples:
                 # fpts_chunk is shape (chunk_size, n_players), stack all chunks
                 all_fpts = np.vstack(world_fpts_samples)  # shape: (n_worlds, n_players)
+                all_minutes = np.vstack(minutes_world_samples) if minutes_world_samples else None
                 
                 # Compute quantiles per player
                 quantiles = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
                 fpts_quantiles = np.percentile(all_fpts, [q * 100 for q in quantiles], axis=0)
                 fpts_mean = all_fpts.mean(axis=0)
                 fpts_std = all_fpts.std(axis=0)
+                minutes_mean = all_minutes.mean(axis=0) if all_minutes is not None else minutes_sim_base
+                minutes_std = all_minutes.std(axis=0) if all_minutes is not None else np.zeros_like(minutes_sim_base)
+                minutes_quantiles = (
+                    np.percentile(all_minutes, [10, 50, 90], axis=0) if all_minutes is not None else None
+                )
                 
                 # Build output projection DataFrame
                 proj_df = mu_df[["game_date", "game_id", "team_id", "player_id"]].copy()
                 proj_df["minutes_mean"] = minutes_sim_base
+                proj_df["minutes_sim_mean"] = minutes_mean
+                proj_df["minutes_sim_std"] = minutes_std
+                if minutes_quantiles is not None:
+                    proj_df["minutes_sim_p10"] = minutes_quantiles[0]
+                    proj_df["minutes_sim_p50"] = minutes_quantiles[1]
+                    proj_df["minutes_sim_p90"] = minutes_quantiles[2]
                 proj_df["dk_fpts_mean"] = fpts_mean
                 proj_df["dk_fpts_std"] = fpts_std
                 proj_df["dk_fpts_p05"] = fpts_quantiles[0]

@@ -96,6 +96,7 @@ export function EvaluationPage() {
         <label className="evaluation-days">
           Days
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            <option value={1}>1</option>
             <option value={7}>7</option>
             <option value={14}>14</option>
             <option value={30}>30</option>
@@ -153,9 +154,79 @@ export function EvaluationPage() {
                 {loading ? '…' : formatPercent(summary?.avg_chalk_top5_acc)}
               </div>
             </div>
+            <div className="card">
+              <div className="label">Own MAE</div>
+              <div
+                className={`value ${getMetricClass(summary?.avg_own_mae, { good: 8, warn: 12 })}`}
+              >
+                {loading ? '…' : formatNumber(summary?.avg_own_mae)}
+              </div>
+            </div>
           </>
         )}
       </div>
+
+      {/* Salary Tier Accuracy */}
+      {!loading && summary?.avg_fpts_mae_elite != null && (
+        <div className="evaluation-section">
+          <h2>Accuracy by Salary Tier</h2>
+          <div className="salary-tier-grid">
+            <div className="tier-card elite">
+              <div className="tier-label">Elite ($8K+)</div>
+              <div className="tier-value">{formatNumber(summary?.avg_fpts_mae_elite)}</div>
+            </div>
+            <div className="tier-card mid">
+              <div className="tier-label">Mid ($5.5-8K)</div>
+              <div className="tier-value">{formatNumber(summary?.avg_fpts_mae_mid)}</div>
+            </div>
+            <div className="tier-card value">
+              <div className="tier-label">Value ($3.5-5.5K)</div>
+              <div className="tier-value">{formatNumber(summary?.avg_fpts_mae_value)}</div>
+            </div>
+            <div className="tier-card punt">
+              <div className="tier-label">Punt ($3-3.5K)</div>
+              <div className="tier-value">{formatNumber(summary?.avg_fpts_mae_punt)}</div>
+            </div>
+          </div>
+          <p className="section-note">FPTS Mean Absolute Error by salary tier</p>
+        </div>
+      )}
+
+      {/* Edge Cases Summary */}
+      {!loading && (summary?.total_dnp_false_positives > 0 || summary?.total_starter_misses > 0) && (
+        <div className="evaluation-section">
+          <h2>Prediction Failures</h2>
+          <p className="section-note" style={{ marginTop: 0, marginBottom: '1rem' }}>
+            High-impact prediction errors that would hurt lineup construction
+          </p>
+          <div className="edge-case-grid">
+            <div className="edge-case-card">
+              <div className="edge-case-value">{summary?.total_dnp_false_positives ?? 0}</div>
+              <div className="edge-case-label">Injured/DNP Misses</div>
+              <div className="edge-case-desc">
+                Players we projected to play 10+ min who didn't suit up.
+                Likely late scratches or injury news we missed.
+              </div>
+            </div>
+            <div className="edge-case-card">
+              <div className="edge-case-value">{summary?.total_starter_misses ?? 0}</div>
+              <div className="edge-case-label">Minutes Underestimates</div>
+              <div className="edge-case-desc">
+                Players who played 30+ min but we predicted under 20.
+                Missed lineup changes or role expansions.
+              </div>
+            </div>
+            <div className="edge-case-card">
+              <div className="edge-case-value">{summary?.total_blowup_misses ?? 0}</div>
+              <div className="edge-case-label">Ceiling Misses</div>
+              <div className="edge-case-desc">
+                Players who scored 50+ FPTS but we projected under 30.
+                Underestimated upside on big performances.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FPTS Accuracy Trend */}
       {!loading && chartData.length > 0 && (
@@ -268,6 +339,30 @@ export function EvaluationPage() {
                 />
               </LineChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Top Ownership Misses */}
+      {!loading && hasOwnership && metrics.length > 0 && metrics[metrics.length - 1]?.own_top_misses && (
+        <div className="evaluation-section">
+          <h2>Top Ownership Misses (Latest Day)</h2>
+          <p className="section-note" style={{ marginTop: 0, marginBottom: '1rem' }}>
+            Largest absolute errors between predicted and actual ownership
+          </p>
+          <div className="ownership-misses-grid">
+            {metrics[metrics.length - 1].own_top_misses?.map((miss, i) => (
+              <div key={i} className="ownership-miss-card">
+                <div className="miss-player">{miss.player}</div>
+                <div className="miss-details">
+                  <span className="miss-actual">Actual: {miss.actual}%</span>
+                  <span className="miss-pred">Pred: {miss.pred}%</span>
+                  <span className={`miss-error ${miss.error > 0 ? 'under' : 'over'}`}>
+                    {miss.error > 0 ? '↓' : '↑'} {Math.abs(miss.error).toFixed(1)}pts
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -12,6 +12,7 @@ import { apiUrl } from './api/client'
 import PipelinePage from './pages/PipelinePage'
 import EvaluationPage from './pages/EvaluationPage'
 import OptimizerPage from './pages/OptimizerPage'
+import ContestPage from './pages/ContestPage'
 import { MinutesResponse, PlayerRow } from './types'
 import {
   formatFpts,
@@ -76,6 +77,7 @@ type SortKey =
   | 'sim_stl_mean'
   | 'sim_blk_mean'
   | 'sim_tov_mean'
+  | 'sim_minutes_sim_p50'
   | 'sim_minutes_sim_mean'
 
 type RunOption = {
@@ -110,17 +112,19 @@ const SORT_LABELS: Record<SortKey, string> = {
   sim_stl_mean: 'Sim STL',
   sim_blk_mean: 'Sim BLK',
   sim_tov_mean: 'Sim TOV',
-  sim_minutes_sim_mean: 'Sim MIN',
+  sim_minutes_sim_p50: 'Sim MIN p50',
+  sim_minutes_sim_mean: 'Sim MIN mean',
 }
 
 
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' => {
+const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'contest' => {
   if (typeof window === 'undefined') {
     return 'minutes'
   }
+  if (window.location.pathname.includes('contest')) return 'contest'
   if (window.location.pathname.includes('optimizer')) return 'optimizer'
   if (window.location.pathname.includes('pipeline')) return 'pipeline'
   if (window.location.pathname.includes('evaluation')) return 'evaluation'
@@ -130,7 +134,7 @@ const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' => {
 
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'contest'>(initialTab)
   const [selectedDate, setSelectedDate] = useState(todayISO())
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
@@ -149,7 +153,7 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer' }
+    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer', contest: '/contest' }
     window.history.replaceState({}, '', pathMap[activeTab])
   }, [activeTab])
 
@@ -352,7 +356,8 @@ function App() {
     { key: 'sim_stl_mean', label: 'Sim STL' },
     { key: 'sim_blk_mean', label: 'Sim BLK' },
     { key: 'sim_tov_mean', label: 'Sim TOV' },
-    { key: 'sim_minutes_sim_mean', label: 'Sim MIN' },
+    { key: 'sim_minutes_sim_p50', label: 'Sim MIN p50' },
+    { key: 'sim_minutes_sim_mean', label: 'Sim MIN mean' },
   ]
 
   const nav = (
@@ -381,6 +386,12 @@ function App() {
       >
         Optimizer
       </button>
+      <button
+        className={activeTab === 'contest' ? 'active' : ''}
+        onClick={() => setActiveTab('contest')}
+      >
+        Contest
+      </button>
     </nav>
   )
 
@@ -407,6 +418,15 @@ function App() {
       <div className="app-shell">
         {nav}
         <OptimizerPage />
+      </div>
+    )
+  }
+
+  if (activeTab === 'contest') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <ContestPage />
       </div>
     )
   }
@@ -635,7 +655,10 @@ function App() {
                       <td>{formatPercent(row.play_prob)}</td>
                       {/* Ownership Columns */}
                       <td>{formatSalary(row.salary)}</td>
-                      <td className="ownership-cell">{formatOwnership(row.pred_own_pct)}</td>
+                      <td className="ownership-cell">
+                        {row.is_locked && <span className="lock-icon" title="Predictions locked">🔒</span>}
+                        {formatOwnership(row.pred_own_pct)}
+                      </td>
                       <td className="value-cell">{formatValue(row.value)}</td>
                       {showSim && (
                         <>
@@ -646,7 +669,7 @@ function App() {
                           ))}
                           {simStatColumns.map(({ key }) => (
                             <td key={key}>
-                              {key === 'sim_minutes_sim_mean'
+                              {key.startsWith('sim_minutes_sim_')
                                 ? formatMinutesSim(row[key as keyof PlayerRow] as number | undefined)
                                 : formatStat(row[key as keyof PlayerRow] as number | undefined)}
                             </td>

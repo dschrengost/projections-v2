@@ -26,6 +26,7 @@ from scrapers.oddstrader import EventOdds, OddstraderScraper
 
 app = typer.Typer(help=__doc__)
 ODDSTRADER_TZ = ZoneInfo("America/New_York")
+ODDS_SNAPSHOT_COLS: tuple[str, ...] = ODDS_SNAPSHOT_SCHEMA.columns
 
 
 def _status_target(start_day: pd.Timestamp, end_day: pd.Timestamp) -> str:
@@ -128,6 +129,57 @@ def _build_odds_snapshot(odds_raw: pd.DataFrame, schedule_df: pd.DataFrame) -> p
     ]
 
 
+def _dedupe_snapshot_by_game(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    working = df.copy()
+    working["game_id"] = pd.to_numeric(working["game_id"], errors="coerce")
+    working["as_of_ts"] = pd.to_datetime(working.get("as_of_ts"), utc=True, errors="coerce")
+    working["ingested_ts"] = pd.to_datetime(working.get("ingested_ts"), utc=True, errors="coerce")
+    working = working.dropna(subset=["game_id"]).copy()
+    if working.empty:
+        return working
+    working.sort_values(["as_of_ts", "ingested_ts"], inplace=True, na_position="first")
+    return working.drop_duplicates(subset=["game_id"], keep="last")
+
+
+def _merge_odds_snapshots(existing: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
+    existing = _dedupe_snapshot_by_game(existing)
+    incoming = _dedupe_snapshot_by_game(incoming)
+    if existing.empty:
+        return incoming
+    if incoming.empty:
+        return existing
+
+    cols = [col for col in ODDS_SNAPSHOT_COLS if col != "game_id"]
+    existing = existing.rename(columns={col: f"{col}_old" for col in cols})
+    incoming = incoming.rename(columns={col: f"{col}_new" for col in cols})
+    merged = existing.merge(incoming, on="game_id", how="outer")
+
+    as_of_old = pd.to_datetime(merged.get("as_of_ts_old"), utc=True, errors="coerce")
+    as_of_new = pd.to_datetime(merged.get("as_of_ts_new"), utc=True, errors="coerce")
+    ing_old = pd.to_datetime(merged.get("ingested_ts_old"), utc=True, errors="coerce")
+    ing_new = pd.to_datetime(merged.get("ingested_ts_new"), utc=True, errors="coerce")
+
+    use_new = as_of_new.notna() & (
+        as_of_old.isna()
+        | (as_of_new > as_of_old)
+        | ((as_of_new == as_of_old) & (ing_old.isna() | (ing_new >= ing_old)))
+    )
+
+    out: dict[str, pd.Series] = {"game_id": pd.to_numeric(merged["game_id"], errors="coerce")}
+    for col in cols:
+        new_col = merged.get(f"{col}_new")
+        old_col = merged.get(f"{col}_old")
+        chosen = new_col.where(use_new, old_col)
+        fallback = old_col.where(use_new, new_col)
+        out[col] = chosen.combine_first(fallback)
+
+    frame = pd.DataFrame(out)
+    frame = frame.dropna(subset=["game_id", "as_of_ts"])
+    return frame
+
+
 @app.command()
 def main(
     start: datetime = typer.Option(..., help="Start date inclusive (YYYY-MM-DD)."),
@@ -171,7 +223,8 @@ def main(
         raise typer.BadParameter("--end must be on/after --start.")
 
     target_date = _status_target(start_day, end_day)
-    run_ts = datetime.now(timezone.utc).isoformat()
+    run_dt = datetime.now(timezone.utc)
+    run_ts = run_dt.isoformat()
     rows_written = 0
     try:
         schedule_df = load_schedule_data(schedule, start_day, end_day, schedule_timeout)
@@ -211,32 +264,77 @@ def main(
             if odds_raw.empty:
                 typer.echo("[odds] no raw rows to persist for the requested window.")
             else:
-                normalized = odds_raw["as_of_ts"].dt.tz_convert("UTC").dt.normalize()
-                for cursor in storage.iter_days(start_day, end_day):
-                    cursor_utc = cursor.tz_localize("UTC")
-                    mask = normalized == cursor_utc
-                    if not mask.any():
-                        continue
-                    day_frame = odds_raw.loc[mask].copy()
-                    result = storage.write_bronze_partition(
-                        day_frame,
+                working = odds_raw.merge(
+                    schedule_df.loc[:, ["game_id", "game_date"]],
+                    on="game_id",
+                    how="left",
+                )
+                working["game_date"] = pd.to_datetime(working["game_date"], errors="coerce").dt.date
+                missing_dates = working["game_date"].isna().sum()
+                if missing_dates:
+                    typer.echo(
+                        f"[odds] warning: {missing_dates} row(s) missing game_date after schedule merge; dropping.",
+                        err=True,
+                    )
+                    working = working.dropna(subset=["game_date"]).copy()
+
+                for game_date, day_frame in working.groupby("game_date"):
+                    payload = day_frame.drop(columns=["game_date"])
+                    history_result = storage.write_bronze_partition_run(
+                        payload,
                         dataset="odds_raw",
                         data_root=data_root,
                         season=season,
-                        target_date=cursor.date(),
+                        target_date=game_date,
+                        run_ts=run_dt,
                         bronze_root=bronze_root_path,
                     )
                     typer.echo(
-                        f"[odds] bronze partition {result.target_date}: "
-                        f"{result.rows} rows -> {result.path}"
+                        f"[odds] bronze history date={game_date} run_ts={run_dt:%Y%m%dT%H%M%SZ}: "
+                        f"{history_result.rows} rows -> {history_result.path}"
+                    )
+
+                    # Transitional: keep the legacy flat daily file updated as a "latest view".
+                    latest_result = storage.write_bronze_partition(
+                        payload,
+                        dataset="odds_raw",
+                        data_root=data_root,
+                        season=season,
+                        target_date=game_date,
+                        bronze_root=bronze_root_path,
+                    )
+                    typer.echo(
+                        f"[odds] bronze latest date={game_date}: "
+                        f"{latest_result.rows} rows -> {latest_result.path}"
                     )
 
         silver_path = silver_out or silver_default
         silver_path.parent.mkdir(parents=True, exist_ok=True)
-        odds_snapshot.to_parquet(silver_path, index=False)
-        rows_written = len(odds_snapshot)
+        merged_snapshot = odds_snapshot
+        if silver_path.exists():
+            try:
+                existing_snapshot = pd.read_parquet(silver_path)
+            except Exception as exc:  # noqa: BLE001
+                typer.echo(f"[odds] warning: failed reading existing snapshot ({exc}); overwriting.", err=True)
+            else:
+                try:
+                    existing_snapshot = enforce_schema(existing_snapshot, ODDS_SNAPSHOT_SCHEMA, allow_missing_optional=True)
+                except Exception as exc:  # noqa: BLE001
+                    typer.echo(f"[odds] warning: existing snapshot schema mismatch ({exc}); overwriting.", err=True)
+                else:
+                    merged_snapshot = _merge_odds_snapshots(existing_snapshot, odds_snapshot)
+                    merged_snapshot = enforce_schema(
+                        merged_snapshot, ODDS_SNAPSHOT_SCHEMA, allow_missing_optional=True
+                    )
+                    typer.echo(
+                        f"[odds] merged with existing: {len(existing_snapshot)} existing + "
+                        f"{len(merged_snapshot) - len(existing_snapshot)} new = {len(merged_snapshot)} total"
+                    )
 
-        typer.echo(f"[odds] wrote {len(odds_snapshot):,} snapshot rows -> {silver_path}")
+        merged_snapshot.to_parquet(silver_path, index=False)
+        rows_written = len(merged_snapshot)
+
+        typer.echo(f"[odds] wrote {len(merged_snapshot):,} snapshot rows -> {silver_path}")
         write_status(
             JobStatus(
                 job_name="odds_live",
@@ -246,7 +344,7 @@ def main(
                 status="success",
                 rows_written=rows_written,
                 expected_rows=None,
-                nan_rate_key_cols=_nan_rate(odds_snapshot, ["game_id", "spread_home", "total"]),
+                nan_rate_key_cols=_nan_rate(merged_snapshot, ["game_id", "spread_home", "total"]),
             )
         )
     except Exception as exc:  # noqa: BLE001

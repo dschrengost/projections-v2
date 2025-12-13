@@ -74,6 +74,61 @@ def latest_pre_tip_snapshot(
     return merged.drop(columns=[tip_ts_col]).reset_index(drop=True)
 
 
+def select_latest_before(
+    df: pd.DataFrame,
+    cutoff_ts: datetime | str | pd.Timestamp,
+    *,
+    group_cols: Iterable[str],
+    as_of_col: str = "as_of_ts",
+    ingested_col: str = "ingested_ts",
+) -> pd.DataFrame:
+    """Select the latest row per group with ``as_of`` ≤ cutoff (ties by ``ingested_ts``).
+
+    This is the core "time travel" primitive used by gold slate freezing:
+      - Prefer ``as_of_ts`` as the semantic timestamp.
+      - Fall back to ``ingested_ts`` only when ``as_of_ts`` is unavailable.
+      - Break ties deterministically by sorting on ``(as_of_ts, ingested_ts)``.
+    """
+
+    if df.empty:
+        return df.copy()
+
+    missing = set(group_cols) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required group columns: {', '.join(sorted(missing))}")
+
+    cutoff = pd.to_datetime(cutoff_ts, utc=True)
+    working = df.copy()
+
+    added_cols: list[str] = []
+    if as_of_col in working.columns:
+        working[as_of_col] = pd.to_datetime(working[as_of_col], utc=True, errors="coerce")
+    else:
+        working[as_of_col] = pd.NaT
+        added_cols.append(as_of_col)
+
+    if ingested_col in working.columns:
+        working[ingested_col] = pd.to_datetime(working[ingested_col], utc=True, errors="coerce")
+    else:
+        working[ingested_col] = pd.NaT
+        added_cols.append(ingested_col)
+
+    use_ingested = working[as_of_col].isna().all() and working[ingested_col].notna().any()
+    primary_col = ingested_col if use_ingested else as_of_col
+
+    eligible = working[primary_col].notna() & (working[primary_col] <= cutoff)
+    filtered = working.loc[eligible].copy()
+    if filtered.empty:
+        return pd.DataFrame(columns=df.columns)
+
+    sort_cols = list(group_cols) + [primary_col, ingested_col]
+    filtered.sort_values(sort_cols, kind="mergesort", na_position="first", inplace=True)
+    selected = filtered.groupby(list(group_cols), as_index=False).tail(1)
+    if added_cols:
+        selected = selected.drop(columns=added_cols, errors="ignore")
+    return selected.reset_index(drop=True)
+
+
 def select_injury_snapshot(
     df: pd.DataFrame,
     *,

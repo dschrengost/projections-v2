@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
-from datetime import date, datetime
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from .optimizer_service import (
     build_player_pool,
+    get_data_root,
     get_job_store,
     get_slates_for_date,
     load_optimizer_config,
@@ -37,6 +39,11 @@ router = APIRouter()
 # Request/Response Models
 # ---------------------------------------------------------------------------
 
+class GameInfo(BaseModel):
+    """Game in a slate."""
+    matchup: str
+    start_time: Optional[str] = None
+
 
 class SlateInfo(BaseModel):
     """Draft group / slate info."""
@@ -48,6 +55,7 @@ class SlateInfo(BaseModel):
     earliest_start: Optional[str] = None
     latest_start: Optional[str] = None
     example_contest_name: Optional[str] = None
+    games: List[GameInfo] = []
 
 
 class PoolPlayer(BaseModel):
@@ -62,6 +70,9 @@ class PoolPlayer(BaseModel):
     dk_id: Optional[str] = None
     own_proj: Optional[float] = None
     stddev: Optional[float] = None
+    p90: Optional[float] = None
+    game_matchup: Optional[str] = None
+    game_start_utc: Optional[str] = None
 
 
 class QuickBuildRequest(BaseModel):
@@ -74,7 +85,7 @@ class QuickBuildRequest(BaseModel):
 
     # Pool settings
     max_pool: int = Field(default=10000, ge=100, le=200000, description="Max lineups in pool")
-    builds: int = Field(default=4, ge=1, le=16, description="Number of parallel workers")
+    builds: int = Field(default=22, ge=1, le=24, description="Number of parallel workers")
     per_build: int = Field(default=3000, ge=100, le=50000, description="Target lineups per worker")
     min_uniq: int = Field(default=1, ge=1, le=8, description="Min unique players between lineups")
     jitter: float = Field(default=0.0005, ge=0.0, le=0.1, description="Projection jitter")
@@ -87,6 +98,10 @@ class QuickBuildRequest(BaseModel):
     global_team_limit: int = Field(default=4, ge=1, le=8, description="Max players per team")
     lock_ids: List[str] = Field(default_factory=list, description="Player IDs to lock")
     ban_ids: List[str] = Field(default_factory=list, description="Player IDs to ban")
+    
+    # Game filters
+    include_games: List[str] = Field(default_factory=list, description="Only include players from these games (e.g., ['MIN@DAL'])")
+    exclude_games: List[str] = Field(default_factory=list, description="Exclude players from these games")
 
     # Ownership penalty
     ownership_penalty_enabled: bool = Field(default=False, description="Enable ownership penalty")
@@ -120,6 +135,13 @@ class LineupRow(BaseModel):
 
     lineup_id: int
     player_ids: List[str]
+    mean: Optional[float] = None
+    p10: Optional[float] = None
+    p50: Optional[float] = None
+    p75: Optional[float] = None
+    p90: Optional[float] = None
+    stdev: Optional[float] = None
+    ceiling_upside: Optional[float] = None
 
 
 class LineupsResponse(BaseModel):
@@ -129,6 +151,188 @@ class LineupsResponse(BaseModel):
     lineups_count: int
     lineups: List[LineupRow]
     stats: Dict[str, Any]
+
+
+class ExportLineupsRequest(BaseModel):
+    """Request to export arbitrary lineups as DK-uploadable CSV."""
+
+    date: str = Field(..., description="Game date YYYY-MM-DD")
+    draft_group_id: int = Field(..., description="DraftKings draft group ID")
+    site: str = Field(default="dk", description="Site: dk")
+    filename_prefix: Optional[str] = Field(default=None, description="Optional filename prefix")
+    lineups: List[List[str]] = Field(..., description="List of lineups (each a list of player_ids)")
+
+
+# ---------------------------------------------------------------------------
+# DK CSV Export Helpers
+# ---------------------------------------------------------------------------
+
+
+DK_NBA_SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
+
+# DraftKings rosterSlotId → DK CSV slot (NBA Classic)
+DK_NBA_ROSTER_SLOT_ID_TO_SLOT = {
+    458: "PG",
+    459: "SG",
+    460: "SF",
+    461: "PF",
+    462: "C",
+    463: "F",
+    464: "G",
+    465: "UTIL",
+}
+
+
+def _safe_filename_part(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", value.strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("._-")
+    return cleaned or "lineups"
+
+
+def _load_dk_nba_draftable_ids_by_player(
+    draft_group_id: int,
+) -> tuple[Dict[int, Dict[str, int]], Dict[int, str]]:
+    """Return {dk_player_id -> {slot -> draftableId}}, plus {dk_player_id -> displayName}."""
+    bronze_path = (
+        get_data_root()
+        / "bronze"
+        / "dk"
+        / "draftables"
+        / f"draftables_raw_{draft_group_id}.json"
+    )
+    if not bronze_path.exists():
+        raise FileNotFoundError(f"Draftables not found: {bronze_path}")
+
+    with open(bronze_path) as f:
+        payload = json.load(f)
+
+    draftables = payload.get("draftables", [])
+    if not isinstance(draftables, list):
+        raise RuntimeError("Draftables payload missing 'draftables' list")
+
+    ids_by_player: Dict[int, Dict[str, int]] = {}
+    names_by_player: Dict[int, str] = {}
+    for d in draftables:
+        if not isinstance(d, dict):
+            continue
+        dk_player_id = d.get("playerId")
+        draftable_id = d.get("draftableId") or d.get("id")
+        roster_slot_id = d.get("rosterSlotId")
+        if dk_player_id is None or draftable_id is None or roster_slot_id is None:
+            continue
+        try:
+            dk_player_id_i = int(dk_player_id)
+            draftable_id_i = int(draftable_id)
+            roster_slot_id_i = int(roster_slot_id)
+        except (TypeError, ValueError):
+            continue
+
+        slot = DK_NBA_ROSTER_SLOT_ID_TO_SLOT.get(roster_slot_id_i)
+        if not slot:
+            continue
+
+        ids_by_player.setdefault(dk_player_id_i, {})[slot] = draftable_id_i
+
+        display_name = d.get("displayName")
+        if isinstance(display_name, str) and display_name.strip() and dk_player_id_i not in names_by_player:
+            names_by_player[dk_player_id_i] = display_name.strip()
+
+    return ids_by_player, names_by_player
+
+
+def _export_lineups_to_dk_csv(
+    game_date: str,
+    draft_group_id: int,
+    site: str,
+    lineups: List[List[str]],
+) -> str:
+    """Render DK-uploadable CSV content for the given lineups.
+
+    Uses DK 'draftableId' (roster IDs) per slot, not playerId.
+    """
+    pool = build_player_pool(
+        game_date=game_date,
+        draft_group_id=draft_group_id,
+        site=site,
+    )
+
+    internal_to_dk_player_id: Dict[str, int] = {}
+    internal_to_name: Dict[str, str] = {}
+    for p in pool:
+        pid = str(p.get("player_id"))
+        internal_to_name[pid] = str(p.get("name") or pid)
+        dk_id_raw = p.get("dk_id")
+        if not dk_id_raw:
+            continue
+        try:
+            internal_to_dk_player_id[pid] = int(dk_id_raw)
+        except (TypeError, ValueError):
+            continue
+
+    draftable_ids_by_player, dk_names_by_player = _load_dk_nba_draftable_ids_by_player(draft_group_id)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(DK_NBA_SLOTS)
+
+    def assign_lineup_to_slots(player_ids: List[str]) -> Dict[str, str]:
+        """Assign internal player_ids to DK slots using draftableId availability."""
+        pids = [str(pid) for pid in player_ids]
+        if len(pids) != len(DK_NBA_SLOTS):
+            return {}
+
+        adj: Dict[str, List[str]] = {}
+        for pid in pids:
+            dk_pid = internal_to_dk_player_id.get(pid)
+            if dk_pid is None:
+                adj[pid] = []
+                continue
+            adj[pid] = list(draftable_ids_by_player.get(dk_pid, {}).keys())
+
+        match_r: Dict[str, Optional[str]] = {s: None for s in DK_NBA_SLOTS}
+        match_l: Dict[str, Optional[str]] = {pid: None for pid in pids}
+
+        def dfs(pid: str, seen: set[str]) -> bool:
+            for s in adj.get(pid, []):
+                if s in seen:
+                    continue
+                seen.add(s)
+                if match_r[s] is None or dfs(match_r[s], seen):
+                    match_r[s] = pid
+                    match_l[pid] = s
+                    return True
+            return False
+
+        changed = True
+        while changed:
+            changed = False
+            for pid in pids:
+                if match_l[pid] is None and dfs(pid, set()):
+                    changed = True
+
+        return {slot: pid for slot, pid in match_r.items() if pid is not None}
+
+    for lineup in lineups:
+        slot_to_internal = assign_lineup_to_slots(list(lineup))
+        row: List[str] = []
+        for slot in DK_NBA_SLOTS:
+            internal_pid = slot_to_internal.get(slot)
+            if not internal_pid:
+                row.append("")
+                continue
+            dk_player_id = internal_to_dk_player_id.get(internal_pid)
+            if dk_player_id is None:
+                row.append("")
+                continue
+            draftable_id = draftable_ids_by_player.get(dk_player_id, {}).get(slot)
+            if not draftable_id:
+                row.append("")
+                continue
+            name = dk_names_by_player.get(dk_player_id) or internal_to_name.get(internal_pid) or str(internal_pid)
+            row.append(f"{name} ({draftable_id})")
+        writer.writerow(row)
+
+    return output.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -164,14 +368,26 @@ async def get_player_pool(
     draft_group_id: int = Query(..., description="Draft group ID"),
     run_id: Optional[str] = Query(default=None, description="Projections run ID"),
     site: str = Query(default="dk", description="Site: dk or fd"),
+    include_games: Optional[str] = Query(default=None, description="Comma-separated games to include (e.g., 'MIN@DAL,LAL@GSW')"),
+    exclude_games: Optional[str] = Query(default=None, description="Comma-separated games to exclude"),
 ):
-    """Get merged player pool (projections + salaries + positions)."""
+    """Get merged player pool (projections + salaries + positions).
+    
+    Use include_games or exclude_games to filter by specific games.
+    Games are specified as 'AWAY@HOME' format (e.g., 'MIN@DAL').
+    """
     try:
+        # Parse comma-separated game lists
+        include_list = [g.strip() for g in include_games.split(",")] if include_games else None
+        exclude_list = [g.strip() for g in exclude_games.split(",")] if exclude_games else None
+        
         pool = build_player_pool(
             game_date=date,
             draft_group_id=draft_group_id,
             site=site,
             run_id=run_id,
+            include_games=include_list,
+            exclude_games=exclude_list,
         )
         return pool
     except FileNotFoundError as exc:
@@ -204,11 +420,17 @@ async def start_build(
 
     # Build player pool first (fail fast if data missing)
     try:
+        # Parse game filters (convert empty lists to None)
+        include_games = request.include_games if request.include_games else None
+        exclude_games = request.exclude_games if request.exclude_games else None
+        
         player_pool = build_player_pool(
             game_date=request.date,
             draft_group_id=request.draft_group_id,
             site=request.site,
             run_id=request.run_id,
+            include_games=include_games,
+            exclude_games=exclude_games,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -268,10 +490,12 @@ async def get_build_lineups(job_id: str):
     if job.status == "failed":
         raise HTTPException(status_code=500, detail=f"Job failed: {job.error}")
 
-    lineups = [
-        LineupRow(lineup_id=i, player_ids=list(lineup))
-        for i, lineup in enumerate(job.lineups)
-    ]
+    lineups: List[LineupRow] = []
+    for i, lineup in enumerate(job.lineups):
+        extra: Dict[str, Any] = {}
+        if job.lineup_stats and i < len(job.lineup_stats):
+            extra = job.lineup_stats[i] or {}
+        lineups.append(LineupRow(lineup_id=i, player_ids=list(lineup), **extra))
 
     return LineupsResponse(
         job_id=job.job_id,
@@ -288,11 +512,8 @@ async def export_lineups_csv(
 ):
     """Export lineups as DraftKings-uploadable CSV.
     
-    Format: Each cell is "Player Name (DK_ID)" in positional order.
+    Format: Each cell is "Player Name (draftableId)" in positional order.
     """
-    from .optimizer_service import build_player_pool
-    from dataclasses import dataclass
-    
     job = get_job_store().get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
@@ -303,129 +524,55 @@ async def export_lineups_csv(
             detail=f"Job not completed (status: {job.status})",
         )
 
-    # DK slot order
-    DK_SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
-    
-    # Build player lookup from pool
     game_date = date or job.game_date
     try:
-        pool = build_player_pool(
+        csv_content = _export_lineups_to_dk_csv(
             game_date=game_date,
             draft_group_id=job.draft_group_id,
             site=job.site,
+            lineups=[list(lu) for lu in job.lineups],
         )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.warning("Failed to load pool for export: %s", e)
-        pool = []
-    
-    # Create lookup: player_id -> {name, dk_id, positions}
-    @dataclass
-    class PlayerInfo:
-        name: str
-        dk_id: str
-        positions: List[str]
-    
-    pid2player: Dict[str, PlayerInfo] = {}
-    for p in pool:
-        pid2player[p["player_id"]] = PlayerInfo(
-            name=p["name"],
-            dk_id=p.get("dk_id") or p["player_id"],
-            positions=p["positions"],
-        )
+        logger.exception("Failed to export DK CSV: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(DK_SLOTS)
-
-    def assign_lineup_to_slots(player_ids: List[str]) -> Dict[str, str]:
-        """Assign players to DK slots using bipartite matching.
-        
-        Returns dict mapping slot -> player_id.
-        """
-        SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
-        
-        def eligible_for_slot(pid: str, slot: str) -> bool:
-            if pid not in pid2player:
-                return False
-            pos = set(pid2player[pid].positions)
-            if slot in {"PG", "SG", "SF", "PF", "C"}:
-                return slot in pos
-            if slot == "G":
-                return "PG" in pos or "SG" in pos
-            if slot == "F":
-                return "SF" in pos or "PF" in pos
-            if slot == "UTIL":
-                return True
-            return False
-        
-        pids = list(player_ids)
-        if len(pids) != 8:
-            return {}
-        
-        # Build adjacency: pid -> list of eligible slots
-        adj = {pid: [s for s in SLOTS if eligible_for_slot(pid, s)] for pid in pids}
-        
-        # Hopcroft-Karp style: keep trying to find augmenting paths
-        matchR: Dict[str, Optional[str]] = {s: None for s in SLOTS}
-        matchL: Dict[str, Optional[str]] = {pid: None for pid in pids}
-        
-        def dfs(pid: str, seen: set) -> bool:
-            for s in adj.get(pid, []):
-                if s in seen:
-                    continue
-                seen.add(s)
-                if matchR[s] is None or dfs(matchR[s], seen):
-                    matchR[s] = pid
-                    matchL[pid] = s
-                    return True
-            return False
-        
-        # Keep trying until no more augmenting paths
-        changed = True
-        while changed:
-            changed = False
-            for pid in pids:
-                if matchL[pid] is None:  # Unmatched player
-                    if dfs(pid, set()):
-                        changed = True
-        
-        # Build result: slot -> pid
-        return {slot: pid for slot, pid in matchR.items() if pid is not None}
-
-
-
-    for lineup in job.lineups:
-        player_ids = list(lineup)
-        
-        # Check if we have player info
-        if not all(pid in pid2player for pid in player_ids):
-            # Fallback: write raw IDs
-            row = player_ids[:8]
-            while len(row) < 8:
-                row.append("")
-            writer.writerow(row)
-            continue
-        # Assign to slots
-        slot_to_pid = assign_lineup_to_slots(player_ids)
-        
-        # Build row in slot order
-        row = []
-        for slot in DK_SLOTS:
-            pid = slot_to_pid.get(slot)
-            if pid and pid in pid2player:
-                p = pid2player[pid]
-                row.append(f"{p.name} ({p.dk_id})")
-            else:
-                row.append("")
-        writer.writerow(row)
-
-    csv_content = output.getvalue()
     filename = f"lineups_{job.game_date}_{job.job_id[:8]}.csv"
 
     return Response(
         content=csv_content,
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/export")
+async def export_custom_lineups_csv(request: ExportLineupsRequest):
+    """Export arbitrary lineups as DraftKings-uploadable CSV (draftableIds)."""
+    if not request.lineups:
+        raise HTTPException(status_code=400, detail="No lineups provided")
+
+    try:
+        csv_content = _export_lineups_to_dk_csv(
+            game_date=request.date,
+            draft_group_id=request.draft_group_id,
+            site=request.site,
+            lineups=request.lineups,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to export DK CSV: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    prefix = _safe_filename_part(request.filename_prefix) if request.filename_prefix else "lineups"
+    filename = f"{prefix}_{request.date}_{request.draft_group_id}_{len(request.lineups)}.csv"
+
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
 
@@ -499,7 +646,17 @@ async def get_saved_build_endpoint(
     # Convert lineups format
     if "lineups" in build:
         build["lineups"] = [
-            LineupRow(lineup_id=lu.get("lineup_id", i), player_ids=lu.get("player_ids", []))
+            LineupRow(
+                lineup_id=lu.get("lineup_id", i),
+                player_ids=lu.get("player_ids", []),
+                mean=lu.get("mean"),
+                p10=lu.get("p10"),
+                p50=lu.get("p50"),
+                p75=lu.get("p75"),
+                p90=lu.get("p90"),
+                stdev=lu.get("stdev"),
+                ceiling_upside=lu.get("ceiling_upside"),
+            )
             for i, lu in enumerate(build["lineups"])
         ]
     

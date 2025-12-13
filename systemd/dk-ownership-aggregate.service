@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=oneshot
 User=daniel
-WorkingDirectory=/home/daniel/projects/projections-v2/scrapers/dk_contests
-ExecStart=/home/daniel/projects/projections-v2/scrapers/dk_contests/.venv/bin/python build_ownership_data.py
+WorkingDirectory=/home/daniel/projects/projections-v2
+ExecStart=/home/daniel/.local/bin/uv run python scrapers/dk_contests/build_ownership_data.py
 StandardOutput=journal
 StandardError=journal
 

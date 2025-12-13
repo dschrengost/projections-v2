@@ -5,6 +5,11 @@ import { apiUrl } from './client'
 
 // Types
 
+export interface GameInfo {
+    matchup: string
+    start_time?: string
+}
+
 export interface Slate {
     game_date: string
     slate_type: string
@@ -13,6 +18,7 @@ export interface Slate {
     earliest_start?: string
     latest_start?: string
     example_contest_name?: string
+    games?: GameInfo[]
 }
 
 export interface PoolPlayer {
@@ -25,7 +31,11 @@ export interface PoolPlayer {
     dk_id?: string
     own_proj?: number | null
     stddev?: number | null
+    p90?: number | null
+    game_matchup?: string
+    game_start_utc?: string
 }
+
 
 export interface QuickBuildRequest {
     date: string
@@ -44,6 +54,8 @@ export interface QuickBuildRequest {
     global_team_limit?: number
     lock_ids?: string[]
     ban_ids?: string[]
+    include_games?: string[]
+    exclude_games?: string[]
     ownership_penalty_enabled?: boolean
     ownership_lambda?: number
     randomness_pct?: number | null
@@ -68,6 +80,13 @@ export interface JobStatus {
 export interface LineupRow {
     lineup_id: number
     player_ids: string[]
+    mean?: number | null
+    p10?: number | null
+    p50?: number | null
+    p75?: number | null
+    p90?: number | null
+    stdev?: number | null
+    ceiling_upside?: number | null
 }
 
 export interface LineupsResponse {
@@ -131,6 +150,30 @@ export async function getBuildLineups(jobId: string): Promise<LineupsResponse> {
 export async function exportLineupsCSV(jobId: string): Promise<Blob> {
     const res = await fetch(apiUrl(`/api/optimizer/build/${jobId}/export`))
     if (!res.ok) throw new Error(`Failed to export: ${res.status}`)
+    return res.blob()
+}
+
+export async function exportCustomLineupsCSV(
+    date: string,
+    draftGroupId: number,
+    lineups: string[][],
+    filenamePrefix?: string,
+): Promise<Blob> {
+    const res = await fetch(apiUrl('/api/optimizer/export'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            date,
+            draft_group_id: draftGroupId,
+            site: 'dk',
+            filename_prefix: filenamePrefix ?? null,
+            lineups,
+        }),
+    })
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Failed to export: ${res.status}`)
+    }
     return res.blob()
 }
 

@@ -29,19 +29,43 @@ def _compute_summary(data: list[dict[str, Any]]) -> dict[str, Any]:
         return sum(d.get(key, 0) or 0 for d in data)
 
     return {
-        # FPTS metrics
+        # Core FPTS metrics
         "avg_fpts_mae": safe_avg("fpts_mae"),
         "avg_minutes_mae": safe_avg("minutes_mae"),
         "avg_coverage_80": safe_avg("coverage_80"),
         "avg_coverage_90": safe_avg("coverage_90"),
+        "avg_coverage_50": safe_avg("coverage_50"),
         "avg_bias": safe_avg("bias"),
         "total_missed": safe_sum("missed"),
         "total_false_preds": safe_sum("false_preds"),
+        
+        # Calibration gaps
+        "avg_cal_gap_50": safe_avg("cal_gap_50"),
+        "avg_cal_gap_80": safe_avg("cal_gap_80"),
+        "avg_cal_gap_90": safe_avg("cal_gap_90"),
+        
+        # Salary tier accuracy
+        "avg_fpts_mae_elite": safe_avg("fpts_mae_elite"),
+        "avg_fpts_mae_mid": safe_avg("fpts_mae_mid"),
+        "avg_fpts_mae_value": safe_avg("fpts_mae_value"),
+        "avg_fpts_mae_punt": safe_avg("fpts_mae_punt"),
+        
+        # Starter/bench splits
+        "avg_fpts_mae_starters": safe_avg("fpts_mae_starters"),
+        "avg_fpts_mae_bench": safe_avg("fpts_mae_bench"),
+        
+        # Edge cases
+        "total_dnp_false_positives": safe_sum("dnp_false_positives"),
+        "total_starter_misses": safe_sum("starter_misses"),
+        "total_blowup_misses": safe_sum("blowup_misses"),
+        
         # Ownership metrics
         "avg_own_mae": safe_avg("own_mae"),
+        "avg_own_smape": safe_avg("own_smape"),
         "avg_own_corr": safe_avg("own_corr"),
         "avg_chalk_top5_acc": safe_avg("chalk_top5_acc"),
         "avg_own_bias": safe_avg("own_bias"),
+        
         # Counts
         "dates_evaluated": len(data),
         "total_players_matched": safe_sum("players_matched"),

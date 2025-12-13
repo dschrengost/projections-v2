@@ -25,6 +25,7 @@ from projections.minutes_v1.starter_flags import (
     derive_starter_flag_label,
     normalize_starter_signals,
 )
+from projections.etl import storage as bronze_storage
 from projections.pipeline.status import JobStatus, write_status
 from scrapers.nba_players import NbaPlayersScraper, PlayerProfile
 
@@ -656,10 +657,16 @@ def _build_minutes_live_logic(
     
     # In backfill mode, load injuries from bronze by date (has historical snapshots)
     if backfill_mode and injuries_path is None:
-        bronze_injuries_path = data_root / "bronze" / "injuries_raw" / f"season={season_value}" / f"date={target_day.strftime('%Y-%m-%d')}"
-        if bronze_injuries_path.exists():
-            injuries_df = _read_parquet_tree(bronze_injuries_path)
-            warnings.append(f"[backfill-mode] Loaded injuries from bronze: {bronze_injuries_path}")
+        injuries_df = bronze_storage.read_bronze_day(
+            "injuries_raw",
+            data_root,
+            season_value,
+            target_day.date(),
+            include_runs=False,
+            prefer_history=True,
+        )
+        if not injuries_df.empty:
+            warnings.append(f"[backfill-mode] Loaded injuries from bronze day={target_day.date().isoformat()}")
         else:
             # Fallback to silver if bronze date partition doesn't exist
             injuries_df = _load_table(injuries_default, injuries_path)
@@ -837,7 +844,6 @@ def _build_minutes_live_logic(
             # These should not count toward a player's baseline minutes expectation
             played_mask = minutes > 0
             played_minutes = minutes[played_mask]
-            played_dates = dates[played_mask]
             
             # Use last played game for min_last1 (not DNP games)
             last_minutes = played_minutes.iloc[-1] if not played_minutes.empty else 0.0

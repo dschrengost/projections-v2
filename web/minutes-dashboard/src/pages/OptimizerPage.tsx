@@ -6,6 +6,7 @@ import {
     getBuildStatus,
     getBuildLineups,
     exportLineupsCSV,
+    exportCustomLineupsCSV,
     getSavedBuilds,
     loadSavedBuild,
     deleteSavedBuild,
@@ -15,10 +16,18 @@ import {
     LineupRow,
     QuickBuildRequest,
     SavedBuild,
+    GameInfo,
 } from '../api/optimizer'
 import { formatSalary } from '../utils'
 
 type SortKey = 'name' | 'team' | 'salary' | 'proj' | 'own_proj' | 'value'
+
+type LineupGroup = {
+    id: string
+    name: string
+    lineup_ids: number[]
+    created_at: string
+}
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
@@ -46,11 +55,13 @@ export default function OptimizerPage() {
 
     // Build config
     const [maxPool, setMaxPool] = useState(5000)
-    const [builds, setBuilds] = useState(4)
+    const [builds, setBuilds] = useState(22)
     const [minUniq, setMinUniq] = useState(1)
     const [globalTeamLimit, setGlobalTeamLimit] = useState(4)
     const [minSalary, setMinSalary] = useState<number | null>(null)
     const [maxSalary, setMaxSalary] = useState<number | null>(50000)
+    const [minProj, setMinProj] = useState<number | null>(null)
+    const [randomnessPct, setRandomnessPct] = useState(0)
 
     // Job state
     const [currentJob, setCurrentJob] = useState<JobStatus | null>(null)
@@ -60,11 +71,31 @@ export default function OptimizerPage() {
     // Lineup filter
     const [lineupFilter, setLineupFilter] = useState('')
     const [showCount, setShowCount] = useState(50)
-    const [lineupSort, setLineupSort] = useState<'default' | 'proj-desc' | 'proj-asc' | 'salary-desc' | 'salary-asc'>('default')
+    const [lineupSort, setLineupSort] = useState<'default' | 'proj-desc' | 'proj-asc' | 'salary-desc' | 'salary-asc' | 'p90-desc' | 'p90-asc' | 'own-desc' | 'own-asc'>('default')
+    const [minLineupProj, setMinLineupProj] = useState<number | null>(null)
+    const [maxLineupOwn, setMaxLineupOwn] = useState<number | null>(null)
+    const [minLineupP90, setMinLineupP90] = useState<number | null>(null)
+    const [selectedLineupIds, setSelectedLineupIds] = useState<Set<number>>(new Set())
+    const [lineupGroups, setLineupGroups] = useState<LineupGroup[]>([])
+    const [activeLineupGroupId, setActiveLineupGroupId] = useState<string>('')
 
     // Saved builds
     const [savedBuilds, setSavedBuilds] = useState<SavedBuild[]>([])
     const [savedBuildsLoading, setSavedBuildsLoading] = useState(false)
+    const [selectedBuildIds, setSelectedBuildIds] = useState<Set<string>>(new Set())
+
+    // Game exclusion
+    const [excludedGames, setExcludedGames] = useState<Set<string>>(new Set())
+
+    // Get current slate's games
+    const currentSlateGames = useMemo(() => {
+        const slate = slates.find(s => s.draft_group_id === selectedSlate)
+        return slate?.games ?? []
+    }, [slates, selectedSlate])
+
+    // Check if stddev is available in pool (needed for randomness feature)
+    const hasStddev = useMemo(() =>
+        pool.some(p => p.stddev != null && p.stddev > 0), [pool])
 
     // Load slates when date changes
     useEffect(() => {
@@ -173,14 +204,76 @@ export default function OptimizerPage() {
         try {
             await deleteSavedBuild(selectedDate, jobId)
             await refreshSavedBuilds()
+            // Remove from selection if selected
+            setSelectedBuildIds(prev => {
+                const next = new Set(prev)
+                next.delete(jobId)
+                return next
+            })
         } catch (err) {
             alert('Failed to delete: ' + (err as Error).message)
+        }
+    }
+
+    // Toggle build selection for joining
+    const toggleBuildSelection = (jobId: string) => {
+        setSelectedBuildIds(prev => {
+            const next = new Set(prev)
+            if (next.has(jobId)) {
+                next.delete(jobId)
+            } else {
+                next.add(jobId)
+            }
+            return next
+        })
+    }
+
+    // Join selected builds
+    const handleJoinBuilds = async () => {
+        if (selectedBuildIds.size < 2) return
+
+        const buildName = prompt('Name for merged build:', `Merged (${selectedBuildIds.size} builds)`)
+        if (!buildName) return
+
+        try {
+            // Load all selected builds
+            const allLineups: LineupRow[] = []
+            for (const jobId of selectedBuildIds) {
+                const build = await loadSavedBuild(selectedDate, jobId)
+                if (build.lineups) {
+                    allLineups.push(...build.lineups)
+                }
+            }
+
+            // De-duplicate by player_ids set
+            const seen = new Set<string>()
+            const unique: LineupRow[] = []
+            for (const lu of allLineups) {
+                const key = [...lu.player_ids].sort().join(',')
+                if (!seen.has(key)) {
+                    seen.add(key)
+                    unique.push({ ...lu, lineup_id: unique.length })
+                }
+            }
+
+            setLineups(unique)
+            setCurrentJob(null)
+            setSelectedBuildIds(new Set())
+            alert(`Merged ${selectedBuildIds.size} builds into "${buildName}": ${unique.length} unique lineups`)
+        } catch (err) {
+            alert('Failed to join builds: ' + (err as Error).message)
         }
     }
 
     // Filtered and sorted pool
     const filteredPool = useMemo(() => {
         let filtered = pool.slice()
+
+        // Filter by minimum projection
+        if (minProj != null) {
+            filtered = filtered.filter(p => p.proj >= minProj)
+        }
+
         const text = filter.trim().toLowerCase()
         if (text) {
             filtered = filtered.filter(p =>
@@ -207,7 +300,7 @@ export default function OptimizerPage() {
             return sortDir === 'asc' ? String(left).localeCompare(String(right)) : String(right).localeCompare(String(left))
         })
         return filtered
-    }, [pool, filter, sortKey, sortDir])
+    }, [pool, filter, sortKey, sortDir, minProj])
 
     // Toggle lock/ban
     const toggleLock = (id: string) => {
@@ -259,7 +352,9 @@ export default function OptimizerPage() {
                 max_salary: maxSalary,
                 lock_ids: Array.from(lockedIds),
                 ban_ids: Array.from(bannedIds),
+                exclude_games: Array.from(excludedGames),
                 enum_enable: maxPool >= 5000,
+                randomness_pct: randomnessPct > 0 && hasStddev ? randomnessPct : undefined,
             }
             const job = await startBuild(request)
             setCurrentJob(job)
@@ -284,12 +379,152 @@ export default function OptimizerPage() {
         }
     }
 
+    // Export saved build CSV
+    const handleExportBuild = async (jobId: string) => {
+        try {
+            const blob = await exportLineupsCSV(jobId)
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `lineups_${selectedDate}_${jobId.slice(0, 8)}.csv`
+            a.click()
+            URL.revokeObjectURL(url)
+        } catch (err) {
+            alert('Export failed: ' + (err as Error).message)
+        }
+    }
+
+    const makeLineupGroupId = (): string => {
+        const id = globalThis.crypto?.randomUUID?.()
+        if (id) return id
+        return `${Date.now()}_${Math.random().toString(16).slice(2)}`
+    }
+
+    // Toggle lineup selection
+    const toggleLineupSelection = (lineupId: number) => {
+        setSelectedLineupIds(prev => {
+            const next = new Set(prev)
+            if (next.has(lineupId)) {
+                next.delete(lineupId)
+            } else {
+                next.add(lineupId)
+            }
+            return next
+        })
+    }
+
+    // Select all visible lineups
+    const selectAllVisible = () => {
+        const visibleIds = filteredLineups.slice(0, showCount).map(lu => lu.lineup_id)
+        setSelectedLineupIds(new Set(visibleIds))
+    }
+
+    const selectAllFiltered = () => {
+        const filteredIds = filteredLineups.map(lu => lu.lineup_id)
+        setSelectedLineupIds(new Set(filteredIds))
+    }
+
+    // Clear selection
+    const clearSelection = () => {
+        setSelectedLineupIds(new Set())
+    }
+
+    const safeFilenamePart = (input: string): string => {
+        const cleaned = input
+            .trim()
+            .replace(/\s+/g, '_')
+            .replace(/[^a-zA-Z0-9._-]/g, '')
+        return cleaned || 'group'
+    }
+
+    const downloadCSVBlob = (blob: Blob, filename: string) => {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        a.click()
+        URL.revokeObjectURL(url)
+    }
+
+    const exportLineupsByIds = async (lineupIds: number[], filenamePrefix: string) => {
+        if (!selectedSlate) return
+        if (lineupIds.length === 0) return
+
+        const byId = new Map(lineups.map(lu => [lu.lineup_id, lu]))
+        const exportLineups = lineupIds.map(id => byId.get(id)).filter(Boolean) as LineupRow[]
+        const payload = exportLineups.map(lu => lu.player_ids)
+        if (payload.length === 0) return
+
+        try {
+            const blob = await exportCustomLineupsCSV(selectedDate, selectedSlate, payload, filenamePrefix)
+            downloadCSVBlob(
+                blob,
+                `${safeFilenamePart(filenamePrefix)}_${selectedDate}_${payload.length}.csv`,
+            )
+        } catch (err) {
+            alert('Export failed: ' + (err as Error).message)
+        }
+    }
+
+    // Export selected lineups as CSV
+    const exportSelectedCSV = async () => {
+        if (selectedLineupIds.size === 0) return
+        await exportLineupsByIds(
+            Array.from(selectedLineupIds),
+            `selected_lineups_${selectedLineupIds.size}`,
+        )
+    }
+
+    const createGroupFromSelection = () => {
+        if (selectedLineupIds.size === 0) return
+        const defaultName = `Group ${lineupGroups.length + 1} (${selectedLineupIds.size})`
+        const name = prompt('Group name:', defaultName)?.trim()
+        if (!name) return
+        const group: LineupGroup = {
+            id: makeLineupGroupId(),
+            name,
+            lineup_ids: Array.from(selectedLineupIds),
+            created_at: new Date().toISOString(),
+        }
+        setLineupGroups(prev => [...prev, group])
+        setActiveLineupGroupId(group.id)
+    }
+
+    const deleteActiveGroup = () => {
+        if (!activeLineupGroupId) return
+        const g = lineupGroups.find(gr => gr.id === activeLineupGroupId)
+        if (!g) return
+        if (!confirm(`Delete group "${g.name}"?`)) return
+        setLineupGroups(prev => prev.filter(gr => gr.id !== activeLineupGroupId))
+        setActiveLineupGroupId('')
+    }
+
+    const exportActiveGroupCSV = async () => {
+        if (!activeLineupGroupId) return
+        const g = lineupGroups.find(gr => gr.id === activeLineupGroupId)
+        if (!g) return
+        await exportLineupsByIds(g.lineup_ids, `group_${g.name}`)
+    }
+
+    const selectActiveGroupLineups = () => {
+        if (!activeLineupGroupId) return
+        const g = lineupGroups.find(gr => gr.id === activeLineupGroupId)
+        if (!g) return
+        setSelectedLineupIds(new Set(g.lineup_ids))
+    }
+
     // Get player name by ID for lineup display
     const playerMap = useMemo(() => {
         const map = new Map<string, PoolPlayer>()
         pool.forEach(p => map.set(p.player_id, p))
         return map
     }, [pool])
+
+    useEffect(() => {
+        setSelectedLineupIds(new Set())
+        setLineupGroups([])
+        setActiveLineupGroupId('')
+    }, [lineups])
 
     // Filter and sort lineups
     const filteredLineups = useMemo(() => {
@@ -306,6 +541,18 @@ export default function OptimizerPage() {
             )
         }
 
+        // Filter by lineup metrics
+        result = result.filter(lu => {
+            const proj = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
+            const own = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
+            const p90 = lu.p90 ?? lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
+
+            if (minLineupProj != null && proj < minLineupProj) return false
+            if (maxLineupOwn != null && own > maxLineupOwn) return false
+            if (minLineupP90 != null && p90 < minLineupP90) return false
+            return true
+        })
+
         // Sort
         if (lineupSort !== 'default') {
             result.sort((a, b) => {
@@ -313,19 +560,28 @@ export default function OptimizerPage() {
                 const bProj = b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
                 const aSal = a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0)
                 const bSal = b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0)
+                const aP90 = a.p90 ?? a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
+                const bP90 = b.p90 ?? b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
+                const aOwn = a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
+                const bOwn = b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
 
                 switch (lineupSort) {
                     case 'proj-desc': return bProj - aProj
                     case 'proj-asc': return aProj - bProj
                     case 'salary-desc': return bSal - aSal
                     case 'salary-asc': return aSal - bSal
+                    case 'p90-desc': return bP90 - aP90
+                    case 'p90-asc': return aP90 - bP90
+                    case 'own-desc': return bOwn - aOwn
+                    case 'own-asc': return aOwn - bOwn
                     default: return 0
                 }
             })
         }
 
         return result
-    }, [lineups, lineupFilter, lineupSort, playerMap])
+    }, [lineups, lineupFilter, lineupSort, playerMap, minLineupProj, maxLineupOwn, minLineupP90])
+
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) {
@@ -340,7 +596,7 @@ export default function OptimizerPage() {
         val != null ? val.toFixed(1) : '-'
 
     const formatOwn = (val: number | undefined | null) =>
-        val != null ? (val * 100).toFixed(1) + '%' : '-'
+        val != null ? val.toFixed(1) + '%' : '-'
 
     const formatValue = (p: PoolPlayer) =>
         (p.proj / (p.salary / 1000)).toFixed(2)
@@ -410,7 +666,7 @@ export default function OptimizerPage() {
                             value={builds}
                             onChange={e => setBuilds(Number(e.target.value))}
                             min={1}
-                            max={16}
+                            max={24}
                         />
                     </label>
 
@@ -462,6 +718,85 @@ export default function OptimizerPage() {
                             />
                         </label>
                     </div>
+
+                    <label>
+                        Min Projection
+                        <input
+                            type="number"
+                            value={minProj ?? ''}
+                            onChange={e => setMinProj(e.target.value ? Number(e.target.value) : null)}
+                            placeholder="No min"
+                            min={0}
+                            step={5}
+                        />
+                    </label>
+
+                    {/* Randomness Control */}
+                    <div className={`randomness-control ${!hasStddev ? 'disabled' : ''}`}>
+                        <label>
+                            Randomness: {randomnessPct}%
+                            <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={randomnessPct}
+                                onChange={e => setRandomnessPct(Number(e.target.value))}
+                                disabled={!hasStddev}
+                            />
+                        </label>
+                        {!hasStddev && (
+                            <small className="hint">Requires sim projections with stddev</small>
+                        )}
+                        {hasStddev && randomnessPct > 0 && (
+                            <small className="hint">Adds variance-aware noise for diversity</small>
+                        )}
+                    </div>
+
+                    {/* Game Filters */}
+
+                    {currentSlateGames.length > 0 && (
+                        <div className="game-filters">
+                            <h4>Games ({currentSlateGames.length - excludedGames.size} of {currentSlateGames.length})</h4>
+                            <div className="game-filter-list">
+                                {currentSlateGames.map(game => {
+                                    const isExcluded = excludedGames.has(game.matchup)
+                                    const startTime = game.start_time
+                                        ? new Date(game.start_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                                        : ''
+                                    return (
+                                        <label key={game.matchup} className={`game-filter-item ${isExcluded ? 'excluded' : ''}`}>
+                                            <input
+                                                type="checkbox"
+                                                checked={!isExcluded}
+                                                onChange={() => {
+                                                    setExcludedGames(prev => {
+                                                        const next = new Set(prev)
+                                                        if (next.has(game.matchup)) {
+                                                            next.delete(game.matchup)
+                                                        } else {
+                                                            next.add(game.matchup)
+                                                        }
+                                                        return next
+                                                    })
+                                                }}
+                                            />
+                                            <span className="game-matchup">{game.matchup}</span>
+                                            {startTime && <span className="game-time">{startTime}</span>}
+                                        </label>
+                                    )
+                                })}
+                            </div>
+                            {excludedGames.size > 0 && (
+                                <button
+                                    className="clear-exclusions"
+                                    onClick={() => setExcludedGames(new Set())}
+                                >
+                                    Include All Games
+                                </button>
+                            )}
+                        </div>
+                    )}
 
                     <div className="lock-ban-summary">
                         <span>🔒 Locked: {lockedIds.size}</span>
@@ -599,38 +934,62 @@ export default function OptimizerPage() {
                 <section className="saved-builds-section">
                     <div className="saved-builds-header">
                         <h3>Saved Builds ({savedBuilds.length})</h3>
-                        {savedBuildsLoading && <span className="muted">Loading...</span>}
+                        <div className="saved-builds-header-actions">
+                            {selectedBuildIds.size >= 2 && (
+                                <button className="join-builds-btn" onClick={handleJoinBuilds}>
+                                    Join {selectedBuildIds.size} Builds
+                                </button>
+                            )}
+                            {savedBuildsLoading && <span className="muted">Loading...</span>}
+                        </div>
                     </div>
                     <div className="saved-builds-list">
-                        {savedBuilds.map(build => (
-                            <div key={build.job_id} className="saved-build-card">
-                                <div className="saved-build-info">
-                                    <span className="saved-build-count">{build.lineups_count} lineups</span>
-                                    <span className="saved-build-time">
-                                        {new Date(build.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
-                                    {build.stats?.wall_time_s && (
-                                        <span className="saved-build-stats">
-                                            {(build.stats.wall_time_s as number).toFixed(1)}s
+                        {savedBuilds.map(build => {
+                            const isSelected = selectedBuildIds.has(build.job_id)
+                            return (
+                                <div key={build.job_id} className={`saved-build-card ${isSelected ? 'selected' : ''}`}>
+                                    <input
+                                        type="checkbox"
+                                        className="saved-build-checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleBuildSelection(build.job_id)}
+                                        title="Select to join"
+                                    />
+                                    <div className="saved-build-info">
+                                        <span className="saved-build-count">{build.lineups_count} lineups</span>
+                                        <span className="saved-build-time">
+                                            {new Date(build.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </span>
-                                    )}
+                                        {build.stats?.wall_time_s && (
+                                            <span className="saved-build-stats">
+                                                {(build.stats.wall_time_s as number).toFixed(1)}s
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="saved-build-actions">
+                                        <button
+                                            className="export-btn-sm"
+                                            onClick={() => handleExportBuild(build.job_id)}
+                                            title="Export CSV"
+                                        >
+                                            ⬇
+                                        </button>
+                                        <button
+                                            className="load-btn"
+                                            onClick={() => handleLoadSavedBuild(build.job_id)}
+                                        >
+                                            Load
+                                        </button>
+                                        <button
+                                            className="delete-btn"
+                                            onClick={() => handleDeleteSavedBuild(build.job_id)}
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="saved-build-actions">
-                                    <button
-                                        className="load-btn"
-                                        onClick={() => handleLoadSavedBuild(build.job_id)}
-                                    >
-                                        Load
-                                    </button>
-                                    <button
-                                        className="delete-btn"
-                                        onClick={() => handleDeleteSavedBuild(build.job_id)}
-                                    >
-                                        ×
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
+                            )
+                        })}
                     </div>
                 </section>
             )}
@@ -648,6 +1007,30 @@ export default function OptimizerPage() {
                                 value={lineupFilter}
                                 onChange={e => setLineupFilter(e.target.value)}
                             />
+                            <input
+                                type="number"
+                                placeholder="Min proj"
+                                value={minLineupProj ?? ''}
+                                onChange={e => setMinLineupProj(e.target.value ? Number(e.target.value) : null)}
+                                style={{ width: '80px' }}
+                                title="Minimum projection total"
+                            />
+                            <input
+                                type="number"
+                                placeholder="Max own%"
+                                value={maxLineupOwn ?? ''}
+                                onChange={e => setMaxLineupOwn(e.target.value ? Number(e.target.value) : null)}
+                                style={{ width: '80px' }}
+                                title="Maximum ownership total"
+                            />
+                            <input
+                                type="number"
+                                placeholder="Min p90"
+                                value={minLineupP90 ?? ''}
+                                onChange={e => setMinLineupP90(e.target.value ? Number(e.target.value) : null)}
+                                style={{ width: '80px' }}
+                                title="Minimum p90 ceiling"
+                            />
                             <select
                                 value={showCount}
                                 onChange={e => setShowCount(Number(e.target.value))}
@@ -664,28 +1047,135 @@ export default function OptimizerPage() {
                                 <option value="default">Original Order</option>
                                 <option value="proj-desc">Proj ↓</option>
                                 <option value="proj-asc">Proj ↑</option>
+                                <option value="p90-desc">p90 ↓</option>
+                                <option value="p90-asc">p90 ↑</option>
+                                <option value="own-desc">Own% ↓</option>
+                                <option value="own-asc">Own% ↑</option>
                                 <option value="salary-desc">Salary ↓</option>
                                 <option value="salary-asc">Salary ↑</option>
                             </select>
-                            {lineupFilter && (
-                                <button className="clear-filter" onClick={() => setLineupFilter('')}>
-                                    Clear Filter
+                            {(lineupFilter || minLineupProj || maxLineupOwn || minLineupP90) && (
+                                <button className="clear-filter" onClick={() => {
+                                    setLineupFilter('')
+                                    setMinLineupProj(null)
+                                    setMaxLineupOwn(null)
+                                    setMinLineupP90(null)
+                                }}>
+                                    Clear Filters
                                 </button>
                             )}
+                            <span className="lineups-selected-count">
+                                {selectedLineupIds.size} selected
+                            </span>
+                            <button
+                                className="lineups-action-btn"
+                                onClick={selectAllVisible}
+                                disabled={filteredLineups.length === 0}
+                                title="Select currently shown lineups"
+                            >
+                                Select showing
+                            </button>
+                            <button
+                                className="lineups-action-btn"
+                                onClick={selectAllFiltered}
+                                disabled={filteredLineups.length === 0}
+                                title="Select all filtered lineups"
+                            >
+                                Select filtered
+                            </button>
+                            <button
+                                className="lineups-action-btn"
+                                onClick={clearSelection}
+                                disabled={selectedLineupIds.size === 0}
+                            >
+                                Clear selection
+                            </button>
+                            <button
+                                className="lineups-action-btn primary"
+                                onClick={exportSelectedCSV}
+                                disabled={selectedLineupIds.size === 0}
+                                title="Export selected lineups"
+                            >
+                                Export selected CSV
+                            </button>
+                            <select
+                                value={activeLineupGroupId}
+                                onChange={e => setActiveLineupGroupId(e.target.value)}
+                                title="Lineup groups"
+                            >
+                                <option value="">No group</option>
+                                {lineupGroups.map(g => (
+                                    <option key={g.id} value={g.id}>
+                                        {g.name} ({g.lineup_ids.length})
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                className="lineups-action-btn"
+                                onClick={createGroupFromSelection}
+                                disabled={selectedLineupIds.size === 0}
+                                title="Create a group from the current selection"
+                            >
+                                Save group
+                            </button>
+                            <button
+                                className="lineups-action-btn"
+                                onClick={selectActiveGroupLineups}
+                                disabled={!activeLineupGroupId}
+                                title="Load the active group into selection"
+                            >
+                                Select group
+                            </button>
+                            <button
+                                className="lineups-action-btn primary"
+                                onClick={exportActiveGroupCSV}
+                                disabled={!activeLineupGroupId}
+                                title="Export active group lineups"
+                            >
+                                Export group CSV
+                            </button>
+                            <button
+                                className="lineups-action-btn danger"
+                                onClick={deleteActiveGroup}
+                                disabled={!activeLineupGroupId}
+                                title="Delete active group"
+                            >
+                                Delete group
+                            </button>
                         </div>
                     </div>
 
                     {/* Lineups grid */}
                     <div className="lineups-grid">
                         {filteredLineups.slice(0, showCount).map((lu, idx) => (
-                            <div key={lu.lineup_id} className="lineup-card">
+                            <div
+                                key={lu.lineup_id}
+                                className={`lineup-card ${selectedLineupIds.has(lu.lineup_id) ? 'selected' : ''}`}
+                            >
                                 <div className="lineup-header">
+                                    <label className="lineup-select">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedLineupIds.has(lu.lineup_id)}
+                                            onChange={() => toggleLineupSelection(lu.lineup_id)}
+                                            title="Select lineup"
+                                        />
+                                    </label>
                                     <span>#{idx + 1}</span>
                                     <span className="lineup-salary">
                                         ${lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0).toLocaleString()}
                                     </span>
                                     <span className="lineup-proj">
                                         {lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0).toFixed(1)} pts
+                                    </span>
+                                    <span className="lineup-p90">
+                                        p90: {(() => {
+                                            const p90 = lu.p90 ?? lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
+                                            return p90 > 0 ? p90.toFixed(1) : '—'
+                                        })()}
+                                    </span>
+                                    <span className="lineup-ownership">
+                                        {lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0).toFixed(1)}% own
                                     </span>
                                 </div>
                                 <div className="lineup-players">

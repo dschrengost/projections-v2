@@ -182,13 +182,39 @@ def load_predictions(date_str: str, data_root: Path) -> pd.DataFrame:
 
 
 def load_actual_ownership(date_str: str, data_root: Path) -> pd.DataFrame:
-    """Load actual contest ownership for a date."""
+    """Load actual contest ownership for a date.
+    
+    Reads from ownership_by_slate/ and picks the main slate (largest player pool).
+    """
+    # Try new path first: ownership_by_slate/{date}_{slate_id}.parquet
+    slate_dir = data_root / "bronze" / "dk_contests" / "ownership_by_slate"
+    if slate_dir.exists():
+        # Find all slates for this date
+        slate_files = list(slate_dir.glob(f"{date_str}_*.parquet"))
+        if slate_files:
+            # Pick the largest slate (main slate has most players)
+            best_file = None
+            best_size = 0
+            for f in slate_files:
+                try:
+                    df = pd.read_parquet(f)
+                    if len(df) > best_size:
+                        best_size = len(df)
+                        best_file = f
+                except Exception:
+                    continue
+            
+            if best_file:
+                df = pd.read_parquet(best_file)
+                df['player_name_lower'] = df['Player'].str.lower().str.strip()
+                return df
+    
+    # Fallback to legacy path: ownership_by_date/{date}.parquet
     own_path = data_root / "bronze" / "dk_contests" / "ownership_by_date" / f"{date_str}.parquet"
     if not own_path.exists():
         return pd.DataFrame()
     
     df = pd.read_parquet(own_path)
-    # Normalize name for joining
     df['player_name_lower'] = df['Player'].str.lower().str.strip()
     return df
 
@@ -220,8 +246,23 @@ def compute_ownership_metrics(actual: pd.DataFrame, predictions: pd.DataFrame) -
     if len(merged) == 0:
         return {'own_players_matched': 0}
     
+    # Compute errors
+    merged['own_error'] = merged['own_pct'] - merged['pred_own_pct']
+    merged['own_abs_error'] = np.abs(merged['own_error'])
+    
     # MAE
-    own_mae = np.abs(merged['own_pct'] - merged['pred_own_pct']).mean()
+    own_mae = merged['own_abs_error'].mean()
+    
+    # SMAPE (Symmetric Mean Absolute Percentage Error)
+    # SMAPE = |actual - pred| / ((|actual| + |pred|) / 2) * 100
+    # Handles zero values better than MAPE
+    denominator = (np.abs(merged['own_pct']) + np.abs(merged['pred_own_pct'])) / 2
+    # Avoid division by zero (when both are 0, which shouldn't happen much for ownership)
+    valid_mask = denominator > 0.1  # Minimum threshold to avoid blow-ups
+    if valid_mask.sum() > 0:
+        smape = (merged.loc[valid_mask, 'own_abs_error'] / denominator[valid_mask]).mean() * 100
+    else:
+        smape = np.nan
     
     # Chalk accuracy (identify top 5 owned correctly)
     actual_top5 = set(merged.nlargest(5, 'own_pct')['player_name_lower'])
@@ -236,20 +277,41 @@ def compute_ownership_metrics(actual: pd.DataFrame, predictions: pd.DataFrame) -
     
     # High ownership accuracy (>20% actual)
     high_own = merged[merged['own_pct'] >= 20]
-    high_own_mae = np.abs(high_own['own_pct'] - high_own['pred_own_pct']).mean() if len(high_own) > 0 else np.nan
+    high_own_mae = high_own['own_abs_error'].mean() if len(high_own) > 0 else np.nan
+    
+    # Top 5 ownership misses (largest absolute errors)
+    top_misses = merged.nlargest(5, 'own_abs_error')[['Player', 'own_pct', 'pred_own_pct', 'own_error']].copy()
+    top_misses_list = []
+    for _, row in top_misses.iterrows():
+        top_misses_list.append({
+            'player': row['Player'],
+            'actual': round(row['own_pct'], 1),
+            'pred': round(row['pred_own_pct'], 1),
+            'error': round(row['own_error'], 1),
+        })
     
     return {
         'own_players_matched': len(merged),
         'own_mae': round(own_mae, 2),
+        'own_smape': round(smape, 1) if not np.isnan(smape) else None,
         'own_corr': round(corr, 3) if not np.isnan(corr) else None,
         'chalk_top5_acc': round(chalk_accuracy, 2),
         'own_bias': round(own_bias, 2),
         'high_own_mae': round(high_own_mae, 2) if not np.isnan(high_own_mae) else None,
+        'own_top_misses': top_misses_list,
     }
 
 
 def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minutes: int = 5) -> dict:
-    """Compute accuracy metrics for predictions vs actuals."""
+    """Compute accuracy metrics for predictions vs actuals.
+    
+    Includes:
+    - Core metrics: FPTS MAE, minutes MAE, coverage, bias
+    - Salary tier accuracy: elite/mid/value/punt
+    - Starter vs bench accuracy
+    - Calibration: p25-p75, p10-p90, p05-p95 vs expected
+    - Edge cases: DNP false positives, starter misses
+    """
     # Ensure player_id is same type for merge
     actuals = actuals.copy()
     predictions = predictions.copy()
@@ -263,12 +325,10 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
         return {'players_matched': 0}
     
     # === Roster Accuracy (based on merged predictions only) ===
-    # Missed: players who played 5+ min but we predicted < threshold
-    min_pred_threshold = min_minutes * 0.5  # More lenient threshold (2.5 min for 5 min cutoff)
+    min_pred_threshold = min_minutes * 0.5
     played_5plus = merged[merged['actual_minutes'] >= min_minutes]
     missed = played_5plus[played_5plus['minutes_mean'] < min_pred_threshold] if 'minutes_mean' in merged.columns else pd.DataFrame()
     
-    # False predictions: we predicted 5+ min but they played < min threshold
     high_pred = merged[merged['minutes_mean'] >= min_minutes] if 'minutes_mean' in merged.columns else pd.DataFrame()
     false_preds = high_pred[high_pred['actual_minutes'] < min_minutes]
     
@@ -278,39 +338,133 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
     if len(played) == 0:
         return {'players_matched': 0, 'missed': len(missed), 'false_preds': len(false_preds)}
     
-    # Minutes metrics
-    mins_mae = np.abs(played['actual_minutes'] - played['minutes_mean']).mean() if 'minutes_mean' in played.columns else np.nan
+    # Compute error columns for reuse
+    if 'dk_fpts_mean' in played.columns:
+        played['fpts_error'] = played['actual_dk_fpts'] - played['dk_fpts_mean']
+    if 'minutes_mean' in played.columns:
+        played['mins_error'] = played['actual_minutes'] - played['minutes_mean']
     
-    # FPTS metrics
-    fpts_mae = np.abs(played['actual_dk_fpts'] - played['dk_fpts_mean']).mean() if 'dk_fpts_mean' in played.columns else np.nan
+    # === Core Metrics ===
+    mins_mae = np.abs(played['mins_error']).mean() if 'mins_error' in played.columns else np.nan
+    fpts_mae = np.abs(played['fpts_error']).mean() if 'fpts_error' in played.columns else np.nan
+    fpts_bias = played['fpts_error'].mean() * -1 if 'fpts_error' in played.columns else np.nan  # Negative because error = actual - pred
     
-    # Coverage (% of actuals within p10-p90)
-    if 'dk_fpts_p10' in played.columns and 'dk_fpts_p90' in played.columns:
-        in_range = (played['actual_dk_fpts'] >= played['dk_fpts_p10']) & (played['actual_dk_fpts'] <= played['dk_fpts_p90'])
-        coverage_80 = in_range.mean()
-    else:
-        coverage_80 = np.nan
+    # === Calibration Metrics ===
+    calibration = {}
+    intervals = [
+        ('50', 'dk_fpts_p25', 'dk_fpts_p75', 0.50),
+        ('80', 'dk_fpts_p10', 'dk_fpts_p90', 0.80),
+        ('90', 'dk_fpts_p05', 'dk_fpts_p95', 0.90),
+    ]
+    for name, lo_col, hi_col, expected in intervals:
+        if lo_col in played.columns and hi_col in played.columns:
+            in_range = (played['actual_dk_fpts'] >= played[lo_col]) & (played['actual_dk_fpts'] <= played[hi_col])
+            observed = in_range.mean()
+            calibration[f'coverage_{name}'] = round(observed, 3)
+            calibration[f'cal_gap_{name}'] = round(observed - expected, 3)
+        else:
+            calibration[f'coverage_{name}'] = None
+            calibration[f'cal_gap_{name}'] = None
     
-    # p05-p95 coverage
-    if 'dk_fpts_p05' in played.columns and 'dk_fpts_p95' in played.columns:
-        in_range_90 = (played['actual_dk_fpts'] >= played['dk_fpts_p05']) & (played['actual_dk_fpts'] <= played['dk_fpts_p95'])
-        coverage_90 = in_range_90.mean()
-    else:
-        coverage_90 = np.nan
+    # === Salary Tier Accuracy ===
+    salary_tiers = {}
+    if 'salary' in played.columns and 'fpts_error' in played.columns:
+        tiers = {
+            'elite': (8000, 15000),
+            'mid': (5500, 7999),
+            'value': (3500, 5499),
+            'punt': (3000, 3499),
+        }
+        for tier_name, (low, high) in tiers.items():
+            tier_df = played[(played['salary'] >= low) & (played['salary'] <= high)]
+            if len(tier_df) > 0:
+                salary_tiers[f'fpts_mae_{tier_name}'] = round(np.abs(tier_df['fpts_error']).mean(), 2)
+                salary_tiers[f'n_{tier_name}'] = len(tier_df)
+            else:
+                salary_tiers[f'fpts_mae_{tier_name}'] = None
+                salary_tiers[f'n_{tier_name}'] = 0
     
-    # Bias (mean prediction - mean actual)
-    fpts_bias = (played['dk_fpts_mean'].mean() - played['actual_dk_fpts'].mean()) if 'dk_fpts_mean' in played.columns else np.nan
+    # === Starter vs Bench Accuracy ===
+    starter_metrics = {}
+    starter_col = 'is_starter' if 'is_starter' in played.columns else None
+    if starter_col is None and 'starter_flag' in played.columns:
+        starter_col = 'starter_flag'
     
-    return {
+    if starter_col and 'fpts_error' in played.columns:
+        starters = played[played[starter_col] == True]
+        bench = played[played[starter_col] == False]
+        if len(starters) > 0:
+            starter_metrics['fpts_mae_starters'] = round(np.abs(starters['fpts_error']).mean(), 2)
+            starter_metrics['n_starters'] = len(starters)
+        if len(bench) > 0:
+            starter_metrics['fpts_mae_bench'] = round(np.abs(bench['fpts_error']).mean(), 2)
+            starter_metrics['n_bench'] = len(bench)
+    
+    # === Edge Case Detection ===
+    edge_cases = {}
+    
+    # DNP false positives: predicted > 10 min but played 0
+    if 'minutes_mean' in merged.columns:
+        dnp_fp = merged[(merged['actual_minutes'] == 0) & (merged['minutes_mean'] >= 10)]
+        edge_cases['dnp_false_positives'] = len(dnp_fp)
+        if len(dnp_fp) > 0:
+            name_col = 'player_name_actual' if 'player_name_actual' in dnp_fp.columns else 'player_name'
+            edge_cases['dnp_fp_names'] = dnp_fp[name_col].tolist()[:5]  # Top 5 for debugging
+    
+    # Starter misses: played > 30 min but predicted < 20
+    if 'minutes_mean' in merged.columns:
+        starter_misses = merged[(merged['actual_minutes'] >= 30) & (merged['minutes_mean'] < 20)]
+        edge_cases['starter_misses'] = len(starter_misses)
+        if len(starter_misses) > 0:
+            name_col = 'player_name_actual' if 'player_name_actual' in starter_misses.columns else 'player_name'
+            edge_cases['starter_miss_names'] = starter_misses[name_col].tolist()[:5]
+    
+    # Blowup misses: actual FPTS > 50 but predicted < 30
+    if 'dk_fpts_mean' in merged.columns:
+        blowup_misses = merged[(merged['actual_dk_fpts'] >= 50) & (merged['dk_fpts_mean'] < 30)]
+        edge_cases['blowup_misses'] = len(blowup_misses)
+    
+    # === Positional Accuracy ===
+    pos_metrics = {}
+    if 'pos_bucket' in played.columns and 'fpts_error' in played.columns:
+        for pos in ['PG', 'SG', 'SF', 'PF', 'C']:
+            pos_df = played[played['pos_bucket'] == pos]
+            if len(pos_df) > 0:
+                pos_metrics[f'fpts_mae_{pos}'] = round(np.abs(pos_df['fpts_error']).mean(), 2)
+                pos_metrics[f'n_{pos}'] = len(pos_df)
+    
+    # === Combine all metrics ===
+    result = {
+        # Core
         'players_matched': len(played),
         'minutes_mae': round(mins_mae, 2) if not np.isnan(mins_mae) else None,
         'fpts_mae': round(fpts_mae, 2) if not np.isnan(fpts_mae) else None,
-        'coverage_80': round(coverage_80, 3) if not np.isnan(coverage_80) else None,
-        'coverage_90': round(coverage_90, 3) if not np.isnan(coverage_90) else None,
         'bias': round(fpts_bias, 2) if not np.isnan(fpts_bias) else None,
         'missed': len(missed),
         'false_preds': len(false_preds),
     }
+    
+    # Add calibration (backward compatible: coverage_80, coverage_90)
+    result['coverage_80'] = calibration.get('coverage_80')
+    result['coverage_90'] = calibration.get('coverage_90')
+    result['coverage_50'] = calibration.get('coverage_50')
+    result['cal_gap_50'] = calibration.get('cal_gap_50')
+    result['cal_gap_80'] = calibration.get('cal_gap_80')
+    result['cal_gap_90'] = calibration.get('cal_gap_90')
+    
+    # Add salary tiers
+    result.update(salary_tiers)
+    
+    # Add starter/bench
+    result.update(starter_metrics)
+    
+    # Add edge cases
+    result.update(edge_cases)
+    
+    # Add positional (these can be large, so only include counts)
+    result.update(pos_metrics)
+    
+    return result
 
 
 @app.command()

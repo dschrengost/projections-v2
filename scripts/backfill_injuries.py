@@ -1,227 +1,361 @@
 #!/usr/bin/env python3
-"""
-Backfill injury data from NBA PDF reports using the existing NBAInjuryScraper.
+"""Backfill NBA injury report PDFs into append-only bronze partitions.
 
-This script:
-1. For each date, gets game tip times from box scores
-2. For each tip time, fetches the injury PDF from ~1 hour before
-3. Writes the injury data to bronze layer with correct as_of_ts
+This script fetches hourly NBA injury reports (typically published at :30 ET),
+normalizes them into the canonical ``injuries_raw`` schema, and writes:
 
-Usage:
-    python -m scripts.backfill_injuries_v2 --date 2025-11-12
-    python -m scripts.backfill_injuries_v2 --start 2025-11-01 --end 2025-11-30 --no-dry-run
+  - canonical history: ``date=YYYY-MM-DD/hour=HH/injuries.parquet``
+  - transitional latest view: ``date=YYYY-MM-DD/injuries.parquet`` (overwritten)
+
+Status is tracked under ``<DATA_ROOT>/bronze/injuries_raw/_backfill_status.json`` so
+long backfills can be resumed.
 """
+
+from __future__ import annotations
+
 import json
-import typer
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
+import os
 from pathlib import Path
-from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from typing import Any, Iterable
+
 import pandas as pd
-from rich.console import Console
-from rich.progress import track
+import typer
 
-# Import the existing scraper
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from scrapers.nba_injuries import NBAInjuryScraper, InjuryRecord, ET_TZ
+from projections import paths
+from projections.etl import storage
+from projections.etl.common import load_schedule_data
+from projections.etl.injuries import (
+    _build_injuries_raw,
+    _build_player_resolver,
+    _records_from_scraper_payload,
+)
+from projections.minutes_v1.schemas import INJURIES_RAW_SCHEMA, enforce_schema, validate_with_pandera
+from projections.minutes_v1.season_dataset import PlayerResolver, TeamResolver
+from scrapers.nba_injuries import ET_TZ, NBAInjuryScraper
 
-console = Console()
-app = typer.Typer()
-
-# Player name to ID mapping cache
-_player_name_map: dict[str, int] = {}
-
-
-def load_player_name_map(data_root: Path) -> dict[str, int]:
-    """Load player name to ID mapping from roster data."""
-    global _player_name_map
-    if _player_name_map:
-        return _player_name_map
-    
-    # Load from roster snapshots
-    roster_root = data_root / "silver" / "roster_nightly"
-    for month_dir in roster_root.glob("season=2025/month=*/roster.parquet"):
-        try:
-            df = pd.read_parquet(month_dir)
-            for _, row in df.iterrows():
-                name = str(row.get('player_name', '')).lower().strip()
-                pid = row.get('player_id')
-                if name and pid:
-                    _player_name_map[name] = int(pid)
-        except Exception:
-            continue
-    
-    console.print(f"  [dim]Loaded {len(_player_name_map)} player name mappings[/dim]")
-    return _player_name_map
+app = typer.Typer(help=__doc__)
 
 
-def normalize_name(name: str) -> str:
-    """Normalize player name for matching."""
-    # Handle "Last, First" format
-    if ',' in name:
-        parts = name.split(',', 1)
-        name = f"{parts[1].strip()} {parts[0].strip()}"
-    return name.lower().strip()
+class NoScheduleForDateError(RuntimeError):
+    """Raised when schedule data cannot be loaded for a date (often: no games)."""
 
 
-def get_tip_times_from_boxscores(date_str: str, data_root: Path) -> list[datetime]:
-    """Get tip times for all games on a date from box scores."""
-    box_path = data_root / "bronze" / "boxscores_raw" / "season=2025" / f"date={date_str}" / "boxscores_raw.parquet"
-    if not box_path.exists():
-        return []
-    
-    tip_times = []
-    df = pd.read_parquet(box_path)
-    for _, row in df.iterrows():
-        payload = json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
-        tip_str = payload.get('game_time_utc')
-        if tip_str:
-            tip = pd.to_datetime(tip_str, utc=True)
-            tip_times.append(tip.to_pydatetime())
-    
-    return sorted(set(tip_times))
+def _iter_dates(start: date, end: date) -> Iterable[date]:
+    cursor = start
+    while cursor <= end:
+        yield cursor
+        cursor += timedelta(days=1)
 
 
-def records_to_bronze_df(records: list[InjuryRecord], as_of_ts: datetime, player_map: dict[str, int]) -> pd.DataFrame:
-    """Convert InjuryRecords to bronze DataFrame format."""
-    rows = []
-    for rec in records:
-        # Normalize name and look up player ID
-        name = normalize_name(rec.player_name)
-        player_id = player_map.get(name)
-        
-        if player_id is None:
-            # Try partial matches
-            for stored_name, pid in player_map.items():
-                if name in stored_name or stored_name in name:
-                    player_id = pid
-                    break
-        
-        if player_id is None:
-            continue  # Skip if we can't find the player
-        
-        # Map status
-        status = rec.current_status.upper() if rec.current_status else ''
-        if 'OUT' in status:
-            status = 'OUT'
-        elif 'QUESTIONABLE' in status:
-            status = 'GTD'  # Game time decision
-        elif 'DOUBTFUL' in status:
-            status = 'GTD'
-        elif 'PROBABLE' in status:
-            status = 'AVAIL'
-        elif 'AVAILABLE' in status:
-            status = 'AVAIL'
-        else:
-            status = 'AVAIL'
-        
-        rows.append({
-            'player_id': player_id,
-            'status': status,
-            'reason': rec.reason,
-            'game_date': rec.game_date,
-            'as_of_ts': as_of_ts,
-        })
-    
-    return pd.DataFrame(rows)
+def _atomic_write_text(path: Path, payload: str, *, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    try:
+        tmp.write_text(payload, encoding=encoding)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
-def update_bronze_injuries(
-    date_str: str,
-    new_data: pd.DataFrame,
+def _status_path(data_root: Path) -> Path:
+    return storage.default_bronze_root("injuries_raw", data_root) / "_backfill_status.json"
+
+
+def _load_status(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "last_run": None,
+            "dates_completed": [],
+            "dates_failed": [],
+            "hours_fetched": 0,
+            "hours_missing": 0,
+            "dates": {},
+        }
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_status(path: Path, status: dict[str, Any]) -> None:
+    status["last_run"] = datetime.now(timezone.utc).isoformat()
+    _atomic_write_text(path, json.dumps(status, indent=2, sort_keys=True))
+
+
+def _hour_partition_exists(
+    *,
     data_root: Path,
+    season: int,
+    target_date: date,
+    hour: int,
+    bronze_root: Path | None = None,
+) -> bool:
+    output_name = storage.DEFAULT_BRONZE_FILENAMES.get("injuries_raw", "data.parquet")
+    day_dir = storage.bronze_partition_dir(
+        "injuries_raw",
+        data_root=data_root,
+        season=season,
+        target_date=target_date,
+        bronze_root=bronze_root,
+    )
+    return (day_dir / f"hour={hour:02d}" / output_name).exists()
+
+
+@dataclass(frozen=True)
+class HourResult:
+    hour: int
+    status: str
+    rows: int
+    error: str | None = None
+
+
+def _backfill_day(
+    target_date: date,
+    *,
+    season: int,
+    data_root: Path,
+    schedule_paths: list[str],
+    schedule_timeout: float,
+    player_resolver: PlayerResolver,
+    injury_timeout: float,
+    start_hour: int,
+    end_hour: int,
     dry_run: bool,
-) -> int:
-    """Merge new injury data into bronze layer."""
-    bronze_path = data_root / "bronze" / "injuries_raw" / "season=2025" / f"date={date_str}" / "injuries.parquet"
-    
-    if bronze_path.exists():
-        existing = pd.read_parquet(bronze_path)
-        existing["as_of_ts"] = pd.to_datetime(existing["as_of_ts"], utc=True)
-    else:
-        existing = pd.DataFrame()
-    
-    if len(new_data) == 0:
-        return 0
-    
-    # Combine existing and new data
-    if len(existing) > 0:
-        combined = pd.concat([existing, new_data], ignore_index=True)
-        # Keep unique player/as_of_ts combinations, preferring new data
-        combined = combined.drop_duplicates(subset=['player_id', 'as_of_ts'], keep='last')
-    else:
-        combined = new_data
-    
-    if not dry_run:
-        bronze_path.parent.mkdir(parents=True, exist_ok=True)
-        combined.to_parquet(bronze_path, index=False)
-    
-    return len(new_data)
+    force: bool,
+) -> tuple[list[HourResult], int, int]:
+    if start_hour < 0 or start_hour > 23:
+        raise typer.BadParameter("--start-hour must be in [0, 23]")
+    if end_hour < 0 or end_hour > 23 or end_hour < start_hour:
+        raise typer.BadParameter("--end-hour must be in [0, 23] and >= --start-hour")
+
+    target_day = pd.Timestamp(target_date).normalize()
+    schedule_start = target_day - pd.Timedelta(days=1)
+    schedule_end = target_day + pd.Timedelta(days=1)
+
+    effective_schedule = list(schedule_paths)
+    if not effective_schedule:
+        # Prefer local silver schedule partitions over NBA API fallback (API can be flaky/blocked).
+        months: set[int] = {int(schedule_start.month), int(schedule_end.month)}
+        for month in sorted(months):
+            candidate = (
+                data_root
+                / "silver"
+                / "schedule"
+                / f"season={season}"
+                / f"month={month:02d}"
+                / "schedule.parquet"
+            )
+            if candidate.exists():
+                effective_schedule.append(str(candidate))
+
+    try:
+        schedule_df = load_schedule_data(
+            effective_schedule, schedule_start, schedule_end, schedule_timeout
+        )
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc)
+        no_games_markers = (
+            "NBA schedule API did not return any games",
+            "Schedule filter removed all rows",
+            "No games found in the requested window",
+        )
+        if any(marker in msg for marker in no_games_markers):
+            raise NoScheduleForDateError(
+                f"No schedule rows for {target_date.isoformat()} (season={season}); likely no games."
+            ) from exc
+        raise NoScheduleForDateError(
+            f"Unable to load schedule rows for {target_date.isoformat()} (season={season}). "
+            "Provide --schedule pointing at local schedule.parquet files, or run the schedule ETL "
+            "to populate <data_root>/silver/schedule/season=YYYY/month=MM/schedule.parquet."
+        ) from exc
+    resolver = TeamResolver(schedule_df)
+
+    bronze_root_path = storage.default_bronze_root("injuries_raw", data_root)
+
+    hour_results: list[HourResult] = []
+    frames: list[pd.DataFrame] = []
+    hours_fetched = 0
+    hours_missing = 0
+
+    with NBAInjuryScraper(timeout=injury_timeout) as scraper:
+        for hour in range(start_hour, end_hour + 1):
+            if not force and _hour_partition_exists(
+                data_root=data_root,
+                season=season,
+                target_date=target_date,
+                hour=hour,
+                bronze_root=bronze_root_path,
+            ):
+                hour_results.append(HourResult(hour=hour, status="skipped_exists", rows=0))
+                continue
+
+            report_time = datetime.combine(target_date, time(hour, 30), tzinfo=ET_TZ)
+            try:
+                if not scraper.report_exists(report_time):
+                    hours_missing += 1
+                    hour_results.append(HourResult(hour=hour, status="missing", rows=0))
+                    continue
+
+                records = scraper.fetch_report(report_time)
+                if isinstance(records, pd.DataFrame):
+                    raise RuntimeError("Expected InjuryRecord list, received DataFrame.")
+                payload = _records_from_scraper_payload(records)
+                injuries_raw = _build_injuries_raw(
+                    payload,
+                    start=target_day,
+                    end=target_day,
+                    resolver=resolver,
+                    player_resolver=player_resolver,
+                )
+                injuries_raw = enforce_schema(injuries_raw, INJURIES_RAW_SCHEMA)
+                validate_with_pandera(injuries_raw, INJURIES_RAW_SCHEMA)
+                frames.append(injuries_raw)
+                if not dry_run:
+                    storage.write_bronze_partition_hourly(
+                        injuries_raw,
+                        dataset="injuries_raw",
+                        data_root=data_root,
+                        season=season,
+                        target_date=target_date,
+                        hour=hour,
+                        bronze_root=bronze_root_path,
+                    )
+                hours_fetched += 1
+                hour_results.append(HourResult(hour=hour, status="success", rows=len(injuries_raw)))
+            except Exception as exc:  # noqa: BLE001
+                hour_results.append(HourResult(hour=hour, status="error", rows=0, error=str(exc)))
+
+    if frames and not dry_run:
+        combined = pd.concat(frames, ignore_index=True)
+        storage.write_bronze_partition(
+            combined,
+            dataset="injuries_raw",
+            data_root=data_root,
+            season=season,
+            target_date=target_date,
+            bronze_root=bronze_root_path,
+        )
+
+    return hour_results, hours_fetched, hours_missing
 
 
 @app.command()
 def backfill(
-    date_str: str = typer.Option(None, "--date", "-d", help="Single date (YYYY-MM-DD)"),
-    start: str = typer.Option(None, "--start", "-s", help="Start date"),
-    end: str = typer.Option(None, "--end", "-e", help="End date"),
-    data_root: Path = typer.Option(Path("/home/daniel/projections-data"), "--data-root"),
-    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="Don't modify data"),
-):
-    """Backfill injury data from official NBA PDFs."""
-    
+    season: int | None = typer.Option(
+        None,
+        "--season",
+        help=(
+            "Season partition label (e.g., 2025). When omitted, derived from each date "
+            "(month>=8 -> same year, else year-1)."
+        ),
+    ),
+    date_str: str | None = typer.Option(None, "--date", help="Single ET date (YYYY-MM-DD)."),
+    start: str | None = typer.Option(None, "--start", help="Start ET date (YYYY-MM-DD)."),
+    end: str | None = typer.Option(None, "--end", help="End ET date (YYYY-MM-DD)."),
+    schedule: list[str] = typer.Option(
+        [],
+        "--schedule",
+        help="Optional schedule parquet glob(s). Falls back to NBA API when omitted.",
+    ),
+    data_root: Path = typer.Option(
+        paths.get_data_root(),
+        "--data-root",
+        help="Base data directory (defaults to PROJECTIONS_DATA_ROOT or ./data).",
+    ),
+    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="Don't modify data."),
+    force: bool = typer.Option(False, "--force", help="Re-fetch and overwrite existing hour partitions."),
+    start_hour: int = typer.Option(8, "--start-hour", min=0, max=23, help="First ET hour to probe."),
+    end_hour: int = typer.Option(23, "--end-hour", min=0, max=23, help="Last ET hour to probe."),
+    schedule_timeout: float = typer.Option(10.0, "--schedule-timeout", help="Schedule API timeout (seconds)."),
+    player_timeout: float = typer.Option(10.0, "--player-timeout", help="NBA player resolver timeout (seconds)."),
+    injury_timeout: float = typer.Option(30.0, "--injury-timeout", help="NBA injury PDF timeout (seconds)."),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="Skip dates already marked completed."),
+) -> None:
+    """Backfill hourly injury report snapshots into bronze."""
     if date_str:
-        dates = [date_str]
+        start_date = end_date = date.fromisoformat(date_str)
     elif start and end:
         start_date = date.fromisoformat(start)
         end_date = date.fromisoformat(end)
-        dates = []
-        current = start_date
-        while current <= end_date:
-            dates.append(current.isoformat())
-            current += timedelta(days=1)
     else:
-        console.print("[red]Must specify --date or --start/--end[/red]")
-        return
-    
-    console.print(f"[bold]Backfilling {len(dates)} days{'(DRY RUN)' if dry_run else ''}[/bold]\n")
-    
-    # Load player name mapping
-    player_map = load_player_name_map(data_root)
-    
-    total_records = 0
-    
-    with NBAInjuryScraper() as scraper:
-        for d in track(dates, description="Processing dates..."):
-            # Get tip times
-            tip_times = get_tip_times_from_boxscores(d, data_root)
-            if not tip_times:
-                continue
-            
-            # Get latest tip time (use report from 1 hour before)
-            latest_tip = max(tip_times)
-            report_time = latest_tip - timedelta(hours=1)
-            
-            try:
-                records = scraper.fetch_report(report_time)
-                if isinstance(records, pd.DataFrame):
-                    continue
-                
-                # Convert to bronze format
-                new_df = records_to_bronze_df(records, latest_tip, player_map)
-                
-                # Update bronze
-                count = update_bronze_injuries(d, new_df, data_root, dry_run)
-                total_records += count
-                
-            except Exception as e:
-                console.print(f"  [yellow]{d}: Error - {e}[/yellow]")
-                continue
-    
-    console.print(f"\n[bold green]Done! Added {total_records} injury records[/bold green]")
-    if dry_run:
-        console.print("[yellow]This was a dry run - no data was modified[/yellow]")
-        console.print("Run with --no-dry-run to actually update the data")
+        raise typer.BadParameter("Provide --date or both --start/--end.")
+    if end_date < start_date:
+        raise typer.BadParameter("--end must be on/after --start.")
+
+    data_root = data_root.resolve()
+    status_file = _status_path(data_root)
+    status = _load_status(status_file)
+
+    typer.echo(
+        f"[injuries-backfill] season={season or 'auto'} dates={start_date.isoformat()}..{end_date.isoformat()} "
+        f"hours={start_hour:02d}-{end_hour:02d} dry_run={dry_run} force={force} resume={resume}"
+    )
+
+    typer.echo("[injuries-backfill] building player resolver...")
+    player_resolver = _build_player_resolver(player_timeout)
+
+    for target_date in _iter_dates(start_date, end_date):
+        season_value = season or (target_date.year if target_date.month >= 8 else target_date.year - 1)
+        key = target_date.isoformat()
+        if resume and not force and key in set(status.get("dates_completed", [])):
+            typer.echo(f"[injuries-backfill] {key}: skipping (already completed).")
+            continue
+
+        typer.echo(f"[injuries-backfill] {key}: probing hourly PDFs...")
+        try:
+            hour_results, hours_fetched, hours_missing = _backfill_day(
+                target_date,
+                season=season_value,
+                data_root=data_root,
+                schedule_paths=schedule,
+                schedule_timeout=schedule_timeout,
+                player_resolver=player_resolver,
+                injury_timeout=injury_timeout,
+                start_hour=start_hour,
+                end_hour=end_hour,
+                dry_run=dry_run,
+                force=force,
+            )
+        except NoScheduleForDateError as exc:
+            typer.echo(f"[injuries-backfill] {key}: {exc}")
+            status.setdefault("dates", {})[key] = {
+                "no_schedule": True,
+                "message": str(exc),
+                "hours": {},
+            }
+            status.setdefault("dates_completed", []).append(key)
+            _write_status(status_file, status)
+            continue
+        status.setdefault("dates", {})[key] = {
+            "hours": {
+                f"{result.hour:02d}": {
+                    "status": result.status,
+                    "rows": result.rows,
+                    "error": result.error,
+                }
+                for result in hour_results
+            },
+        }
+        status["hours_fetched"] = int(status.get("hours_fetched", 0)) + int(hours_fetched)
+        status["hours_missing"] = int(status.get("hours_missing", 0)) + int(hours_missing)
+
+        errors = [result for result in hour_results if result.status == "error"]
+        if errors:
+            status.setdefault("dates_failed", []).append(
+                {"date": key, "error": errors[0].error or "unknown"}
+            )
+            typer.echo(f"[injuries-backfill] {key}: completed with {len(errors)} error(s).", err=True)
+        else:
+            status.setdefault("dates_completed", []).append(key)
+            typer.echo(
+                f"[injuries-backfill] {key}: done (hours_fetched={hours_fetched}, hours_missing={hours_missing})."
+            )
+
+        _write_status(status_file, status)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     app()
