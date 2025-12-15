@@ -16,6 +16,7 @@ from projections.features.availability import normalize_status
 from projections.labels import derive_starter_flag_labels
 from projections.metrics.minutes import compute_mae_by_actual_minutes_bucket
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest, load_feature_frame
+from projections.minutes_v1.horizons import add_odds_missing_indicator, add_time_to_tip_features
 from projections.minutes_v1.production import load_production_minutes_bundle
 from projections.models import minutes_lgbm as ml
 from projections.models.minutes_features import MINUTES_TARGET_COL
@@ -56,6 +57,8 @@ def _prepare_slice(df: pd.DataFrame, window: ml.DateWindow) -> pd.DataFrame:
 def score_with_bundle(df: pd.DataFrame, bundle: dict[str, Any]) -> pd.DataFrame:
     if df.empty:
         return df.copy()
+    df = add_time_to_tip_features(df)
+    df = add_odds_missing_indicator(df)
     feature_columns: list[str] = bundle["feature_columns"]
     missing = [col for col in feature_columns if col not in df.columns]
     if missing:
@@ -200,7 +203,11 @@ def main(
     feature_df = derive_starter_flag_labels(feature_df, output_col="starter_flag")
 
     status_col = _resolve_status_column(feature_df, override=status_column)
-    bundle = load_production_minutes_bundle()
+    loaded = load_production_minutes_bundle()
+    if loaded.get("mode") == "dual":
+        bundle = dict(loaded.get("late_bundle") or {})
+    else:
+        bundle = dict(loaded)
     windows = _build_windows()
 
     payload: dict[str, dict[str, Dict[str, Any]]] = {}

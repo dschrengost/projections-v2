@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import joblib
 import lightgbm as lgb
@@ -18,8 +18,13 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.isotonic import IsotonicRegression
 from sklearn.impute import SimpleImputer
 
+try:
+    import mlflow
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+
 from projections import paths
-from projections.labels import derive_starter_flag_labels
 from projections.metrics.minutes import compute_mae_by_actual_minutes_bucket
 from projections.minutes_v1 import modeling
 from projections.minutes_v1.artifacts import compute_feature_hash, ensure_run_directory, write_json
@@ -111,6 +116,106 @@ app = typer.Typer(help=__doc__)
 
 
 _DEFAULT_PARAMETER_SOURCES = {ParameterSource.DEFAULT, ParameterSource.DEFAULT_MAP}
+
+# MLFlow tracking URI - uses same SQLite backend as the systemd service
+MLFLOW_TRACKING_URI = "sqlite:////home/daniel/projections-data/mlflow/mlflow.db"
+MLFLOW_EXPERIMENT_NAME = "minutes_v1_training"
+
+
+def _log_to_mlflow(
+    *,
+    run_id: str,
+    params: dict[str, Any],
+    metrics: dict[str, Any],
+    quantiles: Any,  # QuantileArtifacts or dict
+    feature_columns: list[str],
+    run_dir: Path,
+    windows_meta: dict[str, Any],
+) -> None:
+    """Log training run to MLFlow with params, metrics, feature importance, and artifacts."""
+    if not MLFLOW_AVAILABLE:
+        typer.echo("[mlflow] MLFlow not available, skipping logging", err=True)
+        return
+
+    try:
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
+
+        with mlflow.start_run(run_name=run_id):
+            # Log parameters
+            flat_params = {
+                "run_id": run_id,
+                "train_start": windows_meta["train"]["start"],
+                "train_end": windows_meta["train"]["end"],
+                "cal_start": windows_meta["cal"]["start"],
+                "cal_end": windows_meta["cal"]["end"],
+                "val_start": windows_meta["val"]["start"],
+                "val_end": windows_meta["val"]["end"],
+                "n_features": len(feature_columns),
+            }
+            for key, value in params.items():
+                if value is not None and not isinstance(value, (dict, list)):
+                    flat_params[key] = value
+            mlflow.log_params(flat_params)
+
+            # Log metrics - flatten nested dicts
+            def sanitize_name(name: str) -> str:
+                """Sanitize metric name for MLFlow (alphanumerics, underscores, dashes, periods, spaces, colons, slashes)."""
+                return name.replace("|", "_").replace("<", "lt").replace(">", "gt").replace("(", "").replace(")", "")
+
+            flat_metrics: dict[str, float] = {}
+            for key, value in metrics.items():
+                if isinstance(value, dict):
+                    # Handle per_bucket and other nested dicts
+                    for sub_key, sub_value in value.items():
+                        if isinstance(sub_value, dict):
+                            for sub_sub_key, sub_sub_value in sub_value.items():
+                                if isinstance(sub_sub_value, (int, float)) and sub_sub_value is not None:
+                                    metric_name = sanitize_name(f"{key}_{sub_key}_{sub_sub_key}")
+                                    flat_metrics[metric_name] = float(sub_sub_value)
+                        elif isinstance(sub_value, (int, float)) and sub_value is not None:
+                            metric_name = sanitize_name(f"{key}_{sub_key}")
+                            flat_metrics[metric_name] = float(sub_value)
+                elif isinstance(value, (int, float)) and value is not None:
+                    flat_metrics[key] = float(value)
+            mlflow.log_metrics(flat_metrics)
+
+            # Log feature importance from the p50 quantile model
+            # Handle both QuantileArtifacts and dict types
+            models_dict = getattr(quantiles, "models", quantiles) if hasattr(quantiles, "models") else quantiles
+            if isinstance(models_dict, dict) and 0.5 in models_dict:
+                model_p50 = models_dict[0.5]
+                importance_gain = model_p50.feature_importances_
+                importance_df = pd.DataFrame({
+                    "feature": feature_columns,
+                    "importance_gain": importance_gain,
+                }).sort_values("importance_gain", ascending=False)
+
+                # Log as artifact
+                importance_path = run_dir / "feature_importance.csv"
+                importance_df.to_csv(importance_path, index=False)
+                mlflow.log_artifact(str(importance_path))
+
+                # Log top features as metrics for quick comparison
+                for i, row in importance_df.head(20).iterrows():
+                    safe_name = str(row["feature"]).replace(".", "_")[:50]
+                    mlflow.log_metric(f"importance_{safe_name}", float(row["importance_gain"]))
+
+            # Log bucket-level MAE as metrics for easy comparison
+            for key in metrics:
+                if key.startswith("val_mae_"):
+                    mlflow.log_metric(key, float(metrics[key]))
+
+            # Log key artifacts
+            for artifact_name in ["metrics.json", "meta.json", "conformal_offsets.json", "feature_columns.json"]:
+                artifact_path = run_dir / artifact_name
+                if artifact_path.exists():
+                    mlflow.log_artifact(str(artifact_path))
+
+            typer.echo(f"[mlflow] Logged run '{run_id}' to experiment '{MLFLOW_EXPERIMENT_NAME}'")
+
+    except Exception as e:
+        typer.echo(f"[mlflow] Warning: Failed to log to MLFlow: {e}", err=True)
 
 
 def _apply_training_overrides(
@@ -1215,6 +1320,11 @@ def main(
         "--lgbm-learning-rate",
         help="Override LightGBM learning_rate (quantile trees).",
     ),
+    split_col: str | None = typer.Option(
+        None,
+        "--split-col",
+        help="Optional explicit split column (values: train|cal|val). When set, date windows are ignored.",
+    ),
 ) -> None:
     """Train LightGBM quantile models with a dedicated calibration window."""
 
@@ -1250,6 +1360,7 @@ def main(
         "lgbm_n_estimators": lgbm_n_estimators,
         "lgbm_max_depth": lgbm_max_depth,
         "lgbm_learning_rate": lgbm_learning_rate,
+        "split_col": split_col,
     }
     resolved_params = _apply_training_overrides(ctx, cli_params, config_path)
     train_start = resolved_params["train_start"]
@@ -1285,6 +1396,7 @@ def main(
     lgbm_n_estimators = resolved_params.get("lgbm_n_estimators")
     lgbm_max_depth = resolved_params.get("lgbm_max_depth")
     lgbm_learning_rate = resolved_params.get("lgbm_learning_rate")
+    split_col = resolved_params.get("split_col")
 
     if run_id is None:
         raise typer.BadParameter("--run-id is required (set via CLI flag or config file).")
@@ -1335,10 +1447,61 @@ def main(
         month=month,
         target_col=target_col,
     )
-    feature_df = derive_starter_flag_labels(feature_df, output_col="starter_flag")
-    train_df = _filter_out_players(train_window.slice(feature_df))
-    cal_df = _filter_out_players(cal_window.slice(feature_df))
-    val_df = _filter_out_players(val_window.slice(feature_df))
+
+    # NOTE: starter_flag must be inference-available.
+    # Never derive it from box score minutes (e.g. top-5 minute getters), or we will leak label
+    # information into both the model fit and the bucketed conformal calibration.
+    starter_flag_source = "default_zero"
+    if "is_confirmed_starter" in feature_df.columns or "is_projected_starter" in feature_df.columns:
+        confirmed = feature_df.get("is_confirmed_starter")
+        projected = feature_df.get("is_projected_starter")
+        if confirmed is not None:
+            confirmed_bool = confirmed.fillna(False).astype(bool)
+        else:
+            confirmed_bool = pd.Series(False, index=feature_df.index)
+        if projected is not None:
+            projected_bool = projected.fillna(False).astype(bool)
+        else:
+            projected_bool = pd.Series(False, index=feature_df.index)
+        feature_df["starter_flag"] = (confirmed_bool | projected_bool).astype(int)
+        starter_flag_source = "is_confirmed_starter|is_projected_starter"
+    else:
+        feature_df["starter_flag"] = 0
+    typer.echo(f"[train] starter_flag derived from {starter_flag_source}")
+
+    if split_col:
+        ensure_columns(feature_df, [split_col])
+        split_series = feature_df[split_col].astype(str).str.strip().str.lower()
+        mapped = split_series.map({"train": "train", "cal": "cal", "calibration": "cal", "val": "val", "valid": "val", "validation": "val"})
+        if mapped.isna().any():
+            bad = split_series[mapped.isna()].drop_duplicates().tolist()
+            raise ValueError(f"Unsupported values found in --split-col '{split_col}': {bad[:10]}")
+        feature_df = feature_df.copy()
+        feature_df[split_col] = mapped.astype("string")
+        if "game_id" in feature_df.columns:
+            game_split_counts = feature_df.groupby("game_id")[split_col].nunique(dropna=False)
+            if (game_split_counts > 1).any():
+                bad_games = game_split_counts[game_split_counts > 1].index.astype(str).tolist()
+                raise ValueError(
+                    "Explicit split column assigns the same game_id to multiple splits (sample): "
+                    + ", ".join(bad_games[:10])
+                )
+        raw_train = feature_df[feature_df[split_col] == "train"].copy()
+        raw_cal = feature_df[feature_df[split_col] == "cal"].copy()
+        raw_val = feature_df[feature_df[split_col] == "val"].copy()
+        missing_splits = [name for name, frame in (("train", raw_train), ("cal", raw_cal), ("val", raw_val)) if frame.empty]
+        if missing_splits:
+            raise ValueError(
+                f"Explicit split column '{split_col}' produced empty split(s): {', '.join(missing_splits)}. "
+                "Adjust split cutoffs and ensure snapshot coverage."
+            )
+        train_df = _filter_out_players(raw_train)
+        cal_df = _filter_out_players(raw_cal)
+        val_df = _filter_out_players(raw_val)
+    else:
+        train_df = _filter_out_players(train_window.slice(feature_df))
+        cal_df = _filter_out_players(cal_window.slice(feature_df))
+        val_df = _filter_out_players(val_window.slice(feature_df))
     for frame in (train_df, cal_df, val_df):
         frame["plays_target"] = (frame[target_col] > 0).astype(int)
 
@@ -1497,8 +1660,13 @@ def main(
     val_eval["p90"] = val_eval["minutes_p90"]
     val_eval["p50"] = val_eval["minutes_p50"]
 
-    val_unique = deduplicate_latest(val_eval, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
+    dedup_key_cols = list(KEY_COLUMNS)
+    if "horizon_min" in val_eval.columns:
+        dedup_key_cols.append("horizon_min")
+    val_unique = deduplicate_latest(val_eval, key_cols=dedup_key_cols, order_cols=["feature_as_of_ts"])
     join_key = ["game_id", "player_id", "tip_ts"]
+    if "horizon_min" in val_unique.columns:
+        join_key.append("horizon_min")
     ensure_columns(val_unique, join_key)
     duplicate_count = int(val_unique.duplicated(join_key).sum())
     if duplicate_count:
@@ -1528,6 +1696,20 @@ def main(
     # "if active" distribution only.
     val_mae = float(mean_absolute_error(y_val_unique, val_unique["p50"]))
     val_mae_raw = float(mean_absolute_error(y_val_unique, val_unique["p50_raw"]))
+    val_mae_by_horizon: dict[str, float] | None = None
+    val_rows_by_horizon: dict[str, int] | None = None
+    if "horizon_min" in val_unique.columns:
+        val_mae_by_horizon = {}
+        val_rows_by_horizon = {}
+        for horizon, group in val_unique.groupby("horizon_min", dropna=False):
+            horizon_key = "__missing__" if pd.isna(horizon) else str(int(horizon))
+            horizon_y = pd.to_numeric(group[target_col], errors="coerce")
+            horizon_pred = pd.to_numeric(group["p50"], errors="coerce")
+            mask = horizon_y.notna() & horizon_pred.notna()
+            if int(mask.sum()) == 0:
+                continue
+            val_mae_by_horizon[horizon_key] = float(mean_absolute_error(horizon_y[mask], horizon_pred[mask]))
+            val_rows_by_horizon[horizon_key] = int(len(group))
     val_mae_buckets = compute_mae_by_actual_minutes_bucket(
         y_val_unique.to_numpy(dtype=float), val_unique["p50"].to_numpy(dtype=float)
     )
@@ -1680,6 +1862,8 @@ def main(
         "val_rows_unique": len(val_unique),
         "val_mae_p50": val_mae,
         "val_mae_p50_raw": val_mae_raw,
+        "val_mae_by_horizon_min": val_mae_by_horizon,
+        "val_rows_by_horizon_min": val_rows_by_horizon,
         "val_p10_raw_coverage": val_p10_raw,
         "val_p90_raw_coverage": val_p90_raw,
         "val_p10_coverage": val_p10_cov,
@@ -1732,6 +1916,17 @@ def main(
         "cal": cal_window.to_metadata(),
         "val": val_window.to_metadata(),
     }
+    if split_col and "tip_ts" in feature_df.columns:
+        def _tip_window(frame: pd.DataFrame) -> dict[str, str | None]:
+            tips = pd.to_datetime(frame.get("tip_ts"), utc=True, errors="coerce").dropna()
+            if tips.empty:
+                return {"start": None, "end": None}
+            return {
+                "start": tips.min().isoformat().replace("+00:00", "Z"),
+                "end": tips.max().isoformat().replace("+00:00", "Z"),
+            }
+
+        windows_meta = {"train": _tip_window(train_df), "cal": _tip_window(cal_df), "val": _tip_window(val_df)}
 
     write_json(run_dir / "metrics.json", metrics)
     write_json(
@@ -1768,7 +1963,7 @@ def main(
     # Auto-register model in registry
     try:
         manifest = load_manifest()
-        version = register_model(
+        register_model(
             manifest,
             model_name="minutes_v1_lgbm",
             version=run_id,
@@ -1790,6 +1985,17 @@ def main(
         typer.echo(f"[registry] Registered minutes_v1_lgbm v{run_id} (stage=dev)")
     except Exception as e:
         typer.echo(f"[registry] Warning: Failed to register model: {e}", err=True)
+
+    # Log to MLFlow
+    _log_to_mlflow(
+        run_id=run_id,
+        params=params,
+        metrics=metrics,
+        quantiles=quantiles,
+        feature_columns=feature_columns,
+        run_dir=run_dir,
+        windows_meta=windows_meta,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,0 +1,11 @@
+{
+  "mode": "dual",
+  "artifact_root": "artifacts/minutes_lgbm",
+  "early_run_id": "minutes_early_run_id_here",
+  "late_run_id": "minutes_late_run_id_here",
+  "late_threshold_min": 60,
+  "blend_band_min": 30,
+  "reconcile_team_minutes": "p50_and_tails",
+  "enable_upside_adjustment": true
+}
+

@@ -23,6 +23,8 @@ EXCLUDED_FEATURE_COLUMNS = {
     "game_date",
     "tip_ts",
     "feature_as_of_ts",
+    # Horizonized training metadata (kept for evaluation, not as a model feature).
+    "horizon_min",
 }
 
 # The legacy pipeline only exposes numeric features, so the default categorical list

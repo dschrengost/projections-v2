@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Any
 
+import numpy as np
 import pandas as pd
 import typer
 
@@ -28,7 +29,28 @@ from projections.minutes_v1.schemas import (
 app = typer.Typer(help=__doc__)
 LABELS_FILENAME = "labels.parquet"
 LEGACY_LABEL_FILENAME = "boxscore_labels.parquet"
+RATES_FILENAME = "rates_training_base.parquet"
 REQUIRED_FEATURE_COLUMNS = {"player_id", "game_date", "team_id", "starter_flag", "status"}
+
+# Enrichment columns from rates_training_base
+ENRICHMENT_COLUMNS_VACANCY = [
+    "vac_min_szn",
+    "vac_min_guard_szn",
+    "vac_min_wing_szn",
+    "vac_min_big_szn",
+]
+ENRICHMENT_COLUMNS_PACE = [
+    "team_pace_szn",
+    "opp_pace_szn",
+]
+ENRICHMENT_COLUMNS_TEAM_STRENGTH = [
+    "team_off_rtg_szn",
+    "team_def_rtg_szn",
+    "opp_def_rtg_szn",
+]
+ENRICHMENT_COLUMNS = (
+    ENRICHMENT_COLUMNS_VACANCY + ENRICHMENT_COLUMNS_PACE + ENRICHMENT_COLUMNS_TEAM_STRENGTH
+)
 
 
 def _normalize_date(value: datetime) -> pd.Timestamp:
@@ -259,6 +281,90 @@ def _load_archetype_deltas(root: Path | None, season: int | str) -> pd.DataFrame
     return None
 
 
+def _load_enrichment(
+    data_root: Path,
+    season: int,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pd.DataFrame:
+    """Load enrichment features from rates_training_base for the date range."""
+    rates_root = data_root / "gold" / "rates_training_base" / f"season={season}"
+    if not rates_root.exists():
+        return pd.DataFrame()
+
+    join_keys = ["game_id", "player_id", "team_id"]
+    cols_to_load = join_keys + [c for c in ENRICHMENT_COLUMNS if c not in join_keys]
+
+    frames: list[pd.DataFrame] = []
+    for day in iter_days(start, end):
+        date_dir = rates_root / f"game_date={day.date().isoformat()}"
+        pq_path = date_dir / RATES_FILENAME
+        if pq_path.exists():
+            try:
+                df = pd.read_parquet(pq_path, columns=cols_to_load)
+                frames.append(df)
+            except Exception:  # noqa: BLE001
+                continue
+
+    if not frames:
+        return pd.DataFrame()
+
+    combined = pd.concat(frames, ignore_index=True)
+    # Normalize join keys
+    for col in join_keys:
+        if col in combined.columns:
+            combined[col] = pd.to_numeric(combined[col], errors="coerce").astype("Int64")
+    # Deduplicate by join keys
+    combined = combined.dropna(subset=join_keys).drop_duplicates(subset=join_keys, keep="last")
+    return combined.reset_index(drop=True)
+
+
+def _apply_enrichment(
+    features: pd.DataFrame,
+    enrichment: pd.DataFrame,
+) -> pd.DataFrame:
+    """Merge enrichment features and fill missing values."""
+    if enrichment.empty:
+        # Add empty enrichment columns with appropriate fill values
+        for col in ENRICHMENT_COLUMNS_VACANCY:
+            features[col] = 0.0
+        for col in ENRICHMENT_COLUMNS_PACE + ENRICHMENT_COLUMNS_TEAM_STRENGTH:
+            features[col] = np.nan
+        return features
+
+    join_keys = ["game_id", "player_id", "team_id"]
+    # Ensure join keys are compatible types
+    for col in join_keys:
+        if col in features.columns:
+            features[col] = pd.to_numeric(features[col], errors="coerce").astype("Int64")
+
+    # Merge enrichment
+    enriched = features.merge(
+        enrichment,
+        on=join_keys,
+        how="left",
+        suffixes=("", "_enrich"),
+    )
+
+    # Fill missing values
+    for col in ENRICHMENT_COLUMNS_VACANCY:
+        if col in enriched.columns:
+            enriched[col] = enriched[col].fillna(0.0)
+        else:
+            enriched[col] = 0.0
+
+    for col in ENRICHMENT_COLUMNS_PACE + ENRICHMENT_COLUMNS_TEAM_STRENGTH:
+        if col in enriched.columns:
+            # Fill with global mean (or reasonable default)
+            mean_val = enriched[col].mean(skipna=True)
+            fill_val = mean_val if pd.notna(mean_val) else 100.0
+            enriched[col] = enriched[col].fillna(fill_val)
+        else:
+            enriched[col] = 100.0
+
+    return enriched
+
+
 @app.command()
 def main(
     start_date: datetime = typer.Option(
@@ -377,6 +483,18 @@ def main(
         # Merge from labels as last resort.
         label_flags = labels[["game_id", "player_id", "starter_flag"]].drop_duplicates()
         features = features.merge(label_flags, on=["game_id", "player_id"], how="left")
+
+    # Enrich with vacancy, pace, and team context features from rates_training_base
+    enrichment = _load_enrichment(data_root, season_value, start_day, end_day)
+    if not enrichment.empty:
+        typer.echo(f"[features] enriching with {len(enrichment):,} rates_training_base rows")
+        pre_rows = len(features)
+        features = _apply_enrichment(features, enrichment)
+        matched = features[ENRICHMENT_COLUMNS[0]].notna().sum()
+        typer.echo(f"[features] enrichment coverage: {matched}/{pre_rows} rows ({matched/pre_rows:.1%})")
+    else:
+        typer.echo("[features] warning: no enrichment data found for season={season_value}")
+        features = _apply_enrichment(features, enrichment)  # Adds columns with default fills
 
     missing_required = REQUIRED_FEATURE_COLUMNS - set(features.columns)
     if missing_required:

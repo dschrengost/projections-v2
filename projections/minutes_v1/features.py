@@ -20,6 +20,7 @@ from projections.features import return_ramp as return_ramp_features
 from projections.features import role as role_features
 from projections.features import rest as rest_features
 from projections.features import trend as trend_features
+from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.minutes_v1.pos import canonical_pos_bucket_series
 
 
@@ -136,7 +137,47 @@ class MinutesFeatureBuilder:
         return depth_features.attach_depth_features(df, self.roster_nightly)
 
     def _player_history_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        working = df.sort_values(["player_id", "game_date"]).copy()
+        working = df.copy()
+        if set(KEY_COLUMNS).issubset(working.columns) and working.duplicated(subset=list(KEY_COLUMNS)).any():
+            tip_ts = (
+                pd.to_datetime(working["tip_ts"], utc=True, errors="coerce")
+                if "tip_ts" in working.columns
+                else pd.Series(pd.NaT, index=working.index)
+            )
+            injury_ts = (
+                pd.to_datetime(working["injury_as_of_ts"], utc=True, errors="coerce")
+                if "injury_as_of_ts" in working.columns
+                else pd.Series(pd.NaT, index=working.index)
+            )
+            odds_ts = (
+                pd.to_datetime(working["odds_as_of_ts"], utc=True, errors="coerce")
+                if "odds_as_of_ts" in working.columns
+                else pd.Series(pd.NaT, index=working.index)
+            )
+            roster_ts = (
+                pd.to_datetime(working["roster_as_of_ts"], utc=True, errors="coerce")
+                if "roster_as_of_ts" in working.columns
+                else pd.Series(pd.NaT, index=working.index)
+            )
+
+            asof_candidates = pd.concat([injury_ts, odds_ts, roster_ts], axis=1)
+            working["_history_feature_as_of_ts"] = asof_candidates.max(axis=1)
+            working["_history_feature_as_of_ts"] = working["_history_feature_as_of_ts"].fillna(tip_ts)
+            too_late = (
+                working["_history_feature_as_of_ts"].notna()
+                & tip_ts.notna()
+                & (working["_history_feature_as_of_ts"] > tip_ts)
+            )
+            if too_late.any():
+                working.loc[too_late, "_history_feature_as_of_ts"] = tip_ts[too_late]
+            working = deduplicate_latest(
+                working,
+                key_cols=KEY_COLUMNS,
+                order_cols=["_history_feature_as_of_ts"],
+            )
+            working.drop(columns=["_history_feature_as_of_ts"], inplace=True)
+
+        working = working.sort_values(["player_id", "game_date"]).copy()
         working = trend_features.attach_trend_features(working)
         working = role_features.attach_role_features(working)
         working = rest_features.attach_rest_features(working)
@@ -422,7 +463,7 @@ class MinutesFeatureBuilder:
         if (
             getattr(self, "roster_nightly", None) is not None
             and not self.roster_nightly.empty
-            and "listed_pos" in self.roster_nightly.columns
+            and {"game_id", "player_id", "listed_pos"}.issubset(self.roster_nightly.columns)
         ):
             roster = self.roster_nightly.copy()
             roster = roster.dropna(subset=["game_id", "player_id", "listed_pos"])

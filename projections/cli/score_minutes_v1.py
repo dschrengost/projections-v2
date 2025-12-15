@@ -22,6 +22,8 @@ from projections.labels import derive_starter_flag_labels
 from projections.minutes_v1 import modeling
 from projections.minutes_v1.config import load_scoring_config
 from projections.minutes_v1.production import DEFAULT_PRODUCTION_ROOT, load_production_minutes_bundle
+from projections.minutes_v1.horizons import add_odds_missing_indicator, add_time_to_tip_features
+from projections.minutes_v1.routing import late_model_weight, minutes_model_used_label
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.minutes_v1.constants import AvailabilityStatus
 from projections.minutes_v1.logs import prediction_logs_base
@@ -215,6 +217,81 @@ def _resolve_bundle_artifacts(
     model_meta = bundle.get("meta", {})
     run_id = bundle.get("run_id") or resolved.name
     return bundle, resolved, model_meta, run_id
+
+
+def _resolve_model_artifacts(
+    bundle_dir: Path | None,
+    config_path: Path,
+    *,
+    override_run_id: str | None,
+    artifact_root: Path = DEFAULT_PRODUCTION_ROOT,
+) -> dict[str, Any]:
+    """Resolve either a single bundle or a dual (early/late) bundle selection."""
+
+    if override_run_id is not None or bundle_dir is not None:
+        bundle, resolved_bundle_dir, model_meta, model_run_id = _resolve_bundle_artifacts(
+            bundle_dir,
+            config_path,
+            override_run_id=override_run_id,
+            artifact_root=artifact_root,
+        )
+        return {
+            "mode": "single",
+            "bundle": bundle,
+            "bundle_dir": resolved_bundle_dir,
+            "model_meta": model_meta,
+            "model_run_id": model_run_id,
+        }
+
+    production = load_production_minutes_bundle(config_path=config_path)
+    if production.get("mode") == "dual":
+        early_bundle = _ensure_bundle_defaults(dict(production["early_bundle"]))
+        late_bundle = _ensure_bundle_defaults(dict(production["late_bundle"]))
+        early_dir = Path(str(early_bundle.get("run_dir", ""))).expanduser()
+        late_dir = Path(str(late_bundle.get("run_dir", ""))).expanduser()
+        early_run_id = str(early_bundle.get("run_id") or production.get("early_run_id") or early_dir.name)
+        late_run_id = str(late_bundle.get("run_id") or production.get("late_run_id") or late_dir.name)
+        late_threshold_min = float(production.get("late_threshold_min", 60.0))
+        blend_band_min = float(production.get("blend_band_min", 30.0))
+        model_meta = {
+            "mode": "dual",
+            "early_run_id": early_run_id,
+            "late_run_id": late_run_id,
+            "early_bundle_dir": str(early_dir),
+            "late_bundle_dir": str(late_dir),
+            "early_meta": early_bundle.get("meta", {}),
+            "late_meta": late_bundle.get("meta", {}),
+            "late_threshold_min": late_threshold_min,
+            "blend_band_min": blend_band_min,
+        }
+        return {
+            "mode": "dual",
+            "early_bundle": early_bundle,
+            "late_bundle": late_bundle,
+            "early_bundle_dir": early_dir,
+            "late_bundle_dir": late_dir,
+            "model_meta": model_meta,
+            "model_run_id": f"dual:{early_run_id}+{late_run_id}",
+            "late_threshold_min": late_threshold_min,
+            "blend_band_min": blend_band_min,
+            "early_run_id": early_run_id,
+            "late_run_id": late_run_id,
+        }
+
+    bundle = _ensure_bundle_defaults(dict(production))
+    run_dir_str = bundle.get("run_dir")
+    if not run_dir_str:
+        raise RuntimeError("Production bundle missing run_dir metadata.")
+    resolved = Path(str(run_dir_str)).expanduser()
+    model_meta = bundle.get("meta", {})
+    model_run_id = str(bundle.get("run_id") or resolved.name)
+    return {
+        "mode": "single",
+        "bundle": bundle,
+        "bundle_dir": resolved,
+        "model_meta": model_meta,
+        "model_run_id": model_run_id,
+    }
 
 
 def _read_parquet_source(path: Path) -> pd.DataFrame:
@@ -453,6 +530,8 @@ def _prepare_features(df: pd.DataFrame, *, mode: Mode = "historical") -> pd.Data
     except ValueError:
         return pd.DataFrame()
     working = deduplicate_latest(working, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
+    working = add_time_to_tip_features(working)
+    working = add_odds_missing_indicator(working)
     return working.reset_index(drop=True)
 
 
@@ -588,6 +667,74 @@ def _score_rows(
         typer.echo("[minutes] warning: is_starter not found in features; defaulting to 0", err=True)
     working = _attach_unconditional_minutes(working)
     return working
+
+
+def _score_rows_dual(
+    df: pd.DataFrame,
+    *,
+    early_bundle: dict,
+    late_bundle: dict,
+    late_threshold_min: float,
+    blend_band_min: float,
+    enable_play_prob_head: bool = True,
+    enable_play_prob_mixing: bool = False,
+    promotion_ctx: PromotionPriorContext | None = None,
+    promotion_debug: bool = False,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+    if "time_to_tip_min" not in df.columns:
+        raise RuntimeError("Dual scoring requires time_to_tip_min column (compute from tip_ts/feature_as_of_ts).")
+
+    weights = late_model_weight(
+        df["time_to_tip_min"],
+        late_threshold_min=late_threshold_min,
+        blend_band_min=blend_band_min,
+    )
+    used = minutes_model_used_label(weights)
+
+    early_scored = _score_rows(
+        df,
+        early_bundle,
+        enable_play_prob_head=enable_play_prob_head,
+        enable_play_prob_mixing=enable_play_prob_mixing,
+        promotion_ctx=promotion_ctx,
+        promotion_debug=promotion_debug,
+    )
+    late_scored = _score_rows(
+        df,
+        late_bundle,
+        enable_play_prob_head=enable_play_prob_head,
+        enable_play_prob_mixing=enable_play_prob_mixing,
+        promotion_ctx=promotion_ctx,
+        promotion_debug=promotion_debug,
+    )
+
+    result = early_scored.copy()
+    late_mask = used == "late"
+    blend_mask = used == "blend"
+    if late_mask.any():
+        result.loc[late_mask] = late_scored.loc[late_mask]
+    if blend_mask.any():
+        # Base non-minute columns on late model (more relevant near tip), then blend key outputs.
+        result.loc[blend_mask] = late_scored.loc[blend_mask]
+        w = weights.loc[blend_mask].astype(float)
+        for col in ("minutes_p10", "minutes_p50", "minutes_p90", "play_prob"):
+            if col in result.columns and col in early_scored.columns and col in late_scored.columns:
+                result.loc[blend_mask, col] = (1.0 - w) * early_scored.loc[blend_mask, col] + w * late_scored.loc[blend_mask, col]
+        # Keep conditional/alias columns consistent with blended minutes quantiles.
+        for base in ("minutes_p10", "minutes_p50", "minutes_p90"):
+            cond_col = f"{base}_cond"
+            if cond_col in result.columns and base in result.columns:
+                result.loc[blend_mask, cond_col] = result.loc[blend_mask, base]
+        alias_map = {"p10_cond": "minutes_p10", "p50_cond": "minutes_p50", "p90_cond": "minutes_p90"}
+        for alias, src in alias_map.items():
+            if alias in result.columns and src in result.columns:
+                result.loc[blend_mask, alias] = result.loc[blend_mask, src]
+
+    result["minutes_model_used"] = used
+    result["minutes_model_late_weight"] = weights.astype(float)
+    return result
 
 
 def _annotate_metadata(
@@ -920,7 +1067,7 @@ def score_minutes_range_to_parquet(
         config_path=promotion_config,
     )
 
-    bundle, resolved_bundle_dir, model_meta, model_run_id = _resolve_bundle_artifacts(
+    model = _resolve_model_artifacts(
         bundle_dir,
         bundle_config,
         override_run_id=override_run_id,
@@ -946,14 +1093,31 @@ def score_minutes_range_to_parquet(
     if limit_rows is not None:
         prepared = prepared.head(limit_rows).copy()
     play_prob_enabled = enable_play_prob_head and not disable_play_prob
-    scored = _score_rows(
-        prepared,
-        bundle,
-        enable_play_prob_head=play_prob_enabled,
-        enable_play_prob_mixing=enable_play_prob_mixing,
-        promotion_ctx=promotion_ctx,
-        promotion_debug=promotion_prior_debug,
-    )
+    if model["mode"] == "dual":
+        scored = _score_rows_dual(
+            prepared,
+            early_bundle=model["early_bundle"],
+            late_bundle=model["late_bundle"],
+            late_threshold_min=model["late_threshold_min"],
+            blend_band_min=model["blend_band_min"],
+            enable_play_prob_head=play_prob_enabled,
+            enable_play_prob_mixing=enable_play_prob_mixing,
+            promotion_ctx=promotion_ctx,
+            promotion_debug=promotion_prior_debug,
+        )
+        resolved_bundle_dir = Path(model["late_bundle_dir"])
+    else:
+        scored = _score_rows(
+            prepared,
+            model["bundle"],
+            enable_play_prob_head=play_prob_enabled,
+            enable_play_prob_mixing=enable_play_prob_mixing,
+            promotion_ctx=promotion_ctx,
+            promotion_debug=promotion_prior_debug,
+        )
+        resolved_bundle_dir = Path(model["bundle_dir"])
+    model_meta = model["model_meta"]
+    model_run_id = model["model_run_id"]
     scored["game_date"] = pd.to_datetime(scored["game_date"]).dt.date
 
     should_debug = debug_describe if debug_describe is not None else (start_day == end_day)
@@ -1258,7 +1422,7 @@ def main(
         raise typer.BadParameter("--end-date cannot be before --date")
 
     try:
-        bundle, resolved_bundle_dir, model_meta, model_run_id = _resolve_bundle_artifacts(
+        model = _resolve_model_artifacts(
             bundle_dir,
             bundle_config,
             override_run_id=override_run_id,
@@ -1336,14 +1500,31 @@ def main(
         raise typer.Exit(code=1)
     if limit_rows is not None:
         prepared = prepared.head(limit_rows).copy()
-    scored = _score_rows(
-        prepared,
-        bundle,
-        enable_play_prob_head=play_prob_enabled,
-        enable_play_prob_mixing=enable_play_prob_mixing,
-        promotion_ctx=promotion_ctx,
-        promotion_debug=promotion_prior_debug,
-    )
+    if model["mode"] == "dual":
+        scored = _score_rows_dual(
+            prepared,
+            early_bundle=model["early_bundle"],
+            late_bundle=model["late_bundle"],
+            late_threshold_min=model["late_threshold_min"],
+            blend_band_min=model["blend_band_min"],
+            enable_play_prob_head=play_prob_enabled,
+            enable_play_prob_mixing=enable_play_prob_mixing,
+            promotion_ctx=promotion_ctx,
+            promotion_debug=promotion_prior_debug,
+        )
+        resolved_bundle_dir = Path(model["late_bundle_dir"])
+    else:
+        scored = _score_rows(
+            prepared,
+            model["bundle"],
+            enable_play_prob_head=play_prob_enabled,
+            enable_play_prob_mixing=enable_play_prob_mixing,
+            promotion_ctx=promotion_ctx,
+            promotion_debug=promotion_prior_debug,
+        )
+        resolved_bundle_dir = Path(model["bundle_dir"])
+    model_meta = model["model_meta"]
+    model_run_id = model["model_run_id"]
     scored["game_date"] = pd.to_datetime(scored["game_date"]).dt.date
     seasons: set[int] = set()
     if "season" in scored.columns:

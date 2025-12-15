@@ -50,6 +50,50 @@ def prepare_injuries_snapshot(injuries_snapshot: pd.DataFrame) -> pd.DataFrame:
     return prepared
 
 
+def _select_latest_injury_snapshot(
+    base_df: pd.DataFrame,
+    injuries_snapshot: pd.DataFrame,
+    *,
+    tip_col: str = "tip_ts",
+    as_of_col: str = "as_of_ts",
+) -> pd.DataFrame:
+    """Return at most one injury row per (game_id, player_id).
+
+    The silver injuries snapshot tables can contain multiple rows per
+    (game_id, player_id) (e.g. periodic refreshes, legacy partition overlap).
+    If we merge those directly we duplicate player-game rows and corrupt any
+    shift-based history features.
+    """
+
+    if injuries_snapshot.empty:
+        return injuries_snapshot.copy()
+
+    working = ensure_as_of_column(injuries_snapshot.copy(), column=as_of_col)
+    working[as_of_col] = pd.to_datetime(working[as_of_col], utc=True, errors="coerce")
+    working = working.dropna(subset=["game_id", "player_id"])
+
+    tip_lookup: pd.DataFrame | None = None
+    if tip_col in base_df.columns and "game_id" in base_df.columns:
+        tip_lookup = base_df.loc[:, ["game_id", tip_col]].drop_duplicates().copy()
+        tip_lookup[tip_col] = pd.to_datetime(tip_lookup[tip_col], utc=True, errors="coerce")
+
+    group_cols = ["game_id", "player_id"]
+    if tip_lookup is not None and not tip_lookup.empty:
+        working = working.merge(tip_lookup, on="game_id", how="left")
+        valid = working[as_of_col].notna() & working[tip_col].notna() & (working[as_of_col] <= working[tip_col])
+        eligible = working.loc[valid].copy()
+        if eligible.empty:
+            return working.iloc[0:0].drop(columns=[tip_col], errors="ignore")
+        idx = eligible.groupby(group_cols)[as_of_col].idxmax()
+        return eligible.loc[idx].drop(columns=[tip_col], errors="ignore").reset_index(drop=True)
+
+    eligible = working.dropna(subset=[as_of_col])
+    if eligible.empty:
+        return working.iloc[0:0].copy()
+    idx = eligible.groupby(group_cols)[as_of_col].idxmax()
+    return eligible.loc[idx].reset_index(drop=True)
+
+
 def attach_availability_features(
     base_df: pd.DataFrame,
     injuries_snapshot: pd.DataFrame | None = None,
@@ -78,6 +122,8 @@ def attach_availability_features(
         raise ValueError(
             f"Injuries snapshot missing required columns: {', '.join(sorted(missing_cols))}"
         )
+
+    prepared_injuries = _select_latest_injury_snapshot(base_df, prepared_injuries)
 
     available_cols = [col for col in _INJURY_COLUMNS if col in prepared_injuries.columns]
     optional_cols = [col for col in _OPTIONAL_INJURY_COLUMNS if col in prepared_injuries.columns]

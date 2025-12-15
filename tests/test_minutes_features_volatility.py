@@ -79,3 +79,24 @@ def test_game_env_scores_from_spread() -> None:
     assert enriched.loc[0, "blowout_risk_score"] > 0.0
     assert 0.0 <= enriched.loc[0, "close_game_score"] <= 1.0
     assert enriched.loc[1, ["blowout_risk_score", "close_game_score"]].eq(0.5).all()
+
+
+def test_game_env_features_dedupes_duplicate_game_ids() -> None:
+    base = pd.DataFrame(
+        {
+            "game_id": [1, 2],
+            "tip_ts": ["2025-01-01T02:00:00Z", "2025-01-01T02:00:00Z"],
+        }
+    )
+    odds = pd.DataFrame(
+        {
+            "game_id": [1, 1, 2],
+            "home_line": [-5.0, -6.0, 2.0],
+            "total": [220, 221, 215],
+            "as_of_ts": ["2025-01-01T00:00:00Z", "2025-01-01T01:00:00Z", "2025-01-01T00:30:00Z"],
+        }
+    )
+
+    enriched = game_env_features.attach_game_environment_features(base, odds)
+    assert len(enriched) == len(base)
+    assert enriched.loc[enriched["game_id"] == 1, "spread_home"].iloc[0] == -6.0

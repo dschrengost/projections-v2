@@ -11,6 +11,7 @@ import typer
 
 from projections import paths
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
+from projections.minutes_v1.horizons import add_odds_missing_indicator, add_time_to_tip_features
 from projections.minutes_v1.production import load_production_minutes_bundle
 from projections.models import minutes_lgbm as ml
 
@@ -36,7 +37,11 @@ def main(
     features_root: Path = typer.Option(paths.data_path("gold", "features_minutes_v1"), help="Root of gold features."),
 ) -> None:
     features_root = features_root.expanduser().resolve()
-    bundle = load_production_minutes_bundle()
+    loaded = load_production_minutes_bundle()
+    if loaded.get("mode") == "dual":
+        bundle = dict(loaded.get("late_bundle") or {})
+    else:
+        bundle = dict(loaded)
     run_dir = bundle.get("run_dir")
     run_id = bundle.get("run_id")
     feature_cols = bundle["feature_columns"]
@@ -46,6 +51,8 @@ def main(
     day_df = _load_features(features_root, date)
     filtered = ml._filter_out_players(day_df)
     deduped = deduplicate_latest(filtered, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
+    deduped = add_time_to_tip_features(deduped)
+    deduped = add_odds_missing_indicator(deduped)
     preds = ml.modeling.predict_quantiles(bundle["quantiles"], deduped[feature_cols])
     p10_raw = np.minimum(preds[0.1], preds[0.5])
     p90_raw = np.maximum(preds[0.9], preds[0.5])

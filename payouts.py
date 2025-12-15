@@ -1,4 +1,12 @@
-"""Contest payout helpers for lineup scoring."""
+"""OBSOLETE: This file is deprecated and should not be used.
+
+Use projections/contest_sim/payouts.py instead, which has:
+- Positional rate tracking (top 1%, 5%, 10%)
+- Proper module structure
+
+This file remains for reference only. The import `from .scoring_models`
+is broken since there is no scoring_models.py in the project root.
+"""
 
 from __future__ import annotations
 

@@ -237,7 +237,11 @@ def main(
         feature_df = derive_starter_flag_labels(feature_df, output_col="starter_flag")
     status_col = _resolve_status_column(feature_df, override=status_column)
 
-    bundle = load_production_minutes_bundle()
+    loaded = load_production_minutes_bundle()
+    if loaded.get("mode") == "dual":
+        bundle = dict(loaded.get("late_bundle") or {})
+    else:
+        bundle = dict(loaded)
     scored = score_with_bundle(feature_df, bundle)
     mask = _qish_mask(scored[status_col])
     q_players = scored.loc[mask].copy()

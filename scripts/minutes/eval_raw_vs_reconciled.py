@@ -16,7 +16,6 @@ Usage:
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +32,7 @@ from projections.minutes_v1.reconcile import (
     reconcile_minutes_p50_all,
 )
 from projections.cli.score_minutes_v1 import _load_bundle, _score_rows
+from projections.minutes_v1.production import resolve_production_run_dir
 
 console = Console()
 app = typer.Typer(help=__doc__)
@@ -224,15 +224,7 @@ def main(
     
     # Load model bundle
     if bundle_dir is None:
-        # Try to find production bundle from config
-        current_run_path = Path("config/minutes_current_run.json")
-        if current_run_path.exists():
-            with current_run_path.open() as f:
-                run_info = json.load(f)
-            bundle_dir = Path(run_info.get("artifact_root", "artifacts/minutes_lgbm")) / run_info["run_id"]
-        else:
-            console.print("[red]No bundle specified and no production config found.[/red]")
-            raise typer.Exit(1)
+        bundle_dir, _ = resolve_production_run_dir()
     
     console.print(f"[dim]Loading bundle from {bundle_dir}[/dim]")
     bundle = _load_bundle(bundle_dir)

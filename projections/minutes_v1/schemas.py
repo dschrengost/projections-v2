@@ -567,6 +567,16 @@ FEATURES_MINUTES_V1_SCHEMA = TableSchema(
         "arch_missing_same_pos_count",
         "arch_missing_total_count",
         "feature_as_of_ts",
+        # Enrichment columns from rates_training_base
+        "vac_min_szn",
+        "vac_min_guard_szn",
+        "vac_min_wing_szn",
+        "vac_min_big_szn",
+        "team_pace_szn",
+        "opp_pace_szn",
+        "team_off_rtg_szn",
+        "team_def_rtg_szn",
+        "opp_def_rtg_szn",
     ),
     pandas_dtypes={
         "game_id": INT_DTYPE,
@@ -643,6 +653,16 @@ FEATURES_MINUTES_V1_SCHEMA = TableSchema(
         "arch_missing_same_pos_count": INT_DTYPE,
         "arch_missing_total_count": INT_DTYPE,
         "feature_as_of_ts": UTC_TS,
+        # Enrichment columns
+        "vac_min_szn": FLOAT_DTYPE,
+        "vac_min_guard_szn": FLOAT_DTYPE,
+        "vac_min_wing_szn": FLOAT_DTYPE,
+        "vac_min_big_szn": FLOAT_DTYPE,
+        "team_pace_szn": FLOAT_DTYPE,
+        "opp_pace_szn": FLOAT_DTYPE,
+        "team_off_rtg_szn": FLOAT_DTYPE,
+        "team_def_rtg_szn": FLOAT_DTYPE,
+        "opp_def_rtg_szn": FLOAT_DTYPE,
     },
     primary_key=("game_id", "player_id", "team_id"),
     defaults={
@@ -656,6 +676,16 @@ FEATURES_MINUTES_V1_SCHEMA = TableSchema(
         "arch_missing_total_count": 0,
         "depth_same_pos_active": 0,
         "starter_flag": 0,
+        # Enrichment defaults
+        "vac_min_szn": 0.0,
+        "vac_min_guard_szn": 0.0,
+        "vac_min_wing_szn": 0.0,
+        "vac_min_big_szn": 0.0,
+        "team_pace_szn": pd.NA,
+        "opp_pace_szn": pd.NA,
+        "team_off_rtg_szn": pd.NA,
+        "team_def_rtg_szn": pd.NA,
+        "opp_def_rtg_szn": pd.NA,
     },
 )
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from projections.features import availability as availability_features
 from projections.minutes_v1 import ensure_as_of_column, freeze_boxscore_labels, latest_pre_tip_snapshot
 from projections.minutes_v1.constants import AvailabilityStatus, STATUS_PRIORS
 from projections.minutes_v1.features import MinutesFeatureBuilder
@@ -153,3 +154,106 @@ def test_minutes_feature_builder_produces_core_columns():
     # Second game should have a recent start pct of 1.0 after two consecutive starts.
     assert features.loc[features["game_id"] == 102, "recent_start_pct_10"].iloc[0] == pytest.approx(1.0)
     assert "starter_prev_game_asof" in features.columns
+
+
+def test_attach_availability_features_dedupes_duplicate_snapshots() -> None:
+    base = pd.DataFrame(
+        {
+            "game_id": [101],
+            "player_id": [900],
+            "tip_ts": ["2024-10-21T23:00:00Z"],
+        }
+    )
+    injuries = pd.DataFrame(
+        {
+            "game_id": [101, 101],
+            "player_id": [900, 900],
+            "status": ["Q", "OUT"],
+            "restriction_flag": [False, False],
+            "ramp_flag": [False, False],
+            "games_since_return": [pd.NA, pd.NA],
+            "days_since_return": [pd.NA, pd.NA],
+            "as_of_ts": ["2024-10-21T20:00:00Z", "2024-10-21T22:30:00Z"],
+        }
+    )
+
+    enriched = availability_features.attach_availability_features(base, injuries_snapshot=injuries)
+    assert len(enriched) == len(base)
+    assert enriched.loc[0, "status"] == AvailabilityStatus.OUT
+    assert enriched.loc[0, "prior_play_prob"] == STATUS_PRIORS[AvailabilityStatus.OUT]
+    assert enriched.loc[0, "injury_as_of_ts"] == pd.Timestamp("2024-10-21T22:30:00Z")
+
+
+def test_minutes_feature_builder_history_not_corrupted_by_duplicate_odds() -> None:
+    schedule = pd.DataFrame(
+        {
+            "game_id": [101, 102],
+            "season": ["2024-25", "2024-25"],
+            "game_date": ["2024-10-21", "2024-10-23"],
+            "tip_ts": ["2024-10-21T23:00:00Z", "2024-10-23T00:00:00Z"],
+            "home_team_id": [1, 2],
+            "away_team_id": [2, 1],
+        }
+    )
+    injuries = pd.DataFrame(
+        {
+            "game_id": [101, 102],
+            "player_id": [900, 900],
+            "status": ["Probable", "Available"],
+            "restriction_flag": [False, False],
+            "ramp_flag": [False, False],
+            "games_since_return": [3, 4],
+            "days_since_return": [7, 9],
+            "as_of_ts": ["2024-10-21T20:00:00Z", "2024-10-22T20:00:00Z"],
+        }
+    )
+    odds = pd.DataFrame(
+        {
+            "game_id": [101, 101, 102, 102],
+            "home_line": [-5.5, -5.5, 4.0, 4.0],
+            "total": [225.5, 225.5, 219.0, 219.0],
+            "as_of_ts": [
+                "2024-10-21T21:00:00Z",
+                "2024-10-21T21:00:00Z",
+                "2024-10-22T21:00:00Z",
+                "2024-10-22T21:00:00Z",
+            ],
+        }
+    )
+    roster = pd.DataFrame(
+        {
+            "team_id": [1, 1, 1, 1],
+            "game_date": ["2024-10-21", "2024-10-21", "2024-10-23", "2024-10-23"],
+            "player_id": [900, 901, 900, 902],
+            "active_flag": [True, True, True, True],
+            "listed_pos": ["PG", "SG", "PG", "PF"],
+            "as_of_ts": [
+                "2024-10-20T12:00:00Z",
+                "2024-10-20T12:00:00Z",
+                "2024-10-22T12:00:00Z",
+                "2024-10-22T12:00:00Z",
+            ],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "game_id": [101, 102],
+            "player_id": [900, 900],
+            "team_id": [1, 1],
+            "season": ["2024-25", "2024-25"],
+            "game_date": ["2024-10-21", "2024-10-23"],
+            "minutes": [32.0, 28.0],
+            "starter_flag": [1, 1],
+        }
+    )
+
+    builder = MinutesFeatureBuilder(
+        schedule=schedule,
+        injuries_snapshot=injuries,
+        odds_snapshot=odds,
+        roster_nightly=roster,
+        coach_tenure=pd.DataFrame(),
+    )
+    features = builder.build(labels)
+
+    assert features.loc[features["game_id"] == 102, "min_last1"].iloc[0] == pytest.approx(32.0)

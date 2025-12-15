@@ -86,7 +86,13 @@ SIM_COLUMNS = [
     "stl_mean",
     "blk_mean",
     "tov_mean",
-    "minutes_mean",
+    # Minutes simulation stats
+    "minutes_mean",       # model p50 (reference)
+    "minutes_sim_mean",   # cross-world average
+    "minutes_sim_std",    # cross-world std
+    "minutes_sim_p10",    # sim p10
+    "minutes_sim_p50",    # sim p50
+    "minutes_sim_p90",    # sim p90
     # Metadata
     "sim_profile",
     "n_worlds",

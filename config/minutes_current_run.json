@@ -1,6 +1,7 @@
 {
-  "bundle_dir": "artifacts/minutes_lgbm/healthy_optimal_split_20251205",
-  "run_id": "healthy_optimal_split_20251205",
+  "mode": "single",
+  "bundle_dir": "artifacts/minutes_lgbm/minutes_v1_safe_starter_20251214",
+  "run_id": "minutes_v1_safe_starter_20251214",
   "reconcile_team_minutes": "p50_and_tails",
   "enable_upside_adjustment": true
 }

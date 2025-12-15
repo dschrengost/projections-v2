@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -15,6 +14,7 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.minutes_v1.horizons import add_odds_missing_indicator, add_time_to_tip_features
 from projections.minutes_v1.production import load_production_minutes_bundle
 
 app = typer.Typer(help=__doc__)
@@ -107,10 +107,15 @@ def main(
 
     typer.echo(f"[smoke] Features written to {feature_path}")
     live_features = pd.read_parquet(feature_path)
-    bundle = load_production_minutes_bundle()
-    bundle = dict(bundle)
+    loaded = load_production_minutes_bundle()
+    if loaded.get("mode") == "dual":
+        bundle = dict(loaded.get("late_bundle") or {})
+    else:
+        bundle = dict(loaded)
     feature_columns = bundle["feature_columns"]
-    missing = [col for col in feature_columns if col not in live_features.columns]
+    enriched = add_time_to_tip_features(live_features)
+    enriched = add_odds_missing_indicator(enriched)
+    missing = [col for col in feature_columns if col not in enriched.columns]
     if missing:
         raise RuntimeError(f"Live features missing columns: {', '.join(missing)}")
 

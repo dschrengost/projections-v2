@@ -10,7 +10,7 @@ Output: $DATA_ROOT/artifacts/minutes_v1/residuals/<run_id>_minutes_residuals.jso
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -202,7 +202,11 @@ def main(
     ),
 ) -> None:
     split_norm: Split = split.lower()  # type: ignore[assignment]
-    bundle = load_production_minutes_bundle()
+    loaded = load_production_minutes_bundle()
+    if loaded.get("mode") == "dual":
+        bundle = dict(loaded.get("late_bundle") or {})
+    else:
+        bundle = dict(loaded)
     run_id = bundle.get("run_id") or bundle.get("meta", {}).get("run_id")
     if not run_id:
         run_dir = bundle.get("run_dir")

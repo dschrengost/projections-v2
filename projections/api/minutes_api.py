@@ -19,6 +19,7 @@ from projections.api.pipeline_status_api import router as pipeline_status_router
 from projections.api.evaluation_api import router as evaluation_router
 from projections.api.optimizer_api import router as optimizer_router
 from projections.api.contest_api import router as contest_router
+from projections.api.contest_sim_api import router as contest_sim_router
 
 DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
@@ -349,6 +350,7 @@ def create_app(
     app.include_router(evaluation_router, prefix="/api")
     app.include_router(optimizer_router, prefix="/api/optimizer", tags=["optimizer"])
     app.include_router(contest_router, prefix="/api/contest", tags=["contest"])
+    app.include_router(contest_sim_router, prefix="/api/contest-sim", tags=["contest-sim"])
 
     @app.get("/api/minutes")
     def get_minutes(date: str | None = None, run_id: str | None = None) -> JSONResponse:

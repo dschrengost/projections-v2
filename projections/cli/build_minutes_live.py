@@ -14,6 +14,7 @@ from projections import paths
 
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest, write_ids_csv
 from projections.minutes_v1.features import MinutesFeatureBuilder
+from projections.minutes_v1.pos import canonical_pos_bucket_series
 from projections.minutes_v1.schemas import (
     BOX_SCORE_LABELS_SCHEMA,
     FEATURES_MINUTES_V1_SCHEMA,
@@ -39,6 +40,25 @@ IDS_FILENAME = "ids.csv"
 LATEST_POINTER = "latest_run.json"
 ACTIVE_ROSTER_FILENAME = "active_roster.parquet"
 INACTIVE_PLAYERS_FILENAME = "inactive_players.csv"
+RATES_TRAINING_BASE_FILENAME = "rates_training_base.parquet"
+
+VACANCY_FEATURE_COLUMNS: tuple[str, ...] = (
+    "vac_min_szn",
+    "vac_min_guard_szn",
+    "vac_min_wing_szn",
+    "vac_min_big_szn",
+)
+TEAM_CONTEXT_COLUMNS: tuple[str, ...] = (
+    "team_pace_szn",
+    "team_off_rtg_szn",
+    "team_def_rtg_szn",
+)
+OPP_CONTEXT_COLUMNS: tuple[str, ...] = (
+    "opp_pace_szn",
+    "opp_def_rtg_szn",
+)
+
+_OUT_LIKE_STATUS_VALUES: set[str] = {"OUT", "O", "Q", "QUESTIONABLE", "DOUBTFUL", "D", "INACTIVE"}
 
 app = typer.Typer(help=__doc__)
 
@@ -121,6 +141,213 @@ def _filter_by_game_ids(df: pd.DataFrame, game_ids: Iterable[int]) -> pd.DataFra
     if not normalized:
         return df.iloc[0:0].copy()
     return df[pd.to_numeric(df["game_id"], errors="coerce").astype("Int64").isin(normalized)].copy()
+
+
+def _player_hist_minutes_szn(
+    labels: pd.DataFrame,
+    *,
+    target_day: pd.Timestamp,
+    player_ids: set[int],
+) -> pd.DataFrame:
+    if labels.empty or not player_ids:
+        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
+    required = {"player_id", "game_date", "minutes"}
+    if not required.issubset(labels.columns):
+        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
+
+    working = labels.loc[:, ["player_id", "game_date", "minutes"]].copy()
+    working["game_date"] = pd.to_datetime(working["game_date"]).dt.normalize()
+    working = working.loc[working["game_date"] < target_day].copy()
+    if working.empty:
+        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
+
+    working["player_id"] = pd.to_numeric(working["player_id"], errors="coerce").astype("Int64")
+    working = working.dropna(subset=["player_id"])
+    if working.empty:
+        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
+
+    working = working.loc[working["player_id"].astype(int).isin(player_ids)].copy()
+    if working.empty:
+        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
+
+    working["minutes"] = pd.to_numeric(working["minutes"], errors="coerce").fillna(0.0).astype(float)
+    grouped = (
+        working.groupby("player_id", as_index=False)["minutes"]
+        .sum()
+        .rename(columns={"minutes": "hist_minutes_szn"})
+    )
+    grouped["hist_minutes_szn"] = grouped["hist_minutes_szn"].astype(float)
+    return grouped
+
+
+def _compute_vacancy_features(
+    *,
+    injuries_snapshot: pd.DataFrame,
+    roster_nightly: pd.DataFrame,
+    labels_source: pd.DataFrame,
+    target_day: pd.Timestamp,
+    warnings: list[str],
+) -> pd.DataFrame:
+    """Compute vacancy features for the live slate (team-level, joined to each player row)."""
+
+    if injuries_snapshot.empty:
+        return pd.DataFrame(columns=["game_id", "team_id", *VACANCY_FEATURE_COLUMNS])
+
+    required = {"game_id", "player_id", "status"}
+    if not required.issubset(injuries_snapshot.columns):
+        missing = sorted(required - set(injuries_snapshot.columns))
+        warnings.append(
+            f"vacancy: injuries_snapshot missing required columns {missing}; leaving vacancy features at defaults."
+        )
+        return pd.DataFrame(columns=["game_id", "team_id", *VACANCY_FEATURE_COLUMNS])
+
+    injuries = injuries_snapshot.copy()
+    injuries["game_id"] = pd.to_numeric(injuries["game_id"], errors="coerce").astype("Int64")
+    injuries["player_id"] = pd.to_numeric(injuries["player_id"], errors="coerce").astype("Int64")
+    injuries = injuries.dropna(subset=["game_id", "player_id"])
+    if injuries.empty:
+        return pd.DataFrame(columns=["game_id", "team_id", *VACANCY_FEATURE_COLUMNS])
+
+    injuries["as_of_ts"] = pd.to_datetime(injuries.get("as_of_ts"), utc=True, errors="coerce")
+    injuries = (
+        injuries.sort_values(["game_id", "player_id", "as_of_ts"], kind="mergesort")
+        .groupby(["game_id", "player_id"], as_index=False)
+        .tail(1)
+    )
+
+    status = injuries["status"].astype(str).str.upper().str.strip()
+    injuries = injuries.loc[status.isin(_OUT_LIKE_STATUS_VALUES)].copy()
+    if injuries.empty:
+        return pd.DataFrame(columns=["game_id", "team_id", *VACANCY_FEATURE_COLUMNS])
+
+    roster_cols = [col for col in ("game_id", "player_id", "team_id", "listed_pos") if col in roster_nightly.columns]
+    roster_map = roster_nightly.loc[:, roster_cols].dropna(subset=["game_id", "player_id"]).copy() if roster_cols else pd.DataFrame()
+    if not roster_map.empty:
+        roster_map["game_id"] = pd.to_numeric(roster_map["game_id"], errors="coerce").astype("Int64")
+        roster_map["player_id"] = pd.to_numeric(roster_map["player_id"], errors="coerce").astype("Int64")
+        if "team_id" in roster_map.columns:
+            roster_map["team_id"] = pd.to_numeric(roster_map["team_id"], errors="coerce").astype("Int64")
+        roster_map = roster_map.dropna(subset=["game_id", "player_id"]).drop_duplicates(
+            subset=["game_id", "player_id"], keep="last"
+        )
+        injuries = injuries.merge(
+            roster_map,
+            on=["game_id", "player_id"],
+            how="left",
+            suffixes=("", "_roster"),
+        )
+        if "team_id" in injuries.columns and "team_id_roster" in injuries.columns:
+            injuries["team_id"] = injuries["team_id"].fillna(injuries["team_id_roster"])
+        elif "team_id_roster" in injuries.columns and "team_id" not in injuries.columns:
+            injuries = injuries.rename(columns={"team_id_roster": "team_id"})
+
+        if "listed_pos" in injuries.columns and "listed_pos_roster" in injuries.columns:
+            injuries["listed_pos"] = injuries["listed_pos"].fillna(injuries["listed_pos_roster"])
+        elif "listed_pos_roster" in injuries.columns and "listed_pos" not in injuries.columns:
+            injuries = injuries.rename(columns={"listed_pos_roster": "listed_pos"})
+
+        injuries.drop(columns=["team_id_roster", "listed_pos_roster"], inplace=True, errors="ignore")
+
+    if "team_id" not in injuries.columns:
+        warnings.append("vacancy: missing team_id mapping; leaving vacancy features at defaults.")
+        return pd.DataFrame(columns=["game_id", "team_id", *VACANCY_FEATURE_COLUMNS])
+
+    injuries["team_id"] = pd.to_numeric(injuries["team_id"], errors="coerce").astype("Int64")
+    injuries = injuries.dropna(subset=["team_id"])
+    if injuries.empty:
+        return pd.DataFrame(columns=["game_id", "team_id", *VACANCY_FEATURE_COLUMNS])
+
+    player_ids = set(injuries["player_id"].dropna().astype(int).tolist())
+    player_hist = _player_hist_minutes_szn(labels_source, target_day=target_day, player_ids=player_ids)
+    injuries = injuries.merge(player_hist, on="player_id", how="left")
+    injuries["hist_minutes_szn"] = injuries["hist_minutes_szn"].fillna(0.0)
+
+    pos_bucket = canonical_pos_bucket_series(injuries.get("listed_pos", pd.Series("UNK", index=injuries.index)))
+    injuries["pos_bucket"] = pos_bucket
+    injuries["hist_minutes_guard_szn"] = injuries["hist_minutes_szn"].where(injuries["pos_bucket"] == "G", 0.0)
+    injuries["hist_minutes_wing_szn"] = injuries["hist_minutes_szn"].where(injuries["pos_bucket"] == "W", 0.0)
+    injuries["hist_minutes_big_szn"] = injuries["hist_minutes_szn"].where(injuries["pos_bucket"] == "BIG", 0.0)
+
+    grouped = injuries.groupby(["game_id", "team_id"], as_index=False).agg(
+        vac_min_szn=("hist_minutes_szn", "sum"),
+        vac_min_guard_szn=("hist_minutes_guard_szn", "sum"),
+        vac_min_wing_szn=("hist_minutes_wing_szn", "sum"),
+        vac_min_big_szn=("hist_minutes_big_szn", "sum"),
+    )
+    for col in VACANCY_FEATURE_COLUMNS:
+        grouped[col] = pd.to_numeric(grouped.get(col), errors="coerce").fillna(0.0).astype(float)
+    return grouped
+
+
+def _load_team_context_from_rates_training_base(
+    *,
+    data_root: Path,
+    season_value: int,
+    target_day: pd.Timestamp,
+    team_ids: set[int],
+    warnings: list[str],
+    max_days_back: int = 14,
+) -> pd.DataFrame:
+    if not team_ids:
+        return pd.DataFrame(columns=["team_id", *TEAM_CONTEXT_COLUMNS])
+
+    root = data_root / "gold" / "rates_training_base" / f"season={season_value}"
+    if not root.exists():
+        warnings.append(f"team-context: missing rates_training_base root at {root}")
+        return pd.DataFrame(columns=["team_id", *TEAM_CONTEXT_COLUMNS])
+
+    candidates: list[tuple[pd.Timestamp, Path]] = []
+    for day_dir in root.glob("game_date=*"):
+        try:
+            day_value = pd.Timestamp(day_dir.name.split("=", 1)[1]).normalize()
+        except Exception:  # noqa: BLE001
+            continue
+        if day_value >= target_day:
+            continue
+        pq_path = day_dir / RATES_TRAINING_BASE_FILENAME
+        if pq_path.exists():
+            candidates.append((day_value, pq_path))
+
+    if not candidates:
+        warnings.append("team-context: no prior rates_training_base partitions available")
+        return pd.DataFrame(columns=["team_id", *TEAM_CONTEXT_COLUMNS])
+
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    remaining = set(team_ids)
+    frames: list[pd.DataFrame] = []
+
+    for idx, (_day, pq_path) in enumerate(candidates):
+        if not remaining or idx >= max_days_back:
+            break
+        try:
+            df = pd.read_parquet(pq_path, columns=["team_id", *TEAM_CONTEXT_COLUMNS])
+        except Exception:  # noqa: BLE001
+            continue
+
+        if df.empty:
+            continue
+        df["team_id"] = pd.to_numeric(df["team_id"], errors="coerce").astype("Int64")
+        df = df.dropna(subset=["team_id"])
+        if df.empty:
+            continue
+        df = df.loc[df["team_id"].astype(int).isin(remaining)].copy()
+        if df.empty:
+            continue
+
+        grouped = df.groupby("team_id", as_index=False)[list(TEAM_CONTEXT_COLUMNS)].mean()
+        frames.append(grouped)
+        found = set(grouped["team_id"].dropna().astype(int).tolist())
+        remaining -= found
+
+    if not frames:
+        warnings.append("team-context: failed to load any usable rates_training_base partitions")
+        return pd.DataFrame(columns=["team_id", *TEAM_CONTEXT_COLUMNS])
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined.dropna(subset=["team_id"]).drop_duplicates(subset=["team_id"], keep="first")
+    for col in TEAM_CONTEXT_COLUMNS:
+        combined[col] = pd.to_numeric(combined.get(col), errors="coerce")
+    return combined.reset_index(drop=True)
 
 
 def _player_profiles_to_frame(players: List[PlayerProfile]) -> pd.DataFrame:
@@ -804,7 +1031,7 @@ def _build_minutes_live_logic(
         )
         raw_features = raw_features.merge(label_flags, on=["game_id", "player_id"], how="left")
     deduped = deduplicate_latest(raw_features, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
-    aligned = enforce_schema(deduped, FEATURES_MINUTES_V1_SCHEMA)
+    aligned = enforce_schema(deduped, FEATURES_MINUTES_V1_SCHEMA, allow_missing_optional=True)
     validate_with_pandera(aligned, FEATURES_MINUTES_V1_SCHEMA)
 
     aligned["game_date"] = pd.to_datetime(aligned["game_date"]).dt.normalize()
@@ -910,6 +1137,93 @@ def _build_minutes_live_logic(
             live_slice[col] = base.fillna(False) | roster_vals.fillna(False)
             if roster_col in live_slice.columns:
                 live_slice.drop(columns=[roster_col], inplace=True)
+
+    vacancy_features = _compute_vacancy_features(
+        injuries_snapshot=injuries_slice,
+        roster_nightly=roster_builder_slice,
+        labels_source=labels_source_df,
+        target_day=target_day,
+        warnings=warnings,
+    )
+    if not vacancy_features.empty:
+        live_slice = live_slice.merge(
+            vacancy_features,
+            on=["game_id", "team_id"],
+            how="left",
+            suffixes=("", "_vac"),
+        )
+        for col in VACANCY_FEATURE_COLUMNS:
+            merged_col = f"{col}_vac"
+            if merged_col in live_slice.columns:
+                live_slice[col] = (
+                    pd.to_numeric(live_slice[merged_col], errors="coerce")
+                    .combine_first(pd.to_numeric(live_slice[col], errors="coerce"))
+                    .fillna(0.0)
+                    .astype(float)
+                )
+                live_slice.drop(columns=[merged_col], inplace=True)
+            else:
+                live_slice[col] = pd.to_numeric(live_slice[col], errors="coerce").fillna(0.0).astype(float)
+    else:
+        for col in VACANCY_FEATURE_COLUMNS:
+            live_slice[col] = pd.to_numeric(live_slice[col], errors="coerce").fillna(0.0).astype(float)
+
+    team_ids = set(pd.to_numeric(live_slice["team_id"], errors="coerce").dropna().astype(int).tolist())
+    opponent_ids = set(
+        pd.to_numeric(live_slice["opponent_team_id"], errors="coerce").dropna().astype(int).tolist()
+    )
+    context_team_ids = team_ids | opponent_ids
+    team_context = _load_team_context_from_rates_training_base(
+        data_root=data_root,
+        season_value=season_value,
+        target_day=target_day,
+        team_ids=context_team_ids,
+        warnings=warnings,
+    )
+    if not team_context.empty:
+        live_slice = live_slice.merge(
+            team_context,
+            on="team_id",
+            how="left",
+            suffixes=("", "_ctx"),
+        )
+        for col in TEAM_CONTEXT_COLUMNS:
+            merged_col = f"{col}_ctx"
+            if merged_col in live_slice.columns:
+                live_slice[col] = pd.to_numeric(live_slice[merged_col], errors="coerce").combine_first(
+                    pd.to_numeric(live_slice[col], errors="coerce")
+                )
+                live_slice.drop(columns=[merged_col], inplace=True)
+
+        opp_ctx = team_context.rename(
+            columns={
+                "team_id": "opponent_team_id",
+                "team_pace_szn": "opp_pace_szn",
+                "team_def_rtg_szn": "opp_def_rtg_szn",
+            }
+        )
+        opp_cols = ["opponent_team_id", *OPP_CONTEXT_COLUMNS]
+        opp_cols = [col for col in opp_cols if col in opp_ctx.columns]
+        if len(opp_cols) > 1:
+            live_slice = live_slice.merge(
+                opp_ctx[opp_cols],
+                on="opponent_team_id",
+                how="left",
+                suffixes=("", "_oppctx"),
+            )
+            for col in OPP_CONTEXT_COLUMNS:
+                merged_col = f"{col}_oppctx"
+                if merged_col in live_slice.columns:
+                    live_slice[col] = pd.to_numeric(live_slice[merged_col], errors="coerce").combine_first(
+                        pd.to_numeric(live_slice[col], errors="coerce")
+                    )
+                    live_slice.drop(columns=[merged_col], inplace=True)
+
+    # Fill any remaining NaNs with conservative defaults (mean or 100.0).
+    for col in (*TEAM_CONTEXT_COLUMNS, *OPP_CONTEXT_COLUMNS):
+        values = pd.to_numeric(live_slice[col], errors="coerce")
+        mean_val = float(values.mean(skipna=True)) if not values.dropna().empty else 100.0
+        live_slice[col] = values.fillna(mean_val).astype(float)
 
     active_validation: dict | None = None
     if active_roster_df is not None and not active_roster_df.empty and active_pairs_set:
