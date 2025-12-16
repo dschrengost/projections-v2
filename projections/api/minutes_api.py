@@ -20,6 +20,7 @@ from projections.api.evaluation_api import router as evaluation_router
 from projections.api.optimizer_api import router as optimizer_router
 from projections.api.contest_api import router as contest_router
 from projections.api.contest_sim_api import router as contest_sim_router
+from projections.api.diagnostics_api import router as diagnostics_router
 
 DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
@@ -351,6 +352,7 @@ def create_app(
     app.include_router(optimizer_router, prefix="/api/optimizer", tags=["optimizer"])
     app.include_router(contest_router, prefix="/api/contest", tags=["contest"])
     app.include_router(contest_sim_router, prefix="/api/contest-sim", tags=["contest-sim"])
+    app.include_router(diagnostics_router)
 
     @app.get("/api/minutes")
     def get_minutes(date: str | None = None, run_id: str | None = None) -> JSONResponse:
@@ -510,27 +512,46 @@ def create_app(
         return JSONResponse(payload)
 
     @app.get("/api/ownership")
-    def get_ownership(date: str | None = None) -> JSONResponse:
-        """Return ownership predictions for a date."""
+    def get_ownership(date: str | None = None, draft_group_id: str | None = None) -> JSONResponse:
+        """Return ownership predictions for a date.
+        
+        If draft_group_id specified, returns that slate's predictions.
+        Otherwise, returns the main slate (largest by player count).
+        """
         slate_day = _parse_date(date)
-        
-        # Load from silver/ownership_predictions
         data_root = paths.data_path()
-        own_path = data_root / "silver" / "ownership_predictions" / f"{slate_day}.parquet"
         
-        if not own_path.exists():
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No ownership predictions for {slate_day}"
-            )
+        # Check for per-slate structure first (new format)
+        slate_dir = data_root / "silver" / "ownership_predictions" / str(slate_day)
+        
+        if slate_dir.exists():
+            # New per-slate format
+            slate_files = list(slate_dir.glob("*.parquet"))
+            slate_files = [f for f in slate_files if not f.name.endswith("_locked.parquet")]
+            
+            if not slate_files:
+                raise HTTPException(status_code=404, detail=f"No ownership predictions for {slate_day}")
+            
+            if draft_group_id:
+                # Use specified slate
+                own_path = slate_dir / f"{draft_group_id}.parquet"
+                if not own_path.exists():
+                    raise HTTPException(status_code=404, detail=f"No predictions for slate {draft_group_id}")
+            else:
+                # Find main slate (largest by file size as proxy for player count)
+                own_path = max(slate_files, key=lambda f: f.stat().st_size)
+        else:
+            # Fall back to legacy single-file format
+            own_path = data_root / "silver" / "ownership_predictions" / f"{slate_day}.parquet"
+            if not own_path.exists():
+                raise HTTPException(status_code=404, detail=f"No ownership predictions for {slate_day}")
         
         df = pd.read_parquet(own_path)
         
-        # Build response with relevant columns
-        output_cols = ["player_id", "player_name", "salary", "pos", "team", "proj_fpts", "pred_own_pct", "is_locked"]
+        # Build response
+        output_cols = ["player_id", "player_name", "salary", "pos", "team", "proj_fpts", "pred_own_pct", "is_locked", "draft_group_id"]
         available_cols = [c for c in output_cols if c in df.columns]
         
-        # Ensure is_locked has a default value if missing
         if "is_locked" not in df.columns:
             df["is_locked"] = False
             available_cols.append("is_locked")
@@ -539,10 +560,67 @@ def create_app(
         
         payload = {
             "date": slate_day.isoformat(),
+            "draft_group_id": df["draft_group_id"].iloc[0] if "draft_group_id" in df.columns else None,
             "count": len(players),
             "players": players,
         }
         return JSONResponse(jsonable_encoder(payload))
+
+    @app.get("/api/ownership/slates")
+    def list_ownership_slates(date: str | None = None) -> JSONResponse:
+        """List available slates for a date with lock status."""
+        import json
+        
+        slate_day = _parse_date(date)
+        data_root = paths.data_path()
+        slate_dir = data_root / "silver" / "ownership_predictions" / str(slate_day)
+        
+        if not slate_dir.exists():
+            # Check for legacy format
+            legacy_path = data_root / "silver" / "ownership_predictions" / f"{slate_day}.parquet"
+            if legacy_path.exists():
+                # Single legacy slate
+                df = pd.read_parquet(legacy_path)
+                return JSONResponse({
+                    "date": slate_day.isoformat(),
+                    "slates": [{
+                        "draft_group_id": "legacy",
+                        "player_count": len(df),
+                        "is_locked": df["is_locked"].any() if "is_locked" in df.columns else False,
+                    }]
+                })
+            raise HTTPException(status_code=404, detail=f"No ownership predictions for {slate_day}")
+        
+        # Try to load slates.json metadata
+        meta_path = slate_dir / "slates.json"
+        if meta_path.exists():
+            with open(meta_path) as f:
+                slates_meta = json.load(f)
+            slates = [
+                {"draft_group_id": dg_id, **info}
+                for dg_id, info in slates_meta.items()
+            ]
+        else:
+            # Build from parquet files
+            slates = []
+            for f in slate_dir.glob("*.parquet"):
+                if f.name.endswith("_locked.parquet"):
+                    continue
+                dg_id = f.stem
+                df = pd.read_parquet(f)
+                slates.append({
+                    "draft_group_id": dg_id,
+                    "player_count": len(df),
+                    "is_locked": df["is_locked"].any() if "is_locked" in df.columns else False,
+                })
+        
+        # Sort by player count descending (main slate first)
+        slates.sort(key=lambda x: x.get("player_count", 0), reverse=True)
+        
+        return JSONResponse({
+            "date": slate_day.isoformat(),
+            "slates": slates,
+        })
 
     @app.post("/api/trigger")
     def trigger_pipeline(background_tasks: BackgroundTasks) -> JSONResponse:

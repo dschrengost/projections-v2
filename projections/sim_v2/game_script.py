@@ -7,7 +7,6 @@ scripts per world to shift player minutes quantiles.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -23,6 +22,9 @@ class GameScriptConfig:
     
     # Spread coefficient (margin ≈ -coef * spread)
     spread_coef: float = -0.726
+
+    # Noise added to per-world quantile targets (in quantile space).
+    quantile_noise_std: float = 0.08
     
     # Script thresholds (from team's perspective)
     blowout_threshold: int = 15
@@ -59,7 +61,8 @@ class GameScriptConfig:
         return cls(
             margin_std=config.get("margin_std", 13.4),
             spread_coef=config.get("spread_coef", -0.726),
-            quantile_targets=quantile_targets if quantile_targets else None,
+            quantile_noise_std=float(config.get("quantile_noise_std", 0.08)),
+            quantile_targets=quantile_targets,
         )
 
 
@@ -128,11 +131,21 @@ def sample_minutes_with_scripts(
     """
     n_players = len(minutes_p50)
     
-    # Estimate player-level distribution from quantiles
-    # Assume normal-ish: use p10/p90 to estimate sigma
-    # sigma ≈ (p90 - p10) / 2.56  (for normal, z_0.90 - z_0.10 ≈ 2.56)
-    sigma = np.maximum((minutes_p90 - minutes_p10) / 2.56, 0.5)
-    mu = minutes_p50  # Use median as center
+    # Estimate player-level distribution from quantiles.
+    #
+    # Use an asymmetric split-normal centered at p50:
+    #   For q <= 0.5: x = p50 + sigma_low  * z
+    #   For q >= 0.5: x = p50 + sigma_high * z
+    #
+    # where z = Φ^{-1}(q). Choose sigma_low/high so that:
+    #   p10 = p50 + sigma_low  * z10
+    #   p90 = p50 + sigma_high * z90
+    z90 = 1.2815515655446004  # stats.norm.ppf(0.90)
+    p50 = minutes_p50
+    p10 = np.minimum(minutes_p10, p50)
+    p90 = np.maximum(minutes_p90, p50)
+    sigma_low = np.maximum((p50 - p10) / z90, 0.5)
+    sigma_high = np.maximum((p90 - p50) / z90, 0.5)
     
     # Get unique games and sample margins
     unique_games = {}  # (game_id, team_id) -> team_spread
@@ -181,13 +194,13 @@ def sample_minutes_with_scripts(
     
     # Add some noise to target quantiles to avoid all same-script players
     # getting identical minutes
-    quantile_noise = rng.normal(0, 0.08, size=target_quantiles.shape)
+    quantile_noise = rng.normal(0, config.quantile_noise_std, size=target_quantiles.shape)
     target_quantiles = np.clip(target_quantiles + quantile_noise, 0.05, 0.95)
     
     # Sample minutes from player distribution at target quantile
-    # For normal: x = mu + sigma * z where z = ppf(quantile)
     z_scores = stats.norm.ppf(target_quantiles)
-    minutes_worlds = mu[None, :] + sigma[None, :] * z_scores
+    sigma = np.where(z_scores < 0.0, sigma_low[None, :], sigma_high[None, :])
+    minutes_worlds = p50[None, :] + sigma * z_scores
     minutes_worlds = np.maximum(minutes_worlds, 0)
     
     return minutes_worlds
@@ -199,4 +212,3 @@ __all__ = [
     "predict_margin_distribution",
     "sample_minutes_with_scripts",
 ]
-

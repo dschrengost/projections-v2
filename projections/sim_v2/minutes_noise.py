@@ -247,16 +247,32 @@ def enforce_team_240_minutes(
     team_indices: np.ndarray,
     rotation_mask: np.ndarray,
     bench_mask: np.ndarray,
+    baseline_minutes: np.ndarray | None = None,
     clamp_scale: tuple[float, float] = (0.7, 1.3),
+    active_mask: np.ndarray | None = None,
+    starter_mask: np.ndarray | None = None,
+    max_rotation_size: int | None = None,
 ) -> np.ndarray:
     """
     Rescale rotation players per team per world so totals approach 240 minutes.
 
     minutes_world: (W, P) non-negative minutes after noise
     team_indices:  (P,) int codes 0..T-1
-    rotation_mask: (P,) bool for rotation players
+    rotation_mask: (P,) bool for rotation players (based on projected minutes >= 12)
     bench_mask:    (P,) bool for deep bench players
+    baseline_minutes: (P,) optional baseline minutes used to pick a stable
+                     rotation when max_rotation_size is set. When provided,
+                     the capped rotation uses baseline ordering instead of
+                     sampled per-world minutes (reduces churn into the tail).
     clamp_scale:   allowable scaling range
+    active_mask:   (W, P) bool indicating which players are active in each world.
+                   If provided, only active players participate in reconciliation,
+                   and inactive players' minutes flow to active teammates.
+    starter_mask:  (P,) bool indicating starters (optional). Used to avoid
+                   nerfing starter minutes when teams are oversubscribed.
+    max_rotation_size: Optional hard cap on the number of players that can
+                       receive minutes per team per world. When set, players
+                       outside the capped rotation are zeroed out before scaling.
     """
 
     if minutes_world.size == 0:
@@ -268,12 +284,146 @@ def enforce_team_240_minutes(
     if n_teams == 0:
         return mins
 
-    team_one_hot = np.eye(n_teams, dtype=float)[team_idx]  # (P, T)
-    rot_one_hot = team_one_hot * rotation_mask[:, None]
-    bench_one_hot = team_one_hot * bench_mask[:, None]
+    n_worlds, n_players = mins.shape
 
-    bench_sum = mins @ bench_one_hot  # (W, T)
-    rot_sum = mins @ rot_one_hot      # (W, T)
+    if active_mask is not None:
+        mins = mins * active_mask.astype(float)
+
+    starter = (
+        np.asarray(starter_mask, dtype=bool)
+        if starter_mask is not None
+        else np.zeros(n_players, dtype=bool)
+    )
+
+    if max_rotation_size is not None and max_rotation_size > 0:
+        # Rotation-capped reconciliation (per-team, per-world):
+        # 1) Keep all active starters + top-N non-starters by sampled minutes
+        #    (or by baseline minutes if provided)
+        # 2) Zero out minutes for players outside the capped rotation
+        # 3) If team is oversubscribed (>240), scale non-starters down to fit while
+        #    leaving starters unchanged (prevents starter nerf)
+        # 4) If team is undersubscribed (<240), scale everyone up (clamped)
+
+        out = mins.copy()
+        team_to_players = [np.flatnonzero(team_idx == t) for t in range(n_teams)]
+        full_active = active_mask is None
+
+        for team_players in team_to_players:
+            if team_players.size == 0:
+                continue
+            starter_local = starter[team_players]
+            baseline_local = None
+            if baseline_minutes is not None:
+                baseline_local = np.asarray(baseline_minutes, dtype=float)[team_players]
+            for w in range(n_worlds):
+                if full_active:
+                    active_local = np.ones(team_players.size, dtype=bool)
+                else:
+                    active_local = active_mask[w, team_players].astype(bool)
+                    if not active_local.any():
+                        out[w, team_players] = 0.0
+                        continue
+
+                desired = out[w, team_players]
+                if baseline_local is None:
+                    candidate_local = active_local & ((desired > 0.0) | starter_local)
+                else:
+                    candidate_local = active_local & ((baseline_local > 0.0) | starter_local)
+                if not candidate_local.any():
+                    out[w, team_players] = 0.0
+                    continue
+
+                starter_keep = candidate_local & starter_local
+                keep_local = starter_keep.copy()
+                starter_count = int(starter_keep.sum())
+                slots_left = max_rotation_size - starter_count
+                if slots_left > 0:
+                    nonstarter_candidates = np.flatnonzero(candidate_local & ~starter_local)
+                    if nonstarter_candidates.size:
+                        scores = (
+                            baseline_local
+                            if baseline_local is not None
+                            else desired
+                        )
+                        order = nonstarter_candidates[np.argsort(-scores[nonstarter_candidates], kind="mergesort")]
+                        if baseline_local is None:
+                            keep_local[order[:slots_left]] = True
+                        else:
+                            # Prefer bench players with positive sampled minutes to avoid
+                            # creating short team totals due to clamp_scale when a top
+                            # baseline bench player's sample hits 0.0 in a given world.
+                            positive_mask = desired[order] > 1e-9
+                            take = order[positive_mask][:slots_left]
+                            if take.size < slots_left:
+                                take = np.concatenate([take, order[~positive_mask][: slots_left - take.size]])
+                            keep_local[take] = True
+                # Never drop starters due to the cap: if starters exceed max_rotation_size,
+                # keep them all and only cap the non-starters.
+
+                # Zero out active players not in the kept rotation.
+                drop_local = active_local & ~keep_local
+                if drop_local.any():
+                    out[w, team_players[drop_local]] = 0.0
+                    desired = out[w, team_players]  # refresh view after drops
+
+                kept = keep_local & active_local
+                if not kept.any():
+                    continue
+
+                starter_kept = kept & starter_local
+                bench_kept = kept & ~starter_local
+                sum_starters = float(desired[starter_kept].sum())
+                sum_bench = float(desired[bench_kept].sum())
+                sum_total = sum_starters + sum_bench
+                if sum_total <= 1e-6:
+                    continue
+
+                if sum_total >= 240.0:
+                    if sum_bench > 1e-6 and sum_starters < 240.0:
+                        bench_scale = (240.0 - sum_starters) / sum_bench
+                        bench_scale = max(0.0, float(bench_scale))
+                        out[w, team_players[bench_kept]] = desired[bench_kept] * bench_scale
+                        # Starters unchanged when oversubscribed.
+                    else:
+                        # No bench to shrink (or starters already exceed 240): scale starters down.
+                        starter_scale = 240.0 / max(sum_starters, 1e-6)
+                        starter_scale = float(np.clip(starter_scale, clamp_scale[0], 1.0))
+                        out[w, team_players[starter_kept]] = desired[starter_kept] * starter_scale
+                        out[w, team_players[bench_kept]] = 0.0
+                else:
+                    scale = 240.0 / sum_total
+                    scale = float(np.clip(scale, 1.0, clamp_scale[1]))
+                    out[w, team_players[kept]] = desired[kept] * scale
+
+        # Ensure inactive players stay at 0 if active_mask was provided.
+        if active_mask is not None:
+            out = out * active_mask.astype(float)
+        return out
+
+    # Legacy behavior: scale rotation minutes proportionally, leaving bench fixed.
+    # If active_mask provided, determine rotation/bench per-world based on who is active.
+    if active_mask is not None:
+        per_world_rotation = active_mask & (rotation_mask[None, :] | (mins >= 12.0))
+        per_world_bench = active_mask & ~per_world_rotation & (mins > 0.0)
+    else:
+        per_world_rotation = np.broadcast_to(rotation_mask[None, :], (n_worlds, n_players))
+        per_world_bench = np.broadcast_to(bench_mask[None, :], (n_worlds, n_players))
+
+    team_one_hot = np.eye(n_teams, dtype=float)[team_idx]  # (P, T)
+
+    # Compute per-world, per-team sums for rotation and bench
+    # rot_one_hot_world: (W, P, T) - which players count as rotation per world
+    # We need to sum mins where player is rotation for each team
+
+    # For efficiency, compute team totals using matrix ops
+    # bench_sum[w, t] = sum of mins[w, p] where per_world_bench[w, p] and team[p] == t
+    # rot_sum[w, t] = sum of mins[w, p] where per_world_rotation[w, p] and team[p] == t
+
+    bench_mins = mins * per_world_bench.astype(float)  # (W, P)
+    rot_mins = mins * per_world_rotation.astype(float)  # (W, P)
+
+    bench_sum = bench_mins @ team_one_hot  # (W, T)
+    rot_sum = rot_mins @ team_one_hot      # (W, T)
 
     target_rot = np.clip(240.0 - bench_sum, a_min=0.0, a_max=None)
     scale = np.ones_like(target_rot)
@@ -282,5 +432,12 @@ def enforce_team_240_minutes(
     scale = np.clip(scale, clamp_scale[0], clamp_scale[1])
 
     scale_per_player = scale[:, team_idx]  # (W, P)
-    mins_scaled = mins * np.where(rotation_mask[None, :], scale_per_player, 1.0)
+
+    # Only scale rotation players (per-world determination)
+    mins_scaled = mins * np.where(per_world_rotation, scale_per_player, 1.0)
+
+    # Ensure inactive players stay at 0 if active_mask was provided
+    if active_mask is not None:
+        mins_scaled = mins_scaled * active_mask.astype(float)
+
     return mins_scaled

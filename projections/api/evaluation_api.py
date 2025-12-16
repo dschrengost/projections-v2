@@ -28,6 +28,10 @@ def _compute_summary(data: list[dict[str, Any]]) -> dict[str, Any]:
     def safe_sum(key: str) -> int:
         return sum(d.get(key, 0) or 0 for d in data)
 
+    def safe_sum_float(key: str) -> float:
+        values = [d[key] for d in data if d.get(key) is not None]
+        return round(sum(values), 3) if values else 0.0
+
     return {
         # Core FPTS metrics
         "avg_fpts_mae": safe_avg("fpts_mae"),
@@ -56,6 +60,12 @@ def _compute_summary(data: list[dict[str, Any]]) -> dict[str, Any]:
         
         # Edge cases
         "total_dnp_false_positives": safe_sum("dnp_false_positives"),
+        "total_inactive_false_positives_10": safe_sum("inactive_false_positives_10"),
+        "total_active_dnp_false_positives_10": safe_sum("active_dnp_false_positives_10"),
+        "total_ghost_minutes_total": safe_sum_float("ghost_minutes_total"),
+        "total_ghost_minutes_inactive": safe_sum_float("ghost_minutes_inactive"),
+        "total_ghost_minutes_active_dnp": safe_sum_float("ghost_minutes_active_dnp"),
+        "avg_ghost_minutes_rate": safe_avg("ghost_minutes_rate"),
         "total_starter_misses": safe_sum("starter_misses"),
         "total_blowup_misses": safe_sum("blowup_misses"),
         

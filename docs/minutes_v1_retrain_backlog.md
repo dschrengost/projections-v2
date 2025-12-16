@@ -6,6 +6,12 @@ Items to address in the next model retraining iteration.
 
 ## High Priority
 
+### 0. Rotation Eligibility Model (P(in_rotation | ACTIVE))
+
+**Fast fix (Dec 2025):** Add a conservative heuristic `rotation_prob` derived from pregame history features (recent minutes + starter history) and cap minutes quantiles for low `rotation_prob` players during scoring. This reduces “ACTIVE but 0 minutes” ghost allocations that can steal minutes from core DFS players during team-240 reconciliation.
+
+**Future (recommended):** Replace the heuristic with a trained classifier for `P(in_rotation | ACTIVE)` (or `P(minutes > 0 | ACTIVE)` / `P(minutes > 4 | ACTIVE)`) and use it to gate minute allocation + stabilize rotation caps in both L2 reconciliation and sim.
+
 ### 1. DNP/Injury Label Inclusion in Training
 
 **Root Cause (Dec 2025 investigation)**: Aaron Wiggins was projected 0 minutes despite being a 20+ mpg player because:
@@ -305,4 +311,3 @@ game_importance = (
 
 - [x] Fix 0-minute games polluting `roll_mean_*` (workaround applied Dec 2025)
 - [x] Change rotation threshold from 6 mpg to 12 mpg in sim (Dec 2025)
-

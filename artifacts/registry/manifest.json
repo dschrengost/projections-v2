@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2025-12-14T18:13:04.742567+00:00",
+  "updated_at": "2025-12-15T15:47:17.183906+00:00",
   "models": {
     "rates_v1_lgbm": {
       "name": "rates_v1_lgbm",
@@ -118,6 +118,139 @@
             "num_targets": 12
           },
           "description": "Train to 2024-06-30 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage1_20251215_145256",
+          "run_id": "rates_v1_stage1_20251215_145256",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage1_20251215_145256",
+          "stage": "dev",
+          "created_at": "2025-12-15T14:53:27.039675+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2024-06-30",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.09503015220471413,
+            "train_rows": 6079,
+            "val_rows": 8680,
+            "num_targets": 12
+          },
+          "description": "Train to 2024-06-30 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage1_20251215_145548",
+          "run_id": "rates_v1_stage1_20251215_145548",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage1_20251215_145548",
+          "stage": "dev",
+          "created_at": "2025-12-15T14:56:22.568822+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-12-01",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08487471330908063,
+            "train_rows": 15502,
+            "val_rows": 557,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-12-01 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage3_context_20251215_154113",
+          "run_id": "rates_v1_stage3_context_20251215_154113",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage3_context_20251215_154113",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:41:49.519739+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-12-01",
+          "feature_schema_version": "stage3_context",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08589583439997615,
+            "train_rows": 15502,
+            "val_rows": 557,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-12-01 | stage3_context | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage2_tracking_20251215_154236",
+          "run_id": "rates_v1_stage2_tracking_20251215_154236",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage2_tracking_20251215_154236",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:43:11.804825+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-12-01",
+          "feature_schema_version": "stage2_tracking",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08553610347978331,
+            "train_rows": 15502,
+            "val_rows": 557,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-12-01 | stage2_tracking | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage2_bigval_20251215_154629",
+          "run_id": "rates_v1_stage2_bigval_20251215_154629",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage2_bigval_20251215_154629",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:47:15.730806+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-01-01",
+          "feature_schema_version": "stage2_tracking",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08937245681738488,
+            "train_rows": 7405,
+            "val_rows": 6173,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-01-01 | stage2_tracking | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage1_bigval_20251215_154629",
+          "run_id": "rates_v1_stage1_bigval_20251215_154629",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage1_bigval_20251215_154629",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:47:16.386969+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-01-01",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08879337143919584,
+            "train_rows": 7405,
+            "val_rows": 6173,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-01-01 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage3_bigval_20251215_154629",
+          "run_id": "rates_v1_stage3_bigval_20251215_154629",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage3_bigval_20251215_154629",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:47:17.183884+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-01-01",
+          "feature_schema_version": "stage3_context",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08930198324929715,
+            "train_rows": 7405,
+            "val_rows": 6173,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-01-01 | stage3_context | 12 targets"
         }
       ],
       "current_prod": "rates_v1_stage1_optimal_20251206_060349",

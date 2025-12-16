@@ -55,12 +55,51 @@ import typer
 
 from projections.paths import data_path
 from projections.minutes_v1.pos import canonical_pos_bucket
-from projections.fpts_v1.datasets import (
-    _coerce_ts,
-    _iter_days,
-    _parse_minutes_iso,
-    _season_from_day,
-)
+from typing import Iterable as _Iterable
+
+
+def _coerce_ts(val) -> pd.Timestamp | None:
+    """Coerce a value to a pandas Timestamp."""
+    if val is None or pd.isna(val):
+        return None
+    return pd.Timestamp(val)
+
+
+def _iter_days(start: pd.Timestamp, end: pd.Timestamp) -> _Iterable[pd.Timestamp]:
+    """Iterate over days in [start, end] inclusive."""
+    day = start.normalize()
+    end_day = end.normalize()
+    while day <= end_day:
+        yield day
+        day += pd.Timedelta(days=1)
+
+
+def _parse_minutes_iso(val) -> float:
+    """Parse ISO duration (PT32M15S) to float minutes."""
+    if pd.isna(val):
+        return 0.0
+    s = str(val)
+    if not s.startswith("PT"):
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return 0.0
+    mins = 0.0
+    s = s[2:]  # strip PT
+    if "M" in s:
+        m_part, s = s.split("M", 1)
+        mins += float(m_part)
+    if "S" in s:
+        s_part = s.replace("S", "")
+        if s_part:
+            mins += float(s_part) / 60.0
+    return mins
+
+
+def _season_from_day(day: pd.Timestamp) -> int:
+    """Return NBA season start year (Aug-Jul)."""
+    return day.year if day.month >= 8 else day.year - 1
+
 
 app = typer.Typer(add_completion=False)
 
@@ -336,16 +375,35 @@ def load_tracking_roles(data_root: Path, start: pd.Timestamp, end: pd.Timestamp)
 def _seasonal_cumulative_avg(
     values: pd.Series, weights: pd.Series, player_ids: pd.Series, seasons: pd.Series, *, min_weight: float
 ) -> pd.Series:
+    """Compute season-to-date per-minute rate (excluding current game).
+    
+    Args:
+        values: Game stat totals (e.g., FGA per game)
+        weights: Minutes played per game
+        player_ids: Player identifiers
+        seasons: Season identifiers
+        min_weight: Minimum cumulative minutes required
+        
+    Returns:
+        Per-minute rate: cumsum(values) / cumsum(weights)
+        
+    Note: This computes the TRUE per-minute rate, not a weighted average.
+    For example, if a player has 18 FGA in 36 min and 16 FGA in 35 min,
+    the rate is (18+16)/(36+35) = 0.479 FGA/min, NOT (18*36+16*35)/(36+35) = 17.01.
+    """
     numeric_values = pd.to_numeric(values, errors="coerce").fillna(0.0)
     numeric_weights = pd.to_numeric(weights, errors="coerce").fillna(0.0)
-    weighted = numeric_values * numeric_weights
-    shifted_weighted = weighted.groupby([player_ids, seasons]).shift(1)
+    # Shift to exclude current game
+    shifted_values = numeric_values.groupby([player_ids, seasons]).shift(1)
     shifted_weights = numeric_weights.groupby([player_ids, seasons]).shift(1)
-    cum_weighted = shifted_weighted.groupby([player_ids, seasons]).cumsum()
+    # Cumulative sums
+    cum_values = shifted_values.groupby([player_ids, seasons]).cumsum()
     cum_weights = shifted_weights.groupby([player_ids, seasons]).cumsum()
+    # Per-minute rate = total stats / total minutes
     denom = cum_weights.replace(0.0, np.nan)
-    avg = cum_weighted / denom
+    avg = cum_values / denom
     return avg.where(cum_weights >= min_weight)
+
 
 
 def _prepare_roster_latest(roster: pd.DataFrame) -> pd.DataFrame:

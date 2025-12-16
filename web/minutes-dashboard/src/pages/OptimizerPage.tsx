@@ -628,7 +628,7 @@ export default function OptimizerPage() {
                             {slates.length === 0 && <option value="">No slates</option>}
                             {slates.map(s => (
                                 <option key={s.draft_group_id} value={s.draft_group_id}>
-                                    {s.slate_type} ({s.n_contests} contests)
+                                    {s.slate_type} ({s.draft_group_id}) - {s.n_contests} contests
                                 </option>
                             ))}
                         </select>

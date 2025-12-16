@@ -45,6 +45,11 @@ class SimV2Profile:
     use_game_scripts: bool = False
     game_script_margin_std: float = 13.4
     game_script_spread_coef: float = -0.726
+    game_script_quantile_targets: dict[str, tuple[float, float]] = field(default_factory=dict)
+    game_script_quantile_noise_std: float = 0.08
+    # Vegas anchoring (team points vs implied totals)
+    vegas_points_anchor: bool = False
+    vegas_points_drift_pct: float = 0.05
 
 
 def _read_json(path: Path) -> dict:
@@ -113,12 +118,26 @@ def load_sim_v2_profile(
     rates_source = config.get("rates_source")
     noise_cfg = config.get("noise", {}) or {}
     use_efficiency_scoring = bool(config.get("efficiency_scoring", True))
+
+    vegas_cfg = config.get("vegas_anchoring", {}) or {}
+    vegas_points_anchor = bool(vegas_cfg.get("enabled", False))
+    vegas_points_drift_pct = float(vegas_cfg.get("drift_pct", 0.05))
     
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
     use_game_scripts = bool(game_script_cfg.get("enabled", False))
     game_script_margin_std = float(game_script_cfg.get("margin_std", 13.4))
     game_script_spread_coef = float(game_script_cfg.get("spread_coef", -0.726))
+    game_script_quantile_noise_std = float(game_script_cfg.get("quantile_noise_std", 0.08))
+    quantile_targets: dict[str, tuple[float, float]] = {}
+    raw_targets = game_script_cfg.get("quantile_targets") or {}
+    if isinstance(raw_targets, dict):
+        for script, targets in raw_targets.items():
+            if not isinstance(targets, dict):
+                continue
+            starter = float(targets.get("starter", 0.5))
+            bench = float(targets.get("bench", 0.5))
+            quantile_targets[str(script)] = (starter, bench)
 
     return SimV2Profile(
         name=profile,
@@ -149,6 +168,10 @@ def load_sim_v2_profile(
         use_game_scripts=use_game_scripts,
         game_script_margin_std=game_script_margin_std,
         game_script_spread_coef=game_script_spread_coef,
+        game_script_quantile_targets=quantile_targets,
+        game_script_quantile_noise_std=game_script_quantile_noise_std,
+        vegas_points_anchor=vegas_points_anchor,
+        vegas_points_drift_pct=vegas_points_drift_pct,
     )
 
 

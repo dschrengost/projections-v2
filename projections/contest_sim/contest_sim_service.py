@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -19,6 +19,7 @@ from .scoring_models import (
     SummaryStats,
     ContestSimResult,
 )
+from .dupe_penalty import compute_batch_dupe_penalties
 
 __all__ = [
     "load_worlds_matrix",
@@ -255,6 +256,8 @@ def run_contest_simulation(
     entry_fee: float = 3.0,
     weights: List[int] | None = None,
     data_root: Path | None = None,
+    player_ownership: Optional[Dict[str, float]] = None,
+    entry_max: int = 150,
 ) -> ContestSimResult:
     """Run full contest simulation.
 
@@ -278,6 +281,11 @@ def run_contest_simulation(
         Entry counts per lineup (default: 1 each)
     data_root : Path | None
         Data root directory
+    player_ownership : Optional[Dict[str, float]]
+        Player ID -> ownership % mapping for dupe penalty calculation.
+        If None, dupe penalties are not applied.
+    entry_max : int
+        Max entries per user (for dupe penalty binning)
 
     Returns
     -------
@@ -346,10 +354,25 @@ def run_contest_simulation(
     lineup_p90 = np.percentile(lineup_scores, 90, axis=1)
     lineup_p95 = np.percentile(lineup_scores, 95, axis=1)
 
+    # Compute dupe penalties if ownership data is provided
+    if player_ownership:
+        logger.info("Computing dupe penalties with ownership data")
+        dupe_penalties = compute_batch_dupe_penalties(
+            lineups=lineups,
+            player_ownership=player_ownership,
+            field_size=field_size,
+            entry_max=entry_max,
+        )
+    else:
+        # No penalty if ownership not provided
+        dupe_penalties = [1.0] * n_lineups
+
     # Build results
     results: List[LineupEVResult] = []
     for idx in range(n_lineups):
         ev = float(payout_result.expected_payouts[idx])
+        dupe_penalty = dupe_penalties[idx]
+        adjusted_payout = ev * dupe_penalty
         result = LineupEVResult(
             lineup_id=idx,
             player_ids=lineups[idx],
@@ -365,6 +388,8 @@ def run_contest_simulation(
             top_5pct_rate=float(payout_result.top_5pct_rates[idx]),
             top_10pct_rate=float(payout_result.top_10pct_rates[idx]),
             cash_rate=float(payout_result.cash_rates[idx]),
+            dupe_penalty=dupe_penalty,
+            adjusted_expected_payout=adjusted_payout,
         )
         results.append(result)
 

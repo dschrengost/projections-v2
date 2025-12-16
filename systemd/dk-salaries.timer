@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily DK salaries/draftables timer (~8am ET)
+Requires=dk-salaries.service
+
+[Timer]
+OnCalendar=*-*-* 08:05:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=dk-salaries.service
+
+[Install]
+WantedBy=timers.target

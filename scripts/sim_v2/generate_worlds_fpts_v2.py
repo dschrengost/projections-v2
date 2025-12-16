@@ -28,6 +28,86 @@ from projections.sim_v2.residuals import sample_residuals_with_team_factor
 
 app = typer.Typer(add_completion=False)
 
+DEFAULT_MAX_ROTATION_SIZE = 10
+
+
+def _build_implied_team_points(
+    minutes_df: pd.DataFrame,
+    schedule_df: pd.DataFrame,
+) -> dict[tuple[int, int], float]:
+    """Return {(game_id, team_id): implied_points} using total/spread_home + home/away ids."""
+
+    if minutes_df.empty or schedule_df.empty:
+        return {}
+    required = {"game_id", "total", "spread_home"}
+    sched_required = {"game_id", "home_team_id", "away_team_id"}
+    if not required.issubset(minutes_df.columns) or not sched_required.issubset(schedule_df.columns):
+        return {}
+
+    odds = minutes_df.loc[:, ["game_id", "total", "spread_home"]].dropna(subset=["game_id"]).drop_duplicates("game_id").copy()
+    odds["game_id"] = pd.to_numeric(odds["game_id"], errors="coerce").astype("Int64")
+    odds["total"] = pd.to_numeric(odds["total"], errors="coerce")
+    odds["spread_home"] = pd.to_numeric(odds["spread_home"], errors="coerce")
+    odds = odds.dropna(subset=["game_id", "total", "spread_home"]).copy()
+
+    sched = schedule_df.loc[:, ["game_id", "home_team_id", "away_team_id"]].copy()
+    sched["game_id"] = pd.to_numeric(sched["game_id"], errors="coerce").astype("Int64")
+    for col in ("home_team_id", "away_team_id"):
+        sched[col] = pd.to_numeric(sched[col], errors="coerce").astype("Int64")
+    sched = sched.dropna(subset=["game_id", "home_team_id", "away_team_id"]).drop_duplicates("game_id").copy()
+
+    merged = odds.merge(sched, on="game_id", how="inner")
+    if merged.empty:
+        return {}
+
+    implied: dict[tuple[int, int], float] = {}
+    for _, row in merged.iterrows():
+        gid = int(row["game_id"])
+        total = float(row["total"])
+        spread_home = float(row["spread_home"])
+        home_id = int(row["home_team_id"])
+        away_id = int(row["away_team_id"])
+        implied_home = total / 2.0 - spread_home / 2.0
+        implied_away = total - implied_home
+        implied[(gid, home_id)] = float(implied_home)
+        implied[(gid, away_id)] = float(implied_away)
+    return implied
+
+
+def _apply_team_points_vegas_anchor(
+    pts_worlds: np.ndarray,
+    *,
+    group_map: dict[tuple[int, int], np.ndarray],
+    implied_team_points: dict[tuple[int, int], float],
+    drift_pct: float,
+) -> np.ndarray:
+    """Scale per-team points in-place so team totals fall within implied*(1±drift_pct)."""
+
+    if pts_worlds.size == 0 or not group_map or not implied_team_points:
+        return pts_worlds
+    drift = float(max(0.0, drift_pct))
+    eps = 1e-6
+    for key, idxs in group_map.items():
+        implied = implied_team_points.get((int(key[0]), int(key[1])))
+        if implied is None or not np.isfinite(implied):
+            continue
+        implied_f = float(implied)
+        lo = implied_f * (1.0 - drift)
+        hi = implied_f * (1.0 + drift)
+
+        team_pts = pts_worlds[:, idxs].sum(axis=1)
+        scale = np.ones_like(team_pts, dtype=float)
+
+        low_mask = (team_pts < lo) & (team_pts > eps)
+        high_mask = team_pts > hi
+        if low_mask.any():
+            scale[low_mask] = lo / team_pts[low_mask]
+        if high_mask.any():
+            scale[high_mask] = hi / np.maximum(team_pts[high_mask], eps)
+        if (scale != 1.0).any():
+            pts_worlds[:, idxs] *= scale[:, None]
+    return pts_worlds
+
 
 def _parse_date(value: str) -> date:
     try:
@@ -115,6 +195,18 @@ def _load_minutes_projection(
             df = pd.read_parquet(path)
             return df, rid, path, label
     raise FileNotFoundError(f"No minutes_v1 projection found for {date_token} (source={minutes_source}).")
+
+
+def _load_schedule_for_date(root: Path, game_date: pd.Timestamp) -> pd.DataFrame:
+    season = int(game_date.year) if game_date.month >= 8 else int(game_date.year - 1)
+    month = int(game_date.month)
+    schedule_path = root / "silver" / "schedule" / f"season={season}" / f"month={month:02d}" / "schedule.parquet"
+    if not schedule_path.exists():
+        return pd.DataFrame()
+    df = pd.read_parquet(schedule_path)
+    df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce").dt.date
+    day = pd.Timestamp(game_date).date()
+    return df.loc[df["game_date"] == day].copy()
 
 
 def _load_rates_live_frame(
@@ -620,6 +712,31 @@ def main(
             raise ValueError(f"Unsupported rates_source for rates mean: {rates_source}")
         output_base = output_root or (root / "artifacts" / "sim_v2" / "worlds_fpts_v2")
 
+        # Optional: rates residual noise params (team/player shocks) for rates mode.
+        # When enabled and available, we use these calibrated sigmas instead of the heuristic k_default noise.
+        rates_noise_params = None
+        rates_noise_path = None
+        if use_rates_noise_eff:
+            try:
+                rates_noise_params, rates_noise_path = load_rates_noise_params(
+                    data_root=root,
+                    run_id=rates_run,
+                    split=rates_split or "val",
+                    sigma_scale=rates_sigma_scale,
+                )
+                typer.echo(
+                    f"[sim_v2] rates_noise enabled (rates path): run_id={rates_run or 'current'} split={rates_split or 'val'} "
+                    f"sigma_scale={rates_sigma_scale:.3f} team_sigma_scale={float(team_sigma_scale_eff):.3f} "
+                    f"player_sigma_scale={float(player_sigma_scale_eff):.3f} targets={len(rates_noise_params)} path={rates_noise_path}"
+                )
+            except FileNotFoundError as exc:
+                typer.echo(
+                    f"[sim_v2] warning: rates noise params not found; falling back to heuristic noise ({exc})",
+                    err=True,
+                )
+                rates_noise_params = None
+                rates_noise_path = None
+
         # Game script config
         use_game_scripts = profile_cfg.use_game_scripts
         game_script_config = None
@@ -627,6 +744,8 @@ def main(
             game_script_config = GameScriptConfig(
                 margin_std=profile_cfg.game_script_margin_std,
                 spread_coef=profile_cfg.game_script_spread_coef,
+                quantile_noise_std=profile_cfg.game_script_quantile_noise_std,
+                quantile_targets=profile_cfg.game_script_quantile_targets,
             )
             typer.echo(f"[sim_v2] game_scripts enabled: margin_std={game_script_config.margin_std} spread_coef={game_script_config.spread_coef}")
         minutes_noise_params = None
@@ -678,17 +797,6 @@ def main(
                 continue
 
             minutes_mean_arr = minutes_df[minutes_col].to_numpy(dtype=float)
-            if enforce_team_240 and minutes_mean_arr.size:
-                team_indices = minutes_df["team_id"].astype("category").cat.codes.to_numpy()
-                rotation_mask = minutes_mean_arr >= 12.0
-                bench_mask = (~rotation_mask) & (minutes_mean_arr > 0.0)
-                minutes_mean_arr = enforce_team_240_minutes(
-                    minutes_world=minutes_mean_arr[None, :],
-                    team_indices=team_indices,
-                    rotation_mask=rotation_mask,
-                    bench_mask=bench_mask,
-                    clamp_scale=(0.7, 1.3),
-                )[0]
             minutes_df["minutes_mean"] = minutes_mean_arr
 
             rates_df = None
@@ -861,10 +969,37 @@ def main(
             team_codes = mu_df["team_id"].astype("category")
             team_indices = team_codes.cat.codes.to_numpy(dtype=int)
             n_teams = int(team_indices.max()) + 1 if len(team_indices) else 0
-            rotation_mask = gs_minutes_p50 >= 12.0
-            bench_mask = (~rotation_mask) & (gs_minutes_p50 > 0.0)
+            if "rotation_prob" in mu_df.columns:
+                rot_prob_arr = (
+                    pd.to_numeric(mu_df["rotation_prob"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                )
+                rotation_mask = (rot_prob_arr >= 0.5) | (gs_is_starter > 0)
+                bench_mask = (~rotation_mask) & (gs_minutes_p50 > 0.0)
+            else:
+                rotation_mask = gs_minutes_p50 >= 12.0
+                bench_mask = (~rotation_mask) & (gs_minutes_p50 > 0.0)
             if use_game_scripts and game_script_config is not None:
                 typer.echo(f"[sim_v2] game_scripts: {len(gs_home_team_ids)} games, sampling minutes via scripts")
+
+            # Precompute team group indices for team-level residual shocks.
+            group_map: dict[tuple[int, int], np.ndarray] = {}
+            for idx, key in enumerate(zip(gs_game_ids, gs_team_ids)):
+                group_map.setdefault((int(key[0]), int(key[1])), []).append(idx)
+            group_map = {k: np.array(v, dtype=int) for k, v in group_map.items()}
+
+            # Vegas implied team points for optional anchoring.
+            schedule_df = _load_schedule_for_date(root, pd.Timestamp(game_date))
+            implied_team_points = _build_implied_team_points(minutes_df, schedule_df)
+
+            missing_noise_targets: list[str] = []
+            if rates_noise_params is not None:
+                missing_noise_targets = [t for t in stat_targets if t not in rates_noise_params]
+                if missing_noise_targets:
+                    typer.echo(
+                        f"[sim_v2] warning: missing rates_noise targets for {missing_noise_targets}; "
+                        f"those stats will fall back to heuristic noise",
+                        err=True,
+                    )
 
             eff_arrays: dict[str, np.ndarray] | None = None
             if use_efficiency:
@@ -883,11 +1018,17 @@ def main(
                     use_efficiency = False
 
             stat_world_samples: dict[str, list[np.ndarray]] = {}
+            active_mask_samples: list[np.ndarray] = []  # Track active masks for conditional aggregation
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
                 rng = np.random.default_rng(date_seed + chunk_start)
-                
-                # Sample minutes based on game script (script determines quantile position)
+
+                # 1. Sample availability FIRST (before minutes)
+                u_active = rng.random(size=(chunk_size, len(play_prob_arr)))
+                active_mask = u_active < play_prob_arr[None, :]
+                active_mask_samples.append(active_mask)
+
+                # 2. Sample minutes based on game script (script determines quantile position)
                 if use_game_scripts and game_script_config is not None:
                     minutes_worlds = sample_minutes_with_scripts(
                         minutes_p10=gs_minutes_p10,
@@ -904,22 +1045,32 @@ def main(
                     )
                 else:
                     # Fallback: sample minutes from per-player distribution.
-                    sigma = np.maximum((gs_minutes_p90 - gs_minutes_p10) / 2.56, 0.5)
-                    eps = rng.standard_normal(size=(chunk_size, len(gs_minutes_p50)))
-                    minutes_worlds = np.maximum(gs_minutes_p50[None, :] + eps * sigma[None, :], 0.0)
+                    z90 = 1.2815515655446004
+                    p50 = gs_minutes_p50
+                    p10 = np.minimum(gs_minutes_p10, p50)
+                    p90 = np.maximum(gs_minutes_p90, p50)
+                    sigma_low = np.maximum((p50 - p10) / z90, 0.5)
+                    sigma_high = np.maximum((p90 - p50) / z90, 0.5)
 
-                # Apply per-world play_prob as an "active" mask.
-                u_active = rng.random(size=minutes_worlds.shape)
-                active_mask = u_active < play_prob_arr[None, :]
-                minutes_worlds = minutes_worlds * active_mask
+                    z = rng.standard_normal(size=(chunk_size, len(gs_minutes_p50)))
+                    sigma = np.where(z < 0.0, sigma_low[None, :], sigma_high[None, :])
+                    minutes_worlds = np.maximum(p50[None, :] + z * sigma, 0.0)
 
+                # 3. Zero out inactive players' minutes (before reconciliation)
+                minutes_worlds = minutes_worlds * active_mask.astype(float)
+
+                # 4. Reconcile to 240 per team per world, considering only active players
                 if enforce_team_240 and n_teams > 0:
                     minutes_worlds = enforce_team_240_minutes(
                         minutes_world=minutes_worlds,
                         team_indices=team_indices,
                         rotation_mask=rotation_mask,
                         bench_mask=bench_mask,
+                        baseline_minutes=gs_minutes_p50,
                         clamp_scale=(0.7, 1.3),
+                        active_mask=active_mask,  # Pass active mask for proper redistribution
+                        starter_mask=gs_is_starter > 0,
+                        max_rotation_size=DEFAULT_MAX_ROTATION_SIZE,
                     )
                 minutes_world_samples.append(minutes_worlds)
 
@@ -931,8 +1082,25 @@ def main(
                     base = target.replace("_per_min", "")
                     rates = pd.to_numeric(mu_df[col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
                     mu_stat = np.clip(rates[None, :] * minutes_worlds, 0.0, None)
-                    eps = rng.standard_t(df=nu, size=mu_stat.shape) * (k_default * np.clip(mu_stat, 0.0, None))
-                    total = np.clip(mu_stat + eps, 0.0, None)
+                    if rates_noise_params is not None and target in rates_noise_params:
+                        params = rates_noise_params.get(target, {})
+                        sigma_team = float(params.get("sigma_team", 0.0) or 0.0) * float(team_sigma_scale_eff)
+                        sigma_player = float(params.get("sigma_player", 0.0) or 0.0) * float(player_sigma_scale_eff)
+                        team_shock = np.zeros_like(mu_stat)
+                        if sigma_team > 0.0:
+                            for _, idxs in group_map.items():
+                                ts = rng.normal(loc=0.0, scale=sigma_team, size=chunk_size)
+                                team_shock[:, idxs] = ts[:, None]
+                        player_eps = rng.normal(loc=0.0, scale=sigma_player, size=mu_stat.shape) if sigma_player > 0.0 else 0.0
+                        total = np.clip(mu_stat + team_shock + player_eps, 0.0, None)
+                    else:
+                        # Heuristic independent noise (legacy): relative scale to mean.
+                        if epsilon_dist == "normal":
+                            eps = rng.standard_normal(size=mu_stat.shape)
+                        else:
+                            eps = rng.standard_t(df=nu, size=mu_stat.shape)
+                        eps = eps * (k_default * np.clip(mu_stat, 0.0, None))
+                        total = np.clip(mu_stat + eps, 0.0, None)
                     stat_totals[base] = total
 
                 if not stat_totals:
@@ -942,28 +1110,90 @@ def main(
                     fpts_chunk, stat_box = _compute_fpts_and_boxscore(
                         stat_totals, efficiency_pct=eff_arrays, use_efficiency=use_efficiency
                     )
+
+                    # Optional vegas anchoring: keep team points within implied*(1±drift_pct).
+                    if (
+                        profile_cfg.vegas_points_anchor
+                        and "pts" in stat_box
+                        and implied_team_points
+                        and np.isfinite(profile_cfg.vegas_points_drift_pct)
+                    ):
+                        pts_before = stat_box["pts"].copy()
+                        stat_box["pts"] = _apply_team_points_vegas_anchor(
+                            stat_box["pts"],
+                            group_map=group_map,
+                            implied_team_points=implied_team_points,
+                            drift_pct=profile_cfg.vegas_points_drift_pct,
+                        )
+                        fpts_chunk = fpts_chunk + (stat_box["pts"] - pts_before)
                 world_fpts_samples.append(fpts_chunk)
                 # Track individual stat worlds for aggregation
                 for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
                     if stat_name in stat_box:
                         stat_world_samples.setdefault(stat_name, []).append(stat_box[stat_name])
 
-            # Aggregate all worlds in-memory and compute quantiles
+            # Aggregate all worlds in-memory and compute CONDITIONAL quantiles
+            # (only count worlds where player is active)
             if world_fpts_samples:
                 # fpts_chunk is shape (chunk_size, n_players), stack all chunks
                 all_fpts = np.vstack(world_fpts_samples)  # shape: (n_worlds, n_players)
                 all_minutes = np.vstack(minutes_world_samples) if minutes_world_samples else None
-                
-                # Compute quantiles per player
-                quantiles = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
-                fpts_quantiles = np.percentile(all_fpts, [q * 100 for q in quantiles], axis=0)
-                fpts_mean = all_fpts.mean(axis=0)
-                fpts_std = all_fpts.std(axis=0)
-                minutes_mean = all_minutes.mean(axis=0) if all_minutes is not None else minutes_sim_base
-                minutes_std = all_minutes.std(axis=0) if all_minutes is not None else np.zeros_like(minutes_sim_base)
-                minutes_quantiles = (
-                    np.percentile(all_minutes, [10, 50, 90], axis=0) if all_minutes is not None else None
+                all_active = np.vstack(active_mask_samples)  # shape: (n_worlds, n_players)
+
+                # Compute CONDITIONAL statistics (only worlds where player is active)
+                # This is what DFS lineup builders want: E[FPTS | plays]
+                n_worlds_total, n_players = all_fpts.shape
+                active_counts = all_active.sum(axis=0)  # worlds active per player
+
+                # Conditional mean: sum over active worlds / count of active worlds
+                fpts_sum = (all_fpts * all_active).sum(axis=0)
+                fpts_mean = np.where(active_counts > 0, fpts_sum / active_counts, 0.0)
+
+                # Conditional std: std over active worlds only
+                fpts_sq_sum = ((all_fpts ** 2) * all_active).sum(axis=0)
+                fpts_var = np.where(
+                    active_counts > 1,
+                    (fpts_sq_sum / active_counts) - (fpts_mean ** 2),
+                    0.0
                 )
+                fpts_std = np.sqrt(np.maximum(fpts_var, 0.0))
+
+                # Conditional quantiles: compute per-player over active worlds only
+                quantiles = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
+                fpts_quantiles = np.zeros((len(quantiles), n_players))
+                for p in range(n_players):
+                    active_worlds_p = all_active[:, p]
+                    if active_worlds_p.sum() > 0:
+                        fpts_active = all_fpts[active_worlds_p, p]
+                        fpts_quantiles[:, p] = np.percentile(fpts_active, [q * 100 for q in quantiles])
+                    else:
+                        fpts_quantiles[:, p] = 0.0
+
+                # Conditional minutes statistics
+                if all_minutes is not None:
+                    minutes_sum = (all_minutes * all_active).sum(axis=0)
+                    minutes_mean = np.where(active_counts > 0, minutes_sum / active_counts, 0.0)
+                    minutes_sq_sum = ((all_minutes ** 2) * all_active).sum(axis=0)
+                    minutes_var = np.where(
+                        active_counts > 1,
+                        (minutes_sq_sum / active_counts) - (minutes_mean ** 2),
+                        0.0
+                    )
+                    minutes_std = np.sqrt(np.maximum(minutes_var, 0.0))
+
+                    # Conditional minutes quantiles
+                    minutes_quantiles = np.zeros((3, n_players))
+                    for p in range(n_players):
+                        active_worlds_p = all_active[:, p]
+                        if active_worlds_p.sum() > 0:
+                            mins_active = all_minutes[active_worlds_p, p]
+                            minutes_quantiles[:, p] = np.percentile(mins_active, [10, 50, 90])
+                        else:
+                            minutes_quantiles[:, p] = 0.0
+                else:
+                    minutes_mean = minutes_sim_base
+                    minutes_std = np.zeros_like(minutes_sim_base)
+                    minutes_quantiles = None
                 
                 # Build output projection DataFrame
                 proj_df = mu_df[["game_date", "game_id", "team_id", "player_id"]].copy()
@@ -986,11 +1216,14 @@ def main(
                 proj_df["sim_profile"] = profile_cfg.name
                 proj_df["n_worlds"] = n_worlds_eff
                 
-                # Add individual stat means for dashboard diagnostics
+                # Add individual stat means for dashboard diagnostics (CONDITIONAL)
                 for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
                     if stat_name in stat_world_samples and stat_world_samples[stat_name]:
                         all_stat = np.vstack(stat_world_samples[stat_name])
-                        proj_df[f"{stat_name}_mean"] = all_stat.mean(axis=0)
+                        # Conditional mean: only count worlds where player is active
+                        stat_sum = (all_stat * all_active).sum(axis=0)
+                        stat_mean = np.where(active_counts > 0, stat_sum / active_counts, 0.0)
+                        proj_df[f"{stat_name}_mean"] = stat_mean
                 
                 # Add optional columns
                 for extra in ("is_starter", "play_prob"):
@@ -1094,8 +1327,15 @@ def main(
                 date_df.get("minutes_pred_p50", date_df[minutes_col]), errors="coerce"
             ).to_numpy(dtype=float)
             role_low = pd.to_numeric(date_df.get("track_role_is_low_minutes", 0), errors="coerce").fillna(0).to_numpy(dtype=float)
-            rotation_mask = (minutes_pred_center >= 12.0) | (role_low == 0)
-            bench_mask = (~rotation_mask) & (minutes_pred_center > 0.0)
+            if "rotation_prob" in date_df.columns:
+                rot_prob_arr = (
+                    pd.to_numeric(date_df["rotation_prob"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                )
+                rotation_mask = (rot_prob_arr >= 0.5) | (pd.to_numeric(date_df.get("is_starter", 0), errors="coerce").fillna(0).to_numpy(dtype=float) > 0)
+                bench_mask = (~rotation_mask) & (minutes_pred_center > 0.0)
+            else:
+                rotation_mask = (minutes_pred_center >= 12.0) | (role_low == 0)
+                bench_mask = (~rotation_mask) & (minutes_pred_center > 0.0)
             play_prob_arr = date_df["play_prob"].fillna(1.0).to_numpy(dtype=float)
 
             team_codes = date_df["team_id"].astype("category")
@@ -1153,27 +1393,46 @@ def main(
                 group_map.setdefault(key, []).append(idx)
             group_map = {k: np.array(v, dtype=int) for k, v in group_map.items()}
 
+            schedule_df = _load_schedule_for_date(root, pd.Timestamp(game_date))
+            implied_team_points = _build_implied_team_points(date_df, schedule_df)
+
             rng = np.random.default_rng(date_seed)
             world_fpts_samples: list[np.ndarray] = []
+            active_mask_samples: list[np.ndarray] = []  # Track active masks for conditional aggregation
+            starter_mask_arr = (
+                pd.to_numeric(date_df.get("is_starter", 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0
+            )
             stat_defaults = np.full(len(date_df), np.nan, dtype=float)
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
+
+                # 1. Sample availability FIRST
+                u_active = rng.random(size=(chunk_size, len(minutes_center)))
+                active_mask = u_active < play_prob_arr[None, :]
+                active_mask_samples.append(active_mask)
+
+                # 2. Sample minutes
                 if use_minutes_noise_eff and sigma_minutes is not None:
                     eps_minutes = rng.standard_normal(size=(chunk_size, len(minutes_center)))
-                    u_active = rng.random(size=(chunk_size, len(minutes_center)))
                     minutes_worlds = np.maximum(minutes_center[None, :] + eps_minutes * sigma_minutes[None, :], 0.0)
-                    active_mask = u_active < play_prob_arr[None, :]
-                    minutes_worlds = minutes_worlds * active_mask
                 else:
                     minutes_worlds = np.repeat(minutes_center[None, :], chunk_size, axis=0)
 
+                # 3. Zero out inactive players
+                minutes_worlds = minutes_worlds * active_mask.astype(float)
+
+                # 4. Reconcile to 240 with active mask
                 if enforce_team_240 and n_teams > 0:
                     minutes_worlds = enforce_team_240_minutes(
                         minutes_world=minutes_worlds,
                         team_indices=team_indices,
                         rotation_mask=rotation_mask,
                         bench_mask=bench_mask,
+                        baseline_minutes=minutes_center,
                         clamp_scale=(0.7, 1.3),
+                        active_mask=active_mask,
+                        starter_mask=starter_mask_arr,
+                        max_rotation_size=DEFAULT_MAX_ROTATION_SIZE,
                     )
                     team_sum = minutes_worlds @ team_one_hot  # (W_chunk, T)
                     typer.echo(
@@ -1212,6 +1471,21 @@ def main(
                 dk_fpts_worlds, stat_box = _compute_fpts_and_boxscore(
                     stat_totals, efficiency_pct=eff_arrays, use_efficiency=use_efficiency
                 )
+
+                if (
+                    profile_cfg.vegas_points_anchor
+                    and "pts" in stat_box
+                    and implied_team_points
+                    and np.isfinite(profile_cfg.vegas_points_drift_pct)
+                ):
+                    pts_before = stat_box["pts"].copy()
+                    stat_box["pts"] = _apply_team_points_vegas_anchor(
+                        stat_box["pts"],
+                        group_map={ (int(k[0]), int(k[1])): v for k, v in group_map.items() },
+                        implied_team_points=implied_team_points,
+                        drift_pct=profile_cfg.vegas_points_drift_pct,
+                    )
+                    dk_fpts_worlds = dk_fpts_worlds + (stat_box["pts"] - pts_before)
                 world_fpts_samples.append(dk_fpts_worlds)
 
                 base_cols = [
@@ -1313,7 +1587,15 @@ def main(
                         team_indices=team_indices,
                         rotation_mask=rotation_mask,
                         bench_mask=bench_mask,
+                        baseline_minutes=minutes_world,
                         clamp_scale=(0.7, 1.3),
+                        starter_mask=(
+                            pd.to_numeric(date_df.get("is_starter", 0.0), errors="coerce")
+                            .fillna(0.0)
+                            .to_numpy(dtype=float)
+                            > 0
+                        ),
+                        max_rotation_size=DEFAULT_MAX_ROTATION_SIZE,
                     )[0]
                 world_df["minutes_sim"] = minutes_world
                 world_df["dk_fpts_world"] = dk_fpts_world

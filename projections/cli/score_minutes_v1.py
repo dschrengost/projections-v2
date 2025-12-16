@@ -535,6 +535,132 @@ def _prepare_features(df: pd.DataFrame, *, mode: Mode = "historical") -> pd.Data
     return working.reset_index(drop=True)
 
 
+def _derive_rotation_prob(df: pd.DataFrame) -> pd.Series:
+    """Heuristic probability a player is in the rotation (given active).
+
+    Goal: avoid allocating meaningful minutes to deep-bench players whose realized
+    minutes are dominated by coach randomness. This is intentionally conservative.
+
+    Future: replace this heuristic with a trained P(in_rotation | ACTIVE) model.
+    """
+
+    if df.empty:
+        return pd.Series(dtype=float)
+
+    is_starter_series = df["is_starter"] if "is_starter" in df.columns else pd.Series(0, index=df.index)
+    starter = pd.to_numeric(is_starter_series, errors="coerce").fillna(0).astype(int) > 0
+    if "is_starter" not in df.columns:
+        # Fall back to pre-scoring starter flags when available.
+        starter_flag_label = df["starter_flag_label"] if "starter_flag_label" in df.columns else pd.Series(0, index=df.index)
+        starter_flag = df["starter_flag"] if "starter_flag" in df.columns else pd.Series(0, index=df.index)
+        starter = (
+            pd.to_numeric(starter_flag_label, errors="coerce").fillna(0).astype(int) > 0
+        ) | (
+            pd.to_numeric(starter_flag, errors="coerce").fillna(0).astype(int) > 0
+        )
+
+    roll_mean_5 = pd.to_numeric(df.get("roll_mean_5"), errors="coerce")
+    min_last1 = pd.to_numeric(df.get("min_last1"), errors="coerce")
+    min_last3 = pd.to_numeric(df.get("min_last3"), errors="coerce")
+    recent_start_pct_10 = pd.to_numeric(df.get("recent_start_pct_10"), errors="coerce")
+    days_since_last = pd.to_numeric(df.get("days_since_last"), errors="coerce")
+
+    # Base tiering from recent minutes signals (handles early season with sparse history).
+    # These thresholds are chosen to prevent 10+ minute allocations for deep bench players
+    # without strong recent evidence.
+    prob = pd.Series(0.10, index=df.index, dtype=float)
+
+    has_any_history = (
+        roll_mean_5.notna()
+        | min_last1.notna()
+        | min_last3.notna()
+        | recent_start_pct_10.notna()
+    )
+    prob = prob.where(has_any_history, 0.20)
+
+    # Strong rotation: clear recent workload.
+    prob = prob.where(~(roll_mean_5 >= 14.0), 0.85)
+    prob = prob.where(~(min_last3 >= 12.0), 0.80)
+    prob = prob.where(~(min_last1 >= 18.0), 0.85)
+
+    # Likely rotation: typical bench piece.
+    prob = prob.where(~((roll_mean_5 >= 8.0) | (min_last1 >= 10.0)), prob.clip(lower=0.55))
+
+    # Fringe rotation: minutes exist but are unstable.
+    prob = prob.where(~((roll_mean_5 >= 4.0) | (min_last1 >= 4.0)), prob.clip(lower=0.35))
+
+    # Starter history bumps.
+    prob = prob.where(~(recent_start_pct_10 >= 0.20), prob.clip(lower=0.60))
+
+    # If the player hasn't appeared recently, downweight.
+    if days_since_last.notna().any():
+        stale = days_since_last >= 10
+        prob = prob.where(~stale, np.minimum(prob, 0.20))
+
+    # Starters always in rotation.
+    prob = prob.where(~starter, 0.98)
+
+    return prob.clip(0.0, 1.0)
+
+
+def _apply_rotation_minutes_caps(df: pd.DataFrame) -> pd.DataFrame:
+    """Cap minutes quantiles for low-rotation players to reduce ghost minutes."""
+
+    if df.empty or "rotation_prob" not in df.columns:
+        return df
+
+    working = df.copy()
+    is_starter_series = working["is_starter"] if "is_starter" in working.columns else pd.Series(0, index=working.index)
+    starter = pd.to_numeric(is_starter_series, errors="coerce").fillna(0).astype(int) > 0
+    rotation_prob = pd.to_numeric(working["rotation_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+
+    # Cap P50 (and corresponding tails) by tier. Starters are untouched.
+    cap_p50 = np.select(
+        [starter, rotation_prob >= 0.55, rotation_prob >= 0.35, rotation_prob >= 0.20],
+        [np.inf, np.inf, 12.0, 6.0],
+        default=2.0,
+    ).astype(float)
+    cap_p90 = np.select(
+        [starter, rotation_prob >= 0.55, rotation_prob >= 0.35, rotation_prob >= 0.20],
+        [np.inf, np.inf, 18.0, 10.0],
+        default=4.0,
+    ).astype(float)
+    cap_p10 = np.select(
+        [starter, rotation_prob >= 0.55, rotation_prob >= 0.35, rotation_prob >= 0.20],
+        [np.inf, np.inf, 6.0, 2.0],
+        default=0.5,
+    ).astype(float)
+
+    for col, cap in (("minutes_p50", cap_p50), ("minutes_p90", cap_p90), ("minutes_p10", cap_p10)):
+        if col in working.columns:
+            values = pd.to_numeric(working[col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            working[col] = np.minimum(values, cap)
+
+    # Keep ordering consistent.
+    if {"minutes_p10", "minutes_p50"}.issubset(working.columns):
+        working["minutes_p10"] = np.minimum(
+            pd.to_numeric(working["minutes_p10"], errors="coerce").fillna(0.0),
+            pd.to_numeric(working["minutes_p50"], errors="coerce").fillna(0.0),
+        )
+    if {"minutes_p90", "minutes_p50"}.issubset(working.columns):
+        working["minutes_p90"] = np.maximum(
+            pd.to_numeric(working["minutes_p90"], errors="coerce").fillna(0.0),
+            pd.to_numeric(working["minutes_p50"], errors="coerce").fillna(0.0),
+        )
+
+    # Propagate to conditional aliases when present.
+    for base in ("minutes_p10", "minutes_p50", "minutes_p90"):
+        cond = f"{base}_cond"
+        if cond in working.columns and base in working.columns:
+            working[cond] = working[base]
+    alias_map = {"p10_cond": "minutes_p10", "p50_cond": "minutes_p50", "p90_cond": "minutes_p90"}
+    for alias, src in alias_map.items():
+        if alias in working.columns and src in working.columns:
+            working[alias] = working[src]
+
+    return working
+
+
 def _score_rows(
     df: pd.DataFrame,
     bundle: dict,
@@ -585,6 +711,9 @@ def _score_rows(
     working["p10_cond"] = working["minutes_p10"]
     working["p50_cond"] = working["minutes_p50"]
     working["p90_cond"] = working["minutes_p90"]
+
+    # Fast rotation gate: reduce ghost minutes for deep bench players.
+    working = _apply_rotation_minutes_caps(working)
 
     bundle_play_prob_enabled = bool(bundle.get("play_prob_enabled", True))
     play_prob_artifacts = (
@@ -1090,6 +1219,8 @@ def score_minutes_range_to_parquet(
     prepared = _prepare_features(raw_features, mode=normalized_mode)
     if prepared.empty:
         raise ValueError("No eligible rows found for requested date range.")
+    prepared["rotation_prob"] = _derive_rotation_prob(prepared)
+    prepared["is_rotation"] = (prepared["rotation_prob"] >= 0.5).astype("int8")
     if limit_rows is not None:
         prepared = prepared.head(limit_rows).copy()
     play_prob_enabled = enable_play_prob_head and not disable_play_prob
@@ -1498,6 +1629,8 @@ def main(
     if prepared.empty:
         typer.echo("[minutes] ERROR: no eligible rows found for requested date range.", err=True)
         raise typer.Exit(code=1)
+    prepared["rotation_prob"] = _derive_rotation_prob(prepared)
+    prepared["is_rotation"] = (prepared["rotation_prob"] >= 0.5).astype("int8")
     if limit_rows is not None:
         prepared = prepared.head(limit_rows).copy()
     if model["mode"] == "dual":

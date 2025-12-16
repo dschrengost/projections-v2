@@ -147,14 +147,22 @@ def _load_sim(
 
 def _load_ownership(
     game_date: date,
+    draft_group_id: str,
     data_root: Path,
 ) -> Optional[pd.DataFrame]:
-    """Load ownership predictions."""
-    own_path = data_root / "silver" / "ownership_predictions" / f"{game_date}.parquet"
+    """Load ownership predictions for a specific slate."""
+    # Try per-slate path first (new format)
+    own_path = data_root / "silver" / "ownership_predictions" / str(game_date) / f"{draft_group_id}.parquet"
     
     if not own_path.exists():
-        print(f"[finalize] Ownership not found at {own_path}")
-        return None
+        # Fall back to legacy format (single file)
+        legacy_path = data_root / "silver" / "ownership_predictions" / f"{game_date}.parquet"
+        if legacy_path.exists():
+            print(f"[finalize] Using legacy ownership path: {legacy_path}")
+            own_path = legacy_path
+        else:
+            print(f"[finalize] Ownership not found at {own_path}")
+            return None
     
     df = pd.read_parquet(own_path)
     
@@ -167,51 +175,62 @@ def _load_ownership(
 
 def _load_salaries(
     game_date: date,
+    draft_group_id: str,
     data_root: Path,
 ) -> Optional[pd.DataFrame]:
-    """Load DK salaries for the main slate."""
-    base = data_root / "gold" / "dk_salaries" / "site=dk" / f"game_date={game_date}"
+    """Load DK salaries for a specific slate."""
+    # Try specific draft group first
+    salaries_path = data_root / "gold" / "dk_salaries" / "site=dk" / f"game_date={game_date}" / f"draft_group_id={draft_group_id}" / "salaries.parquet"
     
-    if not base.exists():
-        return None
-    
-    # Find all draft groups and pick the largest (main slate)
-    draft_group_dirs = sorted(base.glob("draft_group_id=*"))
-    if not draft_group_dirs:
-        return None
-    
-    all_salaries = []
-    for dg_dir in draft_group_dirs:
-        parquet_path = dg_dir / "salaries.parquet"
-        if parquet_path.exists():
-            df = pd.read_parquet(parquet_path)
-            all_salaries.append(df)
-    
-    if not all_salaries:
-        return None
-    
-    combined = pd.concat(all_salaries, ignore_index=True)
-    
-    # Pick the main slate (most players)
-    main_dg = combined.groupby("draft_group_id").size().idxmax()
-    main_slate = combined[combined["draft_group_id"] == main_dg].copy()
+    if salaries_path.exists():
+        df = pd.read_parquet(salaries_path)
+    else:
+        # Fall back to finding any slate
+        base = data_root / "gold" / "dk_salaries" / "site=dk" / f"game_date={game_date}"
+        if not base.exists():
+            return None
+        
+        draft_group_dirs = sorted(base.glob("draft_group_id=*"))
+        if not draft_group_dirs:
+            return None
+        
+        # Use largest slate as fallback
+        all_salaries = []
+        for dg_dir in draft_group_dirs:
+            parquet_path = dg_dir / "salaries.parquet"
+            if parquet_path.exists():
+                df = pd.read_parquet(parquet_path)
+                all_salaries.append(df)
+        
+        if not all_salaries:
+            return None
+        
+        combined = pd.concat(all_salaries, ignore_index=True)
+        main_dg = combined.groupby("draft_group_id").size().idxmax()
+        df = combined[combined["draft_group_id"] == main_dg].copy()
+        print(f"[finalize] Salary fallback: using slate {main_dg}")
     
     # Normalize columns
-    if "display_name" in main_slate.columns:
-        main_slate["player_name"] = main_slate["display_name"]
-    if "dk_player_id" in main_slate.columns:
-        main_slate["dk_player_id"] = main_slate["dk_player_id"]
+    if "display_name" in df.columns:
+        df["player_name"] = df["display_name"]
     
-    return main_slate[["player_name", "salary"]].drop_duplicates("player_name")
+    return df[["player_name", "salary"]].drop_duplicates("player_name")
 
 
 def finalize_projections(
     game_date: date,
     run_id: str,
+    draft_group_id: str,
     data_root: Path,
 ) -> Optional[Path]:
     """
     Merge minutes, sim, and ownership into unified projections artifact.
+    
+    Args:
+        game_date: Game date
+        run_id: Minutes run identifier
+        draft_group_id: DraftKings draft group ID for ownership lookup
+        data_root: Data root path
     
     Returns path to unified artifact or None if minutes unavailable.
     """
@@ -240,7 +259,7 @@ def finalize_projections(
         print("[finalize] No sim projections available")
     
     # Load ownership (join on player_name since DK uses different IDs)
-    ownership = _load_ownership(game_date, data_root)
+    ownership = _load_ownership(game_date, draft_group_id, data_root)
     if ownership is not None and not ownership.empty:
         # Normalize names for matching (handles Unicode like Dončić -> doncic)
         unified["_name_norm"] = unified["player_name"].apply(_normalize_name)
@@ -262,7 +281,7 @@ def finalize_projections(
     
     # Load salaries if not already present
     if "salary" not in unified.columns:
-        salaries = _load_salaries(game_date, data_root)
+        salaries = _load_salaries(game_date, draft_group_id, data_root)
         if salaries is not None:
             # Join on player_name (normalized handles Unicode like Dončić)
             unified["_name_norm"] = unified["player_name"].apply(_normalize_name)
@@ -309,13 +328,14 @@ def main():
     parser = argparse.ArgumentParser(description="Finalize unified projections artifact")
     parser.add_argument("--date", required=True, help="Game date (YYYY-MM-DD)")
     parser.add_argument("--run-id", required=True, help="Run identifier")
+    parser.add_argument("--draft-group-id", required=True, help="DraftKings draft group ID")
     parser.add_argument("--data-root", default=None, help="Data root path")
     args = parser.parse_args()
     
     game_date = date.fromisoformat(args.date)
     root = Path(args.data_root) if args.data_root else data_path()
     
-    result = finalize_projections(game_date, args.run_id, root)
+    result = finalize_projections(game_date, args.run_id, args.draft_group_id, root)
     
     if result is None:
         print("[finalize] Failed to create unified projections")

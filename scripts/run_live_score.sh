@@ -186,6 +186,16 @@ echo "[live] Building rates features..."
   --out-root "${DATA_ROOT}/gold/rates_v1_live" \
   --no-strict
 
+# Run feature sanity check (logs anomalies, saves report)
+echo "[live] Running feature sanity check..."
+if ! /home/daniel/.local/bin/uv run python -m scripts.diagnostics.feature_sanity_check \
+  --date "${START_DATE}" \
+  --data-root "${DATA_ROOT}" \
+  --output-json "${DATA_ROOT}/artifacts/diagnostics/${START_DATE}/feature_sanity.json"
+then
+  echo "[live] warning: Feature sanity check failed or found issues." >&2
+fi
+
 if [[ "${RUN_SIM}" == "1" ]]; then
   echo "[live] Running sim_v2 worlds + aggregation (profile=${SIM_PROFILE}, worlds=${SIM_WORLDS})..."
   if ! /home/daniel/.local/bin/uv run python -m scripts.sim_v2.run_sim_live \
@@ -243,13 +253,48 @@ else
 fi
 
 # === STEP 8: FINALIZE UNIFIED PROJECTIONS ===
-echo "[live] Finalizing unified projections artifact for ${START_DATE}..."
-if ! /home/daniel/.local/bin/uv run python -m projections.cli.finalize_projections \
-  --date "${START_DATE}" \
-  --run-id "${LIVE_RUN_ID}" \
-  --data-root "${DATA_ROOT}"
-then
-  echo "[live] warning: Finalize projections failed." >&2
+# Determine main slate (largest by player count) for ownership merge
+MAIN_DRAFT_GROUP=$(DATA_ROOT="${DATA_ROOT}" START_DATE="${START_DATE}" /home/daniel/.local/bin/uv run python - <<'PY'
+import os
+from pathlib import Path
+
+data_root = Path(os.environ["DATA_ROOT"])
+game_date = os.environ["START_DATE"]
+
+# Find all draft groups for this date
+base = data_root / "gold" / "dk_salaries" / "site=dk" / f"game_date={game_date}"
+if not base.exists():
+    print("", flush=True)
+    exit(0)
+
+# Find largest slate by player count
+best_dg_id = None
+best_count = 0
+for dg_dir in base.glob("draft_group_id=*"):
+    parquet_path = dg_dir / "salaries.parquet"
+    if parquet_path.exists():
+        import pandas as pd
+        df = pd.read_parquet(parquet_path)
+        if len(df) > best_count:
+            best_count = len(df)
+            best_dg_id = dg_dir.name.split("=")[1]
+
+print(best_dg_id or "", flush=True)
+PY
+)
+
+if [[ -z "${MAIN_DRAFT_GROUP}" ]]; then
+  echo "[live] warning: Could not determine main draft group. Finalize skipped." >&2
+else
+  echo "[live] Finalizing unified projections artifact for ${START_DATE} (draft_group=${MAIN_DRAFT_GROUP})..."
+  if ! /home/daniel/.local/bin/uv run python -m projections.cli.finalize_projections \
+    --date "${START_DATE}" \
+    --run-id "${LIVE_RUN_ID}" \
+    --draft-group-id "${MAIN_DRAFT_GROUP}" \
+    --data-root "${DATA_ROOT}"
+  then
+    echo "[live] warning: Finalize projections failed." >&2
+  fi
 fi
 
 echo "[live] Running health checks..."

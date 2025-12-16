@@ -3,16 +3,61 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from datetime import date
+from pathlib import Path
+from typing import Dict, List, Optional
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from projections import paths
 from projections.contest_sim.contest_sim_service import run_contest_simulation
 from projections.contest_sim.payout_generator import load_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _load_player_ownership(game_date: str) -> Dict[str, float]:
+    """Load player_id -> ownership % mapping from projections or ownership predictions.
+    
+    Tries unified projections first, falls back to silver/ownership_predictions.
+    Returns empty dict if not available (dupe penalties disabled).
+    """
+    data_root = paths.data_path()
+    
+    # Try unified projections artifact first
+    unified_root = data_root / "artifacts" / "projections" / game_date
+    for run_dir in sorted(unified_root.glob("run=*"), reverse=True) if unified_root.exists() else []:
+        proj_path = run_dir / "projections.parquet"
+        if proj_path.exists():
+            try:
+                df = pd.read_parquet(proj_path)
+                if "player_id" in df.columns and "pred_own_pct" in df.columns:
+                    ownership = df.dropna(subset=["pred_own_pct"])
+                    result = dict(zip(ownership["player_id"].astype(str), ownership["pred_own_pct"]))
+                    logger.info(f"Loaded ownership for {len(result)} players from unified projections")
+                    return result
+            except Exception as e:
+                logger.warning(f"Failed to load unified projections: {e}")
+                continue
+    
+    # Fall back to silver/ownership_predictions
+    own_path = data_root / "silver" / "ownership_predictions" / f"{game_date}.parquet"
+    if own_path.exists():
+        try:
+            df = pd.read_parquet(own_path)
+            if "player_id" in df.columns and "pred_own_pct" in df.columns:
+                ownership = df.dropna(subset=["pred_own_pct"])
+                result = dict(zip(ownership["player_id"].astype(str), ownership["pred_own_pct"]))
+                logger.info(f"Loaded ownership for {len(result)} players from silver/ownership_predictions")
+                return result
+        except Exception as e:
+            logger.warning(f"Failed to load ownership predictions: {e}")
+    
+    logger.info("No ownership data available, dupe penalties disabled")
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +75,7 @@ class ContestSimRequest(BaseModel):
     field_size_override: Optional[int] = Field(default=None, description="Exact field size (overrides bucket)")
     entry_fee: float = Field(default=3.0, description="Entry fee per lineup")
     weights: Optional[List[int]] = Field(default=None, description="Entry counts per lineup")
+    entry_max: int = Field(default=150, description="Max entries per user (for dupe penalty)")
 
 
 class LineupEVResultResponse(BaseModel):
@@ -49,6 +95,8 @@ class LineupEVResultResponse(BaseModel):
     top_5pct_rate: float
     top_10pct_rate: float
     cash_rate: float
+    dupe_penalty: float = 1.0  # E[1/K], 1.0 = no penalty
+    adjusted_expected_payout: Optional[float] = None  # expected_payout * dupe_penalty
 
 
 class ContestConfigResponse(BaseModel):
@@ -121,8 +169,13 @@ async def run_simulation(request: ContestSimRequest):
 
     Lineups compete against each other (self-play mode) with the
     specified payout archetype and field size.
+    
+    Dupe penalties are automatically applied if ownership data is available.
     """
     try:
+        # Load ownership data for dupe penalty calculation
+        player_ownership = _load_player_ownership(request.game_date)
+        
         result = run_contest_simulation(
             lineups=request.lineups,
             game_date=request.game_date,
@@ -131,6 +184,8 @@ async def run_simulation(request: ContestSimRequest):
             field_size_override=request.field_size_override,
             entry_fee=request.entry_fee,
             weights=request.weights,
+            player_ownership=player_ownership if player_ownership else None,
+            entry_max=request.entry_max,
         )
 
         return ContestSimResponse(

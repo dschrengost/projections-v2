@@ -119,10 +119,14 @@ def _rotation_mask(df: pd.DataFrame, config: ReconcileConfig) -> pd.Series:
         return base_mask
     # Keep starters, fill remaining slots by descending minutes.
     minutes_arr = minutes.to_numpy()
+    rotation_prob_series = pd.to_numeric(df.get("rotation_prob"), errors="coerce").fillna(0.0)
+    rotation_prob_arr = rotation_prob_series.to_numpy(dtype=float)
     starter_idx = np.where(starters.to_numpy())[0]
     keep = set(starter_idx.tolist())
     # Candidates excluding starters
-    candidate_idx = [i for i in np.argsort(-minutes_arr) if i not in keep]
+    # Prefer higher rotation_prob when available to reduce churn from deep bench ghosts.
+    composite = rotation_prob_arr * 1000.0 + minutes_arr
+    candidate_idx = [i for i in np.argsort(-composite, kind="mergesort") if i not in keep]
     slots = config.max_rotation_size - len(keep)
     for idx in candidate_idx:
         if slots <= 0:

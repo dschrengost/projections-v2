@@ -59,6 +59,10 @@ class LineupEVResult:
     top_10pct_rate: float  # P(top 10% finish)
     cash_rate: float  # P(ITM / any payout)
 
+    # Dupe penalty metrics (E[1/K] from ownership-based model)
+    dupe_penalty: float = 1.0  # E[1/K], 1.0 = no penalty (unique lineup)
+    adjusted_expected_payout: Optional[float] = None  # expected_payout * dupe_penalty
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -76,6 +80,8 @@ class LineupEVResult:
             "top_5pct_rate": round(self.top_5pct_rate, 6),
             "top_10pct_rate": round(self.top_10pct_rate, 6),
             "cash_rate": round(self.cash_rate, 6),
+            "dupe_penalty": round(self.dupe_penalty, 4),
+            "adjusted_expected_payout": round(self.adjusted_expected_payout, 4) if self.adjusted_expected_payout is not None else None,
         }
 
 

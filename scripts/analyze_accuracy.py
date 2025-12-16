@@ -44,6 +44,10 @@ def parse_boxscores(boxscore_path: Path, game_date: str) -> pd.DataFrame:
             continue
             
         game_id = payload.get('game_id')
+        try:
+            game_id = int(game_id)
+        except (TypeError, ValueError):
+            pass
         
         for side in ['home', 'away']:
             team_data = payload.get(side, {})
@@ -52,6 +56,7 @@ def parse_boxscores(boxscore_path: Path, game_date: str) -> pd.DataFrame:
             for player in team_data.get('players', []):
                 stats = player.get('statistics', {})
                 minutes_str = stats.get('minutes', 'PT0M0S')
+                boxscore_status = player.get('status')
                 
                 # Parse minutes from ISO duration format (PT12M30S)
                 try:
@@ -100,6 +105,7 @@ def parse_boxscores(boxscore_path: Path, game_date: str) -> pd.DataFrame:
                     'player_id': player.get('person_id'),
                     'player_name': f"{player.get('first_name', '')} {player.get('family_name', '')}".strip(),
                     'team_id': team_id,
+                    'boxscore_status': boxscore_status,
                     'actual_minutes': minutes,
                     'actual_pts': pts,
                     'actual_reb': reb,
@@ -317,9 +323,15 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
     predictions = predictions.copy()
     actuals['player_id'] = actuals['player_id'].astype(str)
     predictions['player_id'] = predictions['player_id'].astype(str)
+
+    merge_keys = ['player_id']
+    if 'game_id' in actuals.columns and 'game_id' in predictions.columns:
+        actuals['game_id'] = pd.to_numeric(actuals['game_id'], errors='coerce').astype('Int64')
+        predictions['game_id'] = pd.to_numeric(predictions['game_id'], errors='coerce').astype('Int64')
+        merge_keys = ['player_id', 'game_id']
     
     # === Merge for accuracy metrics ===
-    merged = actuals.merge(predictions, on='player_id', how='inner', suffixes=('_actual', '_pred'))
+    merged = actuals.merge(predictions, on=merge_keys, how='inner', suffixes=('_actual', '_pred'))
     
     if len(merged) == 0:
         return {'players_matched': 0}
@@ -391,8 +403,8 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
         starter_col = 'starter_flag'
     
     if starter_col and 'fpts_error' in played.columns:
-        starters = played[played[starter_col] == True]
-        bench = played[played[starter_col] == False]
+        starters = played[played[starter_col]]
+        bench = played[~played[starter_col]]
         if len(starters) > 0:
             starter_metrics['fpts_mae_starters'] = round(np.abs(starters['fpts_error']).mean(), 2)
             starter_metrics['n_starters'] = len(starters)
@@ -405,11 +417,35 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
     
     # DNP false positives: predicted > 10 min but played 0
     if 'minutes_mean' in merged.columns:
-        dnp_fp = merged[(merged['actual_minutes'] == 0) & (merged['minutes_mean'] >= 10)]
+        pred_minutes = merged['minutes_mean'].fillna(0)
+        actual_dnp = merged['actual_minutes'] == 0
+        dnp_fp = merged[actual_dnp & (pred_minutes >= 10)]
         edge_cases['dnp_false_positives'] = len(dnp_fp)
         if len(dnp_fp) > 0:
             name_col = 'player_name_actual' if 'player_name_actual' in dnp_fp.columns else 'player_name'
             edge_cases['dnp_fp_names'] = dnp_fp[name_col].tolist()[:5]  # Top 5 for debugging
+
+        # Split: didn't suit up vs active but DNP (boxscore-only; best-effort)
+        if 'boxscore_status' in merged.columns:
+            inactive_mask = merged['boxscore_status'].notna() & (merged['boxscore_status'] != 'ACTIVE')
+            active_mask = ~inactive_mask
+            edge_cases['inactive_false_positives_10'] = int((actual_dnp & (pred_minutes >= 10) & inactive_mask).sum())
+            edge_cases['active_dnp_false_positives_10'] = int((actual_dnp & (pred_minutes >= 10) & active_mask).sum())
+
+            ghost_minutes_total = float(pred_minutes[actual_dnp].sum())
+            ghost_minutes_inactive = float(pred_minutes[actual_dnp & inactive_mask].sum())
+            ghost_minutes_active_dnp = float(pred_minutes[actual_dnp & active_mask].sum())
+            edge_cases['ghost_minutes_total'] = round(ghost_minutes_total, 2)
+            edge_cases['ghost_minutes_inactive'] = round(ghost_minutes_inactive, 2)
+            edge_cases['ghost_minutes_active_dnp'] = round(ghost_minutes_active_dnp, 2)
+
+            # Express as share of team minutes for the evaluated games (240 per team-game)
+            if 'game_id' in merged.columns:
+                team_col = 'team_id_actual' if 'team_id_actual' in merged.columns else None
+                if team_col:
+                    team_games = merged[['game_id', team_col]].drop_duplicates().shape[0]
+                    denom = team_games * 240
+                    edge_cases['ghost_minutes_rate'] = round((ghost_minutes_total / denom), 4) if denom > 0 else None
     
     # Starter misses: played > 30 min but predicted < 20
     if 'minutes_mean' in merged.columns:

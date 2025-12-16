@@ -58,6 +58,12 @@ The L2 layer **only operates on conditional minutes**. It must *not* touch `_unc
 
 We do **not** want to enforce 240 minutes across all players in a deep roster (including clear non-rotation guys). Define an "in-rotation" mask per team.
 
+### 3.0 Rotation Probability (Fast Fix)
+
+As of Dec 2025 we attach a heuristic `rotation_prob` at scoring-time (from pregame history features like `roll_mean_5`, `min_last1`, `min_last3`, `recent_start_pct_10`, `days_since_last`). This is used as a conservative guardrail to avoid allocating meaningful minutes to deep-bench players who are ACTIVE but frequently record 0 minutes (coach’s decision / non-rotation).
+
+This is intentionally a fast fix; the intended long-term replacement is a trained classifier for `P(in_rotation | ACTIVE)`.
+
 ### 3.1 Rotation candidate mask
 
 For each player-row, build:
@@ -68,6 +74,8 @@ is_rotation_candidate = (
     & (minutes_p50 >= config.min_minutes_for_rotation)
 ) | (is_projected_starter == 1)
 ```
+
+In addition, when `rotation_prob` is available we use it to stabilize rotation selection (e.g. for rotation caps) and apply conservative minutes caps for low `rotation_prob` players before reconciliation so “ghost minutes” don’t steal minutes from core DFS players.
 
 Config defaults (overridable via YAML):
 

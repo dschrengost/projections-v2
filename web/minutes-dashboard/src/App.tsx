@@ -14,6 +14,7 @@ import EvaluationPage from './pages/EvaluationPage'
 import OptimizerPage from './pages/OptimizerPage'
 import ContestPage from './pages/ContestPage'
 import ContestSimPage from './pages/ContestSimPage'
+import DiagnosticsPage from './pages/DiagnosticsPage'
 import { MinutesResponse, PlayerRow } from './types'
 import {
   formatFpts,
@@ -121,10 +122,11 @@ const SORT_LABELS: Record<SortKey, string> = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'contest' | 'contest-sim' => {
+const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'contest' | 'contest-sim' | 'diagnostics' => {
   if (typeof window === 'undefined') {
     return 'minutes'
   }
+  if (window.location.pathname.includes('diagnostics')) return 'diagnostics'
   if (window.location.pathname.includes('contest-sim')) return 'contest-sim'
   if (window.location.pathname.includes('contest')) return 'contest'
   if (window.location.pathname.includes('optimizer')) return 'optimizer'
@@ -136,7 +138,7 @@ const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'co
 
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'contest' | 'contest-sim'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'contest' | 'contest-sim' | 'diagnostics'>(initialTab)
   const [selectedDate, setSelectedDate] = useState(todayISO())
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
@@ -155,7 +157,7 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer', contest: '/contest', 'contest-sim': '/contest-sim' }
+    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer', contest: '/contest', 'contest-sim': '/contest-sim', diagnostics: '/diagnostics' }
     window.history.replaceState({}, '', pathMap[activeTab])
   }, [activeTab])
 
@@ -400,6 +402,12 @@ function App() {
       >
         Contest Sim
       </button>
+      <button
+        className={activeTab === 'diagnostics' ? 'active' : ''}
+        onClick={() => setActiveTab('diagnostics')}
+      >
+        Diagnostics
+      </button>
     </nav>
   )
 
@@ -444,6 +452,15 @@ function App() {
       <div className="app-shell">
         {nav}
         <ContestSimPage />
+      </div>
+    )
+  }
+
+  if (activeTab === 'diagnostics') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <DiagnosticsPage />
       </div>
     )
   }
