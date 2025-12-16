@@ -67,6 +67,14 @@
           }
         }
       },
+      "usage_shares": {
+        "enabled": false,
+        "targets": ["fga", "fta", "tov"],
+        "share_temperature": 1.0,
+        "share_noise_std": 0.15,
+        "min_minutes_active_cutoff": 2.0,
+        "fallback": "rate_weighted"
+      },
       "note": "Baseline uses rates path: minutes_v1 -> rates_v1 -> FPTS via efficiency scoring."
     },
     "baseline_rates_noise": {
@@ -132,6 +140,14 @@
           }
         }
       },
+      "usage_shares": {
+        "enabled": false,
+        "targets": ["fga", "fta", "tov"],
+        "share_temperature": 1.0,
+        "share_noise_std": 0.15,
+        "min_minutes_active_cutoff": 2.0,
+        "fallback": "rate_weighted"
+      },
       "note": "Baseline (rates path) but with residual-based rates_noise enabled (team/player shocks)."
     },
     "debug": {
@@ -169,7 +185,60 @@
       "team_factor_gamma": 1.0,
       "enforce_team_240": false,
       "efficiency_scoring": true,
+      "usage_shares": {
+        "enabled": false,
+        "targets": ["fga", "fta", "tov"],
+        "share_temperature": 1.0,
+        "share_noise_std": 0.15,
+        "min_minutes_active_cutoff": 2.0,
+        "fallback": "rate_weighted"
+      },
       "note": "Debug profile with reduced worlds and no noise for testing."
+    },
+    "usage_shares_test": {
+      "mean_source": "rates",
+      "minutes_source": "minutes_v1",
+      "rates_source": "rates_v1_live",
+      "rates_run_id": null,
+      "minutes_run_id": null,
+      "fpts_run_id": null,
+      "worlds": {
+        "n_worlds": 500,
+        "batch_size": 500
+      },
+      "noise": {
+        "epsilon_dist": "student_t",
+        "nu": 5,
+        "sigma_mode": "k_times_mu",
+        "k_default": 0.35
+      },
+      "rates_noise": {
+        "enabled": false,
+        "split": "val"
+      },
+      "minutes_noise": {
+        "enabled": false,
+        "sigma_min": 1.0
+      },
+      "team_sigma_scale": 1.0,
+      "player_sigma_scale": 1.0,
+      "rates_sigma_scale": 1.0,
+      "worlds_per_chunk": 500,
+      "seed": 12345,
+      "min_play_prob": 0.05,
+      "team_factor_sigma": 0.0,
+      "team_factor_gamma": 1.0,
+      "enforce_team_240": false,
+      "efficiency_scoring": true,
+      "usage_shares": {
+        "enabled": true,
+        "targets": ["fga", "fta", "tov"],
+        "share_temperature": 1.0,
+        "share_noise_std": 0.15,
+        "min_minutes_active_cutoff": 2.0,
+        "fallback": "rate_weighted"
+      },
+      "note": "Test profile with usage_shares enabled for smoke testing."
     }
   }
 }
