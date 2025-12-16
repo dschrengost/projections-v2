@@ -221,6 +221,8 @@ def _clean_tables(tables: List[pd.DataFrame]) -> pd.DataFrame:
         frames.append(df)
 
     combined = pd.concat(frames, ignore_index=True)
+    # Replace None values with pd.NA before applying regex to avoid TypeError
+    combined.fillna(pd.NA, inplace=True)
     combined.replace(r"^\s*$", pd.NA, regex=True, inplace=True)
 
     # Drop rows that are repeated headers from downstream pages.

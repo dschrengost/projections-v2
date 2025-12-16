@@ -10,7 +10,7 @@ _CANONICAL = {"G": "G", "W": "W", "B": "BIG", "BIG": "BIG"}
 
 
 def canonical_pos_bucket(value: str | None) -> str:
-    if not value:
+    if value is None or pd.isna(value) or not value:
         return "UNK"
     text = str(value).strip().upper()
     mapped = ARCHETYPE_MAP.get(text, text)

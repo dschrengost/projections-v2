@@ -28,6 +28,8 @@ from projections.ownership_v1.features import (
     OWNERSHIP_FEATURES_V2,
     OWNERSHIP_FEATURES_V3,
     OWNERSHIP_FEATURES_V4,
+    OWNERSHIP_FEATURES_V5,
+    OWNERSHIP_FEATURES_V6,
 )
 
 
@@ -46,6 +48,23 @@ BASE_PARAMS: dict[str, object] = {
     "verbose": -1,
 }
 
+# Stronger regularization for limited data (~5k samples)
+REGULARIZED_PARAMS: dict[str, object] = {
+    "objective": "regression",
+    "metric": "mae",
+    "boosting_type": "gbdt",
+    "num_leaves": 16,            # Down from 32
+    "learning_rate": 0.01,       # Down from 0.05
+    "feature_fraction": 0.6,     # Down from 0.8
+    "bagging_fraction": 0.6,     # Down from 0.8
+    "bagging_freq": 1,
+    "min_data_in_leaf": 200,     # Up from 100
+    "max_depth": 5,              # Explicit limit
+    "lambda_l1": 0.5,            # Add L1
+    "lambda_l2": 5.0,            # Up from 1.0
+    "verbose": -1,
+}
+
 
 def load_training_base(path: Path) -> pd.DataFrame:
     """Load ownership training base."""
@@ -55,9 +74,12 @@ def load_training_base(path: Path) -> pd.DataFrame:
 
 
 def prepare_features(
-    df: pd.DataFrame, 
+    df: pd.DataFrame,
     compute_historical: bool = True,
     compute_slate_features: bool = False,
+    compute_value_leverage: bool = False,
+    compute_player_popularity: bool = False,
+    compute_interactions: bool = False,
 ) -> pd.DataFrame:
     """Compute ownership features from training data."""
     result = df.copy()
@@ -114,7 +136,133 @@ def prepare_features(
     if compute_slate_features:
         print("  Computing slate-structure features...")
         result = compute_slate_structure_features(result)
-    
+
+    # Value leverage features
+    if compute_value_leverage:
+        print("  Computing value leverage features...")
+        result = compute_value_leverage_features(result)
+
+    # Player popularity features
+    if compute_player_popularity:
+        print("  Computing player popularity features...")
+        result = compute_player_popularity_features(result)
+
+    # Interaction features
+    if compute_interactions:
+        print("  Computing interaction features...")
+        result = compute_interaction_features(result)
+
+    return result
+
+
+def compute_value_leverage_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute value leverage features (relative to slate).
+
+    Features:
+    - value_vs_slate_avg: value_per_k minus slate average
+    - salary_vs_median: (salary - slate median) / slate median
+    - is_min_priced_by_pos: cheapest at position on this slate
+    - game_count_on_slate: number of games on slate
+    """
+    result = df.copy()
+
+    # Value vs slate average
+    slate_value_avg = result.groupby("slate_id")["value_per_k"].transform("mean")
+    result["value_vs_slate_avg"] = result["value_per_k"] - slate_value_avg
+
+    # Salary vs median
+    slate_salary_median = result.groupby("slate_id")["salary"].transform("median")
+    result["salary_vs_median"] = (result["salary"] - slate_salary_median) / slate_salary_median
+
+    # Is min-priced by position (cheapest at this position on slate)
+    def is_min_by_pos(group):
+        # For each position the player has, check if they're the cheapest
+        min_by_pos = {}
+        for _, row in group.iterrows():
+            positions = [p for p in ["PG", "SG", "SF", "PF", "C"] if row.get(f"pos_{p}", 0) == 1]
+            if not positions:
+                positions = [row.get("pos", "")]
+            for pos in positions:
+                if pos not in min_by_pos or row["salary"] < min_by_pos[pos]:
+                    min_by_pos[pos] = row["salary"]
+
+        is_min = []
+        for _, row in group.iterrows():
+            positions = [p for p in ["PG", "SG", "SF", "PF", "C"] if row.get(f"pos_{p}", 0) == 1]
+            if not positions:
+                positions = [row.get("pos", "")]
+            is_min.append(any(row["salary"] == min_by_pos.get(pos, float("inf")) for pos in positions))
+        return pd.Series(is_min, index=group.index, dtype=int)
+
+    result["is_min_priced_by_pos"] = result.groupby("slate_id", group_keys=False).apply(
+        is_min_by_pos, include_groups=False
+    )
+
+    # Game count on slate (approximate from unique matchups if available)
+    if "matchup" in result.columns:
+        result["game_count_on_slate"] = result.groupby("slate_id")["matchup"].transform("nunique")
+    else:
+        # Fallback: estimate from team count / 2
+        result["game_count_on_slate"] = result.groupby("slate_id")["team"].transform("nunique") // 2
+
+    return result
+
+
+def compute_player_popularity_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute player popularity features from historical ownership.
+
+    Features:
+    - player_own_median: median historical ownership
+    - player_own_variance: ownership volatility (std)
+    - player_chalk_rate: % of slates with >30% ownership
+    """
+    result = df.copy()
+
+    # Sort by date for proper temporal ordering
+    result = result.sort_values(["game_date", "slate_id"]).reset_index(drop=True)
+
+    def player_stats(group):
+        group = group.sort_values("game_date")
+        # Expanding statistics with shift to avoid leakage
+        median = group["actual_own_pct"].expanding().median().shift(1)
+        variance = group["actual_own_pct"].expanding().std().shift(1)
+        # Chalk rate: % of prior slates with >30% ownership
+        is_chalk = (group["actual_own_pct"] > 30).astype(float)
+        chalk_rate = is_chalk.expanding().mean().shift(1)
+        return pd.DataFrame({
+            "player_own_median": median,
+            "player_own_variance": variance,
+            "player_chalk_rate": chalk_rate,
+        }, index=group.index)
+
+    pop_features = result.groupby("player_id", group_keys=False).apply(
+        player_stats, include_groups=False
+    )
+
+    # Fill NaN with overall averages for players with no history
+    overall_median = result["actual_own_pct"].median()
+    overall_var = result["actual_own_pct"].std()
+    overall_chalk_rate = (result["actual_own_pct"] > 30).mean()
+
+    result["player_own_median"] = pop_features["player_own_median"].fillna(overall_median)
+    result["player_own_variance"] = pop_features["player_own_variance"].fillna(overall_var)
+    result["player_chalk_rate"] = pop_features["player_chalk_rate"].fillna(overall_chalk_rate)
+
+    return result
+
+
+def compute_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute interaction features.
+
+    Features:
+    - value_x_value_tier: value_per_k * is_value_tier (punt play detection)
+    - outs_x_salary_rank: team_outs_count * salary_rank (injury beneficiary)
+    """
+    result = df.copy()
+
+    result["value_x_value_tier"] = result["value_per_k"] * result["is_value_tier"]
+    result["outs_x_salary_rank"] = result["team_outs_count"] * result["salary_rank"]
+
     return result
 
 
@@ -181,6 +329,23 @@ def split_by_season(
     return df[~val_mask].copy(), df[val_mask].copy()
 
 
+def split_by_date(
+    df: pd.DataFrame,
+    val_start_date: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split by date for train/val.
+
+    Args:
+        df: DataFrame with game_date column
+        val_start_date: Start date for validation (YYYY-MM-DD)
+
+    Returns:
+        (train_df, val_df) tuple
+    """
+    val_mask = df["game_date"] >= val_start_date
+    return df[~val_mask].copy(), df[val_mask].copy()
+
+
 def train_model(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
@@ -221,27 +386,35 @@ def train_model(
     train_weight = None
     if params.get("sample_weighting"):
         chalk_weight = params.get("chalk_weight", 3.0)  # Default 3x
-        print(f"Applying sample weighting (chalk_weight={chalk_weight}x)...")
+        source_weight = params.get("source_weight", 2.0)  # DK data weight multiplier
+        print(f"Applying sample weighting (chalk_weight={chalk_weight}x, source_weight={source_weight}x for DK)...")
+
         # Use raw target for weighting logic
         train_weight = np.ones(len(y_train))
-        
+
+        # Source-based weighting (DK data is higher quality)
+        if "data_source" in train_clean.columns:
+            dk_mask = train_clean["data_source"].values == "dk"
+            train_weight[dk_mask] *= source_weight
+            print(f"  DK source rows: {dk_mask.sum():,} (weighted {source_weight}x)")
+
         # Progressive weighting for high ownership (chalk)
         # More aggressive for higher ownership
         if chalk_weight > 1:
             # >30% ownership: 2x
-            train_weight[y_train_raw > 30] = 2.0
+            train_weight[y_train_raw > 30] *= 2.0
             # >40% ownership: chalk_weight * 0.5
-            train_weight[y_train_raw > 40] = chalk_weight * 0.5
+            train_weight[y_train_raw > 40] *= chalk_weight * 0.5
             # >50% ownership: chalk_weight
-            train_weight[y_train_raw > 50] = chalk_weight
+            train_weight[y_train_raw > 50] *= chalk_weight
             # >60% ownership: chalk_weight * 1.5
-            train_weight[y_train_raw > 60] = chalk_weight * 1.5
+            train_weight[y_train_raw > 60] *= chalk_weight * 1.5
             # >70% ownership: chalk_weight * 2
-            train_weight[y_train_raw > 70] = chalk_weight * 2.0
-        
+            train_weight[y_train_raw > 70] *= chalk_weight * 2.0
+
         # Also weight low ownership but less aggressively
-        train_weight[y_train_raw < 5] = 1.5
-        
+        train_weight[y_train_raw < 5] *= 1.5
+
         print(f"  Weighted rows: {(train_weight > 1).sum():,} / {len(train_weight):,}")
         print(f"  >50% ownership weighted: {(y_train_raw > 50).sum():,} samples")
 
@@ -334,12 +507,18 @@ def train_model(
         y_train = y_train_raw
         y_val = y_val_raw
     
+    # Compute correlation safely (handle index mismatch and zero variance)
+    if len(val_preds) > 1 and y_val.std() > 0:
+        val_corr = float(np.corrcoef(val_preds, y_val.values)[0, 1])
+    else:
+        val_corr = float('nan')
+
     metrics = {
-        "train_mae": float(np.abs(train_preds - y_train).mean()),
-        "train_rmse": float(np.sqrt(((train_preds - y_train) ** 2).mean())),
-        "val_mae": float(np.abs(val_preds - y_val).mean()),
-        "val_rmse": float(np.sqrt(((val_preds - y_val) ** 2).mean())),
-        "val_corr": float(pd.Series(val_preds).corr(y_val)),
+        "train_mae": float(np.abs(train_preds - y_train.values).mean()),
+        "train_rmse": float(np.sqrt(((train_preds - y_train.values) ** 2).mean())),
+        "val_mae": float(np.abs(val_preds - y_val.values).mean()),
+        "val_rmse": float(np.sqrt(((val_preds - y_val.values) ** 2).mean())),
+        "val_corr": val_corr,
         "best_iteration": model.best_iteration,
         "num_features": len(features),
     }
@@ -347,7 +526,8 @@ def train_model(
     print(f"\n--- Metrics ---")
     print(f"Train MAE: {metrics['train_mae']:.3f}%")
     print(f"Val MAE: {metrics['val_mae']:.3f}%")
-    print(f"Val Correlation: {metrics['val_corr']:.3f}")
+    corr_str = f"{metrics['val_corr']:.3f}" if not np.isnan(metrics['val_corr']) else "NaN (check val set)"
+    print(f"Val Correlation: {corr_str}")
     print(f"Best iteration: {metrics['best_iteration']}")
     
     return model, metrics
@@ -411,9 +591,9 @@ def main():
     parser.add_argument(
         "--feature-set",
         type=str,
-        choices=["v1", "v2", "v3", "v4"],
+        choices=["v1", "v2", "v3", "v4", "v5", "v6"],
         default="v2",
-        help="Feature set: v1=base, v2=+injuries, v3=+historical, v4=+slate (default: v2)",
+        help="Feature set: v1=base, v2=+injuries, v3=+historical, v4=+slate, v5=+value_leverage, v6=+popularity+interactions (default: v2)",
     )
     parser.add_argument(
         "--num-leaves",
@@ -446,19 +626,44 @@ def main():
         help="Weight multiplier for chalk plays (used with --sample-weighting, default: 3.0)",
     )
     parser.add_argument(
+        "--source-weight",
+        type=float,
+        default=2.0,
+        help="Weight multiplier for DK source data (used with --sample-weighting, default: 2.0)",
+    )
+    parser.add_argument(
         "--chalk-classifier",
         action="store_true",
         help="Train a secondary classifier to boost chalk predictions",
     )
-    
+    parser.add_argument(
+        "--use-merged-base",
+        action="store_true",
+        help="Use merged Linestar+DK training base instead of Linestar-only",
+    )
+    parser.add_argument(
+        "--val-start-date",
+        type=str,
+        default=None,
+        help="Use date-based split instead of season. Format: YYYY-MM-DD",
+    )
+    parser.add_argument(
+        "--regularized",
+        action="store_true",
+        help="Use stronger regularization params (recommended for <5k samples)",
+    )
+
     args = parser.parse_args()
     
     # Defaults
     if args.run_id is None:
         args.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
+
     if args.training_base is None:
-        args.training_base = data_path() / "gold" / "ownership_training_base" / "ownership_training_base.parquet"
+        if args.use_merged_base:
+            args.training_base = data_path() / "gold" / "ownership_merged_base" / "ownership_merged_base.parquet"
+        else:
+            args.training_base = data_path() / "gold" / "ownership_training_base" / "ownership_training_base.parquet"
     
     # Select feature set
     feature_sets = {
@@ -466,49 +671,81 @@ def main():
         "v2": OWNERSHIP_FEATURES_V2,
         "v3": OWNERSHIP_FEATURES_V3,
         "v4": OWNERSHIP_FEATURES_V4,
+        "v5": OWNERSHIP_FEATURES_V5,
+        "v6": OWNERSHIP_FEATURES_V6,
     }
     features = list(feature_sets[args.feature_set])
-    
+
     print(f"Run ID: {args.run_id}")
     print(f"Training base: {args.training_base}")
     print(f"Validation seasons: {args.val_seasons}")
     print(f"Feature set: {args.feature_set} ({len(features)} features)")
-    
+
     # Load and prepare data
     print("\nLoading training data...")
     df = load_training_base(args.training_base)
     print(f"Loaded {len(df):,} rows")
-    
+
     print("\nPreparing features...")
-    compute_historical = (args.feature_set in ["v3", "v4"])
-    compute_slate = (args.feature_set == "v4")
-    df = prepare_features(df, compute_historical=compute_historical, compute_slate_features=compute_slate)
+    compute_historical = args.feature_set in ["v3", "v4", "v5", "v6"]
+    compute_slate = args.feature_set in ["v4", "v5", "v6"]
+    compute_value_leverage = args.feature_set in ["v5", "v6"]
+    compute_player_popularity = args.feature_set == "v6"
+    compute_interactions = args.feature_set == "v6"
+    df = prepare_features(
+        df,
+        compute_historical=compute_historical,
+        compute_slate_features=compute_slate,
+        compute_value_leverage=compute_value_leverage,
+        compute_player_popularity=compute_player_popularity,
+        compute_interactions=compute_interactions,
+    )
     
     # Split train/val
-    # If 2025 is empty (e.g. filtered out because no contest files), use 2024 as val
-    if df[df['season'] == 2025].empty:
-        print("  Warning: 2025 season empty (likely filtered). Using 2024 as validation.")
-        train_df = df[df['season'] < 2024].copy()
-        val_df = df[df['season'] == 2024].copy()
-        val_seasons = [2024] # Update val_seasons for artifact writing
+    if args.val_start_date:
+        # Date-based split (recommended for merged data)
+        print(f"\nUsing date-based split: val >= {args.val_start_date}")
+        train_df, val_df = split_by_date(df, args.val_start_date)
+        val_seasons = sorted(val_df["season"].unique().tolist())
+        train_seasons = sorted(train_df["season"].unique().tolist())
+        print(f"Train: {train_df['game_date'].min()} to {train_df['game_date'].max()} ({len(train_df):,} rows)")
+        print(f"Val: {val_df['game_date'].min()} to {val_df['game_date'].max()} ({len(val_df):,} rows)")
+
+        # Show data source distribution
+        if "data_source" in train_df.columns:
+            print(f"Train sources: {train_df['data_source'].value_counts().to_dict()}")
+            print(f"Val sources: {val_df['data_source'].value_counts().to_dict()}")
     else:
-        train_df = df[df['season'] != 2025].copy()
-        val_df = df[df['season'] == 2025].copy()
-        val_seasons = args.val_seasons # Use original val_seasons
-    
-    train_seasons = sorted(train_df["season"].unique().tolist())
-    print(f"\nTrain seasons: {train_seasons} ({len(train_df):,} rows)")
-    print(f"Val seasons: {val_seasons} ({len(val_df):,} rows)")
+        # Season-based split (legacy)
+        # If 2025 is empty (e.g. filtered out because no contest files), use 2024 as val
+        if df[df['season'] == 2025].empty:
+            print("  Warning: 2025 season empty (likely filtered). Using 2024 as validation.")
+            train_df = df[df['season'] < 2024].copy()
+            val_df = df[df['season'] == 2024].copy()
+            val_seasons = [2024]
+        else:
+            train_df = df[df['season'] != 2025].copy()
+            val_df = df[df['season'] == 2025].copy()
+            val_seasons = args.val_seasons
+
+        train_seasons = sorted(train_df["season"].unique().tolist())
+        print(f"\nTrain seasons: {train_seasons} ({len(train_df):,} rows)")
+        print(f"Val seasons: {val_seasons} ({len(val_df):,} rows)")
     
     print(f"\nFeatures ({len(features)}): {features}")
     
     # Train
-    params = BASE_PARAMS.copy()
-    params["num_leaves"] = args.num_leaves
-    params["learning_rate"] = args.learning_rate
+    if args.regularized:
+        print("Using REGULARIZED_PARAMS (stronger regularization for limited data)")
+        params = REGULARIZED_PARAMS.copy()
+    else:
+        params = BASE_PARAMS.copy()
+        params["num_leaves"] = args.num_leaves
+        params["learning_rate"] = args.learning_rate
     params["target_transform"] = args.target_transform
     params["sample_weighting"] = args.sample_weighting
     params["chalk_weight"] = args.chalk_weight
+    params["source_weight"] = args.source_weight
     params["chalk_classifier"] = args.chalk_classifier
     
     print("\nTraining model...")

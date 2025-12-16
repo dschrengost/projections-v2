@@ -336,6 +336,580 @@ def _apply_usage_shares_allocation(
     return stat_totals
 
 
+def _load_usage_shares_bundle(
+    data_root: Path,
+    usage_cfg: UsageSharesConfig,
+) -> tuple[any, bool]:
+    """
+    Load usage shares LGBM residual bundle if configured.
+    
+    Returns:
+        (bundle, success) - bundle is None if loading fails
+    """
+    if not usage_cfg.enabled or usage_cfg.backend != "lgbm_residual":
+        return None, False
+    
+    try:
+        from projections.usage_shares_v1.production import load_bundle, get_current_run_id
+        
+        # Resolve run_id
+        run_id = usage_cfg.run_id
+        
+        # 1. Check profile-specified run_id
+        if run_id is None:
+            # 2. Check project config file
+            config_path = get_project_root() / "config" / "usage_shares_current_run.json"
+            if config_path.exists():
+                try:
+                    import json
+                    cfg = json.loads(config_path.read_text())
+                    run_id = cfg.get("run_id")
+                except Exception:
+                    pass
+        
+        if run_id is None:
+            # 3. Check production config
+            run_id = get_current_run_id()
+        
+        if run_id is None:
+            # 4. Try latest decision run
+            decision_dir = data_root / "artifacts" / "usage_shares_v1" / "decision"
+            if decision_dir.exists():
+                runs = sorted(decision_dir.glob("decision_*"))
+                if runs:
+                    run_id = runs[-1].name
+        
+        if run_id is None:
+            typer.echo("[sim_v2] usage_shares: no run_id found, falling back to rate_weighted", err=True)
+            return None, False
+        
+        typer.echo(f"[sim_v2] usage_shares: resolved run_id={run_id}")
+        
+        # Load model directly from decision directory if it's a decision run
+        if run_id.startswith("decision_"):
+            decision_path = data_root / "artifacts" / "usage_shares_v1" / "decision" / run_id
+            if decision_path.exists():
+                # Create a lightweight bundle for decision runs
+                from dataclasses import dataclass
+                from typing import Any
+                
+                @dataclass
+                class DecisionBundle:
+                    run_id: str
+                    meta: dict[str, Any]
+                    lgbm_models: dict | None = None
+                    feature_cols: list[str] | None = None
+                
+                # Load results.json for config
+                results_path = decision_path / "results.json"
+                meta = {"data_root": str(data_root), "run_dir": str(decision_path)}
+                feature_cols = None
+                if results_path.exists():
+                    import json
+                    results = json.loads(results_path.read_text())
+                    feature_cols = results.get("feature_cols")
+                    meta["best_shrink"] = results.get("best_shrink", 0.75)
+                
+                bundle = DecisionBundle(
+                    run_id=run_id,
+                    meta=meta,
+                    lgbm_models=None,  # Will load on demand
+                    feature_cols=feature_cols,
+                )
+                return bundle, True
+        
+        # Otherwise use standard bundle loader
+        bundle = load_bundle(
+            data_root=data_root,
+            run_id=run_id,
+            backend="lgbm",
+        )
+        return bundle, True
+        
+    except Exception as e:
+        typer.echo(f"[sim_v2] usage_shares: failed to load bundle: {e}, falling back", err=True)
+        return None, False
+
+
+# Vacancy clipping constants (conservative caps to prevent extreme values)
+VAC_MIN_CAP = 240.0  # Max expected missing minutes per team
+VAC_FGA_CAP = 100.0  # Max expected missing FGA per team
+
+
+def _add_vacancy_features_from_minutes_df(
+    df: pd.DataFrame,
+    group_cols: tuple[str, str] = ("game_id", "team_id"),
+    vacancy_mode: str = "game",
+) -> pd.DataFrame:
+    """
+    Compute vacancy features from minutes model outputs.
+    
+    Vacancy v1: Uses (1 - play_prob) * minutes_pred_p50 as "expected missing minutes"
+    per player, then aggregates to team level.
+    
+    This is leak-safe as it only uses model predictions, not actual outcomes.
+    
+    Args:
+        df: DataFrame with minutes projections (must have play_prob and minutes columns)
+        group_cols: Columns to group by for team aggregation
+        vacancy_mode: "none" = set all vacancy to 0, "game" = compute from play_prob
+        
+    Returns:
+        DataFrame with vacancy columns added
+    """
+    df = df.copy()
+    
+    # Handle vacancy_mode="none" - set all vacancy features to 0
+    if vacancy_mode == "none":
+        for vac_col in ["vac_min_szn", "vac_fga_szn", "vac_min_guard_szn", "vac_min_wing_szn", "vac_min_big_szn"]:
+            df[vac_col] = 0.0
+        return df
+    
+    # Resolve minutes and play_prob columns
+    minutes_col = None
+    for c in ["minutes_pred_p50", "minutes_p50_cond", "minutes_p50"]:
+        if c in df.columns:
+            minutes_col = c
+            break
+    
+    prob_col = None
+    for c in ["minutes_pred_play_prob", "play_prob"]:
+        if c in df.columns:
+            prob_col = c
+            break
+    
+    if minutes_col is None:
+        # No minutes column available, can't compute vacancy
+        return df
+    
+    # Get minutes values
+    minutes = pd.to_numeric(df[minutes_col], errors="coerce").fillna(0.0).clip(lower=0.0)
+    
+    # Get play probability (default to 1.0 if missing = no expected vacancy)
+    if prob_col is not None:
+        play_prob = pd.to_numeric(df[prob_col], errors="coerce").fillna(1.0).clip(0.0, 1.0)
+    else:
+        play_prob = pd.Series(1.0, index=df.index)
+    
+    # Compute per-player vacancy minutes: expected missing minutes
+    # vac_minutes = (1 - p) * m = minutes that player is expected to NOT play
+    df["_vac_minutes"] = (1.0 - play_prob) * minutes
+    
+    # Get season rates for vacancy-weighted stats
+    fga_rate = 0.0
+    for c in ["season_fga_per_min", "pred_fga2_per_min", "pred_fga3_per_min"]:
+        if c in df.columns:
+            if c == "season_fga_per_min":
+                fga_rate = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+                break
+            else:
+                fga_rate = fga_rate + pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    if isinstance(fga_rate, float):
+        fga_rate = pd.Series(0.0, index=df.index)
+    
+    df["_vac_fga"] = df["_vac_minutes"] * fga_rate
+    
+    # Position flags for guard/wing/big classification
+    pos_col = None
+    for c in ["pos_bucket", "position_primary", "position"]:
+        if c in df.columns:
+            pos_col = c
+            break
+    
+    if pos_col is not None:
+        pos_str = df[pos_col].astype(str).str.upper()
+        # Guard = PG or SG
+        is_guard = (pos_str.str.contains("PG", na=False) | pos_str.str.contains("SG", na=False)).astype(float)
+        # Wing = SF or PF (some overlap with guard/big positions)
+        is_wing = (pos_str.str.contains("SF", na=False) | pos_str.str.contains("PF", na=False)).astype(float)
+        # Big = C
+        is_big = pos_str.str.contains("C", na=False).astype(float)
+    else:
+        # Check for individual position flags
+        is_guard = 0.0
+        is_wing = 0.0
+        is_big = 0.0
+        for flag in ["position_flags_PG", "position_flags_SG"]:
+            if flag in df.columns:
+                is_guard = is_guard + pd.to_numeric(df[flag], errors="coerce").fillna(0.0)
+        for flag in ["position_flags_SF", "position_flags_PF"]:
+            if flag in df.columns:
+                is_wing = is_wing + pd.to_numeric(df[flag], errors="coerce").fillna(0.0)
+        if "position_flags_C" in df.columns:
+            is_big = pd.to_numeric(df["position_flags_C"], errors="coerce").fillna(0.0)
+        # Convert to binary (if multiple flags, any match = 1)
+        is_guard = (is_guard > 0).astype(float) if not isinstance(is_guard, float) else 0.0
+        is_wing = (is_wing > 0).astype(float) if not isinstance(is_wing, float) else 0.0
+        is_big = (is_big > 0).astype(float) if not isinstance(is_big, float) else 0.0
+    
+    # Ensure series for consistent indexing
+    if isinstance(is_guard, float):
+        is_guard = pd.Series(is_guard, index=df.index)
+    if isinstance(is_wing, float):
+        is_wing = pd.Series(is_wing, index=df.index)
+    if isinstance(is_big, float):
+        is_big = pd.Series(is_big, index=df.index)
+    
+    df["_vac_guard"] = df["_vac_minutes"] * is_guard
+    df["_vac_wing"] = df["_vac_minutes"] * is_wing
+    df["_vac_big"] = df["_vac_minutes"] * is_big
+    
+    # Aggregate to team level
+    team_aggs = df.groupby(list(group_cols)).agg({
+        "_vac_minutes": "sum",
+        "_vac_fga": "sum",
+        "_vac_guard": "sum",
+        "_vac_wing": "sum",
+        "_vac_big": "sum",
+    }).rename(columns={
+        "_vac_minutes": "vac_min_szn",
+        "_vac_fga": "vac_fga_szn",
+        "_vac_guard": "vac_min_guard_szn",
+        "_vac_wing": "vac_min_wing_szn",
+        "_vac_big": "vac_min_big_szn",
+    })
+    
+    # Track clipping diagnostics before applying clips
+    vac_min_max_before = team_aggs["vac_min_szn"].max()
+    vac_fga_max_before = team_aggs["vac_fga_szn"].max()
+    teams_clipped_min = (team_aggs["vac_min_szn"] > VAC_MIN_CAP).sum()
+    teams_clipped_fga = (team_aggs["vac_fga_szn"] > VAC_FGA_CAP).sum()
+    
+    # Apply conservative clipping to prevent extreme values
+    team_aggs["vac_min_szn"] = team_aggs["vac_min_szn"].clip(0, VAC_MIN_CAP)
+    team_aggs["vac_fga_szn"] = team_aggs["vac_fga_szn"].clip(0, VAC_FGA_CAP)
+    team_aggs["vac_min_guard_szn"] = team_aggs["vac_min_guard_szn"].clip(0, VAC_MIN_CAP)
+    team_aggs["vac_min_wing_szn"] = team_aggs["vac_min_wing_szn"].clip(0, VAC_MIN_CAP)
+    team_aggs["vac_min_big_szn"] = team_aggs["vac_min_big_szn"].clip(0, VAC_MIN_CAP)
+    
+    # Store diagnostics in dataframe attrs for later logging
+    team_aggs.attrs["vac_min_max_before_clip"] = vac_min_max_before
+    team_aggs.attrs["vac_fga_max_before_clip"] = vac_fga_max_before
+    team_aggs.attrs["teams_clipped_min"] = teams_clipped_min
+    team_aggs.attrs["teams_clipped_fga"] = teams_clipped_fga
+    
+    # Merge back to player rows
+    df = df.merge(team_aggs, on=list(group_cols), how="left", suffixes=("_old", ""))
+    
+    # Clean up temp columns
+    for col in ["_vac_minutes", "_vac_fga", "_vac_guard", "_vac_wing", "_vac_big"]:
+        if col in df.columns:
+            df = df.drop(columns=[col])
+    
+    # Also drop any _old suffix columns if they existed
+    for col in list(df.columns):
+        if col.endswith("_old"):
+            df = df.drop(columns=[col])
+    
+    return df
+
+
+def _prepare_live_features_for_usage_shares(
+    df: pd.DataFrame,
+    group_cols: tuple[str, str] = ("game_id", "team_id"),
+) -> pd.DataFrame:
+    """
+    Prepare live slate dataframe with features required by usage shares model.
+    
+    Derives features that can be computed from existing columns:
+    - Renames: minutes_pred_p50, minutes_pred_play_prob
+    - Ranks: minutes_pred_team_rank
+    - Team aggregates: minutes_pred_p50_team_scaled, minutes_pred_team_sum_invalid
+    - One-hot: position_flags_PG/SG/SF/PF/C
+    - Odds: spread_close, total_close, has_odds, odds_lead_time_minutes
+    - Season rates: use pred_* columns as proxy for season rates
+    """
+    df = df.copy()
+    
+    # 1. Rename columns (minutes predictions)
+    for new_col, old_cols in [
+        ("minutes_pred_p50", ["minutes_p50_cond", "minutes_p50"]),
+        ("minutes_pred_play_prob", ["play_prob"]),
+    ]:
+        if new_col not in df.columns:
+            for old in old_cols:
+                if old in df.columns:
+                    df[new_col] = df[old]
+                    break
+            if new_col not in df.columns:
+                df[new_col] = 0.0
+    
+    # 2. Position flags (one-hot from pos_bucket)
+    pos_col = None
+    for c in ["pos_bucket", "position_primary", "position"]:
+        if c in df.columns:
+            pos_col = c
+            break
+    
+    for pos in ["PG", "SG", "SF", "PF", "C"]:
+        flag_col = f"position_flags_{pos}"
+        if flag_col not in df.columns:
+            if pos_col:
+                df[flag_col] = df[pos_col].astype(str).str.contains(pos, case=False, na=False).astype(float)
+            else:
+                df[flag_col] = 0.0
+    
+    # 3. Odds columns
+    if "spread_close" not in df.columns:
+        if "spread_home" in df.columns:
+            df["spread_close"] = df["spread_home"]
+        else:
+            df["spread_close"] = 0.0
+    
+    if "total_close" not in df.columns:
+        if "total" in df.columns:
+            df["total_close"] = df["total"]
+        else:
+            df["total_close"] = 220.0  # Default NBA total
+    
+    if "has_odds" not in df.columns:
+        df["has_odds"] = (
+            df.get("total", pd.Series([0.0])).notna() & 
+            df.get("spread_home", pd.Series([0.0])).notna()
+        ).astype(float)
+    
+    # Odds lead time
+    if "odds_lead_time_minutes" not in df.columns:
+        if "tip_ts" in df.columns and "odds_as_of_ts" in df.columns:
+            tip = pd.to_datetime(df["tip_ts"], errors="coerce")
+            odds_ts = pd.to_datetime(df["odds_as_of_ts"], errors="coerce")
+            df["odds_lead_time_minutes"] = (tip - odds_ts).dt.total_seconds() / 60.0
+            df["odds_lead_time_minutes"] = df["odds_lead_time_minutes"].fillna(0.0)
+        else:
+            df["odds_lead_time_minutes"] = 60.0  # Default 1 hour
+    
+    # 4. Team-level features (rank, scaled, validity)
+    if "minutes_pred_team_rank" not in df.columns:
+        df["minutes_pred_team_rank"] = (
+            df.groupby(list(group_cols))["minutes_pred_p50"]
+            .rank(ascending=False, method="min")
+            .astype(float)
+        )
+    
+    if "minutes_pred_p50_team_scaled" not in df.columns or "minutes_pred_team_sum_invalid" not in df.columns:
+        team_sums = df.groupby(list(group_cols))["minutes_pred_p50"].transform("sum")
+        df["minutes_pred_p50_team_scaled"] = (df["minutes_pred_p50"] / team_sums.clip(lower=1.0)) * 240.0
+        df["minutes_pred_team_sum_invalid"] = ((team_sums < 200) | (team_sums > 280)).astype(float)
+    
+    # 5. Team implied totals (ITT) - derive from total and spread
+    if "team_itt" not in df.columns or "opp_itt" not in df.columns:
+        total = df.get("total_close", pd.Series([220.0] * len(df)))
+        # Simple approximation: use total/2 as proxy since we don't know home/away per player
+        df["team_itt"] = total / 2.0
+        df["opp_itt"] = total / 2.0
+    
+    # 6. Season rates - use predicted rates as proxy
+    rate_mapping = {
+        "season_fga_per_min": ["pred_fga2_per_min", "pred_fga3_per_min"],  # Sum of 2PA + 3PA
+        "season_fta_per_min": ["pred_fta_per_min"],
+        "season_tov_per_min": ["pred_tov_per_min"],
+    }
+    for target, source_cols in rate_mapping.items():
+        if target not in df.columns:
+            val = 0.0
+            for src in source_cols:
+                if src in df.columns:
+                    val = val + pd.to_numeric(df[src], errors="coerce").fillna(0.0)
+            df[target] = val
+    
+    # 7. Vacancy features - pass through if computed upstream, else fallback to 0 for compatibility
+    for vac_col in ["vac_min_szn", "vac_fga_szn", "vac_min_guard_szn", "vac_min_wing_szn", "vac_min_big_szn"]:
+        if vac_col not in df.columns:
+            df[vac_col] = 0.0
+    
+    # 8. Interaction features
+    if "vac_min_szn_x_minutes_rank" not in df.columns:
+        df["vac_min_szn_x_minutes_rank"] = df["vac_min_szn"] * df["minutes_pred_team_rank"]
+    
+    return df
+
+
+def _apply_learned_fga_shares_allocation(
+    stat_totals: dict[str, np.ndarray],
+    player_df: pd.DataFrame,
+    team_indices: np.ndarray,
+    active_mask: np.ndarray,
+    minutes_worlds: np.ndarray,
+    usage_cfg: UsageSharesConfig,
+    bundle: any,
+    rng: np.random.Generator,
+) -> dict[str, np.ndarray]:
+    """
+    Apply learned FGA shares allocation using LGBM residual model.
+    
+    Args:
+        stat_totals: dict of stat arrays, shape (n_worlds, n_players)
+        player_df: DataFrame with player features
+        team_indices: shape (n_players,) - integer indices mapping players to teams
+        active_mask: shape (n_worlds, n_players) - True if player is active
+        minutes_worlds: shape (n_worlds, n_players)
+        usage_cfg: UsageSharesConfig
+        bundle: Loaded usage shares bundle
+        rng: random generator
+        
+    Returns:
+        Updated stat_totals dict
+    """
+    from projections.usage_shares_v1.metrics import compute_baseline_log_weights
+    from projections.usage_shares_v1.features import add_derived_features
+    
+    target = "fga"
+    n_worlds, n_players = minutes_worlds.shape
+    eps = 1e-9
+    
+    # Get original FGA totals
+    orig_fga2 = stat_totals.get("fga2")
+    orig_fga3 = stat_totals.get("fga3")
+    if orig_fga2 is None or orig_fga3 is None:
+        return stat_totals
+    orig_fga = orig_fga2 + orig_fga3
+    
+    # Prepare features for prediction
+    try:
+        # First, prepare live features (renames, ranks, flags, etc.)
+        pred_df = _prepare_live_features_for_usage_shares(player_df.copy())
+        
+        # Then add any additional derived features from usage_shares_v1 module
+        pred_df = add_derived_features(pred_df)
+        
+        # Load model and config
+        config = None
+        
+        # Try to use bundle directly
+        if bundle.lgbm_models and target in bundle.lgbm_models:
+            model = bundle.lgbm_models[target]
+        else:
+            # Try decision run structure
+            data_root = Path(bundle.meta.get("data_root", "/home/daniel/projections-data"))
+            run_id = bundle.run_id
+            
+            # Check decision directory
+            decision_path = data_root / "artifacts" / "usage_shares_v1" / "decision" / run_id
+            if (decision_path / f"model_{target}_starterless.txt").exists():
+                import lightgbm as lgb
+                model = lgb.Booster(model_file=str(decision_path / f"model_{target}_starterless.txt"))
+                config_path = decision_path / "results.json"
+                if config_path.exists():
+                    config = json.loads(config_path.read_text())
+            else:
+                # Fallback
+                typer.echo("[sim_v2] usage_shares: couldn't find model, using rate_weighted", err=True)
+                return stat_totals
+        
+        # Get shrink value
+        shrink = usage_cfg.shrink 
+        if shrink is None and config:
+            shrink = config.get("best_shrink", 0.75)
+        if shrink is None:
+            shrink = 0.75
+        
+        # Get feature columns from config
+        feature_cols = None
+        if config:
+            feature_cols = config.get("feature_cols")
+        if feature_cols is None and hasattr(bundle, "feature_cols"):
+            feature_cols = bundle.feature_cols
+        if feature_cols is None:
+            # Default starterless features
+            feature_cols = [
+                "minutes_pred_p50", "minutes_pred_play_prob", "minutes_pred_p50_team_scaled",
+                "minutes_pred_team_sum_invalid", "minutes_pred_team_rank",
+                "position_flags_PG", "position_flags_SG", "position_flags_SF",
+                "position_flags_PF", "position_flags_C",
+                "spread_close", "total_close", "team_itt", "opp_itt", "has_odds",
+                "odds_lead_time_minutes",
+                "vac_min_szn", "vac_fga_szn", "vac_min_guard_szn", "vac_min_wing_szn", "vac_min_big_szn",
+                "vac_min_szn_x_minutes_rank",
+                "season_fga_per_min", "season_fta_per_min", "season_tov_per_min",
+            ]
+        
+        # Prepare features
+        available_cols = [c for c in feature_cols if c in pred_df.columns]
+        if len(available_cols) < len(feature_cols) * 0.5:
+            typer.echo(f"[sim_v2] usage_shares: insufficient features ({len(available_cols)}/{len(feature_cols)}), using rate_weighted", err=True)
+            return stat_totals
+        
+        X = pred_df[available_cols].copy()
+        for col in available_cols:
+            X[col] = pd.to_numeric(X[col], errors="coerce").fillna(0.0)
+        
+        # Predict delta
+        delta_pred = model.predict(X.values)
+        
+        # Compute baseline log-weights
+        alpha = 0.5
+        baseline_logw = compute_baseline_log_weights(pred_df, target, alpha)
+        
+        # Compute learned log-weights: baseline + shrink * delta
+        learned_logw = baseline_logw + shrink * delta_pred  # (n_players,)
+        
+    except Exception as e:
+        typer.echo(f"[sim_v2] usage_shares: prediction failed: {e}, using rate_weighted", err=True)
+        return stat_totals
+    
+    # Now compute shares per world (with noise if configured)
+    n_teams = int(team_indices.max()) + 1 if len(team_indices) > 0 else 0
+    
+    # Broadcast log-weights to worlds
+    log_weights_2d = np.broadcast_to(learned_logw[None, :], (n_worlds, n_players)).copy()
+    
+    # Add per-world noise if configured
+    if usage_cfg.share_noise_std > 0:
+        noise = rng.normal(loc=0.0, scale=usage_cfg.share_noise_std, size=(n_worlds, n_players))
+        log_weights_2d += noise * active_mask.astype(float)
+    
+    # Apply temperature
+    scaled_logw = log_weights_2d / max(usage_cfg.share_temperature, 1e-6)
+    
+    # Set inactive players (minutes < cutoff OR not active) to -inf
+    min_cutoff_mask = minutes_worlds >= usage_cfg.min_minutes_active_cutoff
+    valid_mask = active_mask & min_cutoff_mask
+    scaled_logw = np.where(valid_mask, scaled_logw, -np.inf)
+    
+    # Compute softmax per team
+    shares = np.zeros((n_worlds, n_players), dtype=float)
+    for t in range(n_teams):
+        team_mask = team_indices == t
+        if not team_mask.any():
+            continue
+        team_logits = scaled_logw[:, team_mask]
+        max_logits = np.max(team_logits, axis=1, keepdims=True)
+        max_logits = np.where(np.isfinite(max_logits), max_logits, 0.0)
+        exp_logits = np.exp(team_logits - max_logits)
+        sum_exp = exp_logits.sum(axis=1, keepdims=True)
+        team_shares = np.where(sum_exp > 0, exp_logits / np.maximum(sum_exp, 1e-12), 0.0)
+        shares[:, team_mask] = team_shares
+    
+    # Compute team totals (from original FGA)
+    team_totals = np.zeros((n_worlds, n_teams), dtype=float)
+    for idx_list in range(n_players):
+        t = team_indices[idx_list]
+        team_totals[:, t] += orig_fga[:, idx_list]
+    
+    # Allocate new FGA
+    new_fga = np.zeros_like(orig_fga)
+    for idx_list in range(n_players):
+        t = team_indices[idx_list]
+        new_fga[:, idx_list] = shares[:, idx_list] * team_totals[:, t]
+    
+    # Split into FGA2/FGA3 using player prior mix
+    fga2_prior = orig_fga2.mean(axis=0) + eps
+    fga3_prior = orig_fga3.mean(axis=0) + eps
+    p3 = fga3_prior / (fga2_prior + fga3_prior)  # (n_players,)
+    
+    new_fga3 = new_fga * p3[None, :]
+    new_fga2 = new_fga - new_fga3
+    
+    # Clip negatives (numerical safety)
+    new_fga2 = np.clip(new_fga2, 0.0, None)
+    new_fga3 = np.clip(new_fga3, 0.0, None)
+    
+    stat_totals["fga2"] = new_fga2
+    stat_totals["fga3"] = new_fga3
+    
+    return stat_totals
+
+
 def _parse_date(value: str) -> date:
     try:
         return datetime.fromisoformat(value).date()
@@ -560,6 +1134,9 @@ def _compute_fpts_and_boxscore(
         "stl": stl,
         "blk": blk,
         "tov": tov,
+        "fga2": fga2,
+        "fga3": fga3,
+        "fta": fta,
     }
     return fpts, stat_box
 
@@ -672,6 +1249,17 @@ def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> p
     for extra in ("minutes_p50_cond", "minutes_p50", "play_prob", "is_starter"):
         if extra in merged.columns:
             base_cols.append(extra)
+    # Passthrough vacancy features for learned usage shares model
+    for vac_col in [
+        "vac_min_szn", "vac_fga_szn", "vac_min_guard_szn",
+        "vac_min_wing_szn", "vac_min_big_szn",
+    ]:
+        if vac_col in merged.columns:
+            base_cols.append(vac_col)
+    # Passthrough other features needed by learned model
+    for feat in ["pos_bucket", "position_primary", "spread_home", "total", "odds_as_of_ts", "tip_ts"]:
+        if feat in merged.columns and feat not in base_cols:
+            base_cols.append(feat)
     return merged[base_cols]
 
 
@@ -867,6 +1455,11 @@ def main(
         "--use-efficiency-scoring/--no-efficiency-scoring",
         help="Toggle efficiency-based scoring (fg% heads). Defaults to profile setting.",
     ),
+    export_attempt_means: bool = typer.Option(
+        False,
+        "--export-attempt-means",
+        help="Export fga2_mean, fga3_mean, fta_mean in projections for diagnostics.",
+    ),
 ) -> None:
     profile_cfg = load_sim_v2_profile(profile=profile, profiles_path=profiles_path)
 
@@ -1019,6 +1612,17 @@ def main(
             minutes_df["play_prob"] = pd.to_numeric(minutes_df.get("play_prob"), errors="coerce").fillna(1.0)
             minutes_df = _ensure_status_bucket(minutes_df)
             minutes_df = minutes_df[minutes_df[minutes_col].notna()]
+            
+            # Compute vacancy features BEFORE filtering by min_play_prob
+            # Only compute if usage_shares enabled (where vacancy is used by learned model)
+            if profile_cfg.usage_shares.enabled and profile_cfg.vacancy_mode != "none":
+                minutes_df = _add_vacancy_features_from_minutes_df(
+                    minutes_df,
+                    group_cols=("game_id", "team_id"),
+                    vacancy_mode=profile_cfg.vacancy_mode,
+                )
+            
+            # Now filter by min_play_prob (removes players unlikely to play)
             minutes_df = minutes_df[minutes_df["play_prob"].fillna(0.0) >= min_play_prob_eff]
             if minutes_df.empty:
                 continue
@@ -1210,11 +1814,48 @@ def main(
 
             # Usage shares config
             usage_shares_cfg = profile_cfg.usage_shares
+            usage_shares_bundle = None
+            use_learned_fga = False
             if usage_shares_cfg.enabled:
                 typer.echo(
                     f"[sim_v2] usage_shares enabled: targets={usage_shares_cfg.targets} "
-                    f"noise_std={usage_shares_cfg.share_noise_std} temp={usage_shares_cfg.share_temperature}"
+                    f"backend={usage_shares_cfg.backend} noise_std={usage_shares_cfg.share_noise_std} "
+                    f"temp={usage_shares_cfg.share_temperature}"
                 )
+                # Load learned model bundle if backend is lgbm_residual
+                if usage_shares_cfg.backend == "lgbm_residual" and "fga" in usage_shares_cfg.targets:
+                    usage_shares_bundle, use_learned_fga = _load_usage_shares_bundle(root, usage_shares_cfg)
+                    if use_learned_fga:
+                        typer.echo(
+                            f"[sim_v2] usage_shares: loaded LGBM residual bundle "
+                            f"(run_id={usage_shares_bundle.run_id if usage_shares_bundle else 'N/A'}, "
+                            f"shrink={usage_shares_cfg.shrink or 0.75})"
+                        )
+                        # Log vacancy stats for debugging
+                        if "vac_min_szn" in minutes_df.columns:
+                            vac_per_team = minutes_df.groupby(["game_id", "team_id"])["vac_min_szn"].first()
+                            vac_p50 = vac_per_team.median()
+                            vac_p90 = vac_per_team.quantile(0.9)
+                            vac_max = vac_per_team.max()
+                            n_high = (vac_per_team > 20).sum()
+                            
+                            # Check for FGA clipping (caps are applied in _add_vacancy)
+                            fga_per_team = minutes_df.groupby(["game_id", "team_id"])["vac_fga_szn"].first() if "vac_fga_szn" in minutes_df.columns else pd.Series([0])
+                            teams_clipped_fga = (fga_per_team >= VAC_FGA_CAP).sum()
+                            fga_max = fga_per_team.max()
+                            
+                            clip_info = f" fga_max={fga_max:.1f} teams_clipped_fga={teams_clipped_fga}" if teams_clipped_fga > 0 else ""
+                            typer.echo(
+                                f"[sim_v2] vacancy_mode={profile_cfg.vacancy_mode} "
+                                f"vac_min_szn p50={vac_p50:.1f} p90={vac_p90:.1f} max={vac_max:.1f} "
+                                f"teams_with_vac>20={n_high}{clip_info}"
+                            )
+                    else:
+                        typer.echo(
+                            "[sim_v2] usage_shares: could not load LGBM bundle, "
+                            f"falling back to {usage_shares_cfg.fallback}",
+                            err=True,
+                        )
 
             # Precompute team group indices for team-level residual shocks.
             group_map: dict[tuple[int, int], np.ndarray] = {}
@@ -1350,14 +1991,60 @@ def main(
 
                 # Apply usage shares allocation (redistributes FGA/FTA/TOV within teams)
                 if usage_shares_cfg.enabled and stat_totals:
-                    stat_totals = _apply_usage_shares_allocation(
-                        stat_totals=stat_totals,
-                        minutes_worlds=minutes_worlds,
-                        rate_arrays=usage_rate_arrays,
-                        group_map=group_map,
-                        usage_cfg=usage_shares_cfg,
-                        rng=rng,
-                    )
+                    # If learned FGA backend is available, use it for FGA
+                    if use_learned_fga and usage_shares_bundle is not None and "fga" in usage_shares_cfg.targets:
+                        # Build team indices array
+                        team_indices_arr = np.zeros(len(gs_team_ids), dtype=int)
+                        team_to_idx = {}
+                        for key, player_idxs in group_map.items():
+                            if key not in team_to_idx:
+                                team_to_idx[key] = len(team_to_idx)
+                            team_indices_arr[player_idxs] = team_to_idx[key]
+                        
+                        # Apply learned FGA allocation
+                        stat_totals = _apply_learned_fga_shares_allocation(
+                            stat_totals=stat_totals,
+                            player_df=mu_df,
+                            team_indices=team_indices_arr,
+                            active_mask=active_mask,
+                            minutes_worlds=minutes_worlds,
+                            usage_cfg=usage_shares_cfg,
+                            bundle=usage_shares_bundle,
+                            rng=rng,
+                        )
+                        
+                        # Apply rate_weighted for non-FGA targets (FTA, TOV)
+                        non_fga_targets = [t for t in usage_shares_cfg.targets if t != "fga"]
+                        if non_fga_targets:
+                            from copy import copy
+                            rate_weighted_cfg = copy(usage_shares_cfg)
+                            rate_weighted_cfg = UsageSharesConfig(
+                                enabled=True,
+                                targets=tuple(non_fga_targets),
+                                backend="rate_weighted",
+                                share_temperature=usage_shares_cfg.share_temperature,
+                                share_noise_std=usage_shares_cfg.share_noise_std,
+                                min_minutes_active_cutoff=usage_shares_cfg.min_minutes_active_cutoff,
+                                fallback="rate_weighted",
+                            )
+                            stat_totals = _apply_usage_shares_allocation(
+                                stat_totals=stat_totals,
+                                minutes_worlds=minutes_worlds,
+                                rate_arrays=usage_rate_arrays,
+                                group_map=group_map,
+                                usage_cfg=rate_weighted_cfg,
+                                rng=rng,
+                            )
+                    else:
+                        # Use rate_weighted for all targets
+                        stat_totals = _apply_usage_shares_allocation(
+                            stat_totals=stat_totals,
+                            minutes_worlds=minutes_worlds,
+                            rate_arrays=usage_rate_arrays,
+                            group_map=group_map,
+                            usage_cfg=usage_shares_cfg,
+                            rng=rng,
+                        )
 
                 if not stat_totals:
                     fpts_chunk = mu_arr[:, None]  # fallback: no stat noise
@@ -1384,7 +2071,7 @@ def main(
                         fpts_chunk = fpts_chunk + (stat_box["pts"] - pts_before)
                 world_fpts_samples.append(fpts_chunk)
                 # Track individual stat worlds for aggregation
-                for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
+                for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov", "fga2", "fga3", "fta"):
                     if stat_name in stat_box:
                         stat_world_samples.setdefault(stat_name, []).append(stat_box[stat_name])
 
@@ -1485,6 +2172,19 @@ def main(
                 for extra in ("is_starter", "play_prob"):
                     if extra in mu_df.columns:
                         proj_df[extra] = mu_df[extra]
+                
+                # Add attempt means for diagnostics (when --export-attempt-means is set)
+                if export_attempt_means:
+                    for stat_name in ("fga2", "fga3", "fta"):
+                        if stat_name in stat_world_samples and stat_world_samples[stat_name]:
+                            all_stat = np.vstack(stat_world_samples[stat_name])
+                            stat_sum = (all_stat * all_active).sum(axis=0)
+                            stat_mean = np.where(active_counts > 0, stat_sum / active_counts, 0.0)
+                            proj_df[f"{stat_name}_mean"] = stat_mean
+                    # Also add vacancy cols if present
+                    for vac_col in ["vac_min_szn", "vac_fga_szn"]:
+                        if vac_col in mu_df.columns:
+                            proj_df[vac_col] = mu_df[vac_col]
                 
                 # Write single projections file
                 proj_path = out_dir / "projections.parquet"

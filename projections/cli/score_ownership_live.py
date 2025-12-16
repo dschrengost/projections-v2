@@ -107,7 +107,7 @@ def _save_locked_predictions(df: pd.DataFrame, game_date: date, draft_group_id: 
         print(f"[ownership] Saved locked predictions for slate {draft_group_id}: {len(df)} players")
 
 
-PRODUCTION_MODEL_RUN = "poc_013_chalk_5x"
+PRODUCTION_MODEL_RUN = "dk_only_v4"
 
 
 def _load_all_slates(

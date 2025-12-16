@@ -20,6 +20,9 @@ class UsageSharesConfig:
 
     enabled: bool = False
     targets: tuple[str, ...] = ("fga", "fta", "tov")
+    backend: str = "rate_weighted"  # "rate_weighted" | "lgbm_residual"
+    run_id: Optional[str] = None  # Run ID for learned model (None = use default)
+    shrink: Optional[float] = None  # Shrinkage for residual model (None = use bundle default)
     share_temperature: float = 1.0
     share_noise_std: float = 0.15
     min_minutes_active_cutoff: float = 2.0
@@ -62,8 +65,13 @@ class SimV2Profile:
     # Vegas anchoring (team points vs implied totals)
     vegas_points_anchor: bool = False
     vegas_points_drift_pct: float = 0.05
+    # Rotation handling
+    rotation_minutes_floor: float = 0.0  # Prune players with < floor minutes
+    max_rotation_size: int | None = None  # None = legacy (10), 0 = disabled
     # Usage shares allocation (stochastic within-team opportunity distribution)
     usage_shares: UsageSharesConfig = field(default_factory=UsageSharesConfig)
+    # Vacancy feature mode: "none" = set to 0, "game" = compute from play_prob
+    vacancy_mode: str = "game"  # "none" | "game"
 
 
 def _read_json(path: Path) -> dict:
@@ -137,16 +145,36 @@ def load_sim_v2_profile(
     vegas_points_anchor = bool(vegas_cfg.get("enabled", False))
     vegas_points_drift_pct = float(vegas_cfg.get("drift_pct", 0.05))
 
+    # Rotation handling config
+    rotation_cfg = config.get("rotation", {}) or {}
+    rotation_minutes_floor = float(rotation_cfg.get("minutes_floor", 0.0))
+    max_rotation_size_raw = rotation_cfg.get("max_size")
+    if max_rotation_size_raw is not None:
+        max_rotation_size = int(max_rotation_size_raw) if max_rotation_size_raw else None
+    else:
+        max_rotation_size = None  # Will use legacy default (10) in sim code
+
     # Usage shares config
     usage_shares_cfg = config.get("usage_shares", {}) or {}
+    usage_shares_run_id_raw = usage_shares_cfg.get("run_id")
+    usage_shares_shrink_raw = usage_shares_cfg.get("shrink")
     usage_shares = UsageSharesConfig(
         enabled=bool(usage_shares_cfg.get("enabled", False)),
         targets=tuple(usage_shares_cfg.get("targets", ("fga", "fta", "tov"))),
+        backend=str(usage_shares_cfg.get("backend", "rate_weighted")),
+        run_id=str(usage_shares_run_id_raw) if usage_shares_run_id_raw is not None else None,
+        shrink=float(usage_shares_shrink_raw) if usage_shares_shrink_raw is not None else None,
         share_temperature=float(usage_shares_cfg.get("share_temperature", 1.0)),
         share_noise_std=float(usage_shares_cfg.get("share_noise_std", 0.15)),
         min_minutes_active_cutoff=float(usage_shares_cfg.get("min_minutes_active_cutoff", 2.0)),
         fallback=str(usage_shares_cfg.get("fallback", "rate_weighted")),
     )
+
+    # Vacancy mode config
+    vacancy_mode_raw = config.get("vacancy_mode", "game")
+    vacancy_mode = str(vacancy_mode_raw) if vacancy_mode_raw else "game"
+    if vacancy_mode not in ("none", "game"):
+        raise ValueError(f"Invalid vacancy_mode: {vacancy_mode}. Must be 'none' or 'game'.")
 
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
@@ -197,7 +225,10 @@ def load_sim_v2_profile(
         game_script_quantile_noise_std=game_script_quantile_noise_std,
         vegas_points_anchor=vegas_points_anchor,
         vegas_points_drift_pct=vegas_points_drift_pct,
+        rotation_minutes_floor=rotation_minutes_floor,
+        max_rotation_size=max_rotation_size,
         usage_shares=usage_shares,
+        vacancy_mode=vacancy_mode,
     )
 
 
