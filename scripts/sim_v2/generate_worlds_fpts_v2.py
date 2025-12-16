@@ -15,7 +15,7 @@ from projections.fpts_v2.features import CATEGORICAL_FEATURES_DEFAULT, build_fpt
 from projections.fpts_v2.loader import load_fpts_and_residual, load_fpts_bundle
 from projections.fpts_v2.scoring import compute_dk_fpts
 from projections.paths import data_path, get_project_root
-from projections.sim_v2.config import DEFAULT_PROFILES_PATH, load_sim_v2_profile
+from projections.sim_v2.config import DEFAULT_PROFILES_PATH, UsageSharesConfig, load_sim_v2_profile
 from projections.sim_v2.game_script import GameScriptConfig, classify_script, sample_minutes_with_scripts
 from projections.sim_v2.minutes_noise import (
     build_sigma_per_player,
@@ -107,6 +107,233 @@ def _apply_team_points_vegas_anchor(
         if (scale != 1.0).any():
             pts_worlds[:, idxs] *= scale[:, None]
     return pts_worlds
+
+
+def _compute_usage_shares(
+    log_weights: np.ndarray,
+    team_indices: np.ndarray,
+    active_mask: np.ndarray,
+    temperature: float,
+    noise_std: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """
+    Compute stochastic usage shares within each team via logit noise + softmax.
+
+    Args:
+        log_weights: shape (n_worlds, n_players) - log of baseline weights
+        team_indices: shape (n_players,) - integer indices mapping players to teams
+        active_mask: shape (n_worlds, n_players) - True if player is active
+        temperature: softmax temperature (1.0 = standard, <1 = sharper)
+        noise_std: std of Gaussian noise to add to log_weights
+        rng: random generator
+
+    Returns:
+        shares: shape (n_worlds, n_players) - shares summing to 1 within each team per world
+    """
+    n_worlds, n_players = log_weights.shape
+    n_teams = int(team_indices.max()) + 1 if len(team_indices) > 0 else 0
+
+    # Add noise to log weights for active players
+    noisy_logw = log_weights.copy()
+    if noise_std > 0:
+        noise = rng.normal(loc=0.0, scale=noise_std, size=(n_worlds, n_players))
+        noisy_logw += noise * active_mask.astype(float)
+
+    # Apply temperature
+    scaled_logw = noisy_logw / max(temperature, 1e-6)
+
+    # Set inactive players to -inf so they get share=0
+    scaled_logw = np.where(active_mask, scaled_logw, -np.inf)
+
+    # Compute softmax per team
+    shares = np.zeros((n_worlds, n_players), dtype=float)
+    for t in range(n_teams):
+        team_mask = team_indices == t
+        if not team_mask.any():
+            continue
+        team_logits = scaled_logw[:, team_mask]  # (n_worlds, n_team_players)
+        # Stable softmax
+        max_logits = np.max(team_logits, axis=1, keepdims=True)
+        max_logits = np.where(np.isfinite(max_logits), max_logits, 0.0)
+        exp_logits = np.exp(team_logits - max_logits)
+        sum_exp = exp_logits.sum(axis=1, keepdims=True)
+        team_shares = np.where(sum_exp > 0, exp_logits / np.maximum(sum_exp, 1e-12), 0.0)
+        shares[:, team_mask] = team_shares
+
+    return shares
+
+
+def _apply_usage_shares_allocation(
+    stat_totals: dict[str, np.ndarray],
+    minutes_worlds: np.ndarray,
+    rate_arrays: dict[str, np.ndarray],
+    group_map: dict[tuple[int, int], np.ndarray],
+    usage_cfg: UsageSharesConfig,
+    rng: np.random.Generator,
+) -> dict[str, np.ndarray]:
+    """
+    Apply stochastic usage share allocation for FGA/FTA/TOV.
+
+    For each target in usage_cfg.targets:
+    1. Compute baseline weights w_i = rate_per_min_i * minutes_i
+    2. Compute log weights, add noise, apply softmax within each team
+    3. Compute team total and redistribute according to shares
+
+    This preserves team totals while introducing within-team coupling.
+
+    Args:
+        stat_totals: dict of stat arrays, shape (n_worlds, n_players)
+        minutes_worlds: shape (n_worlds, n_players)
+        rate_arrays: dict mapping target names to per-minute rates, shape (n_players,)
+        group_map: {(game_id, team_id): player_indices}
+        usage_cfg: UsageSharesConfig
+        rng: random generator
+
+    Returns:
+        Updated stat_totals dict
+    """
+    if not usage_cfg.enabled:
+        return stat_totals
+
+    n_worlds, n_players = minutes_worlds.shape
+    eps = 1e-9
+
+    # Build team_indices from group_map
+    team_indices = np.zeros(n_players, dtype=int)
+    team_to_idx = {}
+    for key, player_idxs in group_map.items():
+        if key not in team_to_idx:
+            team_to_idx[key] = len(team_to_idx)
+        team_indices[player_idxs] = team_to_idx[key]
+
+    # Active mask: players with minutes >= cutoff
+    active_mask = minutes_worlds >= usage_cfg.min_minutes_active_cutoff
+
+    # Process each target
+    for target in usage_cfg.targets:
+        if target == "fga":
+            # FGA = fga2 + fga3
+            fga2_rate = rate_arrays.get("fga2_per_min")
+            fga3_rate = rate_arrays.get("fga3_per_min")
+            if fga2_rate is None or fga3_rate is None:
+                continue
+            fga_rate = fga2_rate + fga3_rate
+
+            # Compute baseline weights
+            weights = np.clip(fga_rate[None, :] * minutes_worlds, eps, None)
+            log_weights = np.log(weights)
+
+            # Compute shares with noise
+            shares = _compute_usage_shares(
+                log_weights,
+                team_indices,
+                active_mask,
+                usage_cfg.share_temperature,
+                usage_cfg.share_noise_std,
+                rng,
+            )
+
+            # Compute team totals from baseline (before reallocation)
+            # Team total = sum of original fga2 + fga3 for team
+            orig_fga2 = stat_totals.get("fga2")
+            orig_fga3 = stat_totals.get("fga3")
+            if orig_fga2 is None or orig_fga3 is None:
+                continue
+            orig_fga = orig_fga2 + orig_fga3
+
+            # Compute team totals per world
+            team_totals = np.zeros((n_worlds, len(team_to_idx)), dtype=float)
+            for key, player_idxs in group_map.items():
+                tidx = team_to_idx[key]
+                team_totals[:, tidx] = orig_fga[:, player_idxs].sum(axis=1)
+
+            # Allocate to players based on shares
+            new_fga = np.zeros_like(orig_fga)
+            for key, player_idxs in group_map.items():
+                tidx = team_to_idx[key]
+                tt = team_totals[:, tidx : tidx + 1]  # (n_worlds, 1)
+                new_fga[:, player_idxs] = shares[:, player_idxs] * tt
+
+            # Split FGA into 2PA/3PA using player prior mix
+            # p3_i = fga3_rate_i / (fga2_rate_i + fga3_rate_i)
+            denom = fga2_rate + fga3_rate
+            p3 = np.where(denom > eps, fga3_rate / denom, 0.0)  # (n_players,)
+            new_fga3 = new_fga * p3[None, :]
+            new_fga2 = new_fga - new_fga3
+
+            stat_totals["fga2"] = new_fga2
+            stat_totals["fga3"] = new_fga3
+
+        elif target == "fta":
+            fta_rate = rate_arrays.get("fta_per_min")
+            if fta_rate is None:
+                continue
+
+            weights = np.clip(fta_rate[None, :] * minutes_worlds, eps, None)
+            log_weights = np.log(weights)
+
+            shares = _compute_usage_shares(
+                log_weights,
+                team_indices,
+                active_mask,
+                usage_cfg.share_temperature,
+                usage_cfg.share_noise_std,
+                rng,
+            )
+
+            orig_fta = stat_totals.get("fta")
+            if orig_fta is None:
+                continue
+
+            team_totals = np.zeros((n_worlds, len(team_to_idx)), dtype=float)
+            for key, player_idxs in group_map.items():
+                tidx = team_to_idx[key]
+                team_totals[:, tidx] = orig_fta[:, player_idxs].sum(axis=1)
+
+            new_fta = np.zeros_like(orig_fta)
+            for key, player_idxs in group_map.items():
+                tidx = team_to_idx[key]
+                tt = team_totals[:, tidx : tidx + 1]
+                new_fta[:, player_idxs] = shares[:, player_idxs] * tt
+
+            stat_totals["fta"] = new_fta
+
+        elif target == "tov":
+            tov_rate = rate_arrays.get("tov_per_min")
+            if tov_rate is None:
+                continue
+
+            weights = np.clip(tov_rate[None, :] * minutes_worlds, eps, None)
+            log_weights = np.log(weights)
+
+            shares = _compute_usage_shares(
+                log_weights,
+                team_indices,
+                active_mask,
+                usage_cfg.share_temperature,
+                usage_cfg.share_noise_std,
+                rng,
+            )
+
+            orig_tov = stat_totals.get("tov")
+            if orig_tov is None:
+                continue
+
+            team_totals = np.zeros((n_worlds, len(team_to_idx)), dtype=float)
+            for key, player_idxs in group_map.items():
+                tidx = team_to_idx[key]
+                team_totals[:, tidx] = orig_tov[:, player_idxs].sum(axis=1)
+
+            new_tov = np.zeros_like(orig_tov)
+            for key, player_idxs in group_map.items():
+                tidx = team_to_idx[key]
+                tt = team_totals[:, tidx : tidx + 1]
+                new_tov[:, player_idxs] = shares[:, player_idxs] * tt
+
+            stat_totals["tov"] = new_tov
+
+    return stat_totals
 
 
 def _parse_date(value: str) -> date:
@@ -981,6 +1208,14 @@ def main(
             if use_game_scripts and game_script_config is not None:
                 typer.echo(f"[sim_v2] game_scripts: {len(gs_home_team_ids)} games, sampling minutes via scripts")
 
+            # Usage shares config
+            usage_shares_cfg = profile_cfg.usage_shares
+            if usage_shares_cfg.enabled:
+                typer.echo(
+                    f"[sim_v2] usage_shares enabled: targets={usage_shares_cfg.targets} "
+                    f"noise_std={usage_shares_cfg.share_noise_std} temp={usage_shares_cfg.share_temperature}"
+                )
+
             # Precompute team group indices for team-level residual shocks.
             group_map: dict[tuple[int, int], np.ndarray] = {}
             for idx, key in enumerate(zip(gs_game_ids, gs_team_ids)):
@@ -1016,6 +1251,16 @@ def main(
                 if eff_arrays is None:
                     typer.echo("[sim_v2] warning: partial fg% preds missing; disabling efficiency scoring for this date.", err=True)
                     use_efficiency = False
+
+            # Build rate_arrays for usage shares (per-minute rates for each player)
+            usage_rate_arrays: dict[str, np.ndarray] = {}
+            if usage_shares_cfg.enabled:
+                for target in stat_targets:
+                    col = rates_mapping.get(target)
+                    if col and col in mu_df.columns:
+                        usage_rate_arrays[target] = (
+                            pd.to_numeric(mu_df[col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                        )
 
             stat_world_samples: dict[str, list[np.ndarray]] = {}
             active_mask_samples: list[np.ndarray] = []  # Track active masks for conditional aggregation
@@ -1102,6 +1347,17 @@ def main(
                         eps = eps * (k_default * np.clip(mu_stat, 0.0, None))
                         total = np.clip(mu_stat + eps, 0.0, None)
                     stat_totals[base] = total
+
+                # Apply usage shares allocation (redistributes FGA/FTA/TOV within teams)
+                if usage_shares_cfg.enabled and stat_totals:
+                    stat_totals = _apply_usage_shares_allocation(
+                        stat_totals=stat_totals,
+                        minutes_worlds=minutes_worlds,
+                        rate_arrays=usage_rate_arrays,
+                        group_map=group_map,
+                        usage_cfg=usage_shares_cfg,
+                        rng=rng,
+                    )
 
                 if not stat_totals:
                     fpts_chunk = mu_arr[:, None]  # fallback: no stat noise
@@ -1403,6 +1659,15 @@ def main(
                 pd.to_numeric(date_df.get("is_starter", 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0
             )
             stat_defaults = np.full(len(date_df), np.nan, dtype=float)
+
+            # Usage shares config for this path
+            usage_shares_cfg_backfill = profile_cfg.usage_shares
+            if usage_shares_cfg_backfill.enabled:
+                typer.echo(
+                    f"[sim_v2] usage_shares enabled (backfill): targets={usage_shares_cfg_backfill.targets} "
+                    f"noise_std={usage_shares_cfg_backfill.share_noise_std} temp={usage_shares_cfg_backfill.share_temperature}"
+                )
+
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
 
@@ -1458,6 +1723,17 @@ def main(
                     total = np.clip(mu + team_shock + player_eps, 0.0, None)
                     base = target.replace("_per_min", "")
                     stat_totals[base] = total
+
+                # Apply usage shares allocation (redistributes FGA/FTA/TOV within teams)
+                if usage_shares_cfg_backfill.enabled and stat_totals:
+                    stat_totals = _apply_usage_shares_allocation(
+                        stat_totals=stat_totals,
+                        minutes_worlds=minutes_worlds,
+                        rate_arrays=rate_arrays,
+                        group_map=group_map,
+                        usage_cfg=usage_shares_cfg_backfill,
+                        rng=rng,
+                    )
 
                 eff_arrays: dict[str, np.ndarray] | None = None
                 if use_efficiency:

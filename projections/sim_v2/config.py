@@ -15,6 +15,18 @@ DEFAULT_PROFILES_PATH = get_project_root() / "config" / "sim_v2_profiles.json"
 
 
 @dataclass
+class UsageSharesConfig:
+    """Config for stochastic usage share allocation within teams."""
+
+    enabled: bool = False
+    targets: tuple[str, ...] = ("fga", "fta", "tov")
+    share_temperature: float = 1.0
+    share_noise_std: float = 0.15
+    min_minutes_active_cutoff: float = 2.0
+    fallback: str = "rate_weighted"
+
+
+@dataclass
 class SimV2Profile:
     name: str
     fpts_run_id: str
@@ -50,6 +62,8 @@ class SimV2Profile:
     # Vegas anchoring (team points vs implied totals)
     vegas_points_anchor: bool = False
     vegas_points_drift_pct: float = 0.05
+    # Usage shares allocation (stochastic within-team opportunity distribution)
+    usage_shares: UsageSharesConfig = field(default_factory=UsageSharesConfig)
 
 
 def _read_json(path: Path) -> dict:
@@ -122,7 +136,18 @@ def load_sim_v2_profile(
     vegas_cfg = config.get("vegas_anchoring", {}) or {}
     vegas_points_anchor = bool(vegas_cfg.get("enabled", False))
     vegas_points_drift_pct = float(vegas_cfg.get("drift_pct", 0.05))
-    
+
+    # Usage shares config
+    usage_shares_cfg = config.get("usage_shares", {}) or {}
+    usage_shares = UsageSharesConfig(
+        enabled=bool(usage_shares_cfg.get("enabled", False)),
+        targets=tuple(usage_shares_cfg.get("targets", ("fga", "fta", "tov"))),
+        share_temperature=float(usage_shares_cfg.get("share_temperature", 1.0)),
+        share_noise_std=float(usage_shares_cfg.get("share_noise_std", 0.15)),
+        min_minutes_active_cutoff=float(usage_shares_cfg.get("min_minutes_active_cutoff", 2.0)),
+        fallback=str(usage_shares_cfg.get("fallback", "rate_weighted")),
+    )
+
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
     use_game_scripts = bool(game_script_cfg.get("enabled", False))
@@ -172,7 +197,8 @@ def load_sim_v2_profile(
         game_script_quantile_noise_std=game_script_quantile_noise_std,
         vegas_points_anchor=vegas_points_anchor,
         vegas_points_drift_pct=vegas_points_drift_pct,
+        usage_shares=usage_shares,
     )
 
 
-__all__ = ["SimV2Profile", "load_sim_v2_profile", "DEFAULT_PROFILES_PATH"]
+__all__ = ["SimV2Profile", "UsageSharesConfig", "load_sim_v2_profile", "DEFAULT_PROFILES_PATH"]
