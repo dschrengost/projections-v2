@@ -152,9 +152,9 @@ def main(
         None, help="Output root (defaults to <data_root>/gold/minutes_for_rates)"
     ),
     reconcile_mode: ReconcileMode = typer.Option(
-        "p50_and_tails",
+        "none",
         "--reconcile-mode",
-        help="Reconciliation mode: none, p50 (reconcile median only), or p50_and_tails (also clamp tails).",
+        help="Reconciliation mode: none (default, 240-min enforced in sim), p50, or p50_and_tails.",
     ),
     reconcile_config_path: Path = typer.Option(
         DEFAULT_RECONCILE_CONFIG,

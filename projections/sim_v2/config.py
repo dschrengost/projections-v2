@@ -62,6 +62,9 @@ class SimV2Profile:
     # Vegas anchoring (team points vs implied totals)
     vegas_points_anchor: bool = False
     vegas_points_drift_pct: float = 0.05
+    # Rotation handling
+    rotation_minutes_floor: float = 0.0  # Prune players with < floor minutes
+    max_rotation_size: int | None = None  # None = legacy (10), 0 = disabled
     # Usage shares allocation (stochastic within-team opportunity distribution)
     usage_shares: UsageSharesConfig = field(default_factory=UsageSharesConfig)
 
@@ -137,6 +140,15 @@ def load_sim_v2_profile(
     vegas_points_anchor = bool(vegas_cfg.get("enabled", False))
     vegas_points_drift_pct = float(vegas_cfg.get("drift_pct", 0.05))
 
+    # Rotation handling config
+    rotation_cfg = config.get("rotation", {}) or {}
+    rotation_minutes_floor = float(rotation_cfg.get("minutes_floor", 0.0))
+    max_rotation_size_raw = rotation_cfg.get("max_size")
+    if max_rotation_size_raw is not None:
+        max_rotation_size = int(max_rotation_size_raw) if max_rotation_size_raw else None
+    else:
+        max_rotation_size = None  # Will use legacy default (10) in sim code
+
     # Usage shares config
     usage_shares_cfg = config.get("usage_shares", {}) or {}
     usage_shares = UsageSharesConfig(
@@ -197,6 +209,8 @@ def load_sim_v2_profile(
         game_script_quantile_noise_std=game_script_quantile_noise_std,
         vegas_points_anchor=vegas_points_anchor,
         vegas_points_drift_pct=vegas_points_drift_pct,
+        rotation_minutes_floor=rotation_minutes_floor,
+        max_rotation_size=max_rotation_size,
         usage_shares=usage_shares,
     )
 

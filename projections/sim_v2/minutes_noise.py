@@ -236,10 +236,194 @@ __all__ = [
     "bin_bounds",
     "build_sigma_per_player",
     "enforce_team_240_minutes",
+    "enforce_team_240_with_pruning",
     "load_minutes_noise_params",
     "minutes_bin_indices",
     "status_bucket_from_raw",
 ]
+
+
+def enforce_team_240_with_pruning(
+    minutes_world: np.ndarray,
+    team_indices: np.ndarray,
+    active_mask: np.ndarray | None,
+    baseline_minutes: np.ndarray,
+    starter_mask: np.ndarray | None = None,
+    rotation_minutes_floor: float = 0.0,
+    max_rotation_size: int | None = None,
+    clamp_scale: tuple[float, float] = (0.7, 1.3),
+) -> tuple[np.ndarray, dict]:
+    """
+    Enforce 240 minutes per team with floor-based pruning and iterative re-add.
+
+    Algorithm per team per world:
+    1. Apply active_mask to zero inactive players
+    2. Floor prune: zero players with minutes < floor
+    3. Rotation cap: if count(m>0) > K, keep top-K, zero rest
+    4. Iterative re-add: if scale_needed > 1.3, add back pruned players until scale <= 1.3
+    5. Scale to exactly 240
+
+    Returns:
+        minutes_final: (W, P) array with team sums = 240
+        diagnostics: dict with audit metrics
+    """
+    if minutes_world.size == 0:
+        return minutes_world, {}
+
+    mins = np.maximum(minutes_world, 0.0).copy()
+    team_idx = team_indices.astype(int)
+    n_teams = int(team_idx.max()) + 1 if team_idx.size else 0
+    if n_teams == 0:
+        return mins, {}
+
+    n_worlds, n_players = mins.shape
+
+    # Apply active mask first
+    if active_mask is not None:
+        mins = mins * active_mask.astype(float)
+
+    starter = (
+        np.asarray(starter_mask, dtype=bool)
+        if starter_mask is not None
+        else np.zeros(n_players, dtype=bool)
+    )
+    baseline = np.asarray(baseline_minutes, dtype=float)
+
+    # Diagnostics accumulators
+    total_scale_before_readd = 0.0
+    total_players_readded = 0
+    total_needed_readd = 0
+    total_team_worlds = 0
+
+    out = mins.copy()
+    team_to_players = [np.flatnonzero(team_idx == t) for t in range(n_teams)]
+
+    for team_players in team_to_players:
+        if team_players.size == 0:
+            continue
+
+        starter_local = starter[team_players]
+        baseline_local = baseline[team_players]
+
+        for w in range(n_worlds):
+            total_team_worlds += 1
+            m = out[w, team_players].copy()
+            active_local = m > 0
+
+            if not active_local.any():
+                continue
+
+            # Track original active minutes for re-add
+            original_m = m.copy()
+            original_active = active_local.copy()
+
+            # Step 1: Floor prune (never prune starters)
+            pruned_mask = np.zeros_like(active_local, dtype=bool)
+            if rotation_minutes_floor > 0:
+                floor_prune = (m > 0) & (m < rotation_minutes_floor) & ~starter_local
+                m[floor_prune] = 0.0
+                pruned_mask |= floor_prune
+
+            # Step 2: Rotation cap (never cap starters)
+            capped_mask = np.zeros_like(active_local, dtype=bool)
+            if max_rotation_size is not None and max_rotation_size > 0:
+                n_active_starter = int(starter_local[m > 0].sum())
+                n_active_bench = int((~starter_local & (m > 0)).sum())
+                slots_for_bench = max(0, max_rotation_size - n_active_starter)
+
+                if n_active_bench > slots_for_bench and slots_for_bench >= 0:
+                    # Rank bench by baseline (stable), keep top slots_for_bench
+                    bench_mask = ~starter_local & (m > 0)
+                    bench_idxs = np.flatnonzero(bench_mask)
+                    bench_baseline = baseline_local[bench_idxs]
+                    sorted_order = np.argsort(-bench_baseline)  # Descending
+                    drop_idxs = bench_idxs[sorted_order[slots_for_bench:]]
+                    m[drop_idxs] = 0.0
+                    capped_mask[drop_idxs] = True
+
+            # Combined pruned+capped
+            removed_mask = pruned_mask | capped_mask
+
+            # Step 3: Compute scale_needed
+            sum_m = float(m.sum())
+            if sum_m < 1e-6:
+                continue
+
+            scale_needed = 240.0 / sum_m
+            scale_before_readd = scale_needed
+            total_scale_before_readd += scale_before_readd
+
+            # Step 4: Iterative re-add if scale > clamp_scale[1]
+            players_readded = 0
+            if scale_needed > clamp_scale[1] and removed_mask.any():
+                total_needed_readd += 1
+
+                # Candidates: removed players, sorted by original_m descending
+                candidate_idxs = np.flatnonzero(removed_mask)
+                candidate_vals = original_m[candidate_idxs]
+                sorted_order = np.argsort(-candidate_vals)
+                candidate_idxs = candidate_idxs[sorted_order]
+
+                for idx in candidate_idxs:
+                    if scale_needed <= clamp_scale[1]:
+                        break
+                    # Add back this player
+                    m[idx] = original_m[idx]
+                    sum_m = float(m.sum())
+                    scale_needed = 240.0 / sum_m if sum_m > 1e-6 else 1.0
+                    players_readded += 1
+
+                total_players_readded += players_readded
+
+            # Step 5: Scale to exactly 240 with 48-minute per-player cap
+            MAX_PLAYER_MINUTES = 48.0
+            final_mask = m > 0
+            if final_mask.any():
+                for _ in range(20):  # Max iterations to converge
+                    sum_m = float(m[final_mask].sum())
+                    if sum_m < 1e-6:
+                        break
+                    if abs(sum_m - 240.0) < 0.01:
+                        break  # Close enough, exit
+                    
+                    # Identify capped and uncapped players
+                    at_cap = m >= MAX_PLAYER_MINUTES - 0.01
+                    uncapped = final_mask & ~at_cap
+                    
+                    if not uncapped.any():
+                        # Everyone is at cap, force scale everyone
+                        m[final_mask] *= 240.0 / sum_m
+                        break
+                    
+                    # Only scale uncapped players
+                    sum_uncapped = float(m[uncapped].sum())
+                    sum_capped = sum_m - sum_uncapped
+                    target_uncapped = 240.0 - sum_capped
+                    
+                    if target_uncapped < 1e-6:
+                        break  # Nothing to redistribute
+                    
+                    scale = target_uncapped / sum_uncapped
+                    scale = float(np.clip(scale, 0.5, 3.0))
+                    m[uncapped] *= scale
+                    
+                    # Cap at 48 minutes per player
+                    m = np.minimum(m, MAX_PLAYER_MINUTES)
+
+            out[w, team_players] = m
+
+    # Ensure inactive stay at 0
+    if active_mask is not None:
+        out = out * active_mask.astype(float)
+
+    diagnostics = {
+        "scale_before_readd_mean": total_scale_before_readd / max(total_team_worlds, 1),
+        "players_readded_mean": total_players_readded / max(total_team_worlds, 1),
+        "frac_needed_readd": total_needed_readd / max(total_team_worlds, 1),
+        "total_team_worlds": total_team_worlds,
+    }
+
+    return out, diagnostics
 
 
 def enforce_team_240_minutes(
