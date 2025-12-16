@@ -1,0 +1,175 @@
+{
+  "profiles": {
+    "baseline": {
+      "mean_source": "rates",
+      "minutes_source": "minutes_v1",
+      "rates_source": "rates_v1_live",
+      "rates_run_id": null,
+      "minutes_run_id": null,
+      "fpts_run_id": null,
+      "worlds": {
+        "n_worlds": 25000,
+        "batch_size": 5000
+      },
+      "noise": {
+        "epsilon_dist": "student_t",
+        "nu": 5,
+        "sigma_mode": "k_times_mu",
+        "k_default": 0.65
+      },
+      "rates_noise": {
+        "enabled": false,
+        "split": "val",
+        "run_id": "rates_v1_reconciled_20251205_093151"
+      },
+      "minutes_noise": {
+        "enabled": true,
+        "sigma_min": 1.0
+      },
+      "team_sigma_scale": 1.0,
+      "player_sigma_scale": 1.0,
+      "rates_sigma_scale": 1.0,
+      "worlds_per_chunk": 2000,
+      "seed": 12345,
+      "min_play_prob": 0.05,
+      "team_factor_sigma": 0.0,
+      "team_factor_gamma": 1.0,
+      "enforce_team_240": true,
+      "vegas_anchoring": {
+        "enabled": true,
+        "drift_pct": 0.05
+      },
+      "efficiency_scoring": true,
+      "game_script": {
+        "enabled": true,
+        "margin_std": 13.4,
+        "spread_coef": -0.726,
+        "quantile_targets": {
+          "blowout_win": {
+            "starter": 0.35,
+            "bench": 0.55
+          },
+          "comfortable_win": {
+            "starter": 0.45,
+            "bench": 0.52
+          },
+          "close": {
+            "starter": 0.75,
+            "bench": 0.48
+          },
+          "comfortable_loss": {
+            "starter": 0.50,
+            "bench": 0.50
+          },
+          "blowout_loss": {
+            "starter": 0.30,
+            "bench": 0.45
+          }
+        }
+      },
+      "note": "Baseline uses rates path: minutes_v1 -> rates_v1 -> FPTS via efficiency scoring."
+    },
+    "baseline_rates_noise": {
+      "mean_source": "rates",
+      "minutes_source": "minutes_v1",
+      "rates_source": "rates_v1_live",
+      "rates_run_id": null,
+      "minutes_run_id": null,
+      "fpts_run_id": null,
+      "worlds": {
+        "n_worlds": 25000,
+        "batch_size": 5000
+      },
+      "noise": {
+        "epsilon_dist": "student_t",
+        "nu": 5,
+        "sigma_mode": "k_times_mu",
+        "k_default": 0.65
+      },
+      "rates_noise": {
+        "enabled": true,
+        "split": "val",
+        "run_id": "rates_v1_reconciled_20251205_093151"
+      },
+      "minutes_noise": {
+        "enabled": true,
+        "sigma_min": 1.0
+      },
+      "team_sigma_scale": 1.0,
+      "player_sigma_scale": 1.0,
+      "rates_sigma_scale": 1.0,
+      "worlds_per_chunk": 2000,
+      "seed": 12345,
+      "min_play_prob": 0.05,
+      "team_factor_sigma": 0.0,
+      "team_factor_gamma": 1.0,
+      "enforce_team_240": true,
+      "efficiency_scoring": true,
+      "game_script": {
+        "enabled": true,
+        "margin_std": 13.4,
+        "spread_coef": -0.726,
+        "quantile_targets": {
+          "blowout_win": {
+            "starter": 0.35,
+            "bench": 0.55
+          },
+          "comfortable_win": {
+            "starter": 0.45,
+            "bench": 0.52
+          },
+          "close": {
+            "starter": 0.75,
+            "bench": 0.48
+          },
+          "comfortable_loss": {
+            "starter": 0.50,
+            "bench": 0.50
+          },
+          "blowout_loss": {
+            "starter": 0.30,
+            "bench": 0.45
+          }
+        }
+      },
+      "note": "Baseline (rates path) but with residual-based rates_noise enabled (team/player shocks)."
+    },
+    "debug": {
+      "mean_source": "rates",
+      "minutes_source": "minutes_v1",
+      "rates_source": "rates_v1_live",
+      "rates_run_id": null,
+      "minutes_run_id": null,
+      "fpts_run_id": null,
+      "worlds": {
+        "n_worlds": 500,
+        "batch_size": 100
+      },
+      "noise": {
+        "epsilon_dist": "student_t",
+        "nu": 5,
+        "sigma_mode": "k_times_mu",
+        "k_default": 0.35
+      },
+      "rates_noise": {
+        "enabled": false,
+        "split": "val"
+      },
+      "minutes_noise": {
+        "enabled": false,
+        "sigma_min": 1.0
+      },
+      "team_sigma_scale": 1.0,
+      "player_sigma_scale": 1.0,
+      "rates_sigma_scale": 1.0,
+      "worlds_per_chunk": 500,
+      "seed": 12345,
+      "min_play_prob": 0.05,
+      "team_factor_sigma": 0.0,
+      "team_factor_gamma": 1.0,
+      "enforce_team_240": false,
+      "efficiency_scoring": true,
+      "note": "Debug profile with reduced worlds and no noise for testing."
+    }
+  }
+}

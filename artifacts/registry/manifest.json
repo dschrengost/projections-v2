@@ -1,0 +1,1008 @@
+{
+  "schema_version": "1.0.0",
+  "updated_at": "2025-12-15T15:47:17.183906+00:00",
+  "models": {
+    "rates_v1_lgbm": {
+      "name": "rates_v1_lgbm",
+      "versions": [
+        {
+          "version": "rates_v1_reconciled_20251205_093151",
+          "run_id": "rates_v1_reconciled_20251205_093151",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_reconciled_20251205_093151",
+          "stage": "prod",
+          "created_at": "2025-12-05T14:32:51.325188+00:00",
+          "promoted_at": "2025-12-05T14:36:21.542697+00:00",
+          "training_start": "2022-10-20",
+          "training_end": "2024-04-15",
+          "feature_schema_version": "stage3_context",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.05705236893297605,
+            "train_rows": 6029,
+            "val_rows": 7382,
+            "num_targets": 9
+          },
+          "description": "Train to 2024-04-15 | stage3_context | 9 targets"
+        },
+        {
+          "version": "rates_v1_stage3_efficiency_20251205_212357",
+          "run_id": "rates_v1_stage3_efficiency_20251205_212357",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage3_efficiency_20251205_212357",
+          "stage": "prod",
+          "created_at": "2025-12-05T21:24:05.104609+00:00",
+          "promoted_at": "2025-12-05T21:40:35.383046+00:00",
+          "training_start": "2023-10-01",
+          "training_end": "2024-06-30",
+          "feature_schema_version": "stage3_context",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08938758697696204,
+            "train_rows": 3206,
+            "val_rows": 7584,
+            "num_targets": 12
+          },
+          "description": "Train to 2024-06-30 | stage3_context | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage1_20251206_060029",
+          "run_id": "rates_v1_stage1_20251206_060029",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage1_20251206_060029",
+          "stage": "dev",
+          "created_at": "2025-12-06T06:00:40.537326+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-01",
+          "training_end": "2024-06-30",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08756230829166474,
+            "train_rows": 6079,
+            "val_rows": 620,
+            "num_targets": 12
+          },
+          "description": "Train to 2024-06-30 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage1_optimal_20251206_060349",
+          "run_id": "rates_v1_stage1_optimal_20251206_060349",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage1_optimal_20251206_060349",
+          "stage": "prod",
+          "created_at": "2025-12-06T06:04:00.613437+00:00",
+          "promoted_at": "2025-12-06T06:05:21.799481+00:00",
+          "training_start": "2022-10-01",
+          "training_end": "2024-06-30",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08860904789777173,
+            "train_rows": 6079,
+            "val_rows": 1724,
+            "num_targets": 12
+          },
+          "description": "Train to 2024-06-30 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_mlflow_test_20251209_041846",
+          "run_id": "rates_v1_mlflow_test_20251209_041846",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_mlflow_test_20251209_041846",
+          "stage": "dev",
+          "created_at": "2025-12-09T04:18:59.043449+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2024-06-30",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08903198058781607,
+            "train_rows": 3206,
+            "val_rows": 7584,
+            "num_targets": 12
+          },
+          "description": "Train to 2024-06-30 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_mlflow_test_20251209_044003",
+          "run_id": "rates_v1_mlflow_test_20251209_044003",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_mlflow_test_20251209_044003",
+          "stage": "dev",
+          "created_at": "2025-12-09T04:40:32.939466+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2024-06-30",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08903198058781607,
+            "train_rows": 3206,
+            "val_rows": 7584,
+            "num_targets": 12
+          },
+          "description": "Train to 2024-06-30 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage1_20251215_145256",
+          "run_id": "rates_v1_stage1_20251215_145256",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage1_20251215_145256",
+          "stage": "dev",
+          "created_at": "2025-12-15T14:53:27.039675+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2024-06-30",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.09503015220471413,
+            "train_rows": 6079,
+            "val_rows": 8680,
+            "num_targets": 12
+          },
+          "description": "Train to 2024-06-30 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage1_20251215_145548",
+          "run_id": "rates_v1_stage1_20251215_145548",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage1_20251215_145548",
+          "stage": "dev",
+          "created_at": "2025-12-15T14:56:22.568822+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-12-01",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08487471330908063,
+            "train_rows": 15502,
+            "val_rows": 557,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-12-01 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage3_context_20251215_154113",
+          "run_id": "rates_v1_stage3_context_20251215_154113",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage3_context_20251215_154113",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:41:49.519739+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-12-01",
+          "feature_schema_version": "stage3_context",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08589583439997615,
+            "train_rows": 15502,
+            "val_rows": 557,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-12-01 | stage3_context | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage2_tracking_20251215_154236",
+          "run_id": "rates_v1_stage2_tracking_20251215_154236",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage2_tracking_20251215_154236",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:43:11.804825+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-12-01",
+          "feature_schema_version": "stage2_tracking",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08553610347978331,
+            "train_rows": 15502,
+            "val_rows": 557,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-12-01 | stage2_tracking | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage2_bigval_20251215_154629",
+          "run_id": "rates_v1_stage2_bigval_20251215_154629",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage2_bigval_20251215_154629",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:47:15.730806+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-01-01",
+          "feature_schema_version": "stage2_tracking",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08937245681738488,
+            "train_rows": 7405,
+            "val_rows": 6173,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-01-01 | stage2_tracking | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage1_bigval_20251215_154629",
+          "run_id": "rates_v1_stage1_bigval_20251215_154629",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage1_bigval_20251215_154629",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:47:16.386969+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-01-01",
+          "feature_schema_version": "stage1",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08879337143919584,
+            "train_rows": 7405,
+            "val_rows": 6173,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-01-01 | stage1 | 12 targets"
+        },
+        {
+          "version": "rates_v1_stage3_bigval_20251215_154629",
+          "run_id": "rates_v1_stage3_bigval_20251215_154629",
+          "artifact_path": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage3_bigval_20251215_154629",
+          "stage": "dev",
+          "created_at": "2025-12-15T15:47:17.183884+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-01",
+          "training_end": "2025-01-01",
+          "feature_schema_version": "stage3_context",
+          "feature_hash": null,
+          "metrics": {
+            "val_mae_avg": 0.08930198324929715,
+            "train_rows": 7405,
+            "val_rows": 6173,
+            "num_targets": 12
+          },
+          "description": "Train to 2025-01-01 | stage3_context | 12 targets"
+        }
+      ],
+      "current_prod": "rates_v1_stage1_optimal_20251206_060349",
+      "current_staging": null
+    },
+    "minutes_v1_lgbm": {
+      "name": "minutes_v1_lgbm",
+      "versions": [
+        {
+          "version": "retrained_healthy_data_20251205",
+          "run_id": "retrained_healthy_data_20251205",
+          "artifact_path": "artifacts/minutes_lgbm/retrained_healthy_data_20251205",
+          "stage": "dev",
+          "created_at": "2025-12-06T01:43:04.981337+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-01T00:00:00Z",
+          "training_end": "2025-02-28T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "4d0dac9b49f3ab2759fff8e94a7e5341d4222e138e055fb7ce76779f5390d74b",
+          "metrics": {
+            "val_mae": 5.44790557657701,
+            "val_p10_coverage": 0.3564891846921797,
+            "val_p90_coverage": 0.9059900166389351,
+            "val_winkler": 26.152963445905023
+          },
+          "description": "Train 2022-10-01 to 2025-02-28"
+        },
+        {
+          "version": "healthy_optimal_split_20251205",
+          "run_id": "healthy_optimal_split_20251205",
+          "artifact_path": "artifacts/minutes_lgbm/healthy_optimal_split_20251205",
+          "stage": "dev",
+          "created_at": "2025-12-06T02:03:28.663577+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-01T00:00:00Z",
+          "training_end": "2025-03-31T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "4d0dac9b49f3ab2759fff8e94a7e5341d4222e138e055fb7ce76779f5390d74b",
+          "metrics": {
+            "val_mae": 5.4824773330003636,
+            "val_p10_coverage": 0.3527454242928453,
+            "val_p90_coverage": 0.9113976705490848,
+            "val_winkler": 25.68005227110816
+          },
+          "description": "Train 2022-10-01 to 2025-03-31"
+        },
+        {
+          "version": "minutes_v1_early_dual_20251213_a",
+          "run_id": "minutes_v1_early_dual_20251213_a",
+          "artifact_path": "artifacts/minutes_lgbm/minutes_v1_early_dual_20251213_a",
+          "stage": "dev",
+          "created_at": "2025-12-14T04:24:06.858104+00:00",
+          "promoted_at": null,
+          "training_start": "2025-11-20T01:00:00Z",
+          "training_end": "2025-11-24T01:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "bcbf037a0551f46aadf17932695b07ed7c7a66131a7ef64b5ff92c790c790a0a",
+          "metrics": {
+            "val_mae": 7.262888207068503,
+            "val_p10_coverage": 0.2217997465145754,
+            "val_p90_coverage": 0.9416983523447402,
+            "val_winkler": 20.12941365921463
+          },
+          "description": "Train 2025-11-20 to 2025-11-24"
+        },
+        {
+          "version": "minutes_v1_late_dual_20251213_a",
+          "run_id": "minutes_v1_late_dual_20251213_a",
+          "artifact_path": "artifacts/minutes_lgbm/minutes_v1_late_dual_20251213_a",
+          "stage": "dev",
+          "created_at": "2025-12-14T04:32:32.027125+00:00",
+          "promoted_at": null,
+          "training_start": "2025-10-22T23:00:00Z",
+          "training_end": "2025-11-24T01:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "bcbf037a0551f46aadf17932695b07ed7c7a66131a7ef64b5ff92c790c790a0a",
+          "metrics": {
+            "val_mae": 4.78885048227714,
+            "val_p10_coverage": 0.2695481335952849,
+            "val_p90_coverage": 0.9410609037328095,
+            "val_winkler": 18.67913183587771
+          },
+          "description": "Train 2025-10-22 to 2025-11-24"
+        },
+        {
+          "version": "minutes_v1_early_dual_20251214_a",
+          "run_id": "minutes_v1_early_dual_20251214_a",
+          "artifact_path": "artifacts/minutes_lgbm/minutes_v1_early_dual_20251214_a",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:18:32.397685+00:00",
+          "promoted_at": null,
+          "training_start": "2025-11-21T00:00:00Z",
+          "training_end": "2025-11-26T04:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "bcbf037a0551f46aadf17932695b07ed7c7a66131a7ef64b5ff92c790c790a0a",
+          "metrics": {
+            "val_mae": 4.6997096995486745,
+            "val_p10_coverage": 0.2434325744308231,
+            "val_p90_coverage": 0.9124343257443083,
+            "val_winkler": 19.77808518544925
+          },
+          "description": "Train 2025-11-21 to 2025-11-26"
+        },
+        {
+          "version": "minutes_v1_late_dual_20251214_a",
+          "run_id": "minutes_v1_late_dual_20251214_a",
+          "artifact_path": "artifacts/minutes_lgbm/minutes_v1_late_dual_20251214_a",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:18:40.871879+00:00",
+          "promoted_at": null,
+          "training_start": "2025-11-21T00:00:00Z",
+          "training_end": "2025-11-26T04:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "bcbf037a0551f46aadf17932695b07ed7c7a66131a7ef64b5ff92c790c790a0a",
+          "metrics": {
+            "val_mae": 4.482884552849482,
+            "val_p10_coverage": 0.24191685912240185,
+            "val_p90_coverage": 0.9232101616628176,
+            "val_winkler": 19.600881128106057
+          },
+          "description": "Train 2025-11-21 to 2025-11-26"
+        },
+        {
+          "version": "minutes_v1_enriched_final_20251214",
+          "run_id": "minutes_v1_enriched_final_20251214",
+          "artifact_path": "artifacts/minutes_lgbm/minutes_v1_enriched_final_20251214",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:34:52.510454+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2025-11-15T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 3.535812276827696,
+            "val_p10_coverage": 0.22546419098143236,
+            "val_p90_coverage": 0.870026525198939,
+            "val_winkler": 14.293534958440137
+          },
+          "description": "Train 2023-10-24 to 2025-11-15"
+        },
+        {
+          "version": "minutes_v1_enriched_wider_20251214",
+          "run_id": "minutes_v1_enriched_wider_20251214",
+          "artifact_path": "artifacts/minutes_lgbm/minutes_v1_enriched_wider_20251214",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:40:16.499442+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2025-11-10T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 3.5478319103509475,
+            "val_p10_coverage": 0.22679045092838196,
+            "val_p90_coverage": 0.8740053050397878,
+            "val_winkler": 15.556267285335437
+          },
+          "description": "Train 2023-10-24 to 2025-11-10"
+        },
+        {
+          "version": "wf_enriched_fold_03",
+          "run_id": "wf_enriched_fold_03",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_03",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:06.934843+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2024-10-20T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 2.9154120077915797,
+            "val_p10_coverage": 0.15463917525773196,
+            "val_p90_coverage": 0.8969072164948454,
+            "val_winkler": 14.136326638533143
+          },
+          "description": "Train 2023-10-24 to 2024-10-20"
+        },
+        {
+          "version": "wf_enriched_fold_04",
+          "run_id": "wf_enriched_fold_04",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_04",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:10.043379+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2024-11-10T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 3.7204728522979416,
+            "val_p10_coverage": 0.19,
+            "val_p90_coverage": 0.91,
+            "val_winkler": 16.703938549803965
+          },
+          "description": "Train 2023-10-24 to 2024-11-10"
+        },
+        {
+          "version": "wf_enriched_fold_05",
+          "run_id": "wf_enriched_fold_05",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_05",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:13.190327+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2024-12-01T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 2.7310951788018345,
+            "val_p10_coverage": 0.21296296296296297,
+            "val_p90_coverage": 0.9259259259259259,
+            "val_winkler": 13.509570096989405
+          },
+          "description": "Train 2023-10-24 to 2024-12-01"
+        },
+        {
+          "version": "wf_enriched_fold_06",
+          "run_id": "wf_enriched_fold_06",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_06",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:16.445762+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2024-12-22T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 4.2794045009784565,
+            "val_p10_coverage": 0.1592920353982301,
+            "val_p90_coverage": 0.8053097345132744,
+            "val_winkler": 19.693116231079088
+          },
+          "description": "Train 2023-10-24 to 2024-12-22"
+        },
+        {
+          "version": "wf_enriched_fold_07",
+          "run_id": "wf_enriched_fold_07",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_07",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:19.766184+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2025-01-12T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 3.3937104558319953,
+            "val_p10_coverage": 0.28125,
+            "val_p90_coverage": 0.9296875,
+            "val_winkler": 15.318663685332277
+          },
+          "description": "Train 2023-10-24 to 2025-01-12"
+        },
+        {
+          "version": "wf_enriched_fold_08",
+          "run_id": "wf_enriched_fold_08",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_08",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:23.224705+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2025-02-02T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 4.44435286756508,
+            "val_p10_coverage": 0.1619047619047619,
+            "val_p90_coverage": 0.9238095238095239,
+            "val_winkler": 19.052190284313184
+          },
+          "description": "Train 2023-10-24 to 2025-02-02"
+        },
+        {
+          "version": "wf_enriched_fold_09",
+          "run_id": "wf_enriched_fold_09",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_09",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:26.713460+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2025-02-23T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 3.387031905125451,
+            "val_p10_coverage": 0.1297709923664122,
+            "val_p90_coverage": 0.9389312977099237,
+            "val_winkler": 14.27729864356018
+          },
+          "description": "Train 2023-10-24 to 2025-02-23"
+        },
+        {
+          "version": "wf_enriched_fold_10",
+          "run_id": "wf_enriched_fold_10",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_10",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:30.279260+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2025-03-16T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 4.608304869732218,
+            "val_p10_coverage": 0.24822695035460993,
+            "val_p90_coverage": 0.7872340425531915,
+            "val_winkler": 21.555568238253702
+          },
+          "description": "Train 2023-10-24 to 2025-03-16"
+        },
+        {
+          "version": "wf_enriched_fold_20",
+          "run_id": "wf_enriched_fold_20",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_20",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:53.609420+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2025-10-12T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 5.1259711993388954,
+            "val_p10_coverage": 0.24300178677784395,
+            "val_p90_coverage": 0.8558665872543181,
+            "val_winkler": 15.999409142635018
+          },
+          "description": "Train 2023-10-24 to 2025-10-12"
+        },
+        {
+          "version": "wf_enriched_fold_21",
+          "run_id": "wf_enriched_fold_21",
+          "artifact_path": "artifacts/minutes_lgbm/wf_enriched_fold_21",
+          "stage": "dev",
+          "created_at": "2025-12-14T05:57:58.782799+00:00",
+          "promoted_at": null,
+          "training_start": "2023-10-24T00:00:00Z",
+          "training_end": "2025-11-02T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "31a9194d5398508388096711dd1971c652ece8b574f6994996e506cabe754677",
+          "metrics": {
+            "val_mae": 3.4639239735369434,
+            "val_p10_coverage": 0.24192526915769474,
+            "val_p90_coverage": 0.9227359088030399,
+            "val_winkler": 14.335941902683432
+          },
+          "description": "Train 2023-10-24 to 2025-11-02"
+        },
+        {
+          "version": "walkfwd_v1_fold_01",
+          "run_id": "walkfwd_v1_fold_01",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v1_fold_01",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:16:33.519379+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2023-11-09T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 1.593296907570501,
+            "val_p10_coverage": 0.3554902680866691,
+            "val_p90_coverage": 0.951891296364304,
+            "val_winkler": 7.507135690419608
+          },
+          "description": "Train 2022-10-18 to 2023-11-09"
+        },
+        {
+          "version": "walkfwd_v1_fold_02",
+          "run_id": "walkfwd_v1_fold_02",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v1_fold_02",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:16:49.975864+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2023-12-07T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.8861044398702341,
+            "val_p10_coverage": 0.35377358490566035,
+            "val_p90_coverage": 0.9641509433962264,
+            "val_winkler": 2.9687434247740856
+          },
+          "description": "Train 2022-10-18 to 2023-12-07"
+        },
+        {
+          "version": "walkfwd_v1_fold_03",
+          "run_id": "walkfwd_v1_fold_03",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v1_fold_03",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:17:06.755571+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-01-04T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.7603716406580208,
+            "val_p10_coverage": 0.3438395415472779,
+            "val_p90_coverage": 0.9641833810888252,
+            "val_winkler": 3.276976648817105
+          },
+          "description": "Train 2022-10-18 to 2024-01-04"
+        },
+        {
+          "version": "walkfwd_v1_fold_04",
+          "run_id": "walkfwd_v1_fold_04",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v1_fold_04",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:17:23.590164+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-02-01T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.7023964114069101,
+            "val_p10_coverage": 0.31675675675675674,
+            "val_p90_coverage": 0.9702702702702702,
+            "val_winkler": 2.310163823429994
+          },
+          "description": "Train 2022-10-18 to 2024-02-01"
+        },
+        {
+          "version": "walkfwd_v1_fold_05",
+          "run_id": "walkfwd_v1_fold_05",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v1_fold_05",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:17:40.200668+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-02-29T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.6488911223851603,
+            "val_p10_coverage": 0.32475247524752476,
+            "val_p90_coverage": 0.976897689768977,
+            "val_winkler": 2.3356734288754137
+          },
+          "description": "Train 2022-10-18 to 2024-02-29"
+        },
+        {
+          "version": "walkfwd_v1_fold_10",
+          "run_id": "walkfwd_v1_fold_10",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v1_fold_10",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:24:38.229930+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-10-10T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 1.600163274052125,
+            "val_p10_coverage": 0.5542556303012577,
+            "val_p90_coverage": 0.9994150336355659,
+            "val_winkler": 3.6955935475041057
+          },
+          "description": "Train 2022-10-18 to 2024-10-10"
+        },
+        {
+          "version": "walkfwd_v1_fold_11",
+          "run_id": "walkfwd_v1_fold_11",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v1_fold_11",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:24:55.870835+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-11-07T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.48118509735088666,
+            "val_p10_coverage": 0.2891081871345029,
+            "val_p90_coverage": 0.9839181286549707,
+            "val_winkler": 2.9372772525167705
+          },
+          "description": "Train 2022-10-18 to 2024-11-07"
+        },
+        {
+          "version": "walkfwd_v1_fold_12",
+          "run_id": "walkfwd_v1_fold_12",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v1_fold_12",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:25:14.145697+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-12-05T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.33806845066715935,
+            "val_p10_coverage": 0.2472808701215611,
+            "val_p90_coverage": 0.9779270633397313,
+            "val_winkler": 2.4814681681468245
+          },
+          "description": "Train 2022-10-18 to 2024-12-05"
+        },
+        {
+          "version": "walkfwd_v2_fold_01",
+          "run_id": "walkfwd_v2_fold_01",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_01",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:39:44.766245+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2023-11-09T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 1.7182301228763184,
+            "val_p10_coverage": 0.3668747704737422,
+            "val_p90_coverage": 0.9445464561145795,
+            "val_winkler": 8.287992111727533
+          },
+          "description": "Train 2022-10-18 to 2023-11-09"
+        },
+        {
+          "version": "walkfwd_v2_fold_02",
+          "run_id": "walkfwd_v2_fold_02",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_02",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:40:03.983760+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2023-12-07T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 1.0200044338117806,
+            "val_p10_coverage": 0.37169811320754714,
+            "val_p90_coverage": 0.9433962264150944,
+            "val_winkler": 4.153367223583724
+          },
+          "description": "Train 2022-10-18 to 2023-12-07"
+        },
+        {
+          "version": "walkfwd_v2_fold_03",
+          "run_id": "walkfwd_v2_fold_03",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_03",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:40:23.920544+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-01-04T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.9145468838889095,
+            "val_p10_coverage": 0.3543457497612225,
+            "val_p90_coverage": 0.9512893982808023,
+            "val_winkler": 3.589723271593485
+          },
+          "description": "Train 2022-10-18 to 2024-01-04"
+        },
+        {
+          "version": "walkfwd_v2_fold_04",
+          "run_id": "walkfwd_v2_fold_04",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_04",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:40:43.065865+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-02-01T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.8815617939551534,
+            "val_p10_coverage": 0.3227027027027027,
+            "val_p90_coverage": 0.9513513513513514,
+            "val_winkler": 2.647609125168121
+          },
+          "description": "Train 2022-10-18 to 2024-02-01"
+        },
+        {
+          "version": "walkfwd_v2_fold_05",
+          "run_id": "walkfwd_v2_fold_05",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_05",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:41:01.983142+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-02-29T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.8324024931767037,
+            "val_p10_coverage": 0.3432343234323432,
+            "val_p90_coverage": 0.9683168316831683,
+            "val_winkler": 2.934771244169853
+          },
+          "description": "Train 2022-10-18 to 2024-02-29"
+        },
+        {
+          "version": "walkfwd_v2_fold_10",
+          "run_id": "walkfwd_v2_fold_10",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_10",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:42:17.925348+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-10-10T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 1.436306406415505,
+            "val_p10_coverage": 0.5630301257677683,
+            "val_p90_coverage": 0.9988300672711319,
+            "val_winkler": 3.7119013407442565
+          },
+          "description": "Train 2022-10-18 to 2024-10-10"
+        },
+        {
+          "version": "walkfwd_v2_fold_11",
+          "run_id": "walkfwd_v2_fold_11",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_11",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:42:38.805384+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-11-07T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.6969493812125843,
+            "val_p10_coverage": 0.2887426900584795,
+            "val_p90_coverage": 0.9835526315789473,
+            "val_winkler": 2.503650473142094
+          },
+          "description": "Train 2022-10-18 to 2024-11-07"
+        },
+        {
+          "version": "walkfwd_v2_fold_12",
+          "run_id": "walkfwd_v2_fold_12",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_12",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:42:59.258574+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2024-12-05T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.7889569147832489,
+            "val_p10_coverage": 0.27895073576455537,
+            "val_p90_coverage": 0.9769673704414588,
+            "val_winkler": 2.2941098704010643
+          },
+          "description": "Train 2022-10-18 to 2024-12-05"
+        },
+        {
+          "version": "walkfwd_v2_fold_13",
+          "run_id": "walkfwd_v2_fold_13",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_13",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:43:19.912683+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2025-01-02T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.7701044513741155,
+            "val_p10_coverage": 0.2953231739358907,
+            "val_p90_coverage": 0.9847609038360483,
+            "val_winkler": 3.5159853209060374
+          },
+          "description": "Train 2022-10-18 to 2025-01-02"
+        },
+        {
+          "version": "walkfwd_v2_fold_14",
+          "run_id": "walkfwd_v2_fold_14",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_14",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:43:40.554693+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2025-01-30T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.7748143034921308,
+            "val_p10_coverage": 0.28593319031566045,
+            "val_p90_coverage": 0.9886607416487895,
+            "val_winkler": 2.389145421063116
+          },
+          "description": "Train 2022-10-18 to 2025-01-30"
+        },
+        {
+          "version": "walkfwd_v2_fold_15",
+          "run_id": "walkfwd_v2_fold_15",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_15",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:44:02.348303+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2025-02-27T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 0.6927648303512745,
+            "val_p10_coverage": 0.25998731769181993,
+            "val_p90_coverage": 0.9800253646163601,
+            "val_winkler": 2.2614670173918414
+          },
+          "description": "Train 2022-10-18 to 2025-02-27"
+        },
+        {
+          "version": "walkfwd_v2_fold_20",
+          "run_id": "walkfwd_v2_fold_20",
+          "artifact_path": "artifacts/minutes_lgbm/walkfwd_v2_fold_20",
+          "stage": "dev",
+          "created_at": "2025-12-14T06:45:21.550172+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-18T00:00:00Z",
+          "training_end": "2025-10-09T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 5.803641556889892,
+            "val_p10_coverage": 0.29545454545454547,
+            "val_p90_coverage": 0.8961038961038961,
+            "val_winkler": 23.718757680660097
+          },
+          "description": "Train 2022-10-18 to 2025-10-09"
+        },
+        {
+          "version": "minutes_v1_safe_starter_20251214",
+          "run_id": "minutes_v1_safe_starter_20251214",
+          "artifact_path": "artifacts/minutes_lgbm/minutes_v1_safe_starter_20251214",
+          "stage": "dev",
+          "created_at": "2025-12-14T18:13:04.742556+00:00",
+          "promoted_at": null,
+          "training_start": "2022-10-01T00:00:00Z",
+          "training_end": "2025-03-31T00:00:00Z",
+          "feature_schema_version": "v1",
+          "feature_hash": "32d09203b97f7d80035a35156eb9b98c1888256f36df869fc3745d1c47ff4615",
+          "metrics": {
+            "val_mae": 8.396159305973901,
+            "val_p10_coverage": 0.3765378617224051,
+            "val_p90_coverage": 0.9492289031363715,
+            "val_winkler": 34.193336239771746
+          },
+          "description": "Train 2022-10-01 to 2025-03-31"
+        }
+      ],
+      "current_prod": null,
+      "current_staging": null
+    }
+  }
+}

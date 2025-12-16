@@ -1,0 +1,14 @@
+[Unit]
+Description=Aggregate DK contest ownership data
+After=network.target
+
+[Service]
+Type=oneshot
+User=daniel
+WorkingDirectory=/home/daniel/projects/projections-v2
+ExecStart=/home/daniel/.local/bin/uv run python scrapers/dk_contests/build_ownership_data.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

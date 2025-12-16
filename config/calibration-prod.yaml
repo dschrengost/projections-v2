@@ -1,0 +1,111 @@
+minutes_training:
+  run_id: v1_dec_smoke_lgbm
+  data_root: data
+  artifact_root: artifacts/minutes_v1
+  train_start: 2022-10-01T00:00:00+00:00
+  train_end: 2025-02-28T23:59:59+00:00
+  cal_start: 2025-03-01T00:00:00+00:00
+  cal_end: 2025-04-30T23:59:59+00:00
+  val_start: 2025-10-01T00:00:00+00:00
+  val_end: 2025-11-14T23:59:59+00:00
+  conformal_mode: two-sided
+  conformal_buckets: starter,p50bins
+  conformal_k: 200
+  playable_min_p50: 10.0
+  tolerance_relaxed: false
+  allow_guard_failure: true
+
+calibration_window:
+  start: 2024-12-01
+  end: 2024-12-31
+  season: 2024
+  month: 12
+
+model_artifact: v1_dec_smoke_lgbm
+
+play_probability:
+  enabled: true
+  artifact: wf_2024-12_fold2_twoS_10d_k600_mixture2
+  brier_guard: 0.12
+  ece_guard: 0.05
+
+minutes_guardrails:
+  playable_filter:
+    min_p50: 10.0
+    min_proj_points: 8.0
+  conditional_targets:
+    p10: 0.10
+    p90: 0.90
+    tolerance: 0.02
+    monitor_band: 0.03
+  log_floor_metrics: true
+
+score_flags:
+  use_buckets: true
+  bucket_min_ess: 360
+  bucket_inherit: true
+  use_global_p10_delta: true
+  use_global_p90_delta: true
+  global_recent_target_rows_p10: 90
+  global_recent_target_rows_p90: 300
+  recent_target_rows: 300
+  recency_half_life_days: 12
+  center_width: true
+  min_quantile_half_width: 0.05
+  one_sided_days: 7
+  p10_hysteresis_lower: 0.10
+  p10_hysteresis_upper: 0.11
+  delta_smoothing_alpha_p10: 0.0
+  delta_smoothing_alpha_p90: 0.3
+  p10_floor_guard: 0.11
+  global_delta_cap: 0.3
+
+sequential_backtest_flags:
+  history_months: 2
+  use_buckets: true
+  bucket_min_ess: 360
+  bucket_inherit: true
+  use_global_p10_delta: true
+  use_global_p90_delta: true
+  global_recent_target_rows_p10: 90
+  global_recent_target_rows_p90: 300
+  recent_target_rows: 300
+  recency_half_life_days: 12
+  center_width: true
+  min_quantile_half_width: 0.05
+  one_sided_days: 7
+  p10_hysteresis_lower: 0.10
+  p10_hysteresis_upper: 0.11
+  delta_smoothing_alpha_p10: 0.0
+  delta_smoothing_alpha_p90: 0.3
+  p10_floor_guard: 0.11
+
+ci_thresholds:
+  p10_month:
+    min: 0.09
+    max: 0.11
+  p90_month:
+    min: 0.90
+    max: 0.94
+  subfloor_days_max: 3
+  subfloor_threshold: 0.06
+  guard_start_day: 8
+  cap_binding_max: 0.30
+  monotone_repair_max: 0.005
+  width_delta_max_pct: 0.15
+  injury_missing_gap_max: 0.05
+
+ci:
+  team_report_pre_tip_max_miss_rate: 0.05
+  roster_timing_min_p5_minutes: 5
+  roster_timing_min_p50_minutes: 20
+  roster_timing_allow_neg_minutes: 0
+  inj_timing_min_p5_minutes: 5
+  inj_timing_min_p50_minutes: 20
+  inj_timing_allow_neg_minutes: 0
+  tier_min_n: 200
+  p10_target: 0.10
+  p90_target: 0.90
+  tier_eps: 0.03
+  allow_non_monotonic_rows: 0
+  allow_nonzero_forced_zero: 0

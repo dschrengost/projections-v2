@@ -1,0 +1,8 @@
+{
+  "p50_threshold": 32.0,
+  "k_high_star": 1.0,
+  "group_keys": [
+    "starter_flag"
+  ],
+  "run_id": "lgbm_full_v1_no_p_play_20251202"
+}

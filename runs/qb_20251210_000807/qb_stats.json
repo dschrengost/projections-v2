@@ -1,0 +1,11 @@
+{
+  "accepted": 1076,
+  "duplicates": 0,
+  "near_duplicates": 0,
+  "dropped_low_quality": 0,
+  "emitted": 1076,
+  "wall_time_s": 5.9425671100616455,
+  "bloom_rejects": 0,
+  "collector_seen_dups": 2782,
+  "collector_forwarded": 1076
+}

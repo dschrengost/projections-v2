@@ -1,0 +1,5 @@
+[live] Tip window gating disabled via LIVE_DISABLE_TIP_WINDOW=1 (still using lead=60m/tail=180m for logging).
+[live] Schedule missing or gating disabled; proceeding without tip window gating.
+warning: The `tool.uv.dev-dependencies` field (used in `pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
+[live] Building features as of 2025-12-06 18:55:06...
+warning: The `tool.uv.dev-dependencies` field (used in `pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead

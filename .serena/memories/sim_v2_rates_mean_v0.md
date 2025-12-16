@@ -1,0 +1,5 @@
+Added a rates-driven mean mode to sim_v2 worlds generator.
+- New profile config `rates_v0` in config/sim_v2_profiles.json with mean_source='rates', minutes_source='minutes_v1', rates_source='rates_v1_live', Student-t noise config, and smaller batch size.
+- SimV2Profile now includes mean_source, rates_source, minutes_source, noise dict, worlds_n/worlds_batch_size defaults (config loader updated).
+- generate_worlds_fpts_v2.py: added helpers to load minutes_v1 (with project-root fallback) and rates_v1_live, compute DK FPTS means from minutes+rates via build_rates_mean_fpts, and draw_independent_noise. Added CLI override --minutes-run-id, optional n_worlds defaulting to profile. New mean_source='rates' branch builds mu from minutes/rates, applies independent Student-t noise (sigma=k*mu), and writes worlds under artifacts/sim_v2/worlds_fpts_v2.
+- Smoke tested on 2025-12-03 with rates_run_id/minutes_run_id=20251204T013000Z, n_worlds=20; outputs written to /home/daniel/projections-data/artifacts/sim_v2/worlds_fpts_v2/game_date=2025-12-03.

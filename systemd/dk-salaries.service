@@ -1,0 +1,18 @@
+[Unit]
+Description=Build DK salaries/draftables (gold dk_salaries)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+User=daniel
+Group=daniel
+ExecStart=/home/daniel/.local/bin/uv run python -m scripts.dk.run_daily_salaries --slate-type all --single-slate
+StandardOutput=journal
+StandardError=journal
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

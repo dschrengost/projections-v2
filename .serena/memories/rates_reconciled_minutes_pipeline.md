@@ -1,0 +1,5 @@
+- Updated scripts/minutes/build_minutes_for_rates.py to support reconciliation by default (reconcile_mode Literal["none", "p50", "p50_and_tails"], default p50_and_tails). Loads config/minutes_l2_reconcile.yaml, uses dataclasses.replace to toggle clamp_tails for p50 vs p50_and_tails, and fills play_prob/is_starter fallbacks before calling reconcile_minutes_p50_all.
+- Fixed a bug from prior work where reconcile_minutes_p50_all was called with an unsupported clamp_tails kwarg; now uses config only.
+- scripts/rates/build_training_base.py exposes --minutes-for-rates-root to point at a custom minutes_for_rates tree when rebuilding rates_training_base.
+- Verified CLI flags with `uv run python -m scripts.minutes.build_minutes_for_rates --help` and `uv run python -m scripts.rates.build_training_base --help`; no backfills/retraining executed yet.
+- Pending to finish plan: rebuild minutes_for_rates with reconciliation, rebuild rates_training_base using the reconciled minutes root, retrain rates_v1, and update config/rates_current_run.json with the new run_id.

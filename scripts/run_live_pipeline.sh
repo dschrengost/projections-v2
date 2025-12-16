@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DATA_ROOT="${PROJECTIONS_DATA_ROOT:-/home/daniel/projections-data}"
+START_DATE="${LIVE_START_DATE:-$(date -I)}"
+END_DATE="${LIVE_END_DATE:-$START_DATE}"
+SEASON="${LIVE_SEASON:-$(date +%Y)}"
+MONTH="${LIVE_MONTH:-$(date +%-m)}"
+FLAGS="${LIVE_FLAGS:-}"  # additional CLI flags
+TIP_LEAD_MINUTES="${LIVE_TIP_LEAD_MINUTES:-60}"   # start scoring this many minutes before first tip
+TIP_TAIL_MINUTES="${LIVE_TIP_TAIL_MINUTES:-180}"  # keep running this many minutes after last tip
+LOCK_BUFFER_MINUTES="${LIVE_LOCK_BUFFER_MINUTES:-15}"
+DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-1}"
+# Read reconcile mode from config JSON if present, else fall back to env var or default
+CONFIG_RECONCILE=$(jq -r '.reconcile_team_minutes // empty' config/minutes_current_run.json 2>/dev/null || true)
+RECONCILE_MODE="${LIVE_RECONCILE_MODE:-${CONFIG_RECONCILE:-p50}}"
+MINUTES_OUTPUT_MODE="${LIVE_MINUTES_OUTPUT:-conditional}"
+
+cd /home/daniel/projects/projections-v2
+
+# Determine whether we are within the scoring window based on today's schedule.
+NOW_UTC=$(date -u +%s)
+SCHEDULE_PATH="${DATA_ROOT}/silver/schedule/season=${SEASON}/month=$(printf "%02d" "${MONTH}")/schedule.parquet"
+if [[ -f "${SCHEDULE_PATH}" ]]; then
+  if [[ "${DISABLE_TIP_WINDOW}" == "1" ]]; then
+    TIP_WINDOW="DISABLED"
+    echo "[live] Tip window gating disabled via LIVE_DISABLE_TIP_WINDOW=1 (lead=${TIP_LEAD_MINUTES}m tail=${TIP_TAIL_MINUTES}m for logging)."
+  else
+    TIP_WINDOW=$(SCHEDULE_PATH="${SCHEDULE_PATH}" START_DATE="${START_DATE}" TIP_LEAD_MINUTES="${TIP_LEAD_MINUTES}" TIP_TAIL_MINUTES="${TIP_TAIL_MINUTES}" /home/daniel/.local/bin/uv run python - <<'PY'
+import os, sys
+import pandas as pd
+from datetime import datetime, timezone
+
+path = os.environ["SCHEDULE_PATH"]
+target = os.environ["START_DATE"]
+lead = int(os.environ["TIP_LEAD_MINUTES"])
+tail = int(os.environ["TIP_TAIL_MINUTES"])
+
+df = pd.read_parquet(path)
+df["game_date"] = pd.to_datetime(df["game_date"]).dt.date
+df = df[df["game_date"] == pd.to_datetime(target).date()]
+if df.empty or "tip_ts" not in df.columns:
+    print("MISSING", flush=True)
+    sys.exit(0)
+tips = pd.to_datetime(df["tip_ts"], utc=True, errors="coerce").dropna()
+if tips.empty:
+    print("MISSING", flush=True)
+    sys.exit(0)
+first_tip = tips.min()
+last_tip = tips.max()
+start_ts = first_tip - pd.Timedelta(minutes=lead)
+end_ts = last_tip + pd.Timedelta(minutes=tail)
+print(start_ts.timestamp(), end_ts.timestamp(), flush=True)
+PY
+)
+  fi
+  if [[ "${TIP_WINDOW}" != "MISSING" && "${TIP_WINDOW}" != "DISABLED" ]]; then
+    START_TS=$(echo "${TIP_WINDOW}" | awk '{print $1}')
+    END_TS=$(echo "${TIP_WINDOW}" | awk '{print $2}')
+    if (( $(echo "${NOW_UTC} < ${START_TS}" | bc -l) )); then
+      echo "[live] Skipping run: before pre-tip window (first tip lead ${TIP_LEAD_MINUTES}m)."
+      exit 0
+    fi
+  else
+    echo "[live] Schedule missing or gating disabled; proceeding without tip window gating."
+  fi
+else
+  echo "[live] Schedule parquet not found at ${SCHEDULE_PATH}; proceeding without tip window gating."
+fi
+
+/home/daniel/.local/bin/uv run python -m projections.cli.live_pipeline \
+  --start "${START_DATE}" \
+  --end "${END_DATE}" \
+  --season "${SEASON}" \
+  --month "${MONTH}" \
+  --data-root "${DATA_ROOT}" \
+  --schedule "${DATA_ROOT}/silver/schedule/season=${SEASON}/month=$(printf "%02d" "${MONTH}")/schedule.parquet" \
+  ${FLAGS}
+
+if [[ "${LIVE_SCORE:-0}" != "1" ]]; then
+  exit 0
+fi
+
+# Use the current time for run_as_of_ts so faster feeds (odds) aren't filtered out
+# between slower feeds (injuries). build_minutes_live still applies per-game tip_ts bounds.
+RUN_AS_OF_TS="${LIVE_RUN_AS_OF_TS:-$(date -u '+%Y-%m-%d %H:%M:%S')}"
+
+/home/daniel/.local/bin/uv run python -m projections.cli.build_minutes_live \
+  --date "${START_DATE}" \
+  --run-as-of-ts "${RUN_AS_OF_TS}" \
+  --lock-buffer-minutes "${LOCK_BUFFER_MINUTES}"
+
+# Use current time for run ID to ensure dashboard always shows fresh data
+# (run_as_of_ts is for anti-leak filtering; run_id is for output paths)
+RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
+
+SCORE_ARGS=(
+  --date "${START_DATE}"
+  --mode live
+  --run-id "${RUN_ID}"
+  --reconcile-team-minutes "${RECONCILE_MODE}"
+  --minutes-output "${MINUTES_OUTPUT_MODE}"
+)
+if [[ -n "${LIVE_BUNDLE_DIR:-}" ]]; then
+  SCORE_ARGS+=(--bundle-dir "${LIVE_BUNDLE_DIR}")
+fi
+
+/home/daniel/.local/bin/uv run python -m projections.cli.score_minutes_v1 "${SCORE_ARGS[@]}"
+

@@ -1,0 +1,21 @@
+[Unit]
+Description=Daily tracking data scrape and roles build
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=daniel
+WorkingDirectory=/home/daniel/projects/projections-v2
+ExecStart=/home/daniel/projects/projections-v2/scripts/run_tracking_daily.sh
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment="PATH=/home/daniel/projects/projections-v2/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PROJECTIONS_DATA_ROOT=/home/daniel/projections-data"
+
+[Install]
+WantedBy=multi-user.target

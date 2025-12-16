@@ -1,0 +1,20 @@
+l2_reconcile:
+  # Reconciliation disabled by request; keep defaults here for future use.
+  p_play_min_rotation: 0.05
+  min_minutes_for_rotation: 4.0
+  max_rotation_size: 10
+  clamp_tails: true
+  team_minutes:
+    target: 240.0
+    tolerance: 0.0
+  bounds:
+    starter_floor: 16.0
+    p90_cap_multiplier: 1.10
+    max_extra_minutes_above_p50: 10.0
+    hard_cap: 44.0
+  weights:
+    starter_penalty: 1.0
+    rotation_penalty: 0.5
+    deep_penalty: 0.1
+    spread_epsilon: 0.5
+    scale_with_spread: true

@@ -1,0 +1,305 @@
+{
+  "data_root": "/home/daniel/projections-data",
+  "date_window": {
+    "end": "2025-11-25",
+    "start": "2025-11-21"
+  },
+  "games": 23,
+  "labels_root": "/home/daniel/projections-data/gold/labels_minutes_v1",
+  "logs_root": "/home/daniel/projections-data/gold/prediction_logs_minutes",
+  "metrics": {
+    "injury_return_slices": [
+      {
+        "bucket": "non_injury_return",
+        "coverage_p10_p90": 0.39363817097415504,
+        "coverage_p10_p90_cond": 0.39363817097415504,
+        "mae_minutes": 6.0687328327360195,
+        "over_rate_p90": 0.47912524850894633,
+        "over_rate_p90_cond": 0.47912524850894633,
+        "rmse_minutes": 8.000939238306673,
+        "rows": 503,
+        "smape_minutes": 0.408553201252387,
+        "under_rate_p10": 0.1272365805168986,
+        "under_rate_p10_cond": 0.1272365805168986
+      }
+    ],
+    "overall": {
+      "coverage_p10_p90": 0.3283582089552239,
+      "coverage_p10_p90_cond": 0.39363817097415504,
+      "mae_minutes": 5.754703924657167,
+      "over_rate_p90": 0.3996683250414594,
+      "over_rate_p90_cond": 0.47912524850894633,
+      "rmse_minutes": 7.788253570766607,
+      "rows": 603,
+      "smape_minutes": 0.6724747267495037,
+      "under_rate_p10": 0.27197346600331673,
+      "under_rate_p10_cond": 0.1272365805168986
+    },
+    "rotation_slices": [
+      {
+        "bucket": "rotation_all",
+        "coverage_p10_p90": 0.364,
+        "coverage_p10_p90_cond": 0.364,
+        "mae_minutes": 4.876592208010874,
+        "over_rate_p90": 0.464,
+        "over_rate_p90_cond": 0.464,
+        "rmse_minutes": 6.075360261567084,
+        "rows": 250,
+        "smape_minutes": 0.1819903785081147,
+        "under_rate_p10": 0.172,
+        "under_rate_p10_cond": 0.172
+      },
+      {
+        "bucket": "rotation_starters_30_plus",
+        "coverage_p10_p90": 0.5531914893617021,
+        "coverage_p10_p90_cond": 0.5531914893617021,
+        "mae_minutes": 4.3020145440483315,
+        "over_rate_p90": 0.1702127659574468,
+        "over_rate_p90_cond": 0.1702127659574468,
+        "rmse_minutes": 5.586014201082983,
+        "rows": 47,
+        "smape_minutes": 0.13967734617038696,
+        "under_rate_p10": 0.2765957446808511,
+        "under_rate_p10_cond": 0.2765957446808511
+      },
+      {
+        "bucket": "rotation_mid_minutes",
+        "coverage_p10_p90": 0.31976744186046513,
+        "coverage_p10_p90_cond": 0.31976744186046513,
+        "mae_minutes": 5.2582131392093014,
+        "over_rate_p90": 0.5116279069767442,
+        "over_rate_p90_cond": 0.5116279069767442,
+        "rmse_minutes": 6.46736633583639,
+        "rows": 172,
+        "smape_minutes": 0.20677491066420742,
+        "under_rate_p10": 0.1686046511627907,
+        "under_rate_p10_cond": 0.1686046511627907
+      }
+    ],
+    "rows": 603,
+    "slices": {
+      "minutes_p50": [
+        {
+          "bucket": "<20",
+          "coverage_p10_p90": 0.3057142857142857,
+          "coverage_p10_p90_cond": 0.42292490118577075,
+          "mae_minutes": 6.236047679491705,
+          "over_rate_p90": 0.35714285714285715,
+          "over_rate_p90_cond": 0.49407114624505927,
+          "rmse_minutes": 8.5836047383131,
+          "rows": 350,
+          "smape_minutes": 1.0114419017226344,
+          "under_rate_p10": 0.33714285714285713,
+          "under_rate_p10_cond": 0.08300395256916997
+        },
+        {
+          "bucket": "20-30",
+          "coverage_p10_p90": 0.3142857142857143,
+          "coverage_p10_p90_cond": 0.31976744186046513,
+          "mae_minutes": 5.558482209642609,
+          "over_rate_p90": 0.5028571428571429,
+          "over_rate_p90_cond": 0.5116279069767442,
+          "rmse_minutes": 7.073259909884935,
+          "rows": 175,
+          "smape_minutes": 0.2375159121956782,
+          "under_rate_p10": 0.18285714285714286,
+          "under_rate_p10_cond": 0.1686046511627907
+        },
+        {
+          "bucket": ">30",
+          "coverage_p10_p90": 0.46153846153846156,
+          "coverage_p10_p90_cond": 0.46153846153846156,
+          "mae_minutes": 4.035069128957928,
+          "over_rate_p90": 0.358974358974359,
+          "over_rate_p90_cond": 0.358974358974359,
+          "rmse_minutes": 5.105660857283591,
+          "rows": 78,
+          "smape_minutes": 0.12733730759980771,
+          "under_rate_p10": 0.1794871794871795,
+          "under_rate_p10_cond": 0.1794871794871795
+        }
+      ],
+      "spread_home": [
+        {
+          "bucket": "<=3",
+          "coverage_p10_p90": 0.25984251968503935,
+          "coverage_p10_p90_cond": 0.30275229357798167,
+          "mae_minutes": 5.231796762183886,
+          "over_rate_p90": 0.5275590551181102,
+          "over_rate_p90_cond": 0.6146788990825688,
+          "rmse_minutes": 7.165595482507372,
+          "rows": 127,
+          "smape_minutes": 0.6114494474435768,
+          "under_rate_p10": 0.2125984251968504,
+          "under_rate_p10_cond": 0.08256880733944955
+        },
+        {
+          "bucket": "3-8",
+          "coverage_p10_p90": 0.3148936170212766,
+          "coverage_p10_p90_cond": 0.3756345177664975,
+          "mae_minutes": 6.542765181683864,
+          "over_rate_p90": 0.3872340425531915,
+          "over_rate_p90_cond": 0.4619289340101523,
+          "rmse_minutes": 8.943002802879919,
+          "rows": 235,
+          "smape_minutes": 0.7209716383055194,
+          "under_rate_p10": 0.2978723404255319,
+          "under_rate_p10_cond": 0.16243654822335024
+        },
+        {
+          "bucket": ">8",
+          "coverage_p10_p90": 0.3775933609958506,
+          "coverage_p10_p90_cond": 0.4619289340101523,
+          "mae_minutes": 5.261819336411661,
+          "over_rate_p90": 0.34439834024896265,
+          "over_rate_p90_cond": 0.4213197969543147,
+          "rmse_minutes": 6.835509630468877,
+          "rows": 241,
+          "smape_minutes": 0.6573437568581717,
+          "under_rate_p10": 0.27800829875518673,
+          "under_rate_p10_cond": 0.116751269035533
+        }
+      ],
+      "starter_flag": [
+        {
+          "bucket": "starter",
+          "coverage_p10_p90": 0.5333333333333333,
+          "coverage_p10_p90_cond": 0.5333333333333333,
+          "mae_minutes": 4.593306849495022,
+          "over_rate_p90": 0.16,
+          "over_rate_p90_cond": 0.16,
+          "rmse_minutes": 6.01267359231846,
+          "rows": 75,
+          "smape_minutes": 0.16818218458950748,
+          "under_rate_p10": 0.30666666666666664,
+          "under_rate_p10_cond": 0.30666666666666664
+        },
+        {
+          "bucket": "bench",
+          "coverage_p10_p90": 0.29924242424242425,
+          "coverage_p10_p90_cond": 0.3691588785046729,
+          "mae_minutes": 5.919675100106336,
+          "over_rate_p90": 0.4337121212121212,
+          "over_rate_p90_cond": 0.5350467289719626,
+          "rmse_minutes": 8.008599616903378,
+          "rows": 528,
+          "smape_minutes": 0.7441071901245032,
+          "under_rate_p10": 0.26704545454545453,
+          "under_rate_p10_cond": 0.09579439252336448
+        }
+      ],
+      "status": [
+        {
+          "bucket": "other",
+          "coverage_p10_p90": 0.3283582089552239,
+          "coverage_p10_p90_cond": 0.39363817097415504,
+          "mae_minutes": 5.754703924657167,
+          "over_rate_p90": 0.3996683250414594,
+          "over_rate_p90_cond": 0.47912524850894633,
+          "rmse_minutes": 7.788253570766607,
+          "rows": 603,
+          "smape_minutes": 0.6724747267495037,
+          "under_rate_p10": 0.27197346600331673,
+          "under_rate_p10_cond": 0.1272365805168986
+        }
+      ]
+    },
+    "status_slices": [
+      {
+        "bucket": "CLEAN",
+        "coverage_p10_p90": 0.3283582089552239,
+        "coverage_p10_p90_cond": 0.39363817097415504,
+        "mae_minutes": 5.754703924657167,
+        "over_rate_p90": 0.3996683250414594,
+        "over_rate_p90_cond": 0.47912524850894633,
+        "rmse_minutes": 7.788253570766607,
+        "rows": 603,
+        "smape_minutes": 0.6724747267495037,
+        "under_rate_p10": 0.27197346600331673,
+        "under_rate_p10_cond": 0.1272365805168986
+      }
+    ]
+  },
+  "rows": 603,
+  "schedule_root": "/home/daniel/projections-data/silver/schedule",
+  "snapshot_mode": "last_before_tip",
+  "snapshot_summary": {
+    "games_skipped": 14,
+    "games_with_snapshots": 23,
+    "rows_after_label_join": 603,
+    "rows_before_label_join": 604,
+    "skipped_games": [
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500048,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500049,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500050,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500051,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500052,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500053,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500054,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500055,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500056,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500268,
+        "reason": "no_snapshot_before_tip"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500269,
+        "reason": "no_snapshot_before_tip"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500270,
+        "reason": "no_snapshot_before_tip"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500271,
+        "reason": "no_snapshot_before_tip"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500272,
+        "reason": "no_snapshot_before_tip"
+      }
+    ],
+    "total_games": 37
+  }
+}

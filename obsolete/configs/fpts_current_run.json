@@ -1,0 +1,6 @@
+{
+  "run_id": "fpts_v2_stage0_20251129_062655",
+  "artifact_root": "/home/daniel/projections-data/artifacts/fpts_v2/runs",
+  "scoring_system": "dk",
+  "note": "Baseline FPTS production run pinned to stage0 (total-FPTS head with residuals)."
+}

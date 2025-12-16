@@ -1,0 +1,41 @@
+{
+  "counts": {
+    "early_rows": 2185,
+    "games": 310,
+    "horizon_rows": 18527,
+    "late_rows": 16342
+  },
+  "created_at": "2025-12-14T05:11:09.623202+00:00",
+  "early_horizons_minutes": [
+    360,
+    180,
+    90
+  ],
+  "horizons_minutes": [
+    360,
+    180,
+    90,
+    60,
+    30,
+    15,
+    0
+  ],
+  "late_horizons_minutes": [
+    60,
+    30,
+    15,
+    0
+  ],
+  "max_snapshot_age_hours": 12.0,
+  "paths": {
+    "early": "/home/daniel/projects/projections-v2/data/training/horizons_minutes_v1/run=20251214T051109Z/early_rows.parquet",
+    "horizons": "/home/daniel/projects/projections-v2/data/training/horizons_minutes_v1/run=20251214T051109Z/horizon_rows.parquet",
+    "late": "/home/daniel/projects/projections-v2/data/training/horizons_minutes_v1/run=20251214T051109Z/late_rows.parquet"
+  },
+  "snapshot_ts_col": "feature_as_of_ts",
+  "split_bounds": {
+    "cal_end": "2025-12-07T23:59:59+00:00",
+    "train_end": "2025-11-27T23:59:59+00:00",
+    "val_end": "2025-12-12T23:59:59+00:00"
+  }
+}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Freeze slates every 5 minutes
+
+[Timer]
+OnCalendar=*-*-* 08..23:*:00/5
+Unit=freeze-slates.service
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,1456 @@
+{
+  "data_root": "/home/daniel/projections-data",
+  "date_window": {
+    "end": "2025-11-30",
+    "start": "2025-10-21"
+  },
+  "games": 44,
+  "labels_root": "/home/daniel/projections-data/gold/labels_minutes_v1",
+  "logs_root": "/home/daniel/projections-data/gold/prediction_logs_minutes",
+  "metrics": {
+    "injury_return_slices": [
+      {
+        "bucket": "non_injury_return",
+        "coverage_p10_p90": 0.524731182795699,
+        "coverage_p10_p90_cond": 0.524731182795699,
+        "mae_minutes": 5.505244101325835,
+        "over_rate_p90": 0.34838709677419355,
+        "over_rate_p90_cond": 0.34838709677419355,
+        "rmse_minutes": 7.523810589198948,
+        "rows": 930,
+        "smape_minutes": 0.3499130452039872,
+        "under_rate_p10": 0.12688172043010754,
+        "under_rate_p10_cond": 0.12688172043010754
+      }
+    ],
+    "overall": {
+      "coverage_p10_p90": 0.4241645244215938,
+      "coverage_p10_p90_cond": 0.524731182795699,
+      "mae_minutes": 5.648716419721325,
+      "over_rate_p90": 0.2776349614395887,
+      "over_rate_p90_cond": 0.34838709677419355,
+      "rmse_minutes": 7.6159295298527185,
+      "rows": 1167,
+      "smape_minutes": 0.6730241062893814,
+      "under_rate_p10": 0.2982005141388175,
+      "under_rate_p10_cond": 0.12688172043010754
+    },
+    "rotation_slices": [
+      {
+        "bucket": "rotation_all",
+        "coverage_p10_p90": 0.5049115913555993,
+        "coverage_p10_p90_cond": 0.5049115913555993,
+        "mae_minutes": 4.947972867535628,
+        "over_rate_p90": 0.33595284872298625,
+        "over_rate_p90_cond": 0.33595284872298625,
+        "rmse_minutes": 6.88632831801926,
+        "rows": 509,
+        "smape_minutes": 0.18881961092792346,
+        "under_rate_p10": 0.15913555992141454,
+        "under_rate_p10_cond": 0.15913555992141454
+      },
+      {
+        "bucket": "rotation_starters_30_plus",
+        "coverage_p10_p90": 0.640625,
+        "coverage_p10_p90_cond": 0.640625,
+        "mae_minutes": 5.065902372796291,
+        "over_rate_p90": 0.1875,
+        "over_rate_p90_cond": 0.1875,
+        "rmse_minutes": 7.783561956924551,
+        "rows": 192,
+        "smape_minutes": 0.18209446438858393,
+        "under_rate_p10": 0.171875,
+        "under_rate_p10_cond": 0.171875
+      },
+      {
+        "bucket": "rotation_mid_minutes",
+        "coverage_p10_p90": 0.43356643356643354,
+        "coverage_p10_p90_cond": 0.43356643356643354,
+        "mae_minutes": 5.01162316611993,
+        "over_rate_p90": 0.4020979020979021,
+        "over_rate_p90_cond": 0.4020979020979021,
+        "rmse_minutes": 6.460946868387718,
+        "rows": 286,
+        "smape_minutes": 0.20202646880044794,
+        "under_rate_p10": 0.16433566433566432,
+        "under_rate_p10_cond": 0.16433566433566432
+      }
+    ],
+    "rows": 1167,
+    "slices": {
+      "minutes_p50": [
+        {
+          "bucket": "<20",
+          "coverage_p10_p90": 0.363914373088685,
+          "coverage_p10_p90_cond": 0.5486935866983373,
+          "mae_minutes": 6.091944267667715,
+          "over_rate_p90": 0.23394495412844038,
+          "over_rate_p90_cond": 0.36342042755344417,
+          "rmse_minutes": 7.970283571558816,
+          "rows": 654,
+          "smape_minutes": 1.0417583334516745,
+          "under_rate_p10": 0.40214067278287463,
+          "under_rate_p10_cond": 0.08788598574821853
+        },
+        {
+          "bucket": "20-30",
+          "coverage_p10_p90": 0.42758620689655175,
+          "coverage_p10_p90_cond": 0.43356643356643354,
+          "mae_minutes": 5.25078119549919,
+          "over_rate_p90": 0.39655172413793105,
+          "over_rate_p90_cond": 0.4020979020979021,
+          "rmse_minutes": 6.9342577401767,
+          "rows": 290,
+          "smape_minutes": 0.2268261037135452,
+          "under_rate_p10": 0.17586206896551723,
+          "under_rate_p10_cond": 0.16433566433566432
+        },
+        {
+          "bucket": ">30",
+          "coverage_p10_p90": 0.5964125560538116,
+          "coverage_p10_p90_cond": 0.5964125560538116,
+          "mae_minutes": 4.866340646032891,
+          "over_rate_p90": 0.25112107623318386,
+          "over_rate_p90_cond": 0.25112107623318386,
+          "rmse_minutes": 7.396161852284203,
+          "rows": 223,
+          "smape_minutes": 0.17188166764746604,
+          "under_rate_p10": 0.15246636771300448,
+          "under_rate_p10_cond": 0.15246636771300448
+        }
+      ],
+      "spread_home": [
+        {
+          "bucket": "<=3",
+          "coverage_p10_p90": 0.36086956521739133,
+          "coverage_p10_p90_cond": 0.4368421052631579,
+          "mae_minutes": 5.552044265048411,
+          "over_rate_p90": 0.3695652173913043,
+          "over_rate_p90_cond": 0.4473684210526316,
+          "rmse_minutes": 7.359835662211787,
+          "rows": 230,
+          "smape_minutes": 0.6272207439872395,
+          "under_rate_p10": 0.26956521739130435,
+          "under_rate_p10_cond": 0.11578947368421053
+        },
+        {
+          "bucket": "3-8",
+          "coverage_p10_p90": 0.41386138613861384,
+          "coverage_p10_p90_cond": 0.5277777777777778,
+          "mae_minutes": 6.27714805123127,
+          "over_rate_p90": 0.25742574257425743,
+          "over_rate_p90_cond": 0.3282828282828283,
+          "rmse_minutes": 8.636191602913673,
+          "rows": 505,
+          "smape_minutes": 0.7274151936831812,
+          "under_rate_p10": 0.3287128712871287,
+          "under_rate_p10_cond": 0.14393939393939395
+        },
+        {
+          "bucket": ">8",
+          "coverage_p10_p90": 0.4699074074074074,
+          "coverage_p10_p90_cond": 0.5697674418604651,
+          "mae_minutes": 4.965560451346898,
+          "over_rate_p90": 0.2523148148148148,
+          "over_rate_p90_cond": 0.3168604651162791,
+          "rmse_minutes": 6.376589697612293,
+          "rows": 432,
+          "smape_minutes": 0.6338279817422142,
+          "under_rate_p10": 0.2777777777777778,
+          "under_rate_p10_cond": 0.11337209302325581
+        }
+      ],
+      "starter_flag": [
+        {
+          "bucket": "starter",
+          "coverage_p10_p90": 0.6175438596491228,
+          "coverage_p10_p90_cond": 0.6175438596491228,
+          "mae_minutes": 4.993299689161862,
+          "over_rate_p90": 0.17543859649122806,
+          "over_rate_p90_cond": 0.17543859649122806,
+          "rmse_minutes": 7.427595008617673,
+          "rows": 285,
+          "smape_minutes": 0.18664691103019404,
+          "under_rate_p10": 0.20701754385964913,
+          "under_rate_p10_cond": 0.20701754385964913
+        },
+        {
+          "bucket": "bench",
+          "coverage_p10_p90": 0.36167800453514737,
+          "coverage_p10_p90_cond": 0.48372093023255813,
+          "mae_minutes": 5.86050073741911,
+          "over_rate_p90": 0.31065759637188206,
+          "over_rate_p90_cond": 0.4248062015503876,
+          "rmse_minutes": 7.675798150279786,
+          "rows": 882,
+          "smape_minutes": 0.8301868054377584,
+          "under_rate_p10": 0.3276643990929705,
+          "under_rate_p10_cond": 0.09147286821705426
+        }
+      ],
+      "status": [
+        {
+          "bucket": "qish",
+          "coverage_p10_p90": 0.6666666666666666,
+          "coverage_p10_p90_cond": 0.6666666666666666,
+          "mae_minutes": 8.11076943928182,
+          "over_rate_p90": 0.0,
+          "over_rate_p90_cond": 0.0,
+          "rmse_minutes": 8.866777460386098,
+          "rows": 3,
+          "smape_minutes": 0.48925524230553136,
+          "under_rate_p10": 0.3333333333333333,
+          "under_rate_p10_cond": 0.3333333333333333
+        },
+        {
+          "bucket": "other",
+          "coverage_p10_p90": 0.42353951890034364,
+          "coverage_p10_p90_cond": 0.5242718446601942,
+          "mae_minutes": 5.64237092224823,
+          "over_rate_p90": 0.27835051546391754,
+          "over_rate_p90_cond": 0.34951456310679613,
+          "rmse_minutes": 7.612440152677339,
+          "rows": 1164,
+          "smape_minutes": 0.6734977373821233,
+          "under_rate_p10": 0.2981099656357388,
+          "under_rate_p10_cond": 0.1262135922330097
+        }
+      ]
+    },
+    "status_slices": [
+      {
+        "bucket": "CLEAN",
+        "coverage_p10_p90": 0.42353951890034364,
+        "coverage_p10_p90_cond": 0.5242718446601942,
+        "mae_minutes": 5.64237092224823,
+        "over_rate_p90": 0.27835051546391754,
+        "over_rate_p90_cond": 0.34951456310679613,
+        "rmse_minutes": 7.612440152677339,
+        "rows": 1164,
+        "smape_minutes": 0.6734977373821233,
+        "under_rate_p10": 0.2981099656357388,
+        "under_rate_p10_cond": 0.1262135922330097
+      },
+      {
+        "bucket": "OTHER",
+        "coverage_p10_p90": 0.6666666666666666,
+        "coverage_p10_p90_cond": 0.6666666666666666,
+        "mae_minutes": 8.11076943928182,
+        "over_rate_p90": 0.0,
+        "over_rate_p90_cond": 0.0,
+        "rmse_minutes": 8.866777460386098,
+        "rows": 3,
+        "smape_minutes": 0.48925524230553136,
+        "under_rate_p10": 0.3333333333333333,
+        "under_rate_p10_cond": 0.3333333333333333
+      }
+    ]
+  },
+  "rows": 1167,
+  "schedule_root": "/home/daniel/projections-data/silver/schedule",
+  "snapshot_mode": "last_before_tip",
+  "snapshot_summary": {
+    "games_skipped": 239,
+    "games_with_snapshots": 60,
+    "rows_after_label_join": 1167,
+    "rows_before_label_join": 1598,
+    "skipped_games": [
+      {
+        "game_date": "2025-10-21",
+        "game_id": 22500001,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-21",
+        "game_id": 22500002,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500003,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500004,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500080,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500081,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500082,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500083,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500084,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500085,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500086,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500087,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500088,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-22",
+        "game_id": 22500089,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-23",
+        "game_id": 22500005,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-23",
+        "game_id": 22500006,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500018,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500019,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500090,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500091,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500092,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500093,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500094,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500095,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500096,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500097,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500098,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-24",
+        "game_id": 22500099,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-25",
+        "game_id": 22500100,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-25",
+        "game_id": 22500101,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-25",
+        "game_id": 22500102,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-25",
+        "game_id": 22500103,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-25",
+        "game_id": 22500104,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-26",
+        "game_id": 22500105,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-26",
+        "game_id": 22500106,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-26",
+        "game_id": 22500107,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-26",
+        "game_id": 22500108,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-26",
+        "game_id": 22500109,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-26",
+        "game_id": 22500110,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-26",
+        "game_id": 22500111,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-26",
+        "game_id": 22500112,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-26",
+        "game_id": 22500113,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500007,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500008,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500114,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500115,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500116,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500117,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500118,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500119,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500120,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500121,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-27",
+        "game_id": 22500122,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-28",
+        "game_id": 22500123,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-28",
+        "game_id": 22500124,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-28",
+        "game_id": 22500125,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-28",
+        "game_id": 22500126,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-28",
+        "game_id": 22500127,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500128,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500129,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500130,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500131,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500132,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500133,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500134,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500135,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500136,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-29",
+        "game_id": 22500137,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-30",
+        "game_id": 22500138,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-30",
+        "game_id": 22500139,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-30",
+        "game_id": 22500140,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-30",
+        "game_id": 22500141,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-31",
+        "game_id": 22500020,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-31",
+        "game_id": 22500021,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-31",
+        "game_id": 22500022,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-31",
+        "game_id": 22500023,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-31",
+        "game_id": 22500024,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-31",
+        "game_id": 22500025,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-10-31",
+        "game_id": 22500026,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-01",
+        "game_id": 22500142,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-01",
+        "game_id": 22500143,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-01",
+        "game_id": 22500144,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-01",
+        "game_id": 22500145,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-01",
+        "game_id": 22500146,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-01",
+        "game_id": 22500147,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-02",
+        "game_id": 22500148,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-02",
+        "game_id": 22500149,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-02",
+        "game_id": 22500150,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-02",
+        "game_id": 22500151,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-02",
+        "game_id": 22500152,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-02",
+        "game_id": 22500153,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-02",
+        "game_id": 22500154,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-02",
+        "game_id": 22500155,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-03",
+        "game_id": 22500156,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-03",
+        "game_id": 22500157,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-03",
+        "game_id": 22500158,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-03",
+        "game_id": 22500159,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-03",
+        "game_id": 22500160,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-03",
+        "game_id": 22500161,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-03",
+        "game_id": 22500162,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-03",
+        "game_id": 22500163,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-03",
+        "game_id": 22500164,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-04",
+        "game_id": 22500165,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-04",
+        "game_id": 22500166,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-04",
+        "game_id": 22500167,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-04",
+        "game_id": 22500168,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-04",
+        "game_id": 22500169,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-04",
+        "game_id": 22500170,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500171,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500172,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500173,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500174,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500175,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500176,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500177,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500178,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500179,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500180,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-05",
+        "game_id": 22500181,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-06",
+        "game_id": 22500182,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500028,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500029,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500030,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500031,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500032,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500033,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500034,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500035,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500036,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500037,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-07",
+        "game_id": 22500038,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-08",
+        "game_id": 22500183,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-08",
+        "game_id": 22500184,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-08",
+        "game_id": 22500185,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-08",
+        "game_id": 22500186,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-08",
+        "game_id": 22500187,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-08",
+        "game_id": 22500188,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-08",
+        "game_id": 22500189,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-08",
+        "game_id": 22500190,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-09",
+        "game_id": 22500191,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-09",
+        "game_id": 22500192,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-09",
+        "game_id": 22500193,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-09",
+        "game_id": 22500194,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-09",
+        "game_id": 22500195,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-09",
+        "game_id": 22500196,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-09",
+        "game_id": 22500197,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-10",
+        "game_id": 22500198,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-10",
+        "game_id": 22500199,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-10",
+        "game_id": 22500200,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-10",
+        "game_id": 22500201,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-10",
+        "game_id": 22500202,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-10",
+        "game_id": 22500203,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-10",
+        "game_id": 22500204,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-10",
+        "game_id": 22500205,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-10",
+        "game_id": 22500206,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-11",
+        "game_id": 22500207,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-11",
+        "game_id": 22500208,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-11",
+        "game_id": 22500209,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-11",
+        "game_id": 22500210,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-11",
+        "game_id": 22500211,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-11",
+        "game_id": 22500212,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500213,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500214,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500215,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500216,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500217,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500218,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500219,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500220,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500221,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500222,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500223,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-12",
+        "game_id": 22500224,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-13",
+        "game_id": 22500225,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-13",
+        "game_id": 22500226,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-13",
+        "game_id": 22500227,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-14",
+        "game_id": 22500039,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-14",
+        "game_id": 22500040,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-14",
+        "game_id": 22500041,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-14",
+        "game_id": 22500042,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-14",
+        "game_id": 22500043,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-14",
+        "game_id": 22500044,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-14",
+        "game_id": 22500045,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-14",
+        "game_id": 22500046,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-14",
+        "game_id": 22500047,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-15",
+        "game_id": 22500228,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-15",
+        "game_id": 22500229,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-15",
+        "game_id": 22500230,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-15",
+        "game_id": 22500231,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-15",
+        "game_id": 22500232,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-16",
+        "game_id": 22500233,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-16",
+        "game_id": 22500234,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-16",
+        "game_id": 22500235,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-16",
+        "game_id": 22500236,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-16",
+        "game_id": 22500237,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-16",
+        "game_id": 22500238,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-16",
+        "game_id": 22500239,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-16",
+        "game_id": 22500240,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-17",
+        "game_id": 22500241,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-17",
+        "game_id": 22500242,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-17",
+        "game_id": 22500243,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-17",
+        "game_id": 22500244,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-17",
+        "game_id": 22500245,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-17",
+        "game_id": 22500246,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-17",
+        "game_id": 22500247,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-17",
+        "game_id": 22500248,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-18",
+        "game_id": 22500249,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-18",
+        "game_id": 22500250,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-18",
+        "game_id": 22500251,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-18",
+        "game_id": 22500252,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-18",
+        "game_id": 22500253,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-18",
+        "game_id": 22500254,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-19",
+        "game_id": 22500255,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-19",
+        "game_id": 22500256,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-19",
+        "game_id": 22500257,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-19",
+        "game_id": 22500258,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-19",
+        "game_id": 22500259,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-19",
+        "game_id": 22500260,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-19",
+        "game_id": 22500261,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-19",
+        "game_id": 22500262,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-19",
+        "game_id": 22500263,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-20",
+        "game_id": 22500264,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-20",
+        "game_id": 22500265,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-20",
+        "game_id": 22500266,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-20",
+        "game_id": 22500267,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500048,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500049,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500050,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500051,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500052,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500053,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500054,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500055,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-21",
+        "game_id": 22500056,
+        "reason": "no_logs"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500268,
+        "reason": "no_snapshot_before_tip"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500269,
+        "reason": "no_snapshot_before_tip"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500270,
+        "reason": "no_snapshot_before_tip"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500271,
+        "reason": "no_snapshot_before_tip"
+      },
+      {
+        "game_date": "2025-11-22",
+        "game_id": 22500272,
+        "reason": "no_snapshot_before_tip"
+      }
+    ],
+    "total_games": 299
+  }
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run live rates scoring hourly on game days
+
+[Timer]
+OnCalendar=*-*-* 10..23:15:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

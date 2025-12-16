@@ -1,0 +1,14 @@
+# Example timer for the minutes label backfill job.
+# Copy to /etc/systemd/system/post-slate-minutes-labels.timer, reload daemon,
+# then `sudo systemctl enable --now post-slate-minutes-labels.timer`.
+
+[Unit]
+Description=Daily minutes label refresh trigger
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Unit=post-slate-minutes-labels.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

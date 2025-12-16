@@ -1,0 +1,8 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2146,161222,NBA $5 Double Up,1,459,5.0,2000.0
+2146,161227,NBA $30K And-One [20 Entry Max],4,35671,1.0,30000.0
+2146,161232,NBA $2 Double Up,1,1149,2.0,2000.0
+2146,161233,NBA $400K Shootaround [$100K to 1st],4,23529,20.0,400000.0
+2146,161270,NBA Showdown $70K Fadeaway [$20K to 1st] (BOS vs MIA),4,5490,15.0,70000.0
+2146,161275,NBA Showdown $60K Fadeaway [$20K to 1st] (OKC vs NOP),4,4705,15.0,60000.0
+2146,161285,NBA Showdown $200K Fadeaway [$50K to 1st] (LAL vs DEN),4,13071,18.0,200000.0

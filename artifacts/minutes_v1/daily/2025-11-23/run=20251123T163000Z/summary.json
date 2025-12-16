@@ -1,0 +1,50 @@
+{
+  "date": "2025-11-23",
+  "generated_at": "2025-11-23T17:30:16.704802+00:00",
+  "model_run_id": "lgbm_full_v1_vol",
+  "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_lgbm/lgbm_full_v1_vol",
+  "model_meta": {
+    "feature_hash": "32c16a81820d6d7f37465279ee20e69b4d11ab91a5f526b7874678aad558ae52",
+    "fold_id": null,
+    "model": "lightgbm_quantiles",
+    "params": {
+      "cal_days": null,
+      "conformal_buckets": "starter,p50bins",
+      "conformal_k": 200,
+      "conformal_mode": "two-sided",
+      "coverage_tolerance": 0.02,
+      "playable_min_p50": 10.0,
+      "playable_winkler_baseline": null,
+      "playable_winkler_tolerance": 1.0,
+      "quantiles": [
+        0.1,
+        0.5,
+        0.9
+      ],
+      "random_state": 42,
+      "winkler_baseline": null
+    },
+    "target_col": "minutes",
+    "windows": {
+      "cal": {
+        "end": "2025-04-30T00:00:00Z",
+        "start": "2025-03-01T00:00:00Z"
+      },
+      "train": {
+        "end": "2025-02-28T00:00:00Z",
+        "start": "2022-10-01T00:00:00Z"
+      },
+      "val": {
+        "end": "2025-11-14T00:00:00Z",
+        "start": "2025-10-01T00:00:00Z"
+      }
+    }
+  },
+  "run_id": "20251123T163000Z",
+  "run_as_of_ts": "2025-11-23T16:30:00+00:00",
+  "counts": {
+    "rows": 231,
+    "players": 231,
+    "teams": 16
+  }
+}

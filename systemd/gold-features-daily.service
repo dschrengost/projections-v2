@@ -1,0 +1,18 @@
+[Unit]
+Description=Build gold minutes_v1 features for yesterday's slate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+User=daniel
+Group=daniel
+ExecStart=/home/daniel/projects/projections-v2/scripts/run_gold_daily.sh
+StandardOutput=journal
+StandardError=journal
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

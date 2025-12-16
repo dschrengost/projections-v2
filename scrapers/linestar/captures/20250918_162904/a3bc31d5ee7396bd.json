@@ -1,0 +1,82 @@
+{
+  "url": "https://syndication.twitter.com/settings?session_id=c204cbba674f585928eab6fd700d1177addf4d1d",
+  "status": 200,
+  "method": "GET",
+  "headers": {
+    "x-transaction-id": "c925b798a9071c92",
+    "x-connection-hash": "3e78d2394bbddad45155981ed1d497f9caf8794bd335f2db2c0d6cb2456a2e14",
+    "content-encoding": "gzip",
+    "cf-cache-status": "DYNAMIC",
+    "x-response-time": "7",
+    "date": "Thu, 18 Sep 2025 16:29:05 GMT",
+    "content-type": "application/json; charset=utf-8",
+    "last-modified": "Thu, 18 Sep 2025 16:29:05 GMT",
+    "vary": "Origin, accept-encoding",
+    "perf": "7402827104",
+    "strict-transport-security": "max-age=631138519; includeSubdomains",
+    "cache-control": "must-revalidate, max-age=600",
+    "origin-cf-ray": "9812385ec0c8e82a-ORD",
+    "access-control-allow-credentials": "true",
+    "cf-ray": "9812385eb9f5e82a-ORD",
+    "access-control-allow-origin": "https://platform.twitter.com",
+    "content-length": "338",
+    "server": "cloudflare"
+  },
+  "data": {
+    "should_obtain_cookie_consent": false,
+    "features": {
+      "tfw_timeline_list": {
+        "bucket": [],
+        "version": null
+      },
+      "tfw_follower_count_sunset": {
+        "bucket": true,
+        "version": null
+      },
+      "tfw_tweet_edit_backend": {
+        "bucket": "on",
+        "version": null
+      },
+      "tfw_refsrc_session": {
+        "bucket": "on",
+        "version": null
+      },
+      "tfw_fosnr_soft_interventions_enabled": {
+        "bucket": "on",
+        "version": null
+      },
+      "tfw_mixed_media_15897": {
+        "bucket": "treatment",
+        "version": null
+      },
+      "tfw_experiments_cookie_expiration": {
+        "bucket": 1209600,
+        "version": null
+      },
+      "tfw_show_birdwatch_pivots_enabled": {
+        "bucket": "on",
+        "version": null
+      },
+      "tfw_duplicate_scribes_to_settings": {
+        "bucket": "on",
+        "version": null
+      },
+      "tfw_use_profile_image_shape_enabled": {
+        "bucket": "on",
+        "version": null
+      },
+      "tfw_video_hls_dynamic_manifests_15082": {
+        "bucket": "true_bitrate",
+        "version": null
+      },
+      "tfw_legacy_timeline_sunset": {
+        "bucket": true,
+        "version": null
+      },
+      "tfw_tweet_edit_frontend": {
+        "bucket": "on",
+        "version": null
+      }
+    }
+  }
+}

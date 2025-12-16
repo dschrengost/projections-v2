@@ -1,0 +1,11 @@
+min_starter_games_for_confidence: 5
+min_team_starts: 20
+promotion_delta_min: 4.0
+promotion_floor_default: 24.0
+promotion_floor_by_pos:
+  G: 28.0
+  W: 26.0
+  BIG: 24.0
+alpha_p10: 0.3
+alpha_p50: 0.5
+alpha_p90: 0.4

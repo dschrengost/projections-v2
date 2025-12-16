@@ -1,0 +1,9 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2089,157058,NBA Single Entry $5 Double Up,1,919,5.0,4000.0
+2089,157069,NBA $2 Double Up,1,1149,2.0,2000.0
+2089,157070,NBA $35K And-One [20 Entry Max],4,41617,1.0,35000.0
+2089,157073,NBA $350K Fadeaway [$100K to 1st],4,27450,15.0,350000.0
+2089,157130,NBA Showdown $20K Fadeaway [$5K to 1st] (ORL vs CHA),4,1568,15.0,20000.0
+2089,157133,NBA Showdown $15K Pull Up Jumper [$5K to 1st] (BOS vs CLE),4,1764,10.0,15000.0
+2089,157136,NBA Showdown $10K Pull Up Jumper [$2K to 1st] (SAS vs HOU),4,1176,10.0,10000.0
+2089,157143,NBA Showdown $150K Fadeaway [$50K to 1st] (PHX vs DEN),4,11764,15.0,150000.0

@@ -1,0 +1,18 @@
+[Unit]
+Description=Projections Minutes API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/daniel/projects/projections-v2
+User=daniel
+Group=daniel
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+Environment=MINUTES_DAILY_ROOT=/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily
+ExecStart=/home/daniel/.local/bin/uv run uvicorn projections.api.minutes_api:create_app --factory --host 0.0.0.0 --port 8500
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

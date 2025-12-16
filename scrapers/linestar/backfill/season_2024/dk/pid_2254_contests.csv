@@ -1,0 +1,7 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2254,168856,NBA $2 Double Up,1,1149,2.0,2000.0
+2254,168858,NBA $25K mini-MAX [150 Entry Max],4,59453,0.5,25000.0
+2254,168859,NBA $300K Fadeaway [$100K to 1st],4,23529,15.0,300000.0
+2254,168869,NBA $5 Double Up,1,689,5.0,3000.0
+2254,168896,NBA Showdown $10K Pull Up Jumper [$2K to 1st] (NOP @ PHI),4,1176,10.0,10000.0
+2254,168901,NBA Showdown $40K Fadeaway [$10K to 1st]  (BKN @ DEN),4,3137,15.0,40000.0

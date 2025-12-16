@@ -1,0 +1,50 @@
+{
+  "date": "2025-11-21",
+  "generated_at": "2025-11-21T23:26:52.768152+00:00",
+  "model_run_id": "v1_full_calibration",
+  "bundle_dir": "artifacts/minutes_v1/v1_full_calibration",
+  "model_meta": {
+    "feature_hash": "ac92bebab5ccfcd74e7a788d859f382bae61f4021f4cd9dc099d3889f79e10ff",
+    "fold_id": null,
+    "model": "lightgbm_quantiles",
+    "params": {
+      "cal_days": null,
+      "conformal_buckets": "starter,p50bins",
+      "conformal_k": 200,
+      "conformal_mode": "two-sided",
+      "coverage_tolerance": 0.02,
+      "playable_min_p50": 10.0,
+      "playable_winkler_baseline": null,
+      "playable_winkler_tolerance": 1.0,
+      "quantiles": [
+        0.1,
+        0.5,
+        0.9
+      ],
+      "random_state": 42,
+      "winkler_baseline": null
+    },
+    "target_col": "minutes",
+    "windows": {
+      "cal": {
+        "end": "2025-05-31T00:00:00Z",
+        "start": "2024-05-01T00:00:00Z"
+      },
+      "train": {
+        "end": "2024-04-30T00:00:00Z",
+        "start": "2022-10-01T00:00:00Z"
+      },
+      "val": {
+        "end": "2025-11-18T00:00:00Z",
+        "start": "2025-06-01T00:00:00Z"
+      }
+    }
+  },
+  "run_id": "20251121T232506Z",
+  "run_as_of_ts": "2025-11-21T23:25:06+00:00",
+  "counts": {
+    "rows": 240,
+    "players": 240,
+    "teams": 18
+  }
+}

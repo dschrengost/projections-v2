@@ -1,0 +1,24 @@
+[Unit]
+Description=Run projections live scoring
+After=network-online.target
+Wants=network-online.target
+OnFailure=status-email-user@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+Environment=MINUTES_DAILY_ROOT=/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily
+Environment=LIVE_SEASON=2025
+Environment=LIVE_DISABLE_TIP_WINDOW=1
+Environment=LIVE_TIP_LEAD_MINUTES=60
+Environment=LIVE_TIP_TAIL_MINUTES=180
+User=daniel
+Group=daniel
+ExecStart=/home/daniel/projects/projections-v2/scripts/run_live_score.sh
+StandardOutput=journal
+StandardError=journal
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+period_id,contest_id,contest_name,contest_type,entries,buyin,purse
+2441,181194,NBA $200K Fadeaway [$50K to 1st],4,13071,18.0,200000.0
+2441,181197,NBA $25K mini-MAX [150 Entry Max],4,59453,0.5,25000.0
+2441,181199,NBA Single Entry $5 Double Up,1,459,5.0,2000.0
+2441,181207,NBA $2 Double Up,1,1149,2.0,2000.0
+2441,181213,NBA $8K Pull Up Jumper [$2K to 1st] (Turbo),4,941,10.0,8000.0
+2441,181215,NBA $500 Quarter Jukebox [Just $0.25!] (Turbo),4,2378,0.25,500.0
+2441,181216,NBA $35K Fadeaway [$10K to 1st] (Night),4,2287,18.0,35000.0
+2441,181217,NBA $5K And-One (Night),4,5945,1.0,5000.0
+2441,181242,NBA Showdown $30K Fadeaway [$10K to 1st] (NOP @ BKN),4,2352,15.0,30000.0
+2441,181244,NBA Showdown $2.1K mini-MAX [150 Entry Max] (NOP @ BKN),4,5112,0.5,2150.0
+2441,181246,NBA Showdown $6K Pull Up Jumper [$2K to 1st] (ATL @ WAS),4,705,10.0,6000.0
+2441,181248,NBA Showdown $400 Quarter Jukebox [Just $0.25!] (ATL @ WAS),4,1902,0.25,400.0
+2441,181249,NBA Showdown $6K Pull Up Jumper [$2K to 1st] (GSW @ CLE),4,705,10.0,6000.0
+2441,181250,NBA Showdown $1K And-One (GSW @ CLE),4,1189,1.0,1000.0
+2441,181252,NBA Showdown $40K Fadeaway [$10K to 1st] (HOU @ DAL),4,2614,18.0,40000.0
+2441,181254,NBA Showdown $2.1K mini-MAX [150 Entry Max] (HOU @ DAL),4,5112,0.5,2150.0

@@ -1,0 +1,14 @@
+# Example systemd unit for the minutes label backfill job.
+# Copy to /etc/systemd/system/post-slate-minutes-labels.service, run
+# `sudo systemctl daemon-reload` and `sudo systemctl enable --now post-slate-minutes-labels.timer`.
+
+[Unit]
+Description=Backfill minutes_v1 labels after each NBA slate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+ExecStart=/home/daniel/projects/projections-v2/scripts/run_post_slate_minutes_labels.sh

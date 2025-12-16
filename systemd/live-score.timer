@@ -1,0 +1,13 @@
+[Unit]
+Description=Run live scoring pipeline (smart timing: 30min pre-window, 5min during slate)
+After=network-online.target
+
+[Timer]
+# Run every 5 minutes, script handles frequency based on game schedule
+OnCalendar=*-*-* 08..23:*:00/5
+Unit=live-score.service
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

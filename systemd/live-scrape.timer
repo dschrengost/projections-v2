@@ -1,0 +1,13 @@
+[Unit]
+Description=Run live scraping every 30 minutes
+After=network-online.target
+
+[Timer]
+# Run at :05 and :35 past the hour
+OnCalendar=*-*-* 08..23:05,35:00
+Unit=live-scrape.service
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

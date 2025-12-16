@@ -1,0 +1,16 @@
+{
+  "group_keys": [
+    "starter_flag"
+  ],
+  "k_low": {
+    "[0]": 0.3,
+    "[1]": 0.52
+  },
+  "k_high": {
+    "[0]": 0.7,
+    "[1]": 0.7
+  },
+  "fallback_k_low": 0.38,
+  "fallback_k_high": 0.7,
+  "run_id": "lgbm_full_v1_no_p_play_20251202"
+}

@@ -1,0 +1,25 @@
+{
+  "run_id": "fpts_lgbm_v1",
+  "data_root": "/home/daniel/projections-data",
+  "artifact_root": "/home/daniel/projects/projections-v2/artifacts/fpts_lgbm/fpts_lgbm_v1",
+  "minutes_source": "actual",
+  "scoring_system": "dk",
+  "learning_rate": 0.05,
+  "num_leaves": 63,
+  "n_estimators": 600,
+  "subsample": 0.85,
+  "colsample_bytree": 0.85,
+  "random_state": 42,
+  "train_window": {
+    "start": "2023-10-24",
+    "end": "2023-12-10"
+  },
+  "cal_window": {
+    "start": "2023-12-11",
+    "end": "2023-12-20"
+  },
+  "val_window": {
+    "start": "2023-12-21",
+    "end": "2023-12-31"
+  }
+}

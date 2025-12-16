@@ -13,6 +13,7 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+.serena/
 
 # Data + model artifacts (retain placeholders)
 data/raw/*
@@ -28,3 +29,9 @@ models/*
 !models/.gitkeep
 
 notebooks/.ipynb_checkpoints/
+.env
+hs_err_pid*.log
+replay_pid*.log
+
+# Generated artifacts
+artifacts/
