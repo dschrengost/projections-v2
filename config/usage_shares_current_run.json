@@ -1,4 +1,4 @@
 {
-    "run_id": "20251215_220429",
-    "backend": "lgbm"
+    "run_id": "decision_20251216_083525",
+    "note": "FGA starterless residual model with 25 features, shrink=0.75"
 }

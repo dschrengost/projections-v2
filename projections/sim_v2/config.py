@@ -20,6 +20,9 @@ class UsageSharesConfig:
 
     enabled: bool = False
     targets: tuple[str, ...] = ("fga", "fta", "tov")
+    backend: str = "rate_weighted"  # "rate_weighted" | "lgbm_residual"
+    run_id: Optional[str] = None  # Run ID for learned model (None = use default)
+    shrink: Optional[float] = None  # Shrinkage for residual model (None = use bundle default)
     share_temperature: float = 1.0
     share_noise_std: float = 0.15
     min_minutes_active_cutoff: float = 2.0
@@ -67,6 +70,8 @@ class SimV2Profile:
     max_rotation_size: int | None = None  # None = legacy (10), 0 = disabled
     # Usage shares allocation (stochastic within-team opportunity distribution)
     usage_shares: UsageSharesConfig = field(default_factory=UsageSharesConfig)
+    # Vacancy feature mode: "none" = set to 0, "game" = compute from play_prob
+    vacancy_mode: str = "game"  # "none" | "game"
 
 
 def _read_json(path: Path) -> dict:
@@ -151,14 +156,25 @@ def load_sim_v2_profile(
 
     # Usage shares config
     usage_shares_cfg = config.get("usage_shares", {}) or {}
+    usage_shares_run_id_raw = usage_shares_cfg.get("run_id")
+    usage_shares_shrink_raw = usage_shares_cfg.get("shrink")
     usage_shares = UsageSharesConfig(
         enabled=bool(usage_shares_cfg.get("enabled", False)),
         targets=tuple(usage_shares_cfg.get("targets", ("fga", "fta", "tov"))),
+        backend=str(usage_shares_cfg.get("backend", "rate_weighted")),
+        run_id=str(usage_shares_run_id_raw) if usage_shares_run_id_raw is not None else None,
+        shrink=float(usage_shares_shrink_raw) if usage_shares_shrink_raw is not None else None,
         share_temperature=float(usage_shares_cfg.get("share_temperature", 1.0)),
         share_noise_std=float(usage_shares_cfg.get("share_noise_std", 0.15)),
         min_minutes_active_cutoff=float(usage_shares_cfg.get("min_minutes_active_cutoff", 2.0)),
         fallback=str(usage_shares_cfg.get("fallback", "rate_weighted")),
     )
+
+    # Vacancy mode config
+    vacancy_mode_raw = config.get("vacancy_mode", "game")
+    vacancy_mode = str(vacancy_mode_raw) if vacancy_mode_raw else "game"
+    if vacancy_mode not in ("none", "game"):
+        raise ValueError(f"Invalid vacancy_mode: {vacancy_mode}. Must be 'none' or 'game'.")
 
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
@@ -212,6 +228,7 @@ def load_sim_v2_profile(
         rotation_minutes_floor=rotation_minutes_floor,
         max_rotation_size=max_rotation_size,
         usage_shares=usage_shares,
+        vacancy_mode=vacancy_mode,
     )
 
 

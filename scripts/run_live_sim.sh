@@ -27,7 +27,7 @@ else
 fi
 
 # Configuration
-PROFILE="${SIM_PROFILE:-baseline}"
+PROFILE="${SIM_PROFILE:-sim_v3}"
 NUM_WORLDS="${SIM_NUM_WORLDS:-2000}"
 
 echo "[sim] Starting live simulation for ${SLATE_DATE}"

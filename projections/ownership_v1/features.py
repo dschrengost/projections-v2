@@ -53,6 +53,27 @@ VEGAS_FEATURES = [
     "team_implied_total", # implied team total
 ]
 
+# Value leverage features (relative to slate)
+VALUE_LEVERAGE_FEATURES = [
+    "value_vs_slate_avg",     # value_per_k - slate mean
+    "salary_vs_median",       # (salary - slate median) / slate median
+    "is_min_priced_by_pos",   # cheapest at this position on slate
+    "game_count_on_slate",    # number of games on slate
+]
+
+# Player popularity features
+PLAYER_POPULARITY_FEATURES = [
+    "player_own_median",      # median historical ownership
+    "player_own_variance",    # ownership volatility (std)
+    "player_chalk_rate",      # % of slates with >30% ownership
+]
+
+# Interaction features
+INTERACTION_FEATURES = [
+    "value_x_value_tier",     # value_per_k * is_value_tier
+    "outs_x_salary_rank",     # team_outs_count * salary_rank
+]
+
 # Base feature set for training
 OWNERSHIP_FEATURES = (
     VALUE_FEATURES 
@@ -80,22 +101,40 @@ OWNERSHIP_FEATURES_V4 = (
 
 # Extended features including Vegas (for when available)
 OWNERSHIP_FEATURES_EXTENDED = (
-    OWNERSHIP_FEATURES_V4 
+    OWNERSHIP_FEATURES_V4
     + VEGAS_FEATURES
+)
+
+# V5: Adds value leverage features
+OWNERSHIP_FEATURES_V5 = (
+    OWNERSHIP_FEATURES_V4
+    + VALUE_LEVERAGE_FEATURES
+)
+
+# V6: V5 + player popularity + interactions
+OWNERSHIP_FEATURES_V6 = (
+    OWNERSHIP_FEATURES_V5
+    + PLAYER_POPULARITY_FEATURES
+    + INTERACTION_FEATURES
 )
 
 
 __all__ = [
     "VALUE_FEATURES",
-    "SALARY_TIER_FEATURES", 
+    "SALARY_TIER_FEATURES",
     "POSITION_FEATURES",
     "INJURY_FEATURES",
     "HISTORICAL_FEATURES",
     "SLATE_FEATURES",
     "VEGAS_FEATURES",
+    "VALUE_LEVERAGE_FEATURES",
+    "PLAYER_POPULARITY_FEATURES",
+    "INTERACTION_FEATURES",
     "OWNERSHIP_FEATURES",
     "OWNERSHIP_FEATURES_V2",
     "OWNERSHIP_FEATURES_V3",
     "OWNERSHIP_FEATURES_V4",
+    "OWNERSHIP_FEATURES_V5",
+    "OWNERSHIP_FEATURES_V6",
     "OWNERSHIP_FEATURES_EXTENDED",
 ]

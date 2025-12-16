@@ -361,6 +361,9 @@ def build_training_base(
     injuries = load_injuries(injuries_root)
     merged = compute_injury_features(merged, injuries)
     
+    # Add data source marker
+    merged["data_source"] = "linestar"
+
     # Select and order columns
     output_cols = [
         # Identifiers
@@ -400,6 +403,8 @@ def build_training_base(
         "salary_id",
         "entries",
         "contest_name",
+        # Source
+        "data_source",
     ]
     
     # Only include columns that exist
