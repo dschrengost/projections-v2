@@ -65,3 +65,11 @@
    - Replace `(game_date, player_name_norm)` join with a slate-aware join (use slate overlap / slate_size matching).
 3) After data is sane, iterate model improvements (logit target, monotonic constraints, calibration/normalization with caps).
 
+## 2025-12-17 — Phase 2: Data Fixes
+
+### Step 1: Fix DK slate aggregation (zero-fill across contests)
+- Change: `scrapers/dk_contests/build_ownership_data.py` now treats players missing from a contest as **0%** when aggregating ownership across contests in a slate cluster.
+- Why: without zero-fill, per-player denominators exclude contests where a player is absent, inflating ownership and causing slate sums to exceed 800%.
+- Added: `slate_entries`, `slate_num_contests` metadata to the aggregated per-slate parquet rows.
+- Tests: `tests/test_scrapers/test_build_ownership_data.py` covers zero-fill + entry weighting behavior.
+
