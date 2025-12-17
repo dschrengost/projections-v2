@@ -87,3 +87,22 @@
 ### Step 4: Deterministic training
 - Change: `scripts/ownership/train_ownership_v1.py` now supports `--seed` (default `1337`) and `--num-threads` (default `1`) and injects LightGBM deterministic params (`seed`, `feature_fraction_seed`, `bagging_seed`, `data_random_seed`, `deterministic=True`, `force_row_wise=True`).
 - Why: we want reproducible training/eval runs while iterating on features/targets and comparing ranking/top-chalk metrics.
+
+### Step 5: Rebaseline on the fixed DK base (post label/join fixes)
+- Trained a clean baseline with the production feature set + weighting:
+  - Run: `dk_only_v4_cleanbase_seed1337` (`--feature-set v4 --sample-weighting --val-start-date 2025-11-24 --seed 1337`)
+  - Eval JSON: `reports/ownership_eval_runs/dk_only_v4_cleanbase_seed1337.json`
+  - Key outcomes vs legacy `dk_only_v4` (not apples-to-apples due to earlier label/join issues): stable actual sums (~794%), improved error and pooled Spearman.
+
+### Step 6: Model iteration focused on ranking + chalk
+- Tried richer feature set `v6` (adds value leverage + popularity + interactions):
+  - `dk_only_v6_cleanbase_seed1337`: big lift in top10 Spearman (chalk ordering), but more spike risk after sum-scaling (more >60% preds).
+- Tried logit target (better handling of tail + extremes):
+  - `dk_only_v6_logit_cleanbase_seed1337`: major lift in pooled Spearman and error; trade-off was worse ECE after sum-scaling (sharper outputs).
+- Tuned chalk weighting to recover top-chalk recall without losing ranking:
+  - `dk_only_v6_logit_chalk5_cleanbase_seed1337`: improved Recall@10 and reduced top10/top20 underprediction after sum-scaling.
+  - This run is the current “After” candidate in `reports/ownership_eval_before_after.md`.
+
+### Step 7: Calibration/normalization experiments
+- Added optional “softmax slate calibrator” plumbing (fit on train, evaluate on val) to explore distribution-shape calibration, but the naive softmax layer can allocate >100% to a single player (invalid) and performed poorly on the fixed slice without additional caps/redistribution.
+- Next: if we want to use softmax/IPF-style normalization in production, we need support-aware caps + smooth redistribution (no >100%, no spikes), then re-evaluate.
