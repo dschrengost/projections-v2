@@ -457,6 +457,19 @@ def train_model(
             "scale_pos_weight": scale_pos_weight,  # Handle imbalance
             "verbose": -1,
         }
+        seed = int(params.get("seed", 1337))
+        num_threads = int(params.get("num_threads", 1))
+        clf_params.update(
+            {
+                "seed": seed,
+                "feature_fraction_seed": seed,
+                "bagging_seed": seed,
+                "data_random_seed": seed,
+                "deterministic": True,
+                "force_row_wise": True,
+                "num_threads": num_threads,
+            }
+        )
         
         train_data_clf = lgb.Dataset(X_train, label=y_train_clf)
         val_data_clf = lgb.Dataset(X_val, label=y_val_clf, reference=train_data_clf)
@@ -523,7 +536,7 @@ def train_model(
         "num_features": len(features),
     }
     
-    print(f"\n--- Metrics ---")
+    print("\n--- Metrics ---")
     print(f"Train MAE: {metrics['train_mae']:.3f}%")
     print(f"Val MAE: {metrics['val_mae']:.3f}%")
     corr_str = f"{metrics['val_corr']:.3f}" if not np.isnan(metrics['val_corr']) else "NaN (check val set)"
@@ -606,6 +619,18 @@ def main():
         type=float,
         default=0.05,
         help="LightGBM learning rate",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=1337,
+        help="Random seed for deterministic training (default: 1337)",
+    )
+    parser.add_argument(
+        "--num-threads",
+        type=int,
+        default=1,
+        help="LightGBM num_threads (default: 1 for determinism)",
     )
     parser.add_argument(
         "--target-transform",
@@ -747,6 +772,13 @@ def main():
     params["chalk_weight"] = args.chalk_weight
     params["source_weight"] = args.source_weight
     params["chalk_classifier"] = args.chalk_classifier
+    params["seed"] = args.seed
+    params["feature_fraction_seed"] = args.seed
+    params["bagging_seed"] = args.seed
+    params["data_random_seed"] = args.seed
+    params["deterministic"] = True
+    params["force_row_wise"] = True
+    params["num_threads"] = args.num_threads
     
     print("\nTraining model...")
     model, metrics = train_model(train_df, val_df, features, params=params)
