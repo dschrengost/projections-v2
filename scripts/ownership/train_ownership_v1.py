@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from projections.paths import data_path
+from projections.ownership_v1.calibration import SoftmaxCalibrator
 from projections.ownership_v1.features import (
     OWNERSHIP_FEATURES,
     OWNERSHIP_FEATURES_V2,
@@ -640,6 +641,17 @@ def main():
         help="Target transformation (default: none)",
     )
     parser.add_argument(
+        "--fit-calibrator",
+        action="store_true",
+        help="Fit and save a softmax calibrator (per-slate sum constraint) from training predictions",
+    )
+    parser.add_argument(
+        "--target-sum-pct",
+        type=float,
+        default=800.0,
+        help="Target slate sum in percent (DK classic=800, FD classic=900; default: 800)",
+    )
+    parser.add_argument(
         "--sample-weighting",
         action="store_true",
         help="Apply sample weighting (progressive for chalk plays)",
@@ -808,6 +820,29 @@ def main():
         val_df = val_df.copy()
         val_df["pred_own_pct"] = val_preds
         val_df.to_csv(run_dir / "val_predictions.csv", index=False)
+
+    if args.fit_calibrator:
+        print("\nFitting softmax calibrator on training set...")
+        train_scores = model.predict(train_df[features], num_iteration=model.best_iteration)
+        if params.get("target_transform") == "logit":
+            train_scores = 1 / (1 + np.exp(-train_scores))
+            train_scores *= 100.0
+
+        train_scores = np.clip(train_scores, 0.0, 100.0)
+        calib_df = train_df[["slate_id", "actual_own_pct"]].copy()
+        calib_df["pred_own_pct"] = train_scores
+
+        calibrator = SoftmaxCalibrator().fit(
+            calib_df,
+            score_col="pred_own_pct",
+            target_col="actual_own_pct",
+            slate_id_col="slate_id",
+            R=float(args.target_sum_pct) / 100.0,
+            verbose=True,
+        )
+        cal_path = run_dir / "calibrator.json"
+        calibrator.save(cal_path)
+        print(f"[calibration] Saved calibrator to: {cal_path}")
     
     write_artifacts(
         run_dir=run_dir,

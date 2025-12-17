@@ -6,6 +6,9 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
+
+from projections.ownership_v1.calibration import SoftmaxCalibrator
 from projections.ownership_v1.evaluation import (
     OwnershipEvalSlice,
     default_eval_slice_path,
@@ -13,9 +16,16 @@ from projections.ownership_v1.evaluation import (
     load_eval_slice,
     load_run_val_predictions,
 )
+from projections.paths import data_path
 
 
-def _render_markdown(run_id: str, slice_def: OwnershipEvalSlice, raw: dict, scaled: dict) -> str:
+def _render_markdown(
+    run_id: str,
+    slice_def: OwnershipEvalSlice,
+    raw: dict,
+    scaled: dict,
+    softmax: dict | None = None,
+) -> str:
     def fmt(x: float) -> str:
         if x != x:  # NaN
             return "NaN"
@@ -66,7 +76,38 @@ def _render_markdown(run_id: str, slice_def: OwnershipEvalSlice, raw: dict, scal
     lines.append(f"- Scaled count pred>60 / pred>70 / pred>100: {int(get(scaled, 'sums.n_pred_over_60'))} / {int(get(scaled, 'sums.n_pred_over_70'))} / {int(get(scaled, 'sums.n_pred_over_100'))}")
     lines.append("")
 
+    if softmax is not None:
+        lines.append("### Softmax-Calibrated (Run Calibrator)")
+        lines.append(f"- MAE/RMSE: {fmt(get(softmax, 'regression.mae_pct'))} / {fmt(get(softmax, 'regression.rmse_pct'))} (pct points)")
+        lines.append(f"- Spearman pooled: {fmt(get(softmax, 'ranking.spearman_pooled'))}")
+        lines.append(f"- ECE: {fmt(get(softmax, 'calibration.ece_pct'))} (pct points)")
+        lines.append(f"- Sum(pred) mean±std: {fmt(get(softmax, 'sums.sum_pred_mean'))} ± {fmt(get(softmax, 'sums.sum_pred_std'))}")
+        lines.append(f"- Max(pred) mean/p95: {fmt(get(softmax, 'sums.max_pred_mean'))} / {fmt(get(softmax, 'sums.max_pred_p95'))}")
+        lines.append("")
+
     return "\n".join(lines)
+
+
+def _apply_softmax_calibration(
+    df: "np.typing.NDArray | object",  # avoid importing pandas types in signature
+    *,
+    calibrator: SoftmaxCalibrator,
+    slate_id_col: str = "slate_id",
+    pred_col: str = "pred_own_pct",
+    out_col: str = "pred_own_pct_softmax",
+):
+    import pandas as pd
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("df must be a pandas DataFrame")
+    work = df.copy()
+    work[out_col] = np.nan
+    for _, g in work.groupby(slate_id_col):
+        scores = g[pred_col].astype(float).to_numpy()
+        scores = np.clip(scores, 0.0, 100.0)
+        calibrated_frac = calibrator.apply(scores)
+        work.loc[g.index, out_col] = calibrated_frac * 100.0
+    return work
 
 
 def main() -> None:
@@ -78,6 +119,12 @@ def main() -> None:
         default=default_eval_slice_path(),
         help="Path to fixed validation slice JSON (default: config/ownership_eval_slice.json)",
     )
+    parser.add_argument(
+        "--calibrator-path",
+        type=Path,
+        default=None,
+        help="Optional SoftmaxCalibrator JSON (default: <run_dir>/calibrator.json if present)",
+    )
     parser.add_argument("--out-md", type=Path, default=None, help="Write a markdown summary to this path")
     parser.add_argument("--out-json", type=Path, default=None, help="Write metrics JSON (raw + scaled) to this path")
     args = parser.parse_args()
@@ -87,6 +134,12 @@ def main() -> None:
     df = slice_def.filter_df(df)
     if df.empty:
         raise SystemExit(f"Slice produced 0 rows for run_id={args.run_id} using {args.slice_config}")
+
+    calibrator_path = args.calibrator_path
+    if calibrator_path is None:
+        candidate = data_path() / "artifacts" / "ownership_v1" / "runs" / args.run_id / "calibrator.json"
+        if candidate.exists():
+            calibrator_path = candidate
 
     raw_res = evaluate_predictions(
         df,
@@ -101,12 +154,27 @@ def main() -> None:
         normalization="scale_to_sum",
     )
 
+    softmax_res = None
+    if calibrator_path is not None and calibrator_path.exists():
+        calibrator = SoftmaxCalibrator.load(calibrator_path)
+        calibrated_df = _apply_softmax_calibration(df, calibrator=calibrator)
+        softmax_res = evaluate_predictions(
+            calibrated_df,
+            slice_name=slice_def.name,
+            target_sum_pct=slice_def.target_sum_pct,
+            pred_col="pred_own_pct_softmax",
+            normalization="none",
+        )
+
     payload = {
         "run_id": args.run_id,
         "slice": slice_def.to_dict(),
         "raw": raw_res.to_dict(),
         "scaled_to_sum": scaled_res.to_dict(),
     }
+    if softmax_res is not None:
+        payload["softmax_calibrated"] = softmax_res.to_dict()
+        payload["calibrator_path"] = str(calibrator_path)
 
     if args.out_json is not None:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)
@@ -114,7 +182,13 @@ def main() -> None:
 
     if args.out_md is not None:
         args.out_md.parent.mkdir(parents=True, exist_ok=True)
-        md = _render_markdown(args.run_id, slice_def, raw_res.to_dict(), scaled_res.to_dict())
+        md = _render_markdown(
+            args.run_id,
+            slice_def,
+            raw_res.to_dict(),
+            scaled_res.to_dict(),
+            softmax=softmax_res.to_dict() if softmax_res is not None else None,
+        )
         args.out_md.write_text(md + "\n", encoding="utf-8")
 
 
