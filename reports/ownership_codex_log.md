@@ -73,3 +73,13 @@
 - Added: `slate_entries`, `slate_num_contests` metadata to the aggregated per-slate parquet rows.
 - Tests: `tests/test_scrapers/test_build_ownership_data.py` covers zero-fill + entry weighting behavior.
 
+### Step 2: Slate-aware DK↔LineStar matching (subset-aware overlap)
+- Change: `scripts/ownership/build_ownership_dk_base.py` now maps each DK `slate_id` to the best matching LineStar `slate_id` using player-pool overlap (subset-aware `overlap_coeff = |A∩B| / min(|A|,|B|)`), then joins players within that mapped slate by normalized name.
+- Why: the previous `(game_date, player_name_norm)` join was ambiguous on multi-slate dates and brittle to date drift; it also produced severe chalk-mass dropouts on some slates.
+- Result (current local lake): `76` DK slates → `36` matched to LineStar; `3,999` joined rows written to `gold/ownership_dk_base/ownership_dk_base.parquet` (dates `2025-10-25..2025-12-06`).
+- Tests: added `tests/ownership_v1/test_dk_linestar_matching.py`; ran focused suite (`tests/ownership_v1/*` + `tests/test_scrapers/test_build_ownership_data.py`).
+
+### Step 3: Validation slice refinement (feature coverage)
+- Finding: two DK slates in the original fixed slice (`2025-12-02_1`, `2025-12-05_1`) do **not** have corresponding LineStar projection coverage (LineStar has only one slate for each of those dates) and also don’t have DK salary coverage in the local lake (only one DK `draft_group_id` per date captured).
+- Action: updated the fixed eval slice to exclude those unsupported slates and renamed it to `dk_2025-11-24_to_2025-12-06_fixed_supported` (now `n_slates=10`) in `config/ownership_eval_slice.json`.
+- Note: `reports/ownership_eval_before_after.md` baseline section was updated to reflect the new slice definition (still using the production run’s stored `val_predictions.csv`).
