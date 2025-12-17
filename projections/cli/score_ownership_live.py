@@ -107,7 +107,7 @@ def _save_locked_predictions(df: pd.DataFrame, game_date: date, draft_group_id: 
         print(f"[ownership] Saved locked predictions for slate {draft_group_id}: {len(df)} players")
 
 
-PRODUCTION_MODEL_RUN = "dk_only_v4"
+PRODUCTION_MODEL_RUN = "dk_only_v6_logit_chalk5_cleanbase_seed1337"
 
 
 def _load_all_slates(
@@ -207,18 +207,77 @@ def _load_fpts_predictions(
     
     The sim projections contain dk_fpts_mean from Monte Carlo worlds.
     """
-    # Sim projections: artifacts/sim_v2/projections/game_date=YYYY-MM-DD/projections.parquet
-    sim_path = (
-        data_root / "artifacts" / "sim_v2" / "projections" 
-        / f"game_date={game_date}" / "projections.parquet"
-    )
-    
-    if not sim_path.exists():
-        print(f"[ownership] No sim projections at {sim_path}")
+    import json
+
+    sim_root = data_root / "artifacts" / "sim_v2" / "projections"
+
+    def _resolve_sim_run_dir(base_dir: Path, desired_run_id: str | None) -> Path | None:
+        # Prefer explicit run id from CLI when available.
+        if desired_run_id:
+            candidate = base_dir / f"run={desired_run_id}"
+            if candidate.exists():
+                return candidate
+
+        pointer = base_dir / "latest_run.json"
+        if pointer.exists():
+            try:
+                payload = json.loads(pointer.read_text(encoding="utf-8"))
+                latest = payload.get("run_id")
+                if latest:
+                    candidate = base_dir / f"run={latest}"
+                    if candidate.exists():
+                        return candidate
+            except json.JSONDecodeError:
+                pass
+
+        run_dirs = sorted(
+            [p for p in base_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
+            reverse=True,
+        )
+        if run_dirs:
+            return run_dirs[0]
+        if (base_dir / "sim_v2_projections.parquet").exists():
+            return base_dir
         return None
-    
-    print(f"[ownership] Loading FPTS from sim_v2 worlds: {sim_path}")
-    df = pd.read_parquet(sim_path)
+
+    def _load_sim_projections(day: date, desired_run_id: str | None) -> pd.DataFrame | None:
+        candidates = [
+            sim_root / f"game_date={day.isoformat()}",
+            sim_root / f"date={day.isoformat()}",
+            sim_root / day.isoformat(),
+        ]
+        for base in candidates:
+            if not base.exists():
+                continue
+            if base.is_file() and base.suffix == ".parquet":
+                try:
+                    return pd.read_parquet(base)
+                except Exception:
+                    continue
+            direct = base / "projections.parquet"
+            if direct.exists():
+                try:
+                    return pd.read_parquet(direct)
+                except Exception:
+                    pass
+
+            run_dir = _resolve_sim_run_dir(base, desired_run_id) if base.is_dir() else None
+            if run_dir is None:
+                continue
+            candidate = (
+                run_dir if run_dir.is_file() and run_dir.suffix == ".parquet" else run_dir / "sim_v2_projections.parquet"
+            )
+            if candidate.exists():
+                try:
+                    return pd.read_parquet(candidate)
+                except Exception:
+                    continue
+        return None
+
+    df = _load_sim_projections(game_date, run_id)
+    if df is None or df.empty:
+        print(f"[ownership] No sim projections found under {sim_root} for {game_date} (run_id={run_id})")
+        return None
     
     # Use dk_fpts_mean from worlds
     if "dk_fpts_mean" not in df.columns:
@@ -259,10 +318,24 @@ def _load_injuries(
 
 
 @lru_cache(maxsize=32)
-def _historical_ownership_map(
+def _historical_ownership_feature_maps(
     *, game_date_iso: str, data_root_str: str, window: int = 10
-) -> dict[str, float]:
-    """Compute name_norm -> avg ownership over last N slates before game_date."""
+) -> tuple[
+    dict[str, float],
+    dict[str, float],
+    dict[str, float],
+    dict[str, float],
+    float,
+    float,
+    float,
+    float,
+]:
+    """Compute historical ownership features per player before game_date.
+
+    Returns:
+        (avg10_map, median_map, std_map, chalk_rate_map,
+         overall_avg10, overall_median, overall_std, overall_chalk_rate)
+    """
 
     data_root = Path(data_root_str)
     path = (
@@ -273,24 +346,24 @@ def _historical_ownership_map(
         / "all_ownership.parquet"
     )
     if not path.exists():
-        return {}
+        return {}, {}, {}, {}, 0.0, 0.0, 0.0, 0.0
 
     df = pd.read_parquet(path)
     if df.empty or "Player" not in df.columns or "own_pct" not in df.columns:
-        return {}
+        return {}, {}, {}, {}, 0.0, 0.0, 0.0, 0.0
 
     df = df.copy()
     df["game_date"] = pd.to_datetime(df.get("game_date"), errors="coerce").dt.date
     cutoff = date.fromisoformat(game_date_iso)
     df = df[df["game_date"].notna() & (df["game_date"] < cutoff)].copy()
     if df.empty:
-        return {}
+        return {}, {}, {}, {}, 0.0, 0.0, 0.0, 0.0
 
     df["_name_norm"] = df["Player"].astype(str).apply(_normalize_name)
     df["_own"] = pd.to_numeric(df["own_pct"], errors="coerce")
     df = df[df["_name_norm"].ne("") & df["_own"].notna()].copy()
     if df.empty:
-        return {}
+        return {}, {}, {}, {}, 0.0, 0.0, 0.0, 0.0
 
     # Ensure stable ordering within date.
     sort_cols = ["game_date"]
@@ -301,8 +374,28 @@ def _historical_ownership_map(
     def _tail_mean(g: pd.DataFrame) -> float:
         return float(g.tail(window)["_own"].mean())
 
-    means = df.groupby("_name_norm", sort=False).apply(_tail_mean, include_groups=False)
-    return means.to_dict()
+    by_player = df.groupby("_name_norm", sort=False)
+
+    avg10 = by_player.apply(_tail_mean, include_groups=False)
+    median = by_player["_own"].median()
+    std = by_player["_own"].std()
+    chalk_rate = by_player.apply(lambda g: float((g["_own"] > 30.0).mean()), include_groups=False)
+
+    overall_avg10 = float(pd.Series(avg10.values).mean()) if len(avg10) else 0.0
+    overall_median = float(df["_own"].median())
+    overall_std = float(df["_own"].std()) if df["_own"].std() == df["_own"].std() else 0.0
+    overall_chalk_rate = float((df["_own"] > 30.0).mean())
+
+    return (
+        {str(k): float(v) for k, v in avg10.to_dict().items()},
+        {str(k): float(v) for k, v in median.to_dict().items()},
+        {str(k): float(v) for k, v in std.fillna(0.0).to_dict().items()},
+        {str(k): float(v) for k, v in chalk_rate.to_dict().items()},
+        overall_avg10,
+        overall_median,
+        overall_std,
+        overall_chalk_rate,
+    )
 
 
 def _attach_live_ownership_enrichment(
@@ -318,17 +411,31 @@ def _attach_live_ownership_enrichment(
     working = salaries.copy()
     working["_name_norm"] = working["player_name"].astype(str).apply(_normalize_name)
 
-    # Historical ownership baseline.
-    hist = _historical_ownership_map(
+    # Historical ownership features.
+    (
+        avg10_map,
+        median_map,
+        std_map,
+        chalk_rate_map,
+        overall_avg10,
+        overall_median,
+        overall_std,
+        overall_chalk_rate,
+    ) = _historical_ownership_feature_maps(
         game_date_iso=game_date.isoformat(),
         data_root_str=str(data_root),
         window=10,
     )
-    if hist:
-        overall = float(pd.Series(hist.values()).mean()) if hist else 0.0
-        working["player_own_avg_10"] = working["_name_norm"].map(hist).fillna(overall).astype(float)
+    if avg10_map:
+        working["player_own_avg_10"] = working["_name_norm"].map(avg10_map).fillna(overall_avg10).astype(float)
+        working["player_own_median"] = working["_name_norm"].map(median_map).fillna(overall_median).astype(float)
+        working["player_own_variance"] = working["_name_norm"].map(std_map).fillna(overall_std).astype(float)
+        working["player_chalk_rate"] = working["_name_norm"].map(chalk_rate_map).fillna(overall_chalk_rate).astype(float)
     else:
         working["player_own_avg_10"] = 0.0
+        working["player_own_median"] = 0.0
+        working["player_own_variance"] = 0.0
+        working["player_chalk_rate"] = 0.0
 
     # Injury enrichment.
     inj = _load_injuries(game_date, data_root)
@@ -558,13 +665,6 @@ def score_ownership(
         slate_id_col=None,  # Treat as single slate
     )
     
-    # Add slate-level features
-    features["slate_size"] = len(features)
-    features["salary_pct_of_max"] = features["salary"] / features["salary"].max()
-    features["is_min_salary"] = (features["salary"] == features["salary"].min()).astype(int)
-    min_salary = features["salary"].min()
-    features["slate_near_min_count"] = (features["salary"] <= min_salary + 200).sum()
-    
     # Prepare model input (strict feature selection)
     try:
         _ = prepare_model_input(features, bundle.feature_cols)
@@ -582,6 +682,7 @@ def score_ownership(
     output["pred_own_pct"] = predictions.values
     output["game_date"] = game_date
     output["run_id"] = run_id
+    output["model_run"] = model_run
     
     # Apply calibration if enabled
     config = _load_calibration_config()
