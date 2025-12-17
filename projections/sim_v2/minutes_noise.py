@@ -436,6 +436,7 @@ def enforce_team_240_minutes(
     active_mask: np.ndarray | None = None,
     starter_mask: np.ndarray | None = None,
     max_rotation_size: int | None = None,
+    play_prob: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Rescale rotation players per team per world so totals approach 240 minutes.
@@ -529,6 +530,11 @@ def enforce_team_240_minutes(
                             if baseline_local is not None
                             else desired
                         )
+                        # Add play_prob as tiebreaker when baseline_minutes are tied
+                        # (e.g., all bench at 6.0). Use small multiplier to preserve baseline ordering.
+                        if play_prob is not None:
+                            play_prob_local = np.asarray(play_prob, dtype=float)[team_players]
+                            scores = scores + 0.001 * play_prob_local
                         order = nonstarter_candidates[np.argsort(-scores[nonstarter_candidates], kind="mergesort")]
                         if baseline_local is None:
                             keep_local[order[:slots_left]] = True

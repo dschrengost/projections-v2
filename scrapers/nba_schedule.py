@@ -107,6 +107,11 @@ class NbaScheduleScraper:
         if season is None and target_date is None:
             try:
                 games = self._fetch_scoreboard_games()
+                # Validate: if scoreboard returns bad data (e.g., team_id=0), fall back to season schedule
+                for g in games:
+                    if not (g.home_team and g.home_team.team_id) or not (g.away_team and g.away_team.team_id):
+                        games = []
+                        break
             except RuntimeError:
                 games = []
             else:

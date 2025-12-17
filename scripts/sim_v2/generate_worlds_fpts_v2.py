@@ -1957,6 +1957,7 @@ def main(
                         active_mask=active_mask,  # Pass active mask for proper redistribution
                         starter_mask=gs_is_starter > 0,
                         max_rotation_size=DEFAULT_MAX_ROTATION_SIZE,
+                        play_prob=play_prob_arr,
                     )
                 minutes_world_samples.append(minutes_worlds)
 
@@ -2398,6 +2399,7 @@ def main(
                         active_mask=active_mask,
                         starter_mask=starter_mask_arr,
                         max_rotation_size=DEFAULT_MAX_ROTATION_SIZE,
+                        play_prob=play_prob_arr,
                     )
                     team_sum = minutes_worlds @ team_one_hot  # (W_chunk, T)
                     typer.echo(
@@ -2572,6 +2574,7 @@ def main(
                             > 0
                         ),
                         max_rotation_size=DEFAULT_MAX_ROTATION_SIZE,
+                        play_prob=date_df["play_prob"].fillna(1.0).to_numpy(dtype=float) if "play_prob" in date_df.columns else None,
                     )[0]
                 world_df["minutes_sim"] = minutes_world
                 world_df["dk_fpts_world"] = dk_fpts_world

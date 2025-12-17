@@ -107,7 +107,11 @@ class TeamResolver:
                 (row.home_team_id, row.home_team_name, row.home_team_city, row.home_team_tricode),
                 (row.away_team_id, row.away_team_name, row.away_team_city, row.away_team_tricode),
             ]:
-                city_alias = "".join(part[0] for part in re.sub(r"[.]", "", city).split() if part)
+                # Skip incomplete team entries (e.g., NBA Cup games with missing team info)
+                if not tricode:
+                    continue
+                city_str = city or ""
+                city_alias = "".join(part[0] for part in re.sub(r"[.]", "", city_str).split() if part)
                 alias_values = {
                     name,
                     f"{city} {name}",
@@ -125,6 +129,9 @@ class TeamResolver:
         self.tip_lookup: dict[str, pd.Timestamp] = {}
         self.matchup_lookup: dict[tuple[str, str], list[str]] = {}
         for row in self.schedule.itertuples():
+            # Skip games with incomplete team info (e.g., NBA Cup with missing data)
+            if not row.away_team_tricode or not row.home_team_tricode:
+                continue
             key_local = (row.game_date.strftime("%Y-%m-%d"), row.away_team_tricode, row.home_team_tricode)
             key_tip = (row.tip_day.strftime("%Y-%m-%d"), row.away_team_tricode, row.home_team_tricode)
             self.game_lookup_local[key_local] = row.game_id

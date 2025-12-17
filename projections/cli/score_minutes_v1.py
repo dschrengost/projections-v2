@@ -593,8 +593,11 @@ def _derive_rotation_prob(df: pd.DataFrame) -> pd.Series:
     prob = prob.where(~(recent_start_pct_10 >= 0.20), prob.clip(lower=0.60))
 
     # If the player hasn't appeared recently, downweight.
+    # BUT: if min_last1 > 0, player clearly played recently regardless of days_since_last.
+    # This handles NBA Cup games where days_since_last may be incorrectly computed.
     if days_since_last.notna().any():
-        stale = days_since_last >= 10
+        has_recent_minutes = min_last1.notna() & (min_last1 > 0)
+        stale = (days_since_last >= 10) & ~has_recent_minutes
         prob = prob.where(~stale, np.minimum(prob, 0.20))
 
     # Starters always in rotation.
