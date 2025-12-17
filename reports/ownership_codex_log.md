@@ -83,3 +83,7 @@
 - Finding: two DK slates in the original fixed slice (`2025-12-02_1`, `2025-12-05_1`) do **not** have corresponding LineStar projection coverage (LineStar has only one slate for each of those dates) and also don’t have DK salary coverage in the local lake (only one DK `draft_group_id` per date captured).
 - Action: updated the fixed eval slice to exclude those unsupported slates and renamed it to `dk_2025-11-24_to_2025-12-06_fixed_supported` (now `n_slates=10`) in `config/ownership_eval_slice.json`.
 - Note: `reports/ownership_eval_before_after.md` baseline section was updated to reflect the new slice definition (still using the production run’s stored `val_predictions.csv`).
+
+### Step 4: Deterministic training
+- Change: `scripts/ownership/train_ownership_v1.py` now supports `--seed` (default `1337`) and `--num-threads` (default `1`) and injects LightGBM deterministic params (`seed`, `feature_fraction_seed`, `bagging_seed`, `data_random_seed`, `deterministic=True`, `force_row_wise=True`).
+- Why: we want reproducible training/eval runs while iterating on features/targets and comparing ranking/top-chalk metrics.
