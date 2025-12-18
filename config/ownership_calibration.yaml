@@ -46,6 +46,14 @@ playable_filter:
   scale_per_player: 0.05
   baseline_slate_size: 80
 
+# Default normalization when calibration is disabled.
+# Ensures ownership sums to the site total (DK classic = 800%).
+normalization:
+  enabled: true
+  # Default target is calibration.R * 100 when not provided.
+  # target_sum_pct: 800.0
+  cap_pct: 100.0
+
 # Logging configuration for debugging
 logging:
   # Log per-run metrics (sum before/after, top players, etc.)

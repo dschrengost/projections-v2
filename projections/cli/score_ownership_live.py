@@ -22,7 +22,11 @@ from projections.ownership_v1.schemas import (
     prepare_model_input,
     validate_raw_input,
 )
-from projections.ownership_v1.score import compute_ownership_features, predict_ownership
+from projections.ownership_v1.score import (
+    compute_ownership_features,
+    normalize_ownership_to_target_sum,
+    predict_ownership,
+)
 from projections.paths import data_path
 
 
@@ -683,9 +687,27 @@ def score_ownership(
     output["game_date"] = game_date
     output["run_id"] = run_id
     output["model_run"] = model_run
+
+    # Preserve raw model output prior to any filtering/normalization.
+    output["pred_own_pct_raw"] = output["pred_own_pct"].astype(float)
     
-    # Apply calibration if enabled
     config = _load_calibration_config()
+
+    # Apply playable filter: zero out unplayable players.
+    play_cfg = config.get("playable_filter", {})
+    unplayable_mask = pd.Series(False, index=output.index)
+    if play_cfg.get("enabled", False):
+        min_fpts = float(play_cfg.get("min_proj_fpts", 8.0))
+        if play_cfg.get("slate_aware", False):
+            baseline = int(play_cfg.get("baseline_slate_size", 80))
+            scale = float(play_cfg.get("scale_per_player", 0.05))
+            min_fpts = min_fpts + max(0.0, (len(output) - baseline) * scale)
+
+        unplayable_mask = output["proj_fpts"].astype(float) < min_fpts
+        if unplayable_mask.any():
+            output.loc[unplayable_mask, "pred_own_pct"] = 0.0
+
+    # Apply calibration (softmax) if enabled.
     cal_cfg = config.get("calibration", {})
     
     if cal_cfg.get("enabled", False):
@@ -715,17 +737,18 @@ def score_ownership(
                 # Exclude zero prediction (optional - default False)
                 if struct_cfg.get("exclude_zero_prediction", False):
                     mask &= (output["pred_own_pct"] > 0)
+
+                # Exclude unplayable players from calibration allocation.
+                mask &= ~unplayable_mask
                 
                 # Apply calibration with mask
-                scores = output["pred_own_pct"].values
+                scores = output["pred_own_pct_raw"].values
                 calibrated = apply_calibration_with_mask(
                     scores, 
                     mask.values, 
                     calibrator.params
                 )
                 
-                # Store both raw and calibrated
-                output["pred_own_pct_raw"] = output["pred_own_pct"]
                 output["pred_own_pct"] = calibrated * 100.0  # Convert to percent
                 
                 # Log metrics
@@ -737,25 +760,18 @@ def score_ownership(
                 
         except Exception as e:
             print(f"[ownership] Calibration failed: {e}, using raw predictions")
-    
-    # Apply playable filter: zero out unplayable players
-    play_cfg = config.get("playable_filter", {})
-    if play_cfg.get("enabled", False):
-        min_fpts = play_cfg.get("min_proj_fpts", 8.0)
-        
-        # Optional slate-aware threshold
-        if play_cfg.get("slate_aware", False):
-            baseline = play_cfg.get("baseline_slate_size", 80)
-            scale = play_cfg.get("scale_per_player", 0.05)
-            slate_size = len(output)
-            min_fpts = min_fpts + max(0, (slate_size - baseline) * scale)
-        
-        # Apply filter using proj_fpts from features
-        unplayable_mask = output["proj_fpts"] < min_fpts
-        n_filtered = unplayable_mask.sum()
-        
-        if n_filtered > 0:
-            output.loc[unplayable_mask, "pred_own_pct"] = 0.0
+
+    # Default normalization if calibration is disabled.
+    norm_cfg = config.get("normalization", {})
+    if not cal_cfg.get("enabled", False) and norm_cfg.get("enabled", True):
+        slots = float(cal_cfg.get("R", 8.0))
+        target_sum_pct = float(norm_cfg.get("target_sum_pct", slots * 100.0))
+        cap_pct = float(norm_cfg.get("cap_pct", 100.0))
+        output["pred_own_pct"] = normalize_ownership_to_target_sum(
+            output["pred_own_pct"],
+            target_sum_pct=target_sum_pct,
+            cap_pct=cap_pct,
+        )
     
     # Add draft_group_id to output
     output["draft_group_id"] = draft_group_id

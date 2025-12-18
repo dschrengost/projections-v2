@@ -194,4 +194,56 @@ def compute_ownership_features(
     return result
 
 
-__all__ = ["predict_ownership", "compute_ownership_features"]
+def normalize_ownership_to_target_sum(
+    own_pct: pd.Series,
+    *,
+    target_sum_pct: float,
+    cap_pct: float = 100.0,
+) -> pd.Series:
+    """Scale ownership predictions to a target slate sum in percent space.
+
+    Uses a proportional scaling with an optional cap (default 100%) to avoid
+    pathological values. If capping prevents reaching the requested target sum,
+    returns the best-effort capped allocation.
+    """
+
+    if target_sum_pct <= 0:
+        return own_pct.astype(float)
+
+    values = own_pct.astype(float).to_numpy()
+    values = np.clip(values, 0.0, cap_pct)
+    total = float(values.sum())
+    if total <= 0:
+        return pd.Series(values, index=own_pct.index, name=own_pct.name)
+
+    scaled = np.zeros_like(values, dtype=float)
+    remaining_target = float(target_sum_pct)
+    free = values > 0
+
+    # Iteratively scale remaining mass, capping as needed.
+    while True:
+        free_sum = float(values[free].sum())
+        if free_sum <= 0:
+            break
+
+        scale = remaining_target / free_sum
+        proposed = values[free] * scale
+
+        over = proposed > cap_pct
+        if not np.any(over):
+            scaled[free] = proposed
+            break
+
+        free_idx = np.where(free)[0]
+        over_idx = free_idx[over]
+        scaled[over_idx] = cap_pct
+        free[over_idx] = False
+        remaining_target = float(target_sum_pct - scaled.sum())
+        if remaining_target <= 0:
+            break
+
+    scaled = np.clip(scaled, 0.0, cap_pct)
+    return pd.Series(scaled, index=own_pct.index, name=own_pct.name)
+
+
+__all__ = ["predict_ownership", "compute_ownership_features", "normalize_ownership_to_target_sum"]
