@@ -130,10 +130,10 @@
 ### Step 4: Leak-safety for historical runs (injuries + lock gating)
 - Problem: our `silver/injuries_snapshot/.../injuries.parquet` files can contain multiple snapshots for the same `game_date` (including post-lock updates). For historical backtests, “load latest for date” can leak future injury status into pre-lock features.
 - Change: `projections/cli/score_ownership_live.py` now:
-  - uses schedule `tip_ts` (UTC) for lock detection and gating,
-  - threads an `injuries_cutoff_ts` into scoring, and
-  - filters injuries to `as_of_ts <= min(now_utc, slate_first_tip_utc)` when `as_of_ts` exists.
-- Outcome: scoring is now safe to run on historical dates without pulling post-lock injury snapshots for that slate.
+  - derives DK slate lock time from bronze draftables (`bronze/dk/draftables/draftables_raw_<draft_group_id>.json` → `competitions[*].startTime`) as the primary source (schedule parquet is not guaranteed to have full historical coverage),
+  - threads an `injuries_cutoff_ts` (= `min(now_utc, slate_lock_utc)`) into scoring, and filters injuries to `as_of_ts <= injuries_cutoff_ts`,
+  - when `run_id` minutes/sim artifacts aren’t present, chooses the latest minutes/sim run at or before `injuries_cutoff_ts` (prevents silently using post-lock runs).
+- Outcome: backtests can score historical slates without pulling post-lock injuries/minutes/sim artifacts.
 - Follow-up: fixed `slates.json` metadata generation to use `datetime.now(tz=UTC)` so lock detection doesn’t compare tz-naive vs tz-aware timestamps.
 - Added: `score_ownership_live.py --ignore-lock-cache --no-write-lock-cache` to enable deterministic rescoring/backtests without being blocked by existing `*_locked.parquet` cache files.
 
@@ -144,6 +144,16 @@
   - Supports `--pred-snapshot locked` (default) to evaluate the first pre-lock snapshot saved by live scoring.
   - Emits the same core metrics as our fixed-slice evaluator (MAE/RMSE, Spearman, top-chalk rank/recall, ECE, sum checks).
 - Tests: `tests/ownership_v1/test_production_path_eval.py` covers overlap mapping + suffix normalization.
+
+### Step 6: Production-path model mismatch + production-aligned retrain (local-only)
+- Finding: the fixed-slice (DK↔LineStar) model metrics are strong, but production-path eval on DK actuals is materially worse due to domain shift (production uses sim_v2 `proj_fpts` + DK salaries; training base uses LineStar projections).
+- Action:
+  - Made `score_ownership_live.py` backtest-safe for lock timing even when `silver/schedule` lacks historical coverage by deriving DK lock time from bronze draftables `competitions[*].startTime`.
+  - Trained a production-aligned model on the joined production-path dataset (`2025-11-30..2025-12-15`, main slate only) and re-scored the same window.
+- Production eval window (main slate by `slate_entries`, `n_slates=13`, `n_rows=1765`):
+  - Baseline model (`dk_only_v6_logit_chalk5_cleanbase_seed1337`): pooled Spearman `0.5628`, Recall@10 `0.3077`, MAE `5.2295`, ECE `1.5786`.
+  - Prod-trained model (`dk_prod_v5_logit_locksafe_1130_1215_seed1337`): pooled Spearman `0.6896`, Recall@10 `0.2385`, MAE `4.9774`, ECE `1.7656`.
+  - Power calibrator on prod-trained outputs (`gamma≈0.75`): ECE improved to `~0.8880` with essentially unchanged ranking.
 
 ## 2025-12-18 — Calibration/Normalization Iteration
 

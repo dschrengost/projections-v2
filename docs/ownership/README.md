@@ -96,6 +96,10 @@ uv run python projections/cli/score_ownership_live.py \
 9. Apply lock persistence
 10. Save per-slate parquet files to `silver/ownership_predictions/{date}/`
 
+Notes:
+- DK lock timing is derived from `bronze/dk/draftables/draftables_raw_<draft_group_id>.json` (`competitions[*].startTime`) so historical backtests don’t depend on partial schedule parquet coverage.
+- For historical rescoring/backtests: `uv run python -m projections.cli.score_ownership_live --date YYYY-MM-DD --run-id backtest --data-root ~/projections-data --ignore-lock-cache --no-write-lock-cache`
+
 ### 3. Playable Filter
 
 Zeros out ownership for players who are truly unplayable (model assigns ownership based on salary, but player has no realistic chance of scoring).

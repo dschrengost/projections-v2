@@ -17,6 +17,9 @@ This doc describes the NBA DFS ownership projection model and how to train/evalu
 - Injuries snapshot (optional): `silver/injuries_snapshot/season=*/month=*/injuries_snapshot.parquet`
 - Historical DK ownership labels (for priors only): `bronze/dk_contests/ownership_by_slate/all_ownership.parquet` (filtered to `< game_date`)
 
+**Lock timing (DK)**:
+- Uses DK draftables `competitions[*].startTime` from `bronze/dk/draftables/draftables_raw_<draft_group_id>.json` as the primary “first tip” timestamp for gating (schedule parquet may not include full historical dates).
+
 **Output**:
 - Per-slate predictions written to `silver/ownership_predictions/YYYY-MM-DD/<draft_group_id>.parquet`
 - Cached lock snapshot: `silver/ownership_predictions/YYYY-MM-DD/<draft_group_id>_locked.parquet`
@@ -98,8 +101,13 @@ Evaluate on the fixed slice:
 Score a live slate date:
 - `uv run python projections/cli/score_ownership_live.py --date YYYY-MM-DD --run-id <PIPELINE_RUN_ID> --model-run <RUN_ID>`
 
+Rescore a historical date for backtests (ignore cache, don’t write new locked files):
+- `uv run python -m projections.cli.score_ownership_live --date YYYY-MM-DD --run-id <RUN_ID> --data-root ~/projections-data --ignore-lock-cache --no-write-lock-cache`
+
+Production-path eval (DK actuals ↔ live preds):
+- `uv run python scripts/ownership/evaluate_ownership_production_path.py --start-date 2025-11-30 --end-date 2025-12-15 --data-root ~/projections-data --slate-selector largest_entries --pred-snapshot latest --out-md /tmp/prod_eval.md`
+
 ## Current Production Model Run
 
 `projections/cli/score_ownership_live.py` defaults to:
 - `dk_only_v6_logit_chalk5_cleanbase_seed1337`
-
