@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
-from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -44,6 +42,23 @@ def _load_player_ownership(game_date: str) -> Dict[str, float]:
                 continue
     
     # Fall back to silver/ownership_predictions
+    slate_dir = data_root / "silver" / "ownership_predictions" / game_date
+    if slate_dir.exists():
+        slate_files = [p for p in slate_dir.glob("*.parquet") if not p.name.endswith("_locked.parquet")]
+        if slate_files:
+            own_path = max(slate_files, key=lambda p: p.stat().st_size)
+            try:
+                df = pd.read_parquet(own_path)
+                if "player_id" in df.columns and "pred_own_pct" in df.columns:
+                    ownership = df.dropna(subset=["pred_own_pct"])
+                    result = dict(zip(ownership["player_id"].astype(str), ownership["pred_own_pct"]))
+                    logger.info(
+                        f"Loaded ownership for {len(result)} players from silver/ownership_predictions/{game_date}/"
+                    )
+                    return result
+            except Exception as e:
+                logger.warning(f"Failed to load per-slate ownership predictions: {e}")
+
     own_path = data_root / "silver" / "ownership_predictions" / f"{game_date}.parquet"
     if own_path.exists():
         try:
@@ -250,4 +265,3 @@ async def get_config():
     except Exception as e:
         logger.exception(f"Failed to load config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-

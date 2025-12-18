@@ -6,6 +6,8 @@ import pytest
 
 from projections.ownership_v1.calibration import (
     CalibrationParams,
+    PowerCalibrator,
+    PowerCalibrationParams,
     SoftmaxCalibrator,
     apply_calibration,
     fit_calibration,
@@ -184,6 +186,30 @@ class TestSoftmaxCalibrator:
         assert loaded.b == calibrator.b
         assert loaded.R == calibrator.R
         assert loaded.fitted == calibrator.fitted
+
+
+class TestPowerCalibrator:
+    """Tests for PowerCalibrator class."""
+
+    def test_sum_to_r_constraint(self):
+        scores = np.array([0.0, 10.0, 20.0, 30.0], dtype=float)
+        calibrator = PowerCalibrator(params=PowerCalibrationParams(gamma=1.5, eps=1e-3, R=8.0))
+        calibrated = calibrator.apply(scores)
+        assert np.isclose(calibrated.sum(), 8.0)
+
+    def test_ranking_preservation(self):
+        scores = np.array([10.0, 30.0, 20.0, 5.0, 25.0], dtype=float)
+        calibrator = PowerCalibrator(params=PowerCalibrationParams(gamma=1.2, eps=1e-3, R=8.0))
+        calibrated = calibrator.apply(scores)
+        assert np.array_equal(np.argsort(scores), np.argsort(calibrated))
+
+    def test_mask_excludes_players(self):
+        scores = np.array([10.0, 20.0, 30.0], dtype=float)
+        mask = np.array([True, False, True])
+        calibrator = PowerCalibrator(params=PowerCalibrationParams(gamma=1.0, eps=1e-3, R=8.0))
+        calibrated = calibrator.apply(scores, mask=mask)
+        assert calibrated[1] == 0.0
+        assert np.isclose(calibrated.sum(), 8.0)
 
 
 if __name__ == "__main__":

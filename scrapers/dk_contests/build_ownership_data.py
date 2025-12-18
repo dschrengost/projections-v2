@@ -110,6 +110,11 @@ def aggregate_slate_ownership(
     """
     Aggregate ownership for a single slate (group of contests).
     Computes entry-weighted average ownership.
+
+    Important: players missing from a contest are treated as 0% in that contest.
+    This prevents inflated ownership and ensures slate-level sums remain stable
+    (≈ 800% for DK NBA classic) when contests within a cluster have different
+    player pools.
     """
     all_data = []
     for cid in slate_contests:
@@ -120,24 +125,45 @@ def aggregate_slate_ownership(
         return pd.DataFrame()
     
     combined = pd.concat(all_data, ignore_index=True)
-    
-    # Compute weighted average ownership per player
-    def weighted_avg(group):
-        if group['entries'].sum() == 0:
-            return group['own_pct'].mean()
-        return (group['own_pct'] * group['entries']).sum() / group['entries'].sum()
-    
-    agg = combined.groupby('Player').apply(
-        lambda g: pd.Series({
-            'own_pct': weighted_avg(g),
-            'own_pct_simple': g['own_pct'].mean(),
-            'FPTS': g['FPTS'].iloc[0],
-            'entries': g['entries'].sum(),
-            'num_contests': g['contest_id'].nunique(),
-        }),
-        include_groups=False
-    ).reset_index()
-    
+
+    # Total contest weights (entries) for the slate.
+    contest_weights = combined[["contest_id", "entries"]].drop_duplicates("contest_id")
+    total_entries = float(contest_weights["entries"].sum())
+    total_contests = int(contest_weights["contest_id"].nunique())
+
+    def weighted_avg_with_zeros(group: pd.DataFrame) -> float:
+        """Entry-weighted mean ownership, treating missing contests as 0%."""
+        if total_entries <= 0:
+            return float(group["own_pct"].mean())
+        return float((group["own_pct"] * group["entries"]).sum() / total_entries)
+
+    def mean_with_zeros(group: pd.DataFrame) -> float:
+        """Unweighted mean across contests, treating missing contests as 0%."""
+        if total_contests <= 0:
+            return float(group["own_pct"].mean())
+        return float(group["own_pct"].sum() / total_contests)
+
+    agg = (
+        combined.groupby("Player", sort=False)
+        .apply(
+            lambda g: pd.Series(
+                {
+                    "own_pct": weighted_avg_with_zeros(g),
+                    "own_pct_simple": mean_with_zeros(g),
+                    "FPTS": g["FPTS"].iloc[0],
+                    # Backwards-compatible per-player metadata
+                    "entries": g["entries"].sum(),
+                    "num_contests": g["contest_id"].nunique(),
+                    # Slate-level metadata (same for all players)
+                    "slate_entries": total_entries,
+                    "slate_num_contests": total_contests,
+                }
+            ),
+            include_groups=False,
+        )
+        .reset_index()
+    )
+
     return agg
 
 

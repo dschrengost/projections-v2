@@ -36,6 +36,13 @@ class OwnershipInputSchema:
         "pos_SF",
         "pos_PF",
         "pos_C",
+        # V5/V6 computed features (safe to compute at inference time)
+        "value_vs_slate_avg",
+        "salary_vs_median",
+        "is_min_priced_by_pos",
+        "game_count_on_slate",
+        "value_x_value_tier",
+        "outs_x_salary_rank",
     )
     
     # Optional enrichment columns (filled with defaults if missing)
@@ -43,6 +50,10 @@ class OwnershipInputSchema:
         "player_is_questionable",  # Default: 0
         "team_outs_count",          # Default: 0
         "player_own_avg_10",        # Default: 0
+        # V6 player popularity features
+        "player_own_median",        # Default: 0
+        "player_own_variance",      # Default: 0
+        "player_chalk_rate",        # Default: 0
     )
     
     # Slate-level features (computed from data)
@@ -86,6 +97,9 @@ def fill_optional_columns(df: pd.DataFrame, copy: bool = True) -> pd.DataFrame:
         "player_is_questionable": 0,
         "team_outs_count": 0,
         "player_own_avg_10": 0.0,
+        "player_own_median": 0.0,
+        "player_own_variance": 0.0,
+        "player_chalk_rate": 0.0,
     }
     
     for col, default in defaults.items():

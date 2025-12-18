@@ -2,6 +2,8 @@
 
 This document describes the ownership prediction pipeline for DraftKings NBA slates.
 
+For training + evaluation details (fixed slice, feature sets, model artifacts), see `docs/ownership_model.md`.
+
 ## Overview
 
 The ownership system predicts what percentage of lineups will contain each player. Accurate ownership predictions are critical for:
@@ -62,12 +64,12 @@ Key features used by the model:
 - Position dummies: `pos_PG`, `pos_SG`, etc.
 
 #### Training Data
-- **Source**: Linestar projected ownership + DK contest actual ownership
-- **Path**: `gold/ownership_training_base/ownership_training_base.parquet`
+- **Labels**: DK contest actual ownership, aggregated per slate (`bronze/dk_contests/ownership_by_slate/all_ownership.parquet`)
+- **Training base**: `gold/ownership_dk_base/ownership_dk_base.parquet` (built from DK labels + pre-lock features; may use LineStar only during dataset assembly)
 
 #### Production Model
-- **Run ID**: `poc_013_chalk_5x`
-- **Path**: `artifacts/ownership_v1/{run_id}/`
+- **Run ID**: `dk_only_v6_logit_chalk5_cleanbase_seed1337`
+- **Path**: `artifacts/ownership_v1/runs/{run_id}/`
 
 ### 2. Live Scoring (`score_ownership_live.py`)
 
@@ -76,9 +78,10 @@ Key features used by the model:
 Runs as part of the live pipeline to generate ownership predictions for upcoming slates.
 
 ```bash
-python -m projections.cli.score_ownership_live \
+uv run python projections/cli/score_ownership_live.py \
     --date 2025-12-08 \
-    --run-id live_v1
+    --run-id live_v1 \
+    --model-run dk_only_v6_logit_chalk5_cleanbase_seed1337
 ```
 
 #### Data Flow
@@ -89,8 +92,13 @@ python -m projections.cli.score_ownership_live \
 5. Compute ownership features
 6. Run model prediction
 7. Apply playable filter
-8. Apply lock persistence
-9. Save to `silver/ownership_predictions/{date}.parquet`
+8. Normalize to target slate sum (default `800%` for DK classic)
+9. Apply lock persistence
+10. Save per-slate parquet files to `silver/ownership_predictions/{date}/`
+
+Notes:
+- DK lock timing is derived from `bronze/dk/draftables/draftables_raw_<draft_group_id>.json` (`competitions[*].startTime`) so historical backtests don’t depend on partial schedule parquet coverage.
+- For historical rescoring/backtests: `uv run python -m projections.cli.score_ownership_live --date YYYY-MM-DD --run-id backtest --data-root ~/projections-data --ignore-lock-cache --no-write-lock-cache`
 
 ### 3. Playable Filter
 
@@ -131,25 +139,12 @@ lock_persistence:
 | 7:45pm | Merge: 40 (7pm+7:30pm from locked) + 60 (current) |
 | 10:15pm | Merge: 100 (all from locked) + 0 (current) |
 
-### 5. Calibration (Disabled)
+### 5. Normalization & Calibration
 
-A softmax-style calibration layer that ensures predictions sum to R (8 for DK, where 8 roster slots × 100% = 800%).
+Ownership percentages obey a hard slate constraint (DK classic: `8` roster slots → `800%` total).
 
-**Status**: Currently disabled due to weak correlation between model predictions and actual ownership. Can be enabled once model improves.
-
-**Config**:
-```yaml
-calibration:
-  enabled: false
-  R: 8.0
-```
-
-**Math**:
-```
-w_i = exp(a * s_i + b)
-p_i = w_i / sum(w)
-ŷ_i = R * p_i
-```
+- **Default normalization** (recommended): proportional scale-to-sum after the playable filter (`normalization.enabled: true`).
+- **Optional calibration**: softmax-style layer (`SoftmaxCalibrator`) that reshapes the distribution while enforcing a sum constraint (`calibration.enabled: true`). This remains disabled by default.
 
 ## Configuration
 
@@ -166,6 +161,10 @@ playable_filter:
   min_proj_fpts: 8.0
   slate_aware: false
 
+normalization:
+  enabled: true
+  cap_pct: 100.0
+
 lock_persistence:
   enabled: true
 
@@ -177,31 +176,30 @@ logging:
 
 | File | Description |
 |------|-------------|
-| `silver/ownership_predictions/{date}.parquet` | Final predictions (merged) |
-| `silver/ownership_predictions/{date}_locked.parquet` | First-run predictions (immutable) |
+| `silver/ownership_predictions/{date}/{draft_group_id}.parquet` | Per-slate predictions |
+| `silver/ownership_predictions/{date}/{draft_group_id}_locked.parquet` | First-run predictions for that slate (immutable) |
+| `silver/ownership_predictions/{date}/slates.json` | Slate metadata for the date |
 
 ### Output Columns
-- `player_id`: NBA API player ID
+- `player_id`: DK player ID (from salaries)
 - `player_name`: Display name
 - `salary`: DK salary
 - `pos`: Position(s)
 - `team`: Team tricode
 - `proj_fpts`: Sim FPTS projection
-- `pred_own_pct`: Predicted ownership percentage
+- `pred_own_pct`: Predicted ownership percentage (normalized to slate sum)
+- `pred_own_pct_raw`: Raw model output before filtering/normalization
 - `game_date`: Game date
 - `run_id`: Pipeline run ID
+- `model_run`: Ownership model run ID
 
 ## Known Limitations
 
-1. **Model trained on Linestar data**: Weak correlation (0.111) between Linestar's projected ownership and actual ownership. Model improvements needed.
-
-2. **Chalk underestimation**: Model tends to flatten ownership distribution. True 50%+ chalk plays may be predicted lower.
-
-3. **First-run requirement**: Lock persistence requires the pipeline to run before the first game locks. If first run happens after games start, those predictions can't be recovered.
+1. **LineStar is not used at runtime**: Production inference uses DK salaries + sim projections + optional injury + historical DK priors. LineStar may still be used for training-data assembly.
+2. **First-run requirement**: Lock persistence requires the pipeline to run before the first game locks. If first run happens after games start, those predictions can’t be recovered.
 
 ## Future Improvements
 
-1. **Retrain with DK contest data**: Use `bronze/dk_contests/ownership_by_slate/` for cleaner labels
-2. **Add FPTS as direct feature**: Help model distinguish playable vs unplayable value plays
-3. **Re-enable calibration**: Once model correlation improves, calibration can enforce sum-to-800% constraint
-4. **Position/salary marginals**: Add IPF layer for position and salary bin constraints
+1. **Safer constrained normalization**: add caps + smooth redistribution to avoid spikes while keeping exact slate sums.
+2. **Per-slate eligibility**: better structural-zero logic for fringe players (avoid normalization inflating true dust).
+3. **Position/salary marginals**: add IPF layer for position and salary bin constraints.

@@ -6,6 +6,11 @@
 calibration:
   # Enable/disable the calibration layer
   enabled: false
+
+  # Calibration method:
+  # - softmax: exp(a*s+b) slate softmax (legacy)
+  # - power:   slate allocation via (s+eps)^gamma (rank-preserving)
+  method: softmax
   
   # Path to fitted calibrator parameters (JSON)
   # Relative to data root (projections-data/)
@@ -45,6 +50,14 @@ playable_filter:
   # e.g., 100-player slate: 8.0 + (100-80)*0.05 = 9.0
   scale_per_player: 0.05
   baseline_slate_size: 80
+
+# Default normalization when calibration is disabled.
+# Ensures ownership sums to the site total (DK classic = 800%).
+normalization:
+  enabled: true
+  # Default target is calibration.R * 100 when not provided.
+  # target_sum_pct: 800.0
+  cap_pct: 100.0
 
 # Logging configuration for debugging
 logging:

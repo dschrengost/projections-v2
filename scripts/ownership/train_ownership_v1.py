@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from projections.paths import data_path
+from projections.ownership_v1.calibration import SoftmaxCalibrator
 from projections.ownership_v1.features import (
     OWNERSHIP_FEATURES,
     OWNERSHIP_FEATURES_V2,
@@ -457,6 +458,19 @@ def train_model(
             "scale_pos_weight": scale_pos_weight,  # Handle imbalance
             "verbose": -1,
         }
+        seed = int(params.get("seed", 1337))
+        num_threads = int(params.get("num_threads", 1))
+        clf_params.update(
+            {
+                "seed": seed,
+                "feature_fraction_seed": seed,
+                "bagging_seed": seed,
+                "data_random_seed": seed,
+                "deterministic": True,
+                "force_row_wise": True,
+                "num_threads": num_threads,
+            }
+        )
         
         train_data_clf = lgb.Dataset(X_train, label=y_train_clf)
         val_data_clf = lgb.Dataset(X_val, label=y_val_clf, reference=train_data_clf)
@@ -523,7 +537,7 @@ def train_model(
         "num_features": len(features),
     }
     
-    print(f"\n--- Metrics ---")
+    print("\n--- Metrics ---")
     print(f"Train MAE: {metrics['train_mae']:.3f}%")
     print(f"Val MAE: {metrics['val_mae']:.3f}%")
     corr_str = f"{metrics['val_corr']:.3f}" if not np.isnan(metrics['val_corr']) else "NaN (check val set)"
@@ -608,11 +622,34 @@ def main():
         help="LightGBM learning rate",
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=1337,
+        help="Random seed for deterministic training (default: 1337)",
+    )
+    parser.add_argument(
+        "--num-threads",
+        type=int,
+        default=1,
+        help="LightGBM num_threads (default: 1 for determinism)",
+    )
+    parser.add_argument(
         "--target-transform",
         type=str,
         choices=["none", "logit"],
         default="none",
         help="Target transformation (default: none)",
+    )
+    parser.add_argument(
+        "--fit-calibrator",
+        action="store_true",
+        help="Fit and save a softmax calibrator (per-slate sum constraint) from training predictions",
+    )
+    parser.add_argument(
+        "--target-sum-pct",
+        type=float,
+        default=800.0,
+        help="Target slate sum in percent (DK classic=800, FD classic=900; default: 800)",
     )
     parser.add_argument(
         "--sample-weighting",
@@ -686,6 +723,13 @@ def main():
     df = load_training_base(args.training_base)
     print(f"Loaded {len(df):,} rows")
 
+    # Some ad-hoc training bases (e.g., production-path joins) may not include
+    # a season column. Infer NBA season start year from game_date.
+    if "season" not in df.columns and "game_date" in df.columns:
+        gd = pd.to_datetime(df["game_date"], errors="coerce")
+        season = gd.dt.year.where(gd.dt.month >= 10, gd.dt.year - 1)
+        df["season"] = season.astype("Int64")
+
     print("\nPreparing features...")
     compute_historical = args.feature_set in ["v3", "v4", "v5", "v6"]
     compute_slate = args.feature_set in ["v4", "v5", "v6"]
@@ -747,6 +791,13 @@ def main():
     params["chalk_weight"] = args.chalk_weight
     params["source_weight"] = args.source_weight
     params["chalk_classifier"] = args.chalk_classifier
+    params["seed"] = args.seed
+    params["feature_fraction_seed"] = args.seed
+    params["bagging_seed"] = args.seed
+    params["data_random_seed"] = args.seed
+    params["deterministic"] = True
+    params["force_row_wise"] = True
+    params["num_threads"] = args.num_threads
     
     print("\nTraining model...")
     model, metrics = train_model(train_df, val_df, features, params=params)
@@ -776,6 +827,29 @@ def main():
         val_df = val_df.copy()
         val_df["pred_own_pct"] = val_preds
         val_df.to_csv(run_dir / "val_predictions.csv", index=False)
+
+    if args.fit_calibrator:
+        print("\nFitting softmax calibrator on training set...")
+        train_scores = model.predict(train_df[features], num_iteration=model.best_iteration)
+        if params.get("target_transform") == "logit":
+            train_scores = 1 / (1 + np.exp(-train_scores))
+            train_scores *= 100.0
+
+        train_scores = np.clip(train_scores, 0.0, 100.0)
+        calib_df = train_df[["slate_id", "actual_own_pct"]].copy()
+        calib_df["pred_own_pct"] = train_scores
+
+        calibrator = SoftmaxCalibrator().fit(
+            calib_df,
+            score_col="pred_own_pct",
+            target_col="actual_own_pct",
+            slate_id_col="slate_id",
+            R=float(args.target_sum_pct) / 100.0,
+            verbose=True,
+        )
+        cal_path = run_dir / "calibrator.json"
+        calibrator.save(cal_path)
+        print(f"[calibration] Saved calibrator to: {cal_path}")
     
     write_artifacts(
         run_dir=run_dir,
