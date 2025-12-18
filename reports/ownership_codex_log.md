@@ -148,7 +148,7 @@
 
 ### Step 1: Add a “power” calibration option (rank-preserving)
 - Added: `PowerCalibrator` (`projections/ownership_v1/calibration.py`) implementing `(s+eps)^gamma` within-slate allocation; preserves ranking by construction.
-- Added: `scripts/ownership/fit_power_calibrator.py` to fit `gamma` on a joined production-path dataset, prioritizing top-chalk MAE.
+- Added: `scripts/ownership/fit_power_calibrator.py` to fit `gamma` on a joined production-path dataset, prioritizing top-chalk MAE (also writes a full eval block for the calibrated outputs).
 - Updated: `projections/cli/score_ownership_live.py` to support `calibration.method: power` and to enforce post-calibration cap/sum guardrails via `normalize_ownership_to_target_sum` (prevents >100% allocations).
 - Updated: `config/ownership_calibration.yaml` to document the new calibration method.
 - Tests: extended `tests/ownership_v1/test_calibration.py` with `PowerCalibrator` unit coverage.

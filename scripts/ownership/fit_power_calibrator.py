@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from projections.ownership_v1.calibration import PowerCalibrationParams, PowerCalibrator
+from projections.ownership_v1.evaluation import evaluate_predictions
 from projections.ownership_v1.score import normalize_ownership_to_target_sum
 
 
@@ -115,6 +116,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Fit a power ownership calibrator (gamma) on joined preds+actuals")
     parser.add_argument("--in-parquet", type=Path, required=True, help="Joined parquet from evaluate_ownership_production_path.py")
     parser.add_argument("--out-json", type=Path, required=True, help="Write calibrator JSON here (relative or absolute)")
+    parser.add_argument("--out-md", type=Path, default=None, help="Optional: write a markdown summary here")
     parser.add_argument("--score-col", default="pred_own_pct_raw")
     parser.add_argument("--actual-col", default="actual_own_pct")
     parser.add_argument("--slate-id-col", default="slate_id")
@@ -185,11 +187,36 @@ def main() -> None:
     if best is None:
         raise SystemExit("No candidates evaluated.")
 
+    # Recompute predictions for the best gamma so we can report full eval metrics.
+    best_pred = _apply_gamma(
+        df,
+        gamma=float(best.gamma),
+        eps=float(best.eps),
+        R=float(best.R),
+        cap_pct=float(best.cap_pct),
+        score_col=str(args.score_col),
+        slate_id_col=str(args.slate_id_col),
+        min_proj_fpts=float(args.min_proj_fpts),
+    )
+    eval_df = df.copy()
+    eval_df["pred_own_pct_power"] = best_pred
+    eval_df = eval_df.dropna(subset=[str(args.actual_col), "pred_own_pct_power"]).copy()
+    eval_res = evaluate_predictions(
+        eval_df,
+        slice_name=f"power_fit_{args.in_parquet.name}",
+        pred_col="pred_own_pct_power",
+        actual_col=str(args.actual_col),
+        slate_id_col=str(args.slate_id_col),
+        target_sum_pct=float(best.R) * 100.0,
+        normalization="none",
+    )
+
     calibrator = PowerCalibrator(params=PowerCalibrationParams(gamma=best.gamma, eps=best.eps, R=best.R))
     payload = {
         "type": "power",
         "params": calibrator.params.to_dict(),
         "fit": best.to_dict(),
+        "eval": eval_res.to_dict(),
         "notes": {
             "objective": args.objective,
             "min_proj_fpts": float(args.min_proj_fpts),
@@ -200,7 +227,29 @@ def main() -> None:
     args.out_json.parent.mkdir(parents=True, exist_ok=True)
     args.out_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
+    if args.out_md is not None:
+        def fmt(x: float) -> str:
+            return f"{x:.4f}" if x == x else "NaN"
+
+        md_lines = [
+            "# Power Calibrator Fit",
+            "",
+            f"- gamma: {best.gamma:.4f} (eps={best.eps:g}, R={best.R:.1f}, cap_pct={best.cap_pct:.1f})",
+            f"- objective ({args.objective}): {fmt(best.objective)}",
+            f"- MAE all / top20: {fmt(best.mae_all)} / {fmt(best.mae_top20)}",
+            f"- Top10 mean bias: {fmt(best.top10_bias)}",
+            f"- Max pred mean / p95: {fmt(best.max_pred_mean)} / {fmt(best.max_pred_p95)}",
+            "",
+            "## Eval (pred_own_pct_power)",
+            f"- MAE/RMSE: {fmt(payload['eval']['regression']['mae_pct'])} / {fmt(payload['eval']['regression']['rmse_pct'])}",
+            f"- Spearman pooled: {fmt(payload['eval']['ranking']['spearman_pooled'])}",
+            f"- Spearman top10/top20: {fmt(payload['eval']['ranking']['spearman_top10_mean'])} / {fmt(payload['eval']['ranking']['spearman_top20_mean'])}",
+            f"- Recall@10/20: {fmt(payload['eval']['ranking']['recall_at_10'])} / {fmt(payload['eval']['ranking']['recall_at_20'])}",
+            f"- ECE: {fmt(payload['eval']['calibration']['ece_pct'])}",
+        ]
+        args.out_md.parent.mkdir(parents=True, exist_ok=True)
+        args.out_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+
 
 if __name__ == "__main__":
     main()
-
