@@ -1928,6 +1928,7 @@ def main(
                         n_worlds=chunk_size,
                         config=game_script_config,
                         rng=rng,
+                        rotation_p50_threshold=profile_cfg.game_script_rotation_threshold,
                     )
                 else:
                     # Fallback: sample minutes from per-player distribution.

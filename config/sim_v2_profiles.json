@@ -65,7 +65,8 @@
             "starter": 0.30,
             "bench": 0.45
           }
-        }
+        },
+        "rotation_p50_threshold": 20.0
       },
       "usage_shares": {
         "enabled": false,
@@ -147,7 +148,8 @@
             "starter": 0.30,
             "bench": 0.45
           }
-        }
+        },
+        "rotation_p50_threshold": 20.0
       },
       "usage_shares": {
         "enabled": true,

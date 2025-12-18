@@ -109,12 +109,16 @@ def sample_minutes_with_scripts(
     n_worlds: int,
     config: GameScriptConfig,
     rng: np.random.Generator,
+    rotation_p50_threshold: float = 20.0,
 ) -> np.ndarray:
     """
     Sample minutes per world based on game script.
     
     The game script determines which quantile of the player's minutes
     distribution we sample from. Close games → higher quantile for starters.
+    
+    Players with p50 >= rotation_p50_threshold are treated as "rotation players"
+    and sample from starter quantiles even if not marked as starters.
     
     Args:
         minutes_p10, p50, p90: Per-player minute quantiles
@@ -125,6 +129,7 @@ def sample_minutes_with_scripts(
         n_worlds: Number of simulation worlds
         config: Game script configuration
         rng: Random generator
+        rotation_p50_threshold: Players with p50 >= this use starter quantiles
         
     Returns:
         minutes_worlds: shape (n_worlds, n_players)
@@ -146,6 +151,9 @@ def sample_minutes_with_scripts(
     p90 = np.maximum(minutes_p90, p50)
     sigma_low = np.maximum((p50 - p10) / z90, 0.5)
     sigma_high = np.maximum((p90 - p50) / z90, 0.5)
+    
+    # Identify rotation players: starters OR high-minute bench players
+    is_rotation = (is_starter > 0) | (minutes_p50 >= rotation_p50_threshold)
     
     # Get unique games and sample margins
     unique_games = {}  # (game_id, team_id) -> team_spread
@@ -186,11 +194,11 @@ def sample_minutes_with_scripts(
             
             margin = game_margins[key][w]
             script = classify_script(margin, config)
-            starter = is_starter[i]
             
             if script in config.quantile_targets:
                 starter_q, bench_q = config.quantile_targets[script]
-                target_quantiles[w, i] = starter_q if starter else bench_q
+                # Use starter quantile for rotation players (starters OR high p50)
+                target_quantiles[w, i] = starter_q if is_rotation[i] else bench_q
     
     # Add some noise to target quantiles to avoid all same-script players
     # getting identical minutes
@@ -204,6 +212,7 @@ def sample_minutes_with_scripts(
     minutes_worlds = np.maximum(minutes_worlds, 0)
     
     return minutes_worlds
+
 
 
 __all__ = [

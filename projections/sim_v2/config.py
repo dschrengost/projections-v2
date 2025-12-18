@@ -62,6 +62,7 @@ class SimV2Profile:
     game_script_spread_coef: float = -0.726
     game_script_quantile_targets: dict[str, tuple[float, float]] = field(default_factory=dict)
     game_script_quantile_noise_std: float = 0.08
+    game_script_rotation_threshold: float = 20.0  # p50 >= this → use starter quantiles
     # Vegas anchoring (team points vs implied totals)
     vegas_points_anchor: bool = False
     vegas_points_drift_pct: float = 0.05
@@ -182,6 +183,7 @@ def load_sim_v2_profile(
     game_script_margin_std = float(game_script_cfg.get("margin_std", 13.4))
     game_script_spread_coef = float(game_script_cfg.get("spread_coef", -0.726))
     game_script_quantile_noise_std = float(game_script_cfg.get("quantile_noise_std", 0.08))
+    game_script_rotation_threshold = float(game_script_cfg.get("rotation_p50_threshold", 20.0))
     quantile_targets: dict[str, tuple[float, float]] = {}
     raw_targets = game_script_cfg.get("quantile_targets") or {}
     if isinstance(raw_targets, dict):
@@ -223,6 +225,7 @@ def load_sim_v2_profile(
         game_script_spread_coef=game_script_spread_coef,
         game_script_quantile_targets=quantile_targets,
         game_script_quantile_noise_std=game_script_quantile_noise_std,
+        game_script_rotation_threshold=game_script_rotation_threshold,
         vegas_points_anchor=vegas_points_anchor,
         vegas_points_drift_pct=vegas_points_drift_pct,
         rotation_minutes_floor=rotation_minutes_floor,

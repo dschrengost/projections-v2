@@ -61,6 +61,10 @@ The sim_v2 simulator generates Monte Carlo fantasy point (FPTS) projections for 
 
 **Key Insight:** In close games, starters sample from p65 of their minutes distribution (more minutes). In blowouts, they sample from p30-p35 (less minutes, as they rest).
 
+**Rotation Player Threshold:**
+
+Bench players with `minutes_p50 >= rotation_p50_threshold` (default: 20 min) are treated as "rotation players" and sample from **starter quantiles** instead of bench quantiles. This prevents strong bench players like Tyler Herro from being systematically undervalued.
+
 ### 4. Noise Model
 - Student-t distribution with `nu=5` degrees of freedom (fat tails)
 - Scale parameter `k=0.65` controls variance relative to mean
@@ -100,6 +104,7 @@ The sim_v2 simulator generates Monte Carlo fantasy point (FPTS) projections for 
 | `nu` | 5 | Student-t df (lower = fatter tails) |
 | `enforce_team_240` | true | Normalize team minutes to 240 |
 | `game_script.enabled` | true | Apply game script adjustments |
+| `game_script.rotation_p50_threshold` | 20.0 | p50 >= this → use starter quantiles |
 | `min_play_prob` | 0.05 | Minimum play probability to include |
 
 ## Usage
@@ -258,6 +263,10 @@ stat_total = rate * minutes + team_shock + player_eps
 **Note:** The empirical 0.31 team-mean correlation aligns well with the `same_team_corr` values (~0.30-0.35) from rates residuals. Current settings appear well-calibrated. If correlations seem too high in practice, reduce `team_sigma_scale` to 0.7-0.8.
 
 ## Changelog
+
+### 2025-12-17
+- Added `rotation_p50_threshold` to game script: bench players with p50 >= 20 min now use starter quantiles
+- Fixes issue where strong bench players (e.g., Tyler Herro) were systematically undervalued
 
 ### 2025-12-07
 - Enabled `rates_noise` in baseline profile (using Dec 5 residuals)
