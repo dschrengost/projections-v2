@@ -6,7 +6,7 @@ import argparse
 from functools import lru_cache
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -66,9 +66,9 @@ def _load_schedule_with_times(game_date: date, data_root: Path) -> pd.DataFrame:
     df = pd.read_parquet(schedule_path)
     df = df[df['game_date'] == str(game_date)]
     
-    # Parse tip_local_ts to datetime
-    if 'tip_local_ts' in df.columns:
-        df['game_start'] = pd.to_datetime(df['tip_local_ts'])
+    # Parse tip_ts (UTC) to datetime for consistent gating / leak safety.
+    if "tip_ts" in df.columns:
+        df["game_start"] = pd.to_datetime(df["tip_ts"], utc=True, errors="coerce")
     
     return df
 
@@ -83,9 +83,6 @@ def _get_locked_teams(schedule: pd.DataFrame, current_time: datetime) -> set:
         game_start = row['game_start']
         if pd.isna(game_start):
             continue
-        # Make timezone-naive comparison
-        if hasattr(game_start, 'tzinfo') and game_start.tzinfo is not None:
-            game_start = game_start.replace(tzinfo=None)
         if current_time >= game_start:
             locked_teams.add(row['home_team_tricode'])
             locked_teams.add(row['away_team_tricode'])
@@ -181,8 +178,6 @@ def _get_slate_first_game_time(
         if home in slate_teams or away in slate_teams:
             game_start = row["game_start"]
             if pd.notna(game_start):
-                if hasattr(game_start, "tzinfo") and game_start.tzinfo is not None:
-                    game_start = game_start.replace(tzinfo=None)
                 if earliest is None or game_start < earliest:
                     earliest = game_start
     
@@ -298,6 +293,8 @@ def _load_fpts_predictions(
 def _load_injuries(
     game_date: date,
     data_root: Path,
+    *,
+    cutoff_ts: datetime | None = None,
 ) -> pd.DataFrame:
     """Load injury data for the date."""
     season = game_date.year if game_date.month >= 10 else game_date.year
@@ -315,6 +312,9 @@ def _load_injuries(
             df["_report_date"] = pd.to_datetime(df["report_date"], errors="coerce").dt.date
             df = df[df["_report_date"] == game_date].copy()
             df = df.drop(columns=["_report_date"], errors="ignore")
+        if cutoff_ts is not None and "as_of_ts" in df.columns and not df.empty:
+            as_of = pd.to_datetime(df["as_of_ts"], utc=True, errors="coerce")
+            df = df[as_of.notna() & (as_of <= cutoff_ts)].copy()
         if not df.empty:
             return df
     
@@ -409,6 +409,7 @@ def _attach_live_ownership_enrichment(
     data_root: Path,
     minutes_team_map: dict[int, str] | None,
     nba_player_ids: pd.Series | None,
+    injuries_cutoff_ts: datetime | None,
 ) -> pd.DataFrame:
     """Attach player_own_avg_10, player_is_questionable, team_outs_count."""
 
@@ -442,7 +443,7 @@ def _attach_live_ownership_enrichment(
         working["player_chalk_rate"] = 0.0
 
     # Injury enrichment.
-    inj = _load_injuries(game_date, data_root)
+    inj = _load_injuries(game_date, data_root, cutoff_ts=injuries_cutoff_ts)
     if inj.empty:
         working["player_is_questionable"] = 0
         working["team_outs_count"] = 0
@@ -499,6 +500,7 @@ def score_ownership(
     run_id: str,
     data_root: Path,
     model_run: str = PRODUCTION_MODEL_RUN,
+    injuries_cutoff_ts: datetime | None = None,
 ) -> Optional[pd.DataFrame]:
     """
     Score ownership predictions for a single slate.
@@ -539,6 +541,7 @@ def score_ownership(
             data_root=data_root,
             minutes_team_map=None,
             nba_player_ids=None,
+            injuries_cutoff_ts=injuries_cutoff_ts,
         )
     else:
         # Load minutes to get player_name -> NBA player_id mapping
@@ -622,6 +625,7 @@ def score_ownership(
                 data_root=data_root,
                 minutes_team_map=team_id_to_tricode,
                 nba_player_ids=salaries.get("nba_player_id"),
+                injuries_cutoff_ts=injuries_cutoff_ts,
             )
             salaries = salaries.drop(columns=["_name_norm", "nba_player_id"], errors="ignore")
         else:
@@ -634,6 +638,7 @@ def score_ownership(
                 data_root=data_root,
                 minutes_team_map=None,
                 nba_player_ids=None,
+                injuries_cutoff_ts=injuries_cutoff_ts,
             )
     
     # Fill missing FPTS
@@ -802,12 +807,18 @@ def score_all_slates(
     
     # Load schedule for lock detection
     schedule = _load_schedule_with_times(game_date, data_root)
-    current_time = datetime.now()
+    current_time = datetime.now(tz=UTC)
     
     results = {}
     
     for dg_id, slate_df in slates.items():
         slate_teams = set(slate_df["team"].unique()) if "team" in slate_df.columns else set()
+        slate_lock_ts = _get_slate_first_game_time(slate_teams, schedule)
+        cutoff_ts = None
+        if slate_lock_ts is not None:
+            cutoff_ts = min(current_time, slate_lock_ts)
+        else:
+            cutoff_ts = current_time
         
         # Check if this slate is locked
         if _is_slate_locked(slate_teams, schedule, current_time):
@@ -835,6 +846,7 @@ def score_all_slates(
             run_id=run_id,
             data_root=data_root,
             model_run=model_run,
+            injuries_cutoff_ts=cutoff_ts,
         )
         
         if predictions is not None:

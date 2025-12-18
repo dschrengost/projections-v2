@@ -126,3 +126,11 @@
 ### Docs / Tests
 - Added `docs/ownership_model.md` and updated `docs/ownership/README.md` to reflect the current training/eval/inference pipeline and the “no LineStar at runtime” constraint.
 - Focused test command remains: `uv run pytest -q tests/ownership_v1 tests/test_scrapers/test_build_ownership_data.py` (full suite still fails due to unrelated minutes_v1 collection issues).
+
+### Step 4: Leak-safety for historical runs (injuries + lock gating)
+- Problem: our `silver/injuries_snapshot/.../injuries.parquet` files can contain multiple snapshots for the same `game_date` (including post-lock updates). For historical backtests, “load latest for date” can leak future injury status into pre-lock features.
+- Change: `projections/cli/score_ownership_live.py` now:
+  - uses schedule `tip_ts` (UTC) for lock detection and gating,
+  - threads an `injuries_cutoff_ts` into scoring, and
+  - filters injuries to `as_of_ts <= min(now_utc, slate_first_tip_utc)` when `as_of_ts` exists.
+- Outcome: scoring is now safe to run on historical dates without pulling post-lock injury snapshots for that slate.
