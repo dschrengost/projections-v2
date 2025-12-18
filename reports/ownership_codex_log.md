@@ -106,3 +106,23 @@
 ### Step 7: Calibration/normalization experiments
 - Added optional “softmax slate calibrator” plumbing (fit on train, evaluate on val) to explore distribution-shape calibration, but the naive softmax layer can allocate >100% to a single player (invalid) and performed poorly on the fixed slice without additional caps/redistribution.
 - Next: if we want to use softmax/IPF-style normalization in production, we need support-aware caps + smooth redistribution (no >100%, no spikes), then re-evaluate.
+
+## 2025-12-18 — Phase 3: Output + Integration
+
+### Step 1: Production inference supports v6 + logit runs
+- Updated inference (`projections/ownership_v1/score.py`) to invert `target_transform=logit` using sigmoid and return percent space.
+- Expanded inference-time feature builder (`compute_ownership_features`) to include v5/v6 computed features (slate structure, value leverage, interactions) with safe defaults.
+- Updated schema defaults to allow v6 “player popularity” features when present and to default them to 0 when missing.
+- Live scoring now enriches with historical player priors (`player_own_avg_10`, `player_own_median`, `player_own_variance` (std), `player_chalk_rate`) from DK contest labels.
+- Explicit intent: **no LineStar dependency at runtime**. Live scoring uses DK salaries + sim_v2 projections + optional injuries + historical DK priors.
+
+### Step 2: Enforce slate sum constraints in live scoring
+- Added `pred_own_pct_raw` column and applied playable filter first, then normalized `pred_own_pct` to the site total (default DK classic `800%`) via proportional scale-to-sum with an optional 100% cap (config: `config/ownership_calibration.yaml` → `normalization`).
+- Smoke check: `score_ownership_live.py` on `2025-12-08` produced `sum(pred_own_pct)=800%` (raw sum was ~718%).
+
+### Step 3: Downstream consumer robustness
+- `projections/api/contest_sim_api.py` now loads ownership from the new per-slate directory format (`silver/ownership_predictions/<date>/*.parquet`) when present, falling back to the legacy single-file path.
+
+### Docs / Tests
+- Added `docs/ownership_model.md` and updated `docs/ownership/README.md` to reflect the current training/eval/inference pipeline and the “no LineStar at runtime” constraint.
+- Focused test command remains: `uv run pytest -q tests/ownership_v1 tests/test_scrapers/test_build_ownership_data.py` (full suite still fails due to unrelated minutes_v1 collection issues).

@@ -36,8 +36,6 @@
 - Scaled max(pred) mean/p95: 50.7427 / 57.8836
 - Scaled count pred>60 / pred>70 / pred>100: 0 / 0 / 0
 
-## After (TBD)
-
 ## Before (Clean DK Base Baseline: dk_only_v4_cleanbase_seed1337)
 
 - Slice: `dk_2025-11-24_to_2025-12-06_fixed_supported` (n_slates=10, n_rows=1155, dates=2025-11-24..2025-12-06)
