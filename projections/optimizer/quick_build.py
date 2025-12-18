@@ -258,6 +258,11 @@ class QuickBuildStats:
     bloom_rejects: int = 0
     collector_seen_dups: int = 0
     collector_forwarded: int = 0
+    # Warm solve diagnostics (enum phase OPT finding)
+    warm_solve_status: str = ""  # "OPTIMAL", "FEASIBLE", "INFEASIBLE", etc.
+    warm_solve_is_optimal: bool = False
+    warm_solve_best_obj: float = 0.0
+    warm_solve_time_s: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -720,12 +725,23 @@ def _configure_solver(solver: cp_model.CpSolver, spec: Spec, cfg: QuickBuildConf
             pass
 
 
-def _solve_best_objective(spec: Spec, cfg: QuickBuildConfig, seed: int) -> Optional[int]:
+def _solve_best_objective(spec: Spec, cfg: QuickBuildConfig, seed: int) -> tuple[int | None, dict]:
+    """Find best objective value for enumeration floors.
+    
+    Returns:
+        (best_objective, diagnostics_dict) where diagnostics contains:
+        - status: solver status string
+        - is_optimal: whether OPTIMAL was found
+        - best_obj: objective value (float)
+        - time_s: solve time in seconds
+    """
+    diag: dict = {"status": "", "is_optimal": False, "best_obj": 0.0, "time_s": 0.0}
+    start_t = time.time()
     try:
         # Use raw points (no jitter) for estimating OPT so enum floors are stable
         artifacts = build_cpsat_model(spec, jitter=0.0, seed=seed)
     except Exception:
-        return None
+        return None, diag
 
     solver = cp_model.CpSolver()
     _configure_solver(solver, spec, cfg, seed)
@@ -733,12 +749,27 @@ def _solve_best_objective(spec: Spec, cfg: QuickBuildConfig, seed: int) -> Optio
     if warm and warm > 0:
         solver.parameters.max_time_in_seconds = float(warm)
     status = solver.Solve(artifacts.model)
+    diag["time_s"] = round(time.time() - start_t, 3)
+    
+    # Map status to string
+    status_map = {
+        cp_model.OPTIMAL: "OPTIMAL",
+        cp_model.FEASIBLE: "FEASIBLE",
+        cp_model.INFEASIBLE: "INFEASIBLE",
+        cp_model.MODEL_INVALID: "MODEL_INVALID",
+        cp_model.UNKNOWN: "UNKNOWN",
+    }
+    diag["status"] = status_map.get(status, f"STATUS_{status}")
+    diag["is_optimal"] = (status == cp_model.OPTIMAL)
+    
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return None
+        return None, diag
     try:
-        return int(round(solver.ObjectiveValue()))
+        best = int(round(solver.ObjectiveValue()))
+        diag["best_obj"] = float(best)
+        return best, diag
     except Exception:
-        return None
+        return None, diag
 
 
 def _run_enum_phase(
@@ -750,22 +781,24 @@ def _run_enum_phase(
     seen_hashes: set[int],
     logger: logging.Logger,
     cross_bloom: "CrossWorkerBloom | None" = None,
-) -> None:
+) -> dict:
+    """Run enumeration phase and return warm solve diagnostics."""
+    warm_diag: dict = {"status": "", "is_optimal": False, "best_obj": 0.0, "time_s": 0.0}
     if not cfg.enum_enable or not cfg.enum_targets:
-        return
-    best = _solve_best_objective(spec, cfg, seed)
+        return warm_diag
+    best, warm_diag = _solve_best_objective(spec, cfg, seed)
     if best is None or best <= 0:
         logger.info("[quick-build] worker seed=%s: enum skipped (best=%s)", seed, best)
         try:
-            print(f"[quick-build] worker seed={seed}: enum skipped (best={best})")
+            print(f"[quick-build] worker seed={seed}: enum skipped (best={best}) status={warm_diag['status']}")
         except Exception:
             pass
-        return
+        return warm_diag
 
     targets = sorted(set(cfg.enum_targets), reverse=True)
     try:
         print(
-            f"[quick-build] worker seed={seed}: enum start warm_best={best} targets={len(targets)}"
+            f"[quick-build] worker seed={seed}: enum start warm_best={best} optimal={warm_diag['is_optimal']} time={warm_diag['time_s']:.2f}s targets={len(targets)}"
         )
     except Exception:
         pass
@@ -843,7 +876,7 @@ def _run_enum_phase(
             pass
         if cb.emitted == 0:
             continue
-
+    return warm_diag
 
 def _worker_main(
     spec: Spec,
@@ -1009,6 +1042,24 @@ def quick_build_pool(
     stop = Event()
     pool = InMemoryPool(max(1, cfg.effective_max_pool))
     stats = QuickBuildStats()
+
+    # Run warm solve in main process to capture diagnostics for stats
+    if cfg.enum_enable:
+        base_seed = cfg.seed if cfg.seed is not None else int(time.time())
+        _, warm_diag = _solve_best_objective(spec, cfg, base_seed)
+        stats.warm_solve_status = warm_diag.get("status", "")
+        stats.warm_solve_is_optimal = warm_diag.get("is_optimal", False)
+        stats.warm_solve_best_obj = warm_diag.get("best_obj", 0.0)
+        stats.warm_solve_time_s = warm_diag.get("time_s", 0.0)
+        try:
+            print(
+                f"[quick-build] warm solve: status={stats.warm_solve_status} "
+                f"optimal={stats.warm_solve_is_optimal} best_obj={stats.warm_solve_best_obj} "
+                f"time={stats.warm_solve_time_s:.2f}s"
+            )
+        except Exception:
+            pass
+
 
     # Optional cross-worker Bloom prefilter
     cross_bloom = None
