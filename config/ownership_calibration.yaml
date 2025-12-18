@@ -5,16 +5,16 @@
 
 calibration:
   # Enable/disable the calibration layer
-  enabled: false
+  enabled: true
 
   # Calibration method:
   # - softmax: exp(a*s+b) slate softmax (legacy)
   # - power:   slate allocation via (s+eps)^gamma (rank-preserving)
-  method: softmax
+  method: power
   
   # Path to fitted calibrator parameters (JSON)
   # Relative to data root (projections-data/)
-  calibrator_path: "artifacts/ownership_v1/calibrator.json"
+  calibrator_path: "artifacts/ownership_v1/power_calibrator.json"
   
   # Target sum R (slots per lineup)
   # DK NBA classic = 8, FD NBA = 9

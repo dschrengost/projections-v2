@@ -55,6 +55,113 @@ def _load_calibration_config() -> dict:
         return yaml.safe_load(f)
 
 
+def _apply_postprocessing(
+    output: pd.DataFrame,
+    salaries: pd.DataFrame,
+    *,
+    config: dict,
+    data_root: Path,
+) -> pd.DataFrame:
+    """Apply playable filter, optional calibration, and normalization.
+
+    Important production invariant: the final `pred_own_pct` should always be
+    normalized to the configured target sum (unless normalization is disabled),
+    even if calibration is enabled but missing/invalid.
+    """
+
+    result = output.copy()
+
+    # Apply playable filter: zero out unplayable players.
+    play_cfg = config.get("playable_filter", {})
+    unplayable_mask = pd.Series(False, index=result.index)
+    if play_cfg.get("enabled", False):
+        min_fpts = float(play_cfg.get("min_proj_fpts", 8.0))
+        if play_cfg.get("slate_aware", False):
+            baseline = int(play_cfg.get("baseline_slate_size", 80))
+            scale = float(play_cfg.get("scale_per_player", 0.05))
+            min_fpts = min_fpts + max(0.0, (len(result) - baseline) * scale)
+
+        unplayable_mask = result["proj_fpts"].astype(float) < min_fpts
+        if unplayable_mask.any():
+            result.loc[unplayable_mask, "pred_own_pct"] = 0.0
+
+    cal_cfg = config.get("calibration", {})
+    norm_cfg = config.get("normalization", {})
+
+    slots = float(cal_cfg.get("R", 8.0))
+    target_sum_pct = float(norm_cfg.get("target_sum_pct", slots * 100.0))
+    cap_pct = float(norm_cfg.get("cap_pct", 100.0))
+
+    # Apply calibration if enabled.
+    if cal_cfg.get("enabled", False):
+        method = str(cal_cfg.get("method", "softmax")).lower()
+        print(
+            f"[ownership] Applying calibration method={method} (sum before: {result['pred_own_pct'].sum():.1f}%)"
+        )
+
+        calibrator_path = data_root / cal_cfg.get("calibrator_path", "artifacts/ownership_v1/calibrator.json")
+        if not calibrator_path.exists():
+            print(f"[ownership] Calibrator not found at {calibrator_path}, falling back to scaling")
+        else:
+            try:
+                calibrator: SoftmaxCalibrator | PowerCalibrator
+                if method == "softmax":
+                    calibrator = SoftmaxCalibrator.load(calibrator_path)
+                elif method == "power":
+                    calibrator = PowerCalibrator.load(calibrator_path)
+                else:
+                    raise ValueError(f"Unknown calibration method: {method}")
+
+                # Build structural zero mask.
+                # True = include in calibration, False = structural zero (set to 0)
+                struct_cfg = cal_cfg.get("structural_zeros", {})
+                mask = pd.Series(True, index=result.index)
+
+                # Exclude OUT players (already filtered earlier, but double-check).
+                if struct_cfg.get("exclude_out", True) and "_injury_status" in salaries.columns:
+                    mask &= (salaries["_injury_status"].str.upper() != "OUT")
+
+                # Exclude zero-minute players - check if we have this info.
+                if struct_cfg.get("exclude_zero_minutes", True) and "proj_minutes" in result.columns:
+                    mask &= (result["proj_minutes"] > 0)
+
+                # Exclude zero prediction (optional).
+                if struct_cfg.get("exclude_zero_prediction", False):
+                    mask &= (result["pred_own_pct"] > 0)
+
+                # Exclude unplayable players from calibration allocation.
+                mask &= ~unplayable_mask
+
+                scores = result["pred_own_pct_raw"].values
+                if method == "softmax":
+                    calibrated = apply_calibration_with_mask(scores, mask.values, calibrator.params)
+                    result["pred_own_pct"] = calibrated * 100.0  # Convert to percent
+                elif method == "power":
+                    calibrated = calibrator.apply(scores, mask=mask.values)
+                    result["pred_own_pct"] = calibrated * 100.0  # Convert to percent
+                else:  # pragma: no cover
+                    raise ValueError(f"Unknown calibration method: {method}")
+
+                log_cfg = config.get("logging", {})
+                if log_cfg.get("log_metrics", True):
+                    n_zeros = (~mask).sum()
+                    print(
+                        f"[ownership] Calibration: {n_zeros} structural zeros, sum after: {result['pred_own_pct'].sum():.1f}%"
+                    )
+            except Exception as e:
+                print(f"[ownership] Calibration failed: {e}, falling back to scaling")
+
+    # Always normalize unless explicitly disabled.
+    if norm_cfg.get("enabled", True):
+        result["pred_own_pct"] = normalize_ownership_to_target_sum(
+            result["pred_own_pct"],
+            target_sum_pct=target_sum_pct,
+            cap_pct=cap_pct,
+        )
+
+    return result
+
+
 def _load_schedule_with_times(game_date: date, data_root: Path) -> pd.DataFrame:
     """Load schedule with game times for lock detection."""
     month = game_date.month
@@ -815,104 +922,7 @@ def score_ownership(
     
     config = _load_calibration_config()
 
-    # Apply playable filter: zero out unplayable players.
-    play_cfg = config.get("playable_filter", {})
-    unplayable_mask = pd.Series(False, index=output.index)
-    if play_cfg.get("enabled", False):
-        min_fpts = float(play_cfg.get("min_proj_fpts", 8.0))
-        if play_cfg.get("slate_aware", False):
-            baseline = int(play_cfg.get("baseline_slate_size", 80))
-            scale = float(play_cfg.get("scale_per_player", 0.05))
-            min_fpts = min_fpts + max(0.0, (len(output) - baseline) * scale)
-
-        unplayable_mask = output["proj_fpts"].astype(float) < min_fpts
-        if unplayable_mask.any():
-            output.loc[unplayable_mask, "pred_own_pct"] = 0.0
-
-    # Apply calibration (softmax) if enabled.
-    cal_cfg = config.get("calibration", {})
-    
-    if cal_cfg.get("enabled", False):
-        method = str(cal_cfg.get("method", "softmax")).lower()
-        print(f"[ownership] Applying calibration method={method} (sum before: {output['pred_own_pct'].sum():.1f}%)")
-        
-        try:
-            # Load calibrator
-            calibrator_path = data_path() / cal_cfg.get("calibrator_path", "artifacts/ownership_v1/calibrator.json")
-            if not calibrator_path.exists():
-                print(f"[ownership] Calibrator not found at {calibrator_path}, skipping")
-            else:
-                calibrator: SoftmaxCalibrator | PowerCalibrator
-                if method == "softmax":
-                    calibrator = SoftmaxCalibrator.load(calibrator_path)
-                elif method == "power":
-                    calibrator = PowerCalibrator.load(calibrator_path)
-                else:
-                    raise ValueError(f"Unknown calibration method: {method}")
-                
-                # Build structural zero mask
-                # True = include in calibration, False = structural zero (set to 0)
-                struct_cfg = cal_cfg.get("structural_zeros", {})
-                mask = pd.Series(True, index=output.index)
-                
-                # Exclude OUT players (already filtered earlier, but double-check)
-                if struct_cfg.get("exclude_out", True) and "_injury_status" in salaries.columns:
-                    mask &= (salaries["_injury_status"].str.upper() != "OUT")
-                
-                # Exclude zero-minute players - check if we have this info
-                if struct_cfg.get("exclude_zero_minutes", True) and "proj_minutes" in output.columns:
-                    mask &= (output["proj_minutes"] > 0)
-                
-                # Exclude zero prediction (optional - default False)
-                if struct_cfg.get("exclude_zero_prediction", False):
-                    mask &= (output["pred_own_pct"] > 0)
-
-                # Exclude unplayable players from calibration allocation.
-                mask &= ~unplayable_mask
-                
-                scores = output["pred_own_pct_raw"].values
-                if method == "softmax":
-                    calibrated = apply_calibration_with_mask(scores, mask.values, calibrator.params)
-                    output["pred_own_pct"] = calibrated * 100.0  # Convert to percent
-                elif method == "power":
-                    calibrated = calibrator.apply(scores, mask=mask.values)
-                    output["pred_own_pct"] = calibrated * 100.0  # Convert to percent
-                else:  # pragma: no cover
-                    raise ValueError(f"Unknown calibration method: {method}")
-                
-                # Log metrics
-                log_cfg = config.get("logging", {})
-                if log_cfg.get("log_metrics", True):
-                    n_zeros = (~mask).sum()
-                    print(f"[ownership] Calibration: {n_zeros} structural zeros, "
-                          f"sum after: {output['pred_own_pct'].sum():.1f}%")
-
-                # Enforce post-calibration cap/sum guardrails (in case a calibrator
-                # allocates >100% to a single player).
-                norm_cfg = config.get("normalization", {})
-                slots = float(cal_cfg.get("R", 8.0))
-                target_sum_pct = float(norm_cfg.get("target_sum_pct", slots * 100.0))
-                cap_pct = float(norm_cfg.get("cap_pct", 100.0))
-                output["pred_own_pct"] = normalize_ownership_to_target_sum(
-                    output["pred_own_pct"],
-                    target_sum_pct=target_sum_pct,
-                    cap_pct=cap_pct,
-                )
-                
-        except Exception as e:
-            print(f"[ownership] Calibration failed: {e}, using raw predictions")
-
-    # Default normalization if calibration is disabled.
-    norm_cfg = config.get("normalization", {})
-    if not cal_cfg.get("enabled", False) and norm_cfg.get("enabled", True):
-        slots = float(cal_cfg.get("R", 8.0))
-        target_sum_pct = float(norm_cfg.get("target_sum_pct", slots * 100.0))
-        cap_pct = float(norm_cfg.get("cap_pct", 100.0))
-        output["pred_own_pct"] = normalize_ownership_to_target_sum(
-            output["pred_own_pct"],
-            target_sum_pct=target_sum_pct,
-            cap_pct=cap_pct,
-        )
+    output = _apply_postprocessing(output, salaries, config=config, data_root=data_root)
     
     # Add draft_group_id to output
     output["draft_group_id"] = draft_group_id

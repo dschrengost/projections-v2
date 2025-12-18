@@ -163,3 +163,15 @@
 - Updated: `projections/cli/score_ownership_live.py` to support `calibration.method: power` and to enforce post-calibration cap/sum guardrails via `normalize_ownership_to_target_sum` (prevents >100% allocations).
 - Updated: `config/ownership_calibration.yaml` to document the new calibration method.
 - Tests: extended `tests/ownership_v1/test_calibration.py` with `PowerCalibrator` unit coverage.
+
+### Step 2: Production enablement guidance (softmax vs power) + safety fix
+- Evaluated calibration methods on the fixed production-path window (`2025-11-30..2025-12-15`, main slate only) using the already-joined parquet.
+  - Softmax calibration using the existing `artifacts/ownership_v1/calibrator.json` (`a≈0.007`) **massively flattens** outputs (max ownership drops to ~`12%` mean / `27%` p95), worsens MAE, and is not a good production default.
+  - Power calibration with `gamma≈0.75` improves ECE and RMSE while preserving within-slate ranking / top-chalk recall (rank-preserving by construction).
+- Safety fix: `projections/cli/score_ownership_live.py` now **always normalizes** to the configured target sum even when `calibration.enabled=true` but the calibrator file is missing/invalid (prevents unnormalized outputs).
+- Also fixed calibrator path resolution to be rooted at the CLI `--data-root` (instead of the global `data_path()`), so production can reliably point at a single data root.
+- Test added: `tests/ownership_v1/test_score_ownership_live_postprocessing.py` (normalization fallback when calibrator missing).
+
+### Step 3: Enable power calibration (prod config)
+- Enabled calibration in `config/ownership_calibration.yaml` and set `method: power` with `calibrator_path: artifacts/ownership_v1/power_calibrator.json`.
+- Fitted and wrote a power calibrator artifact to the local data root at `/home/daniel/projections-data/artifacts/ownership_v1/power_calibrator.json` (gamma≈`0.75`) based on the fixed production-path window (`2025-11-30..2025-12-15`).
