@@ -135,3 +135,11 @@
   - filters injuries to `as_of_ts <= min(now_utc, slate_first_tip_utc)` when `as_of_ts` exists.
 - Outcome: scoring is now safe to run on historical dates without pulling post-lock injury snapshots for that slate.
 - Follow-up: fixed `slates.json` metadata generation to use `datetime.now(tz=UTC)` so lock detection doesn’t compare tz-naive vs tz-aware timestamps.
+
+### Step 5: Production-path backtest evaluator (DK actuals ↔ live preds)
+- Added: `scripts/ownership/evaluate_ownership_production_path.py`
+  - Maps DK `slate_id` (contest exports) ↔ DK `draft_group_id` (salary slates) via player-pool overlap, then joins players by normalized name.
+  - Supports `--slate-selector largest_entries` (default) to approximate “main slate only”.
+  - Supports `--pred-snapshot locked` (default) to evaluate the first pre-lock snapshot saved by live scoring.
+  - Emits the same core metrics as our fixed-slice evaluator (MAE/RMSE, Spearman, top-chalk rank/recall, ECE, sum checks).
+- Tests: `tests/ownership_v1/test_production_path_eval.py` covers overlap mapping + suffix normalization.
