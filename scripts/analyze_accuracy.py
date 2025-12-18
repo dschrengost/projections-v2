@@ -403,8 +403,10 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
         starter_col = 'starter_flag'
     
     if starter_col and 'fpts_error' in played.columns:
-        starters = played[played[starter_col]]
-        bench = played[~played[starter_col]]
+        # Convert to boolean mask (handles both int and float columns)
+        starter_mask = pd.to_numeric(played[starter_col], errors='coerce').fillna(0).astype(bool)
+        starters = played[starter_mask]
+        bench = played[~starter_mask]
         if len(starters) > 0:
             starter_metrics['fpts_mae_starters'] = round(np.abs(starters['fpts_error']).mean(), 2)
             starter_metrics['n_starters'] = len(starters)
