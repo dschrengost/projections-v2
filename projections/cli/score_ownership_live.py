@@ -810,6 +810,9 @@ def score_all_slates(
     run_id: str,
     data_root: Path,
     model_run: str = PRODUCTION_MODEL_RUN,
+    *,
+    ignore_lock_cache: bool = False,
+    write_lock_cache: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """
     Score ownership predictions for all slates on a date.
@@ -841,7 +844,7 @@ def score_all_slates(
             cutoff_ts = current_time
         
         # Check if this slate is locked
-        if _is_slate_locked(slate_teams, schedule, current_time):
+        if not ignore_lock_cache and _is_slate_locked(slate_teams, schedule, current_time):
             first_game = _get_slate_first_game_time(slate_teams, schedule)
             print(f"[ownership] Slate {dg_id} is LOCKED (first game: {first_game})")
             
@@ -873,7 +876,8 @@ def score_all_slates(
             results[dg_id] = predictions
             
             # Save for future lock
-            _save_locked_predictions(predictions, game_date, dg_id, data_root)
+            if write_lock_cache:
+                _save_locked_predictions(predictions, game_date, dg_id, data_root)
     
     return results
 
@@ -916,13 +920,30 @@ def main():
     parser.add_argument("--run-id", required=True, help="Run identifier")
     parser.add_argument("--data-root", default=None, help="Data root path")
     parser.add_argument("--model-run", default=PRODUCTION_MODEL_RUN, help="Model run ID")
+    parser.add_argument(
+        "--ignore-lock-cache",
+        action="store_true",
+        help="Force scoring even when slates are locked (useful for backtests/rescoring).",
+    )
+    parser.add_argument(
+        "--no-write-lock-cache",
+        action="store_true",
+        help="Do not write *_locked.parquet cache files (useful for backtests).",
+    )
     args = parser.parse_args()
     
     game_date = date.fromisoformat(args.date)
     root = Path(args.data_root) if args.data_root else data_path()
     
     # Score all slates
-    results = score_all_slates(game_date, args.run_id, root, args.model_run)
+    results = score_all_slates(
+        game_date,
+        args.run_id,
+        root,
+        args.model_run,
+        ignore_lock_cache=bool(args.ignore_lock_cache),
+        write_lock_cache=not bool(args.no_write_lock_cache),
+    )
     
     if not results:
         print("[ownership] No predictions generated")
