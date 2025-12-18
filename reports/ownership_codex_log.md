@@ -134,3 +134,4 @@
   - threads an `injuries_cutoff_ts` into scoring, and
   - filters injuries to `as_of_ts <= min(now_utc, slate_first_tip_utc)` when `as_of_ts` exists.
 - Outcome: scoring is now safe to run on historical dates without pulling post-lock injury snapshots for that slate.
+- Follow-up: fixed `slates.json` metadata generation to use `datetime.now(tz=UTC)` so lock detection doesn’t compare tz-naive vs tz-aware timestamps.

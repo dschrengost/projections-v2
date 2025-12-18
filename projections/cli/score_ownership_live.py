@@ -867,7 +867,7 @@ def _save_slates_metadata(
     """Save slates.json metadata file."""
     import json
     
-    current_time = datetime.now()
+    current_time = datetime.now(tz=UTC)
     slates_meta = {}
     
     for dg_id, df in results.items():
