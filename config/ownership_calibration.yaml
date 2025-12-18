@@ -6,6 +6,11 @@
 calibration:
   # Enable/disable the calibration layer
   enabled: false
+
+  # Calibration method:
+  # - softmax: exp(a*s+b) slate softmax (legacy)
+  # - power:   slate allocation via (s+eps)^gamma (rank-preserving)
+  method: softmax
   
   # Path to fitted calibrator parameters (JSON)
   # Relative to data root (projections-data/)

@@ -13,6 +13,7 @@ from typing import Optional
 import pandas as pd
 
 from projections.ownership_v1.calibration import (
+    PowerCalibrator,
     SoftmaxCalibrator,
     apply_calibration_with_mask,
 )
@@ -716,7 +717,8 @@ def score_ownership(
     cal_cfg = config.get("calibration", {})
     
     if cal_cfg.get("enabled", False):
-        print(f"[ownership] Applying calibration (sum before: {output['pred_own_pct'].sum():.1f}%)")
+        method = str(cal_cfg.get("method", "softmax")).lower()
+        print(f"[ownership] Applying calibration method={method} (sum before: {output['pred_own_pct'].sum():.1f}%)")
         
         try:
             # Load calibrator
@@ -724,7 +726,13 @@ def score_ownership(
             if not calibrator_path.exists():
                 print(f"[ownership] Calibrator not found at {calibrator_path}, skipping")
             else:
-                calibrator = SoftmaxCalibrator.load(calibrator_path)
+                calibrator: SoftmaxCalibrator | PowerCalibrator
+                if method == "softmax":
+                    calibrator = SoftmaxCalibrator.load(calibrator_path)
+                elif method == "power":
+                    calibrator = PowerCalibrator.load(calibrator_path)
+                else:
+                    raise ValueError(f"Unknown calibration method: {method}")
                 
                 # Build structural zero mask
                 # True = include in calibration, False = structural zero (set to 0)
@@ -746,15 +754,15 @@ def score_ownership(
                 # Exclude unplayable players from calibration allocation.
                 mask &= ~unplayable_mask
                 
-                # Apply calibration with mask
                 scores = output["pred_own_pct_raw"].values
-                calibrated = apply_calibration_with_mask(
-                    scores, 
-                    mask.values, 
-                    calibrator.params
-                )
-                
-                output["pred_own_pct"] = calibrated * 100.0  # Convert to percent
+                if method == "softmax":
+                    calibrated = apply_calibration_with_mask(scores, mask.values, calibrator.params)
+                    output["pred_own_pct"] = calibrated * 100.0  # Convert to percent
+                elif method == "power":
+                    calibrated = calibrator.apply(scores, mask=mask.values)
+                    output["pred_own_pct"] = calibrated * 100.0  # Convert to percent
+                else:  # pragma: no cover
+                    raise ValueError(f"Unknown calibration method: {method}")
                 
                 # Log metrics
                 log_cfg = config.get("logging", {})
@@ -762,6 +770,18 @@ def score_ownership(
                     n_zeros = (~mask).sum()
                     print(f"[ownership] Calibration: {n_zeros} structural zeros, "
                           f"sum after: {output['pred_own_pct'].sum():.1f}%")
+
+                # Enforce post-calibration cap/sum guardrails (in case a calibrator
+                # allocates >100% to a single player).
+                norm_cfg = config.get("normalization", {})
+                slots = float(cal_cfg.get("R", 8.0))
+                target_sum_pct = float(norm_cfg.get("target_sum_pct", slots * 100.0))
+                cap_pct = float(norm_cfg.get("cap_pct", 100.0))
+                output["pred_own_pct"] = normalize_ownership_to_target_sum(
+                    output["pred_own_pct"],
+                    target_sum_pct=target_sum_pct,
+                    cap_pct=cap_pct,
+                )
                 
         except Exception as e:
             print(f"[ownership] Calibration failed: {e}, using raw predictions")

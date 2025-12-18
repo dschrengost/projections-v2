@@ -344,11 +344,81 @@ class SoftmaxCalibrator:
         return self.params.R
 
 
+@dataclass
+class PowerCalibrationParams:
+    """Power-scaling parameters for slate-level allocation."""
+
+    gamma: float = 1.0
+    eps: float = 1e-3
+    R: float = 8.0
+
+    def to_dict(self) -> dict:
+        return {"gamma": float(self.gamma), "eps": float(self.eps), "R": float(self.R)}
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "PowerCalibrationParams":
+        return cls(
+            gamma=float(payload.get("gamma", 1.0)),
+            eps=float(payload.get("eps", 1e-3)),
+            R=float(payload.get("R", 8.0)),
+        )
+
+
+@dataclass
+class PowerCalibrator:
+    """Slate-level power calibration (rank-preserving).
+
+    For a slate with model scores s_i >= 0, compute weights:
+      w_i = (s_i + eps) ** gamma
+    then allocate ownership fractions that sum to R:
+      yhat_i = R * w_i / sum_j w_j
+    """
+
+    params: PowerCalibrationParams = field(default_factory=PowerCalibrationParams)
+
+    def apply(self, scores: np.ndarray, *, mask: np.ndarray | None = None) -> np.ndarray:
+        if len(scores) == 0:
+            return np.array([], dtype=float)
+
+        s = np.asarray(scores, dtype=float)
+        s = np.clip(s, 0.0, 100.0)
+
+        if mask is None:
+            m = np.ones_like(s, dtype=bool)
+        else:
+            m = np.asarray(mask, dtype=bool)
+            if m.shape != s.shape:
+                raise ValueError("mask must have the same shape as scores")
+
+        w = np.zeros_like(s, dtype=float)
+        if np.any(m):
+            w[m] = (s[m] + float(self.params.eps)) ** float(self.params.gamma)
+
+        total = float(w.sum())
+        if total <= 0.0:
+            return np.zeros_like(s, dtype=float)
+
+        return float(self.params.R) * (w / total)
+
+    def save(self, path: Path | str) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump({"params": self.params.to_dict()}, f, indent=2)
+
+    @classmethod
+    def load(cls, path: Path | str) -> "PowerCalibrator":
+        with open(path) as f:
+            data = json.load(f)
+        return cls(params=PowerCalibrationParams.from_dict(data.get("params", {})))
+
+
 __all__ = [
     "CalibrationParams",
     "SoftmaxCalibrator",
+    "PowerCalibrationParams",
+    "PowerCalibrator",
     "apply_calibration",
     "apply_calibration_with_mask",
     "fit_calibration",
 ]
-
