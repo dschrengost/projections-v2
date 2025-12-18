@@ -723,6 +723,13 @@ def main():
     df = load_training_base(args.training_base)
     print(f"Loaded {len(df):,} rows")
 
+    # Some ad-hoc training bases (e.g., production-path joins) may not include
+    # a season column. Infer NBA season start year from game_date.
+    if "season" not in df.columns and "game_date" in df.columns:
+        gd = pd.to_datetime(df["game_date"], errors="coerce")
+        season = gd.dt.year.where(gd.dt.month >= 10, gd.dt.year - 1)
+        df["season"] = season.astype("Int64")
+
     print("\nPreparing features...")
     compute_historical = args.feature_set in ["v3", "v4", "v5", "v6"]
     compute_slate = args.feature_set in ["v4", "v5", "v6"]
