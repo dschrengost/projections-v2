@@ -65,13 +65,53 @@ def _load_schedule_with_times(game_date: date, data_root: Path) -> pd.DataFrame:
         return pd.DataFrame()
     
     df = pd.read_parquet(schedule_path)
-    df = df[df['game_date'] == str(game_date)]
+    df = df.copy()
+    df["_game_date"] = pd.to_datetime(df.get("game_date"), errors="coerce").dt.date
+    df = df[df["_game_date"] == game_date].copy()
+    df = df.drop(columns=["_game_date"], errors="ignore")
     
     # Parse tip_ts (UTC) to datetime for consistent gating / leak safety.
     if "tip_ts" in df.columns:
         df["game_start"] = pd.to_datetime(df["tip_ts"], utc=True, errors="coerce")
     
     return df
+
+
+def _load_dk_draft_group_lock_ts(
+    *,
+    draft_group_id: str,
+    data_root: Path,
+) -> datetime | None:
+    """Best-effort first-tip timestamp for a DK draft group from bronze draftables.
+
+    This is more reliable for backtests than the schedule parquet (which may only
+    contain recently scraped dates).
+    """
+
+    draftables_path = data_root / "bronze" / "dk" / "draftables" / f"draftables_raw_{draft_group_id}.json"
+    if not draftables_path.exists():
+        return None
+
+    try:
+        import json
+
+        payload = json.loads(draftables_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    comps = payload.get("competitions") if isinstance(payload, dict) else None
+    if not isinstance(comps, list) or not comps:
+        return None
+
+    starts = [c.get("startTime") for c in comps if isinstance(c, dict) and c.get("startTime")]
+    if not starts:
+        return None
+
+    parsed = pd.to_datetime(pd.Series(starts), utc=True, errors="coerce").dropna()
+    if parsed.empty:
+        return None
+    lock_ts = parsed.min()
+    return lock_ts.to_pydatetime() if hasattr(lock_ts, "to_pydatetime") else lock_ts
 
 
 def _get_locked_teams(schedule: pd.DataFrame, current_time: datetime) -> set:
@@ -201,6 +241,8 @@ def _load_fpts_predictions(
     game_date: date,
     run_id: str,
     data_root: Path,
+    *,
+    cutoff_ts: datetime | None = None,
 ) -> Optional[pd.DataFrame]:
     """
     Load FPTS predictions from sim_v2 worlds output.
@@ -211,12 +253,36 @@ def _load_fpts_predictions(
 
     sim_root = data_root / "artifacts" / "sim_v2" / "projections"
 
-    def _resolve_sim_run_dir(base_dir: Path, desired_run_id: str | None) -> Path | None:
+    def _resolve_sim_run_dir(
+        base_dir: Path,
+        desired_run_id: str | None,
+        *,
+        cutoff_ts_utc: datetime | None,
+    ) -> Path | None:
         # Prefer explicit run id from CLI when available.
         if desired_run_id:
             candidate = base_dir / f"run={desired_run_id}"
             if candidate.exists():
                 return candidate
+
+        # Backtest safety: if we have a cutoff timestamp (e.g., slate lock),
+        # prefer the latest run at or before that cutoff.
+        if cutoff_ts_utc is not None and base_dir.is_dir():
+            best_dt: datetime | None = None
+            best_dir: Path | None = None
+            for p in base_dir.iterdir():
+                if not p.is_dir() or not p.name.startswith("run="):
+                    continue
+                rid = p.name.split("run=", 1)[1]
+                try:
+                    dt = datetime.strptime(rid, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+                except ValueError:
+                    continue
+                if dt <= cutoff_ts_utc and (best_dt is None or dt > best_dt):
+                    best_dt = dt
+                    best_dir = p
+            if best_dir is not None:
+                return best_dir
 
         pointer = base_dir / "latest_run.json"
         if pointer.exists():
@@ -246,6 +312,14 @@ def _load_fpts_predictions(
             sim_root / f"date={day.isoformat()}",
             sim_root / day.isoformat(),
         ]
+
+        cutoff_ts_utc = None
+        if cutoff_ts is not None:
+            cutoff_dt = cutoff_ts.to_pydatetime() if hasattr(cutoff_ts, "to_pydatetime") else cutoff_ts
+            if isinstance(cutoff_dt, datetime):
+                cutoff_ts_utc = cutoff_dt if cutoff_dt.tzinfo is not None else cutoff_dt.replace(tzinfo=UTC)
+                cutoff_ts_utc = cutoff_ts_utc.astimezone(UTC)
+
         for base in candidates:
             if not base.exists():
                 continue
@@ -261,7 +335,7 @@ def _load_fpts_predictions(
                 except Exception:
                     pass
 
-            run_dir = _resolve_sim_run_dir(base, desired_run_id) if base.is_dir() else None
+            run_dir = _resolve_sim_run_dir(base, desired_run_id, cutoff_ts_utc=cutoff_ts_utc) if base.is_dir() else None
             if run_dir is None:
                 continue
             candidate = (
@@ -529,8 +603,9 @@ def score_ownership(
         print(f"[ownership] Empty slate data for {draft_group_id}")
         return None
     
-    # Load FPTS predictions from sim
-    fpts = _load_fpts_predictions(game_date, run_id, data_root)
+    # Load FPTS predictions from sim. For backtests, use the slate cutoff time
+    # (usually the first tip) to avoid accidentally selecting post-lock runs.
+    fpts = _load_fpts_predictions(game_date, run_id, data_root, cutoff_ts=injuries_cutoff_ts)
     
     if fpts is None or fpts.empty:
         print(f"[ownership] No FPTS predictions for {game_date}, using salary-based estimate")
@@ -552,14 +627,56 @@ def score_ownership(
         
         minutes_root = Path("/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily") / str(game_date)
         latest_pointer = minutes_root / "latest_run.json"
-        
+
+        def _coerce_cutoff_ts() -> datetime | None:
+            if injuries_cutoff_ts is None:
+                return None
+            cutoff_dt = (
+                injuries_cutoff_ts.to_pydatetime()
+                if hasattr(injuries_cutoff_ts, "to_pydatetime")
+                else injuries_cutoff_ts
+            )
+            if not isinstance(cutoff_dt, datetime):
+                return None
+            cutoff_dt = cutoff_dt if cutoff_dt.tzinfo is not None else cutoff_dt.replace(tzinfo=UTC)
+            return cutoff_dt.astimezone(UTC)
+
+        cutoff_ts_utc = _coerce_cutoff_ts()
+
         player_id_map = None
         team_id_to_tricode: dict[int, str] | None = None
-        if latest_pointer.exists():
+        status_map = None
+
+        chosen_minutes_run: str | None = None
+        # Prefer explicit run_id when minutes artifacts exist for it (production).
+        explicit_minutes_path = minutes_root / f"run={run_id}" / "minutes.parquet"
+        if explicit_minutes_path.exists():
+            chosen_minutes_run = run_id
+        elif cutoff_ts_utc is not None and minutes_root.exists():
+            # Backtest safety: choose the latest minutes run at or before cutoff.
+            best_dt: datetime | None = None
+            for p in minutes_root.iterdir():
+                if not p.is_dir() or not p.name.startswith("run="):
+                    continue
+                rid = p.name.split("run=", 1)[1]
+                try:
+                    dt = datetime.strptime(rid, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+                except ValueError:
+                    continue
+                if dt <= cutoff_ts_utc and (best_dt is None or dt > best_dt):
+                    best_dt = dt
+                    chosen_minutes_run = rid
+
+        if chosen_minutes_run is None and latest_pointer.exists():
             try:
                 with open(latest_pointer) as f:
-                    latest_run = json.load(f).get("run_id")
-                minutes_path = minutes_root / f"run={latest_run}" / "minutes.parquet"
+                    chosen_minutes_run = json.load(f).get("run_id")
+            except Exception as e:
+                print(f"[ownership] Failed to load minutes for mapping: {e}")
+
+        if chosen_minutes_run is not None:
+            try:
+                minutes_path = minutes_root / f"run={chosen_minutes_run}" / "minutes.parquet"
                 if minutes_path.exists():
                     # Load player_id, player_name, and status (for OUT filtering)
                     cols_to_load = ["player_id", "player_name"]
@@ -572,14 +689,13 @@ def score_ownership(
                     if "team_tricode" in minutes_df.columns:
                         cols_to_load.append("team_tricode")
                     minutes_df = minutes_df[[c for c in cols_to_load if c in minutes_df.columns]].copy()
-                    
+
                     # Create name -> player_id mapping using normalized names
                     # This handles European characters like Dončić -> doncic
                     minutes_df["_name_norm"] = minutes_df["player_name"].apply(_normalize_name)
                     player_id_map = minutes_df.drop_duplicates("_name_norm").set_index("_name_norm")["player_id"]
-                    
+
                     # Also create player_id -> status map for OUT filtering
-                    status_map = None
                     if "status" in minutes_df.columns:
                         status_map = minutes_df.drop_duplicates("player_id").set_index("player_id")["status"]
                     if {"team_id", "team_tricode"}.issubset(minutes_df.columns):
@@ -836,30 +952,30 @@ def score_all_slates(
     
     for dg_id, slate_df in slates.items():
         slate_teams = set(slate_df["team"].unique()) if "team" in slate_df.columns else set()
-        slate_lock_ts = _get_slate_first_game_time(slate_teams, schedule)
-        cutoff_ts = None
-        if slate_lock_ts is not None:
-            cutoff_ts = min(current_time, slate_lock_ts)
-        else:
-            cutoff_ts = current_time
+        slate_lock_ts = _load_dk_draft_group_lock_ts(draft_group_id=str(dg_id), data_root=data_root)
+        if slate_lock_ts is None:
+            slate_lock_ts = _get_slate_first_game_time(slate_teams, schedule)
+        cutoff_ts = min(current_time, slate_lock_ts) if slate_lock_ts is not None else current_time
         
         # Check if this slate is locked
-        if not ignore_lock_cache and _is_slate_locked(slate_teams, schedule, current_time):
-            first_game = _get_slate_first_game_time(slate_teams, schedule)
-            print(f"[ownership] Slate {dg_id} is LOCKED (first game: {first_game})")
-            
-            # Try to load cached predictions
-            cached = _load_locked_predictions(game_date, dg_id, data_root)
-            if cached is not None and not cached.empty:
-                cached["is_locked"] = True
-                results[dg_id] = cached
-                print(f"  -> Using cached predictions: {len(cached)} players")
-                continue
+        is_locked = slate_lock_ts is not None and current_time >= slate_lock_ts
+        if is_locked:
+            print(f"[ownership] Slate {dg_id} is LOCKED (first game: {slate_lock_ts})")
+
+            if not ignore_lock_cache:
+                # Try to load cached predictions
+                cached = _load_locked_predictions(game_date, dg_id, data_root)
+                if cached is not None and not cached.empty:
+                    cached["is_locked"] = True
+                    results[dg_id] = cached
+                    print(f"  -> Using cached predictions: {len(cached)} players")
+                    continue
+                else:
+                    print("  -> WARNING: No cached predictions, scoring anyway")
             else:
-                print("  -> WARNING: No cached predictions, scoring anyway")
+                print("  -> Backtest mode: ignoring lock cache, rescoring anyway")
         else:
-            first_game = _get_slate_first_game_time(slate_teams, schedule)
-            print(f"[ownership] Slate {dg_id} is UNLOCKED (first game: {first_game})")
+            print(f"[ownership] Slate {dg_id} is UNLOCKED (first game: {slate_lock_ts})")
         
         # Score this slate
         predictions = score_ownership(
@@ -897,8 +1013,10 @@ def _save_slates_metadata(
     for dg_id, df in results.items():
         teams = list(df["team"].unique()) if "team" in df.columns else []
         slate_teams = set(teams)
-        first_game = _get_slate_first_game_time(slate_teams, schedule)
-        is_locked = _is_slate_locked(slate_teams, schedule, current_time)
+        first_game = _load_dk_draft_group_lock_ts(draft_group_id=str(dg_id), data_root=data_root)
+        if first_game is None:
+            first_game = _get_slate_first_game_time(slate_teams, schedule)
+        is_locked = first_game is not None and current_time >= first_game
         
         slates_meta[dg_id] = {
             "player_count": len(df),

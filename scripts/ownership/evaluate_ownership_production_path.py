@@ -312,11 +312,16 @@ def _load_live_preds_for_date(pred_root: Path, game_date: date, *, snapshot: str
     # Prefer locked snapshot per draft_group_id when available.
     chosen: dict[str, Path] = {}
     for p in parquet_files:
-        m = re.match(r"^(?P<dg>\\d+)(?P<locked>_locked)?\\.parquet$", p.name)
-        if not m:
+        name = p.name
+        locked = name.endswith("_locked.parquet")
+        if locked:
+            dg = name[: -len("_locked.parquet")]
+        else:
+            if not name.endswith(".parquet"):
+                continue
+            dg = name[: -len(".parquet")]
+        if not dg.isdigit():
             continue
-        dg = m.group("dg")
-        locked = m.group("locked") is not None
         if snapshot == "locked":
             if locked:
                 chosen[dg] = p
@@ -618,4 +623,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
