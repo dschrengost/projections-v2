@@ -730,15 +730,23 @@ def _score_rows(
 
     # Force play_prob to 0.0 for known OUT players (if they were allowed through filtering).
     # Also zero their minutes quantiles so they don't contribute to team totals.
+    # Check both injury status AND lineup_role (from daily lineups) to catch late scratches.
+    out_mask = pd.Series(False, index=working.index)
     if "status" in working.columns:
         status_col = working["status"].astype(str).str.upper()
-        out_mask = status_col == AvailabilityStatus.OUT.value
-        if out_mask.any():
-            working.loc[out_mask, "play_prob"] = 0.0
-            # Zero minutes for OUT players - they should not contribute to team totals
-            for min_col in ["minutes_p10", "minutes_p50", "minutes_p90"]:
-                if min_col in working.columns:
-                    working.loc[out_mask, min_col] = 0.0
+        out_mask = out_mask | (status_col == AvailabilityStatus.OUT.value)
+    if "lineup_role" in working.columns:
+        lineup_role_col = working["lineup_role"].astype(str).str.lower()
+        out_mask = out_mask | (lineup_role_col == "out")
+    if out_mask.any():
+        working.loc[out_mask, "play_prob"] = 0.0
+        # Zero minutes for OUT players - they should not contribute to team totals
+        for min_col in ["minutes_p10", "minutes_p50", "minutes_p90"]:
+            if min_col in working.columns:
+                working.loc[out_mask, min_col] = 0.0
+        # Update status to OUT if it wasn't already (for lineup_role outs)
+        if "status" in working.columns:
+            working.loc[out_mask, "status"] = AvailabilityStatus.OUT.value
     if enable_play_prob_mixing:
         typer.echo(
             "play_prob mixing flag enabled for scoring (lab only); conditional minutes remain unchanged.",

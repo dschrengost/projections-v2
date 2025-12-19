@@ -59,6 +59,8 @@ export interface QuickBuildRequest {
     ownership_penalty_enabled?: boolean
     ownership_lambda?: number
     randomness_pct?: number | null
+    use_user_overrides?: boolean
+    ownership_mode?: string
 }
 
 export interface JobStatus {
@@ -223,4 +225,107 @@ export async function deleteSavedBuild(date: string, jobId: string): Promise<voi
         const body = await res.json().catch(() => ({}))
         throw new Error(body.detail || `Failed to delete build: ${res.status}`)
     }
+}
+
+// ---------------------------------------------------------------------------
+// User Overrides
+// ---------------------------------------------------------------------------
+
+export interface PlayerOverride {
+    player_id: string
+    minutes?: number | null
+    fpts?: number | null
+    own?: number | null
+    is_out: boolean
+    updated_at?: string
+}
+
+export interface SlateOverrides {
+    game_date: string
+    draft_group_id: number
+    client_revision: number
+    updated_at: string
+    overrides: PlayerOverride[]
+}
+
+export interface PoolPlayerWithOverrides extends PoolPlayer {
+    model_proj?: number
+    model_minutes?: number
+    model_own?: number
+    effective_proj?: number
+    effective_minutes?: number
+    effective_own?: number
+    has_override?: boolean
+    used_fppm_fallback?: boolean
+    fppm?: number
+    is_active?: boolean
+}
+
+export async function getOverrides(
+    date: string,
+    draftGroupId: number,
+): Promise<SlateOverrides> {
+    const res = await fetch(
+        apiUrl(`/api/optimizer/overrides?date=${date}&draft_group_id=${draftGroupId}`)
+    )
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Failed to fetch overrides: ${res.status}`)
+    }
+    return res.json()
+}
+
+export async function saveOverrides(
+    date: string,
+    draftGroupId: number,
+    overrides: PlayerOverride[],
+    expectedRevision?: number,
+): Promise<SlateOverrides> {
+    const res = await fetch(apiUrl('/api/optimizer/overrides'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            date,
+            draft_group_id: draftGroupId,
+            overrides,
+            expected_revision: expectedRevision ?? null,
+        }),
+    })
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Failed to save overrides: ${res.status}`)
+    }
+    return res.json()
+}
+
+export async function clearOverrides(
+    date: string,
+    draftGroupId: number,
+): Promise<{ status: string; count: number }> {
+    const res = await fetch(
+        apiUrl(`/api/optimizer/overrides?date=${date}&draft_group_id=${draftGroupId}`),
+        { method: 'DELETE' }
+    )
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Failed to clear overrides: ${res.status}`)
+    }
+    return res.json()
+}
+
+export async function getPlayerPoolWithOverrides(
+    date: string,
+    draftGroupId: number,
+    runId?: string | null,
+): Promise<PoolPlayerWithOverrides[]> {
+    let url = apiUrl(
+        `/api/optimizer/pool?date=${date}&draft_group_id=${draftGroupId}&use_user_overrides=true`
+    )
+    if (runId) url += `&run_id=${encodeURIComponent(runId)}`
+    const res = await fetch(url)
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Failed to fetch pool with overrides: ${res.status}`)
+    }
+    return res.json()
 }

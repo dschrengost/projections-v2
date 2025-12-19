@@ -1,0 +1,5315 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41257631,
+      "firstName": "Tyrese",
+      "lastName": "Maxey",
+      "displayName": "Tyrese Maxey",
+      "shortName": "T. Maxey",
+      "playerId": 1186160,
+      "playerDkId": 527230,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 15600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527230.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527230.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "54.1",
+          "sortValue": "54.1"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1186160-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257632,
+      "firstName": "Jalen",
+      "lastName": "Brunson",
+      "displayName": "Jalen Brunson",
+      "shortName": "J. Brunson",
+      "playerId": 887914,
+      "playerDkId": 33006,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 14100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33006.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33006.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "44.6",
+          "sortValue": "44.6"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "887914-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257633,
+      "firstName": "Karl-Anthony",
+      "lastName": "Towns",
+      "displayName": "Karl-Anthony Towns",
+      "shortName": "K. Towns",
+      "playerId": 837030,
+      "playerDkId": 33194,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 13500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33194.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33194.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "45.7",
+          "sortValue": "45.7"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "837030-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257634,
+      "firstName": "Joel",
+      "lastName": "Embiid",
+      "displayName": "Joel Embiid",
+      "shortName": "J. Embiid",
+      "playerId": 794508,
+      "playerDkId": 33292,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 12600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33292.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33292.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.6",
+          "sortValue": "36.6"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "794508-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257635,
+      "firstName": "Josh",
+      "lastName": "Hart",
+      "displayName": "Josh Hart",
+      "shortName": "J. Hart",
+      "playerId": 741892,
+      "playerDkId": 33217,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 12000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33217.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33217.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.1",
+          "sortValue": "33.1"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "741892-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257636,
+      "firstName": "OG",
+      "lastName": "Anunoby",
+      "displayName": "OG Anunoby",
+      "shortName": "O. Anunoby",
+      "playerId": 900535,
+      "playerDkId": 33382,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 11100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33382.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33382.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.3",
+          "sortValue": "32.3"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "900535-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257637,
+      "firstName": "Mikal",
+      "lastName": "Bridges",
+      "displayName": "Mikal Bridges",
+      "shortName": "M. Bridges",
+      "playerId": 846400,
+      "playerDkId": 33313,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 10500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33313.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33313.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "35.0",
+          "sortValue": "35.0"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "846400-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257597,
+      "firstName": "Tyrese",
+      "lastName": "Maxey",
+      "displayName": "Tyrese Maxey",
+      "shortName": "T. Maxey",
+      "playerId": 1186160,
+      "playerDkId": 527230,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 10400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527230.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527230.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "54.1",
+          "sortValue": "54.1"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1186160-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257638,
+      "firstName": "Paul",
+      "lastName": "George",
+      "displayName": "Paul George",
+      "shortName": "P. George",
+      "playerId": 469218,
+      "playerDkId": 33100,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 10200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33100.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33100.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.4",
+          "sortValue": "32.4"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "469218-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257639,
+      "firstName": "Quentin",
+      "lastName": "Grimes",
+      "displayName": "Quentin Grimes",
+      "shortName": "Q. Grimes",
+      "playerId": 1132827,
+      "playerDkId": 591030,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 9900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591030.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591030.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "30.8",
+          "sortValue": "30.8"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1132827-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257640,
+      "firstName": "VJ",
+      "lastName": "Edgecombe",
+      "displayName": "VJ Edgecombe",
+      "shortName": "V. Edgecombe",
+      "playerId": 1519361,
+      "playerDkId": 905552,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 9600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905552.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905552.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.9",
+          "sortValue": "31.9"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1519361-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257598,
+      "firstName": "Jalen",
+      "lastName": "Brunson",
+      "displayName": "Jalen Brunson",
+      "shortName": "J. Brunson",
+      "playerId": 887914,
+      "playerDkId": 33006,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 9400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33006.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33006.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "44.6",
+          "sortValue": "44.6"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "887914-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257599,
+      "firstName": "Karl-Anthony",
+      "lastName": "Towns",
+      "displayName": "Karl-Anthony Towns",
+      "shortName": "K. Towns",
+      "playerId": 837030,
+      "playerDkId": 33194,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 9000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33194.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33194.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "45.7",
+          "sortValue": "45.7"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "837030-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257641,
+      "firstName": "Andre",
+      "lastName": "Drummond",
+      "displayName": "Andre Drummond",
+      "shortName": "A. Drummond",
+      "playerId": 614746,
+      "playerDkId": 33035,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 9000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33035.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33035.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "24.1",
+          "sortValue": "24.1"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "614746-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257642,
+      "firstName": "Kelly",
+      "lastName": "Oubre Jr.",
+      "displayName": "Kelly Oubre Jr.",
+      "shortName": "K. Oubre Jr.",
+      "playerId": 843271,
+      "playerDkId": 33310,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 8700,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33310.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33310.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.4",
+          "sortValue": "29.4"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "843271-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257600,
+      "firstName": "Joel",
+      "lastName": "Embiid",
+      "displayName": "Joel Embiid",
+      "shortName": "J. Embiid",
+      "playerId": 794508,
+      "playerDkId": 33292,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 8400,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33292.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33292.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.6",
+          "sortValue": "36.6"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "794508-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257643,
+      "firstName": "Jordan",
+      "lastName": "Clarkson",
+      "displayName": "Jordan Clarkson",
+      "shortName": "J. Clarkson",
+      "playerId": 551975,
+      "playerDkId": 32983,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 8100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32983.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32983.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.3",
+          "sortValue": "16.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "551975-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257601,
+      "firstName": "Josh",
+      "lastName": "Hart",
+      "displayName": "Josh Hart",
+      "shortName": "J. Hart",
+      "playerId": 741892,
+      "playerDkId": 33217,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 8000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33217.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33217.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.1",
+          "sortValue": "33.1"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "741892-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257644,
+      "firstName": "Dominick",
+      "lastName": "Barlow",
+      "displayName": "Dominick Barlow",
+      "shortName": "D. Barlow",
+      "playerId": 1419291,
+      "playerDkId": 678122,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 7500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/678122.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/678122.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.8",
+          "sortValue": "21.8"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1419291-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257602,
+      "firstName": "OG",
+      "lastName": "Anunoby",
+      "displayName": "OG Anunoby",
+      "shortName": "O. Anunoby",
+      "playerId": 900535,
+      "playerDkId": 33382,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 7400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33382.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33382.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.3",
+          "sortValue": "32.3"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "900535-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257603,
+      "firstName": "Mikal",
+      "lastName": "Bridges",
+      "displayName": "Mikal Bridges",
+      "shortName": "M. Bridges",
+      "playerId": 846400,
+      "playerDkId": 33313,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 7000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33313.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33313.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "35.0",
+          "sortValue": "35.0"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "846400-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257645,
+      "firstName": "Mitchell",
+      "lastName": "Robinson",
+      "displayName": "Mitchell Robinson",
+      "shortName": "M. Robinson",
+      "playerId": 1076265,
+      "playerDkId": 33242,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 6900,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33242.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33242.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.4",
+          "sortValue": "19.4"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1076265-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257604,
+      "firstName": "Paul",
+      "lastName": "George",
+      "displayName": "Paul George",
+      "shortName": "P. George",
+      "playerId": 469218,
+      "playerDkId": 33100,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 6800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33100.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33100.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.4",
+          "sortValue": "32.4"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "469218-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257605,
+      "firstName": "Quentin",
+      "lastName": "Grimes",
+      "displayName": "Quentin Grimes",
+      "shortName": "Q. Grimes",
+      "playerId": 1132827,
+      "playerDkId": 591030,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 6600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591030.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591030.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "30.8",
+          "sortValue": "30.8"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1132827-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257663,
+      "firstName": "Miles",
+      "lastName": "McBride",
+      "displayName": "Miles McBride",
+      "shortName": "M. McBride",
+      "playerId": 1175084,
+      "playerDkId": 591041,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 6600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591041.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591041.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1175084-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257606,
+      "firstName": "VJ",
+      "lastName": "Edgecombe",
+      "displayName": "VJ Edgecombe",
+      "shortName": "V. Edgecombe",
+      "playerId": 1519361,
+      "playerDkId": 905552,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 6400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905552.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905552.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.9",
+          "sortValue": "31.9"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1519361-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257646,
+      "firstName": "Trendon",
+      "lastName": "Watford",
+      "displayName": "Trendon Watford",
+      "shortName": "T. Watford",
+      "playerId": 1176529,
+      "playerDkId": 591097,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 6300,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591097.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591097.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1176529-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257607,
+      "firstName": "Andre",
+      "lastName": "Drummond",
+      "displayName": "Andre Drummond",
+      "shortName": "A. Drummond",
+      "playerId": 614746,
+      "playerDkId": 33035,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 6000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33035.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33035.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "24.1",
+          "sortValue": "24.1"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "614746-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257647,
+      "firstName": "Jared",
+      "lastName": "McCain",
+      "displayName": "Jared McCain",
+      "shortName": "J. McCain",
+      "playerId": 1458807,
+      "playerDkId": 800373,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 6000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800373.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800373.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.0",
+          "sortValue": "14.0"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1458807-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257608,
+      "firstName": "Kelly",
+      "lastName": "Oubre Jr.",
+      "displayName": "Kelly Oubre Jr.",
+      "shortName": "K. Oubre Jr.",
+      "playerId": 843271,
+      "playerDkId": 33310,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 5800,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33310.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33310.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.4",
+          "sortValue": "29.4"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "843271-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257664,
+      "firstName": "Landry",
+      "lastName": "Shamet",
+      "displayName": "Landry Shamet",
+      "shortName": "L. Shamet",
+      "playerId": 893100,
+      "playerDkId": 33111,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 5700,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33111.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33111.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.5",
+          "sortValue": "15.5"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "893100-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257609,
+      "firstName": "Jordan",
+      "lastName": "Clarkson",
+      "displayName": "Jordan Clarkson",
+      "shortName": "J. Clarkson",
+      "playerId": 551975,
+      "playerDkId": 32983,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32983.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32983.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.3",
+          "sortValue": "16.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "551975-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257648,
+      "firstName": "Tyler",
+      "lastName": "Kolek",
+      "displayName": "Tyler Kolek",
+      "shortName": "T. Kolek",
+      "playerId": 1232325,
+      "playerDkId": 800652,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800652.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800652.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.2",
+          "sortValue": "11.2"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1232325-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257610,
+      "firstName": "Dominick",
+      "lastName": "Barlow",
+      "displayName": "Dominick Barlow",
+      "shortName": "D. Barlow",
+      "playerId": 1419291,
+      "playerDkId": 678122,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 5000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/678122.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/678122.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.8",
+          "sortValue": "21.8"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1419291-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257649,
+      "firstName": "Ariel",
+      "lastName": "Hukporti",
+      "displayName": "Ariel Hukporti",
+      "shortName": "A. Hukporti",
+      "playerId": 1350535,
+      "playerDkId": 800801,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800801.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800801.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.6",
+          "sortValue": "6.6"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1350535-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257611,
+      "firstName": "Mitchell",
+      "lastName": "Robinson",
+      "displayName": "Mitchell Robinson",
+      "shortName": "M. Robinson",
+      "playerId": 1076265,
+      "playerDkId": 33242,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 4600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33242.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33242.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.4",
+          "sortValue": "19.4"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1076265-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257650,
+      "firstName": "Jabari",
+      "lastName": "Walker",
+      "displayName": "Jabari Walker",
+      "shortName": "J. Walker",
+      "playerId": 1232517,
+      "playerDkId": 649593,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 4500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649593.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649593.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.9",
+          "sortValue": "10.9"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1232517-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257629,
+      "firstName": "Miles",
+      "lastName": "McBride",
+      "displayName": "Miles McBride",
+      "shortName": "M. McBride",
+      "playerId": 1175084,
+      "playerDkId": 591041,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 4400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591041.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591041.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1175084-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257612,
+      "firstName": "Trendon",
+      "lastName": "Watford",
+      "displayName": "Trendon Watford",
+      "shortName": "T. Watford",
+      "playerId": 1176529,
+      "playerDkId": 591097,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 4200,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591097.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591097.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1176529-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257651,
+      "firstName": "Guerschon",
+      "lastName": "Yabusele",
+      "displayName": "Guerschon Yabusele",
+      "shortName": "G. Yabusele",
+      "playerId": 920087,
+      "playerDkId": 58783,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/58783.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/58783.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.0",
+          "sortValue": "7.0"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "920087-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257613,
+      "firstName": "Jared",
+      "lastName": "McCain",
+      "displayName": "Jared McCain",
+      "shortName": "J. McCain",
+      "playerId": 1458807,
+      "playerDkId": 800373,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 4000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800373.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800373.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.0",
+          "sortValue": "14.0"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1458807-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257630,
+      "firstName": "Landry",
+      "lastName": "Shamet",
+      "displayName": "Landry Shamet",
+      "shortName": "L. Shamet",
+      "playerId": 893100,
+      "playerDkId": 33111,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 3800,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33111.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33111.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.5",
+          "sortValue": "15.5"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "893100-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257614,
+      "firstName": "Tyler",
+      "lastName": "Kolek",
+      "displayName": "Tyler Kolek",
+      "shortName": "T. Kolek",
+      "playerId": 1232325,
+      "playerDkId": 800652,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800652.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800652.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.2",
+          "sortValue": "11.2"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1232325-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257652,
+      "firstName": "Justin",
+      "lastName": "Edwards",
+      "displayName": "Justin Edwards",
+      "shortName": "J. Edwards",
+      "playerId": 1465002,
+      "playerDkId": 800676,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800676.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800676.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.1",
+          "sortValue": "12.1"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1465002-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257615,
+      "firstName": "Ariel",
+      "lastName": "Hukporti",
+      "displayName": "Ariel Hukporti",
+      "shortName": "A. Hukporti",
+      "playerId": 1350535,
+      "playerDkId": 800801,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 3200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800801.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800801.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.6",
+          "sortValue": "6.6"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1350535-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257616,
+      "firstName": "Jabari",
+      "lastName": "Walker",
+      "displayName": "Jabari Walker",
+      "shortName": "J. Walker",
+      "playerId": 1232517,
+      "playerDkId": 649593,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649593.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649593.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.9",
+          "sortValue": "10.9"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1232517-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257653,
+      "firstName": "Adem",
+      "lastName": "Bona",
+      "displayName": "Adem Bona",
+      "shortName": "A. Bona",
+      "playerId": 1350567,
+      "playerDkId": 800658,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800658.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800658.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.8",
+          "sortValue": "11.8"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1350567-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257617,
+      "firstName": "Guerschon",
+      "lastName": "Yabusele",
+      "displayName": "Guerschon Yabusele",
+      "shortName": "G. Yabusele",
+      "playerId": 920087,
+      "playerDkId": 58783,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 2800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/58783.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/58783.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.0",
+          "sortValue": "7.0"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "920087-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257618,
+      "firstName": "Justin",
+      "lastName": "Edwards",
+      "displayName": "Justin Edwards",
+      "shortName": "J. Edwards",
+      "playerId": 1465002,
+      "playerDkId": 800676,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800676.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800676.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.1",
+          "sortValue": "12.1"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1465002-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257654,
+      "firstName": "Kyle",
+      "lastName": "Lowry",
+      "displayName": "Kyle Lowry",
+      "shortName": "K. Lowry",
+      "playerId": 266394,
+      "playerDkId": 33371,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33371.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33371.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.6",
+          "sortValue": "4.6"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "266394-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257619,
+      "firstName": "Adem",
+      "lastName": "Bona",
+      "displayName": "Adem Bona",
+      "shortName": "A. Bona",
+      "playerId": 1350567,
+      "playerDkId": 800658,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 2000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800658.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800658.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.8",
+          "sortValue": "11.8"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1350567-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257620,
+      "firstName": "Kyle",
+      "lastName": "Lowry",
+      "displayName": "Kyle Lowry",
+      "shortName": "K. Lowry",
+      "playerId": 266394,
+      "playerDkId": 33371,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33371.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33371.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.6",
+          "sortValue": "4.6"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "266394-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257655,
+      "firstName": "Johni",
+      "lastName": "Broome",
+      "displayName": "Johni Broome",
+      "shortName": "J. Broome",
+      "playerId": 1231975,
+      "playerDkId": 906342,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906342.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906342.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.9",
+          "sortValue": "5.9"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1231975-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257656,
+      "firstName": "Kevin",
+      "lastName": "McCullar Jr.",
+      "displayName": "Kevin McCullar Jr.",
+      "shortName": "K. McCullar Jr.",
+      "playerId": 1156809,
+      "playerDkId": 799444,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/799444.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/799444.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.4",
+          "sortValue": "2.4"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1156809-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257657,
+      "firstName": "Eric",
+      "lastName": "Gordon",
+      "displayName": "Eric Gordon",
+      "shortName": "E. Gordon",
+      "playerId": 401085,
+      "playerDkId": 33069,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33069.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33069.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.0",
+          "sortValue": "7.0"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "401085-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257658,
+      "firstName": "Hunter",
+      "lastName": "Sallis",
+      "displayName": "Hunter Sallis",
+      "shortName": "H. Sallis",
+      "playerId": 1343005,
+      "playerDkId": 906407,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906407.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906407.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.3",
+          "sortValue": "2.3"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1343005-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257659,
+      "firstName": "Trey",
+      "lastName": "Jemison",
+      "displayName": "Trey Jemison",
+      "shortName": "T. Jemison",
+      "playerId": 1132023,
+      "playerDkId": 717494,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/717494.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/717494.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.3",
+          "sortValue": "4.3"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1132023-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257660,
+      "firstName": "Mohamed",
+      "lastName": "Diawara",
+      "displayName": "Mohamed Diawara",
+      "shortName": "M. Diawara",
+      "playerId": 1437712,
+      "playerDkId": 906387,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906387.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906387.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.1",
+          "sortValue": "3.1"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1437712-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257661,
+      "firstName": "Pacome",
+      "lastName": "Dadiet",
+      "displayName": "Pacome Dadiet",
+      "shortName": "P. Dadiet",
+      "playerId": 1500956,
+      "playerDkId": 800410,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800410.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800410.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.7",
+          "sortValue": "1.7"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1500956-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257662,
+      "firstName": "Tosan",
+      "lastName": "Evbuomwan",
+      "displayName": "Tosan Evbuomwan",
+      "shortName": "T. Evbuomwan",
+      "playerId": 1197249,
+      "playerDkId": 713827,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713827.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713827.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "0.6",
+          "sortValue": "0.6"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1197249-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257621,
+      "firstName": "Johni",
+      "lastName": "Broome",
+      "displayName": "Johni Broome",
+      "shortName": "J. Broome",
+      "playerId": 1231975,
+      "playerDkId": 906342,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906342.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906342.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.9",
+          "sortValue": "5.9"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1231975-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257622,
+      "firstName": "Kevin",
+      "lastName": "McCullar Jr.",
+      "displayName": "Kevin McCullar Jr.",
+      "shortName": "K. McCullar Jr.",
+      "playerId": 1156809,
+      "playerDkId": 799444,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/799444.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/799444.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.4",
+          "sortValue": "2.4"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1156809-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257623,
+      "firstName": "Eric",
+      "lastName": "Gordon",
+      "displayName": "Eric Gordon",
+      "shortName": "E. Gordon",
+      "playerId": 401085,
+      "playerDkId": 33069,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33069.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33069.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.0",
+          "sortValue": "7.0"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "401085-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257624,
+      "firstName": "Hunter",
+      "lastName": "Sallis",
+      "displayName": "Hunter Sallis",
+      "shortName": "H. Sallis",
+      "playerId": 1343005,
+      "playerDkId": 906407,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906407.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906407.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.3",
+          "sortValue": "2.3"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1343005-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257625,
+      "firstName": "Trey",
+      "lastName": "Jemison",
+      "displayName": "Trey Jemison",
+      "shortName": "T. Jemison",
+      "playerId": 1132023,
+      "playerDkId": 717494,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/717494.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/717494.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.3",
+          "sortValue": "4.3"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1132023-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257626,
+      "firstName": "Mohamed",
+      "lastName": "Diawara",
+      "displayName": "Mohamed Diawara",
+      "shortName": "M. Diawara",
+      "playerId": 1437712,
+      "playerDkId": 906387,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906387.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906387.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.1",
+          "sortValue": "3.1"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1437712-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257627,
+      "firstName": "Pacome",
+      "lastName": "Dadiet",
+      "displayName": "Pacome Dadiet",
+      "shortName": "P. Dadiet",
+      "playerId": 1500956,
+      "playerDkId": 800410,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800410.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800410.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.7",
+          "sortValue": "1.7"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1500956-6133356",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41257628,
+      "firstName": "Tosan",
+      "lastName": "Evbuomwan",
+      "displayName": "Tosan Evbuomwan",
+      "shortName": "T. Evbuomwan",
+      "playerId": 1197249,
+      "playerDkId": 713827,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713827.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713827.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133356,
+        "name": "PHI @ NYK",
+        "nameDisplay": [
+          {
+            "value": "PHI"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133356,
+          "name": "PHI @ NYK",
+          "nameDisplay": [
+            {
+              "value": "PHI"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "0.6",
+          "sortValue": "0.6"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1197249-6133356",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6133356,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 18,
+        "teamName": "Knicks",
+        "abbreviation": "NYK",
+        "city": "New York",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32940.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 20,
+        "teamName": "76ers",
+        "abbreviation": "PHI",
+        "city": "Philadelphia",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32947.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32947.png"
+      },
+      "startTime": "2025-12-20T00:00:00.0000000Z",
+      "name": "PHI @ NYK",
+      "venue": "Madison Square Garden",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 32,
+          "value": "AMZN"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}

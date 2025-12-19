@@ -252,6 +252,32 @@ def _resolve_sim_run_dir(base_dir: Path) -> Path | None:
     return base_dir if (base_dir / SIM_PROJECTIONS_FILENAME).exists() else None
 
 
+def _load_ownership_predictions(day: date, data_root: Path) -> pd.DataFrame | None:
+    """Load ownership predictions for a date, returning the main slate."""
+    slate_dir = data_root / "silver" / "ownership_predictions" / str(day)
+
+    if slate_dir.exists():
+        slate_files = list(slate_dir.glob("*.parquet"))
+        slate_files = [f for f in slate_files if not f.name.endswith("_locked.parquet")]
+        if slate_files:
+            # Use largest slate (main slate)
+            own_path = max(slate_files, key=lambda f: f.stat().st_size)
+            try:
+                return pd.read_parquet(own_path)
+            except Exception:
+                pass
+
+    # Fall back to legacy single-file format
+    legacy_path = data_root / "silver" / "ownership_predictions" / f"{day}.parquet"
+    if legacy_path.exists():
+        try:
+            return pd.read_parquet(legacy_path)
+        except Exception:
+            pass
+
+    return None
+
+
 def _load_sim_projections(day: date, root: Path) -> pd.DataFrame | None:
     candidates = [
         root / f"game_date={day.isoformat()}",  # New format (run_sim_live.py)
@@ -443,6 +469,41 @@ def create_app(
                     else:
                         rename_map[col] = f"sim_{col}"
                 df = df.merge(sim_df.rename(columns=rename_map), on=join_keys, how="left")
+
+        # Merge ownership predictions (includes salary)
+        # Note: ownership uses DK player_ids, minutes uses NBA player_ids, so join on normalized name+team
+        own_df = _load_ownership_predictions(slate_day, data_root)
+        if own_df is not None and "player_name" in own_df.columns and "player_name" in df.columns:
+            import unicodedata
+            def _norm_name(s: str) -> str:
+                if not s:
+                    return ""
+                normalized = unicodedata.normalize("NFKD", str(s))
+                return normalized.encode("ascii", "ignore").decode("ascii").lower().strip()
+
+            # Create normalized join keys
+            own_df = own_df.copy()
+            own_df["_join_name"] = own_df["player_name"].apply(_norm_name)
+            if "team" in own_df.columns:
+                own_df["_join_team"] = own_df["team"].str.upper()
+            df["_join_name"] = df["player_name"].apply(_norm_name)
+            if "team_tricode" in df.columns:
+                df["_join_team"] = df["team_tricode"].str.upper()
+
+            # Select columns for merge
+            own_merge_cols = ["_join_name", "_join_team", "salary", "pred_own_pct"]
+            if "is_locked" in own_df.columns:
+                own_merge_cols.append("is_locked")
+            own_merge_cols = [c for c in own_merge_cols if c in own_df.columns]
+
+            join_cols = ["_join_name", "_join_team"] if "_join_team" in df.columns else ["_join_name"]
+            join_cols = [c for c in join_cols if c in own_df.columns]
+
+            if join_cols:
+                df = df.merge(own_df[own_merge_cols].drop_duplicates(subset=join_cols), on=join_cols, how="left")
+                # Clean up temp columns
+                df = df.drop(columns=["_join_name", "_join_team"], errors="ignore")
+
         players = _serialize_players(df)
         payload = {"date": slate_day.isoformat(), "count": len(players), "players": players}
         return JSONResponse(payload)

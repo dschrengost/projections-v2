@@ -1,0 +1,5455 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41258263,
+      "firstName": "Shai",
+      "lastName": "Gilgeous-Alexander",
+      "displayName": "Shai Gilgeous-Alexander",
+      "shortName": "S. Gilgeous-Alexander",
+      "playerId": 1067856,
+      "playerDkId": 33258,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 17700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33258.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33258.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "52.6",
+          "sortValue": "52.6"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1067856-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258264,
+      "firstName": "Anthony",
+      "lastName": "Edwards",
+      "displayName": "Anthony Edwards",
+      "shortName": "A. Edwards",
+      "playerId": 1175367,
+      "playerDkId": 509114,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 15900,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/509114.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/509114.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "44.7",
+          "sortValue": "44.7"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1175367-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258265,
+      "firstName": "Julius",
+      "lastName": "Randle",
+      "displayName": "Julius Randle",
+      "shortName": "J. Randle",
+      "playerId": 786412,
+      "playerDkId": 33234,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 15300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33234.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33234.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.2",
+          "sortValue": "43.2"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "786412-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258266,
+      "firstName": "Jalen",
+      "lastName": "Williams",
+      "displayName": "Jalen Williams",
+      "shortName": "Jal. Williams",
+      "playerId": 1182404,
+      "playerDkId": 649561,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 13500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649561.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649561.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.6",
+          "sortValue": "36.6"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1182404-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258267,
+      "firstName": "Chet",
+      "lastName": "Holmgren",
+      "displayName": "Chet Holmgren",
+      "shortName": "C. Holmgren",
+      "playerId": 1343009,
+      "playerDkId": 649545,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 12600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649545.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649545.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "35.5",
+          "sortValue": "35.5"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1343009-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258228,
+      "firstName": "Shai",
+      "lastName": "Gilgeous-Alexander",
+      "displayName": "Shai Gilgeous-Alexander",
+      "shortName": "S. Gilgeous-Alexander",
+      "playerId": 1067856,
+      "playerDkId": 33258,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 11800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33258.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33258.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "52.6",
+          "sortValue": "52.6"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1067856-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258268,
+      "firstName": "Naz",
+      "lastName": "Reid",
+      "displayName": "Naz Reid",
+      "shortName": "N. Reid",
+      "playerId": 1137200,
+      "playerDkId": 33206,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 11400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33206.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33206.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.9",
+          "sortValue": "29.9"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1137200-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258269,
+      "firstName": "Donte",
+      "lastName": "DiVincenzo",
+      "displayName": "Donte DiVincenzo",
+      "shortName": "D. DiVincenzo",
+      "playerId": 887915,
+      "playerDkId": 33185,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 10800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33185.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33185.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.4",
+          "sortValue": "29.4"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "887915-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258229,
+      "firstName": "Anthony",
+      "lastName": "Edwards",
+      "displayName": "Anthony Edwards",
+      "shortName": "A. Edwards",
+      "playerId": 1175367,
+      "playerDkId": 509114,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 10600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/509114.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/509114.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "44.7",
+          "sortValue": "44.7"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1175367-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258230,
+      "firstName": "Julius",
+      "lastName": "Randle",
+      "displayName": "Julius Randle",
+      "shortName": "J. Randle",
+      "playerId": 786412,
+      "playerDkId": 33234,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 10200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33234.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33234.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.2",
+          "sortValue": "43.2"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "786412-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258270,
+      "firstName": "Jaden",
+      "lastName": "McDaniels",
+      "displayName": "Jaden McDaniels",
+      "shortName": "J. McDaniels",
+      "playerId": 1177013,
+      "playerDkId": 527235,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 10200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527235.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527235.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.9",
+          "sortValue": "29.9"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1177013-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258294,
+      "firstName": "Isaiah",
+      "lastName": "Hartenstein",
+      "displayName": "Isaiah Hartenstein",
+      "shortName": "I. Hartenstein",
+      "playerId": 1057004,
+      "playerDkId": 33079,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 9900,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33079.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33079.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.8",
+          "sortValue": "33.8"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1057004-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258271,
+      "firstName": "Rudy",
+      "lastName": "Gobert",
+      "displayName": "Rudy Gobert",
+      "shortName": "R. Gobert",
+      "playerId": 739960,
+      "playerDkId": 33393,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 9600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33393.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33393.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.6",
+          "sortValue": "31.6"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "739960-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258231,
+      "firstName": "Jalen",
+      "lastName": "Williams",
+      "displayName": "Jalen Williams",
+      "shortName": "Jal. Williams",
+      "playerId": 1182404,
+      "playerDkId": 649561,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 9000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649561.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649561.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.6",
+          "sortValue": "36.6"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1182404-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258232,
+      "firstName": "Chet",
+      "lastName": "Holmgren",
+      "displayName": "Chet Holmgren",
+      "shortName": "C. Holmgren",
+      "playerId": 1343009,
+      "playerDkId": 649545,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 8400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649545.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649545.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "35.5",
+          "sortValue": "35.5"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1343009-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258272,
+      "firstName": "Bones",
+      "lastName": "Hyland",
+      "displayName": "Bones Hyland",
+      "shortName": "B. Hyland",
+      "playerId": 1178199,
+      "playerDkId": 591031,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 8100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591031.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591031.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.7",
+          "sortValue": "10.7"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1178199-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258233,
+      "firstName": "Naz",
+      "lastName": "Reid",
+      "displayName": "Naz Reid",
+      "shortName": "N. Reid",
+      "playerId": 1137200,
+      "playerDkId": 33206,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 7600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33206.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33206.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.9",
+          "sortValue": "29.9"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1137200-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258273,
+      "firstName": "Ajay",
+      "lastName": "Mitchell",
+      "displayName": "Ajay Mitchell",
+      "shortName": "A. Mitchell",
+      "playerId": 1340238,
+      "playerDkId": 800653,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 7500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800653.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800653.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "27.4",
+          "sortValue": "27.4"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1340238-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258234,
+      "firstName": "Donte",
+      "lastName": "DiVincenzo",
+      "displayName": "Donte DiVincenzo",
+      "shortName": "D. DiVincenzo",
+      "playerId": 887915,
+      "playerDkId": 33185,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 7200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33185.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33185.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.4",
+          "sortValue": "29.4"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "887915-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258235,
+      "firstName": "Jaden",
+      "lastName": "McDaniels",
+      "displayName": "Jaden McDaniels",
+      "shortName": "J. McDaniels",
+      "playerId": 1177013,
+      "playerDkId": 527235,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 6800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527235.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527235.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.9",
+          "sortValue": "29.9"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1177013-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258259,
+      "firstName": "Isaiah",
+      "lastName": "Hartenstein",
+      "displayName": "Isaiah Hartenstein",
+      "shortName": "I. Hartenstein",
+      "playerId": 1057004,
+      "playerDkId": 33079,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 6600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33079.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33079.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.8",
+          "sortValue": "33.8"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1057004-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258274,
+      "firstName": "Cason",
+      "lastName": "Wallace",
+      "displayName": "Cason Wallace",
+      "shortName": "C. Wallace",
+      "playerId": 1408195,
+      "playerDkId": 713763,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 6600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713763.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713763.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1408195-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258236,
+      "firstName": "Rudy",
+      "lastName": "Gobert",
+      "displayName": "Rudy Gobert",
+      "shortName": "R. Gobert",
+      "playerId": 739960,
+      "playerDkId": 33393,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 6400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33393.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33393.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.6",
+          "sortValue": "31.6"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "739960-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258275,
+      "firstName": "Luguentz",
+      "lastName": "Dort",
+      "displayName": "Luguentz Dort",
+      "shortName": "L. Dort",
+      "playerId": 1134693,
+      "playerDkId": 33263,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 6300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33263.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33263.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.8",
+          "sortValue": "16.8"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1134693-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258276,
+      "firstName": "Aaron",
+      "lastName": "Wiggins",
+      "displayName": "Aaron Wiggins",
+      "shortName": "A. Wiggins",
+      "playerId": 1133788,
+      "playerDkId": 591059,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 6000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591059.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591059.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1133788-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258237,
+      "firstName": "Bones",
+      "lastName": "Hyland",
+      "displayName": "Bones Hyland",
+      "shortName": "B. Hyland",
+      "playerId": 1178199,
+      "playerDkId": 591031,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591031.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591031.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.7",
+          "sortValue": "10.7"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1178199-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258277,
+      "firstName": "Alex",
+      "lastName": "Caruso",
+      "displayName": "Alex Caruso",
+      "shortName": "A. Caruso",
+      "playerId": 697644,
+      "playerDkId": 33126,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33126.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33126.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.1",
+          "sortValue": "17.1"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "697644-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258295,
+      "firstName": "Jaylin",
+      "lastName": "Williams",
+      "displayName": "Jaylin Williams",
+      "shortName": "Jay. Williams",
+      "playerId": 1231367,
+      "playerDkId": 649580,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 5100,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649580.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649580.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.5",
+          "sortValue": "17.5"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1231367-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258238,
+      "firstName": "Ajay",
+      "lastName": "Mitchell",
+      "displayName": "Ajay Mitchell",
+      "shortName": "A. Mitchell",
+      "playerId": 1340238,
+      "playerDkId": 800653,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 5000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800653.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800653.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "27.4",
+          "sortValue": "27.4"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1340238-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258278,
+      "firstName": "Isaiah",
+      "lastName": "Joe",
+      "displayName": "Isaiah Joe",
+      "shortName": "I. Joe",
+      "playerId": 1134010,
+      "playerDkId": 527259,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527259.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527259.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.5",
+          "sortValue": "21.5"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1134010-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258239,
+      "firstName": "Cason",
+      "lastName": "Wallace",
+      "displayName": "Cason Wallace",
+      "shortName": "C. Wallace",
+      "playerId": 1408195,
+      "playerDkId": 713763,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 4400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713763.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713763.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1408195-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258240,
+      "firstName": "Luguentz",
+      "lastName": "Dort",
+      "displayName": "Luguentz Dort",
+      "shortName": "L. Dort",
+      "playerId": 1134693,
+      "playerDkId": 33263,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33263.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33263.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.8",
+          "sortValue": "16.8"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1134693-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258279,
+      "firstName": "Terrence",
+      "lastName": "Shannon Jr.",
+      "displayName": "Terrence Shannon Jr.",
+      "shortName": "T. Shannon Jr.",
+      "playerId": 1182148,
+      "playerDkId": 800404,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800404.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800404.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.7",
+          "sortValue": "8.7"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1182148-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258241,
+      "firstName": "Aaron",
+      "lastName": "Wiggins",
+      "displayName": "Aaron Wiggins",
+      "shortName": "A. Wiggins",
+      "playerId": 1133788,
+      "playerDkId": 591059,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 4000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591059.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591059.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1133788-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258280,
+      "firstName": "Mike",
+      "lastName": "Conley",
+      "displayName": "Mike Conley",
+      "shortName": "M. Conley",
+      "playerId": 329468,
+      "playerDkId": 33389,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 3900,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33389.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33389.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.0",
+          "sortValue": "14.0"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "329468-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258242,
+      "firstName": "Alex",
+      "lastName": "Caruso",
+      "displayName": "Alex Caruso",
+      "shortName": "A. Caruso",
+      "playerId": 697644,
+      "playerDkId": 33126,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33126.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33126.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.1",
+          "sortValue": "17.1"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "697644-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258281,
+      "firstName": "Rob",
+      "lastName": "Dillingham",
+      "displayName": "Rob Dillingham",
+      "shortName": "R. Dillingham",
+      "playerId": 1429354,
+      "playerDkId": 800355,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800355.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800355.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.2",
+          "sortValue": "9.2"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1429354-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258260,
+      "firstName": "Jaylin",
+      "lastName": "Williams",
+      "displayName": "Jaylin Williams",
+      "shortName": "Jay. Williams",
+      "playerId": 1231367,
+      "playerDkId": 649580,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 3400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649580.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649580.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.5",
+          "sortValue": "17.5"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1231367-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258282,
+      "firstName": "Kenrich",
+      "lastName": "Williams",
+      "displayName": "Kenrich Williams",
+      "shortName": "K. Williams",
+      "playerId": 843742,
+      "playerDkId": 33221,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 3300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33221.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33221.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.6",
+          "sortValue": "12.6"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "843742-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258243,
+      "firstName": "Isaiah",
+      "lastName": "Joe",
+      "displayName": "Isaiah Joe",
+      "shortName": "I. Joe",
+      "playerId": 1134010,
+      "playerDkId": 527259,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 3200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527259.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527259.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.5",
+          "sortValue": "21.5"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1134010-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258244,
+      "firstName": "Terrence",
+      "lastName": "Shannon Jr.",
+      "displayName": "Terrence Shannon Jr.",
+      "shortName": "T. Shannon Jr.",
+      "playerId": 1182148,
+      "playerDkId": 800404,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 2800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800404.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800404.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.7",
+          "sortValue": "8.7"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1182148-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258283,
+      "firstName": "Ousmane",
+      "lastName": "Dieng",
+      "displayName": "Ousmane Dieng",
+      "shortName": "O. Dieng",
+      "playerId": 1375876,
+      "playerDkId": 649560,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 2700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649560.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649560.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.8",
+          "sortValue": "8.8"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1375876-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258245,
+      "firstName": "Mike",
+      "lastName": "Conley",
+      "displayName": "Mike Conley",
+      "shortName": "M. Conley",
+      "playerId": 329468,
+      "playerDkId": 33389,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 2600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33389.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33389.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.0",
+          "sortValue": "14.0"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "329468-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258246,
+      "firstName": "Rob",
+      "lastName": "Dillingham",
+      "displayName": "Rob Dillingham",
+      "shortName": "R. Dillingham",
+      "playerId": 1429354,
+      "playerDkId": 800355,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800355.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800355.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.2",
+          "sortValue": "9.2"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1429354-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258284,
+      "firstName": "Branden",
+      "lastName": "Carlson",
+      "displayName": "Branden Carlson",
+      "shortName": "B. Carlson",
+      "playerId": 1177008,
+      "playerDkId": 800680,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800680.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800680.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.3",
+          "sortValue": "10.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1177008-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258247,
+      "firstName": "Kenrich",
+      "lastName": "Williams",
+      "displayName": "Kenrich Williams",
+      "shortName": "K. Williams",
+      "playerId": 843742,
+      "playerDkId": 33221,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 2200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33221.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33221.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.6",
+          "sortValue": "12.6"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "843742-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258285,
+      "firstName": "Jaylen",
+      "lastName": "Clark",
+      "displayName": "Jaylen Clark",
+      "shortName": "J. Clark",
+      "playerId": 1231198,
+      "playerDkId": 709705,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 2100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/709705.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/709705.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.8",
+          "sortValue": "9.8"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1231198-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258248,
+      "firstName": "Ousmane",
+      "lastName": "Dieng",
+      "displayName": "Ousmane Dieng",
+      "shortName": "O. Dieng",
+      "playerId": 1375876,
+      "playerDkId": 649560,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 1800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649560.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649560.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.8",
+          "sortValue": "8.8"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1375876-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258249,
+      "firstName": "Branden",
+      "lastName": "Carlson",
+      "displayName": "Branden Carlson",
+      "shortName": "B. Carlson",
+      "playerId": 1177008,
+      "playerDkId": 800680,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800680.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800680.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.3",
+          "sortValue": "10.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1177008-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258286,
+      "firstName": "Rocco",
+      "lastName": "Zikarsky",
+      "displayName": "Rocco Zikarsky",
+      "shortName": "R. Zikarsky",
+      "playerId": 1502168,
+      "playerDkId": 906413,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906413.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906413.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1502168-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258287,
+      "firstName": "Joan",
+      "lastName": "Beringer",
+      "displayName": "Joan Beringer",
+      "shortName": "J. Beringer",
+      "playerId": 1590552,
+      "playerDkId": 905564,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905564.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905564.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.2",
+          "sortValue": "4.2"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1590552-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258288,
+      "firstName": "Enrique",
+      "lastName": "Freeman",
+      "displayName": "Enrique Freeman",
+      "shortName": "E. Freeman",
+      "playerId": 1197096,
+      "playerDkId": 800665,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800665.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800665.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1197096-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258289,
+      "firstName": "Chris",
+      "lastName": "Youngblood",
+      "displayName": "Chris Youngblood",
+      "shortName": "C. Youngblood",
+      "playerId": 1234814,
+      "playerDkId": 908986,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/908986.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/908986.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.9",
+          "sortValue": "3.9"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1234814-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258290,
+      "firstName": "Brooks",
+      "lastName": "Barnhizer",
+      "displayName": "Brooks Barnhizer",
+      "shortName": "B. Barnhizer",
+      "playerId": 1324660,
+      "playerDkId": 906349,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906349.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906349.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.3",
+          "sortValue": "5.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1324660-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258291,
+      "firstName": "Leonard",
+      "lastName": "Miller",
+      "displayName": "Leonard Miller",
+      "shortName": "L. Miller",
+      "playerId": 1376841,
+      "playerDkId": 713785,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713785.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713785.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.1",
+          "sortValue": "4.1"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1376841-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258292,
+      "firstName": "Johnny",
+      "lastName": "Juzang",
+      "displayName": "Johnny Juzang",
+      "shortName": "J. Juzang",
+      "playerId": 1186159,
+      "playerDkId": 651603,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651603.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651603.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.8",
+          "sortValue": "1.8"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1186159-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258293,
+      "firstName": "Joe",
+      "lastName": "Ingles",
+      "displayName": "Joe Ingles",
+      "shortName": "J. Ingles",
+      "playerId": 553306,
+      "playerDkId": 33395,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33395.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33395.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.4",
+          "sortValue": "1.4"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "553306-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258296,
+      "firstName": "Nikola",
+      "lastName": "Topic",
+      "displayName": "Nikola Topic",
+      "shortName": "N. Topic",
+      "playerId": 1432174,
+      "playerDkId": 726072,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/726072.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/726072.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1432174-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258297,
+      "firstName": "Thomas",
+      "lastName": "Sorber",
+      "displayName": "Thomas Sorber",
+      "shortName": "T. Sorber",
+      "playerId": 1547672,
+      "playerDkId": 905563,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905563.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905563.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1547672-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258250,
+      "firstName": "Jaylen",
+      "lastName": "Clark",
+      "displayName": "Jaylen Clark",
+      "shortName": "J. Clark",
+      "playerId": 1231198,
+      "playerDkId": 709705,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/709705.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/709705.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.8",
+          "sortValue": "9.8"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1231198-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258251,
+      "firstName": "Rocco",
+      "lastName": "Zikarsky",
+      "displayName": "Rocco Zikarsky",
+      "shortName": "R. Zikarsky",
+      "playerId": 1502168,
+      "playerDkId": 906413,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906413.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906413.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1502168-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258252,
+      "firstName": "Joan",
+      "lastName": "Beringer",
+      "displayName": "Joan Beringer",
+      "shortName": "J. Beringer",
+      "playerId": 1590552,
+      "playerDkId": 905564,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905564.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905564.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.2",
+          "sortValue": "4.2"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1590552-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258253,
+      "firstName": "Enrique",
+      "lastName": "Freeman",
+      "displayName": "Enrique Freeman",
+      "shortName": "E. Freeman",
+      "playerId": 1197096,
+      "playerDkId": 800665,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800665.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800665.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1197096-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258254,
+      "firstName": "Chris",
+      "lastName": "Youngblood",
+      "displayName": "Chris Youngblood",
+      "shortName": "C. Youngblood",
+      "playerId": 1234814,
+      "playerDkId": 908986,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/908986.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/908986.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.9",
+          "sortValue": "3.9"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1234814-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258255,
+      "firstName": "Brooks",
+      "lastName": "Barnhizer",
+      "displayName": "Brooks Barnhizer",
+      "shortName": "B. Barnhizer",
+      "playerId": 1324660,
+      "playerDkId": 906349,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906349.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906349.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.3",
+          "sortValue": "5.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1324660-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258256,
+      "firstName": "Leonard",
+      "lastName": "Miller",
+      "displayName": "Leonard Miller",
+      "shortName": "L. Miller",
+      "playerId": 1376841,
+      "playerDkId": 713785,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713785.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713785.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.1",
+          "sortValue": "4.1"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1376841-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258257,
+      "firstName": "Johnny",
+      "lastName": "Juzang",
+      "displayName": "Johnny Juzang",
+      "shortName": "J. Juzang",
+      "playerId": 1186159,
+      "playerDkId": 651603,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651603.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651603.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.8",
+          "sortValue": "1.8"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "1186159-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258258,
+      "firstName": "Joe",
+      "lastName": "Ingles",
+      "displayName": "Joe Ingles",
+      "shortName": "J. Ingles",
+      "playerId": 553306,
+      "playerDkId": 33395,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33395.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33395.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.4",
+          "sortValue": "1.4"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 16,
+      "teamAbbreviation": "MIN",
+      "draftAlerts": [],
+      "playerGameHash": "553306-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258261,
+      "firstName": "Nikola",
+      "lastName": "Topic",
+      "displayName": "Nikola Topic",
+      "shortName": "N. Topic",
+      "playerId": 1432174,
+      "playerDkId": 726072,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/726072.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/726072.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1432174-6133464",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41258262,
+      "firstName": "Thomas",
+      "lastName": "Sorber",
+      "displayName": "Thomas Sorber",
+      "shortName": "T. Sorber",
+      "playerId": 1547672,
+      "playerDkId": 905563,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905563.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905563.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133464,
+        "name": "OKC @ MIN",
+        "nameDisplay": [
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "MIN"
+          }
+        ],
+        "startTime": "2025-12-20T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133464,
+          "name": "OKC @ MIN",
+          "nameDisplay": [
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "MIN"
+            }
+          ],
+          "startTime": "2025-12-20T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1547672-6133464",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6133464,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 16,
+        "teamName": "Timberwolves",
+        "abbreviation": "MIN",
+        "city": "Minnesota",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32935.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 25,
+        "teamName": "Thunder",
+        "abbreviation": "OKC",
+        "city": "Oklahoma City",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32942.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32942.png"
+      },
+      "startTime": "2025-12-20T02:30:00.0000000Z",
+      "name": "OKC @ MIN",
+      "venue": "Target Center",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 32,
+          "value": "AMZN"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}

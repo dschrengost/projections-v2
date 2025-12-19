@@ -1448,6 +1448,19 @@ tbody tr:hover {
   opacity: 0.7;
 }
 
+.optimizer-pool table tbody tr.player-out {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+.optimizer-pool table tbody tr.player-out td {
+  text-decoration: line-through;
+}
+
+.optimizer-pool table tbody tr.player-override td {
+  background: rgba(59, 130, 246, 0.08);
+}
+
 .optimizer-pool table tbody tr.player-banned td {
   text-decoration: line-through;
 }
@@ -1456,6 +1469,68 @@ tbody tr:hover {
   width: 16px;
   height: 16px;
   cursor: pointer;
+}
+
+.override-input-cell.override-active {
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.override-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.fppm-warning {
+  font-size: 0.8rem;
+  color: #f59e0b;
+}
+
+.override-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  background: #0f172a;
+}
+
+.override-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #cbd5f5;
+}
+
+.override-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.override-buttons button,
+.reset-overrides-btn {
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.override-buttons button:hover,
+.reset-overrides-btn:hover {
+  background: #263449;
+}
+
+.reset-overrides-btn:disabled,
+.override-buttons button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Saved Builds Panel */
@@ -2407,6 +2482,7 @@ tbody tr:hover {
   font-size: 1rem;
   color: #e2e8f0;
 }
+
 /* ==========================================================================
    Contest Simulator Styles
    ========================================================================== */
@@ -2702,7 +2778,7 @@ tbody tr:hover {
 
 .lineup-card-content {
   display: grid;
-  grid-template-columns: 1.2fr 1fr; 
+  grid-template-columns: 1.2fr 1fr;
   height: 100%;
 }
 
@@ -2810,7 +2886,7 @@ tbody tr:hover {
 
 .stat-box.primary {
   padding: 0.4rem;
-  background: #1e293b; 
+  background: #1e293b;
   border: 1px solid #334155;
 }
 
@@ -2885,3 +2961,45 @@ tbody tr:hover {
   color: #94a3b8;
 }
 
+/* === Override Input Columns === */
+th.override-col {
+  background: #1d3a5f;
+  color: #93c5fd;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.override-input-cell {
+  padding: 0.2rem 0.3rem;
+}
+
+.override-input {
+  width: 60px;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.override-input:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+}
+
+.override-input::placeholder {
+  color: #475569;
+}
+
+.override-input::-webkit-inner-spin-button,
+.override-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.override-input[type="number"] {
+  -moz-appearance: textfield;
+}

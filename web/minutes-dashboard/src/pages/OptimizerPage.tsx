@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
     getSlates,
     getPlayerPool,
+    getPlayerPoolWithOverrides,
     startBuild,
     getBuildStatus,
     getBuildLineups,
@@ -10,8 +11,12 @@ import {
     getSavedBuilds,
     loadSavedBuild,
     deleteSavedBuild,
+    getOverrides,
+    saveOverrides,
+    clearOverrides,
     Slate,
-    PoolPlayer,
+    PoolPlayerWithOverrides,
+    PlayerOverride,
     JobStatus,
     LineupRow,
     QuickBuildRequest,
@@ -40,9 +45,19 @@ export default function OptimizerPage() {
     const [slatesError, setSlatesError] = useState<string | null>(null)
 
     // Player pool
-    const [pool, setPool] = useState<PoolPlayer[]>([])
+    const [pool, setPool] = useState<PoolPlayerWithOverrides[]>([])
     const [poolLoading, setPoolLoading] = useState(false)
     const [poolError, setPoolError] = useState<string | null>(null)
+
+    // User overrides
+    const [overrides, setOverrides] = useState<Map<string, PlayerOverride>>(new Map())
+    const [savedOverrides, setSavedOverrides] = useState<Map<string, PlayerOverride>>(new Map())
+    const [overrideRevision, setOverrideRevision] = useState<number | null>(null)
+    const [overrideLoading, setOverrideLoading] = useState(false)
+    const [overrideSaving, setOverrideSaving] = useState(false)
+    const [overrideError, setOverrideError] = useState<string | null>(null)
+    const [pendingOverrideIds, setPendingOverrideIds] = useState<Set<string>>(new Set())
+    const [pendingOutApply, setPendingOutApply] = useState(false)
 
     // Lock/ban players
     const [lockedIds, setLockedIds] = useState<Set<string>>(new Set())
@@ -62,6 +77,13 @@ export default function OptimizerPage() {
     const [maxSalary, setMaxSalary] = useState<number | null>(50000)
     const [minProj, setMinProj] = useState<number | null>(null)
     const [randomnessPct, setRandomnessPct] = useState(0)
+    const [useUserOverrides, setUseUserOverrides] = useState(false)
+
+    const overridesRef = useRef(overrides)
+    const savedOverridesRef = useRef(savedOverrides)
+    const pendingOverrideIdsRef = useRef(pendingOverrideIds)
+    const overrideRevisionRef = useRef(overrideRevision)
+    const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     // Job state
     const [currentJob, setCurrentJob] = useState<JobStatus | null>(null)
@@ -97,6 +119,35 @@ export default function OptimizerPage() {
     const hasStddev = useMemo(() =>
         pool.some(p => p.stddev != null && p.stddev > 0), [pool])
 
+    useEffect(() => {
+        overridesRef.current = overrides
+    }, [overrides])
+
+    useEffect(() => {
+        savedOverridesRef.current = savedOverrides
+    }, [savedOverrides])
+
+    useEffect(() => {
+        pendingOverrideIdsRef.current = pendingOverrideIds
+    }, [pendingOverrideIds])
+
+    useEffect(() => {
+        overrideRevisionRef.current = overrideRevision
+    }, [overrideRevision])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const stored = window.localStorage.getItem('optimizer.useUserOverrides')
+        if (stored != null) {
+            setUseUserOverrides(stored === 'true')
+        }
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem('optimizer.useUserOverrides', String(useUserOverrides))
+    }, [useUserOverrides])
+
     // Load slates when date changes
     useEffect(() => {
         const loadSlates = async () => {
@@ -119,30 +170,222 @@ export default function OptimizerPage() {
         void loadSlates()
     }, [selectedDate])
 
-    // Load player pool when slate changes
-    useEffect(() => {
+    const loadPool = useCallback(async () => {
         if (!selectedSlate) {
             setPool([])
             return
         }
-        const loadPool = async () => {
-            setPoolLoading(true)
-            setPoolError(null)
-            try {
-                const data = await getPlayerPool(selectedDate, selectedSlate)
-                setPool(data)
-                // Reset locks/bans on new pool
-                setLockedIds(new Set())
-                setBannedIds(new Set())
-            } catch (err) {
-                setPoolError((err as Error).message)
-                setPool([])
-            } finally {
-                setPoolLoading(false)
-            }
+        setPoolLoading(true)
+        setPoolError(null)
+        try {
+            const data = useUserOverrides
+                ? await getPlayerPoolWithOverrides(selectedDate, selectedSlate)
+                : await getPlayerPool(selectedDate, selectedSlate)
+            setPool(data)
+            // Reset locks/bans on new pool
+            setLockedIds(new Set())
+            setBannedIds(new Set())
+        } catch (err) {
+            setPoolError((err as Error).message)
+            setPool([])
+        } finally {
+            setPoolLoading(false)
         }
+    }, [selectedDate, selectedSlate, useUserOverrides])
+
+    // Load player pool when slate changes
+    useEffect(() => {
         void loadPool()
+    }, [loadPool])
+
+    const loadOverrides = useCallback(async () => {
+        if (!selectedSlate) {
+            setOverrides(new Map())
+            setSavedOverrides(new Map())
+            setOverrideRevision(null)
+            setPendingOverrideIds(new Set())
+            setPendingOutApply(false)
+            return
+        }
+        setOverrideLoading(true)
+        setOverrideError(null)
+        try {
+            const data = await getOverrides(selectedDate, selectedSlate)
+            const next = new Map<string, PlayerOverride>()
+            data.overrides.forEach((override) => {
+                next.set(override.player_id, override)
+            })
+            setOverrides(next)
+            setSavedOverrides(new Map(next))
+            setOverrideRevision(data.client_revision)
+            setPendingOverrideIds(new Set())
+            setPendingOutApply(false)
+        } catch (err) {
+            setOverrideError((err as Error).message)
+            setOverrides(new Map())
+            setSavedOverrides(new Map())
+            setOverrideRevision(null)
+        } finally {
+            setOverrideLoading(false)
+        }
     }, [selectedDate, selectedSlate])
+
+    useEffect(() => {
+        void loadOverrides()
+        if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current)
+            saveTimerRef.current = null
+        }
+    }, [loadOverrides])
+
+    type OverrideField = 'minutes' | 'fpts' | 'own' | 'is_out'
+
+    const updateOverrideFields = (
+        playerId: string,
+        updates: Partial<Record<OverrideField, number | boolean | null>>,
+    ) => {
+        setOverrides(prev => {
+            const next = new Map(prev)
+            const current = next.get(playerId) ?? {
+                player_id: playerId,
+                minutes: null,
+                fpts: null,
+                own: null,
+                is_out: false,
+            }
+            const updated = {
+                ...current,
+                player_id: playerId,
+                ...updates,
+            } as PlayerOverride
+            const hasOverride = updated.is_out || updated.minutes != null || updated.fpts != null || updated.own != null
+            if (hasOverride) {
+                next.set(playerId, updated)
+            } else {
+                next.delete(playerId)
+            }
+            return next
+        })
+        setPendingOverrideIds(prev => {
+            const next = new Set(prev)
+            next.add(playerId)
+            return next
+        })
+        if (updates.is_out !== undefined) {
+            setPendingOutApply(true)
+        }
+    }
+
+    const updateOverrideField = (playerId: string, field: OverrideField, value: number | boolean | null) => {
+        updateOverrideFields(playerId, { [field]: value })
+    }
+
+    const flushOverrides = useCallback(async () => {
+        if (!selectedSlate) return
+        const pending = Array.from(pendingOverrideIdsRef.current)
+        if (pending.length === 0) return
+        setOverrideSaving(true)
+        setOverrideError(null)
+        const payload = pending.map((playerId) => {
+            const current = overridesRef.current.get(playerId)
+            return {
+                player_id: playerId,
+                minutes: current?.minutes ?? null,
+                fpts: current?.fpts ?? null,
+                own: current?.own ?? null,
+                is_out: current?.is_out ?? false,
+            }
+        })
+        try {
+            const response = await saveOverrides(
+                selectedDate,
+                selectedSlate,
+                payload,
+                overrideRevisionRef.current ?? undefined,
+            )
+            const responseMap = new Map(response.overrides.map(o => [o.player_id, o]))
+            setOverrides(prev => {
+                const next = new Map(prev)
+                pending.forEach((playerId) => {
+                    const updated = responseMap.get(playerId)
+                    if (updated) {
+                        next.set(playerId, updated)
+                    } else {
+                        next.delete(playerId)
+                    }
+                })
+                return next
+            })
+            setSavedOverrides(prev => {
+                const next = new Map(prev)
+                pending.forEach((playerId) => {
+                    const updated = responseMap.get(playerId)
+                    if (updated) {
+                        next.set(playerId, updated)
+                    } else {
+                        next.delete(playerId)
+                    }
+                })
+                return next
+            })
+            setOverrideRevision(response.client_revision)
+            setPendingOverrideIds(prev => {
+                const next = new Set(prev)
+                pending.forEach((playerId) => next.delete(playerId))
+                return next
+            })
+        } catch (err) {
+            setOverrideError((err as Error).message)
+        } finally {
+            setOverrideSaving(false)
+        }
+    }, [selectedDate, selectedSlate])
+
+    const scheduleOverrideSave = useCallback((delayMs = 500) => {
+        if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current)
+        }
+        saveTimerRef.current = setTimeout(() => {
+            saveTimerRef.current = null
+            void flushOverrides()
+        }, delayMs)
+    }, [flushOverrides])
+
+    const discardPendingOverrides = () => {
+        if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current)
+            saveTimerRef.current = null
+        }
+        setOverrides(new Map(savedOverridesRef.current))
+        setPendingOverrideIds(new Set())
+        setPendingOutApply(false)
+    }
+
+    const applyOutChanges = async () => {
+        await flushOverrides()
+        if (pendingOverrideIdsRef.current.size === 0) {
+            if (useUserOverrides) {
+                await loadPool()
+            }
+            setPendingOutApply(false)
+        }
+    }
+
+    const resetAllOverrides = async () => {
+        if (!selectedSlate) return
+        try {
+            setOverrideSaving(true)
+            await clearOverrides(selectedDate, selectedSlate)
+            await loadOverrides()
+            if (useUserOverrides) {
+                await loadPool()
+            }
+        } catch (err) {
+            setOverrideError((err as Error).message)
+        } finally {
+            setOverrideSaving(false)
+        }
+    }
 
     // Poll job status
     useEffect(() => {
@@ -355,6 +598,7 @@ export default function OptimizerPage() {
                 exclude_games: Array.from(excludedGames),
                 enum_enable: maxPool >= 5000,
                 randomness_pct: randomnessPct > 0 && hasStddev ? randomnessPct : undefined,
+                use_user_overrides: useUserOverrides,
             }
             const job = await startBuild(request)
             setCurrentJob(job)
@@ -515,7 +759,7 @@ export default function OptimizerPage() {
 
     // Get player name by ID for lineup display
     const playerMap = useMemo(() => {
-        const map = new Map<string, PoolPlayer>()
+        const map = new Map<string, PoolPlayerWithOverrides>()
         pool.forEach(p => map.set(p.player_id, p))
         return map
     }, [pool])
@@ -543,7 +787,7 @@ export default function OptimizerPage() {
 
         // Filter by lineup metrics
         result = result.filter(lu => {
-            const proj = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
+            const proj = lu.player_ids.reduce((sum, id) => sum + getEffectiveProj(playerMap.get(id)), 0)
             const own = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
             const p90 = lu.p90 ?? lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
 
@@ -556,8 +800,8 @@ export default function OptimizerPage() {
         // Sort
         if (lineupSort !== 'default') {
             result.sort((a, b) => {
-                const aProj = a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
-                const bProj = b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
+                const aProj = a.player_ids.reduce((sum, id) => sum + getEffectiveProj(playerMap.get(id)), 0)
+                const bProj = b.player_ids.reduce((sum, id) => sum + getEffectiveProj(playerMap.get(id)), 0)
                 const aSal = a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0)
                 const bSal = b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0)
                 const aP90 = a.p90 ?? a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
@@ -580,7 +824,7 @@ export default function OptimizerPage() {
         }
 
         return result
-    }, [lineups, lineupFilter, lineupSort, playerMap, minLineupProj, maxLineupOwn, minLineupP90])
+    }, [lineups, lineupFilter, lineupSort, playerMap, minLineupProj, maxLineupOwn, minLineupP90, overrides, useUserOverrides])
 
 
     const toggleSort = (key: SortKey) => {
@@ -598,8 +842,38 @@ export default function OptimizerPage() {
     const formatOwn = (val: number | undefined | null) =>
         val != null ? val.toFixed(1) + '%' : '-'
 
-    const formatValue = (p: PoolPlayer) =>
+    const formatMinutes = (val: number | undefined | null) =>
+        val != null ? val.toFixed(1) : '-'
+
+    const formatValue = (p: PoolPlayerWithOverrides) =>
         (p.proj / (p.salary / 1000)).toFixed(2)
+
+    const isOverrideActive = (override: PlayerOverride | undefined) =>
+        Boolean(override && (override.is_out || override.minutes != null || override.fpts != null || override.own != null))
+
+    const showOverrideColumns = useUserOverrides || overrides.size > 0 || pendingOverrideIds.size > 0
+
+    function getModelFppm(player: PoolPlayerWithOverrides) {
+        const baseMinutes = player.model_minutes ?? null
+        const baseProj = player.model_proj ?? player.proj
+        if (baseMinutes && baseMinutes > 0 && baseProj != null) {
+            return baseProj / baseMinutes
+        }
+        return 1.0
+    }
+
+    function getEffectiveProj(player: PoolPlayerWithOverrides | undefined) {
+        if (!player) return 0
+        if (!useUserOverrides) return player.proj ?? 0
+        const override = overrides.get(player.player_id)
+        if (override?.is_out) return 0
+        if (override?.fpts != null) return override.fpts
+        if (override?.minutes != null) {
+            const fppm = getModelFppm(player)
+            return Number((override.minutes * fppm).toFixed(1))
+        }
+        return player.proj ?? 0
+    }
 
     return (
         <div className="optimizer-page">
@@ -753,6 +1027,75 @@ export default function OptimizerPage() {
                         )}
                     </div>
 
+                    {/* User Overrides Toggle */}
+                    <div className="override-toggle">
+                        <label className="toggle-switch">
+                            <input
+                                type="checkbox"
+                                checked={useUserOverrides}
+                                onChange={e => setUseUserOverrides(e.target.checked)}
+                            />
+                            <span className="toggle-slider"></span>
+                            <span className="toggle-label">
+                                {useUserOverrides ? 'My Projections' : 'Model Projections'}
+                            </span>
+                        </label>
+                        <small className="hint">
+                            {useUserOverrides
+                                ? 'Using your manual projection overrides'
+                                : 'Using model projections (set overrides via API)'}
+                        </small>
+                    </div>
+
+                    <div className="override-status">
+                        {overrideLoading && <div className="muted">Loading overrides...</div>}
+                        {overrideSaving && <div className="muted">Saving overrides...</div>}
+                        {overrideError && <div className="error">Overrides: {overrideError}</div>}
+                        {pendingOverrideIds.size > 0 && (
+                            <div className="override-actions">
+                                <span>{pendingOverrideIds.size} unsaved changes</span>
+                                <div className="override-buttons">
+                                    <button
+                                        type="button"
+                                        onClick={applyOutChanges}
+                                        disabled={overrideSaving}
+                                    >
+                                        Apply
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={discardPendingOverrides}
+                                        disabled={overrideSaving}
+                                    >
+                                        Discard
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        {pendingOutApply && pendingOverrideIds.size === 0 && (
+                            <div className="override-actions">
+                                <span>Out changes saved. Apply to refresh pool.</span>
+                                <div className="override-buttons">
+                                    <button
+                                        type="button"
+                                        onClick={applyOutChanges}
+                                        disabled={overrideSaving}
+                                    >
+                                        Apply
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        <button
+                            type="button"
+                            className="reset-overrides-btn"
+                            onClick={resetAllOverrides}
+                            disabled={!selectedSlate || overrideSaving}
+                        >
+                            Reset All Overrides
+                        </button>
+                    </div>
+
                     {/* Game Filters */}
 
                     {currentSlateGames.length > 0 && (
@@ -871,6 +1214,16 @@ export default function OptimizerPage() {
                                         <th onClick={() => toggleSort('salary')} className="sortable">
                                             Salary {sortKey === 'salary' && (sortDir === 'asc' ? '▲' : '▼')}
                                         </th>
+                                        {showOverrideColumns && (
+                                            <>
+                                                <th className="override-col">Model FPTS</th>
+                                                <th className="override-col">Model Min</th>
+                                                <th className="override-col">My Min</th>
+                                                <th className="override-col">My FPTS</th>
+                                                <th className="override-col">My Own</th>
+                                                <th className="override-col">Out</th>
+                                            </>
+                                        )}
                                         <th onClick={() => toggleSort('proj')} className="sortable">
                                             Proj {sortKey === 'proj' && (sortDir === 'asc' ? '▲' : '▼')}
                                         </th>
@@ -886,10 +1239,18 @@ export default function OptimizerPage() {
                                     {filteredPool.map(p => {
                                         const isLocked = lockedIds.has(p.player_id)
                                         const isBanned = bannedIds.has(p.player_id)
+                                        const override = overrides.get(p.player_id)
+                                        const isOut = override?.is_out ?? false
+                                        const hasOverride = isOverrideActive(override)
                                         return (
                                             <tr
                                                 key={p.player_id}
-                                                className={isLocked ? 'player-locked' : isBanned ? 'player-banned' : ''}
+                                                className={[
+                                                    isLocked ? 'player-locked' : '',
+                                                    isBanned ? 'player-banned' : '',
+                                                    isOut ? 'player-out' : '',
+                                                    hasOverride ? 'player-override' : '',
+                                                ].filter(Boolean).join(' ')}
                                             >
                                                 <td>
                                                     <input
@@ -911,6 +1272,85 @@ export default function OptimizerPage() {
                                                 <td>{p.team}</td>
                                                 <td>{p.positions.join('/')}</td>
                                                 <td>{formatSalary(p.salary)}</td>
+                                                {showOverrideColumns && (
+                                                    <>
+                                                        <td>{formatProj(p.model_proj ?? p.proj)}</td>
+                                                        <td>{formatMinutes(p.model_minutes ?? null)}</td>
+                                                        <td className={`override-input-cell ${override?.minutes != null ? 'override-active' : ''}`}>
+                                                            <input
+                                                                type="number"
+                                                                className="override-input"
+                                                                placeholder="—"
+                                                                step={0.5}
+                                                                min={0}
+                                                                max={48}
+                                                                value={override?.minutes ?? ''}
+                                                                onChange={e => {
+                                                                    const minutes = e.target.value === '' ? null : Number(e.target.value)
+                                                                    if (minutes == null) {
+                                                                        updateOverrideFields(p.player_id, { minutes: null, fpts: null })
+                                                                    } else {
+                                                                        const fppm = getModelFppm(p)
+                                                                        const fpts = Number((minutes * fppm).toFixed(1))
+                                                                        updateOverrideFields(p.player_id, { minutes, fpts })
+                                                                    }
+                                                                }}
+                                                                onBlur={() => scheduleOverrideSave()}
+                                                            />
+                                                        </td>
+                                                        <td className={`override-input-cell ${override?.fpts != null ? 'override-active' : ''}`}>
+                                                            <div className="override-input-wrap">
+                                                                <input
+                                                                    type="number"
+                                                                    className="override-input"
+                                                                    placeholder="—"
+                                                                    step={0.5}
+                                                                    min={0}
+                                                                    value={override?.fpts ?? ''}
+                                                                    onChange={e => updateOverrideField(
+                                                                        p.player_id,
+                                                                        'fpts',
+                                                                        e.target.value === '' ? null : Number(e.target.value),
+                                                                    )}
+                                                                    onBlur={() => scheduleOverrideSave()}
+                                                                />
+                                                                {p.used_fppm_fallback && (
+                                                                    <span className="fppm-warning" title="FPPM fallback used for minutes → FPTS">
+                                                                        ⚠
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className={`override-input-cell ${override?.own != null ? 'override-active' : ''}`}>
+                                                            <input
+                                                                type="number"
+                                                                className="override-input"
+                                                                placeholder="—"
+                                                                step={0.5}
+                                                                min={0}
+                                                                max={100}
+                                                                value={override?.own ?? ''}
+                                                                onChange={e => updateOverrideField(
+                                                                    p.player_id,
+                                                                    'own',
+                                                                    e.target.value === '' ? null : Number(e.target.value),
+                                                                )}
+                                                                onBlur={() => scheduleOverrideSave()}
+                                                            />
+                                                        </td>
+                                                        <td className="override-input-cell">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isOut}
+                                                                onChange={e => {
+                                                                    updateOverrideField(p.player_id, 'is_out', e.target.checked)
+                                                                    scheduleOverrideSave(0)
+                                                                }}
+                                                                title="Mark player out"
+                                                            />
+                                                        </td>
+                                                    </>
+                                                )}
                                                 <td>{formatProj(p.proj)}</td>
                                                 <td>{formatOwn(p.own_proj)}</td>
                                                 <td>{formatValue(p)}</td>
@@ -1166,7 +1606,7 @@ export default function OptimizerPage() {
                                         ${lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0).toLocaleString()}
                                     </span>
                                     <span className="lineup-proj">
-                                        {lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0).toFixed(1)} pts
+                                        {lu.player_ids.reduce((sum, id) => sum + getEffectiveProj(playerMap.get(id)), 0).toFixed(1)} pts
                                     </span>
                                     <span className="lineup-p90">
                                         p90: {(() => {

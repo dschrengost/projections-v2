@@ -8,6 +8,12 @@ Endpoints:
     GET  /api/optimizer/build/{job_id}/lineups - Get completed lineups
     GET  /api/optimizer/build/{job_id}/export  - Export lineups as CSV
     GET  /api/optimizer/jobs           - List recent jobs
+
+    # User Override Endpoints
+    GET  /api/optimizer/overrides      - Get overrides for a slate
+    PUT  /api/optimizer/overrides      - Create/update overrides (batch)
+    DELETE /api/optimizer/overrides/{player_id} - Remove player override
+    DELETE /api/optimizer/overrides    - Clear all overrides for slate
 """
 
 from __future__ import annotations
@@ -73,6 +79,21 @@ class PoolPlayer(BaseModel):
     p90: Optional[float] = None
     game_matchup: Optional[str] = None
     game_start_utc: Optional[str] = None
+    # Override metadata (present when use_user_overrides=true)
+    model_proj: Optional[float] = None
+    model_minutes: Optional[float] = None
+    model_own: Optional[float] = None
+    effective_proj: Optional[float] = None
+    effective_minutes: Optional[float] = None
+    effective_own: Optional[float] = None
+    override_minutes: Optional[float] = None
+    override_fpts: Optional[float] = None
+    override_own: Optional[float] = None
+    is_out: Optional[bool] = None
+    has_override: Optional[bool] = None
+    used_fppm_fallback: Optional[bool] = None
+    fppm: Optional[float] = None
+    is_active: Optional[bool] = None
 
 
 class QuickBuildRequest(BaseModel):
@@ -110,6 +131,10 @@ class QuickBuildRequest(BaseModel):
 
     # Randomness
     randomness_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="Randomness %")
+
+    # User overrides
+    use_user_overrides: bool = Field(default=False, description="Use user projection overrides ('My Proj')")
+    ownership_mode: str = Field(default="renormalize", description="Ownership mode: raw or renormalize")
 
 
 class JobStatus(BaseModel):
@@ -370,11 +395,15 @@ async def get_player_pool(
     site: str = Query(default="dk", description="Site: dk or fd"),
     include_games: Optional[str] = Query(default=None, description="Comma-separated games to include (e.g., 'MIN@DAL,LAL@GSW')"),
     exclude_games: Optional[str] = Query(default=None, description="Comma-separated games to exclude"),
+    use_user_overrides: bool = Query(default=False, description="Apply user projection overrides"),
+    ownership_mode: str = Query(default="renormalize", description="Ownership mode: raw or renormalize"),
 ):
     """Get merged player pool (projections + salaries + positions).
     
     Use include_games or exclude_games to filter by specific games.
     Games are specified as 'AWAY@HOME' format (e.g., 'MIN@DAL').
+    
+    Set use_user_overrides=true to include user overrides with effective values.
     """
     try:
         # Parse comma-separated game lists
@@ -388,6 +417,8 @@ async def get_player_pool(
             run_id=run_id,
             include_games=include_list,
             exclude_games=exclude_list,
+            use_user_overrides=use_user_overrides,
+            ownership_mode=ownership_mode,
         )
         return pool
     except FileNotFoundError as exc:
@@ -431,6 +462,8 @@ async def start_build(
             run_id=request.run_id,
             include_games=include_games,
             exclude_games=exclude_games,
+            use_user_overrides=request.use_user_overrides,
+            ownership_mode=request.ownership_mode,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -662,7 +695,6 @@ async def get_saved_build_endpoint(
     
     return build
 
-
 @router.delete("/saved-builds/{job_id}")
 async def delete_saved_build_endpoint(
     job_id: str,
@@ -676,3 +708,192 @@ async def delete_saved_build_endpoint(
         raise HTTPException(status_code=404, detail=f"Build {job_id} not found for date {date}")
     
     return {"status": "deleted", "job_id": job_id}
+
+
+# ---------------------------------------------------------------------------
+# User Override Endpoints
+# ---------------------------------------------------------------------------
+
+
+class PlayerOverrideRequest(BaseModel):
+    """Request to set overrides for a single player."""
+    
+    player_id: str = Field(..., description="Player ID")
+    minutes: Optional[float] = Field(default=None, ge=0, le=48, description="Override minutes")
+    fpts: Optional[float] = Field(default=None, ge=0, description="Override FPTS")
+    own: Optional[float] = Field(default=None, ge=0, le=100, description="Override ownership %")
+    is_out: bool = Field(default=False, description="Mark player as out")
+
+
+class BatchOverrideRequest(BaseModel):
+    """Request to set multiple overrides at once."""
+    
+    date: str = Field(..., description="Game date YYYY-MM-DD")
+    draft_group_id: int = Field(..., description="Draft group ID")
+    overrides: List[PlayerOverrideRequest] = Field(..., description="List of player overrides")
+    expected_revision: Optional[int] = Field(default=None, description="For conflict detection")
+
+
+class PlayerOverrideResponse(BaseModel):
+    """Override values for a single player."""
+    
+    player_id: str
+    minutes: Optional[float] = None
+    fpts: Optional[float] = None
+    own: Optional[float] = None
+    is_out: bool = False
+    updated_at: str
+
+
+class SlateOverridesResponse(BaseModel):
+    """Response containing all overrides for a slate."""
+    
+    game_date: str
+    draft_group_id: int
+    client_revision: int
+    updated_at: str
+    overrides: List[PlayerOverrideResponse]
+
+
+@router.get("/overrides", response_model=SlateOverridesResponse)
+async def get_overrides(
+    date: str = Query(..., description="Game date YYYY-MM-DD"),
+    draft_group_id: int = Query(..., description="Draft group ID"),
+):
+    """Get all user overrides for a slate."""
+    from .user_overrides import load_slate_overrides
+    
+    slate_overrides = load_slate_overrides(date, draft_group_id)
+    
+    return SlateOverridesResponse(
+        game_date=slate_overrides.game_date,
+        draft_group_id=slate_overrides.draft_group_id,
+        client_revision=slate_overrides.client_revision,
+        updated_at=slate_overrides.updated_at,
+        overrides=[
+            PlayerOverrideResponse(
+                player_id=po.player_id,
+                minutes=po.minutes,
+                fpts=po.fpts,
+                own=po.own,
+                is_out=po.is_out,
+                updated_at=po.updated_at,
+            )
+            for po in slate_overrides.overrides.values()
+        ],
+    )
+
+
+@router.put("/overrides", response_model=SlateOverridesResponse)
+async def set_overrides(request: BatchOverrideRequest):
+    """Create or update overrides (batch). Merges with existing overrides."""
+    from .user_overrides import (
+        PlayerOverride,
+        load_slate_overrides,
+        save_slate_overrides,
+    )
+    
+    # Load existing overrides
+    slate_overrides = load_slate_overrides(request.date, request.draft_group_id)
+    
+    # Check for revision conflict
+    if request.expected_revision is not None:
+        if slate_overrides.client_revision != request.expected_revision:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Revision conflict: expected {request.expected_revision}, got {slate_overrides.client_revision}",
+            )
+    
+    # Apply updates
+    for override_req in request.overrides:
+        # If all values are None/False, remove the override
+        if (
+            override_req.minutes is None
+            and override_req.fpts is None
+            and override_req.own is None
+            and not override_req.is_out
+        ):
+            slate_overrides.remove_override(override_req.player_id)
+        else:
+            po = PlayerOverride(
+                player_id=override_req.player_id,
+                minutes=override_req.minutes,
+                fpts=override_req.fpts,
+                own=override_req.own,
+                is_out=override_req.is_out,
+            )
+            slate_overrides.set_override(po)
+    
+    # Save
+    try:
+        save_slate_overrides(slate_overrides)
+    except Exception as e:
+        logger.exception("Failed to save overrides: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to save: {e}")
+    
+    logger.info(
+        "Saved %d overrides for %s/dg=%d (rev=%d)",
+        len(slate_overrides.overrides),
+        request.date,
+        request.draft_group_id,
+        slate_overrides.client_revision,
+    )
+    
+    return SlateOverridesResponse(
+        game_date=slate_overrides.game_date,
+        draft_group_id=slate_overrides.draft_group_id,
+        client_revision=slate_overrides.client_revision,
+        updated_at=slate_overrides.updated_at,
+        overrides=[
+            PlayerOverrideResponse(
+                player_id=po.player_id,
+                minutes=po.minutes,
+                fpts=po.fpts,
+                own=po.own,
+                is_out=po.is_out,
+                updated_at=po.updated_at,
+            )
+            for po in slate_overrides.overrides.values()
+        ],
+    )
+
+
+@router.delete("/overrides/{player_id}")
+async def remove_player_override(
+    player_id: str,
+    date: str = Query(..., description="Game date YYYY-MM-DD"),
+    draft_group_id: int = Query(..., description="Draft group ID"),
+):
+    """Remove override for a single player."""
+    from .user_overrides import load_slate_overrides, save_slate_overrides
+    
+    slate_overrides = load_slate_overrides(date, draft_group_id)
+    removed = slate_overrides.remove_override(player_id)
+    
+    if not removed:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No override found for player {player_id}",
+        )
+    
+    save_slate_overrides(slate_overrides)
+    
+    return {"status": "deleted", "player_id": player_id}
+
+
+@router.delete("/overrides")
+async def clear_all_overrides(
+    date: str = Query(..., description="Game date YYYY-MM-DD"),
+    draft_group_id: int = Query(..., description="Draft group ID"),
+):
+    """Clear all overrides for a slate."""
+    from .user_overrides import load_slate_overrides, save_slate_overrides
+    
+    slate_overrides = load_slate_overrides(date, draft_group_id)
+    count = len(slate_overrides.overrides)
+    slate_overrides.clear_all()
+    save_slate_overrides(slate_overrides)
+    
+    logger.info("Cleared %d overrides for %s/dg=%d", count, date, draft_group_id)
+    
+    return {"status": "cleared", "count": count}

@@ -14,6 +14,7 @@ Environment=LIVE_DISABLE_TIP_WINDOW=1
 Environment=LIVE_TIP_LEAD_MINUTES=60
 Environment=LIVE_TIP_TAIL_MINUTES=180
 Environment=LIVE_SIM_PROFILE=sim_v3
+Environment=LIVE_SIM_WORLDS=25000
 User=daniel
 Group=daniel
 ExecStart=/home/daniel/projects/projections-v2/scripts/run_live_score.sh

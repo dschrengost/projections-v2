@@ -358,6 +358,8 @@ def build_player_pool(
     data_root: Optional[Path] = None,
     include_games: Optional[List[str]] = None,
     exclude_games: Optional[List[str]] = None,
+    use_user_overrides: bool = False,
+    ownership_mode: str = "renormalize",
 ) -> List[Dict[str, Any]]:
     """Build optimizer-ready player pool by merging projections with salaries.
 
@@ -369,10 +371,16 @@ def build_player_pool(
         data_root: Optional data root override
         include_games: If set, only include players from these games (e.g., ["MIN@DAL", "LAL@GSW"])
         exclude_games: If set, exclude players from these games
+        use_user_overrides: If True, apply user overrides from SlateOverrides
+        ownership_mode: For overrides - "raw" or "renormalize" (default)
 
     Returns list of player dicts with required QuickBuild fields:
         player_id, name, team, positions, salary, proj, own_proj, stddev, dk_id,
         game_matchup, game_start_utc
+        
+        When use_user_overrides=True, also includes:
+        model_proj, model_minutes, model_own, effective_proj, effective_minutes,
+        effective_own, has_override, used_fppm_fallback, is_active, fppm
     """
     root = data_root or get_data_root()
 
@@ -459,6 +467,32 @@ def build_player_pool(
                 exclude_games,
             )
 
+    # Apply user overrides if requested
+    slate_overrides = None
+    if use_user_overrides:
+        from .user_overrides import apply_overrides as apply_user_overrides, load_slate_overrides
+        
+        slate_overrides = load_slate_overrides(game_date, draft_group_id)
+        merged = apply_user_overrides(
+            merged,
+            slate_overrides,
+            ownership_mode=ownership_mode,  # type: ignore
+        )
+        logger.info(
+            "Applied %d user overrides for %s/dg=%d",
+            len(slate_overrides.overrides),
+            game_date,
+            draft_group_id,
+        )
+        # Filter out players marked as out
+        before_count = len(merged)
+        merged = merged[merged["is_active"]]
+        if len(merged) < before_count:
+            logger.info(
+                "Excluded %d players marked as out",
+                before_count - len(merged),
+            )
+
     # Build player pool list
     pool: List[Dict[str, Any]] = []
 
@@ -478,6 +512,24 @@ def build_player_pool(
     )
     if not proj_col:
         raise ValueError("No projection column found in merged data")
+    
+    # Identify minutes column
+    minutes_col = next(
+        (
+            c
+            for c in [
+                "sim_minutes_sim_mean",
+                "minutes_sim_mean",
+                "sim_minutes_sim_p50",
+                "minutes_sim_p50",
+                "minutes_p50",
+                "minutes",
+                "minutes_pred",
+            ]
+            if c in merged.columns
+        ),
+        None,
+    )
 
     # Identify ownership column
     own_col = next(
@@ -532,8 +584,28 @@ def build_player_pool(
             logger.warning("Player %s has invalid salary %s, skipping", player_id, salary)
             continue
 
-        # Get projection
-        proj = row.get(proj_col)
+        # When overrides applied, use effective values; otherwise use model values
+        if use_user_overrides and "effective_fpts" in merged.columns:
+            proj = row.get("effective_fpts")
+            model_proj = row.get("model_fpts", row.get(proj_col))
+            model_minutes = row.get("model_minutes", row.get(minutes_col, 0) if minutes_col else 0)
+            model_own = row.get("model_own", row.get(own_col, 0) if own_col else 0)
+            effective_minutes = row.get("effective_minutes", model_minutes)
+            effective_own = row.get("effective_own", model_own)
+            has_override = bool(row.get("has_override", False))
+            used_fppm_fallback = bool(row.get("used_fppm_fallback", False))
+            fppm = row.get("fppm", 1.0)
+        else:
+            proj = row.get(proj_col)
+            model_proj = proj
+            model_minutes = row.get(minutes_col, 0) if minutes_col else 0
+            model_own = row.get(own_col, 0) if own_col else 0
+            effective_minutes = model_minutes
+            effective_own = model_own
+            has_override = False
+            used_fppm_fallback = False
+            fppm = float(proj / model_minutes) if model_minutes and model_minutes > 0 else 1.0
+        
         if pd.isna(proj) or proj <= 0:
             logger.debug("Player %s has no projection, skipping", player_id)
             continue
@@ -557,7 +629,7 @@ def build_player_pool(
 
         # Optional fields
         if own_col and pd.notna(row.get(own_col)):
-            player["own_proj"] = float(row[own_col])
+            player["own_proj"] = float(effective_own if use_user_overrides else row[own_col])
         if stddev_col and pd.notna(row.get(stddev_col)):
             player["stddev"] = float(row[stddev_col])
         if p90_col and pd.notna(row.get(p90_col)):
@@ -572,6 +644,19 @@ def build_player_pool(
                 player["game_start_utc"] = game_start.isoformat()
             else:
                 player["game_start_utc"] = str(game_start)
+        
+        # Add override-related fields when using user overrides
+        if use_user_overrides:
+            player["model_proj"] = float(model_proj) if pd.notna(model_proj) else 0.0
+            player["model_minutes"] = float(model_minutes) if pd.notna(model_minutes) else 0.0
+            player["model_own"] = float(model_own) if pd.notna(model_own) else 0.0
+            player["effective_proj"] = float(proj)
+            player["effective_minutes"] = float(effective_minutes) if pd.notna(effective_minutes) else 0.0
+            player["effective_own"] = float(effective_own) if pd.notna(effective_own) else 0.0
+            player["has_override"] = has_override
+            player["used_fppm_fallback"] = used_fppm_fallback
+            player["fppm"] = float(fppm) if pd.notna(fppm) else 1.0
+            player["is_active"] = True  # Already filtered out inactive players
 
         pool.append(player)
 

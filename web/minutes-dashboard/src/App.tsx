@@ -67,19 +67,7 @@ type SortKey =
   | 'pred_own_pct'
   | 'value'
   | 'sim_dk_fpts_mean'
-  | 'sim_dk_fpts_p05'
-  | 'sim_dk_fpts_p10'
-  | 'sim_dk_fpts_p25'
-  | 'sim_dk_fpts_p50'
-  | 'sim_dk_fpts_p75'
   | 'sim_dk_fpts_p95'
-  | 'sim_pts_mean'
-  | 'sim_reb_mean'
-  | 'sim_ast_mean'
-  | 'sim_stl_mean'
-  | 'sim_blk_mean'
-  | 'sim_tov_mean'
-  | 'sim_minutes_sim_p50'
   | 'sim_minutes_sim_mean'
 
 type RunOption = {
@@ -102,20 +90,8 @@ const SORT_LABELS: Record<SortKey, string> = {
   pred_own_pct: 'Own%',
   value: 'Value',
   sim_dk_fpts_mean: 'Sim Mean',
-  sim_dk_fpts_p05: 'Sim p05',
-  sim_dk_fpts_p10: 'Sim p10',
-  sim_dk_fpts_p25: 'Sim p25',
-  sim_dk_fpts_p50: 'Sim p50',
-  sim_dk_fpts_p75: 'Sim p75',
   sim_dk_fpts_p95: 'Sim p95',
-  sim_pts_mean: 'Sim PTS',
-  sim_reb_mean: 'Sim REB',
-  sim_ast_mean: 'Sim AST',
-  sim_stl_mean: 'Sim STL',
-  sim_blk_mean: 'Sim BLK',
-  sim_tov_mean: 'Sim TOV',
-  sim_minutes_sim_p50: 'Sim MIN p50',
-  sim_minutes_sim_mean: 'Sim MIN mean',
+  sim_minutes_sim_mean: 'Sim MIN',
 }
 
 
@@ -154,6 +130,19 @@ function App() {
 
   const [showSim, setShowSim] = useState(true)
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
+
+  // Player override state: player_id -> { minutes?: number, fpts?: number, own?: number }
+  type PlayerOverride = { minutes?: number | null; fpts?: number | null; own?: number | null }
+  const [overrides, setOverrides] = useState<Map<string, PlayerOverride>>(new Map())
+
+  const updateOverride = (playerId: string, field: keyof PlayerOverride, value: number | null) => {
+    setOverrides(prev => {
+      const next = new Map(prev)
+      const current = next.get(playerId) ?? {}
+      next.set(playerId, { ...current, [field]: value })
+      return next
+    })
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -344,24 +333,12 @@ function App() {
 
 
   const simFptsColumns: Array<{ key: SortKey; label: string }> = [
-    { key: 'sim_dk_fpts_p05', label: 'Sim p05' },
-    { key: 'sim_dk_fpts_p10', label: 'Sim p10' },
-    { key: 'sim_dk_fpts_p25', label: 'Sim p25' },
-    { key: 'sim_dk_fpts_p50', label: 'Sim p50' },
-    { key: 'sim_dk_fpts_p75', label: 'Sim p75' },
+    { key: 'sim_dk_fpts_mean', label: 'Sim Mean' },
     { key: 'sim_dk_fpts_p95', label: 'Sim p95' },
-    { key: 'sim_dk_fpts_mean', label: 'Sim mean' },
   ]
 
   const simStatColumns: Array<{ key: SortKey; label: string }> = [
-    { key: 'sim_pts_mean', label: 'Sim PTS' },
-    { key: 'sim_reb_mean', label: 'Sim REB' },
-    { key: 'sim_ast_mean', label: 'Sim AST' },
-    { key: 'sim_stl_mean', label: 'Sim STL' },
-    { key: 'sim_blk_mean', label: 'Sim BLK' },
-    { key: 'sim_tov_mean', label: 'Sim TOV' },
-    { key: 'sim_minutes_sim_p50', label: 'Sim MIN p50' },
-    { key: 'sim_minutes_sim_mean', label: 'Sim MIN mean' },
+    { key: 'sim_minutes_sim_mean', label: 'Sim MIN' },
   ]
 
   const nav = (
@@ -624,21 +601,29 @@ function App() {
                       </th>
                     ),
                   )}
-                  {/* Ownership Columns */}
-                  {(['salary', 'pred_own_pct', 'value'] as SortKey[]).map((key) => (
-                    <th key={key} onClick={() => toggleSort(key)} className="sortable">
-                      {SORT_LABELS[key]}
-                      {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
-                    </th>
-                  ))}
+                  {/* Ownership Columns - add My Own% before Own% */}
+                  <th>Salary</th>
+                  <th className="override-col">My Own%</th>
+                  <th onClick={() => toggleSort('pred_own_pct')} className="sortable">
+                    {SORT_LABELS['pred_own_pct']}
+                    {sortKey === 'pred_own_pct' && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
+                  </th>
+                  <th onClick={() => toggleSort('value')} className="sortable">
+                    {SORT_LABELS['value']}
+                    {sortKey === 'value' && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
+                  </th>
                   {showSim && (
                     <>
+                      {/* My FPTS before sim FPTS columns */}
+                      <th className="override-col">My FPTS</th>
                       {simFptsColumns.map(({ key, label }) => (
                         <th key={key} onClick={() => toggleSort(key)} className="sortable">
                           {label}
                           {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
                         </th>
                       ))}
+                      {/* My MIN before sim MIN */}
+                      <th className="override-col">My MIN</th>
                       {simStatColumns.map(({ key, label }) => (
                         <th key={key} onClick={() => toggleSort(key)} className="sortable">
                           {label}
@@ -689,6 +674,23 @@ function App() {
                       <td>{formatPercent(row.play_prob)}</td>
                       {/* Ownership Columns */}
                       <td>{formatSalary(row.salary)}</td>
+                      {/* My Own% input */}
+                      <td className="override-input-cell">
+                        <input
+                          type="number"
+                          className="override-input"
+                          placeholder="—"
+                          step={0.5}
+                          min={0}
+                          max={100}
+                          value={overrides.get(String(row.player_id))?.own ?? ''}
+                          onChange={e => updateOverride(
+                            String(row.player_id),
+                            'own',
+                            e.target.value ? Number(e.target.value) : null
+                          )}
+                        />
+                      </td>
                       <td className="ownership-cell">
                         {row.is_locked && <span className="lock-icon" title="Predictions locked">🔒</span>}
                         {formatOwnership(row.pred_own_pct)}
@@ -696,11 +698,45 @@ function App() {
                       <td className="value-cell">{formatValue(row.value)}</td>
                       {showSim && (
                         <>
+                          {/* My FPTS input */}
+                          <td className="override-input-cell">
+                            <input
+                              type="number"
+                              className="override-input"
+                              placeholder="—"
+                              step={0.5}
+                              min={0}
+                              max={100}
+                              value={overrides.get(String(row.player_id))?.fpts ?? ''}
+                              onChange={e => updateOverride(
+                                String(row.player_id),
+                                'fpts',
+                                e.target.value ? Number(e.target.value) : null
+                              )}
+                            />
+                          </td>
                           {simFptsColumns.map(({ key }) => (
                             <td key={key}>
                               {formatFpts(row[key as keyof PlayerRow] as number | undefined)}
                             </td>
                           ))}
+                          {/* My MIN input */}
+                          <td className="override-input-cell">
+                            <input
+                              type="number"
+                              className="override-input"
+                              placeholder="—"
+                              step={1}
+                              min={0}
+                              max={48}
+                              value={overrides.get(String(row.player_id))?.minutes ?? ''}
+                              onChange={e => updateOverride(
+                                String(row.player_id),
+                                'minutes',
+                                e.target.value ? Number(e.target.value) : null
+                              )}
+                            />
+                          </td>
                           {simStatColumns.map(({ key }) => (
                             <td key={key}>
                               {key.startsWith('sim_minutes_sim_')
