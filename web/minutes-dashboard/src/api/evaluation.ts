@@ -82,6 +82,7 @@ export type EvaluationSummary = {
   avg_own_corr?: number | null
   avg_chalk_top5_acc?: number | null
   avg_own_bias?: number | null
+  avg_high_own_mae?: number | null
 
   // Counts
   dates_evaluated: number

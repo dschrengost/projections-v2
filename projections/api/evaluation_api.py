@@ -75,6 +75,7 @@ def _compute_summary(data: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_own_corr": safe_avg("own_corr"),
         "avg_chalk_top5_acc": safe_avg("chalk_top5_acc"),
         "avg_own_bias": safe_avg("own_bias"),
+        "avg_high_own_mae": safe_avg("high_own_mae"),
         
         # Counts
         "dates_evaluated": len(data),

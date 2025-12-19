@@ -157,9 +157,17 @@ export function EvaluationPage() {
             <div className="card">
               <div className="label">Own MAE</div>
               <div
-                className={`value ${getMetricClass(summary?.avg_own_mae, { good: 8, warn: 12 })}`}
+                className={`value ${getMetricClass(summary?.avg_own_mae, { good: 4, warn: 6 })}`}
               >
                 {loading ? '…' : formatNumber(summary?.avg_own_mae)}
+              </div>
+            </div>
+            <div className="card">
+              <div className="label">High Own MAE</div>
+              <div
+                className={`value ${getMetricClass(summary?.avg_high_own_mae, { good: 10, warn: 20 })}`}
+              >
+                {loading ? '…' : formatNumber(summary?.avg_high_own_mae)}
               </div>
             </div>
           </>

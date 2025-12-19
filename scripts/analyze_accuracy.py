@@ -226,15 +226,42 @@ def load_actual_ownership(date_str: str, data_root: Path) -> pd.DataFrame:
 
 
 def load_ownership_predictions(date_str: str, data_root: Path) -> pd.DataFrame:
-    """Load ownership predictions for a date."""
-    pred_path = data_root / "silver" / "ownership_predictions" / f"{date_str}.parquet"
-    if not pred_path.exists():
-        return pd.DataFrame()
+    """Load ownership predictions for a date.
     
-    df = pd.read_parquet(pred_path)
-    # Normalize name for joining
-    df['player_name_lower'] = df['player_name'].str.lower().str.strip()
-    return df
+    Handles two path formats:
+    - Legacy: silver/ownership_predictions/{date}.parquet 
+    - New: silver/ownership_predictions/{date}/*.parquet (per-slate files)
+    """
+    base_path = data_root / "silver" / "ownership_predictions"
+    
+    # Try legacy format first
+    legacy_path = base_path / f"{date_str}.parquet"
+    if legacy_path.exists():
+        df = pd.read_parquet(legacy_path)
+        df['player_name_lower'] = df['player_name'].str.lower().str.strip()
+        return df
+    
+    # Try new directory format
+    date_dir = base_path / date_str
+    if date_dir.is_dir():
+        # Find all slate parquet files (exclude _locked variants)
+        slate_files = [f for f in date_dir.glob("*.parquet") if not f.name.endswith("_locked.parquet")]
+        if slate_files:
+            # Pick the largest slate (main slate has most players)
+            dfs = []
+            for f in slate_files:
+                try:
+                    df = pd.read_parquet(f)
+                    dfs.append((len(df), df))
+                except Exception:
+                    continue
+            if dfs:
+                # Return the largest slate's predictions
+                _, best_df = max(dfs, key=lambda x: x[0])
+                best_df['player_name_lower'] = best_df['player_name'].str.lower().str.strip()
+                return best_df
+    
+    return pd.DataFrame()
 
 
 def compute_ownership_metrics(actual: pd.DataFrame, predictions: pd.DataFrame) -> dict:
