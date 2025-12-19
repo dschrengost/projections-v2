@@ -1,5 +1,15 @@
 import { apiUrl } from './client'
 
+export type FptsMiss = {
+  player_id: string
+  player_name?: string
+  pred_fpts: number
+  actual_fpts: number
+  error: number
+  pred_mins: number
+  actual_mins: number
+}
+
 export type EvaluationDayMetrics = {
   date: string
   players_matched: number
@@ -13,6 +23,17 @@ export type EvaluationDayMetrics = {
   bias: number | null
   missed: number
   false_preds: number
+  // Minutes by bucket
+  mins_mae_starter_30plus?: number | null
+  n_starter_30plus?: number
+  mins_mae_heavy_20_30?: number | null
+  n_heavy_20_30?: number
+  mins_mae_rotation_10_20?: number | null
+  n_rotation_10_20?: number
+  mins_mae_light_5_10?: number | null
+  n_light_5_10?: number
+  // Top FPTS misses
+  top_fpts_misses?: FptsMiss[]
   // Ownership metrics (optional - may not be available for all dates)
   own_players_matched?: number | null
   own_mae?: number | null

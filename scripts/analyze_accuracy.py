@@ -337,11 +337,13 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
         return {'players_matched': 0}
     
     # === Roster Accuracy (based on merged predictions only) ===
+    # Use p50 minutes from sim if available for consistency with DNP detection
+    pred_min_col = 'minutes_sim_p50' if 'minutes_sim_p50' in merged.columns else 'minutes_mean'
     min_pred_threshold = min_minutes * 0.5
     played_5plus = merged[merged['actual_minutes'] >= min_minutes]
-    missed = played_5plus[played_5plus['minutes_mean'] < min_pred_threshold] if 'minutes_mean' in merged.columns else pd.DataFrame()
+    missed = played_5plus[played_5plus[pred_min_col] < min_pred_threshold] if pred_min_col in merged.columns else pd.DataFrame()
     
-    high_pred = merged[merged['minutes_mean'] >= min_minutes] if 'minutes_mean' in merged.columns else pd.DataFrame()
+    high_pred = merged[merged[pred_min_col] >= min_minutes] if pred_min_col in merged.columns else pd.DataFrame()
     false_preds = high_pred[high_pred['actual_minutes'] < min_minutes]
     
     # Filter to players who played meaningful minutes
@@ -417,9 +419,11 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
     # === Edge Case Detection ===
     edge_cases = {}
     
-    # DNP false positives: predicted > 10 min but played 0
-    if 'minutes_mean' in merged.columns:
-        pred_minutes = merged['minutes_mean'].fillna(0)
+    # DNP false positives: predicted > 10 min (p50) but played 0
+    # Use p50 instead of mean because a p50 of 0 means majority of worlds predict DNP
+    pred_minutes_col = 'minutes_sim_p50' if 'minutes_sim_p50' in merged.columns else 'minutes_mean'
+    if pred_minutes_col in merged.columns:
+        pred_minutes = merged[pred_minutes_col].fillna(0)
         actual_dnp = merged['actual_minutes'] == 0
         dnp_fp = merged[actual_dnp & (pred_minutes >= 10)]
         edge_cases['dnp_false_positives'] = len(dnp_fp)
@@ -471,6 +475,49 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
                 pos_metrics[f'fpts_mae_{pos}'] = round(np.abs(pos_df['fpts_error']).mean(), 2)
                 pos_metrics[f'n_{pos}'] = len(pos_df)
     
+    # === Minutes by Bucket ===
+    minutes_by_bucket = {}
+    if 'mins_error' in played.columns:
+        # Buckets based on actual minutes: starter (30+), heavy (20-30), rotation (10-20), light (<10)
+        buckets = {
+            'starter_30plus': (30, 100),
+            'heavy_20_30': (20, 30),
+            'rotation_10_20': (10, 20),
+            'light_5_10': (5, 10),
+        }
+        for bucket_name, (low, high) in buckets.items():
+            bucket_df = played[(played['actual_minutes'] >= low) & (played['actual_minutes'] < high)]
+            if len(bucket_df) > 0:
+                minutes_by_bucket[f'mins_mae_{bucket_name}'] = round(np.abs(bucket_df['mins_error']).mean(), 2)
+                minutes_by_bucket[f'n_{bucket_name}'] = len(bucket_df)
+            else:
+                minutes_by_bucket[f'mins_mae_{bucket_name}'] = None
+                minutes_by_bucket[f'n_{bucket_name}'] = 0
+    
+    # === Top 10 Biggest FPTS Misses ===
+    top_misses = []
+    if 'fpts_error' in played.columns:
+        played_sorted = played.copy()
+        played_sorted['abs_fpts_error'] = np.abs(played_sorted['fpts_error'])
+        biggest = played_sorted.nlargest(10, 'abs_fpts_error')
+        
+        name_col = 'player_name_actual' if 'player_name_actual' in biggest.columns else 'player_name'
+        if name_col not in biggest.columns:
+            name_col = None
+        
+        for _, row in biggest.iterrows():
+            miss = {
+                'player_id': str(row.get('player_id', '')),
+                'pred_fpts': round(row.get('dk_fpts_mean', 0), 1),
+                'actual_fpts': round(row.get('actual_dk_fpts', 0), 1),
+                'error': round(row.get('fpts_error', 0), 1),
+                'pred_mins': round(row.get('minutes_sim_p50', row.get('minutes_mean', 0)), 1),
+                'actual_mins': round(row.get('actual_minutes', 0), 1),
+            }
+            if name_col:
+                miss['player_name'] = row[name_col]
+            top_misses.append(miss)
+    
     # === Combine all metrics ===
     result = {
         # Core
@@ -501,6 +548,12 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
     
     # Add positional (these can be large, so only include counts)
     result.update(pos_metrics)
+    
+    # Add minutes by bucket
+    result.update(minutes_by_bucket)
+    
+    # Add top misses
+    result['top_fpts_misses'] = top_misses
     
     return result
 

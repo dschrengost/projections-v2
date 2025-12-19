@@ -65,7 +65,7 @@ deployments:
   version: null
   tags: []
   concurrency_limit: 1
-  description: Fetch DraftKings salaries for all slates (runs daily at 8am).
+  description: Fetch DraftKings salaries for all slates (runs daily at 9am).
   entrypoint: prefect_flows/live_pipeline.py:dk_salaries_flow
   parameters: {}
   work_pool:
@@ -73,5 +73,20 @@ deployments:
     work_queue_name: null
     job_variables: {}
   schedules:
-    - cron: "0 8 * * *"
+    - cron: "0 9 * * *"
+      timezone: "America/New_York"
+
+- name: nightly-eval
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: Nightly prediction accuracy evaluation (FPTS + ownership).
+  entrypoint: prefect_flows/live_pipeline.py:nightly_eval_flow
+  parameters: {}
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables: {}
+  schedules:
+    - cron: "30 5 * * *"
       timezone: "America/New_York"

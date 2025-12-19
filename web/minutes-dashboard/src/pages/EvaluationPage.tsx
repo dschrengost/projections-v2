@@ -228,6 +228,76 @@ export function EvaluationPage() {
         </div>
       )}
 
+      {/* Minutes Accuracy by Bucket */}
+      {!loading && metrics.length > 0 && metrics[metrics.length - 1]?.mins_mae_starter_30plus != null && (
+        <div className="evaluation-section">
+          <h2>Minutes Accuracy by Bucket</h2>
+          <p className="section-note" style={{ marginTop: 0, marginBottom: '1rem' }}>
+            Minutes MAE (Mean Absolute Error) grouped by actual playing time
+          </p>
+          <div className="salary-tier-grid">
+            <div className="tier-card elite">
+              <div className="tier-label">Starter (30+)</div>
+              <div className="tier-value">{formatNumber(metrics[metrics.length - 1]?.mins_mae_starter_30plus)}</div>
+              <div className="tier-count">n={metrics[metrics.length - 1]?.n_starter_30plus ?? 0}</div>
+            </div>
+            <div className="tier-card mid">
+              <div className="tier-label">Heavy (20-30)</div>
+              <div className="tier-value">{formatNumber(metrics[metrics.length - 1]?.mins_mae_heavy_20_30)}</div>
+              <div className="tier-count">n={metrics[metrics.length - 1]?.n_heavy_20_30 ?? 0}</div>
+            </div>
+            <div className="tier-card value">
+              <div className="tier-label">Rotation (10-20)</div>
+              <div className="tier-value">{formatNumber(metrics[metrics.length - 1]?.mins_mae_rotation_10_20)}</div>
+              <div className="tier-count">n={metrics[metrics.length - 1]?.n_rotation_10_20 ?? 0}</div>
+            </div>
+            <div className="tier-card punt">
+              <div className="tier-label">Light (5-10)</div>
+              <div className="tier-value">{formatNumber(metrics[metrics.length - 1]?.mins_mae_light_5_10)}</div>
+              <div className="tier-count">n={metrics[metrics.length - 1]?.n_light_5_10 ?? 0}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Top FPTS Misses */}
+      {!loading && metrics.length > 0 && metrics[metrics.length - 1]?.top_fpts_misses?.length && (
+        <div className="evaluation-section">
+          <h2>Top FPTS Misses (Latest Day)</h2>
+          <p className="section-note" style={{ marginTop: 0, marginBottom: '1rem' }}>
+            Largest absolute errors between predicted and actual FPTS
+          </p>
+          <div className="table-wrapper evaluation-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Pred FPTS</th>
+                  <th>Actual FPTS</th>
+                  <th>Error</th>
+                  <th>Pred Min</th>
+                  <th>Actual Min</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics[metrics.length - 1].top_fpts_misses?.slice(0, 10).map((miss, i) => (
+                  <tr key={i}>
+                    <td className="date-cell">{miss.player_name ?? miss.player_id}</td>
+                    <td>{formatNumber(miss.pred_fpts, 1)}</td>
+                    <td>{formatNumber(miss.actual_fpts, 1)}</td>
+                    <td className={miss.error > 0 ? 'metric-good' : 'metric-warn'}>
+                      {miss.error > 0 ? '+' : ''}{formatNumber(miss.error, 1)}
+                    </td>
+                    <td>{formatNumber(miss.pred_mins, 1)}</td>
+                    <td>{formatNumber(miss.actual_mins, 1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* FPTS Accuracy Trend */}
       {!loading && chartData.length > 0 && (
         <div className="evaluation-section">

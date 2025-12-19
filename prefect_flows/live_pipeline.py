@@ -372,6 +372,86 @@ def run_dk_salaries_task(
         "manifest_path": str(manifest_path),
     }
 
+
+@task(
+    name="run-nightly-eval",
+    retries=1,
+    retry_delay_seconds=60,
+    log_prints=True,
+)
+def run_nightly_eval_task(
+    output_path: str | None = None,
+) -> dict:
+    """
+    Run nightly prediction accuracy evaluation (FPTS + ownership).
+    
+    Calls: python -m scripts.analyze_accuracy
+    """
+    import os
+    
+    logger = get_run_logger()
+    start_ts = datetime.now(timezone.utc)
+    
+    effective_output = output_path or str(DATA_ROOT / "reports" / "eval_latest.json")
+    
+    # Build command
+    cmd = [
+        UV_BIN, "run", "python", "-m", "scripts.analyze_accuracy",
+        "--output", effective_output,
+    ]
+    
+    logger.info(f"Running nightly eval, output to {effective_output}")
+    logger.info(f"Command: {' '.join(cmd)}")
+    
+    env = os.environ.copy()
+    env["PROJECTIONS_DATA_ROOT"] = str(DATA_ROOT)
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minute timeout
+        )
+        exit_code, stdout, stderr = result.returncode, result.stdout, result.stderr
+    except subprocess.TimeoutExpired:
+        exit_code, stdout, stderr = -1, "", "Script timed out after 600s"
+    
+    end_ts = datetime.now(timezone.utc)
+    
+    # Log output
+    if stdout:
+        for line in stdout.strip().split("\n"):
+            logger.info(line)
+    if stderr:
+        for line in stderr.strip().split("\n"):
+            logger.warning(line)
+    
+    # Emit manifest
+    manifest_path = emit_manifest(
+        task_name="nightly-eval",
+        start_ts=start_ts,
+        end_ts=end_ts,
+        exit_code=exit_code,
+        output_paths=[effective_output],
+        error_snippet=stderr[:500] if exit_code != 0 and stderr else None,
+        extra={"output_path": effective_output},
+    )
+    logger.info(f"Manifest written to {manifest_path}")
+    
+    if exit_code != 0:
+        raise RuntimeError(f"nightly-eval failed with exit code {exit_code}")
+    
+    return {
+        "exit_code": exit_code,
+        "duration_s": (end_ts - start_ts).total_seconds(),
+        "manifest_path": str(manifest_path),
+        "output_path": effective_output,
+    }
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Flows
 # ──────────────────────────────────────────────────────────────────────────────
@@ -489,13 +569,30 @@ def dk_salaries_flow(
     """
     Flow for fetching DraftKings salary data.
     
-    Runs daily at 8am to pull salary data for all available slates.
+    Runs daily at 9am to pull salary data for all available slates.
     Can also be triggered manually with --force-refresh to re-fetch.
     """
     return run_dk_salaries_task(
         game_date=game_date,
         force_refresh=force_refresh,
     )
+
+
+@flow(
+    name="nightly-eval",
+    description="Run nightly prediction accuracy evaluation (FPTS + ownership).",
+    log_prints=True,
+)
+def nightly_eval_flow(
+    output_path: str | None = None,
+) -> dict:
+    """
+    Flow for running prediction accuracy evaluation.
+    
+    Runs nightly at 5:30am ET (after games conclude) to evaluate
+    yesterday's predictions against actual results.
+    """
+    return run_nightly_eval_task(output_path=output_path)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -506,10 +603,11 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Run live pipeline flows locally")
-    parser.add_argument("flow", choices=["scrape", "score", "full", "dk-salaries"], help="Which flow to run")
+    parser.add_argument("flow", choices=["scrape", "score", "full", "dk-salaries", "nightly-eval"], help="Which flow to run")
     parser.add_argument("--date", help="Game date (YYYY-MM-DD), default=today")
     parser.add_argument("--no-sim", action="store_true", help="Skip simulation")
     parser.add_argument("--force-refresh", action="store_true", help="Force refresh (dk-salaries)")
+    parser.add_argument("--output", help="Output path (nightly-eval)")
     args = parser.parse_args()
     
     if args.flow == "scrape":
@@ -518,5 +616,8 @@ if __name__ == "__main__":
         live_score_flow(game_date=args.date, run_sim=not args.no_sim)
     elif args.flow == "dk-salaries":
         dk_salaries_flow(game_date=args.date, force_refresh=args.force_refresh)
+    elif args.flow == "nightly-eval":
+        nightly_eval_flow(output_path=args.output)
     else:
         live_pipeline_full_flow(game_date=args.date, run_sim=not args.no_sim)
+
