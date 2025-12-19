@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Prevent overlapping runs - exit immediately if another instance is running
+LOCKFILE="/tmp/live-score.lock"
+exec 200>"${LOCKFILE}"
+if ! flock -n 200; then
+  echo "[live] Another instance is already running. Exiting."
+  exit 0
+fi
+
 DATA_ROOT="${PROJECTIONS_DATA_ROOT:-/home/daniel/projections-data}"
 START_DATE="${LIVE_START_DATE:-$(date -I)}"
 END_DATE="${LIVE_END_DATE:-$START_DATE}"
@@ -15,7 +23,7 @@ CONFIG_RECONCILE=$(jq -r '.reconcile_team_minutes // empty' config/minutes_curre
 # Default to 'none' - sim handles reconciliation internally via game script sampling
 RECONCILE_MODE="${LIVE_RECONCILE_MODE:-${CONFIG_RECONCILE:-none}}"
 MINUTES_OUTPUT_MODE="${LIVE_MINUTES_OUTPUT:-conditional}"
-SIM_PROFILE="${LIVE_SIM_PROFILE:-baseline}"
+SIM_PROFILE="${LIVE_SIM_PROFILE:-sim_v3}"
 SIM_WORLDS="${LIVE_SIM_WORLDS:-10000}"
 RUN_SIM="${LIVE_RUN_SIM:-1}"
 DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-0}" # enabled by default - respect game schedule
@@ -253,10 +261,11 @@ else
 fi
 
 # === STEP 8: FINALIZE UNIFIED PROJECTIONS ===
-# Determine main slate (largest by player count) for ownership merge
+# Determine main slate (largest by player count, prefer lowest ID if tied) for ownership merge
 MAIN_DRAFT_GROUP=$(DATA_ROOT="${DATA_ROOT}" START_DATE="${START_DATE}" /home/daniel/.local/bin/uv run python - <<'PY'
 import os
 from pathlib import Path
+import pandas as pd
 
 data_root = Path(os.environ["DATA_ROOT"])
 game_date = os.environ["START_DATE"]
@@ -267,19 +276,24 @@ if not base.exists():
     print("", flush=True)
     exit(0)
 
-# Find largest slate by player count
-best_dg_id = None
-best_count = 0
+# Find largest slate by player count (prefer lowest ID if tied - main slate is usually first)
+slates = []
 for dg_dir in base.glob("draft_group_id=*"):
     parquet_path = dg_dir / "salaries.parquet"
     if parquet_path.exists():
-        import pandas as pd
         df = pd.read_parquet(parquet_path)
-        if len(df) > best_count:
-            best_count = len(df)
-            best_dg_id = dg_dir.name.split("=")[1]
+        dg_id = dg_dir.name.split("=")[1]
+        slates.append((int(dg_id), len(df)))
 
-print(best_dg_id or "", flush=True)
+if not slates:
+    print("", flush=True)
+    exit(0)
+
+# Sort by player count (desc), then by draft_group_id (asc) to get main slate
+slates.sort(key=lambda x: (-x[1], x[0]))
+best_dg_id = str(slates[0][0])
+
+print(best_dg_id, flush=True)
 PY
 )
 

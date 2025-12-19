@@ -1,0 +1,77 @@
+# Welcome to your prefect.yaml file! You can use this file for storing and managing
+# configuration for deploying your flows. We recommend committing this file to source
+# control along with your flow code.
+
+# Generic metadata about this project
+name: projections-v2
+prefect-version: 3.6.7
+
+# build section allows you to manage and build docker images
+build: null
+
+# push section allows you to manage if and how this project is uploaded to remote locations
+push: null
+
+# pull section allows you to provide instructions for cloning this project in remote locations
+pull:
+- prefect.deployments.steps.set_working_directory:
+    directory: /home/daniel/projects/projections-v2
+
+# the deployments section allows you to provide configuration for deploying flows
+deployments:
+- name: live-scrape
+  version: null
+  tags: []
+  concurrency_limit: null
+  description: Scrape live data (injuries, odds, schedule) for today's games.
+  entrypoint: prefect_flows/live_pipeline.py:live_scrape_flow
+  parameters: {}
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables: {}
+  schedules: []
+
+- name: live-score
+  version: null
+  tags: []
+  concurrency_limit: 1  # prevent overlapping runs
+  description: Full live scoring pipeline - features, scoring, sim, ownership.
+  entrypoint: prefect_flows/live_pipeline.py:live_score_flow
+  parameters: {}
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables: {}
+  schedules:
+    - cron: "*/5 8-23 * * *"
+      timezone: "America/New_York"
+
+
+- name: live-pipeline-full
+  version: null
+  tags: []
+  concurrency_limit: 1  # prevent overlapping runs
+  description: Combined scrape + score pipeline (typical production flow).
+  entrypoint: prefect_flows/live_pipeline.py:live_pipeline_full_flow
+  parameters: {}
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables: {}
+  schedules: []
+
+- name: dk-salaries
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: Fetch DraftKings salaries for all slates (runs daily at 8am).
+  entrypoint: prefect_flows/live_pipeline.py:dk_salaries_flow
+  parameters: {}
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables: {}
+  schedules:
+    - cron: "0 8 * * *"
+      timezone: "America/New_York"

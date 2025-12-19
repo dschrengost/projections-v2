@@ -1,0 +1,1497 @@
+{
+  "audit_metadata": {
+    "generated_at_utc": "2025-12-19T01:51:26Z",
+    "repo_root": "/home/daniel/projects/projections-v2",
+    "data_root": "/home/daniel/projections-data",
+    "git_sha": "6d45660aeef52e3fd83d01319af225cc086e413e",
+    "scope": "Read-only audit; inventory + recommendations only (no code changes)."
+  },
+  "schedulers": {
+    "systemd": {
+      "system_units": [
+        {
+          "name": "live-score.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/live-score.timer",
+          "on_calendar": "*-*-* 08..23:*:00/5",
+          "randomized_delay_sec": 30,
+          "persistent": true,
+          "triggers": "live-score.service"
+        },
+        {
+          "name": "live-score.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/live-score.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_live_score.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+            "MINUTES_DAILY_ROOT": "/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily",
+            "LIVE_SEASON": "2025",
+            "LIVE_DISABLE_TIP_WINDOW": "1",
+            "LIVE_TIP_LEAD_MINUTES": "60",
+            "LIVE_TIP_TAIL_MINUTES": "180",
+            "LIVE_SIM_PROFILE": "sim_v3",
+            "LIVE_SIM_WORLDS": "25000"
+          },
+          "on_failure": "status-email-user@%n.service (MISSING)"
+        },
+        {
+          "name": "live-scrape.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/live-scrape.timer",
+          "on_calendar": "*-*-* 08..23:05,35:00",
+          "randomized_delay_sec": 30,
+          "persistent": true,
+          "triggers": "live-scrape.service"
+        },
+        {
+          "name": "live-scrape.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/live-scrape.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_live_scrape.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+            "LIVE_SEASON": "2025"
+          },
+          "on_failure": "status-email-user@%n.service (MISSING)"
+        },
+        {
+          "name": "live-sim.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/live-sim.timer",
+          "on_calendar": "*-*-* 10..23:20,50:00",
+          "randomized_delay_sec": 60,
+          "persistent": true,
+          "triggers": "live-sim.service",
+          "enabled": false
+        },
+        {
+          "name": "live-sim.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/live-sim.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_live_sim.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+            "SIM_PROFILE": "baseline",
+            "SIM_NUM_WORLDS": "2000"
+          },
+          "on_failure": "status-email-user@%n.service (MISSING)",
+          "enabled": false
+        },
+        {
+          "name": "freeze-slates.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/freeze-slates.timer",
+          "on_calendar": "*-*-* 08..23:*:00/5",
+          "randomized_delay_sec": 30,
+          "persistent": true,
+          "triggers": "freeze-slates.service"
+        },
+        {
+          "name": "freeze-slates.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/freeze-slates.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/.local/bin/uv run python -m projections.cli.freeze_slates freeze-pending",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data"
+          }
+        },
+        {
+          "name": "dk-salaries.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/dk-salaries.timer",
+          "on_calendar": "Mon..Sun 14:05",
+          "persistent": true,
+          "triggers": "dk-salaries.service"
+        },
+        {
+          "name": "dk-salaries.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/dk-salaries.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "exec_start": "/usr/bin/env bash -lc 'uv run python -m scripts.dk.run_daily_salaries --site dk --slate-type main'",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+            "UV_PROJECT_ENVIRONMENT": ".venv-user"
+          }
+        },
+        {
+          "name": "dk-ownership-aggregate.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/dk-ownership-aggregate.timer",
+          "on_calendar": "*-*-* 02:00:00",
+          "persistent": true,
+          "triggers": "dk-ownership-aggregate.service"
+        },
+        {
+          "name": "dk-ownership-aggregate.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/dk-ownership-aggregate.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "exec_start": "/home/daniel/.local/bin/uv run python scrapers/dk_contests/build_ownership_data.py"
+        },
+        {
+          "name": "live-boxscores.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/live-boxscores.timer",
+          "on_calendar": "*-*-* 03:30:00",
+          "persistent": true,
+          "triggers": "live-boxscores.service"
+        },
+        {
+          "name": "live-boxscores.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/live-boxscores.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_boxscores.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data"
+          }
+        },
+        {
+          "name": "tracking-daily.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/tracking-daily.timer",
+          "on_calendar": "*-*-* 04:00:00",
+          "persistent": true,
+          "triggers": "tracking-daily.service"
+        },
+        {
+          "name": "tracking-daily.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/tracking-daily.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_tracking_daily.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data"
+          }
+        },
+        {
+          "name": "post-slate-minutes-labels.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/post-slate-minutes-labels.timer",
+          "on_calendar": "*-*-* 06:00:00",
+          "persistent": true,
+          "triggers": "post-slate-minutes-labels.service"
+        },
+        {
+          "name": "post-slate-minutes-labels.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/post-slate-minutes-labels.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_post_slate_minutes_labels.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data"
+          }
+        },
+        {
+          "name": "nightly-eval.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/nightly-eval.timer",
+          "on_calendar": "*-*-* 10:30",
+          "randomized_delay_sec": 60,
+          "persistent": true,
+          "triggers": "nightly-eval.service"
+        },
+        {
+          "name": "nightly-eval.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/nightly-eval.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/.local/bin/uv run python -m scripts.analyze_accuracy --output /home/daniel/projections-data/reports/eval_latest.json",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data"
+          }
+        },
+        {
+          "name": "gold-features-daily.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/gold-features-daily.timer",
+          "on_calendar": "*-*-* 10:00",
+          "randomized_delay_sec": 300,
+          "persistent": true,
+          "triggers": "gold-features-daily.service",
+          "enabled": false
+        },
+        {
+          "name": "gold-features-daily.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/gold-features-daily.service",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_gold_daily.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data"
+          },
+          "enabled": false
+        },
+        {
+          "name": "live-pipeline.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/live-pipeline.service (+ override.conf)",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_live_pipeline.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+            "LIVE_SEASON": "2025",
+            "LIVE_SCORE": "1",
+            "LIVE_TIP_LEAD_MINUTES": "60",
+            "LIVE_TIP_TAIL_MINUTES": "180",
+            "LIVE_LOCK_BUFFER_MINUTES": "0",
+            "LIVE_FLAGS": ""
+          },
+          "enabled": true,
+          "known_state": "FAILED (run_id mismatch in runner script)"
+        },
+        {
+          "name": "live-pipeline-evening.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/live-pipeline-evening.service (+ override.conf)",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_live_pipeline.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+            "LIVE_SEASON": "2025",
+            "LIVE_SCORE": "1",
+            "LIVE_FLAGS": "",
+            "LIVE_DISABLE_TIP_WINDOW": "1",
+            "LIVE_TIP_LEAD_MINUTES": "60",
+            "LIVE_TIP_TAIL_MINUTES": "180",
+            "LIVE_RECONCILE_MODE": "none",
+            "LIVE_LOCK_BUFFER_MINUTES": "0"
+          },
+          "enabled": false,
+          "known_state": "Likely FAILED (inherits run_id mismatch from runner script)"
+        },
+        {
+          "name": "live-pipeline-weekend.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/live-pipeline-weekend.service (+ override.conf)",
+          "type": "oneshot",
+          "working_directory": "/home/daniel/projects/projections-v2",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/projects/projections-v2/scripts/run_live_pipeline.sh",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+            "LIVE_SEASON": "2025",
+            "LIVE_SCORE": "1",
+            "LIVE_FLAGS": "",
+            "LIVE_DISABLE_TIP_WINDOW": "1",
+            "LIVE_TIP_LEAD_MINUTES": "60",
+            "LIVE_TIP_TAIL_MINUTES": "180",
+            "LIVE_RECONCILE_MODE": "none",
+            "LIVE_LOCK_BUFFER_MINUTES": "0"
+          },
+          "enabled": false,
+          "notes": "Unit file sets LIVE_FLAGS=--skip-odds but override.conf clears LIVE_FLAGS, so odds are not actually skipped.",
+          "known_state": "Likely FAILED (inherits run_id mismatch from runner script)"
+        },
+        {
+          "name": "live-pipeline-hourly.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/live-pipeline-hourly.timer",
+          "on_calendar": "*-*-* 08..23:00",
+          "randomized_delay_sec": 30,
+          "persistent": true,
+          "triggers": "live-pipeline.service",
+          "enabled": false
+        },
+        {
+          "name": "live-pipeline-evening.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/live-pipeline-evening.timer",
+          "on_calendar": "Mon..Fri *-*-* 16..23:00/10",
+          "randomized_delay_sec": 15,
+          "persistent": true,
+          "triggers": "live-pipeline-evening.service",
+          "enabled": false
+        },
+        {
+          "name": "live-pipeline-weekend.timer",
+          "kind": "timer",
+          "unit_file": "/etc/systemd/system/live-pipeline-weekend.timer",
+          "on_calendar": "Sat,Sun *-*-* 12..23:00/15",
+          "randomized_delay_sec": 15,
+          "persistent": true,
+          "triggers": "live-pipeline-weekend.service",
+          "enabled": false
+        },
+        {
+          "name": "minutes-dashboard.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/minutes-dashboard.service",
+          "type": "simple",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/.local/bin/uv run uvicorn projections.api.minutes_api:create_app --host 0.0.0.0 --port 8501",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+            "MINUTES_DAILY_ROOT": "/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily",
+            "MINUTES_DASHBOARD_DIST": "/home/daniel/projects/projections-v2/web/minutes-dashboard/dist"
+          },
+          "known_state": "ACTIVE (port 8501)"
+        },
+        {
+          "name": "live-api.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/live-api.service",
+          "type": "simple",
+          "user": "daniel",
+          "group": "daniel",
+          "exec_start": "/home/daniel/.local/bin/uv run uvicorn projections.api.minutes_api:create_app --factory --host 0.0.0.0 --port 8501",
+          "environment": {
+            "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+            "MINUTES_DAILY_ROOT": "/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily"
+          },
+          "known_state": "FLAPPING (port conflict with minutes-dashboard.service)"
+        },
+        {
+          "name": "mlflow.service",
+          "kind": "service",
+          "unit_file": "/etc/systemd/system/mlflow.service",
+          "type": "simple",
+          "user": "daniel",
+          "exec_start": "mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////home/daniel/projections-data/mlflow/mlflow.db --default-artifact-root /home/daniel/projections-data/mlflow/artifacts",
+          "known_state": "ACTIVE"
+        }
+      ],
+      "missing_units_referenced_by_onfailure": [
+        "status-email-user@.service"
+      ],
+      "notable_risks": [
+        "Duplicate scheduling: live-score/live-scrape are enabled both as system units and user units.",
+        "OnFailure handlers are configured but missing; failures can be silent.",
+        "Multiple units run uvicorn on port 8501 (live-api + minutes-dashboard), causing restart loops."
+      ]
+    },
+    "systemd_user_units": [
+      {
+        "name": "live-score.timer",
+        "kind": "timer",
+        "unit_file": "/home/daniel/.config/systemd/user/live-score.timer",
+        "on_calendar": "*-*-* 08..23:*:00/5",
+        "enabled": true,
+        "triggers": "live-score.service"
+      },
+      {
+        "name": "live-score.service",
+        "kind": "service",
+        "unit_file": "/home/daniel/.config/systemd/user/live-score.service",
+        "exec_start": "/home/daniel/projects/projections-v2/scripts/run_live_score.sh",
+        "environment": {
+          "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+          "MINUTES_DAILY_ROOT": "/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily",
+          "LIVE_SEASON": "2025",
+          "LIVE_DISABLE_TIP_WINDOW": "0"
+        }
+      },
+      {
+        "name": "live-scrape.timer",
+        "kind": "timer",
+        "unit_file": "/home/daniel/.config/systemd/user/live-scrape.timer",
+        "on_calendar": "*-*-* 08..23:05,35:00",
+        "enabled": true,
+        "triggers": "live-scrape.service"
+      },
+      {
+        "name": "live-scrape.service",
+        "kind": "service",
+        "unit_file": "/home/daniel/.config/systemd/user/live-scrape.service",
+        "exec_start": "/home/daniel/projects/projections-v2/scripts/run_live_scrape.sh",
+        "environment": {
+          "PROJECTIONS_DATA_ROOT": "/home/daniel/projections-data",
+          "LIVE_SEASON": "2025"
+        }
+      }
+    ],
+    "cron": {
+      "user_crontab_entries": [
+        {
+          "schedule": "0 15 * * *",
+          "command": "/usr/bin/flock -n /tmp/nba_gpp_scraper.lock /bin/bash -lc '/home/daniel/sim-v2/scrapers/run_nba_gpp_scraper.sh' >> /home/daniel/dkresults/logs/nba_gpp_scraper_$(date +\\%F).log 2>&1",
+          "notes": "External repo (/home/daniel/sim-v2); relevant operational dependency for DK contest data."
+        },
+        {
+          "schedule": "30 18 * * *",
+          "command": "/usr/bin/flock -n /tmp/nba_gpp_scraper.lock /bin/bash -lc '/home/daniel/sim-v2/scrapers/run_nba_gpp_scraper.sh' >> /home/daniel/dkresults/logs/nba_gpp_scraper_$(date +\\%F).log 2>&1"
+        },
+        {
+          "schedule": "0 21 * * *",
+          "command": "/usr/bin/flock -n /tmp/nba_gpp_scraper.lock /bin/bash -lc '/home/daniel/sim-v2/scrapers/run_nba_gpp_scraper.sh' >> /home/daniel/dkresults/logs/nba_gpp_scraper_$(date +\\%F).log 2>&1"
+        },
+        {
+          "schedule": "5 15 * * *",
+          "command": "/usr/bin/flock -n /tmp/nba_results_downloader.lock /bin/bash -lc '/home/daniel/sim-v2/scrapers/run_download_nba_results.sh' >> /home/daniel/dkresults/logs/nba_results_downloader_$(date +\\%F).log 2>&1"
+        },
+        {
+          "schedule": "35 18 * * *",
+          "command": "/usr/bin/flock -n /tmp/nba_results_downloader.lock /bin/bash -lc '/home/daniel/sim-v2/scrapers/run_download_nba_results.sh' >> /home/daniel/dkresults/logs/nba_results_downloader_$(date +\\%F).log 2>&1"
+        },
+        {
+          "schedule": "5 21 * * *",
+          "command": "/usr/bin/flock -n /tmp/nba_results_downloader.lock /bin/bash -lc '/home/daniel/sim-v2/scrapers/run_download_nba_results.sh' >> /home/daniel/dkresults/logs/nba_results_downloader_$(date +\\%F).log 2>&1"
+        }
+      ],
+      "system_cron_entries_detected": []
+    }
+  },
+  "production_model_selectors": [
+    {
+      "name": "minutes_v1",
+      "selector_type": "repo_config_json",
+      "selector_path": "config/minutes_current_run.json",
+      "current": {
+        "bundle_dir": "artifacts/minutes_lgbm/minutes_v1_safe_starter_20251214",
+        "run_id": "minutes_v1_safe_starter_20251214",
+        "heads": [
+          "minutes_quantile_p10",
+          "minutes_quantile_p50",
+          "minutes_quantile_p90",
+          "play_prob"
+        ]
+      },
+      "artifacts_location": {
+        "root": "/home/daniel/projects/projections-v2/artifacts/minutes_lgbm/minutes_v1_safe_starter_20251214",
+        "files": [
+          "meta.json",
+          "lgbm_quantiles.joblib"
+        ]
+      }
+    },
+    {
+      "name": "rates_v1",
+      "selector_type": "repo_config_json",
+      "selector_path": "config/rates_current_run.json",
+      "current": {
+        "run_id": "rates_v1_stage1_20251215_145548",
+        "heads": [
+          "fga2_per_min",
+          "fga3_per_min",
+          "fta_per_min",
+          "ast_per_min",
+          "tov_per_min",
+          "oreb_per_min",
+          "dreb_per_min",
+          "stl_per_min",
+          "blk_per_min",
+          "fg2_pct",
+          "fg3_pct",
+          "ft_pct"
+        ]
+      },
+      "artifacts_location": {
+        "root": "/home/daniel/projections-data/artifacts/rates_v1/runs/rates_v1_stage1_20251215_145548",
+        "files": [
+          "meta.json",
+          "model_*.txt"
+        ]
+      }
+    },
+    {
+      "name": "ownership_v1",
+      "selector_type": "hardcoded_constant",
+      "selector_path": "projections/cli/score_ownership_live.py",
+      "current": {
+        "run_id": "dk_only_v6_logit_chalk5_cleanbase_seed1337"
+      },
+      "artifacts_location": {
+        "root": "/home/daniel/projections-data/artifacts/ownership_v1/runs/dk_only_v6_logit_chalk5_cleanbase_seed1337",
+        "files": [
+          "model.txt",
+          "feature_cols.json",
+          "meta.json"
+        ]
+      }
+    },
+    {
+      "name": "usage_shares_v1",
+      "selector_type": "repo_config_json",
+      "selector_path": "config/usage_shares_current_run.json",
+      "current": {
+        "run_id": "decision_20251216_083525",
+        "target": "fga"
+      },
+      "artifacts_location": {
+        "root": "/home/daniel/projections-data/artifacts/usage_shares_v1/decision/decision_20251216_083525",
+        "files": [
+          "model_fga_starterless.txt",
+          "results.json",
+          "report.md"
+        ]
+      }
+    },
+    {
+      "name": "fpts_v2",
+      "selector_type": "missing_repo_config_json",
+      "selector_path": "config/fpts_current_run.json (expected by projections/fpts_v2/current.py)",
+      "current": {
+        "status": "unknown (baseline sim_v2 profile uses mean_source=rates, so fpts_v2 bundle is not required for daily live runs)"
+      },
+      "artifacts_location": {
+        "root": "/home/daniel/projections-data/artifacts/fpts_v2/runs",
+        "example_runs": [
+          "fpts_v2_stage0_20251129_062655",
+          "fpts_v2_stage0_20251128_161852",
+          "fpts_v2_stage3_context_20251129_041316"
+        ]
+      }
+    }
+  ],
+  "data_assets": [
+    {
+      "name": "bronze.injuries_raw",
+      "stage": "bronze",
+      "path": "/home/daniel/projections-data/bronze/injuries_raw",
+      "partition_keys": [
+        "season",
+        "date",
+        "hour (history)"
+      ],
+      "latest_view": "date=YYYY-MM-DD/injuries.parquet (overwritten)",
+      "history_view": "date=YYYY-MM-DD/hour=HH/injuries.parquet (append-only)",
+      "mutable": "history append-only; latest view mutable"
+    },
+    {
+      "name": "silver.injuries_snapshot",
+      "stage": "silver",
+      "path": "/home/daniel/projections-data/silver/injuries_snapshot",
+      "partition_keys": [
+        "season",
+        "month"
+      ],
+      "file": "injuries_snapshot.parquet",
+      "mutable": "mutable (merged + de-duped to latest per (game_id, player_id))",
+      "backfill_gap": "loses intra-day snapshots; cannot reconstruct exact pre-tip state without bronze history + as-of selection"
+    },
+    {
+      "name": "bronze.odds_raw",
+      "stage": "bronze",
+      "path": "/home/daniel/projections-data/bronze/odds_raw",
+      "partition_keys": [
+        "season",
+        "date",
+        "run_ts (history)"
+      ],
+      "latest_view": "date=YYYY-MM-DD/odds.parquet (overwritten)",
+      "history_view": "date=YYYY-MM-DD/run_ts=YYYYMMDDTHHMMSSZ/odds.parquet (append-only)",
+      "mutable": "history append-only; latest view mutable"
+    },
+    {
+      "name": "silver.odds_snapshot",
+      "stage": "silver",
+      "path": "/home/daniel/projections-data/silver/odds_snapshot",
+      "partition_keys": [
+        "season",
+        "month"
+      ],
+      "file": "odds_snapshot.parquet",
+      "mutable": "mutable (merged to latest odds per game)",
+      "backfill_gap": "loses odds time series needed for deterministic historical replays"
+    },
+    {
+      "name": "silver.roster_nightly",
+      "stage": "silver",
+      "path": "/home/daniel/projections-data/silver/roster_nightly",
+      "partition_keys": [
+        "season",
+        "month"
+      ],
+      "file": "roster.parquet",
+      "mutable": "append-only by as_of_ts (dedupe on identical timestamps)"
+    },
+    {
+      "name": "silver.nba_daily_lineups",
+      "stage": "silver",
+      "path": "/home/daniel/projections-data/silver/nba_daily_lineups",
+      "partition_keys": [
+        "season",
+        "date"
+      ],
+      "file": "lineups.parquet",
+      "mutable": "mutable per (season,date) overwrite"
+    },
+    {
+      "name": "silver.schedule",
+      "stage": "silver",
+      "path": "/home/daniel/projections-data/silver/schedule",
+      "partition_keys": [
+        "season",
+        "month"
+      ],
+      "file": "schedule.parquet",
+      "mutable": "mutable per (season,month) overwrite"
+    },
+    {
+      "name": "gold.slates",
+      "stage": "gold",
+      "path": "/home/daniel/projections-data/gold/slates",
+      "partition_keys": [
+        "season",
+        "game_date",
+        "game_id",
+        "snapshot_type"
+      ],
+      "files": [
+        "lock.parquet",
+        "pretip.parquet",
+        "manifest.lock.json",
+        "manifest.pretip.json"
+      ],
+      "mutable": "immutable by default (writes are atomic; overwrite only with --force)"
+    },
+    {
+      "name": "live.features_minutes_v1",
+      "stage": "live",
+      "path": "/home/daniel/projections-data/live/features_minutes_v1",
+      "partition_keys": [
+        "game_date",
+        "run_id"
+      ],
+      "layout": "YYYY-MM-DD/run=RUN_ID/{features.parquet,ids.csv,summary.json,active_roster.parquet} + YYYY-MM-DD/latest_run.json",
+      "mutable": "append-only run dirs; latest_run.json mutable (non-atomic write)"
+    },
+    {
+      "name": "repo.artifacts.minutes_v1_daily",
+      "stage": "repo_artifacts",
+      "path": "/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily",
+      "partition_keys": [
+        "game_date",
+        "run_id"
+      ],
+      "layout": "YYYY-MM-DD/run=RUN_ID/minutes.parquet + YYYY-MM-DD/latest_run.json",
+      "mutable": "append-only run dirs; latest_run.json mutable (non-atomic write)"
+    },
+    {
+      "name": "live.features_rates_v1",
+      "stage": "live",
+      "path": "/home/daniel/projections-data/live/features_rates_v1",
+      "partition_keys": [
+        "game_date",
+        "run_id"
+      ],
+      "layout": "YYYY-MM-DD/run=RUN_ID/features.parquet + run summary + latest_run.json",
+      "mutable": "append-only run dirs; latest_run.json mutable (non-atomic write)"
+    },
+    {
+      "name": "gold.rates_v1_live",
+      "stage": "gold",
+      "path": "/home/daniel/projections-data/gold/rates_v1_live",
+      "partition_keys": [
+        "game_date",
+        "run_id"
+      ],
+      "layout": "YYYY-MM-DD/run=RUN_ID/rates.parquet + run summary + YYYY-MM-DD/latest_run.json",
+      "mutable": "append-only run dirs; latest_run.json mutable (non-atomic write)"
+    },
+    {
+      "name": "artifacts.sim_v2.projections",
+      "stage": "artifacts",
+      "path": "/home/daniel/projections-data/artifacts/sim_v2/projections",
+      "partition_keys": [
+        "game_date"
+      ],
+      "layout": "game_date=YYYY-MM-DD/projections.parquet (current) + legacy date=YYYY-MM-DD dirs",
+      "mutable": "mutable overwrite possible"
+    },
+    {
+      "name": "silver.ownership_predictions",
+      "stage": "silver",
+      "path": "/home/daniel/projections-data/silver/ownership_predictions",
+      "partition_keys": [
+        "game_date",
+        "draft_group_id"
+      ],
+      "layout": "YYYY-MM-DD/{draft_group_id}.parquet + {draft_group_id}_locked.parquet + slates.json",
+      "mutable": "mutable; lock cache introduces time-dependent behavior"
+    },
+    {
+      "name": "artifacts.unified_projections",
+      "stage": "artifacts",
+      "path": "/home/daniel/projections-data/artifacts/projections",
+      "partition_keys": [
+        "game_date",
+        "run_id"
+      ],
+      "layout": "YYYY-MM-DD/run=RUN_ID/projections.parquet + YYYY-MM-DD/latest_run.json",
+      "mutable": "append-only run dirs; latest_run.json mutable (non-atomic write)"
+    },
+    {
+      "name": "gold.dk_salaries",
+      "stage": "gold",
+      "path": "/home/daniel/projections-data/gold/dk_salaries",
+      "partition_keys": [
+        "site",
+        "game_date",
+        "draft_group_id"
+      ],
+      "layout": "site=dk/game_date=YYYY-MM-DD/draft_group_id=NNNNNN/salaries.parquet",
+      "mutable": "mutable overwrite possible"
+    },
+    {
+      "name": "bronze.pipeline_status",
+      "stage": "bronze",
+      "path": "/home/daniel/projections-data/bronze/pipeline_status",
+      "partition_keys": [
+        "job_name",
+        "target_date (filename)"
+      ],
+      "layout": "<job_name>_<target_date>.json",
+      "mutable": "mutable overwrite; stores only latest status per (job,target_date)"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "systemd.live-scrape",
+      "purpose": "Scrape and persist core silver snapshots: injuries, daily lineups, odds, roster.",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "live-scrape.timer",
+        "service": "live-scrape.service",
+        "on_calendar": "*-*-* 08..23:05,35:00"
+      },
+      "entrypoint": {
+        "type": "bash",
+        "path": "scripts/run_live_scrape.sh",
+        "exec": "uv run python -m projections.cli.live_pipeline ..."
+      },
+      "inputs": [
+        {
+          "asset": "silver.schedule",
+          "path_hint": "/home/daniel/projections-data/silver/schedule/season=YYYY/month=MM/schedule.parquet",
+          "partition_keys": [
+            "season",
+            "month"
+          ],
+          "required": false,
+          "notes": "If missing, ETLs fall back to NBA API."
+        }
+      ],
+      "outputs": [
+        "bronze.injuries_raw",
+        "silver.injuries_snapshot",
+        "bronze.daily_lineups",
+        "silver.nba_daily_lineups",
+        "bronze.odds_raw",
+        "silver.odds_snapshot",
+        "bronze.roster_nightly_raw",
+        "silver.roster_nightly",
+        "bronze.pipeline_status"
+      ],
+      "explicit_dependencies": [],
+      "implicit_dependencies": [
+        "Network availability (NBA/oddstrader endpoints).",
+        "Any consumer reading mutable silver snapshots is implicitly tied to latest scrape state."
+      ],
+      "idempotency": {
+        "rerun_safe": "PARTIAL",
+        "why": "Writes/merges monthly silver files and can overwrite 'latest' views; behavior depends on external feeds/time."
+      },
+      "observability": [
+        "journald logs",
+        "bronze.pipeline_status for injuries_live/odds_live/schedule_live (when invoked)"
+      ],
+      "known_failures": [
+        {
+          "evidence": "journalctl -u live-scrape.service (2025-12-18 16:05:36)",
+          "error": "Oddstrader SSL handshake timed out -> RuntimeError: Failed request",
+          "notes": "OnFailure handler attempted but missing."
+        }
+      ]
+    },
+    {
+      "id": "systemd.live-score",
+      "purpose": "End-to-end live scoring loop: scrape -> minutes features -> minutes score -> rates -> sim -> ownership -> finalize -> health checks.",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "live-score.timer",
+        "service": "live-score.service",
+        "on_calendar": "*-*-* 08..23:*:00/5"
+      },
+      "entrypoint": {
+        "type": "bash",
+        "path": "scripts/run_live_score.sh",
+        "lock": "/tmp/live-score.lock (flock)"
+      },
+      "inputs": [
+        "silver.schedule",
+        "silver.injuries_snapshot",
+        "silver.odds_snapshot",
+        "silver.roster_nightly",
+        "gold.dk_salaries",
+        "production_model_selectors.minutes_v1",
+        "production_model_selectors.rates_v1",
+        "production_model_selectors.ownership_v1",
+        "config/sim_v2_profiles.json"
+      ],
+      "outputs": [
+        "live.features_minutes_v1",
+        "repo.artifacts.minutes_v1_daily",
+        "live.features_rates_v1",
+        "gold.rates_v1_live",
+        "artifacts.sim_v2.projections",
+        "silver.ownership_predictions",
+        "artifacts.unified_projections"
+      ],
+      "explicit_dependencies": [
+        "systemd.dk-salaries (for ownership + finalize)",
+        "systemd.live-scrape (conceptually; live-score can also scrape itself)"
+      ],
+      "implicit_dependencies": [
+        "Uses current wall-clock time for run_id, run_as_of_ts, slate lock gating, and finalize 'is_locked' flags.",
+        "Reads and writes latest_run.json pointers (non-atomic) across multiple roots.",
+        "Cross-root dependencies: minutes artifacts live under repo, while most other assets live under /home/daniel/projections-data."
+      ],
+      "idempotency": {
+        "rerun_safe": "PARTIAL",
+        "why": "Per-run directories are append-only, but latest pointers and gold 'publish' copies are mutable; some steps depend on current time/lock state."
+      },
+      "observability": [
+        "journald logs",
+        "per-run summary.json files in multiple roots",
+        "bronze.pipeline_status for build_minutes_live/build_rates_features_live/score_rates_live"
+      ],
+      "known_failures": [
+        {
+          "evidence": "journalctl -u live-score.service (2025-12-18 20:04:30)",
+          "error": "ConnectError: Temporary failure in name resolution",
+          "notes": "Injuries scrape failed; indicates network/DNS flakiness."
+        },
+        {
+          "evidence": "systemctl status live-score.service",
+          "error": "[live] Another instance is already running. Exiting.",
+          "notes": "Usually indicates duplicate triggers (system + user timers) or long-running prior job."
+        }
+      ]
+    },
+    {
+      "id": "systemd.freeze-slates",
+      "purpose": "Freeze immutable per-game snapshots at lock and pre-tip, writing gold/slates with manifests.",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "freeze-slates.timer",
+        "service": "freeze-slates.service",
+        "on_calendar": "*-*-* 08..23:*:00/5"
+      },
+      "entrypoint": {
+        "type": "python_module",
+        "exec": "python -m projections.cli.freeze_slates freeze-pending"
+      },
+      "inputs": [
+        "silver.schedule",
+        "bronze.injuries_raw",
+        "bronze.odds_raw",
+        "silver.roster_nightly",
+        "labels/season=YYYY/boxscore_labels.parquet"
+      ],
+      "outputs": [
+        "gold.slates"
+      ],
+      "idempotency": {
+        "rerun_safe": "YES",
+        "why": "Skips existing snapshots unless --force; writes parquet and manifest atomically."
+      },
+      "observability": [
+        "journald logs",
+        "gold.slates manifests include input max_ts and row_count"
+      ]
+    },
+    {
+      "id": "systemd.tracking-daily",
+      "purpose": "Scrape tracking (bronze) and build tracking_roles (gold).",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "tracking-daily.timer",
+        "service": "tracking-daily.service",
+        "on_calendar": "*-*-* 04:00:00"
+      },
+      "entrypoint": {
+        "type": "bash",
+        "path": "scripts/run_tracking_daily.sh",
+        "exec": "python -m scripts.tracking.scrape_tracking_raw run-day ...; python -m scripts.tracking.build_tracking_roles ..."
+      },
+      "inputs": [
+        "bronze.nba_tracking_raw (stats.nba.com)",
+        "silver.schedule (optional for game_id mapping)",
+        "labels/season=YYYY/boxscore_labels.parquet (optional for mapping)",
+        "gold/projections_minutes_v1 (optional for mapping)"
+      ],
+      "outputs": [
+        "bronze/nba/tracking partitions",
+        "gold/tracking_roles partitions"
+      ],
+      "idempotency": {
+        "rerun_safe": "PARTIAL",
+        "why": "tracking scrape writes idempotent partitions; tracking_roles overwrites by default; current implementation can crash if expected columns are missing."
+      },
+      "known_failures": [
+        {
+          "evidence": "journalctl -u tracking-daily.service (2025-12-18 18:07:33)",
+          "error": "AttributeError: 'numpy.float64' object has no attribute 'fillna'",
+          "likely_root": "projections/tracking/roles.py uses pd.to_numeric(base.get('potential_ast_raw'), ...).fillna(0.0) which fails when column is absent (base.get returns None -> scalar NaN)."
+        }
+      ]
+    },
+    {
+      "id": "systemd.dk-salaries",
+      "purpose": "Fetch DK draftables and write gold dk_salaries partitions for today.",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "dk-salaries.timer",
+        "service": "dk-salaries.service",
+        "on_calendar": "Mon..Sun 14:05"
+      },
+      "entrypoint": {
+        "type": "python_module",
+        "exec": "python -m scripts.dk.run_daily_salaries --site dk --slate-type main"
+      },
+      "inputs": [
+        "DraftKings API (contests + draftables endpoints)"
+      ],
+      "outputs": [
+        "gold.dk_salaries",
+        "bronze/dk/draftables/draftables_raw_<draft_group_id>.json (unpartitioned; overwritten)"
+      ],
+      "idempotency": {
+        "rerun_safe": "PARTIAL",
+        "why": "Gold outputs are partitioned by date/draft_group_id, but bronze draftables JSON lacks date partition and can be overwritten."
+      }
+    },
+    {
+      "id": "systemd.live-boxscores",
+      "purpose": "Backfill prior slate boxscores and update labels.",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "live-boxscores.timer",
+        "service": "live-boxscores.service",
+        "on_calendar": "*-*-* 03:30:00"
+      },
+      "entrypoint": {
+        "type": "python_module",
+        "exec": "python -m projections.etl.boxscores --start yesterday --end yesterday"
+      },
+      "inputs": [
+        "silver.schedule",
+        "NBA boxscore JSON endpoints"
+      ],
+      "outputs": [
+        "bronze/boxscores_raw/season=YYYY/date=YYYY-MM-DD/boxscores_raw.parquet",
+        "labels/season=YYYY/boxscore_labels.parquet"
+      ],
+      "idempotency": {
+        "rerun_safe": "YES",
+        "why": "Re-fetch + de-dupe by (game_id, team_id, player_id), overwriting frozen labels output."
+      }
+    },
+    {
+      "id": "systemd.post-slate-minutes-labels",
+      "purpose": "Backfill gold minutes_v1 labels for yesterday.",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "post-slate-minutes-labels.timer",
+        "service": "post-slate-minutes-labels.service",
+        "on_calendar": "*-*-* 06:00:00"
+      },
+      "entrypoint": {
+        "type": "bash",
+        "path": "scripts/run_post_slate_minutes_labels.sh",
+        "exec": "python -m projections.cli.backfill_minutes_labels --start-date yesterday --end-date yesterday"
+      },
+      "inputs": [
+        "bronze/boxscores_raw",
+        "labels/season=YYYY/boxscore_labels.parquet"
+      ],
+      "outputs": [
+        "gold/labels_minutes_v1/season=YYYY/game_date=YYYY-MM-DD/labels.parquet"
+      ],
+      "idempotency": {
+        "rerun_safe": "YES",
+        "why": "Skips existing unless overwrite flag is used; writes per-day partitions."
+      }
+    },
+    {
+      "id": "systemd.dk-ownership-aggregate",
+      "purpose": "Aggregate DK contest results into ownership training data.",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "dk-ownership-aggregate.timer",
+        "service": "dk-ownership-aggregate.service",
+        "on_calendar": "*-*-* 02:00:00"
+      },
+      "entrypoint": {
+        "type": "python_script",
+        "path": "scrapers/dk_contests/build_ownership_data.py"
+      },
+      "inputs": [
+        "bronze/dk_contests (contest data; may depend on external cron jobs in /home/daniel/sim-v2)"
+      ],
+      "outputs": [
+        "bronze/dk_contests/ownership_by_slate/all_ownership.parquet"
+      ],
+      "idempotency": {
+        "rerun_safe": "UNKNOWN",
+        "why": "Not audited in depth; output is a single parquet and may be overwritten."
+      }
+    },
+    {
+      "id": "systemd.live-pipeline",
+      "purpose": "Legacy live runner: scrape -> build minutes live -> score minutes. Currently broken due to run_id mismatch in scripts/run_live_pipeline.sh.",
+      "scheduler": {
+        "type": "systemd_mixed",
+        "services": [
+          {
+            "service": "live-pipeline.service",
+            "enabled": true,
+            "notes": "Enabled oneshot service (runs on boot), not a timer."
+          },
+          {
+            "service": "live-pipeline-evening.service",
+            "enabled": false
+          },
+          {
+            "service": "live-pipeline-weekend.service",
+            "enabled": false
+          }
+        ],
+        "timers": [
+          {
+            "timer": "live-pipeline-hourly.timer",
+            "on_calendar": "*-*-* 08..23:00",
+            "enabled": false,
+            "triggers": "live-pipeline.service"
+          },
+          {
+            "timer": "live-pipeline-evening.timer",
+            "on_calendar": "Mon..Fri *-*-* 16..23:00/10",
+            "enabled": false,
+            "triggers": "live-pipeline-evening.service"
+          },
+          {
+            "timer": "live-pipeline-weekend.timer",
+            "on_calendar": "Sat,Sun *-*-* 12..23:00/15",
+            "enabled": false,
+            "triggers": "live-pipeline-weekend.service"
+          }
+        ]
+      },
+      "entrypoint": {
+        "type": "bash",
+        "path": "scripts/run_live_pipeline.sh",
+        "notes": "Calls projections.cli.live_pipeline + projections.cli.build_minutes_live (without --run-id) + projections.cli.score_minutes_v1 (with a new run_id)."
+      },
+      "inputs": [
+        "silver.schedule",
+        "silver.injuries_snapshot",
+        "silver.odds_snapshot",
+        "silver.roster_nightly",
+        "production_model_selectors.minutes_v1"
+      ],
+      "outputs": [
+        "silver snapshots (via projections.cli.live_pipeline)",
+        "live.features_minutes_v1",
+        "repo.artifacts.minutes_v1_daily"
+      ],
+      "explicit_dependencies": [],
+      "implicit_dependencies": [
+        "Uses wall-clock time for run_as_of_ts and run_id; cannot reproduce historical state without explicit as-of selection.",
+        "Writes/reads mutable 'latest' snapshots and latest pointers."
+      ],
+      "idempotency": {
+        "rerun_safe": "NO",
+        "why": "Feature build and scoring do not share a stable run_id, so reruns can leave partial/mismatched outputs and downstream FileNotFound errors."
+      },
+      "observability": [
+        "journald logs"
+      ],
+      "known_failures": [
+        {
+          "evidence": "journalctl -u live-pipeline.service",
+          "error": "FileNotFoundError: requested run=<RUN_ID> missing under /home/daniel/projections-data/live/features_minutes_v1/<DATE>",
+          "root_cause": "scripts/run_live_pipeline.sh generates a run_id for scoring but does not pass that run_id to build_minutes_live."
+        }
+      ]
+    },
+    {
+      "id": "systemd.live-sim",
+      "purpose": "Legacy live sim runner: ensure minutes are in gold/projections_minutes_v1, then run sim_v2 worlds + aggregation.",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "live-sim.timer",
+        "service": "live-sim.service",
+        "on_calendar": "*-*-* 10..23:20,50:00",
+        "enabled": false
+      },
+      "entrypoint": {
+        "type": "bash",
+        "path": "scripts/run_live_sim.sh"
+      },
+      "inputs": [
+        "gold.projections_minutes_v1 (or repo.artifacts.minutes_v1_daily as source of truth)",
+        "gold.rates_v1_live",
+        "config/sim_v2_profiles.json"
+      ],
+      "outputs": [
+        "gold.projections_minutes_v1/game_date=YYYY-MM-DD/minutes.parquet (copied if missing)",
+        "artifacts.sim_v2.projections"
+      ],
+      "idempotency": {
+        "rerun_safe": "PARTIAL",
+        "why": "Selects 'latest' minutes run directory by mtime and copies into gold; sim outputs are per-date but publish/copy is mutable."
+      },
+      "known_failures": [
+        {
+          "evidence": "scripts/run_live_sim.sh",
+          "error": "No rates data found at /home/daniel/projections-data/gold/rates_v1_live/<DATE>",
+          "notes": "Systemd ordering references live-rates.service (not installed in /etc/systemd/system), so dependency enforcement is ineffective."
+        }
+      ]
+    },
+    {
+      "id": "systemd.nightly-eval",
+      "purpose": "Nightly evaluation: write eval_latest.json report.",
+      "scheduler": {
+        "type": "systemd_timer",
+        "timer": "nightly-eval.timer",
+        "service": "nightly-eval.service",
+        "on_calendar": "*-*-* 10:30"
+      },
+      "entrypoint": {
+        "type": "python_module",
+        "exec": "python -m scripts.analyze_accuracy --output /home/daniel/projections-data/reports/eval_latest.json"
+      },
+      "inputs": [
+        "historical projections and labels (various roots)"
+      ],
+      "outputs": [
+        "reports/eval_latest.json"
+      ]
+    }
+  ],
+  "current_dag": {
+    "job_edges": [
+      {
+        "from": "systemd.dk-salaries",
+        "to": "systemd.live-score",
+        "reason": "live-score ownership/finalize reads gold.dk_salaries"
+      },
+      {
+        "from": "systemd.live-scrape",
+        "to": "systemd.live-score",
+        "reason": "live-score can run scrape internally, but also relies on fresh injuries/odds/roster state"
+      },
+      {
+        "from": "systemd.live-boxscores",
+        "to": "systemd.post-slate-minutes-labels",
+        "reason": "minutes labels backfill uses boxscores+labels sources"
+      },
+      {
+        "from": "systemd.tracking-daily",
+        "to": "rates_v1 training jobs (manual)",
+        "reason": "tracking_roles enrich rates training base"
+      }
+    ],
+    "implicit_asset_edges": [
+      {
+        "from": "systemd.live-score",
+        "to": "bronze.pipeline_status",
+        "reason": "sub-steps write JobStatus snapshots (build_minutes_live, build_rates_features_live, score_rates_live)"
+      },
+      {
+        "from": "systemd.live-score",
+        "to": "gold.projections_minutes_v1",
+        "reason": "script copies repo minutes artifact into gold/game_date=... for sim consumption"
+      }
+    ]
+  },
+  "backfill_entrypoints": [
+    {
+      "name": "scripts/backfill_season.sh",
+      "type": "bash",
+      "purpose": "Loop over dates and run scripts/run_live_score.sh with LIVE_BACKFILL_MODE=1",
+      "supports_resume": false,
+      "notes": "Uses live-score script; ownership step is skipped once first tip has passed (problematic for historical backfills)."
+    },
+    {
+      "name": "scripts/backfill_injuries.py",
+      "type": "python_cli",
+      "purpose": "Backfill hourly injuries_raw partitions with status tracking",
+      "supports_resume": true,
+      "interfaces": [
+        "backfill --start YYYY-MM-DD --end YYYY-MM-DD --no-dry-run"
+      ]
+    },
+    {
+      "name": "scripts/backfill_slates.py",
+      "type": "python_cli",
+      "purpose": "Backfill gold/slates snapshots using freeze_slates logic; resumable + dry-run",
+      "supports_resume": true,
+      "interfaces": [
+        "backfill --start YYYY-MM-DD --end YYYY-MM-DD --snapshot-type {lock|pretip|both} --resume/--no-resume --dry-run/--no-dry-run"
+      ]
+    },
+    {
+      "name": "projections/cli/backfill_minutes_labels.py",
+      "type": "python_cli",
+      "purpose": "Backfill gold/labels_minutes_v1 partitions by calling projections.etl.boxscores + build_minutes_labels",
+      "supports_resume": true
+    },
+    {
+      "name": "scripts/minutes/backfill_projections_minutes_v1.py",
+      "type": "python_cli",
+      "purpose": "Score minutes projections into gold/projections_minutes_v1 over a date range",
+      "supports_resume": true,
+      "notes": "Can overwrite existing outputs when --overwrite-existing is set (destructive)."
+    },
+    {
+      "name": "scripts/tracking/scrape_tracking_raw.py backfill",
+      "type": "python_cli",
+      "purpose": "Backfill stats.nba.com tracking data into bronze/nba/tracking partitions",
+      "supports_resume": true
+    },
+    {
+      "name": "scripts/backfill_boxscores_from_json.py",
+      "type": "python_cli",
+      "purpose": "Backfill boxscores_raw + labels from archived JSON dumps",
+      "supports_resume": false
+    }
+  ],
+  "backfill_capability_by_asset": {
+    "bronze.injuries_raw": {
+      "backfillable": "YES",
+      "entrypoints": [
+        "scripts/backfill_injuries.py"
+      ],
+      "prerequisites": [
+        "NBA injury report endpoint availability",
+        "Schedule availability (prefer local silver schedule files)"
+      ],
+      "concurrency": "serial recommended (per-hour fetch + rate limiting)",
+      "runtime_estimate_per_day": "2-10 min (24 hourly attempts; depends on network and PDF parse)",
+      "runtime_estimate_full_season": "8-24 hours wall time (rough; depends on gaps + retries)"
+    },
+    "silver.injuries_snapshot": {
+      "backfillable": "PARTIAL",
+      "entrypoints": [
+        "projections/etl/injuries.py (writes latest snapshot, not time-series)"
+      ],
+      "prerequisites": [
+        "bronze.injuries_raw history if you need historical as-of reconstruction"
+      ],
+      "notes": "Current silver snapshot is latest-only; deterministic replays require reconstructing snapshots from bronze history by as-of."
+    },
+    "bronze.odds_raw": {
+      "backfillable": "PARTIAL",
+      "entrypoints": [
+        "projections/etl/odds.py"
+      ],
+      "prerequisites": [
+        "Oddstrader endpoint availability",
+        "Tolerance for missing historical odds (no guaranteed archive)"
+      ]
+    },
+    "gold.slates": {
+      "backfillable": "YES",
+      "entrypoints": [
+        "scripts/backfill_slates.py",
+        "projections/cli/freeze_slates.py"
+      ],
+      "prerequisites": [
+        "silver.schedule",
+        "bronze.injuries_raw and bronze.odds_raw history for correct as-of selection",
+        "silver.roster_nightly history"
+      ],
+      "supports_resume": true,
+      "runtime_estimate_per_game": "seconds to ~1 minute (depends on IO + feature build)",
+      "runtime_estimate_full_season": "1-6 hours (rough; parallelizable by game_id with caps)"
+    },
+    "repo.artifacts.minutes_v1_daily": {
+      "backfillable": "PARTIAL",
+      "entrypoints": [
+        "scripts/backfill_season.sh",
+        "scripts/run_live_score.sh"
+      ],
+      "notes": "Backfill runs are time-dependent (run_id now; ownership and finalize are gated by current time unless explicitly overridden)."
+    },
+    "gold.rates_v1_live": {
+      "backfillable": "PARTIAL",
+      "entrypoints": [
+        "projections/cli/build_rates_features_live.py",
+        "projections/cli/score_rates_live.py",
+        "scripts/run_live_rates.sh"
+      ],
+      "prerequisites": [
+        "live/features_minutes_v1 for the same (game_date, run_id)",
+        "rates_current_run.json points to an available bundle"
+      ]
+    },
+    "artifacts.sim_v2.projections": {
+      "backfillable": "YES",
+      "entrypoints": [
+        "scripts/sim_v2/generate_worlds_fpts_v2.py",
+        "scripts/sim_v2/run_sim_live.py"
+      ],
+      "prerequisites": [
+        "minutes projections and rates predictions for the target partitions",
+        "sim profile config + optional noise params"
+      ],
+      "runtime_estimate_per_day": "1-10 min (depends on n_worlds)",
+      "concurrency": "compute-bound; parallelize across days with CPU cap"
+    },
+    "silver.ownership_predictions": {
+      "backfillable": "PARTIAL",
+      "entrypoints": [
+        "projections/cli/score_ownership_live.py"
+      ],
+      "prerequisites": [
+        "gold.dk_salaries for draft_group_id(s)",
+        "sim_v2 projections for fpts merge (or salary proxy fallback)",
+        "ownership model bundle"
+      ],
+      "notes": "Default behavior is time-dependent (lock cache). Backfills should run with --ignore-lock-cache and avoid writing *_locked.parquet."
+    },
+    "artifacts.unified_projections": {
+      "backfillable": "PARTIAL",
+      "entrypoints": [
+        "projections/cli/finalize_projections.py"
+      ],
+      "notes": "Finalize marks is_locked based on current time; this is not reproducible for historical runs without an explicit as-of timestamp."
+    }
+  },
+  "entrypoints_detected": {
+    "bash": [
+      "scripts/run_boxscores.sh",
+      "scripts/run_gold_daily.sh",
+      "scripts/run_live_pipeline.sh",
+      "scripts/run_live_rates.sh",
+      "scripts/run_live_score.sh",
+      "scripts/run_live_scrape.sh",
+      "scripts/run_live_sim.sh",
+      "scripts/run_minutes_stack.sh",
+      "scripts/run_post_slate_minutes_labels.sh",
+      "scripts/run_tracking_daily.sh",
+      "scripts/backfill_season.sh",
+      "run_stack.sh"
+    ],
+    "python_cli_files_detected": [
+      "projections/cli/backfill_minutes_labels.py",
+      "projections/cli/build_archetype_deltas.py",
+      "projections/cli/build_minutes_labels.py",
+      "projections/cli/build_minutes_live.py",
+      "projections/cli/build_minutes_roles.py",
+      "projections/cli/build_minutes_snapshot_dataset.py",
+      "projections/cli/build_month.py",
+      "projections/cli/build_rates_features_live.py",
+      "projections/cli/build_starter_priors.py",
+      "projections/cli/build_training_dataset.py",
+      "projections/cli/check_health.py",
+      "projections/cli/check_minutes_live.py",
+      "projections/cli/eval_minutes_asymmetric.py",
+      "projections/cli/eval_minutes_live.py",
+      "projections/cli/finalize_projections.py",
+      "projections/cli/freeze_slates.py",
+      "projections/cli/live_pipeline.py",
+      "projections/cli/score_minutes_v1.py",
+      "projections/cli/score_ownership_live.py",
+      "projections/cli/score_rates_live.py",
+      "projections/cli/sequential_backtest.py",
+      "projections/cli/train_minutes_dual.py",
+      "projections/etl/boxscores.py",
+      "projections/etl/daily_lineups.py",
+      "projections/etl/injuries.py",
+      "projections/etl/odds.py",
+      "projections/etl/roster_nightly.py",
+      "projections/etl/schedule.py",
+      "projections/pipelines/build_features_minutes_v1.py",
+      "scripts/analyze_accuracy.py",
+      "scripts/backfill_boxscores_from_json.py",
+      "scripts/backfill_injuries.py",
+      "scripts/backfill_slates.py",
+      "scripts/cleanup_bronze_partitions.py",
+      "scripts/minutes/backfill_projections_minutes_v1.py",
+      "scripts/sim_v2/run_sim_live.py",
+      "scripts/tracking/build_tracking_roles.py",
+      "scripts/tracking/scrape_tracking_raw.py"
+    ]
+  },
+  "evidence_highlights": {
+    "pipeline_status_summary": {
+      "files_total": 326,
+      "success": 307,
+      "error": 19,
+      "error_counts_by_job": {
+        "build_minutes_live": 13,
+        "build_rates_features_live": 2,
+        "injuries_live": 2,
+        "schedule_live": 1,
+        "score_fpts_live": 1
+      },
+      "most_common_error_messages": [
+        "Roster snapshot is ~900-1100h old relative to run_as_of_ts; exceeds 720h limit.",
+        "Roster snapshot is ~70-95h old relative to run_as_of_ts; exceeds 18h limit.",
+        "Oddstrader or network failures (SSL handshake timeout, DNS resolution)."
+      ],
+      "notes": "pipeline_status stores only the latest status per (job_name,target_date) and is not append-only."
+    },
+    "notable_journalctl_errors": [
+      {
+        "unit": "live-pipeline.service",
+        "error": "FileNotFoundError: Requested run=<RUN_ID> missing under /home/daniel/projections-data/live/features_minutes_v1/<DATE>",
+        "root_cause": "scripts/run_live_pipeline.sh generates a new RUN_ID for scoring that does not match the features run_id."
+      },
+      {
+        "unit": "live-api.service",
+        "error": "ERROR: [Errno 98] address already in use ('0.0.0.0', 8501); restart counter > 1400",
+        "root_cause": "Port conflict with minutes-dashboard.service on 8501."
+      },
+      {
+        "unit": "live-scrape.service",
+        "error": "TimeoutError: SSL handshake timed out to ms.virginia.us-east-1.oddstrader.com -> RuntimeError: Failed request",
+        "root_cause": "Oddstrader scrape is network-sensitive; no orchestrated retries/backoff at the job level."
+      },
+      {
+        "unit": "live-score.service",
+        "error": "ConnectError: Temporary failure in name resolution during injuries scrape",
+        "root_cause": "DNS/network flakiness + job-level failure handling/alerts are insufficient."
+      }
+    ]
+  }
+}
