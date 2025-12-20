@@ -15,6 +15,7 @@ import OptimizerPage from './pages/OptimizerPage'
 import ContestPage from './pages/ContestPage'
 import ContestSimPage from './pages/ContestSimPage'
 import DiagnosticsPage from './pages/DiagnosticsPage'
+import EntryManagerPage from './pages/EntryManagerPage'
 import { MinutesResponse, PlayerRow } from './types'
 import {
   formatFpts,
@@ -98,13 +99,14 @@ const SORT_LABELS: Record<SortKey, string> = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'contest' | 'contest-sim' | 'diagnostics' => {
+const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics' => {
   if (typeof window === 'undefined') {
     return 'minutes'
   }
   if (window.location.pathname.includes('diagnostics')) return 'diagnostics'
   if (window.location.pathname.includes('contest-sim')) return 'contest-sim'
   if (window.location.pathname.includes('contest')) return 'contest'
+  if (window.location.pathname.includes('entry-manager')) return 'entry-manager'
   if (window.location.pathname.includes('optimizer')) return 'optimizer'
   if (window.location.pathname.includes('pipeline')) return 'pipeline'
   if (window.location.pathname.includes('evaluation')) return 'evaluation'
@@ -114,7 +116,7 @@ const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'co
 
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'contest' | 'contest-sim' | 'diagnostics'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics'>(initialTab)
   const [selectedDate, setSelectedDate] = useState(todayISO())
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
@@ -146,7 +148,7 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer', contest: '/contest', 'contest-sim': '/contest-sim', diagnostics: '/diagnostics' }
+    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer', 'entry-manager': '/entry-manager', contest: '/contest', 'contest-sim': '/contest-sim', diagnostics: '/diagnostics' }
     window.history.replaceState({}, '', pathMap[activeTab])
   }, [activeTab])
 
@@ -368,6 +370,12 @@ function App() {
         Optimizer
       </button>
       <button
+        className={activeTab === 'entry-manager' ? 'active' : ''}
+        onClick={() => setActiveTab('entry-manager')}
+      >
+        Entry Manager
+      </button>
+      <button
         className={activeTab === 'contest' ? 'active' : ''}
         onClick={() => setActiveTab('contest')}
       >
@@ -411,6 +419,15 @@ function App() {
       <div className="app-shell">
         {nav}
         <OptimizerPage />
+      </div>
+    )
+  }
+
+  if (activeTab === 'entry-manager') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <EntryManagerPage />
       </div>
     )
   }

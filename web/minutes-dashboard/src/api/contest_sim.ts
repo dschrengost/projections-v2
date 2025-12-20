@@ -44,10 +44,12 @@ export interface ContestSimResponse {
     results: LineupEVResult[]
     config: ContestConfig
     stats: SummaryStats
+    build_id?: string | null
 }
 
 export interface ContestSimRequest {
     game_date: string
+    draft_group_id?: number | null
     lineups: string[][]
     archetype?: string
     field_size_bucket?: string
@@ -78,6 +80,24 @@ export interface ConfigResponse {
     default_field_size_bucket: string
 }
 
+export interface SavedSimBuildSummary {
+    build_id: string
+    game_date: string
+    draft_group_id?: number | null
+    created_at: string
+    lineups_count: number
+    name?: string | null
+    kind: 'run' | 'lineups'
+    stats?: Record<string, unknown>
+}
+
+export interface SavedSimBuildDetail extends SavedSimBuildSummary {
+    config?: Record<string, unknown> | null
+    results?: LineupEVResult[]
+    lineups: string[][]
+    request?: Record<string, unknown> | null
+}
+
 export async function runContestSim(request: ContestSimRequest): Promise<ContestSimResponse> {
     const resp = await fetch(`${API_BASE}/run`, {
         method: 'POST',
@@ -97,4 +117,68 @@ export async function getContestSimConfig(): Promise<ConfigResponse> {
         throw new Error('Failed to load contest sim config')
     }
     return resp.json()
+}
+
+export async function getSavedSimBuilds(
+    date: string,
+    kind?: 'run' | 'lineups',
+): Promise<SavedSimBuildSummary[]> {
+    const params = new URLSearchParams({ date })
+    if (kind) params.set('kind', kind)
+    const resp = await fetch(`${API_BASE}/saved-builds?${params.toString()}`)
+    if (!resp.ok) {
+        throw new Error('Failed to load saved sim builds')
+    }
+    return resp.json()
+}
+
+export async function loadSavedSimBuild(
+    date: string,
+    buildId: string,
+): Promise<SavedSimBuildDetail> {
+    const resp = await fetch(`${API_BASE}/saved-builds/${buildId}?date=${encodeURIComponent(date)}`)
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+        throw new Error(err.detail || 'Failed to load saved sim build')
+    }
+    return resp.json()
+}
+
+export async function saveSimLineups(
+    date: string,
+    draftGroupId: number | null,
+    name: string,
+    lineups: string[][],
+    results?: LineupEVResult[] | null,
+    config?: ContestConfig | null,
+    stats?: SummaryStats | null,
+): Promise<SavedSimBuildSummary> {
+    const resp = await fetch(`${API_BASE}/saved-lineups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            game_date: date,
+            draft_group_id: draftGroupId,
+            name,
+            lineups,
+            results: results ?? null,
+            config: config ?? null,
+            stats: stats ?? null,
+        }),
+    })
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+        throw new Error(err.detail || 'Failed to save sim lineups')
+    }
+    return resp.json()
+}
+
+export async function deleteSavedSimBuild(date: string, buildId: string): Promise<void> {
+    const resp = await fetch(`${API_BASE}/saved-builds/${buildId}?date=${encodeURIComponent(date)}`, {
+        method: 'DELETE',
+    })
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+        throw new Error(err.detail || 'Failed to delete sim build')
+    }
 }

@@ -1,9 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
     runContestSim,
     getContestSimConfig,
     ContestSimResponse,
     ConfigResponse,
+    getSavedSimBuilds,
+    loadSavedSimBuild,
+    saveSimLineups,
+    deleteSavedSimBuild,
+    SavedSimBuildSummary,
 } from '../api/contest_sim'
 import {
     getSavedBuilds,
@@ -32,6 +37,12 @@ export default function ContestSimPage() {
     const [savedBuilds, setSavedBuilds] = useState<SavedBuild[]>([])
     const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null)
     const [buildsLoading, setBuildsLoading] = useState(false)
+
+    // Saved contest sim builds
+    const [savedSimBuilds, setSavedSimBuilds] = useState<SavedSimBuildSummary[]>([])
+    const [selectedSimBuildId, setSelectedSimBuildId] = useState<string | null>(null)
+    const [selectedSimLineupId, setSelectedSimLineupId] = useState<string | null>(null)
+    const [simBuildsLoading, setSimBuildsLoading] = useState(false)
 
     // Player pool for name resolution
     const [pool, setPool] = useState<PoolPlayer[]>([])
@@ -102,6 +113,28 @@ export default function ContestSimPage() {
         void load()
     }, [selectedDate, selectedSlate])
 
+    // Load saved contest sim builds when date/slate changes
+    useEffect(() => {
+        const load = async () => {
+            setSimBuildsLoading(true)
+            try {
+                const builds = await getSavedSimBuilds(selectedDate)
+                setSavedSimBuilds(builds)
+                const latestRun = builds.find(b => b.kind === 'run')?.build_id ?? null
+                setSelectedSimBuildId(latestRun)
+                const latestLineup = builds.find(b => b.kind === 'lineups')?.build_id ?? null
+                setSelectedSimLineupId(latestLineup)
+            } catch {
+                setSavedSimBuilds([])
+                setSelectedSimBuildId(null)
+                setSelectedSimLineupId(null)
+            } finally {
+                setSimBuildsLoading(false)
+            }
+        }
+        void load()
+    }, [selectedDate, selectedSlate])
+
     // Load player pool for name resolution
     useEffect(() => {
         if (!selectedSlate) {
@@ -153,6 +186,30 @@ export default function ContestSimPage() {
         }
         void load()
     }, [selectedDate, selectedBuildId])
+
+    // Load sim run when selection changes
+    useEffect(() => {
+        if (!selectedSimBuildId) {
+            return
+        }
+        const load = async () => {
+            try {
+                const build = await loadSavedSimBuild(selectedDate, selectedSimBuildId)
+                if (build.kind === 'run' && build.results && build.config && build.stats) {
+                    setSimResult({
+                        results: build.results,
+                        config: build.config as unknown as ContestSimResponse['config'],
+                        stats: build.stats as unknown as ContestSimResponse['stats'],
+                        build_id: build.build_id,
+                    })
+                    setLineups(build.lineups ?? [])
+                }
+            } catch {
+                setSimResult(null)
+            }
+        }
+        void load()
+    }, [selectedDate, selectedSimBuildId])
 
     // Clear selection when results change
     useEffect(() => {
@@ -208,6 +265,28 @@ export default function ContestSimPage() {
         return results
     }, [resultsWithOwnership, filterPositiveEV, maxOwnership, topN, sortKey, sortDir])
 
+    const activeResults = useMemo(() => {
+        if (selectedLineups.size === 0) return filteredResults
+        return filteredResults.filter(r => selectedLineups.has(r.lineup_id))
+    }, [filteredResults, selectedLineups])
+
+    const activeSummary = useMemo(() => {
+        if (!simResult || activeResults.length === 0) {
+            return null
+        }
+        const avgEv = activeResults.reduce((sum, r) => sum + r.expected_value, 0) / activeResults.length
+        const avgRoi = activeResults.reduce((sum, r) => sum + r.roi, 0) / activeResults.length
+        const positiveEv = activeResults.filter(r => r.expected_value >= 0).length
+        return {
+            lineupCount: activeResults.length,
+            avgEv,
+            avgRoi,
+            positiveEv,
+            worlds: simResult.stats.worlds_count,
+            prizePool: simResult.config.prize_pool,
+        }
+    }, [activeResults, simResult])
+
     // Paginated results
     const paginatedResults = useMemo(() => {
         const start = (page - 1) * pageSize
@@ -221,9 +300,8 @@ export default function ContestSimPage() {
         setPage(1)
     }, [filterPositiveEV, maxOwnership, topN, sortKey, sortDir])
 
-    // Run simulation
-    const handleRunSim = async () => {
-        if (lineups.length === 0) {
+    const runSimWithLineups = useCallback(async (lineupsToRun: string[][]) => {
+        if (lineupsToRun.length === 0) {
             setSimError('No lineups loaded. Select a build first.')
             return
         }
@@ -233,16 +311,100 @@ export default function ContestSimPage() {
         try {
             const result = await runContestSim({
                 game_date: selectedDate,
-                lineups,
+                draft_group_id: selectedSlate ?? undefined,
+                lineups: lineupsToRun,
                 archetype,
                 field_size_bucket: fieldSizeBucket,
                 entry_fee: entryFee,
             })
             setSimResult(result)
+            const builds = await getSavedSimBuilds(selectedDate)
+            setSavedSimBuilds(builds)
+            setSelectedSimBuildId(result.build_id ?? builds.find(b => b.kind === 'run')?.build_id ?? null)
         } catch (err) {
             setSimError((err as Error).message)
         } finally {
             setSimLoading(false)
+        }
+    }, [selectedDate, selectedSlate, archetype, fieldSizeBucket, entryFee])
+
+    // Run simulation
+    const handleRunSim = async () => {
+        await runSimWithLineups(lineups)
+    }
+
+    // Load saved sim lineups when selection changes
+    useEffect(() => {
+        if (!selectedSimLineupId) {
+            return
+        }
+        const load = async () => {
+            try {
+                const build = await loadSavedSimBuild(selectedDate, selectedSimLineupId)
+                if (build.kind === 'lineups') {
+                    setLineups(build.lineups ?? [])
+                    if (build.results && build.config && build.stats) {
+                        setSimResult({
+                            results: build.results,
+                            config: build.config as unknown as ContestSimResponse['config'],
+                            stats: build.stats as unknown as ContestSimResponse['stats'],
+                            build_id: build.build_id,
+                        })
+                    } else {
+                        setSimResult(null)
+                        setSimError('Saved lineups missing snapshot results. Re-save from a sim run.')
+                    }
+                }
+            } catch {
+                // ignore
+            }
+        }
+        void load()
+    }, [selectedDate, selectedSimLineupId])
+
+    const handleSaveSimLineups = async () => {
+        if (!selectedSlate) return
+        if (filteredResults.length === 0) return
+        const defaultName = `Sim lineups (${filteredResults.length})`
+        const name = prompt('Save lineups as:', defaultName)?.trim()
+        if (!name) return
+        try {
+            const lineupsToSave = filteredResults.map(r => r.player_ids)
+            const resultIds = new Set(filteredResults.map(r => r.lineup_id))
+            const resultsToSave = simResult?.results.filter(r => resultIds.has(r.lineup_id)) ?? null
+            const saved = await saveSimLineups(
+                selectedDate,
+                selectedSlate,
+                name,
+                lineupsToSave,
+                resultsToSave,
+                simResult?.config ?? null,
+                simResult?.stats ?? null,
+            )
+            const builds = await getSavedSimBuilds(selectedDate)
+            setSavedSimBuilds(builds)
+            setSelectedSimLineupId(saved.build_id)
+        } catch (err) {
+            alert('Failed to save sim lineups: ' + (err as Error).message)
+        }
+    }
+
+    const handleDeleteSimBuild = async (buildId: string) => {
+        if (!confirm('Delete this saved sim build?')) return
+        try {
+            await deleteSavedSimBuild(selectedDate, buildId)
+            const builds = await getSavedSimBuilds(selectedDate)
+            setSavedSimBuilds(builds)
+            if (selectedSimBuildId === buildId) {
+                setSelectedSimBuildId(null)
+                setSimResult(null)
+            }
+            if (selectedSimLineupId === buildId) {
+                setSelectedSimLineupId(null)
+                setSimResult(null)
+            }
+        } catch (err) {
+            alert('Failed to delete sim build: ' + (err as Error).message)
         }
     }
 
@@ -428,40 +590,122 @@ export default function ContestSimPage() {
 
                 {/* Results Area */}
                 <main className="sim-main">
+                    <section className="saved-builds-section">
+                        <div className="saved-builds-header">
+                            <h3>Saved Sim Runs</h3>
+                            <div className="saved-builds-header-actions">
+                                {simBuildsLoading && <span className="muted">Loading...</span>}
+                            </div>
+                        </div>
+                        <div className="saved-builds-list">
+                            {savedSimBuilds.filter(b => b.kind === 'run').length === 0 && (
+                                <span className="muted">No sim runs yet.</span>
+                            )}
+                            {savedSimBuilds.filter(b => b.kind === 'run').map(b => (
+                                <div key={b.build_id} className={`saved-build-card ${selectedSimBuildId === b.build_id ? 'selected' : ''}`}>
+                                    <div className="saved-build-info">
+                                        <span className="saved-build-count">{b.lineups_count} lineups</span>
+                                        <span className="saved-build-time">{new Date(b.created_at).toLocaleTimeString()}</span>
+                                        {typeof b.stats?.avg_ev === 'number' && (
+                                            <span className="saved-build-stats">EV {b.stats.avg_ev.toFixed(2)}</span>
+                                        )}
+                                    </div>
+                                    <div className="saved-build-actions">
+                                        <button
+                                            className="load-btn"
+                                            onClick={() => {
+                                                setSelectedSimLineupId(null)
+                                                setSelectedSimBuildId(b.build_id)
+                                            }}
+                                        >
+                                            Load
+                                        </button>
+                                        <button
+                                            className="delete-btn"
+                                            onClick={() => handleDeleteSimBuild(b.build_id)}
+                                            title="Delete"
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+
+                    <section className="saved-builds-section">
+                        <div className="saved-builds-header">
+                            <h3>Saved Sim Lineups</h3>
+                        </div>
+                        <div className="saved-builds-list">
+                            {savedSimBuilds.filter(b => b.kind === 'lineups').length === 0 && (
+                                <span className="muted">No saved lineups yet.</span>
+                            )}
+                            {savedSimBuilds.filter(b => b.kind === 'lineups').map(b => (
+                                <div key={b.build_id} className={`saved-build-card ${selectedSimLineupId === b.build_id ? 'selected' : ''}`}>
+                                    <div className="saved-build-info">
+                                        <span className="saved-build-count">{b.lineups_count} lineups</span>
+                                        <span className="saved-build-time">{b.name ?? b.build_id.slice(0, 8)}</span>
+                                    </div>
+                                    <div className="saved-build-actions">
+                                        <button
+                                            className="load-btn"
+                                            onClick={() => {
+                                                setSelectedSimBuildId(null)
+                                                setSelectedSimLineupId(b.build_id)
+                                            }}
+                                        >
+                                            Load
+                                        </button>
+                                        <button
+                                            className="delete-btn"
+                                            onClick={() => handleDeleteSimBuild(b.build_id)}
+                                            title="Delete"
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+
                     {simResult && (
                         <div className="lineup-cards-container">
                             {/* Summary Cards */}
-                            <div className="sim-summary">
+                            <div className="sim-summary compact">
                                 <div className="summary-card">
                                     <div className="card-label">Lineups</div>
-                                    <div className="card-value">{simResult.stats.lineup_count}</div>
+                                    <div className="card-value">{activeSummary?.lineupCount ?? simResult.stats.lineup_count}</div>
                                 </div>
                                 <div className="summary-card">
                                     <div className="card-label">Worlds</div>
-                                    <div className="card-value">{simResult.stats.worlds_count.toLocaleString()}</div>
+                                    <div className="card-value">{(activeSummary?.worlds ?? simResult.stats.worlds_count).toLocaleString()}</div>
                                 </div>
                                 <div className="summary-card">
                                     <div className="card-label">Avg EV</div>
-                                    <div className={`card-value ${simResult.stats.avg_ev >= 0 ? 'positive' : 'negative'}`}>
-                                        {simResult.stats.avg_ev >= 0 ? '$' : '-$'}{Math.abs(simResult.stats.avg_ev).toFixed(2)}
+                                    <div className={`card-value ${(activeSummary?.avgEv ?? simResult.stats.avg_ev) >= 0 ? 'positive' : 'negative'}`}>
+                                        {(activeSummary?.avgEv ?? simResult.stats.avg_ev) >= 0 ? '$' : '-$'}
+                                        {Math.abs(activeSummary?.avgEv ?? simResult.stats.avg_ev).toFixed(2)}
                                     </div>
                                 </div>
                                 <div className="summary-card">
                                     <div className="card-label">Avg ROI</div>
-                                    <div className={`card-value ${simResult.stats.avg_roi >= 0 ? 'positive' : 'negative'}`}>
-                                        {simResult.stats.avg_roi >= 0 ? '+' : ''}{(simResult.stats.avg_roi * 100).toFixed(1)}%
+                                    <div className={`card-value ${(activeSummary?.avgRoi ?? simResult.stats.avg_roi) >= 0 ? 'positive' : 'negative'}`}>
+                                        {(activeSummary?.avgRoi ?? simResult.stats.avg_roi) >= 0 ? '+' : ''}
+                                        {((activeSummary?.avgRoi ?? simResult.stats.avg_roi) * 100).toFixed(1)}%
                                     </div>
                                 </div>
                                 <div className="summary-card">
                                     <div className="card-label">+EV Lineups</div>
                                     <div className="card-value">
-                                        {simResult.stats.positive_ev_count} / {simResult.stats.lineup_count}
+                                        {activeSummary?.positiveEv ?? simResult.stats.positive_ev_count} / {activeSummary?.lineupCount ?? simResult.stats.lineup_count}
                                     </div>
                                 </div>
                                 <div className="summary-card">
                                     <div className="card-label">Prize Pool</div>
                                     <div className="card-value">
-                                        ${simResult.config.prize_pool.toLocaleString()}
+                                        ${(activeSummary?.prizePool ?? simResult.config.prize_pool).toLocaleString()}
                                     </div>
                                 </div>
                             </div>
@@ -531,16 +775,14 @@ export default function ContestSimPage() {
 
                                 <div className="toolbar-group">
                                     <label>Top N:</label>
-                                    <select
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        placeholder="All"
                                         value={topN ?? ''}
                                         onChange={e => setTopN(e.target.value ? Number(e.target.value) : null)}
-                                    >
-                                        <option value="">All</option>
-                                        <option value="150">Top 150</option>
-                                        <option value="500">Top 500</option>
-                                        <option value="1000">Top 1000</option>
-                                        <option value="2000">Top 2000</option>
-                                    </select>
+                                        style={{ width: '90px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                    />
                                 </div>
 
                                 <div className="toolbar-divider" />
@@ -559,6 +801,13 @@ export default function ContestSimPage() {
                                         disabled={selectedLineups.size === 0}
                                     >
                                         Export Selected ({selectedLineups.size})
+                                    </button>
+                                    <button
+                                        onClick={handleSaveSimLineups}
+                                        disabled={filteredResults.length === 0}
+                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: '4px', color: '#60a5fa', cursor: 'pointer', marginLeft: '0.5rem' }}
+                                    >
+                                        Save Sim Lineups ({filteredResults.length})
                                     </button>
                                 </div>
                             </div>

@@ -1571,6 +1571,11 @@ tbody tr:hover {
   padding: 0.4rem 0.6rem;
 }
 
+.saved-build-card.selected {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4);
+}
+
 .saved-build-info {
   display: flex;
   gap: 0.5rem;
@@ -1815,6 +1820,19 @@ tbody tr:hover {
   color: #e2e8f0;
 }
 
+.lineup-slot-label {
+  font-weight: 600;
+  color: #94a3b8;
+  margin-right: 0.35rem;
+}
+
+.lineup-lock {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.35rem;
+  font-size: 0.85em;
+}
+
 .lineup-player.highlight {
   background: #365314;
   color: #bef264;
@@ -1886,6 +1904,32 @@ tbody tr:hover {
   height: 14px;
   cursor: pointer;
   accent-color: #a855f7;
+}
+
+.sim-summary.compact {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+
+.sim-summary.compact .summary-card {
+  padding: 0.5rem 0.6rem;
+  background: #0f172a;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+}
+
+.sim-summary.compact .card-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.sim-summary.compact .card-value {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 0.2rem;
 }
 
 .saved-build-card.selected {
