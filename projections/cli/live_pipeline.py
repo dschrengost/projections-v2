@@ -15,6 +15,13 @@ from projections.etl import injuries as injuries_etl
 from projections.etl import odds as odds_etl
 from projections.etl import roster_nightly as roster_etl
 
+# ESPN injuries for faster real-time injury updates
+try:
+    from scrapers.espn_injuries import scrape_espn_injuries
+    ESPN_AVAILABLE = True
+except ImportError:
+    ESPN_AVAILABLE = False
+
 app = typer.Typer(help="Run injuries, daily lineups, odds, and roster ETLs sequentially.")
 
 
@@ -78,6 +85,7 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
     lineups: bool = typer.Option(True, "--lineups/--skip-lineups", help="Run the daily lineups ETL stage."),
     odds: bool = typer.Option(True, "--odds/--skip-odds", help="Run the odds ETL stage."),
     run_roster: bool = typer.Option(True, "--run-roster/--skip-roster", help="Run the roster nightly stage."),
+    espn_injuries: bool = typer.Option(True, "--espn-injuries/--skip-espn-injuries", help="Run the ESPN injuries scrape for faster injury updates."),
     schedule_timeout: float = typer.Option(10.0, "--schedule-timeout", help="Timeout (seconds) for NBA schedule API fallback."),
     injury_timeout: float = typer.Option(15.0, "--injury-timeout", help="HTTP timeout (seconds) for NBA injury PDF scraping."),
     injury_player_timeout: float = typer.Option(10.0, "--injury-player-timeout", help="Timeout (seconds) for NBA player resolver."),
@@ -179,6 +187,26 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
         )
     else:
         _echo_stage("skipping roster nightly stage")
+
+    # ESPN injuries - faster, more reliable injury updates
+    if espn_injuries and ESPN_AVAILABLE:
+        _echo_stage("running ESPN injuries scrape")
+        try:
+            espn_df = scrape_espn_injuries(start_day.date())
+            if not espn_df.empty:
+                espn_out_path = data_root / "silver" / "espn_injuries" / f"date={start_day.date()}" / "injuries.parquet"
+                espn_out_path.parent.mkdir(parents=True, exist_ok=True)
+                espn_df.to_parquet(espn_out_path, index=False)
+                out_count = len(espn_df[espn_df["status"] == "OUT"])
+                _echo_stage(f"ESPN injuries: {len(espn_df)} total, {out_count} OUT -> {espn_out_path}")
+            else:
+                _echo_stage("ESPN injuries: no injury data found")
+        except Exception as exc:
+            typer.echo(f"[live] warning: ESPN injuries failed ({exc}); continuing", err=True)
+    elif espn_injuries and not ESPN_AVAILABLE:
+        _echo_stage("skipping ESPN injuries (module not available)")
+    else:
+        _echo_stage("skipping ESPN injuries stage")
 
     _echo_stage("live pipeline completed successfully")
 

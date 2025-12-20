@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
+from uuid import uuid4
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
@@ -15,6 +18,66 @@ from projections.contest_sim.payout_generator import load_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _sim_builds_dir() -> Path:
+    """Get the contest sim builds directory under projections-data."""
+    return paths.data_path() / "builds" / "contest_sim"
+
+
+def _save_sim_build(game_date: str, build_data: Dict[str, object]) -> str:
+    builds_root = _sim_builds_dir() / game_date
+    builds_root.mkdir(parents=True, exist_ok=True)
+    build_id = build_data.get("build_id") or str(uuid4())
+    build_path = builds_root / f"{build_id}.json"
+    build_data["build_id"] = build_id
+    with open(build_path, "w") as f:
+        import json
+        json.dump(build_data, f, indent=2)
+    return str(build_id)
+
+
+def _load_sim_build(game_date: str, build_id: str) -> Optional[Dict[str, object]]:
+    build_path = _sim_builds_dir() / game_date / f"{build_id}.json"
+    if not build_path.exists():
+        return None
+    with open(build_path) as f:
+        import json
+        return json.load(f)
+
+
+def _delete_sim_build(game_date: str, build_id: str) -> bool:
+    build_path = _sim_builds_dir() / game_date / f"{build_id}.json"
+    if build_path.exists():
+        build_path.unlink()
+        return True
+    return False
+
+
+def _list_sim_builds(game_date: str) -> List[Dict[str, object]]:
+    builds_root = _sim_builds_dir() / game_date
+    if not builds_root.exists():
+        return []
+    builds = []
+    for build_file in sorted(builds_root.glob("*.json"), reverse=True):
+        try:
+            import json
+            with open(build_file) as f:
+                data = json.load(f)
+            builds.append({
+                "build_id": data.get("build_id", build_file.stem),
+                "game_date": data.get("game_date"),
+                "draft_group_id": data.get("draft_group_id"),
+                "created_at": data.get("created_at"),
+                "lineups_count": data.get("lineups_count"),
+                "name": data.get("name"),
+                "kind": data.get("kind", "run"),
+                "stats": data.get("stats", {}),
+            })
+        except Exception as exc:
+            logger.warning("Failed to read sim build %s: %s", build_file, exc)
+            continue
+    return builds
 
 
 def _load_player_ownership(game_date: str) -> Dict[str, float]:
@@ -84,6 +147,7 @@ class ContestSimRequest(BaseModel):
     """Request to run a contest simulation."""
 
     game_date: str = Field(..., description="Game date in YYYY-MM-DD format")
+    draft_group_id: Optional[int] = Field(default=None, description="Draft group ID")
     lineups: List[List[str]] = Field(..., description="List of lineups (each a list of player_ids)")
     archetype: str = Field(default="medium", description="Payout archetype: top_heavy, medium, flat")
     field_size_bucket: str = Field(default="medium", description="Field size bucket: small, medium, massive")
@@ -143,6 +207,7 @@ class ContestSimResponse(BaseModel):
     results: List[LineupEVResultResponse]
     config: ContestConfigResponse
     stats: SummaryStatsResponse
+    build_id: Optional[str] = None
 
 
 class FieldSizeOption(BaseModel):
@@ -171,6 +236,42 @@ class ConfigResponse(BaseModel):
     default_entry_fee: float
     default_archetype: str
     default_field_size_bucket: str
+
+
+class SavedSimBuildSummary(BaseModel):
+    build_id: str
+    game_date: str
+    draft_group_id: Optional[int] = None
+    created_at: str
+    lineups_count: int
+    name: Optional[str] = None
+    kind: str = "run"  # run | lineups
+    stats: Dict[str, object] = {}
+
+
+class SavedSimBuildDetail(BaseModel):
+    build_id: str
+    game_date: str
+    draft_group_id: Optional[int] = None
+    created_at: str
+    lineups_count: int
+    name: Optional[str] = None
+    kind: str = "run"
+    config: Optional[Dict[str, object]] = None
+    stats: Dict[str, object]
+    results: Optional[List[LineupEVResultResponse]] = None
+    lineups: List[List[str]]
+    request: Optional[Dict[str, object]] = None
+
+
+class SaveSimLineupsRequest(BaseModel):
+    game_date: str
+    draft_group_id: Optional[int] = None
+    name: str
+    lineups: List[List[str]]
+    results: Optional[List[LineupEVResultResponse]] = None
+    config: Optional[ContestConfigResponse] = None
+    stats: Optional[SummaryStatsResponse] = None
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +304,28 @@ async def run_simulation(request: ContestSimRequest):
             entry_max=request.entry_max,
         )
 
+        build_data = {
+            "build_id": str(uuid4()),
+            "game_date": request.game_date,
+            "draft_group_id": request.draft_group_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "lineups_count": len(request.lineups),
+            "kind": "run",
+            "name": None,
+            "config": {
+                "field_size": result.config.field_size,
+                "entry_fee": result.config.entry_fee,
+                "archetype": result.config.archetype,
+                "rake": result.config.rake,
+                "prize_pool": result.config.prize_pool,
+            },
+            "stats": result.stats.to_dict(),
+            "results": [r.to_dict() for r in result.results],
+            "lineups": request.lineups,
+            "request": request.model_dump(),
+        }
+        build_id = _save_sim_build(request.game_date, build_data)
+
         return ContestSimResponse(
             results=[
                 LineupEVResultResponse(**r.to_dict())
@@ -216,6 +339,7 @@ async def run_simulation(request: ContestSimRequest):
                 prize_pool=result.config.prize_pool,
             ),
             stats=SummaryStatsResponse(**result.stats.to_dict()),
+            build_id=build_id,
         )
 
     except FileNotFoundError as e:
@@ -265,3 +389,80 @@ async def get_config():
     except Exception as e:
         logger.exception(f"Failed to load config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/saved-builds", response_model=List[SavedSimBuildSummary])
+async def list_saved_sim_builds(
+    date: str,
+    kind: Optional[str] = None,
+):
+    """List saved contest sim builds for a date."""
+    builds = _list_sim_builds(date)
+    if kind:
+        builds = [b for b in builds if b.get("kind") == kind]
+    return builds
+
+
+@router.get("/saved-builds/{build_id}", response_model=SavedSimBuildDetail)
+async def load_saved_sim_build(build_id: str, date: str):
+    """Load a saved contest sim build with lineups/results."""
+    data = _load_sim_build(date, build_id)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Sim build {build_id} not found for date {date}")
+    results = data.get("results")
+    return SavedSimBuildDetail(
+        build_id=data.get("build_id", build_id),
+        game_date=data.get("game_date", date),
+        draft_group_id=data.get("draft_group_id"),
+        created_at=data.get("created_at", datetime.utcnow().isoformat()),
+        lineups_count=data.get("lineups_count", 0),
+        name=data.get("name"),
+        kind=data.get("kind", "run"),
+        config=data.get("config"),
+        stats=data.get("stats", {}),
+        results=[LineupEVResultResponse(**r) for r in results] if results else None,
+        lineups=data.get("lineups", []),
+        request=data.get("request"),
+    )
+
+
+@router.post("/saved-lineups", response_model=SavedSimBuildSummary)
+async def save_sim_lineups(request: SaveSimLineupsRequest):
+    """Save a named lineup set derived from contest sim results."""
+    if not request.lineups:
+        raise HTTPException(status_code=400, detail="No lineups provided")
+    if not request.results or not request.config or not request.stats:
+        raise HTTPException(status_code=400, detail="Snapshot results/config/stats are required to save sim lineups")
+    build_data = {
+        "build_id": str(uuid4()),
+        "game_date": request.game_date,
+        "draft_group_id": request.draft_group_id,
+        "created_at": datetime.utcnow().isoformat(),
+        "lineups_count": len(request.lineups),
+        "kind": "lineups",
+        "name": request.name,
+        "stats": request.stats.model_dump() if request.stats else {},
+        "config": request.config.model_dump() if request.config else None,
+        "results": [r.model_dump() for r in request.results] if request.results else None,
+        "lineups": request.lineups,
+    }
+    build_id = _save_sim_build(request.game_date, build_data)
+    return SavedSimBuildSummary(
+        build_id=build_id,
+        game_date=request.game_date,
+        draft_group_id=request.draft_group_id,
+        created_at=build_data["created_at"],
+        lineups_count=len(request.lineups),
+        name=request.name,
+        kind="lineups",
+        stats=build_data["stats"] or {},
+    )
+
+
+@router.delete("/saved-builds/{build_id}")
+async def delete_saved_sim_build(build_id: str, date: str):
+    """Delete a saved contest sim build."""
+    deleted = _delete_sim_build(date, build_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Sim build {build_id} not found for date {date}")
+    return {"status": "deleted", "build_id": build_id}

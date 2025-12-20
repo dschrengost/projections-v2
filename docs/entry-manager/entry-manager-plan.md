@@ -70,6 +70,9 @@ class EntryFileState:
    - Update entry state (manual edits or overrides)
 5. `POST /api/optimizer/entries/{contest_id}/export`
    - Return DK CSV with updated lineups
+6. `POST /api/optimizer/entries/{contest_id}/apply-build`
+   - Input: build source (optimizer or contest-sim) + build id
+   - Output: updated entry state with lineups applied
 
 ### UI (Phase 1)
 - New “Entry Manager” panel or page:
@@ -77,21 +80,19 @@ class EntryFileState:
   - List saved contests
   - View entries (locked vs editable)
   - Export updated CSV
+  - Apply saved build lineups (optimizer or contest sim)
 
 ### Phase 2 Enhancements
 - Per-entry edits in UI (slot-level swaps).
 - Global exposure view across entries.
 - Versioning and change history.
 
-### Open Questions
-- Should entry state be keyed by contest_id alone or include date + slate?
+### Saved Build Integration
+- Load lineups from optimizer saved builds (`/api/optimizer/saved-builds`).
+- Load lineups from contest sim saved builds (`/api/contest-sim/saved-builds`).
+- Entry manager applies selected build lineups to entries (primary population path).
 
-might as well include date + slate as part of the metadata as well, but use contest_id as source of truth
-
-- How to handle multiple slates in one CSV (if any)?
-
-we will choose not to handle this for now. one slate per csv only
-
-- Whether to persist original DK CSV row order for export fidelity.
-
-yes
+### Decisions
+- Store date + slate in metadata, but use contest_id as the primary key.
+- Enforce one slate per CSV for now.
+- Persist original DK CSV row order for export fidelity.

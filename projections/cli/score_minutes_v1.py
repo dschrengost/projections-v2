@@ -70,6 +70,31 @@ SUMMARY_FILENAME = "summary.json"
 LATEST_POINTER = "latest_run.json"
 FEATURE_FILENAME = "features.parquet"
 
+
+def _load_espn_out_players(game_date: date, data_root: Path | None = None) -> set[str]:
+    """Load ESPN injuries and return set of player names marked OUT.
+    
+    ESPN updates faster than the official NBA injury reports, catching
+    late scratches like Donovan Mitchell that NBA.com misses.
+    """
+    if data_root is None:
+        data_root = paths.get_data_root()
+    
+    espn_path = data_root / "silver" / "espn_injuries" / f"date={game_date}" / "injuries.parquet"
+    if not espn_path.exists():
+        return set()
+    
+    try:
+        espn_df = pd.read_parquet(espn_path)
+        out_players = espn_df[espn_df["status"] == "OUT"]["player_name"].dropna()
+        out_set = set(out_players.str.strip().str.lower())
+        if out_set:
+            typer.echo(f"[espn] loaded {len(out_set)} OUT players from ESPN", err=True)
+        return out_set
+    except Exception as exc:
+        typer.echo(f"[espn] warning: failed to load ESPN injuries ({exc})", err=True)
+        return set()
+
 Mode = Literal["historical", "live"]
 MinutesOutputMode = Literal["conditional", "unconditional", "both"]
 ReconcileMode = Literal["none", "p50", "p50_and_tails"]
@@ -672,6 +697,7 @@ def _score_rows(
     enable_play_prob_mixing: bool = False,
     promotion_ctx: PromotionPriorContext | None = None,
     promotion_debug: bool = False,
+    espn_out_players: set[str] | None = None,
 ) -> pd.DataFrame:
     if df.empty:
         return df
@@ -730,7 +756,7 @@ def _score_rows(
 
     # Force play_prob to 0.0 for known OUT players (if they were allowed through filtering).
     # Also zero their minutes quantiles so they don't contribute to team totals.
-    # Check both injury status AND lineup_role (from daily lineups) to catch late scratches.
+    # Check: injury status, lineup_role (from daily lineups), AND ESPN injuries for late scratches.
     out_mask = pd.Series(False, index=working.index)
     if "status" in working.columns:
         status_col = working["status"].astype(str).str.upper()
@@ -738,13 +764,21 @@ def _score_rows(
     if "lineup_role" in working.columns:
         lineup_role_col = working["lineup_role"].astype(str).str.lower()
         out_mask = out_mask | (lineup_role_col == "out")
+    # Check ESPN injuries - catches late scratches like Donovan Mitchell
+    if espn_out_players and "player_name" in working.columns:
+        player_names_lower = working["player_name"].astype(str).str.strip().str.lower()
+        espn_mask = player_names_lower.isin(espn_out_players)
+        if espn_mask.any():
+            espn_outs = working.loc[espn_mask, "player_name"].tolist()
+            typer.echo(f"[espn] marking {len(espn_outs)} players OUT: {espn_outs}", err=True)
+            out_mask = out_mask | espn_mask
     if out_mask.any():
         working.loc[out_mask, "play_prob"] = 0.0
         # Zero minutes for OUT players - they should not contribute to team totals
         for min_col in ["minutes_p10", "minutes_p50", "minutes_p90"]:
             if min_col in working.columns:
                 working.loc[out_mask, min_col] = 0.0
-        # Update status to OUT if it wasn't already (for lineup_role outs)
+        # Update status to OUT if it wasn't already (for lineup_role/ESPN outs)
         if "status" in working.columns:
             working.loc[out_mask, "status"] = AvailabilityStatus.OUT.value
     if enable_play_prob_mixing:
@@ -820,6 +854,7 @@ def _score_rows_dual(
     enable_play_prob_mixing: bool = False,
     promotion_ctx: PromotionPriorContext | None = None,
     promotion_debug: bool = False,
+    espn_out_players: set[str] | None = None,
 ) -> pd.DataFrame:
     if df.empty:
         return df
@@ -840,6 +875,7 @@ def _score_rows_dual(
         enable_play_prob_mixing=enable_play_prob_mixing,
         promotion_ctx=promotion_ctx,
         promotion_debug=promotion_debug,
+        espn_out_players=espn_out_players,
     )
     late_scored = _score_rows(
         df,
@@ -848,6 +884,7 @@ def _score_rows_dual(
         enable_play_prob_mixing=enable_play_prob_mixing,
         promotion_ctx=promotion_ctx,
         promotion_debug=promotion_debug,
+        espn_out_players=espn_out_players,
     )
 
     result = early_scored.copy()
@@ -1586,11 +1623,16 @@ def main(
         config_path=promotion_config,
     )
 
+    # Load ESPN injuries for late scratch detection (live mode only)
+    espn_out_players: set[str] = set()
+    normalized_mode: Mode = mode.lower()  # type: ignore[assignment]
+    if normalized_mode == "live":
+        espn_out_players = _load_espn_out_players(start_day)
+
     run_dir_path: Path | None = None
     run_summary: dict | None = None
     run_as_of_ts_value: pd.Timestamp | None = None
 
-    normalized_mode: Mode = mode.lower()  # type: ignore[assignment]
     if normalized_mode == "live":
         if features_path is None:
             run_dir_path = _resolve_run_dir(live_features_root, start_day, run_id, write_mode=False)
@@ -1655,6 +1697,7 @@ def main(
             enable_play_prob_mixing=enable_play_prob_mixing,
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
+            espn_out_players=espn_out_players,
         )
         resolved_bundle_dir = Path(model["late_bundle_dir"])
     else:
@@ -1665,6 +1708,7 @@ def main(
             enable_play_prob_mixing=enable_play_prob_mixing,
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
+            espn_out_players=espn_out_players,
         )
         resolved_bundle_dir = Path(model["bundle_dir"])
     model_meta = model["model_meta"]
