@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 
 from projections import paths
 from projections.contest_sim.contest_sim_service import run_contest_simulation
+from projections.contest_sim.field_library_manager import load_or_build_field_library
+from projections.contest_sim.field_library import load_field_library, list_field_library_paths
 from projections.contest_sim.payout_generator import load_config
 
 logger = logging.getLogger(__name__)
@@ -149,8 +151,38 @@ class ContestSimRequest(BaseModel):
     game_date: str = Field(..., description="Game date in YYYY-MM-DD format")
     draft_group_id: Optional[int] = Field(default=None, description="Draft group ID")
     lineups: List[List[str]] = Field(..., description="List of lineups (each a list of player_ids)")
-    archetype: str = Field(default="medium", description="Payout archetype: top_heavy, medium, flat")
-    field_size_bucket: str = Field(default="medium", description="Field size bucket: small, medium, massive")
+    field_mode: str = Field(
+        default="self_play",
+        description="Field mode: self_play | generated_field",
+    )
+    field_library_version: str = Field(
+        default="v0",
+        description="Field library version to load/build (or 'latest')",
+    )
+    field_library_k: int = Field(
+        default=2500,
+        description="Target unique field lineups K for generated_field",
+    )
+    field_candidate_pool_size: int = Field(
+        default=40000,
+        description="QuickBuild candidate pool size for generated_field",
+    )
+    field_library_rebuild: bool = Field(
+        default=False,
+        description="Force rebuild field library even if cached",
+    )
+    field_library_rebuild_candidates: bool = Field(
+        default=False,
+        description="Force rebuild raw candidate pool for generated_field",
+    )
+    archetype: str = Field(
+        default="GPP Standard (20% paid)",
+        description="Payout archetype name from contest_sim.yaml",
+    )
+    field_size_bucket: str = Field(
+        default="5000",
+        description="Field size bucket (numeric string like '5000' or label from contest_sim.yaml)",
+    )
     field_size_override: Optional[int] = Field(default=None, description="Exact field size (overrides bucket)")
     entry_fee: float = Field(default=3.0, description="Entry fee per lineup")
     weights: Optional[List[int]] = Field(default=None, description="Entry counts per lineup")
@@ -175,6 +207,7 @@ class LineupEVResultResponse(BaseModel):
     top_10pct_rate: float
     cash_rate: float
     dupe_penalty: float = 1.0  # E[1/K], 1.0 = no penalty
+    unadjusted_expected_payout: Optional[float] = None  # expected_payout before dupe penalty
     adjusted_expected_payout: Optional[float] = None  # expected_payout * dupe_penalty
 
 
@@ -199,6 +232,7 @@ class SummaryStatsResponse(BaseModel):
     best_ev_lineup_id: int
     best_win_rate_lineup_id: int
     best_top1pct_lineup_id: int
+    debug: Dict[str, object] = Field(default_factory=dict)
 
 
 class ContestSimResponse(BaseModel):
@@ -274,6 +308,30 @@ class SaveSimLineupsRequest(BaseModel):
     stats: Optional[SummaryStatsResponse] = None
 
 
+class FieldLibrarySummaryResponse(BaseModel):
+    """Summary of a cached field library."""
+
+    version: str
+    path: str
+    game_date: str
+    draft_group_id: int
+    method: Optional[str] = None
+    generated_at: Optional[str] = None
+    selected_k: int
+    weights_sum: int
+    meta: Dict[str, object] = Field(default_factory=dict)
+
+
+class BuildFieldLibraryRequest(BaseModel):
+    game_date: str
+    draft_group_id: int
+    version: str = "v0"
+    k: int = 2500
+    candidate_pool_size: int = 40000
+    rebuild: bool = False
+    rebuild_candidates: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -283,26 +341,62 @@ class SaveSimLineupsRequest(BaseModel):
 async def run_simulation(request: ContestSimRequest):
     """Run contest simulation for the given lineups.
 
-    Lineups compete against each other (self-play mode) with the
-    specified payout archetype and field size.
+    User lineups compete against a modeled opponent field.
     
     Dupe penalties are automatically applied if ownership data is available.
     """
     try:
         # Load ownership data for dupe penalty calculation
         player_ownership = _load_player_ownership(request.game_date)
+
+        field_lineups = None
+        field_weights = None
+        field_library_info: Dict[str, object] = {}
+        if request.field_mode not in {"self_play", "generated_field"}:
+            raise HTTPException(status_code=400, detail=f"Invalid field_mode: {request.field_mode}")
+
+        if request.field_mode == "generated_field":
+            if request.draft_group_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="draft_group_id is required when field_mode=generated_field",
+                )
+            library, lib_path, built_now = load_or_build_field_library(
+                game_date=request.game_date,
+                draft_group_id=int(request.draft_group_id),
+                version=request.field_library_version,
+                k=int(request.field_library_k),
+                candidate_pool_size=int(request.field_candidate_pool_size),
+                rebuild=bool(request.field_library_rebuild),
+                rebuild_candidates=bool(request.field_library_rebuild_candidates),
+            )
+            field_lineups = library.lineups
+            field_weights = library.weights
+            field_library_info = {
+                "field_mode": request.field_mode,
+                "field_library_path": str(lib_path),
+                "field_library_built_now": built_now,
+                "field_library_version": library.meta.get("version", request.field_library_version),
+                "field_library_method": library.meta.get("method"),
+                "field_library_selected_k": len(library.lineups),
+                "field_library_weights_sum": int(sum(library.weights)),
+            }
         
         result = run_contest_simulation(
-            lineups=request.lineups,
+            user_lineups=request.lineups,
             game_date=request.game_date,
             archetype=request.archetype,
             field_size_bucket=request.field_size_bucket,
             field_size_override=request.field_size_override,
             entry_fee=request.entry_fee,
-            weights=request.weights,
+            user_weights=request.weights,
+            field_lineups=field_lineups,
+            field_weights=field_weights,
             player_ownership=player_ownership if player_ownership else None,
             entry_max=request.entry_max,
         )
+        if field_library_info:
+            result.stats.debug.update(field_library_info)
 
         build_data = {
             "build_id": str(uuid4()),
@@ -466,3 +560,57 @@ async def delete_saved_sim_build(build_id: str, date: str):
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Sim build {build_id} not found for date {date}")
     return {"status": "deleted", "build_id": build_id}
+
+
+@router.get("/field-libraries", response_model=List[FieldLibrarySummaryResponse])
+async def list_field_libraries(date: str, draft_group_id: int):
+    """List cached field libraries for a slate."""
+    paths = list_field_library_paths(date, int(draft_group_id))
+    summaries: List[FieldLibrarySummaryResponse] = []
+    for path in paths:
+        try:
+            library = load_field_library(path)
+            version = path.stem.replace("field_library_", "")
+            summaries.append(
+                FieldLibrarySummaryResponse(
+                    version=version,
+                    path=str(path),
+                    game_date=str(library.meta.get("game_date", date)),
+                    draft_group_id=int(library.meta.get("draft_group_id", draft_group_id)),
+                    method=str(library.meta.get("method", "")) or None,
+                    generated_at=str(library.meta.get("generated_at", "")) or None,
+                    selected_k=len(library.lineups),
+                    weights_sum=int(sum(library.weights)),
+                    meta={k: v for k, v in library.meta.items() if k not in {"lineups", "weights"}},
+                )
+            )
+        except Exception as exc:
+            logger.warning("Failed to load field library %s: %s", path, exc)
+            continue
+    return summaries
+
+
+@router.post("/field-libraries/build", response_model=FieldLibrarySummaryResponse)
+async def build_field_library(request: BuildFieldLibraryRequest):
+    """Build (or rebuild) a cached field library for a slate."""
+    library, path, _built_now = load_or_build_field_library(
+        game_date=request.game_date,
+        draft_group_id=int(request.draft_group_id),
+        version=request.version,
+        k=int(request.k),
+        candidate_pool_size=int(request.candidate_pool_size),
+        rebuild=bool(request.rebuild),
+        rebuild_candidates=bool(request.rebuild_candidates),
+    )
+    version = Path(path).stem.replace("field_library_", "")
+    return FieldLibrarySummaryResponse(
+        version=version,
+        path=str(path),
+        game_date=str(library.meta.get("game_date", request.game_date)),
+        draft_group_id=int(library.meta.get("draft_group_id", request.draft_group_id)),
+        method=str(library.meta.get("method", "")) or None,
+        generated_at=str(library.meta.get("generated_at", "")) or None,
+        selected_k=len(library.lineups),
+        weights_sum=int(sum(library.weights)),
+        meta=dict(library.meta),
+    )

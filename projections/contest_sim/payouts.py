@@ -80,6 +80,8 @@ class _VectorizedPayoutAccumulator:
         field_weights: np.ndarray,
         payout_prefix: np.ndarray,
         total_entries: int,
+        *,
+        compute_field_side: bool,
     ) -> None:
         if user_weights.ndim != 1 or field_weights.ndim != 1:
             raise ValueError("weights must be 1D arrays")
@@ -87,6 +89,7 @@ class _VectorizedPayoutAccumulator:
         self.field_weights = field_weights
         self.payout_prefix = payout_prefix
         self.total_entries = total_entries
+        self.compute_field_side = bool(compute_field_side)
 
         user_weights_f = user_weights.astype(np.float64)
         self.user_weights_positive = np.maximum(user_weights_f, 0.0)
@@ -122,6 +125,7 @@ class _VectorizedPayoutAccumulator:
         clone.field_weights = self.field_weights
         clone.payout_prefix = self.payout_prefix
         clone.total_entries = self.total_entries
+        clone.compute_field_side = self.compute_field_side
         clone.user_weights_positive = self.user_weights_positive
         clone.user_weights_float = self.user_weights_float
         clone.total_field_weight = self.total_field_weight
@@ -264,6 +268,9 @@ class _VectorizedPayoutAccumulator:
         self.top_5pct_sum += np.where(start_rank <= self.top_5pct_cutoff, user_w_pos, 0.0)
         self.top_10pct_sum += np.where(start_rank <= self.top_10pct_cutoff, user_w_pos, 0.0)
 
+        if not self.compute_field_side:
+            return
+
         # Field side (simplified - just track EV, win, cash)
         if f_order.size:
             inv_f_order = np.empty_like(f_order)
@@ -398,6 +405,8 @@ def compute_expected_user_payouts_vectorized(
     score_iterator: Iterator[Tuple[np.ndarray, np.ndarray]] | None = None,
     world_count: int | None = None,
     workers: int | str | None = None,
+    compute_field_side: bool = True,
+    world_chunk_size: int | None = 1024,
 ) -> PayoutComputationResult:
     """Vectorized payout computation with positional rate tracking.
 
@@ -421,6 +430,10 @@ def compute_expected_user_payouts_vectorized(
         Total worlds when using score_iterator
     workers : int | str | None
         Worker count for parallel processing
+    world_chunk_size : int | None
+        When using in-memory score matrices, slice worlds into chunks of this
+        size. This keeps per-chunk working sets bounded and allows us to convert
+        each chunk to Fortran order so per-world score vectors are contiguous.
 
     Returns
     -------
@@ -445,7 +458,16 @@ def compute_expected_user_payouts_vectorized(
         world_total = user_scores.shape[1]
 
         def _array_iterator() -> Iterator[Tuple[np.ndarray, np.ndarray]]:
-            yield user_scores, field_scores
+            if world_chunk_size is None:
+                yield user_scores, field_scores
+                return
+            chunk_size = int(world_chunk_size)
+            if chunk_size <= 0 or chunk_size >= world_total:
+                yield user_scores, field_scores
+                return
+            for start in range(0, world_total, chunk_size):
+                stop = min(start + chunk_size, world_total)
+                yield user_scores[:, start:stop], field_scores[:, start:stop]
 
         chunk_iterator: Iterator[Tuple[np.ndarray, np.ndarray]] = _array_iterator()
     else:
@@ -473,7 +495,13 @@ def compute_expected_user_payouts_vectorized(
     payout_prefix = np.zeros(total_entries + 1, dtype=np.float64)
     payout_prefix[1:] = np.cumsum(payout_per_place)
 
-    vector_acc = _VectorizedPayoutAccumulator(user_weights_arr, field_weights_arr, payout_prefix, total_entries)
+    vector_acc = _VectorizedPayoutAccumulator(
+        user_weights_arr,
+        field_weights_arr,
+        payout_prefix,
+        total_entries,
+        compute_field_side=compute_field_side,
+    )
 
     resolved_workers = _resolve_workers(workers, world_total)
     executor: ThreadPoolExecutor | None = None
@@ -498,6 +526,11 @@ def compute_expected_user_payouts_vectorized(
                 raise ValueError("User chunk row count must match user weights")
             if field_chunk.shape[0] != field_weights_arr.size:
                 raise ValueError("Field chunk row count must match field weights")
+
+            # Make per-world column slices contiguous (Fortran order) and ensure
+            # float64 dtype once per chunk rather than per world in update().
+            user_chunk = np.asfortranarray(user_chunk, dtype=np.float64)
+            field_chunk = np.asfortranarray(field_chunk, dtype=np.float64)
 
             chunk_worlds = user_chunk.shape[1]
 

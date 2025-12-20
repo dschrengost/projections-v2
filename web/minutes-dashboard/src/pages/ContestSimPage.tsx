@@ -4,7 +4,10 @@ import {
     getContestSimConfig,
     ContestSimResponse,
     ConfigResponse,
+    FieldLibrarySummary,
+    buildFieldLibrary,
     getSavedSimBuilds,
+    listFieldLibraries,
     loadSavedSimBuild,
     saveSimLineups,
     deleteSavedSimBuild,
@@ -52,6 +55,15 @@ export default function ContestSimPage() {
     const [archetype, setArchetype] = useState('medium')
     const [fieldSizeBucket, setFieldSizeBucket] = useState('medium')
     const [entryFee, setEntryFee] = useState(3.0)
+    const [fieldMode, setFieldMode] = useState<'self_play' | 'generated_field'>('self_play')
+    const [fieldLibraryVersion, setFieldLibraryVersion] = useState('v0')
+    const [fieldLibraryK, setFieldLibraryK] = useState(2500)
+    const [fieldCandidatePoolSize, setFieldCandidatePoolSize] = useState(40000)
+    const [fieldLibraryRebuild, setFieldLibraryRebuild] = useState(false)
+    const [fieldLibraryRebuildCandidates, setFieldLibraryRebuildCandidates] = useState(false)
+    const [fieldLibraries, setFieldLibraries] = useState<FieldLibrarySummary[]>([])
+    const [fieldLibrariesLoading, setFieldLibrariesLoading] = useState(false)
+    const [fieldLibraryError, setFieldLibraryError] = useState<string | null>(null)
 
     // Simulation state
     const [lineups, setLineups] = useState<string[][]>([])
@@ -134,6 +146,31 @@ export default function ContestSimPage() {
         }
         void load()
     }, [selectedDate, selectedSlate])
+
+    // Load cached field libraries when date/slate changes
+    useEffect(() => {
+        if (!selectedSlate) {
+            setFieldLibraries([])
+            return
+        }
+        const load = async () => {
+            setFieldLibrariesLoading(true)
+            setFieldLibraryError(null)
+            try {
+                const libs = await listFieldLibraries(selectedDate, selectedSlate)
+                setFieldLibraries(libs)
+                if (libs.length > 0 && !libs.some(l => l.version === fieldLibraryVersion)) {
+                    setFieldLibraryVersion(libs[0].version)
+                }
+            } catch (err) {
+                setFieldLibraries([])
+                setFieldLibraryError((err as Error).message)
+            } finally {
+                setFieldLibrariesLoading(false)
+            }
+        }
+        void load()
+    }, [selectedDate, selectedSlate, fieldLibraryVersion])
 
     // Load player pool for name resolution
     useEffect(() => {
@@ -316,6 +353,12 @@ export default function ContestSimPage() {
                 archetype,
                 field_size_bucket: fieldSizeBucket,
                 entry_fee: entryFee,
+                field_mode: fieldMode,
+                field_library_version: fieldMode === 'generated_field' ? fieldLibraryVersion : undefined,
+                field_library_k: fieldMode === 'generated_field' ? fieldLibraryK : undefined,
+                field_candidate_pool_size: fieldMode === 'generated_field' ? fieldCandidatePoolSize : undefined,
+                field_library_rebuild: fieldMode === 'generated_field' ? fieldLibraryRebuild : undefined,
+                field_library_rebuild_candidates: fieldMode === 'generated_field' ? fieldLibraryRebuildCandidates : undefined,
             })
             setSimResult(result)
             const builds = await getSavedSimBuilds(selectedDate)
@@ -326,7 +369,53 @@ export default function ContestSimPage() {
         } finally {
             setSimLoading(false)
         }
-    }, [selectedDate, selectedSlate, archetype, fieldSizeBucket, entryFee])
+    }, [
+        selectedDate,
+        selectedSlate,
+        archetype,
+        fieldSizeBucket,
+        entryFee,
+        fieldMode,
+        fieldLibraryVersion,
+        fieldLibraryK,
+        fieldCandidatePoolSize,
+        fieldLibraryRebuild,
+        fieldLibraryRebuildCandidates,
+    ])
+
+    const handleBuildFieldLibrary = useCallback(async () => {
+        if (!selectedSlate) {
+            setFieldLibraryError('Select a slate first')
+            return
+        }
+        setFieldLibrariesLoading(true)
+        setFieldLibraryError(null)
+        try {
+            await buildFieldLibrary({
+                game_date: selectedDate,
+                draft_group_id: selectedSlate,
+                version: fieldLibraryVersion,
+                k: fieldLibraryK,
+                candidate_pool_size: fieldCandidatePoolSize,
+                rebuild: fieldLibraryRebuild,
+                rebuild_candidates: fieldLibraryRebuildCandidates,
+            })
+            const libs = await listFieldLibraries(selectedDate, selectedSlate)
+            setFieldLibraries(libs)
+        } catch (err) {
+            setFieldLibraryError((err as Error).message)
+        } finally {
+            setFieldLibrariesLoading(false)
+        }
+    }, [
+        selectedDate,
+        selectedSlate,
+        fieldLibraryVersion,
+        fieldLibraryK,
+        fieldCandidatePoolSize,
+        fieldLibraryRebuild,
+        fieldLibraryRebuildCandidates,
+    ])
 
     // Run simulation
     const handleRunSim = async () => {
@@ -564,6 +653,88 @@ export default function ContestSimPage() {
                                 )}
                         </select>
                     </label>
+
+                    <label>
+                        Field Model
+                        <select
+                            value={fieldMode}
+                            onChange={e => setFieldMode(e.target.value as 'self_play' | 'generated_field')}
+                        >
+                            <option value="self_play">Self-play (your lineups as field)</option>
+                            <option value="generated_field">Representative field (QuickBuild)</option>
+                        </select>
+                    </label>
+
+                    {fieldMode === 'generated_field' && (
+                        <>
+                            <label>
+                                Field Library Version
+                                <select
+                                    value={fieldLibraryVersion}
+                                    onChange={e => setFieldLibraryVersion(e.target.value)}
+                                >
+                                    {fieldLibraries.length === 0 && <option value="v0">v0</option>}
+                                    {fieldLibraries.map(l => (
+                                        <option key={l.version} value={l.version}>
+                                            {l.version} ({l.selected_k} lineups)
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+
+                            <label>
+                                Field K (unique lineups)
+                                <input
+                                    type="number"
+                                    value={fieldLibraryK}
+                                    onChange={e => setFieldLibraryK(Number(e.target.value))}
+                                    min={100}
+                                    max={5000}
+                                    step={100}
+                                />
+                            </label>
+
+                            <label>
+                                Candidate Pool Size
+                                <input
+                                    type="number"
+                                    value={fieldCandidatePoolSize}
+                                    onChange={e => setFieldCandidatePoolSize(Number(e.target.value))}
+                                    min={5000}
+                                    max={100000}
+                                    step={5000}
+                                />
+                            </label>
+
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={fieldLibraryRebuild}
+                                    onChange={e => setFieldLibraryRebuild(e.target.checked)}
+                                />
+                                Force rebuild field library
+                            </label>
+
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={fieldLibraryRebuildCandidates}
+                                    onChange={e => setFieldLibraryRebuildCandidates(e.target.checked)}
+                                />
+                                Force rebuild candidate pool (slow)
+                            </label>
+
+                            <button
+                                className="run-sim-btn"
+                                onClick={handleBuildFieldLibrary}
+                                disabled={fieldLibrariesLoading || !selectedSlate}
+                            >
+                                {fieldLibrariesLoading ? 'Building...' : 'Build Field Library'}
+                            </button>
+
+                            {fieldLibraryError && <div className="sim-error">{fieldLibraryError}</div>}
+                        </>
+                    )}
 
                     <label>
                         Entry Fee

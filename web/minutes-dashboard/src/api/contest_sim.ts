@@ -38,6 +38,7 @@ export interface SummaryStats {
     best_ev_lineup_id: number
     best_win_rate_lineup_id: number
     best_top1pct_lineup_id: number
+    debug?: Record<string, unknown>
 }
 
 export interface ContestSimResponse {
@@ -51,11 +52,39 @@ export interface ContestSimRequest {
     game_date: string
     draft_group_id?: number | null
     lineups: string[][]
+    field_mode?: 'self_play' | 'generated_field'
+    field_library_version?: string
+    field_library_k?: number
+    field_candidate_pool_size?: number
+    field_library_rebuild?: boolean
+    field_library_rebuild_candidates?: boolean
     archetype?: string
     field_size_bucket?: string
     field_size_override?: number
     entry_fee?: number
     weights?: number[]
+}
+
+export interface FieldLibrarySummary {
+    version: string
+    path: string
+    game_date: string
+    draft_group_id: number
+    method?: string | null
+    generated_at?: string | null
+    selected_k: number
+    weights_sum: number
+    meta?: Record<string, unknown>
+}
+
+export interface BuildFieldLibraryRequest {
+    game_date: string
+    draft_group_id: number
+    version?: string
+    k?: number
+    candidate_pool_size?: number
+    rebuild?: boolean
+    rebuild_candidates?: boolean
 }
 
 export interface FieldSizeOption {
@@ -115,6 +144,27 @@ export async function getContestSimConfig(): Promise<ConfigResponse> {
     const resp = await fetch(`${API_BASE}/config`)
     if (!resp.ok) {
         throw new Error('Failed to load contest sim config')
+    }
+    return resp.json()
+}
+
+export async function listFieldLibraries(date: string, draft_group_id: number): Promise<FieldLibrarySummary[]> {
+    const resp = await fetch(`${API_BASE}/field-libraries?date=${encodeURIComponent(date)}&draft_group_id=${draft_group_id}`)
+    if (!resp.ok) {
+        throw new Error('Failed to load field libraries')
+    }
+    return resp.json()
+}
+
+export async function buildFieldLibrary(req: BuildFieldLibraryRequest): Promise<FieldLibrarySummary> {
+    const resp = await fetch(`${API_BASE}/field-libraries/build`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+    })
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+        throw new Error(err.detail || 'Failed to build field library')
     }
     return resp.json()
 }
