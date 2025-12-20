@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -20,6 +21,7 @@ from .scoring_models import (
     ContestSimResult,
 )
 from .dupe_penalty import compute_batch_dupe_penalties
+from .weights import drop_zero_weight_items, scale_integer_weights_to_target
 
 __all__ = [
     "load_worlds_matrix",
@@ -231,42 +233,59 @@ def score_lineups(
         (n_lineups, n_worlds) matrix of lineup FPTS totals
     """
     n_lineups = len(lineups)
-    n_worlds = worlds_matrix.shape[0]
+    n_worlds = int(worlds_matrix.shape[0])
 
     lineup_scores = np.zeros((n_lineups, n_worlds), dtype=np.float64)
 
+    # Fast path: convert each lineup to column indices once, then use NumPy gathers.
+    # We intentionally avoid a fully-vectorized 3D gather (worlds x lineups x 8)
+    # to keep memory bounded for K=1k–10k and W=10k.
     for lu_idx, lineup in enumerate(lineups):
+        indices: List[int] = []
+        missing: List[str] = []
         for pid in lineup:
-            pid_str = str(pid)
-            if pid_str in player_index:
-                col_idx = player_index[pid_str]
-                lineup_scores[lu_idx, :] += worlds_matrix[:, col_idx]
-            else:
-                logger.warning(f"Player {pid_str} not found in worlds matrix")
+            pid_str = str(pid).strip()
+            if not pid_str:
+                continue
+            col = player_index.get(pid_str)
+            if col is None:
+                missing.append(pid_str)
+                continue
+            indices.append(int(col))
+
+        if missing:
+            # Log once per lineup (not once per player per lineup).
+            logger.warning("Players not found in worlds matrix: %s", ",".join(missing))
+        if not indices:
+            continue
+
+        cols = np.asarray(indices, dtype=np.int64)
+        lineup_scores[lu_idx, :] = np.take(worlds_matrix, cols, axis=1).sum(axis=1)
 
     return lineup_scores
 
 
 def run_contest_simulation(
-    lineups: List[List[str]],
+    *,
+    user_lineups: List[List[str]],
     game_date: str,
     archetype: str = "medium",
     field_size_bucket: str = "medium",
     field_size_override: int | None = None,
     entry_fee: float = 3.0,
-    weights: List[int] | None = None,
+    user_weights: List[int] | None = None,
+    field_lineups: List[List[str]] | None = None,
+    field_weights: List[int] | None = None,
     data_root: Path | None = None,
     player_ownership: Optional[Dict[str, float]] = None,
     entry_max: int = 150,
 ) -> ContestSimResult:
-    """Run full contest simulation.
-
-    Lineups compete against each other (self-play mode).
+    """Run a contest simulation of user lineups against an opponent field.
 
     Parameters
     ----------
-    lineups : List[List[str]]
-        List of lineups to simulate, each a list of player_ids
+    user_lineups : List[List[str]]
+        List of user lineups to simulate, each a list of player_ids.
     game_date : str
         Game date in YYYY-MM-DD format
     archetype : str
@@ -277,8 +296,14 @@ def run_contest_simulation(
         Exact field size, overrides bucket default
     entry_fee : float
         Entry fee per lineup
-    weights : List[int] | None
-        Entry counts per lineup (default: 1 each)
+    user_weights : List[int] | None
+        Entry counts per user lineup (default: 1 each).
+    field_lineups : List[List[str]] | None
+        Opponent field lineups. When omitted, defaults to self-play (field lineups
+        are the same as user lineups).
+    field_weights : List[int] | None
+        Entry counts per field lineup. If provided, will be scaled so that
+        ``sum(field_weights) + sum(user_weights) == field_size``.
     data_root : Path | None
         Data root directory
     player_ownership : Optional[Dict[str, float]]
@@ -300,30 +325,63 @@ def run_contest_simulation(
     else:
         field_size = get_field_size(field_size_bucket, config)
 
-    # Load worlds and score lineups
+    n_user_lineups = len(user_lineups)
+    if n_user_lineups <= 0:
+        raise ValueError("user_lineups must be non-empty")
+
+    # Set user weights (default 1 per lineup)
+    if user_weights is None:
+        user_weights = [1] * n_user_lineups
+    if len(user_weights) != n_user_lineups:
+        raise ValueError("user_weights length must match user_lineups length")
+    if any(w < 0 for w in user_weights):
+        raise ValueError("user_weights must be non-negative integers")
+
+    user_total_entries = int(sum(max(0, int(w)) for w in user_weights))
+    if user_total_entries <= 0:
+        raise ValueError("Sum of user_weights must be positive")
+
+    # Used for dupe-penalty logic: if the caller provides an explicit opponent
+    # field, exact lineup duplication can be modeled directly via field weights.
+    field_provided = field_lineups is not None
+
+    # Self-play default: field is drawn from the user lineup set.
+    if field_lineups is None:
+        field_lineups = user_lineups
+        base_field_weights = user_weights if field_weights is None else field_weights
+    else:
+        base_field_weights = field_weights if field_weights is not None else [1] * len(field_lineups)
+
+    if len(base_field_weights) != len(field_lineups):
+        raise ValueError("field_weights length must match field_lineups length")
+    if any(w < 0 for w in base_field_weights):
+        raise ValueError("field_weights must be non-negative integers")
+
+    target_field_entries = int(field_size - user_total_entries)
+    if target_field_entries <= 0:
+        raise ValueError(
+            f"User entries ({user_total_entries}) must be less than contest field_size ({field_size})"
+        )
+
+    scaled_field_weights = scale_integer_weights_to_target(
+        base_field_weights,
+        target_field_entries,
+        min_weight=1 if target_field_entries >= len(field_lineups) else 0,
+    )
+    field_lineups, scaled_field_weights = drop_zero_weight_items(field_lineups, scaled_field_weights)
+    if not field_lineups or sum(scaled_field_weights) <= 0:
+        raise ValueError("Field weights must sum to a positive value after scaling")
+
+    # Load worlds and score both user + field lineups
     worlds_matrix, player_index = load_worlds_matrix(game_date, data_root)
-    lineup_scores = score_lineups(lineups, worlds_matrix, player_index)
+    user_scores = score_lineups(user_lineups, worlds_matrix, player_index)
+    field_scores = score_lineups(field_lineups, worlds_matrix, player_index)
 
-    n_lineups = len(lineups)
     n_worlds = worlds_matrix.shape[0]
-
-    # Set weights (default 1 per lineup)
-    if weights is None:
-        weights = [1] * n_lineups
-
-    # Scale weights to match field size
-    # In self-play, we treat all lineups as both "user" and "field"
-    total_entries = sum(weights)
-    if total_entries <= 0:
-        total_entries = n_lineups
-        weights = [1] * n_lineups
-
-    scale_factor = field_size / total_entries
-    scaled_weights = [max(1, int(round(w * scale_factor))) for w in weights]
 
     # Generate payout tiers
     defaults = config.get("defaults", {})
-    rake = float(defaults.get("rake", 0.12))
+    rake = float(defaults.get("rake", 0.15))
     payout_tiers = generate_payout_tiers(archetype, field_size, entry_fee, config)
 
     contest_config = ContestConfig(
@@ -334,62 +392,86 @@ def run_contest_simulation(
     )
 
     logger.info(
-        f"Running contest sim: {n_lineups} lineups, {n_worlds} worlds, "
-        f"field_size={field_size}, archetype={archetype}"
+        "Running contest sim: user_lineups=%d field_lineups=%d worlds=%d field_size=%d archetype=%s",
+        n_user_lineups,
+        len(field_lineups),
+        n_worlds,
+        field_size,
+        archetype,
     )
 
-    # In self-play mode, user and field are the same
-    # We use all lineups as both user and field
     payout_result = compute_expected_user_payouts_vectorized(
-        user_scores=lineup_scores,
-        field_scores=lineup_scores,
-        user_weights=scaled_weights,
-        field_weights=scaled_weights,
+        user_scores=user_scores,
+        field_scores=field_scores,
+        user_weights=user_weights,
+        field_weights=scaled_field_weights,
         payout_tiers=payout_tiers,
+        workers=min(22, os.cpu_count() or 1),
+        compute_field_side=False,
     )
 
     # Compute score distribution stats per lineup
-    lineup_means = lineup_scores.mean(axis=1)
-    lineup_stds = lineup_scores.std(axis=1)
-    lineup_p90 = np.percentile(lineup_scores, 90, axis=1)
-    lineup_p95 = np.percentile(lineup_scores, 95, axis=1)
+    lineup_means = user_scores.mean(axis=1)
+    lineup_stds = user_scores.std(axis=1)
+    lineup_p90 = np.percentile(user_scores, 90, axis=1)
+    lineup_p95 = np.percentile(user_scores, 95, axis=1)
 
-    # Compute dupe penalties if ownership data is provided
+    # Compute dupe penalties if ownership data is provided.
+    #
+    # Note: the payout engine already tie-splits when a user lineup matches a
+    # lineup present in the modeled field (field_equal_weight > 0). In that case
+    # we disable the ownership-based dupe penalty to avoid double-counting.
     if player_ownership:
         logger.info("Computing dupe penalties with ownership data")
         dupe_penalties = compute_batch_dupe_penalties(
-            lineups=lineups,
+            lineups=user_lineups,
             player_ownership=player_ownership,
             field_size=field_size,
             entry_max=entry_max,
         )
+        dupe_penalty_disabled_for_matches = 0
+        if field_provided:
+            field_key_to_weight: Dict[Tuple[str, ...], int] = {}
+            for lineup, weight in zip(field_lineups, scaled_field_weights):
+                key = tuple(sorted(str(p).strip() for p in lineup if str(p).strip()))
+                if not key:
+                    continue
+                field_key_to_weight[key] = field_key_to_weight.get(key, 0) + int(weight)
+
+            for idx, lineup in enumerate(user_lineups):
+                key = tuple(sorted(str(p).strip() for p in lineup if str(p).strip()))
+                if field_key_to_weight.get(key, 0) > 0:
+                    dupe_penalties[idx] = 1.0
+                    dupe_penalty_disabled_for_matches += 1
     else:
         # No penalty if ownership not provided
-        dupe_penalties = [1.0] * n_lineups
+        dupe_penalties = [1.0] * n_user_lineups
+        dupe_penalty_disabled_for_matches = 0
 
     # Build results
     results: List[LineupEVResult] = []
-    for idx in range(n_lineups):
-        ev = float(payout_result.expected_payouts[idx])
+    for idx in range(n_user_lineups):
+        unadjusted_payout = float(payout_result.expected_payouts[idx])
         dupe_penalty = dupe_penalties[idx]
-        adjusted_payout = ev * dupe_penalty
+        expected_payout = unadjusted_payout * dupe_penalty
         result = LineupEVResult(
             lineup_id=idx,
-            player_ids=lineups[idx],
+            player_ids=user_lineups[idx],
             mean=float(lineup_means[idx]),
             std=float(lineup_stds[idx]),
             p90=float(lineup_p90[idx]),
             p95=float(lineup_p95[idx]),
-            expected_payout=ev,
-            expected_value=ev - entry_fee,
-            roi=(ev - entry_fee) / entry_fee if entry_fee > 0 else 0.0,
+            expected_payout=expected_payout,
+            expected_value=expected_payout - entry_fee,
+            roi=(expected_payout - entry_fee) / entry_fee if entry_fee > 0 else 0.0,
             win_rate=float(payout_result.win_rates[idx]),
             top_1pct_rate=float(payout_result.top_1pct_rates[idx]),
             top_5pct_rate=float(payout_result.top_5pct_rates[idx]),
             top_10pct_rate=float(payout_result.top_10pct_rates[idx]),
             cash_rate=float(payout_result.cash_rates[idx]),
             dupe_penalty=dupe_penalty,
-            adjusted_expected_payout=adjusted_payout,
+            unadjusted_expected_payout=unadjusted_payout,
+            adjusted_expected_payout=expected_payout,
         )
         results.append(result)
 
@@ -400,7 +482,7 @@ def run_contest_simulation(
     top1_rates = [r.top_1pct_rate for r in results]
 
     stats = SummaryStats(
-        lineup_count=n_lineups,
+        lineup_count=n_user_lineups,
         worlds_count=n_worlds,
         avg_ev=float(np.mean(evs)) if evs else 0.0,
         avg_roi=float(np.mean(rois)) if rois else 0.0,
@@ -408,6 +490,13 @@ def run_contest_simulation(
         best_ev_lineup_id=int(np.argmax(evs)) if evs else 0,
         best_win_rate_lineup_id=int(np.argmax(win_rates)) if win_rates else 0,
         best_top1pct_lineup_id=int(np.argmax(top1_rates)) if top1_rates else 0,
+        debug={
+            "user_total_entries": user_total_entries,
+            "field_total_entries": int(sum(scaled_field_weights)),
+            "total_entries": int(user_total_entries + sum(scaled_field_weights)),
+            "field_unique_k": int(len(field_lineups)),
+            "dupe_penalty_disabled_for_field_matches": int(dupe_penalty_disabled_for_matches),
+        },
     )
 
     return ContestSimResult(

@@ -70,3 +70,10 @@ simulation:
 field:
   ownership_noise_std: 0.02  # Std dev for ownership jitter
   use_actual_ownership: true # Use actual ownership when available
+
+# Default UI selections / parameters
+defaults:
+  rake: 0.15
+  entry_fee: 3.0
+  archetype: "GPP Standard (20% paid)"
+  field_size_bucket: "5000"

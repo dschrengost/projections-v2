@@ -61,6 +61,7 @@ class LineupEVResult:
 
     # Dupe penalty metrics (E[1/K] from ownership-based model)
     dupe_penalty: float = 1.0  # E[1/K], 1.0 = no penalty (unique lineup)
+    unadjusted_expected_payout: Optional[float] = None  # Expected payout before dupe penalty
     adjusted_expected_payout: Optional[float] = None  # expected_payout * dupe_penalty
 
     def to_dict(self) -> dict:
@@ -81,6 +82,9 @@ class LineupEVResult:
             "top_10pct_rate": round(self.top_10pct_rate, 6),
             "cash_rate": round(self.cash_rate, 6),
             "dupe_penalty": round(self.dupe_penalty, 4),
+            "unadjusted_expected_payout": round(self.unadjusted_expected_payout, 4)
+            if self.unadjusted_expected_payout is not None
+            else None,
             "adjusted_expected_payout": round(self.adjusted_expected_payout, 4) if self.adjusted_expected_payout is not None else None,
         }
 
@@ -96,6 +100,7 @@ class SummaryStats:
     best_ev_lineup_id: int
     best_win_rate_lineup_id: int
     best_top1pct_lineup_id: int
+    debug: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -108,6 +113,7 @@ class SummaryStats:
             "best_ev_lineup_id": self.best_ev_lineup_id,
             "best_win_rate_lineup_id": self.best_win_rate_lineup_id,
             "best_top1pct_lineup_id": self.best_top1pct_lineup_id,
+            "debug": self.debug,
         }
 
 

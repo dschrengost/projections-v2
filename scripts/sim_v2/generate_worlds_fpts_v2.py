@@ -2191,6 +2191,18 @@ def main(
                 # Write single projections file
                 proj_path = out_dir / "projections.parquet"
                 proj_df.to_parquet(proj_path, index=False)
+
+                # Also persist the full per-player worlds matrix for downstream consumers
+                # (e.g., contest simulation). This is much smaller than writing one parquet
+                # per world and keeps the fast in-memory aggregation path.
+                if world_fpts_samples:
+                    try:
+                        player_ids = mu_df["player_id"].astype(str).tolist()
+                        worlds_matrix = np.vstack(world_fpts_samples).astype(np.float32, copy=False)
+                        worlds_path = out_dir / "worlds_matrix.parquet"
+                        pd.DataFrame(worlds_matrix, columns=player_ids).to_parquet(worlds_path, index=False)
+                    except Exception as exc:
+                        typer.echo(f"[sim_v2] warning: failed to write worlds_matrix.parquet ({exc})", err=True)
                 
                 typer.echo(
                     f"[sim_v2] {pd.Timestamp(game_date).date()} dk_fpts_world min/med/max="

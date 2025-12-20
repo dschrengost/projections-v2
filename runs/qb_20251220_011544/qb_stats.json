@@ -1,0 +1,15 @@
+{
+  "accepted": 2064,
+  "duplicates": 0,
+  "near_duplicates": 0,
+  "dropped_low_quality": 0,
+  "emitted": 2064,
+  "wall_time_s": 4.407455682754517,
+  "bloom_rejects": 20,
+  "collector_seen_dups": 1251,
+  "collector_forwarded": 2064,
+  "warm_solve_status": "OPTIMAL",
+  "warm_solve_is_optimal": true,
+  "warm_solve_best_obj": 291844.0,
+  "warm_solve_time_s": 0.172
+}
