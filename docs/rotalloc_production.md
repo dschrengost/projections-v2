@@ -16,6 +16,7 @@
 - sim_v2 (`scripts/sim_v2/generate_worlds_fpts_v2.py`) masks availability/minutes by `eligible_flag` and writes `metrics.json` per run dir.
 - `promote_config.json` should set `allocator.p_cutoff` to define the rotation eligibility cutoff.
   - If missing, RotAlloc defaults to `0.15` and **fails in CI** to force explicit config.
+- RotAlloc will **fail in CI** if the rotation classifier outputs only a handful of discrete probabilities (guardrail against a collapsed classifier).
 
 ## Local commands
 

@@ -236,6 +236,22 @@ def score_rotalloc_minutes(
     p_rot = np.clip(np.asarray(p_rot, dtype=np.float64), 0.0, 1.0)
     mu = np.asarray(reg.predict(X), dtype=np.float64)
     mu = np.maximum(mu, 0.0)
+    # Guardrail: classifier output should be a smooth probability distribution.
+    # If it collapses to a handful of discrete values, RotAlloc eligibility won't
+    # separate rotation from bench players.
+    unique_probs = np.unique(np.round(p_rot, 3))
+    if unique_probs.size <= 5:
+        message = (
+            "[rotalloc] warning: rotation classifier outputs are highly discrete "
+            f"(unique_probs={unique_probs.size}, values={unique_probs.tolist()}). "
+            "Re-train the rotation classifier or update calibration."
+        )
+        print(message)
+        if os.environ.get("CI"):
+            raise ValueError(
+                "RotAlloc rotation classifier outputs are too discrete; "
+                "retrain required (CI strict)."
+            )
 
     # Mask candidates: padded rows are not expected here; exclude OUT rows if present.
     mask = np.ones(len(df), dtype=bool)
