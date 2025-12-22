@@ -90,7 +90,7 @@ def test_sim_v2_rates_outputs_minutes_stats(tmp_path: Path) -> None:
         data_root=tmp_path,
         profiles_path=None,
         output_root=output_root,
-        fpts_run_id=None,
+        sim_run_id=None,
         use_rates_noise=False,
         rates_noise_split=None,
         team_sigma_scale=None,
@@ -129,7 +129,7 @@ def test_sim_v2_baseline_missing_spread_still_varies(tmp_path: Path) -> None:
         data_root=tmp_path,
         profiles_path=None,
         output_root=output_root,
-        fpts_run_id=None,
+        sim_run_id=None,
         use_rates_noise=False,
         rates_noise_split=None,
         team_sigma_scale=None,
@@ -150,4 +150,3 @@ def test_sim_v2_baseline_missing_spread_still_varies(tmp_path: Path) -> None:
     df = pd.read_parquet(proj_path)
     assert "minutes_sim_std" in df.columns
     assert (df["minutes_sim_std"] > 0).any()
-

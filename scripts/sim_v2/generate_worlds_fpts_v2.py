@@ -1,7 +1,8 @@
-"""Generate FPTS v2 worlds using residual model noise."""
+"""Generate sim_v2 worlds from minutes + rates with stochastic noise."""
 
 from __future__ import annotations
 
+import os
 import json
 from datetime import date, datetime
 from pathlib import Path
@@ -11,8 +12,6 @@ import numpy as np
 import pandas as pd
 import typer
 
-from projections.fpts_v2.features import CATEGORICAL_FEATURES_DEFAULT, build_fpts_design_matrix
-from projections.fpts_v2.loader import load_fpts_and_residual, load_fpts_bundle
 from projections.fpts_v2.scoring import compute_dk_fpts
 from projections.paths import data_path, get_project_root
 from projections.sim_v2.config import DEFAULT_PROFILES_PATH, UsageSharesConfig, load_sim_v2_profile
@@ -24,7 +23,6 @@ from projections.sim_v2.minutes_noise import (
     status_bucket_from_raw,
 )
 from projections.sim_v2.noise import load_rates_noise_params
-from projections.sim_v2.residuals import sample_residuals_with_team_factor
 
 app = typer.Typer(add_completion=False)
 
@@ -964,38 +962,81 @@ def _load_minutes_projection(
         raise ValueError(f"Unsupported minutes_source={minutes_source}")
 
     daily_base = root / "artifacts" / "minutes_v1" / "daily" / date_token
-    resolved_run = run_id or _read_latest_run_id(daily_base)
+    gold_base = root / "gold" / "projections_minutes_v1" / f"game_date={date_token}"
+
+    resolved_daily = _read_latest_run_id(daily_base)
+    resolved_gold = _read_latest_run_id(gold_base)
+    resolved_run = run_id or resolved_daily or resolved_gold
 
     candidates: list[tuple[Path, Optional[str], str]] = []
-    if resolved_run:
-        candidates.append(
-            (daily_base / f"run={resolved_run}" / "minutes.parquet", resolved_run, "minutes_v1_daily")
-        )
-    gold_path = root / "gold" / "projections_minutes_v1" / f"game_date={date_token}" / "minutes.parquet"
-    candidates.append((gold_path, resolved_run, "projections_minutes_v1"))
+    if run_id:
+        candidates.append((daily_base / f"run={run_id}" / "minutes.parquet", run_id, "minutes_v1_daily"))
+        candidates.append((gold_base / f"run={run_id}" / "minutes.parquet", run_id, "projections_minutes_v1"))
+    else:
+        if resolved_run:
+            candidates.append(
+                (daily_base / f"run={resolved_run}" / "minutes.parquet", resolved_run, "minutes_v1_daily")
+            )
+            candidates.append(
+                (gold_base / f"run={resolved_run}" / "minutes.parquet", resolved_run, "projections_minutes_v1")
+            )
+        gold_path = gold_base / "minutes.parquet"
+        candidates.append((gold_path, resolved_gold, "projections_minutes_v1_flat"))
 
     project_root = get_project_root()
     if project_root != root:
         daily_base_project = project_root / "artifacts" / "minutes_v1" / "daily" / date_token
-        resolved_project_run = run_id or _read_latest_run_id(daily_base_project)
-        if resolved_project_run:
+        gold_base_project = project_root / "gold" / "projections_minutes_v1" / f"game_date={date_token}"
+        resolved_daily_project = _read_latest_run_id(daily_base_project)
+        resolved_gold_project = _read_latest_run_id(gold_base_project)
+
+        if run_id:
             candidates.append(
                 (
-                    daily_base_project / f"run={resolved_project_run}" / "minutes.parquet",
-                    resolved_project_run,
+                    daily_base_project / f"run={run_id}" / "minutes.parquet",
+                    run_id,
                     "minutes_v1_daily_project",
                 )
             )
-        gold_project = (
-            project_root / "gold" / "projections_minutes_v1" / f"game_date={date_token}" / "minutes.parquet"
-        )
-        candidates.append((gold_project, resolved_project_run, "projections_minutes_v1_project"))
+            candidates.append(
+                (
+                    gold_base_project / f"run={run_id}" / "minutes.parquet",
+                    run_id,
+                    "projections_minutes_v1_project",
+                )
+            )
+        else:
+            resolved_project_run = resolved_daily_project or resolved_gold_project
+            if resolved_project_run:
+                candidates.append(
+                    (
+                        daily_base_project / f"run={resolved_project_run}" / "minutes.parquet",
+                        resolved_project_run,
+                        "minutes_v1_daily_project",
+                    )
+                )
+                candidates.append(
+                    (
+                        gold_base_project / f"run={resolved_project_run}" / "minutes.parquet",
+                        resolved_project_run,
+                        "projections_minutes_v1_project",
+                    )
+                )
+            candidates.append(
+                (
+                    gold_base_project / "minutes.parquet",
+                    resolved_gold_project,
+                    "projections_minutes_v1_flat_project",
+                )
+            )
 
     for path, rid, label in candidates:
         if path.exists():
             df = pd.read_parquet(path)
             return df, rid, path, label
-    raise FileNotFoundError(f"No minutes_v1 projection found for {date_token} (source={minutes_source}).")
+    raise FileNotFoundError(
+        f"No minutes_v1 projection found for {date_token} (source={minutes_source}, run_id={run_id!r})."
+    )
 
 
 def _load_schedule_for_date(root: Path, game_date: pd.Timestamp) -> pd.DataFrame:
@@ -1172,7 +1213,7 @@ def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> p
     Returns a DataFrame keyed by (game_date, game_id, team_id, player_id) with:
       - minutes_mean
       - fpts_mean
-      - optional passthrough columns (minutes_p50_cond, minutes_p50, play_prob, is_starter)
+      - optional passthrough columns (minutes_p50_cond, minutes_p50, play_prob, is_starter, eligible_flag, minutes_alloc_mode)
     """
 
     minutes_df = minutes_df.copy()
@@ -1246,7 +1287,18 @@ def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> p
     if base_stat_box:
         for name, values in base_stat_box.items():
             merged[f"{name}_mean"] = values
-    for extra in ("minutes_p50_cond", "minutes_p50", "play_prob", "is_starter"):
+    for extra in (
+        "minutes_p50_cond",
+        "minutes_p50",
+        "play_prob",
+        "is_starter",
+        "rotation_prob",
+        "eligible_flag",
+        "minutes_alloc_mode",
+        "p_rot",
+        "mu_cond",
+        "team_minutes_sum",
+    ):
         if extra in merged.columns:
             base_cols.append(extra)
     # Passthrough vacancy features for learned usage shares model
@@ -1396,7 +1448,11 @@ def main(
         "--output-root",
         help="Defaults to <data_root>/artifacts/sim_v2/worlds_fpts_v2",
     ),
-    fpts_run_id: Optional[str] = typer.Option(None, "--fpts-run-id", help="Override FPTS run id (otherwise profile)."),
+    sim_run_id: Optional[str] = typer.Option(
+        None,
+        "--run-id",
+        help="Optional run id to partition outputs under game_date=.../run=...",
+    ),
     use_rates_noise: Optional[bool] = typer.Option(
         None,
         "--use-rates-noise/--no-rates-noise",
@@ -1469,11 +1525,10 @@ def main(
             return override
         return value
 
-    mean_source = getattr(profile_cfg, "mean_source", "fpts")
+    mean_source = getattr(profile_cfg, "mean_source", "rates")
     minutes_source = profile_cfg.minutes_source or "minutes_v1"
     rates_source = profile_cfg.rates_source or "rates_v1_live"
 
-    fpts_run = _resolve(profile_cfg.fpts_run_id, fpts_run_id, "fpts_run_id")
     use_rates_noise_eff = profile_cfg.use_rates_noise if use_rates_noise is None else use_rates_noise
     resolved_rates_run = _resolve(profile_cfg.rates_run_id, rates_run_id, "rates_run_id")
     # For noise, prefer rates_noise_run_id if specified (allows using older residuals with newer model)
@@ -1499,7 +1554,6 @@ def main(
     seed_eff = seed if seed is not None else (profile_cfg.seed or 1234)
     min_play_prob_eff = min_play_prob if min_play_prob is not None else profile_cfg.min_play_prob
     team_factor_sigma_eff = team_factor_sigma if team_factor_sigma is not None else profile_cfg.team_factor_sigma
-    team_factor_gamma_eff = team_factor_gamma if team_factor_gamma is not None else profile_cfg.team_factor_gamma
     worlds_per_chunk = max(1, (profile_cfg.worlds_batch_size or profile_cfg.worlds_per_chunk))
     n_worlds_eff = int(n_worlds) if n_worlds is not None else int(profile_cfg.worlds_n or 2000)
     enforce_team_240 = profile_cfg.enforce_team_240
@@ -1518,9 +1572,14 @@ def main(
         f"worlds={n_worlds_eff} chunk={worlds_per_chunk} seed={seed_eff} efficiency={use_efficiency_scoring_eff}"
     )
     typer.echo(
-        f"[sim_v2] fpts_run_id={fpts_run} rates_run_id={resolved_rates_run} minutes_run_id={resolved_minutes_run} "
+        f"[sim_v2] rates_run_id={resolved_rates_run} minutes_run_id={resolved_minutes_run} "
         f"use_rates_noise={use_rates_noise_eff} split={rates_split} "
         f"use_minutes_noise={use_minutes_noise_eff} sigma_min={minutes_sigma_min_eff} min_play_prob={min_play_prob_eff}"
+    )
+    typer.echo(
+        f"[sim_v2] game_scripts={profile_cfg.use_game_scripts} "
+        f"play_prob_masking={getattr(profile_cfg, 'use_play_prob_masking', True)} "
+        f"team_factor_sigma={team_factor_sigma_eff}"
     )
 
     if mean_source == "rates":
@@ -1730,6 +1789,8 @@ def main(
             )
 
             out_dir = output_base / f"game_date={pd.Timestamp(game_date).date()}"
+            if sim_run_id:
+                out_dir = out_dir / f"run={sim_run_id}"
             out_dir.mkdir(parents=True, exist_ok=True)
 
             date_seed = seed_eff + int(pd.Timestamp(game_date).toordinal())
@@ -1742,8 +1803,6 @@ def main(
                 if extra in mu_df.columns and extra not in base_cols:
                     base_cols.append(extra)
             base_cols = list(dict.fromkeys(base_cols))
-            stat_defaults = np.full_like(minutes_sim_base, np.nan, dtype=float)
-
             # Minutes sampling inputs (for scripts and/or noise)
             gs_game_ids = mu_df["game_id"].to_numpy()
             gs_team_ids = mu_df["team_id"].to_numpy()
@@ -1800,6 +1859,56 @@ def main(
             team_codes = mu_df["team_id"].astype("category")
             team_indices = team_codes.cat.codes.to_numpy(dtype=int)
             n_teams = int(team_indices.max()) + 1 if len(team_indices) else 0
+            alloc_mode = "legacy"
+            if "minutes_alloc_mode" in mu_df.columns:
+                try:
+                    alloc_mode = str(mu_df["minutes_alloc_mode"].dropna().astype(str).iloc[0]).strip().lower()
+                except Exception:
+                    alloc_mode = "legacy"
+            env_alloc = os.environ.get("PROJECTIONS_MINUTES_ALLOC_MODE")
+            if env_alloc:
+                env_value = str(env_alloc).strip().lower()
+                if env_value in {"legacy", "lgbm", "minutes_v1"}:
+                    alloc_mode = "legacy"
+                elif env_value in {"rotalloc", "rotalloc_expk", "rotalloc-expk"}:
+                    alloc_mode = "rotalloc_expk"
+            minutes_alloc_metrics: dict[str, object] = {"minutes_alloc_mode": alloc_mode}
+            eligible_flag_arr: np.ndarray | None = None
+            max_rotation_size_eff: int | None = profile_cfg.max_rotation_size or DEFAULT_MAX_ROTATION_SIZE
+            if alloc_mode == "rotalloc_expk" and "eligible_flag" in mu_df.columns:
+                eligible_flag_arr = (
+                    pd.to_numeric(mu_df["eligible_flag"], errors="coerce")
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                    > 0.5
+                )
+                try:
+                    eligible_sizes = (
+                        mu_df.assign(_eligible=eligible_flag_arr.astype(int))
+                        .groupby(["game_id", "team_id"])["_eligible"]
+                        .sum()
+                    )
+                    eligible_size_max = int(eligible_sizes.max()) if not eligible_sizes.empty else 0
+                    max_rotation_size_eff = max(int(profile_cfg.max_rotation_size or 0), eligible_size_max)
+                    minutes_alloc_metrics["eligible_size_p50"] = float(eligible_sizes.quantile(0.5))
+                    minutes_alloc_metrics["eligible_size_p90"] = float(eligible_sizes.quantile(0.9))
+                except Exception:
+                    max_rotation_size_eff = max_rotation_size_eff
+
+                team_sums = mu_df.groupby(["game_id", "team_id"])["minutes_mean"].sum()
+                max_dev = float((team_sums - 240.0).abs().max()) if len(team_sums) else 0.0
+                minutes_alloc_metrics["minutes_mean_team_sum_dev_max"] = float(max_dev)
+                if max_dev > 1e-6:
+                    typer.echo(
+                        f"[sim_v2] warning: rotalloc minutes_mean sum-to-240 violated (max_dev={max_dev:.6f}); "
+                        "treating minutes as legacy for reconciliation.",
+                        err=True,
+                    )
+                    alloc_mode = "legacy"
+                    eligible_flag_arr = None
+                    max_rotation_size_eff = profile_cfg.max_rotation_size or DEFAULT_MAX_ROTATION_SIZE
+                    minutes_alloc_metrics["minutes_alloc_mode"] = alloc_mode
+            minutes_alloc_metrics["max_rotation_size_eff"] = int(max_rotation_size_eff or 0)
             if "rotation_prob" in mu_df.columns:
                 rot_prob_arr = (
                     pd.to_numeric(mu_df["rotation_prob"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
@@ -1910,9 +2019,19 @@ def main(
                 rng = np.random.default_rng(date_seed + chunk_start)
 
                 # 1. Sample availability FIRST (before minutes)
-                u_active = rng.random(size=(chunk_size, len(play_prob_arr)))
-                active_mask = u_active < play_prob_arr[None, :]
+                # When use_play_prob_masking is False, skip Bernoulli sampling but still
+                # exclude players with play_prob=0 (OUT/injured players)
+                use_play_prob_masking = getattr(profile_cfg, "use_play_prob_masking", True)
+                if use_play_prob_masking:
+                    u_active = rng.random(size=(chunk_size, len(play_prob_arr)))
+                    active_mask = u_active < play_prob_arr[None, :]
+                else:
+                    # All players with play_prob > 0 are active; OUT players (play_prob=0) stay inactive
+                    active_mask = np.broadcast_to(play_prob_arr > 0, (chunk_size, len(play_prob_arr)))
+                if eligible_flag_arr is not None:
+                    active_mask = active_mask & np.broadcast_to(eligible_flag_arr[None, :], active_mask.shape)
                 active_mask_samples.append(active_mask)
+
 
                 # 2. Sample minutes based on game script (script determines quantile position)
                 if use_game_scripts and game_script_config is not None:
@@ -1957,8 +2076,10 @@ def main(
                         clamp_scale=(0.7, 1.3),
                         active_mask=active_mask,  # Pass active mask for proper redistribution
                         starter_mask=gs_is_starter > 0,
-                        max_rotation_size=DEFAULT_MAX_ROTATION_SIZE,
+                        max_rotation_size=max_rotation_size_eff,
                         play_prob=play_prob_arr,
+                        rotation_prob=rot_prob_arr if "rotation_prob" in mu_df.columns else None,
+                        protected_rotation_size=getattr(profile_cfg, "protected_rotation_size", None),
                     )
                 minutes_world_samples.append(minutes_worlds)
 
@@ -2160,6 +2281,8 @@ def main(
                 proj_df["dk_fpts_p95"] = fpts_quantiles[6]
                 proj_df["sim_profile"] = profile_cfg.name
                 proj_df["n_worlds"] = n_worlds_eff
+                proj_df["minutes_run_id"] = minutes_run_eff
+                proj_df["rates_run_id"] = rates_run_eff
                 
                 # Add individual stat means for dashboard diagnostics (CONDITIONAL)
                 for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
@@ -2192,6 +2315,23 @@ def main(
                 proj_path = out_dir / "projections.parquet"
                 proj_df.to_parquet(proj_path, index=False)
 
+                # Persist small run-scoped diagnostics for debugging/regressions.
+                try:
+                    metrics_payload = {
+                        "game_date": pd.Timestamp(game_date).date().isoformat(),
+                        "sim_profile": profile_cfg.name,
+                        "n_worlds": int(n_worlds_eff),
+                        "minutes_run_id": minutes_run_eff,
+                        "rates_run_id": rates_run_eff,
+                    }
+                    metrics_payload.update(minutes_alloc_metrics)
+                    (out_dir / "metrics.json").write_text(
+                        json.dumps(metrics_payload, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception as exc:
+                    typer.echo(f"[sim_v2] warning: failed to write metrics.json ({exc})", err=True)
+
                 # Also persist the full per-player worlds matrix for downstream consumers
                 # (e.g., contest simulation). This is much smaller than writing one parquet
                 # per world and keeps the fast in-memory aggregation path.
@@ -2211,404 +2351,9 @@ def main(
                 )
         return
 
-    minutes_noise_params = None
-    if use_minutes_noise_eff:
-        minutes_noise_params = load_minutes_noise_params(data_root=root, minutes_run_id=minutes_run)
-        typer.echo(
-            f"[sim_v2] using minutes noise run_id={minutes_noise_params.run_id} "
-            f"sigma_min={minutes_sigma_min_eff:.3f} path={minutes_noise_params.source_path}"
-        )
-
-    if use_rates_noise_eff:
-        bundle = load_fpts_bundle(fpts_run, data_root=root)
-        residual_model = None
-        typer.echo(f"[sim_v2] run_id={fpts_run} feature_cols={len(bundle.feature_cols)}")
-        typer.echo(f"[sim_v2] using rates noise; skipping FPTS residual model for run_id={fpts_run}")
-    else:
-        bundle, residual_model = load_fpts_and_residual(fpts_run, data_root=root)
-        typer.echo(f"[sim_v2] run_id={fpts_run} feature_cols={len(bundle.feature_cols)}")
-        typer.echo(f"[sim_v2] team_factor_sigma={team_factor_sigma_eff} alpha_gamma={team_factor_gamma_eff}")
-
-    noise_params = None
-    noise_path = None
-    stat_targets: list[str] = []
-    efficiency_targets = ["fg2_pct", "fg3_pct", "ft_pct"]
-    if use_rates_noise_eff:
-        noise_params, noise_path = load_rates_noise_params(
-            data_root=root,
-            run_id=rates_run,
-            split=rates_split or "val",
-            sigma_scale=rates_sigma_scale,
-        )
-        stat_targets = list(noise_params.keys())
-        typer.echo(
-            f"[sim_v2] using rates noise run_id={rates_run or 'current'} split={rates_split or 'val'} "
-            f"sigma_scale={rates_sigma_scale:.3f} team_sigma_scale={float(team_sigma_scale_eff):.3f} "
-            f"player_sigma_scale={float(player_sigma_scale_eff):.3f} targets={len(stat_targets)} path={noise_path}"
-        )
-
-    df = _load_base(root, start_ts, end_ts)
-    output_base = output_root or (root / "artifacts" / "sim_v2" / "worlds_fpts_v2")
-
-    for game_date, date_df in df.groupby("game_date"):
-        date_df = date_df.copy()
-        date_df["sim_profile"] = profile_cfg.name
-        try:
-            minutes_col = _resolve_minutes_column(date_df)
-        except KeyError:
-            typer.echo(f"[sim_v2] {game_date.date()} missing minutes columns; skipping.")
-            continue
-        date_df[minutes_col] = pd.to_numeric(date_df[minutes_col], errors="coerce")
-        date_df["is_starter"] = pd.to_numeric(date_df.get("is_starter"), errors="coerce")
-        if "play_prob" in date_df.columns:
-            date_df["play_prob"] = pd.to_numeric(date_df["play_prob"], errors="coerce")
-        else:
-            date_df["play_prob"] = 1.0
-        date_df = _ensure_status_bucket(date_df)
-        date_df = date_df[date_df[minutes_col].notna()]
-        date_df = date_df[date_df["play_prob"].fillna(0.0) >= min_play_prob_eff]
-        if date_df.empty:
-            continue
-        date_df = date_df.reset_index(drop=True)
-
-        out_dir = output_base / f"game_date={game_date.date()}"
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        date_seed = seed_eff + int(pd.Timestamp(game_date).toordinal())
-
-        if use_rates_noise_eff and noise_params is not None:
-            mapping = _resolve_rate_columns(date_df, stat_targets)
-            missing_targets = [t for t in stat_targets if t not in mapping]
-            if missing_targets:
-                typer.echo(f"[sim_v2] warning: missing rate columns for targets={missing_targets}; skipping.")
-            if not mapping:
-                continue
-
-            eff_mapping = _resolve_rate_columns(date_df, efficiency_targets)
-            use_efficiency = use_efficiency_scoring_eff and len(eff_mapping) == len(efficiency_targets)
-            if use_efficiency_scoring_eff and not use_efficiency:
-                typer.echo(
-                    f"[sim_v2] warning: missing fg% preds for {game_date.date()}; falling back to attempts==makes.",
-                    err=True,
-                )
-
-            minutes_center = date_df[minutes_col].to_numpy(dtype=float)
-            minutes_pred_center = pd.to_numeric(
-                date_df.get("minutes_pred_p50", date_df[minutes_col]), errors="coerce"
-            ).to_numpy(dtype=float)
-            role_low = pd.to_numeric(date_df.get("track_role_is_low_minutes", 0), errors="coerce").fillna(0).to_numpy(dtype=float)
-            if "rotation_prob" in date_df.columns:
-                rot_prob_arr = (
-                    pd.to_numeric(date_df["rotation_prob"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-                )
-                rotation_mask = (rot_prob_arr >= 0.5) | (pd.to_numeric(date_df.get("is_starter", 0), errors="coerce").fillna(0).to_numpy(dtype=float) > 0)
-                bench_mask = (~rotation_mask) & (minutes_pred_center > 0.0)
-            else:
-                rotation_mask = (minutes_pred_center >= 12.0) | (role_low == 0)
-                bench_mask = (~rotation_mask) & (minutes_pred_center > 0.0)
-            play_prob_arr = date_df["play_prob"].fillna(1.0).to_numpy(dtype=float)
-
-            team_codes = date_df["team_id"].astype("category")
-            team_indices = team_codes.cat.codes.to_numpy()
-            n_teams = int(team_indices.max()) + 1 if len(team_indices) else 0
-            team_one_hot = np.eye(n_teams, dtype=float)[team_indices] if n_teams > 0 else np.zeros((len(team_indices), 0))
-
-            sigma_minutes = None
-            if use_minutes_noise_eff and minutes_noise_params is not None:
-                sigma_minutes = build_sigma_per_player(
-                    date_df,
-                    minutes_noise_params,
-                    minutes_col=minutes_col,
-                    starter_col="is_starter",
-                    status_col="status_bucket",
-                )
-                if minutes_sigma_min_eff is not None:
-                    sigma_minutes = np.maximum(sigma_minutes, minutes_sigma_min_eff)
-
-            rate_arrays: dict[str, np.ndarray] = {}
-            base_mu: dict[str, np.ndarray] = {}
-            for target, col in mapping.items():
-                rates = pd.to_numeric(date_df[col], errors="coerce").to_numpy()
-                rates = np.nan_to_num(rates, nan=0.0)
-                rate_arrays[target] = rates
-                base = target.replace("_per_min", "")
-                base_mu[base] = np.clip(rates * minutes_center, 0.0, None)
-            eff_arrays_base: dict[str, np.ndarray] | None = None
-            if use_efficiency:
-                eff_arrays_base = {}
-                eff_clamp = {"fg2_pct": (0.3, 0.75), "fg3_pct": (0.2, 0.55), "ft_pct": (0.5, 0.95)}
-                for target, col in eff_mapping.items():
-                    lo, hi = eff_clamp[target]
-                    vals = pd.to_numeric(date_df[col], errors="coerce").to_numpy(dtype=float)
-                    eff_arrays_base[target] = np.clip(vals, lo, hi)
-
-            dk_fpts_mean, base_stat_box = _compute_fpts_and_boxscore(
-                base_mu, efficiency_pct=eff_arrays_base, use_efficiency=use_efficiency
-            )
-            date_df["dk_fpts_mean"] = dk_fpts_mean
-            if base_stat_box:
-                for name, values in base_stat_box.items():
-                    date_df[f"{name}_mean"] = values
-
-            typer.echo(
-                f"[sim_v2] {game_date.date()} rows={len(date_df)} "
-                f"dk_fpts_mean (rates) min/med/max={dk_fpts_mean.min():.2f}/{np.median(dk_fpts_mean):.2f}/{dk_fpts_mean.max():.2f}"
-            )
-
-            # Precompute team grouping once per date.
-            game_ids = date_df["game_id"].to_numpy()
-            team_ids = date_df["team_id"].to_numpy()
-            group_map: dict[tuple[int, int], np.ndarray] = {}
-            for idx, key in enumerate(zip(game_ids, team_ids)):
-                group_map.setdefault(key, []).append(idx)
-            group_map = {k: np.array(v, dtype=int) for k, v in group_map.items()}
-
-            schedule_df = _load_schedule_for_date(root, pd.Timestamp(game_date))
-            implied_team_points = _build_implied_team_points(date_df, schedule_df)
-
-            rng = np.random.default_rng(date_seed)
-            world_fpts_samples: list[np.ndarray] = []
-            active_mask_samples: list[np.ndarray] = []  # Track active masks for conditional aggregation
-            starter_mask_arr = (
-                pd.to_numeric(date_df.get("is_starter", 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0
-            )
-            stat_defaults = np.full(len(date_df), np.nan, dtype=float)
-
-            # Usage shares config for this path
-            usage_shares_cfg_backfill = profile_cfg.usage_shares
-            if usage_shares_cfg_backfill.enabled:
-                typer.echo(
-                    f"[sim_v2] usage_shares enabled (backfill): targets={usage_shares_cfg_backfill.targets} "
-                    f"noise_std={usage_shares_cfg_backfill.share_noise_std} temp={usage_shares_cfg_backfill.share_temperature}"
-                )
-
-            for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
-                chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
-
-                # 1. Sample availability FIRST
-                u_active = rng.random(size=(chunk_size, len(minutes_center)))
-                active_mask = u_active < play_prob_arr[None, :]
-                active_mask_samples.append(active_mask)
-
-                # 2. Sample minutes
-                if use_minutes_noise_eff and sigma_minutes is not None:
-                    eps_minutes = rng.standard_normal(size=(chunk_size, len(minutes_center)))
-                    minutes_worlds = np.maximum(minutes_center[None, :] + eps_minutes * sigma_minutes[None, :], 0.0)
-                else:
-                    minutes_worlds = np.repeat(minutes_center[None, :], chunk_size, axis=0)
-
-                # 3. Zero out inactive players
-                minutes_worlds = minutes_worlds * active_mask.astype(float)
-
-                # 4. Reconcile to 240 with active mask
-                if enforce_team_240 and n_teams > 0:
-                    minutes_worlds = enforce_team_240_minutes(
-                        minutes_world=minutes_worlds,
-                        team_indices=team_indices,
-                        rotation_mask=rotation_mask,
-                        bench_mask=bench_mask,
-                        baseline_minutes=minutes_center,
-                        clamp_scale=(0.7, 1.3),
-                        active_mask=active_mask,
-                        starter_mask=starter_mask_arr,
-                        max_rotation_size=DEFAULT_MAX_ROTATION_SIZE,
-                        play_prob=play_prob_arr,
-                    )
-                    team_sum = minutes_worlds @ team_one_hot  # (W_chunk, T)
-                    typer.echo(
-                        f"[sim_v2] {game_date.date()} enforce_240 team_minutes min/med/max="
-                        f"{float(team_sum.min()):.2f}/{float(np.median(team_sum)):.2f}/{float(team_sum.max()):.2f}"
-                    )
-
-                stat_totals: dict[str, np.ndarray] = {}
-                for target, rates in rate_arrays.items():
-                    params = noise_params.get(target, {})
-                    sigma_team = float(params.get("sigma_team", 0.0) or 0.0)
-                    sigma_player = float(params.get("sigma_player", 0.0) or 0.0)
-                    sigma_team *= float(team_sigma_scale_eff)
-                    sigma_player *= float(player_sigma_scale_eff)
-
-                    mu = np.clip(rates[None, :] * minutes_worlds, 0.0, None)
-                    team_shock = np.zeros_like(mu)
-                    if sigma_team > 0:
-                        for key, idxs in group_map.items():
-                            ts = rng.normal(loc=0.0, scale=sigma_team, size=chunk_size)
-                            team_shock[:, idxs] = ts[:, None]
-                    player_eps = rng.normal(loc=0.0, scale=sigma_player, size=mu.shape)
-                    total = np.clip(mu + team_shock + player_eps, 0.0, None)
-                    base = target.replace("_per_min", "")
-                    stat_totals[base] = total
-
-                # Apply usage shares allocation (redistributes FGA/FTA/TOV within teams)
-                if usage_shares_cfg_backfill.enabled and stat_totals:
-                    stat_totals = _apply_usage_shares_allocation(
-                        stat_totals=stat_totals,
-                        minutes_worlds=minutes_worlds,
-                        rate_arrays=rate_arrays,
-                        group_map=group_map,
-                        usage_cfg=usage_shares_cfg_backfill,
-                        rng=rng,
-                    )
-
-                eff_arrays: dict[str, np.ndarray] | None = None
-                if use_efficiency:
-                    eff_arrays = {}
-                    eff_clamp = {"fg2_pct": (0.3, 0.75), "fg3_pct": (0.2, 0.55), "ft_pct": (0.5, 0.95)}
-                    for target, col in eff_mapping.items():
-                        lo, hi = eff_clamp[target]
-                        vals = pd.to_numeric(date_df[col], errors="coerce").to_numpy(dtype=float)
-                        eff_arrays[target] = np.clip(vals, lo, hi)
-
-                dk_fpts_worlds, stat_box = _compute_fpts_and_boxscore(
-                    stat_totals, efficiency_pct=eff_arrays, use_efficiency=use_efficiency
-                )
-
-                if (
-                    profile_cfg.vegas_points_anchor
-                    and "pts" in stat_box
-                    and implied_team_points
-                    and np.isfinite(profile_cfg.vegas_points_drift_pct)
-                ):
-                    pts_before = stat_box["pts"].copy()
-                    stat_box["pts"] = _apply_team_points_vegas_anchor(
-                        stat_box["pts"],
-                        group_map={ (int(k[0]), int(k[1])): v for k, v in group_map.items() },
-                        implied_team_points=implied_team_points,
-                        drift_pct=profile_cfg.vegas_points_drift_pct,
-                    )
-                    dk_fpts_worlds = dk_fpts_worlds + (stat_box["pts"] - pts_before)
-                world_fpts_samples.append(dk_fpts_worlds)
-
-                base_cols = [
-                    "game_date",
-                    "game_id",
-                    "team_id",
-                    "player_id",
-                    "is_starter",
-                    minutes_col,
-                    "dk_fpts_mean",
-                    "sim_profile",
-                ]
-                if minutes_col != "minutes_p50" and "minutes_p50" in date_df.columns:
-                    base_cols.append("minutes_p50")
-                if "play_prob" in date_df.columns:
-                    base_cols.append("play_prob")
-                base_cols = list(dict.fromkeys(base_cols))
-
-                for offset in range(chunk_size):
-                    world_id = chunk_start + offset
-                    world_df = date_df[base_cols + ([c for c in ["dk_fpts_actual"] if c in date_df.columns])].copy()
-                    world_df["world_id"] = world_id
-                    world_df["minutes_sim"] = minutes_worlds[offset]
-                    world_df["dk_fpts_world"] = dk_fpts_worlds[offset]
-
-                    for base, values in stat_totals.items():
-                        world_df[f"{base}_sim"] = values[offset]
-                    # Derived stats
-                    if "oreb" in stat_totals and "dreb" in stat_totals:
-                        world_df["reb_sim"] = stat_totals["oreb"][offset] + stat_totals["dreb"][offset]
-                    world_df["pts_world"] = stat_box.get("pts", stat_defaults)[offset] if stat_box else stat_defaults
-                    world_df["reb_world"] = stat_box.get("reb", stat_defaults)[offset] if stat_box else stat_defaults
-                    world_df["ast_world"] = stat_box.get("ast", stat_defaults)[offset] if stat_box else stat_defaults
-                    world_df["stl_world"] = stat_box.get("stl", stat_defaults)[offset] if stat_box else stat_defaults
-                    world_df["blk_world"] = stat_box.get("blk", stat_defaults)[offset] if stat_box else stat_defaults
-                    world_df["tov_world"] = stat_box.get("tov", stat_defaults)[offset] if stat_box else stat_defaults
-                    world_df["oreb_world"] = stat_box.get("oreb", stat_defaults)[offset] if stat_box else stat_defaults
-                    world_df["dreb_world"] = stat_box.get("dreb", stat_defaults)[offset] if stat_box else stat_defaults
-
-                    out_path = out_dir / f"world={world_id:04d}.parquet"
-                    world_df.to_parquet(out_path, index=False)
-
-            if world_fpts_samples:
-                combined_fpts = np.concatenate(world_fpts_samples, axis=None)
-                typer.echo(
-                    f"[sim_v2] {game_date.date()} dk_fpts_world min/med/max="
-                    f"{combined_fpts.min():.2f}/{np.median(combined_fpts):.2f}/{combined_fpts.max():.2f}"
-                )
-        else:
-            features = build_fpts_design_matrix(
-                date_df,
-                bundle.feature_cols,
-                categorical_cols=CATEGORICAL_FEATURES_DEFAULT,
-                fill_missing_with_zero=True,
-            )
-            mu = bundle.model.predict(features.values)
-            date_df["dk_fpts_mean"] = mu
-
-            typer.echo(
-                f"[sim_v2] {game_date.date()} rows={len(date_df)} "
-                f"dk_fpts_mean min/med/max={mu.min():.2f}/{np.median(mu):.2f}/{mu.max():.2f}"
-            )
-
-            world_fpts_samples: list[np.ndarray] = []
-            for world_id in range(n_worlds_eff):
-                rng = np.random.default_rng(date_seed + world_id)
-                eps = sample_residuals_with_team_factor(
-                    date_df,
-                    residual_model,
-                    rng,
-                    dk_fpts_col="dk_fpts_mean",
-                    minutes_col=minutes_col,
-                    is_starter_col="is_starter",
-                    game_id_col="game_id",
-                    team_id_col="team_id",
-                    team_factor_sigma=team_factor_sigma_eff,
-                    alpha_gamma=team_factor_gamma_eff,
-                )
-                dk_fpts_world = date_df["dk_fpts_mean"].to_numpy() + eps
-                base_cols = [
-                    "game_date",
-                    "game_id",
-                    "team_id",
-                    "player_id",
-                    "is_starter",
-                    minutes_col,
-                    "dk_fpts_mean",
-                    "sim_profile",
-                ]
-                if minutes_col != "minutes_p50" and "minutes_p50" in date_df.columns:
-                    base_cols.append("minutes_p50")
-                base_cols = list(dict.fromkeys(base_cols))
-                world_df = date_df[base_cols + ([c for c in ["dk_fpts_actual"] if c in date_df.columns])].copy()
-                world_df["world_id"] = world_id
-                minutes_world = date_df[minutes_col].to_numpy()
-                if enforce_team_240 and n_teams > 0:
-                    minutes_world = enforce_team_240_minutes(
-                        minutes_world=minutes_world[None, :],
-                        team_indices=team_indices,
-                        rotation_mask=rotation_mask,
-                        bench_mask=bench_mask,
-                        baseline_minutes=minutes_world,
-                        clamp_scale=(0.7, 1.3),
-                        starter_mask=(
-                            pd.to_numeric(date_df.get("is_starter", 0.0), errors="coerce")
-                            .fillna(0.0)
-                            .to_numpy(dtype=float)
-                            > 0
-                        ),
-                        max_rotation_size=DEFAULT_MAX_ROTATION_SIZE,
-                        play_prob=date_df["play_prob"].fillna(1.0).to_numpy(dtype=float) if "play_prob" in date_df.columns else None,
-                    )[0]
-                world_df["minutes_sim"] = minutes_world
-                world_df["dk_fpts_world"] = dk_fpts_world
-                world_df["pts_world"] = np.full(len(world_df), np.nan, dtype=float)
-                world_df["reb_world"] = np.full(len(world_df), np.nan, dtype=float)
-                world_df["ast_world"] = np.full(len(world_df), np.nan, dtype=float)
-                world_df["stl_world"] = np.full(len(world_df), np.nan, dtype=float)
-                world_df["blk_world"] = np.full(len(world_df), np.nan, dtype=float)
-                world_df["tov_world"] = np.full(len(world_df), np.nan, dtype=float)
-                world_df["oreb_world"] = np.full(len(world_df), np.nan, dtype=float)
-                world_df["dreb_world"] = np.full(len(world_df), np.nan, dtype=float)
-                out_path = out_dir / f"world={world_id:04d}.parquet"
-                world_df.to_parquet(out_path, index=False)
-                world_fpts_samples.append(dk_fpts_world)
-
-            if world_fpts_samples:
-                combined = np.concatenate(world_fpts_samples, axis=None)
-                typer.echo(
-                    f"[sim_v2] {game_date.date()} dk_fpts_world min/med/max="
-                    f"{combined.min():.2f}/{np.median(combined):.2f}/{combined.max():.2f}"
-                )
+    raise ValueError(
+        f"Unsupported sim_v2 mean_source={mean_source!r}; FPTS-only path has been removed."
+    )
 
 
 if __name__ == "__main__":

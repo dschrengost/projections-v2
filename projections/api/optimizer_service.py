@@ -23,6 +23,7 @@ import yaml
 
 from projections.dk.salaries_schema import dk_salaries_gold_path, normalize_positions
 from projections.dk.slates import list_draft_groups_for_date
+from projections.fpts_v2.scoring import compute_dk_fpts
 from projections.optimizer.quick_build import (
     QuickBuildConfig,
     QuickBuildResult,
@@ -67,6 +68,196 @@ def get_data_root() -> Path:
     return Path(os.environ.get("PROJECTIONS_DATA_ROOT", "/home/daniel/projections-data"))
 
 
+def get_minutes_daily_root() -> Path:
+    """Resolve the minutes daily artifacts root (used to pick the freshest run_id)."""
+    raw = os.environ.get("MINUTES_DAILY_ROOT")
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return get_data_root() / "artifacts" / "minutes_v1" / "daily"
+
+
+def _latest_minutes_run_id(game_date: str, minutes_root: Path) -> str | None:
+    """Read artifacts/minutes_v1/daily/<date>/latest_run.json when available."""
+    import json
+
+    pointer = minutes_root / game_date / "latest_run.json"
+    if not pointer.exists():
+        return None
+    try:
+        payload = json.loads(pointer.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    run_id = payload.get("run_id")
+    return str(run_id) if run_id else None
+
+
+def _load_rates_v1_live(
+    game_date: str,
+    root: Path,
+    *,
+    run_id: str | None,
+) -> tuple[pd.DataFrame, str | None] | tuple[None, None]:
+    """
+    Load live rates predictions for a given date and (optionally) run_id.
+
+    Returns (df, resolved_run_id) or (None, None) if not found.
+    """
+    import json
+
+    base = root / "gold" / "rates_v1_live" / game_date
+    if run_id:
+        candidate = base / f"run={run_id}" / "rates.parquet"
+        if candidate.exists():
+            return pd.read_parquet(candidate), run_id
+
+    pointer = base / "latest_run.json"
+    if pointer.exists():
+        try:
+            payload = json.loads(pointer.read_text(encoding="utf-8"))
+            latest = payload.get("run_id")
+        except Exception:
+            latest = None
+        if latest:
+            latest = str(latest)
+            candidate = base / f"run={latest}" / "rates.parquet"
+            if candidate.exists():
+                return pd.read_parquet(candidate), latest
+
+    direct = base / "rates.parquet"
+    if direct.exists():
+        return pd.read_parquet(direct), None
+
+    return None, None
+
+
+def _attach_rates_mean_fpts(
+    minutes_df: pd.DataFrame,
+    rates_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Compute deterministic mean DK FPTS from minutes + rates predictions and attach as `fpts_mean`.
+
+    This is a fast fallback for optimizer projections when sim outputs are unavailable.
+    """
+    if minutes_df.empty or rates_df.empty:
+        return minutes_df
+
+    join_keys = ["game_date", "game_id", "team_id", "player_id"]
+    if any(k not in minutes_df.columns for k in join_keys) or any(k not in rates_df.columns for k in join_keys):
+        return minutes_df
+
+    def _first_present(df: pd.DataFrame, candidates: list[str]) -> str | None:
+        for col in candidates:
+            if col in df.columns:
+                return col
+        return None
+
+    minutes_col = _first_present(minutes_df, ["minutes_p50_cond", "minutes_p50", "minutes_mean", "minutes", "minutes_pred"])
+    if minutes_col is None:
+        return minutes_df
+
+    # Normalize join keys and minutes
+    left = minutes_df.copy()
+    right = rates_df.copy()
+    left["game_date"] = pd.to_datetime(left["game_date"], errors="coerce").dt.normalize()
+    right["game_date"] = pd.to_datetime(right["game_date"], errors="coerce").dt.normalize()
+    for key in ("game_id", "team_id", "player_id"):
+        left[key] = pd.to_numeric(left[key], errors="coerce")
+        right[key] = pd.to_numeric(right[key], errors="coerce")
+    left["_minutes_mean"] = pd.to_numeric(left[minutes_col], errors="coerce").fillna(0.0).clip(lower=0.0)
+
+    merged = left.merge(right, on=join_keys, how="left", suffixes=("", "_rates"))
+    if merged.empty:
+        return minutes_df
+
+    def _rate_col(target: str) -> str | None:
+        if target in merged.columns:
+            return target
+        pred = f"pred_{target}"
+        if pred in merged.columns:
+            return pred
+        return None
+
+    per_min_targets = [
+        "fga2_per_min",
+        "fga3_per_min",
+        "fta_per_min",
+        "ast_per_min",
+        "tov_per_min",
+        "oreb_per_min",
+        "dreb_per_min",
+        "stl_per_min",
+        "blk_per_min",
+    ]
+    cols = {t: _rate_col(t) for t in per_min_targets}
+    if any(v is None for v in cols.values()):
+        return minutes_df
+
+    minutes = merged["_minutes_mean"].to_numpy(dtype=float, copy=False)
+    totals = {}
+    for target, col in cols.items():
+        base = target.replace("_per_min", "")
+        rate = pd.to_numeric(merged[col], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        totals[base] = (minutes * rate).clip(min=0.0)
+
+    # Optional efficiencies
+    fg2_col = _rate_col("fg2_pct")
+    fg3_col = _rate_col("fg3_pct")
+    ft_col = _rate_col("ft_pct")
+    have_eff = fg2_col is not None and fg3_col is not None and ft_col is not None
+
+    if have_eff:
+        fg2_pct = pd.to_numeric(merged[fg2_col], errors="coerce").fillna(0.55).to_numpy(dtype=float, copy=False)
+        fg3_pct = pd.to_numeric(merged[fg3_col], errors="coerce").fillna(0.36).to_numpy(dtype=float, copy=False)
+        ft_pct = pd.to_numeric(merged[ft_col], errors="coerce").fillna(0.78).to_numpy(dtype=float, copy=False)
+        fg2_pct = np.clip(fg2_pct, 0.30, 0.75)
+        fg3_pct = np.clip(fg3_pct, 0.20, 0.55)
+        ft_pct = np.clip(ft_pct, 0.50, 0.95)
+        fgm2 = totals["fga2"] * fg2_pct
+        fgm3 = totals["fga3"] * fg3_pct
+        ftm = totals["fta"] * ft_pct
+    else:
+        # Conservative fallback: treat attempts as makes; ft at 0.75x.
+        fgm2 = totals["fga2"]
+        fgm3 = totals["fga3"]
+        ftm = 0.75 * totals["fta"]
+
+    pts = 2.0 * fgm2 + 3.0 * fgm3 + ftm
+    reb = totals["oreb"] + totals["dreb"]
+
+    scoring_frame = pd.DataFrame(
+        {
+            "pts": pts,
+            "fgm": fgm2 + fgm3,
+            "fga": totals["fga2"] + totals["fga3"],
+            "fg3m": fgm3,
+            "fg3a": totals["fga3"],
+            "ftm": ftm,
+            "fta": totals["fta"],
+            "reb": reb,
+            "oreb": totals["oreb"],
+            "dreb": totals["dreb"],
+            "ast": totals["ast"],
+            "stl": totals["stl"],
+            "blk": totals["blk"],
+            "tov": totals["tov"],
+            "pf": 0.0,
+            "plus_minus": 0.0,
+        }
+    )
+
+    merged["fpts_mean"] = compute_dk_fpts(scoring_frame).astype(float)
+
+    # Keep the original columns; merge back onto the normalized copy to avoid dtype mismatches.
+    out_cols = join_keys + ["fpts_mean"]
+    out = left.merge(
+        merged[out_cols].drop_duplicates(subset=join_keys, keep="last"),
+        on=join_keys,
+        how="left",
+    )
+    return out.drop(columns=["_minutes_mean"], errors="ignore")
+
+
 # ---------------------------------------------------------------------------
 # Player Pool Building
 # ---------------------------------------------------------------------------
@@ -87,14 +278,20 @@ def load_projections_for_date(
     root = data_root or get_data_root()
     df = None
 
+    minutes_root = get_minutes_daily_root()
+    resolved_run_id = run_id or _latest_minutes_run_id(game_date, minutes_root)
+
     # Try unified projections artifact first (has sim + ownership)
     # Path matches minutes_api: artifacts/projections/{date}/run=...
     unified_dir = root / "artifacts" / "projections" / game_date
     if unified_dir.exists():
         run_dir = None
-        if run_id:
-            run_dir = unified_dir / f"run={run_id}"
-        else:
+        if resolved_run_id:
+            candidate = unified_dir / f"run={resolved_run_id}"
+            if candidate.exists():
+                run_dir = candidate
+
+        if run_dir is None:
             # Try latest_run.json pointer
             import json
             latest_pointer = unified_dir / "latest_run.json"
@@ -151,7 +348,7 @@ def load_projections_for_date(
     has_fpts = any(c in df.columns and df[c].notna().any() for c in fpts_cols)
 
     if not has_fpts:
-        sim_df = _load_sim_projections(game_date, root)
+        sim_df = _load_sim_projections(game_date, root, minutes_run_id=resolved_run_id)
         if sim_df is not None and not sim_df.empty:
             # Merge sim projections
             join_keys = ["player_id"]
@@ -180,23 +377,110 @@ def load_projections_for_date(
                 df["sim_dk_fpts_mean"].notna().sum() if "sim_dk_fpts_mean" in df.columns else 0,
             )
 
+    # Final fallback: compute deterministic mean FPTS from minutes + rates_v1_live.
+    has_fpts = any(c in df.columns and df[c].notna().any() for c in fpts_cols)
+    if not has_fpts:
+        rates_df, rates_run_id = _load_rates_v1_live(game_date, root, run_id=resolved_run_id)
+        if rates_df is not None and not rates_df.empty:
+            before = set(df.columns)
+            df = _attach_rates_mean_fpts(df, rates_df)
+            added = sorted(set(df.columns) - before)
+            logger.info(
+                "Attached rates-derived fpts_mean for %s (rates_run=%s, added=%s)",
+                game_date,
+                rates_run_id,
+                added,
+            )
+
     return df
 
 
-def _load_sim_projections(game_date: str, root: Path) -> Optional[pd.DataFrame]:
+def _load_sim_projections(
+    game_date: str,
+    root: Path,
+    *,
+    minutes_run_id: str | None = None,
+) -> Optional[pd.DataFrame]:
     """Load sim_v2 FPTS projections for a date."""
-    sim_candidates = [
-        root / "artifacts" / "sim_v2" / "projections" / f"game_date={game_date}" / "projections.parquet",
-        root / "artifacts" / "sim_v2" / "projections" / f"date={game_date}" / "projections.parquet",
+    import json
+
+    # Source of truth: projections.parquet emitted by scripts.sim_v2.generate_worlds_fpts_v2
+    # under artifacts/sim_v2/worlds_fpts_v2/game_date=.../run=...
+    sim_root = root / "artifacts" / "sim_v2" / "worlds_fpts_v2"
+    base_candidates = [
+        sim_root / f"game_date={game_date}",
+        sim_root / f"date={game_date}",
+        sim_root / game_date,
     ]
 
-    for path in sim_candidates:
-        if path.exists():
+    def _resolve_run_dir(base_dir: Path) -> Path | None:
+        pointer = base_dir / "latest_run.json"
+        if pointer.exists():
             try:
-                return pd.read_parquet(path)
-            except Exception as exc:
-                logger.warning("Failed to load sim projections from %s: %s", path, exc)
+                payload = json.loads(pointer.read_text(encoding="utf-8"))
+                latest = payload.get("run_id")
+            except Exception:
+                latest = None
+            if latest:
+                candidate = base_dir / f"run={latest}"
+                if candidate.exists():
+                    return candidate
+
+        run_dirs = sorted(
+            [p for p in base_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
+            reverse=True,
+        )
+        return run_dirs[0] if run_dirs else None
+
+    def _read_frame(path: Path) -> Optional[pd.DataFrame]:
+        try:
+            return pd.read_parquet(path)
+        except Exception as exc:
+            logger.warning("Failed to load sim projections from %s: %s", path, exc)
+            return None
+
+    def _read_run_dir(run_dir: Path) -> Optional[pd.DataFrame]:
+        for name in ("projections.parquet", "sim_v2_projections.parquet"):
+            candidate = run_dir / name
+            if not candidate.exists():
                 continue
+            df = _read_frame(candidate)
+            if df is not None:
+                return df
+        return None
+
+    for base in base_candidates:
+        if not base.exists():
+            continue
+
+        if minutes_run_id and base.is_dir():
+            run_dir = base / f"run={minutes_run_id}"
+            if run_dir.exists():
+                df = _read_run_dir(run_dir)
+                if df is not None:
+                    return df
+
+        if base.is_file() and base.suffix == ".parquet":
+            df = _read_frame(base)
+        else:
+            df = None
+            direct = base / "projections.parquet"
+            if direct.exists():
+                df = _read_frame(direct)
+            if df is None and base.is_dir():
+                run_dir = _resolve_run_dir(base)
+                if run_dir is not None:
+                    df = _read_run_dir(run_dir)
+            if df is None:
+                continue
+
+        if minutes_run_id:
+            if "minutes_run_id" not in df.columns:
+                continue
+            df = df.loc[df["minutes_run_id"].astype(str) == str(minutes_run_id)].copy()
+            if df.empty:
+                continue
+        return df
 
     return None
 
@@ -360,6 +644,9 @@ def build_player_pool(
     exclude_games: Optional[List[str]] = None,
     use_user_overrides: bool = False,
     ownership_mode: str = "renormalize",
+    include_unmatched_salaries: bool = False,
+    allow_zero_projections: bool = False,
+    exclude_inactive_players: bool = True,
 ) -> List[Dict[str, Any]]:
     """Build optimizer-ready player pool by merging projections with salaries.
 
@@ -373,6 +660,9 @@ def build_player_pool(
         exclude_games: If set, exclude players from these games
         use_user_overrides: If True, apply user overrides from SlateOverrides
         ownership_mode: For overrides - "raw" or "renormalize" (default)
+        include_unmatched_salaries: If True, keep salary rows even when projections don't match.
+        allow_zero_projections: If True, include players with missing/zero projection (proj=0.0).
+        exclude_inactive_players: When using overrides, drop players marked out (default True).
 
     Returns list of player dicts with required QuickBuild fields:
         player_id, name, team, positions, salary, proj, own_proj, stddev, dk_id,
@@ -422,10 +712,11 @@ def build_player_pool(
     sal_df["__join_team"] = sal_df[sal_team_col].apply(_normalize_team)
 
     # Merge on name + team
+    merge_how = "right" if include_unmatched_salaries else "inner"
     merged = proj_df.merge(
         sal_df,
         on=["__join_name", "__join_team"],
-        how="inner",
+        how=merge_how,
         suffixes=("", "_sal"),
     )
 
@@ -484,14 +775,15 @@ def build_player_pool(
             game_date,
             draft_group_id,
         )
-        # Filter out players marked as out
-        before_count = len(merged)
-        merged = merged[merged["is_active"]]
-        if len(merged) < before_count:
-            logger.info(
-                "Excluded %d players marked as out",
-                before_count - len(merged),
-            )
+        if exclude_inactive_players:
+            # Filter out players marked as out
+            before_count = len(merged)
+            merged = merged[merged["is_active"]]
+            if len(merged) < before_count:
+                logger.info(
+                    "Excluded %d players marked as out",
+                    before_count - len(merged),
+                )
 
     # Build player pool list
     pool: List[Dict[str, Any]] = []
@@ -606,9 +898,11 @@ def build_player_pool(
             used_fppm_fallback = False
             fppm = float(proj / model_minutes) if model_minutes and model_minutes > 0 else 1.0
         
-        if pd.isna(proj) or proj <= 0:
-            logger.debug("Player %s has no projection, skipping", player_id)
-            continue
+        if pd.isna(proj) or float(proj) <= 0:
+            if not allow_zero_projections:
+                logger.debug("Player %s has no projection, skipping", player_id)
+                continue
+            proj = 0.0
 
         dk_player_id = row.get(dk_player_id_col)
         dk_id = "" if dk_player_id is None or pd.isna(dk_player_id) else str(int(dk_player_id))
@@ -656,7 +950,17 @@ def build_player_pool(
             player["has_override"] = has_override
             player["used_fppm_fallback"] = used_fppm_fallback
             player["fppm"] = float(fppm) if pd.notna(fppm) else 1.0
-            player["is_active"] = True  # Already filtered out inactive players
+            player["override_minutes"] = (
+                float(row.get("override_minutes")) if pd.notna(row.get("override_minutes")) else None
+            )
+            player["override_fpts"] = (
+                float(row.get("override_fpts")) if pd.notna(row.get("override_fpts")) else None
+            )
+            player["override_own"] = (
+                float(row.get("override_own")) if pd.notna(row.get("override_own")) else None
+            )
+            player["is_out"] = bool(row.get("is_out", False))
+            player["is_active"] = bool(row.get("is_active", True))
 
         pool.append(player)
 
@@ -882,11 +1186,64 @@ def run_quick_build(
         try:
             data_root = get_data_root()
             worlds_root = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2"
-            worlds_candidates = [
-                worlds_root / f"game_date={job.game_date}",
-                worlds_root / f"date={job.game_date}",
-            ]
-            worlds_dir = next((p for p in worlds_candidates if p.exists()), None)
+            run_id = None
+            if isinstance(job.config, dict):
+                run_id = job.config.get("run_id")
+
+            def _resolve_worlds_dir(base_root: Path, game_date: str, run_id: str | None) -> Path | None:
+                import json
+
+                candidates = [
+                    base_root / f"game_date={game_date}",
+                    base_root / f"date={game_date}",
+                    base_root / game_date,
+                ]
+                for base in candidates:
+                    if not base.exists():
+                        continue
+                    if run_id:
+                        candidate = base / f"run={run_id}"
+                        if candidate.exists():
+                            return candidate
+
+                    pointer = base / "latest_run.json"
+                    if pointer.exists():
+                        try:
+                            payload = json.loads(pointer.read_text(encoding="utf-8"))
+                            latest = payload.get("run_id")
+                        except Exception:
+                            latest = None
+                        if latest:
+                            candidate = base / f"run={latest}"
+                            if candidate.exists():
+                                return candidate
+
+                    run_dirs = sorted(
+                        [p for p in base.iterdir() if p.is_dir() and p.name.startswith("run=")],
+                        reverse=True,
+                    )
+                    if run_dirs:
+                        if run_id:
+                            logger.warning(
+                                "sim_v2 worlds run_id=%s not found for %s; using %s",
+                                run_id,
+                                game_date,
+                                run_dirs[0].name,
+                            )
+                        return run_dirs[0]
+
+                    if base.is_dir():
+                        if run_id:
+                            logger.warning(
+                                "sim_v2 worlds run_id=%s not found for %s; using base dir %s",
+                                run_id,
+                                game_date,
+                                base,
+                            )
+                        return base
+                return None
+
+            worlds_dir = _resolve_worlds_dir(worlds_root, job.game_date, run_id)
             if worlds_dir is None:
                 raise FileNotFoundError(
                     f"sim_v2 worlds directory not found for {job.game_date} under {worlds_root}"
@@ -1177,3 +1534,81 @@ def delete_saved_build(game_date: str, job_id: str) -> bool:
         logger.info("Deleted build %s", build_file)
         return True
     return False
+
+
+def save_custom_build(
+    game_date: str,
+    draft_group_id: int,
+    site: str,
+    lineups: List[Dict[str, Any]],
+    name: str | None = None,
+) -> Dict[str, Any]:
+    """Save a custom/merged build to disk.
+    
+    Unlike save_build(), this doesn't require an OptimizerJob.
+    Used for merged builds created in the UI.
+    
+    Returns the saved build summary.
+    """
+    import json
+    
+    job_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    
+    builds_root = _builds_dir() / game_date
+    builds_root.mkdir(parents=True, exist_ok=True)
+    
+    build_file = builds_root / f"{job_id}.json"
+    
+    # Build config to indicate this is a merged build
+    config = {
+        "merged": True,
+        "name": name or f"Merged Build ({len(lineups)} lineups)",
+        "source_builds": [],  # Could be populated if we tracked source job IDs
+    }
+    
+    build_data = {
+        "job_id": job_id,
+        "game_date": game_date,
+        "draft_group_id": draft_group_id,
+        "site": site,
+        "created_at": now,
+        "completed_at": now,
+        "lineups_count": len(lineups),
+        "config": config,
+        "stats": {},
+        "lineups": [
+            {
+                "lineup_id": lu.get("lineup_id", i),
+                "player_ids": lu.get("player_ids", []),
+                **(
+                    {k: v for k, v in lu.items() if k not in ("lineup_id", "player_ids")}
+                ),
+            }
+            for i, lu in enumerate(lineups)
+        ],
+    }
+    
+    with open(build_file, "w") as f:
+        json.dump(build_data, f, indent=2)
+    
+    logger.info(
+        "Saved custom build %s to %s (%d lineups, name=%s)",
+        job_id,
+        build_file,
+        len(lineups),
+        name,
+    )
+    
+    # Return summary (without full lineups)
+    return {
+        "job_id": job_id,
+        "game_date": game_date,
+        "draft_group_id": draft_group_id,
+        "site": site,
+        "created_at": now,
+        "completed_at": now,
+        "lineups_count": len(lineups),
+        "config": config,
+        "stats": {},
+    }

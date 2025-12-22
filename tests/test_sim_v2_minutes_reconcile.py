@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from projections.sim_v2.minutes_noise import enforce_team_240_minutes
 
@@ -156,3 +157,66 @@ def test_enforce_team_240_rotation_cap_uses_baseline_minutes_for_selection() -> 
 
     # The fringe player should be dropped, even if their sampled minutes are high.
     assert out[-1] == 0.0
+
+
+def test_enforce_team_240_protected_core_preserves_heavy_sixth_man() -> None:
+    # Team is oversubscribed: without a protected core, non-starters are scaled down
+    # to fit "leftover after starters". With a protected core, the heavy 6th man
+    # should be protected and flex minutes should absorb more of the adjustment.
+    minutes = np.array(
+        [
+            # Starters
+            36.0,
+            34.0,
+            32.0,
+            30.0,
+            28.0,
+            # Bench (includes a heavy 6th man)
+            30.0,
+            18.0,
+            16.0,
+            14.0,
+            12.0,
+        ],
+        dtype=float,
+    )
+    # Sum = 250 (oversubscribed by 10 minutes).
+    minutes_world = minutes[None, :]
+    team_indices = np.zeros(minutes.size, dtype=int)
+    starter_mask = np.zeros(minutes.size, dtype=bool)
+    starter_mask[:5] = True
+    rotation_prob = np.array([0.98, 0.98, 0.98, 0.98, 0.98, 0.85, 0.60, 0.60, 0.60, 0.60], dtype=float)
+
+    out_legacy = enforce_team_240_minutes(
+        minutes_world=minutes_world,
+        team_indices=team_indices,
+        rotation_mask=minutes >= 12.0,
+        bench_mask=(minutes > 0.0) & (minutes < 12.0),
+        baseline_minutes=minutes,
+        clamp_scale=(0.7, 1.3),
+        starter_mask=starter_mask,
+        max_rotation_size=10,
+    )[0]
+
+    out_protected = enforce_team_240_minutes(
+        minutes_world=minutes_world,
+        team_indices=team_indices,
+        rotation_mask=minutes >= 12.0,
+        bench_mask=(minutes > 0.0) & (minutes < 12.0),
+        baseline_minutes=minutes,
+        clamp_scale=(0.7, 1.3),
+        starter_mask=starter_mask,
+        max_rotation_size=10,
+        rotation_prob=rotation_prob,
+        protected_rotation_size=6,
+    )[0]
+
+    # Both should hit the team constraint (allow tiny float error).
+    assert float(out_legacy.sum()) == pytest.approx(240.0, abs=1e-9)
+    assert float(out_protected.sum()) == pytest.approx(240.0, abs=1e-9)
+
+    # Starters remain unchanged in both modes for this case.
+    np.testing.assert_allclose(out_protected[:5], minutes[:5], rtol=0.0, atol=1e-6)
+
+    # The heavy 6th man should be less penalized when included in the protected core.
+    assert out_protected[5] > out_legacy[5]

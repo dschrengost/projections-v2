@@ -43,6 +43,25 @@ cd "${PROJECT_ROOT}"
 MINUTES_DST_PARTITIONED="${DATA_ROOT}/gold/projections_minutes_v1/game_date=${SLATE_DATE}"
 MINUTES_DST_PLAIN="${DATA_ROOT}/gold/projections_minutes_v1/${SLATE_DATE}"
 MINUTES_SRC="${DATA_ROOT}/artifacts/minutes_v1/daily/${SLATE_DATE}"
+MINUTES_LATEST_JSON="${MINUTES_SRC}/latest_run.json"
+SIM_RUN_ID="${SIM_RUN_ID:-}"
+SIM_RUN_AS_OF_TS=""
+
+if [[ -z "${SIM_RUN_ID}" ]] && [[ -f "${MINUTES_LATEST_JSON}" ]]; then
+    SIM_RUN_ID=$(jq -r '.run_id // empty' "${MINUTES_LATEST_JSON}" 2>/dev/null || true)
+    SIM_RUN_AS_OF_TS=$(jq -r '.run_as_of_ts // empty' "${MINUTES_LATEST_JSON}" 2>/dev/null || true)
+fi
+
+if [[ -z "${SIM_RUN_ID}" ]] && [[ -d "${MINUTES_SRC}" ]]; then
+    LATEST_RUN=$(ls -1t "${MINUTES_SRC}" 2>/dev/null | grep "^run=" | head -1 || true)
+    if [[ -n "${LATEST_RUN}" ]]; then
+        SIM_RUN_ID="${LATEST_RUN#run=}"
+    fi
+fi
+
+if [[ -z "${SIM_RUN_ID}" ]]; then
+    SIM_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+fi
 
 # Check if minutes already exist in either expected location
 if [[ -f "${MINUTES_DST_PARTITIONED}/minutes.parquet" ]]; then
@@ -54,13 +73,12 @@ elif [[ -f "${MINUTES_DST_PLAIN}/minutes.parquet" ]]; then
 elif [[ -d "${MINUTES_SRC}" ]]; then
     echo "[sim] Copying minutes from artifacts to gold..."
     # Find the latest run directory
-    LATEST_RUN=$(ls -1t "${MINUTES_SRC}" 2>/dev/null | grep "^run=" | head -1 || true)
-    if [[ -n "${LATEST_RUN}" ]] && [[ -f "${MINUTES_SRC}/${LATEST_RUN}/minutes.parquet" ]]; then
+    if [[ -f "${MINUTES_SRC}/run=${SIM_RUN_ID}/minutes.parquet" ]]; then
         mkdir -p "${MINUTES_DST_PARTITIONED}"
-        cp "${MINUTES_SRC}/${LATEST_RUN}/minutes.parquet" "${MINUTES_DST_PARTITIONED}/"
-        echo "[sim] Copied minutes from ${MINUTES_SRC}/${LATEST_RUN}"
+        cp "${MINUTES_SRC}/run=${SIM_RUN_ID}/minutes.parquet" "${MINUTES_DST_PARTITIONED}/"
+        echo "[sim] Copied minutes from ${MINUTES_SRC}/run=${SIM_RUN_ID}"
     else
-        echo "[sim] ERROR: No minutes.parquet found in ${MINUTES_SRC}" >&2
+        echo "[sim] ERROR: No minutes.parquet found in ${MINUTES_SRC}/run=${SIM_RUN_ID}" >&2
         exit 1
     fi
 else
@@ -84,6 +102,8 @@ echo "[sim] Running simulation..."
     --run-date "${SLATE_DATE}" \
     --profile "${PROFILE}" \
     --num-worlds "${NUM_WORLDS}" \
-    --data-root "${DATA_ROOT}"
+    --data-root "${DATA_ROOT}" \
+    --run-id "${SIM_RUN_ID}" \
+    ${SIM_RUN_AS_OF_TS:+--run-as-of-ts "${SIM_RUN_AS_OF_TS}"}
 
 echo "[sim] Completed live simulation for ${SLATE_DATE}"

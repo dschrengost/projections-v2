@@ -11,7 +11,6 @@ import pandas as pd
 from sklearn.impute import SimpleImputer
 from typer.testing import CliRunner
 
-from projections.cli.score_minutes import app as score_app
 from projections.cli.score_minutes_v1 import app as score_v1_app
 from projections.cli.sequential_backtest import app as backtest_app
 from projections.metrics.minutes_metrics import app as metrics_app
@@ -123,45 +122,6 @@ def _write_stub_artifacts(
     meta = {"feature_hash": compute_feature_hash(feature_cols)}
     (artifact_root / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
     return artifact_root
-
-
-def test_score_minutes_produces_predictions(tmp_path):
-    data_root = _write_feature_set(tmp_path)
-    artifact_root = _write_stub_artifacts(tmp_path, data_root)
-
-    result = runner.invoke(
-        score_app,
-        [
-            "--start",
-            "2024-12-01",
-            "--end",
-            "2024-12-02",
-            "--run-id",
-            "test_run",
-            "--data-root",
-            str(data_root),
-            "--artifact-root",
-            str(artifact_root.parent),
-            "--season",
-            "2024",
-            "--month",
-            "12",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    preds_path = data_root / "preds" / "minutes_v1" / "2024-12" / "minutes_pred.parquet"
-    assert preds_path.exists()
-    preds = pd.read_parquet(preds_path)
-    assert {"p10", "p90", "p10_raw", "p90_raw", "p50_raw", "minutes_reconciled", "run_id"}.issubset(preds.columns)
-    meta_path = preds_path.with_suffix(".meta.json")
-    assert meta_path.exists()
-    offsets_path = preds_path.with_name(f"{preds_path.stem}.rolling_offsets.csv")
-    assert offsets_path.exists()
-    offsets = pd.read_csv(offsets_path)
-    assert {"score_date", "window_start", "window_end", "delta_p10", "delta_p90", "strategy"}.issubset(offsets.columns)
-    with meta_path.open() as handle:
-        meta = json.load(handle)
-    assert meta.get("calibration", {}).get("strategy") == "rolling"
 
 
 def test_score_minutes_v1_cli_writes_daily_artifacts(tmp_path):

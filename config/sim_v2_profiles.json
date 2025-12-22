@@ -31,8 +31,9 @@
       "rates_sigma_scale": 1.0,
       "worlds_per_chunk": 2000,
       "seed": 12345,
-      "min_play_prob": 0.05,
-      "team_factor_sigma": 0.0,
+      "min_play_prob": 0.0,
+      "use_play_prob_masking": false,
+      "team_factor_sigma": 0.08,
       "team_factor_gamma": 1.0,
       "enforce_team_240": true,
       "vegas_anchoring": {
@@ -41,7 +42,7 @@
       },
       "efficiency_scoring": true,
       "game_script": {
-        "enabled": true,
+        "enabled": false,
         "margin_std": 13.4,
         "spread_coef": -0.726,
         "quantile_targets": {
@@ -68,6 +69,10 @@
         },
         "rotation_p50_threshold": 20.0
       },
+      "rotation": {
+        "max_size": 8,
+        "protected_size": 6
+      },
       "usage_shares": {
         "enabled": false,
         "targets": [
@@ -90,6 +95,10 @@
       "rates_run_id": null,
       "minutes_run_id": null,
       "fpts_run_id": null,
+      "rotation": {
+        "max_size": 8,
+        "protected_size": 6
+      },
       "worlds": {
         "n_worlds": 25000,
         "batch_size": 5000
@@ -114,8 +123,9 @@
       "rates_sigma_scale": 1.0,
       "worlds_per_chunk": 2000,
       "seed": 12345,
-      "min_play_prob": 0.05,
-      "team_factor_sigma": 0.0,
+      "min_play_prob": 0.0,
+      "use_play_prob_masking": false,
+      "team_factor_sigma": 0.08,
       "team_factor_gamma": 1.0,
       "enforce_team_240": true,
       "vegas_anchoring": {
@@ -124,7 +134,7 @@
       },
       "efficiency_scoring": true,
       "game_script": {
-        "enabled": true,
+        "enabled": false,
         "margin_std": 13.4,
         "spread_coef": -0.726,
         "quantile_targets": {

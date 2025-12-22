@@ -437,6 +437,8 @@ def enforce_team_240_minutes(
     starter_mask: np.ndarray | None = None,
     max_rotation_size: int | None = None,
     play_prob: np.ndarray | None = None,
+    rotation_prob: np.ndarray | None = None,
+    protected_rotation_size: int | None = None,
 ) -> np.ndarray:
     """
     Rescale rotation players per team per world so totals approach 240 minutes.
@@ -458,6 +460,13 @@ def enforce_team_240_minutes(
     max_rotation_size: Optional hard cap on the number of players that can
                        receive minutes per team per world. When set, players
                        outside the capped rotation are zeroed out before scaling.
+    rotation_prob: Optional per-player probability of being in the rotation
+                   given active (heuristic). When provided and
+                   protected_rotation_size is set, used to protect a core set
+                   of players (including heavy 6th men) from absorbing all
+                   oversubscription adjustments.
+    protected_rotation_size: Optional size of the "protected core" within each
+                             team/world when max_rotation_size is enabled.
     """
 
     if minutes_world.size == 0:
@@ -500,6 +509,9 @@ def enforce_team_240_minutes(
             baseline_local = None
             if baseline_minutes is not None:
                 baseline_local = np.asarray(baseline_minutes, dtype=float)[team_players]
+            rotation_prob_local = None
+            if rotation_prob is not None:
+                rotation_prob_local = np.asarray(rotation_prob, dtype=float)[team_players]
             for w in range(n_worlds):
                 if full_active:
                     active_local = np.ones(team_players.size, dtype=bool)
@@ -518,13 +530,39 @@ def enforce_team_240_minutes(
                     out[w, team_players] = 0.0
                     continue
 
-                starter_keep = candidate_local & starter_local
-                keep_local = starter_keep.copy()
-                starter_count = int(starter_keep.sum())
-                slots_left = max_rotation_size - starter_count
+                # Determine a protected core for oversubscription handling.
+                # Default (backward-compatible): protect starters only.
+                protected_local = candidate_local & starter_local
+
+                if protected_rotation_size is not None and protected_rotation_size > 0:
+                    # Protect the top-N by a composite rigidity score:
+                    # - baseline (or desired) minutes drives most of the score
+                    # - rotation_prob (if present) boosts likely-rotation players
+                    # Always include starters as protected.
+                    base_score = baseline_local if baseline_local is not None else desired
+                    score = np.asarray(base_score, dtype=float).copy()
+                    score = np.where(candidate_local, score, -np.inf)
+
+                    if rotation_prob_local is not None:
+                        rp = np.clip(rotation_prob_local, 0.0, 1.0)
+                        score = score * (0.5 + rp)
+
+                    # Big boost for starters to ensure they are always protected and retained.
+                    score = np.where(starter_local, score + 1e6, score)
+
+                    order = np.argsort(-score, kind="mergesort")
+                    take_n = min(int(protected_rotation_size), int(candidate_local.sum()))
+                    protect_idxs = order[:take_n]
+                    protected_local = np.zeros_like(candidate_local, dtype=bool)
+                    protected_local[protect_idxs] = True
+                    protected_local |= candidate_local & starter_local
+
+                keep_local = protected_local.copy()
+                protected_count = int(keep_local.sum())
+                slots_left = max_rotation_size - protected_count
                 if slots_left > 0:
-                    nonstarter_candidates = np.flatnonzero(candidate_local & ~starter_local)
-                    if nonstarter_candidates.size:
+                    remaining_candidates = np.flatnonzero(candidate_local & ~keep_local)
+                    if remaining_candidates.size:
                         scores = (
                             baseline_local
                             if baseline_local is not None
@@ -535,7 +573,7 @@ def enforce_team_240_minutes(
                         if play_prob is not None:
                             play_prob_local = np.asarray(play_prob, dtype=float)[team_players]
                             scores = scores + 0.001 * play_prob_local
-                        order = nonstarter_candidates[np.argsort(-scores[nonstarter_candidates], kind="mergesort")]
+                        order = remaining_candidates[np.argsort(-scores[remaining_candidates], kind="mergesort")]
                         if baseline_local is None:
                             keep_local[order[:slots_left]] = True
                         else:
@@ -560,26 +598,39 @@ def enforce_team_240_minutes(
                 if not kept.any():
                     continue
 
-                starter_kept = kept & starter_local
-                bench_kept = kept & ~starter_local
-                sum_starters = float(desired[starter_kept].sum())
-                sum_bench = float(desired[bench_kept].sum())
-                sum_total = sum_starters + sum_bench
+                # Oversubscription handling:
+                # - If protected_rotation_size is set: keep protected_local fixed and scale the rest.
+                # - Else: keep starters fixed and scale non-starters (legacy behavior).
+                use_protected_core = protected_rotation_size is not None and protected_rotation_size > 0
+                if use_protected_core:
+                    prot_kept = kept & protected_local
+                    flex_kept = kept & ~protected_local
+                    sum_prot = float(desired[prot_kept].sum())
+                    sum_flex = float(desired[flex_kept].sum())
+                    sum_total = sum_prot + sum_flex
+                    prot_group = prot_kept
+                else:
+                    starter_kept = kept & starter_local
+                    flex_kept = kept & ~starter_local
+                    sum_prot = float(desired[starter_kept].sum())
+                    sum_flex = float(desired[flex_kept].sum())
+                    sum_total = sum_prot + sum_flex
+                    prot_group = starter_kept
                 if sum_total <= 1e-6:
                     continue
 
                 if sum_total >= 240.0:
-                    if sum_bench > 1e-6 and sum_starters < 240.0:
-                        bench_scale = (240.0 - sum_starters) / sum_bench
-                        bench_scale = max(0.0, float(bench_scale))
-                        out[w, team_players[bench_kept]] = desired[bench_kept] * bench_scale
-                        # Starters unchanged when oversubscribed.
+                    if sum_flex > 1e-6 and sum_prot < 240.0:
+                        flex_scale = (240.0 - sum_prot) / sum_flex
+                        flex_scale = max(0.0, float(flex_scale))
+                        out[w, team_players[flex_kept]] = desired[flex_kept] * flex_scale
+                        # Protected players unchanged when oversubscribed.
                     else:
-                        # No bench to shrink (or starters already exceed 240): scale starters down.
-                        starter_scale = 240.0 / max(sum_starters, 1e-6)
-                        starter_scale = float(np.clip(starter_scale, clamp_scale[0], 1.0))
-                        out[w, team_players[starter_kept]] = desired[starter_kept] * starter_scale
-                        out[w, team_players[bench_kept]] = 0.0
+                        # No flex to shrink (or protected already exceed 240): scale protected down.
+                        prot_scale = 240.0 / max(sum_prot, 1e-6)
+                        prot_scale = float(np.clip(prot_scale, clamp_scale[0], 1.0))
+                        out[w, team_players[prot_group]] = desired[prot_group] * prot_scale
+                        out[w, team_players[flex_kept]] = 0.0
                 else:
                     scale = 240.0 / sum_total
                     scale = float(np.clip(scale, 1.0, clamp_scale[1]))

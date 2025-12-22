@@ -23,10 +23,10 @@ from projections.api.contest_sim_api import router as contest_sim_router
 from projections.api.entry_manager_api import router as entry_manager_router
 from projections.api.diagnostics_api import router as diagnostics_router
 
-DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
+DEFAULT_DAILY_ROOT = paths.data_path("artifacts", "minutes_v1", "daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
 DEFAULT_FPTS_ROOT = paths.data_path("gold", "projections_fpts_v1")
-DEFAULT_SIM_ROOT = paths.data_path("artifacts", "sim_v2", "projections")
+DEFAULT_SIM_ROOT = paths.data_path("artifacts", "sim_v2", "worlds_fpts_v2")
 LATEST_POINTER = "latest_run.json"
 PARQUET_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
@@ -253,9 +253,41 @@ def _resolve_sim_run_dir(base_dir: Path) -> Path | None:
     return base_dir if (base_dir / SIM_PROJECTIONS_FILENAME).exists() else None
 
 
-def _load_ownership_predictions(day: date, data_root: Path) -> pd.DataFrame | None:
+def _resolve_ownership_run_dir(base_dir: Path, run_id: str | None) -> Path | None:
+    if run_id:
+        candidate = base_dir / f"run={run_id}"
+        return candidate if candidate.exists() else None
+
+    pointer = base_dir / LATEST_POINTER
+    if pointer.exists():
+        try:
+            payload = json.loads(pointer.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
+        latest = payload.get("run_id")
+        if latest:
+            candidate = base_dir / f"run={latest}"
+            if candidate.exists():
+                return candidate
+    if base_dir.exists():
+        run_dirs = sorted(
+            [path for path in base_dir.iterdir() if path.is_dir() and path.name.startswith("run=")],
+            reverse=True,
+        )
+        if run_dirs:
+            return run_dirs[0]
+    return None
+
+
+def _load_ownership_predictions(
+    day: date,
+    data_root: Path,
+    *,
+    run_id: str | None = None,
+) -> pd.DataFrame | None:
     """Load ownership predictions for a date, returning the main slate."""
-    slate_dir = data_root / "silver" / "ownership_predictions" / str(day)
+    base_dir = data_root / "silver" / "ownership_predictions" / str(day)
+    slate_dir = _resolve_ownership_run_dir(base_dir, run_id) or base_dir
 
     if slate_dir.exists():
         slate_files = list(slate_dir.glob("*.parquet"))
@@ -268,6 +300,9 @@ def _load_ownership_predictions(day: date, data_root: Path) -> pd.DataFrame | No
             except Exception:
                 pass
 
+    if run_id is not None:
+        return None
+
     # Fall back to legacy single-file format
     legacy_path = data_root / "silver" / "ownership_predictions" / f"{day}.parquet"
     if legacy_path.exists():
@@ -279,7 +314,7 @@ def _load_ownership_predictions(day: date, data_root: Path) -> pd.DataFrame | No
     return None
 
 
-def _load_sim_projections(day: date, root: Path) -> pd.DataFrame | None:
+def _load_sim_projections(day: date, root: Path, *, minutes_run_id: str | None = None) -> pd.DataFrame | None:
     candidates = [
         root / f"game_date={day.isoformat()}",  # New format (run_sim_live.py)
         root / f"date={day.isoformat()}",       # Legacy format
@@ -293,22 +328,50 @@ def _load_sim_projections(day: date, root: Path) -> pd.DataFrame | None:
                 return pd.read_parquet(base)
             except Exception:
                 continue
+        if minutes_run_id and base.is_dir():
+            run_dir = base / f"run={minutes_run_id}"
+            if run_dir.exists():
+                candidates = [run_dir / "projections.parquet", run_dir / SIM_PROJECTIONS_FILENAME]
+                for candidate_path in candidates:
+                    if not candidate_path.exists():
+                        continue
+                    try:
+                        df = pd.read_parquet(candidate_path)
+                        return df
+                    except Exception:
+                        continue
         # Check for projections.parquet directly (new format from run_sim_live.py)
         direct_path = base / "projections.parquet"
         if direct_path.exists():
             try:
-                return pd.read_parquet(direct_path)
+                df = pd.read_parquet(direct_path)
+                if minutes_run_id:
+                    if "minutes_run_id" not in df.columns:
+                        continue
+                    df = df.loc[df["minutes_run_id"].astype(str) == str(minutes_run_id)].copy()
+                    if df.empty:
+                        continue
+                return df
             except Exception:
                 pass
         # Check for run dirs with sim_v2_projections.parquet (legacy aggregator)
         run_dir = _resolve_sim_run_dir(base) if base.is_dir() else None
         if run_dir:
-            candidate_path = (
-                run_dir if run_dir.is_file() and run_dir.suffix == ".parquet" else run_dir / SIM_PROJECTIONS_FILENAME
-            )
-            if candidate_path.exists():
+            candidates = []
+            if run_dir.is_file() and run_dir.suffix == ".parquet":
+                candidates.append(run_dir)
+            else:
+                candidates.extend([run_dir / "projections.parquet", run_dir / SIM_PROJECTIONS_FILENAME])
+            for candidate_path in candidates:
+                if not candidate_path.exists():
+                    continue
                 try:
-                    return pd.read_parquet(candidate_path)
+                    df = pd.read_parquet(candidate_path)
+                    if minutes_run_id and "minutes_run_id" in df.columns:
+                        df = df.loc[df["minutes_run_id"].astype(str) == str(minutes_run_id)].copy()
+                        if df.empty:
+                            continue
+                    return df
                 except Exception:
                     continue
     return None
@@ -332,8 +395,12 @@ def _sim_projections_available(day: date, root: Path) -> bool:
             run_dir = _resolve_sim_run_dir(base)
             if run_dir is None:
                 continue
-            candidate = run_dir if run_dir.is_file() else run_dir / SIM_PROJECTIONS_FILENAME
-            if candidate.exists():
+            candidates = []
+            if run_dir.is_file() and run_dir.suffix == ".parquet":
+                candidates.append(run_dir)
+            else:
+                candidates.extend([run_dir / "projections.parquet", run_dir / SIM_PROJECTIONS_FILENAME])
+            if any(candidate.exists() for candidate in candidates):
                 return True
     return False
 
@@ -385,11 +452,12 @@ def create_app(
     @app.get("/api/minutes")
     def get_minutes(date: str | None = None, run_id: str | None = None) -> JSONResponse:
         slate_day = _parse_date(date)
-        
-        # Try unified projections artifact first (contains minutes, sim, ownership)
+
+        # Source of truth: unified projections artifact (minutes + sim + ownership).
+        # `run_id` is interpreted as projections_run_id when loading unified projections.
         data_root = paths.data_path()
         unified_df = _load_unified_projections(slate_day, run_id, data_root)
-        
+
         if unified_df is not None and not unified_df.empty:
             # Rename sim columns to match expected dashboard format
             has_sim_minutes = any(
@@ -418,8 +486,8 @@ def create_app(
             players = _serialize_players(unified_df)
             payload = {"date": slate_day.isoformat(), "count": len(players), "players": players}
             return JSONResponse(payload)
-        
-        # Fall back to legacy loading (minutes + fpts + sim joins)
+
+        # Fall back to legacy loading (minutes + fpts + sim joins).
         day_dir = minutes_root / slate_day.isoformat()
         run_dir = _resolve_run_dir(day_dir, run_id)
         df = _load_minutes(run_dir)
@@ -441,7 +509,11 @@ def create_app(
                     on=["game_id", "player_id"],
                     how="left",
                 )
-        sim_df = _load_sim_projections(slate_day, sim_root)
+        sim_df = _load_sim_projections(
+            slate_day,
+            sim_root,
+            minutes_run_id=_extract_run_name(run_dir),
+        )
         if sim_df is not None:
             join_keys = ["game_date", "game_id", "team_id", "player_id"]
             missing_keys = [key for key in join_keys if key not in df.columns or key not in sim_df.columns]
@@ -474,7 +546,7 @@ def create_app(
 
         # Merge ownership predictions (includes salary)
         # Note: ownership uses DK player_ids, minutes uses NBA player_ids, so join on normalized name+team
-        own_df = _load_ownership_predictions(slate_day, data_root)
+        own_df = _load_ownership_predictions(slate_day, data_root, run_id=_extract_run_name(run_dir))
         if own_df is not None and "player_name" in own_df.columns and "player_name" in df.columns:
             import unicodedata
             def _norm_name(s: str) -> str:
@@ -575,7 +647,11 @@ def create_app(
         return JSONResponse(payload)
 
     @app.get("/api/ownership")
-    def get_ownership(date: str | None = None, draft_group_id: str | None = None) -> JSONResponse:
+    def get_ownership(
+        date: str | None = None,
+        draft_group_id: str | None = None,
+        run_id: str | None = None,
+    ) -> JSONResponse:
         """Return ownership predictions for a date.
         
         If draft_group_id specified, returns that slate's predictions.
@@ -585,7 +661,11 @@ def create_app(
         data_root = paths.data_path()
         
         # Check for per-slate structure first (new format)
-        slate_dir = data_root / "silver" / "ownership_predictions" / str(slate_day)
+        base_dir = data_root / "silver" / "ownership_predictions" / str(slate_day)
+        run_dir = _resolve_ownership_run_dir(base_dir, run_id) if base_dir.exists() else None
+        if run_id is not None and run_dir is None:
+            raise HTTPException(status_code=404, detail=f"No ownership predictions for run {run_id}")
+        slate_dir = run_dir or base_dir
         
         if slate_dir.exists():
             # New per-slate format
@@ -593,17 +673,25 @@ def create_app(
             slate_files = [f for f in slate_files if not f.name.endswith("_locked.parquet")]
             
             if not slate_files:
-                raise HTTPException(status_code=404, detail=f"No ownership predictions for {slate_day}")
+                if run_dir is not None:
+                    raise HTTPException(status_code=404, detail=f"No ownership predictions for {slate_day}")
+                slate_files = []
             
-            if draft_group_id:
-                # Use specified slate
-                own_path = slate_dir / f"{draft_group_id}.parquet"
-                if not own_path.exists():
-                    raise HTTPException(status_code=404, detail=f"No predictions for slate {draft_group_id}")
+            if slate_files:
+                if draft_group_id:
+                    # Use specified slate
+                    own_path = slate_dir / f"{draft_group_id}.parquet"
+                    if not own_path.exists():
+                        raise HTTPException(status_code=404, detail=f"No predictions for slate {draft_group_id}")
+                else:
+                    # Find main slate (largest by file size as proxy for player count)
+                    own_path = max(slate_files, key=lambda f: f.stat().st_size)
             else:
-                # Find main slate (largest by file size as proxy for player count)
-                own_path = max(slate_files, key=lambda f: f.stat().st_size)
+                own_path = None
         else:
+            own_path = None
+
+        if own_path is None:
             # Fall back to legacy single-file format
             own_path = data_root / "silver" / "ownership_predictions" / f"{slate_day}.parquet"
             if not own_path.exists():
@@ -626,19 +714,20 @@ def create_app(
             "draft_group_id": df["draft_group_id"].iloc[0] if "draft_group_id" in df.columns else None,
             "count": len(players),
             "players": players,
+            "run_id": _extract_run_name(run_dir) if run_dir else None,
         }
         return JSONResponse(jsonable_encoder(payload))
 
     @app.get("/api/ownership/slates")
-    def list_ownership_slates(date: str | None = None) -> JSONResponse:
+    def list_ownership_slates(date: str | None = None, run_id: str | None = None) -> JSONResponse:
         """List available slates for a date with lock status."""
         import json
         
         slate_day = _parse_date(date)
         data_root = paths.data_path()
-        slate_dir = data_root / "silver" / "ownership_predictions" / str(slate_day)
+        base_dir = data_root / "silver" / "ownership_predictions" / str(slate_day)
         
-        if not slate_dir.exists():
+        if not base_dir.exists():
             # Check for legacy format
             legacy_path = data_root / "silver" / "ownership_predictions" / f"{slate_day}.parquet"
             if legacy_path.exists():
@@ -653,11 +742,23 @@ def create_app(
                     }]
                 })
             raise HTTPException(status_code=404, detail=f"No ownership predictions for {slate_day}")
+
+        run_dir = _resolve_ownership_run_dir(base_dir, run_id)
+        if run_id is not None and run_dir is None:
+            raise HTTPException(status_code=404, detail=f"No ownership predictions for run {run_id}")
+        slate_dir = run_dir or base_dir
         
         # Try to load slates.json metadata
         meta_path = slate_dir / "slates.json"
         if meta_path.exists():
             with open(meta_path) as f:
+                slates_meta = json.load(f)
+            slates = [
+                {"draft_group_id": dg_id, **info}
+                for dg_id, info in slates_meta.items()
+            ]
+        elif run_dir is not None and (base_dir / "slates.json").exists():
+            with open(base_dir / "slates.json") as f:
                 slates_meta = json.load(f)
             slates = [
                 {"draft_group_id": dg_id, **info}
@@ -683,6 +784,7 @@ def create_app(
         return JSONResponse({
             "date": slate_day.isoformat(),
             "slates": slates,
+            "run_id": _extract_run_name(run_dir) if run_dir else None,
         })
 
     @app.post("/api/trigger")

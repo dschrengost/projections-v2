@@ -112,10 +112,13 @@ def _build_injuries_raw(
         )
         player_id = player_resolver.resolve(row.get("player_name"))
         team_id = resolver.resolve_team_id(row.get("team"))
+        # Use ingested_ts (actual scrape time) for as_of_ts instead of report_time.
+        # report_time is aligned to :30 report slots which can be in the future,
+        # causing the scoring pipeline to filter out all injury data.
         data.append(
             {
                 "report_date": report_day,
-                "as_of_ts": report_time,
+                "as_of_ts": ingested_ts,  # Use scrape time, not aligned report slot
                 "team_id": team_id,
                 "player_name": row.get("player_name"),
                 "player_id": player_id,

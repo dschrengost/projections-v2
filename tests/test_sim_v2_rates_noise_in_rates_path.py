@@ -131,7 +131,7 @@ def test_rates_noise_applies_in_rates_mean_source(tmp_path: Path) -> None:
         data_root=tmp_path,
         profiles_path=profiles_path,
         output_root=output_root,
-        fpts_run_id=None,
+        sim_run_id=None,
         use_rates_noise=None,
         rates_noise_split=None,
         team_sigma_scale=None,
@@ -153,4 +153,3 @@ def test_rates_noise_applies_in_rates_mean_source(tmp_path: Path) -> None:
     assert "dk_fpts_std" in df.columns
     # If rates_noise isn't applied, k_default=0 would produce zero variance.
     assert (df["dk_fpts_std"] > 0).any()
-

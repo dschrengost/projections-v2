@@ -5,10 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from projections.fpts_v2.current import _load_current_run_id as load_current_fpts_run_id
-from projections.minutes_v1.production import resolve_production_run_dir
 from projections.paths import get_project_root
-from projections.rates_v1.current import get_rates_current_run_id
 
 
 DEFAULT_PROFILES_PATH = get_project_root() / "config" / "sim_v2_profiles.json"
@@ -32,7 +29,6 @@ class UsageSharesConfig:
 @dataclass
 class SimV2Profile:
     name: str
-    fpts_run_id: str
     rates_run_id: Optional[str]
     minutes_run_id: Optional[str]
     use_rates_noise: bool
@@ -50,7 +46,7 @@ class SimV2Profile:
     rates_sigma_scale: float = 1.0
     team_sigma_scale: float = 1.0
     player_sigma_scale: float = 1.0
-    mean_source: str = "fpts"
+    mean_source: str = "rates"
     minutes_source: Optional[str] = None
     rates_source: Optional[str] = None
     noise: dict[str, Any] = field(default_factory=dict)
@@ -69,10 +65,13 @@ class SimV2Profile:
     # Rotation handling
     rotation_minutes_floor: float = 0.0  # Prune players with < floor minutes
     max_rotation_size: int | None = None  # None = legacy (10), 0 = disabled
+    protected_rotation_size: int | None = None  # Optional protected core size within rotation cap
     # Usage shares allocation (stochastic within-team opportunity distribution)
     usage_shares: UsageSharesConfig = field(default_factory=UsageSharesConfig)
     # Vacancy feature mode: "none" = set to 0, "game" = compute from play_prob
     vacancy_mode: str = "game"  # "none" | "game"
+    # Whether to sample active mask from play_prob (True = Bernoulli sampling, False = all active)
+    use_play_prob_masking: bool = True
 
 
 def _read_json(path: Path) -> dict:
@@ -84,9 +83,10 @@ def _read_json(path: Path) -> dict:
 
 def _resolve_minutes_run_id(explicit: Optional[str]) -> Optional[str]:
     if explicit:
-        return explicit
-    _, run_id = resolve_production_run_dir()
-    return str(run_id) if run_id else None
+        return str(explicit)
+    # Default to latest minutes artifacts for the target date; do not auto-resolve to a
+    # model/bundle run id here (that is handled separately for minutes noise params).
+    return None
 
 
 def load_sim_v2_profile(
@@ -103,17 +103,11 @@ def load_sim_v2_profile(
     if config is None:
         raise KeyError(f"Profile '{profile}' not found in {path}")
 
-    mean_source = str(config.get("mean_source", "fpts"))
-    # Only resolve fpts_run_id if mean_source is "fpts" - rates mode doesn't need it
-    if mean_source == "fpts":
-        fpts_run_id = config.get("fpts_run_id") or load_current_fpts_run_id()
-    else:
-        fpts_run_id = config.get("fpts_run_id") or "unused"  # Placeholder - not used for rates mode
+    mean_source = str(config.get("mean_source", "rates"))
+    if mean_source != "rates":
+        raise ValueError(f"Unsupported sim_v2 mean_source={mean_source!r}; rates-only path is supported.")
     # For rates mean_source, don't auto-resolve rates_run_id - it's determined per-date from rates_v1_live
-    if mean_source == "rates":
-        rates_run_id = config.get("rates_run_id")  # Keep as None if not specified
-    else:
-        rates_run_id = config.get("rates_run_id") or get_rates_current_run_id()
+    rates_run_id = config.get("rates_run_id")  # Keep as None if not specified
     minutes_run_id = _resolve_minutes_run_id(config.get("minutes_run_id"))
 
     use_rates_noise = bool(config.get("rates_noise", {}).get("enabled", True))
@@ -150,10 +144,16 @@ def load_sim_v2_profile(
     rotation_cfg = config.get("rotation", {}) or {}
     rotation_minutes_floor = float(rotation_cfg.get("minutes_floor", 0.0))
     max_rotation_size_raw = rotation_cfg.get("max_size")
+    protected_rotation_size_raw = rotation_cfg.get("protected_size")
     if max_rotation_size_raw is not None:
         max_rotation_size = int(max_rotation_size_raw) if max_rotation_size_raw else None
     else:
         max_rotation_size = None  # Will use legacy default (10) in sim code
+
+    if protected_rotation_size_raw is not None:
+        protected_rotation_size = int(protected_rotation_size_raw) if protected_rotation_size_raw else None
+    else:
+        protected_rotation_size = None
 
     # Usage shares config
     usage_shares_cfg = config.get("usage_shares", {}) or {}
@@ -177,6 +177,9 @@ def load_sim_v2_profile(
     if vacancy_mode not in ("none", "game"):
         raise ValueError(f"Invalid vacancy_mode: {vacancy_mode}. Must be 'none' or 'game'.")
 
+    # Play prob masking config (defaults to True for backward compat)
+    use_play_prob_masking = bool(config.get("use_play_prob_masking", True))
+
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
     use_game_scripts = bool(game_script_cfg.get("enabled", False))
@@ -196,7 +199,6 @@ def load_sim_v2_profile(
 
     return SimV2Profile(
         name=profile,
-        fpts_run_id=str(fpts_run_id),
         rates_run_id=str(rates_run_id) if rates_run_id is not None else None,
         minutes_run_id=minutes_run_id,
         use_rates_noise=use_rates_noise,
@@ -230,8 +232,10 @@ def load_sim_v2_profile(
         vegas_points_drift_pct=vegas_points_drift_pct,
         rotation_minutes_floor=rotation_minutes_floor,
         max_rotation_size=max_rotation_size,
+        protected_rotation_size=protected_rotation_size,
         usage_shares=usage_shares,
         vacancy_mode=vacancy_mode,
+        use_play_prob_masking=use_play_prob_masking,
     )
 
 

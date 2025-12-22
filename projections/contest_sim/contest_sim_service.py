@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 def load_worlds_matrix(
     game_date: str,
     data_root: Path | None = None,
+    run_id: str | None = None,
     n_synthetic_worlds: int = 10000,
     seed: int = 42,
 ) -> Tuple[np.ndarray, Dict[str, int]]:
@@ -65,10 +66,39 @@ def load_worlds_matrix(
     if data_root is None:
         data_root = data_path()
 
-    worlds_dir = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2" / f"game_date={game_date}"
+    base_dir = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2" / f"game_date={game_date}"
+    if not base_dir.exists():
+        raise FileNotFoundError(f"No worlds data for {game_date} at {base_dir}")
 
-    if not worlds_dir.exists():
-        raise FileNotFoundError(f"No worlds data for {game_date} at {worlds_dir}")
+    def _resolve_worlds_dir(root_dir: Path, run_id: str | None) -> Path:
+        import json
+
+        if run_id:
+            candidate = root_dir / f"run={run_id}"
+            if candidate.exists():
+                return candidate
+
+        pointer = root_dir / "latest_run.json"
+        if pointer.exists():
+            try:
+                payload = json.loads(pointer.read_text(encoding="utf-8"))
+                latest = payload.get("run_id")
+            except Exception:
+                latest = None
+            if latest:
+                candidate = root_dir / f"run={latest}"
+                if candidate.exists():
+                    return candidate
+
+        run_dirs = sorted(
+            [p for p in root_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
+            reverse=True,
+        )
+        if run_dirs:
+            return run_dirs[0]
+        return root_dir
+
+    worlds_dir = _resolve_worlds_dir(base_dir, run_id)
 
     # Try consolidated matrix first
     matrix_path = worlds_dir / "worlds_matrix.parquet"

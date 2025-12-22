@@ -641,15 +641,6 @@ def _filter_snapshot_by_asof(
     working["game_id"] = pd.to_numeric(working["game_id"], errors="coerce").astype("Int64")
     working[time_col] = pd.to_datetime(working[time_col], utc=True, errors="coerce")
 
-    # For roster, keep the latest snapshot per player/game (no gating); as-of gating is handled downstream via feature_as_of_ts.
-    if dataset_name == "roster_nightly":
-        latest = (
-            working.sort_values(time_col)
-            .groupby(["game_id", "player_id"], as_index=False)
-            .tail(1)
-        )
-        return latest
-
     # Backfill mode: skip timestamp filtering entirely, just use latest snapshot per game/player
     if backfill_mode:
         group_cols = ["game_id", "player_id"] if "player_id" in working.columns else ["game_id"]
@@ -659,6 +650,25 @@ def _filter_snapshot_by_asof(
             .tail(1)
         )
         warnings.append(f"[backfill-mode] {dataset_name}: using latest snapshot per game (no timestamp filtering).")
+        return latest
+
+    # For roster, keep the latest snapshot per player/game, but respect run/tip cutoffs.
+    if dataset_name == "roster_nightly":
+        tip_ts = working["game_id"].map(tip_lookup)
+        limit_ts = tip_ts.fillna(run_as_of_ts)
+        allowed = working[time_col].isna() | (working[time_col] <= run_as_of_ts)
+        allowed &= working[time_col].isna() | (working[time_col] <= limit_ts)
+        filtered = working.loc[allowed].copy()
+        dropped = len(working) - len(filtered)
+        if dropped > 0:
+            warnings.append(
+                f"{dataset_name}: dropped {dropped} rows with snapshot_ts beyond run/tip bounds."
+            )
+        latest = (
+            filtered.sort_values(time_col)
+            .groupby(["game_id", "player_id"], as_index=False)
+            .tail(1)
+        )
         return latest
 
     tip_ts = working["game_id"].map(tip_lookup)

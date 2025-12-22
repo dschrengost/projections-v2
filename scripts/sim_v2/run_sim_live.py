@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from datetime import date as date_cls
 from pathlib import Path
 
@@ -28,10 +27,17 @@ def main(
     data_root: Path | None = typer.Option(None, "--data-root", help="Optional override for data root."),
     profiles_path: Path | None = typer.Option(None, "--profiles-path", help="Optional override for sim profile config."),
     worlds_root: Path | None = typer.Option(None, "--worlds-root", help="Optional output root for worlds parquet files."),
-    projections_root: Path | None = typer.Option(
-        None, "--projections-root", help="Optional output root for aggregated projections."
-    ),
     include_std: bool = typer.Option(True, "--std/--no-std", help="Compute std when aggregating worlds."),
+    sim_run_id: str | None = typer.Option(
+        None,
+        "--run-id",
+        help="Optional run id to partition outputs under game_date=.../run=...",
+    ),
+    run_as_of_ts: str | None = typer.Option(
+        None,
+        "--run-as-of-ts",
+        help="Optional as-of timestamp to record in latest_run.json (UTC string).",
+    ),
     minutes_run_id: str | None = typer.Option(None, "--minutes-run-id", help="Explicit minutes run_id to load."),
     rates_run_id: str | None = typer.Option(None, "--rates-run-id", help="Explicit rates run_id to load."),
 ) -> None:
@@ -39,13 +45,11 @@ def main(
     typer.echo(f"[sim_v2] live sim run date={target_date} profile={profile_name} worlds={num_worlds}")
 
     worlds_output = worlds_root
-    projections_output = projections_root
     if data_root is not None:
         base_root = Path(data_root)
         worlds_output = worlds_output or base_root / "artifacts" / "sim_v2" / "worlds_fpts_v2"
-        projections_output = projections_output or base_root / "artifacts" / "sim_v2" / "projections"
 
-    # Generate worlds - now outputs projections.parquet directly with in-memory aggregation
+    # Generate worlds - outputs projections.parquet directly with in-memory aggregation
     generate_worlds_main(
         start_date=target_date,
         end_date=target_date,
@@ -54,7 +58,7 @@ def main(
         data_root=data_root,
         profiles_path=profiles_path,
         output_root=worlds_output,
-        fpts_run_id=None,
+        sim_run_id=sim_run_id,
         use_rates_noise=None,
         rates_noise_split=None,
         team_sigma_scale=None,
@@ -70,18 +74,23 @@ def main(
         team_factor_gamma=None,
     )
 
-    # Copy projections to output location if different from worlds root
-    # (generate_worlds now outputs projections.parquet directly)
-    if projections_output is not None and worlds_output is not None:
-        src_proj = (worlds_output or Path()) / f"game_date={target_date}" / "projections.parquet"
-        dst_dir = projections_output / f"game_date={target_date}"
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        dst_proj = dst_dir / "projections.parquet"
-        if src_proj.exists():
-            shutil.copy2(src_proj, dst_proj)
-            typer.echo(f"[sim_v2] copied projections to {dst_proj}")
+    # Write latest_run.json pointer if run_id specified
+    if sim_run_id and worlds_output is not None:
+        import json
+        from datetime import datetime, timezone
+
+        payload = {
+            "run_id": sim_run_id,
+            "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if run_as_of_ts:
+            payload["run_as_of_ts"] = run_as_of_ts
+
+        day_dir = worlds_output / f"game_date={target_date}"
+        day_dir.mkdir(parents=True, exist_ok=True)
+        (day_dir / "latest_run.json").write_text(json.dumps(payload), encoding="utf-8")
+
 
 
 if __name__ == "__main__":
     app()
-

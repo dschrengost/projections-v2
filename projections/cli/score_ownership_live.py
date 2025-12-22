@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from functools import lru_cache
 import re
 import unicodedata
@@ -358,7 +359,7 @@ def _load_fpts_predictions(
     """
     import json
 
-    sim_root = data_root / "artifacts" / "sim_v2" / "projections"
+    sim_root = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2"
 
     def _resolve_sim_run_dir(
         base_dir: Path,
@@ -371,10 +372,11 @@ def _load_fpts_predictions(
             candidate = base_dir / f"run={desired_run_id}"
             if candidate.exists():
                 return candidate
+            return None
 
         # Backtest safety: if we have a cutoff timestamp (e.g., slate lock),
         # prefer the latest run at or before that cutoff.
-        if cutoff_ts_utc is not None and base_dir.is_dir():
+        if desired_run_id is None and cutoff_ts_utc is not None and base_dir.is_dir():
             best_dt: datetime | None = None
             best_dir: Path | None = None
             for p in base_dir.iterdir():
@@ -391,24 +393,26 @@ def _load_fpts_predictions(
             if best_dir is not None:
                 return best_dir
 
-        pointer = base_dir / "latest_run.json"
-        if pointer.exists():
-            try:
-                payload = json.loads(pointer.read_text(encoding="utf-8"))
-                latest = payload.get("run_id")
-                if latest:
-                    candidate = base_dir / f"run={latest}"
-                    if candidate.exists():
-                        return candidate
-            except json.JSONDecodeError:
-                pass
+        if desired_run_id is None:
+            pointer = base_dir / "latest_run.json"
+            if pointer.exists():
+                try:
+                    payload = json.loads(pointer.read_text(encoding="utf-8"))
+                    latest = payload.get("run_id")
+                    if latest:
+                        candidate = base_dir / f"run={latest}"
+                        if candidate.exists():
+                            return candidate
+                except json.JSONDecodeError:
+                    pass
 
-        run_dirs = sorted(
-            [p for p in base_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
-            reverse=True,
-        )
-        if run_dirs:
-            return run_dirs[0]
+        if desired_run_id is None:
+            run_dirs = sorted(
+                [p for p in base_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
+                reverse=True,
+            )
+            if run_dirs:
+                return run_dirs[0]
         if (base_dir / "sim_v2_projections.parquet").exists():
             return base_dir
         return None
@@ -435,20 +439,33 @@ def _load_fpts_predictions(
                     return pd.read_parquet(base)
                 except Exception:
                     continue
-            direct = base / "projections.parquet"
-            if direct.exists():
-                try:
-                    return pd.read_parquet(direct)
-                except Exception:
-                    pass
 
-            run_dir = _resolve_sim_run_dir(base, desired_run_id, cutoff_ts_utc=cutoff_ts_utc) if base.is_dir() else None
+            run_dir = None
+            if desired_run_id and base.is_dir():
+                explicit = base / f"run={desired_run_id}"
+                if explicit.exists():
+                    run_dir = explicit
             if run_dir is None:
-                continue
-            candidate = (
-                run_dir if run_dir.is_file() and run_dir.suffix == ".parquet" else run_dir / "sim_v2_projections.parquet"
-            )
-            if candidate.exists():
+                if desired_run_id is None:
+                    direct = base / "projections.parquet"
+                    if direct.exists():
+                        try:
+                            return pd.read_parquet(direct)
+                        except Exception:
+                            pass
+
+            if run_dir is None:
+                run_dir = _resolve_sim_run_dir(base, desired_run_id, cutoff_ts_utc=cutoff_ts_utc) if base.is_dir() else None
+                if run_dir is None:
+                    continue
+            candidates = []
+            if run_dir.is_file() and run_dir.suffix == ".parquet":
+                candidates.append(run_dir)
+            else:
+                candidates.extend([run_dir / "projections.parquet", run_dir / "sim_v2_projections.parquet"])
+            for candidate in candidates:
+                if not candidate.exists():
+                    continue
                 try:
                     return pd.read_parquet(candidate)
                 except Exception:
@@ -644,8 +661,8 @@ def _attach_live_ownership_enrichment(
     status_u = status.astype(str).str.upper() if status is not None else pd.Series("", index=inj.index)
     status_raw_u = status_raw.astype(str).str.upper() if status_raw is not None else pd.Series("", index=inj.index)
 
-    is_out = status_u.eq("OUT") | status_raw_u.eq("OUT")
-    is_q = status_u.isin(["Q", "PROB"]) | status_raw_u.isin(["QUESTIONABLE", "PROBABLE", "DOUBTFUL"])
+    is_out = status_u.isin(["OUT", "D", "DOUBTFUL"]) | status_raw_u.isin(["OUT", "DOUBTFUL"])
+    is_q = status_u.isin(["Q", "PROB"]) | status_raw_u.isin(["QUESTIONABLE", "PROBABLE"])
     inj["_is_q"] = is_q.astype(int)
 
     # Team outs by tricode (DK salary table uses tricodes).
@@ -732,7 +749,7 @@ def score_ownership(
         import json
         from pathlib import Path
         
-        minutes_root = Path("/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily") / str(game_date)
+        minutes_root = data_root / "artifacts" / "minutes_v1" / "daily" / str(game_date)
         latest_pointer = minutes_root / "latest_run.json"
 
         def _coerce_cutoff_ts() -> datetime | None:
@@ -1080,11 +1097,21 @@ def main():
     # Save per-slate predictions
     out_dir = root / "silver" / "ownership_predictions" / str(game_date)
     out_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = out_dir / f"run={args.run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
     
     for dg_id, df in results.items():
-        out_path = out_dir / f"{dg_id}.parquet"
+        out_path = run_dir / f"{dg_id}.parquet"
         df.to_parquet(out_path)
+        legacy_path = out_dir / f"{dg_id}.parquet"
+        df.to_parquet(legacy_path)
         print(f"[ownership] Saved slate {dg_id}: {len(df)} predictions -> {out_path}")
+
+    latest_payload = {
+        "run_id": args.run_id,
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+    }
+    (out_dir / "latest_run.json").write_text(json.dumps(latest_payload, indent=2), encoding="utf-8")
     
     # Save slates metadata
     schedule = _load_schedule_with_times(game_date, root)

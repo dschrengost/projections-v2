@@ -125,7 +125,7 @@ def test_sim_v2_game_script_quantile_targets_from_profile(tmp_path: Path) -> Non
         data_root=tmp_path,
         profiles_path=profiles_path,
         output_root=output_root,
-        fpts_run_id=None,
+        sim_run_id=None,
         use_rates_noise=False,
         rates_noise_split=None,
         team_sigma_scale=None,

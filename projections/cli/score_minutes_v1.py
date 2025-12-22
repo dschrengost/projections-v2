@@ -47,6 +47,11 @@ from projections.minutes_v1.starter_flags import (
     derive_starter_flag_label,
     normalize_starter_signals,
 )
+from projections.minutes_alloc.rotalloc_production import (
+    resolve_minutes_alloc_mode,
+    resolve_rotalloc_bundle_dir,
+    score_rotalloc_minutes,
+)
 from projections.models.minutes_lgbm import (
     _filter_out_players,
     apply_conformal,
@@ -56,7 +61,7 @@ from projections.models.minutes_lgbm import (
 UTC = timezone.utc
 DEFAULT_FEATURES_ROOT = paths.data_path("gold", "features_minutes_v1")
 DEFAULT_LIVE_FEATURES_ROOT = paths.data_path("live", "features_minutes_v1")
-DEFAULT_DAILY_ROOT = Path("artifacts/minutes_v1/daily")
+DEFAULT_DAILY_ROOT = paths.data_path("artifacts", "minutes_v1", "daily")
 DEFAULT_BUNDLE_CONFIG = Path("config/minutes_current_run.json")
 DEFAULT_INJURIES_ROOT = paths.data_path("bronze", "injuries_raw")
 DEFAULT_SCHEDULE_ROOT = paths.data_path("silver", "schedule")
@@ -71,7 +76,12 @@ LATEST_POINTER = "latest_run.json"
 FEATURE_FILENAME = "features.parquet"
 
 
-def _load_espn_out_players(game_date: date, data_root: Path | None = None) -> set[str]:
+def _load_espn_out_players(
+    game_date: date,
+    data_root: Path | None = None,
+    *,
+    run_as_of_ts: datetime | None = None,
+) -> set[str]:
     """Load ESPN injuries and return set of player names marked OUT.
     
     ESPN updates faster than the official NBA injury reports, catching
@@ -86,6 +96,14 @@ def _load_espn_out_players(game_date: date, data_root: Path | None = None) -> se
     
     try:
         espn_df = pd.read_parquet(espn_path)
+        if run_as_of_ts is not None and "as_of_ts" in espn_df.columns:
+            espn_df["as_of_ts"] = pd.to_datetime(espn_df["as_of_ts"], utc=True, errors="coerce")
+            cutoff = pd.Timestamp(run_as_of_ts)
+            if cutoff.tzinfo is None:
+                cutoff = cutoff.tz_localize(UTC)
+            else:
+                cutoff = cutoff.tz_convert(UTC)
+            espn_df = espn_df[espn_df["as_of_ts"].notna() & (espn_df["as_of_ts"] <= cutoff)]
         out_players = espn_df[espn_df["status"] == "OUT"]["player_name"].dropna()
         out_set = set(out_players.str.strip().str.lower())
         if out_set:
@@ -584,11 +602,12 @@ def _derive_rotation_prob(df: pd.DataFrame) -> pd.Series:
             pd.to_numeric(starter_flag, errors="coerce").fillna(0).astype(int) > 0
         )
 
-    roll_mean_5 = pd.to_numeric(df.get("roll_mean_5"), errors="coerce")
-    min_last1 = pd.to_numeric(df.get("min_last1"), errors="coerce")
-    min_last3 = pd.to_numeric(df.get("min_last3"), errors="coerce")
-    recent_start_pct_10 = pd.to_numeric(df.get("recent_start_pct_10"), errors="coerce")
-    days_since_last = pd.to_numeric(df.get("days_since_last"), errors="coerce")
+    na_series = pd.Series(pd.NA, index=df.index)
+    roll_mean_5 = pd.to_numeric(df.get("roll_mean_5", na_series), errors="coerce")
+    min_last1 = pd.to_numeric(df.get("min_last1", na_series), errors="coerce")
+    min_last3 = pd.to_numeric(df.get("min_last3", na_series), errors="coerce")
+    recent_start_pct_10 = pd.to_numeric(df.get("recent_start_pct_10", na_series), errors="coerce")
+    days_since_last = pd.to_numeric(df.get("days_since_last", na_series), errors="coerce")
 
     # Base tiering from recent minutes signals (handles early season with sparse history).
     # These thresholds are chosen to prevent 10+ minute allocations for deep bench players
@@ -1085,6 +1104,7 @@ def _write_daily_outputs(
     run_id: str | None,
     run_as_of_ts: datetime | None,
     minutes_output: MinutesOutputMode,
+    extra_summary: dict[str, Any] | None = None,
 ) -> None:
     run_dir = _resolve_run_dir(out_root, day, run_id, write_mode=True)
     parquet_path = run_dir / OUTPUT_FILENAME
@@ -1107,6 +1127,7 @@ def _write_daily_outputs(
             "opponent_team_id",
             "starter_flag",
             "play_prob",
+            "rotation_prob",
             "minutes_p10",
             "minutes_p50",
             "minutes_p90",
@@ -1135,6 +1156,8 @@ def _write_daily_outputs(
             "teams": int(df["team_id"].nunique()) if not df.empty else 0,
         },
     }
+    if extra_summary:
+        summary["allocation"] = extra_summary
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     if run_id:
         _write_latest_pointer(run_dir.parent, run_id=run_id, run_as_of_ts=run_as_of_ts)
@@ -1339,7 +1362,14 @@ def score_minutes_range_to_parquet(
             scored["minutes_p90"] = scored["minutes_p90_adj"]
         typer.echo("[upside] Applied upside adjustment for Monte Carlo coverage.", err=True)
 
+    alloc_mode = resolve_minutes_alloc_mode(bundle_config)
     normalized_reconcile_mode = reconcile_team_minutes.lower()
+    if alloc_mode == "rotalloc_expk" and normalized_reconcile_mode != "none":
+        typer.echo(
+            f"[rotalloc] forcing reconcile_team_minutes=none (was {normalized_reconcile_mode})",
+            err=True,
+        )
+        normalized_reconcile_mode = "none"
     if normalized_reconcile_mode != "none":
         if normalized_reconcile_mode == "p50_and_tails":
             typer.echo(
@@ -1623,12 +1653,9 @@ def main(
         config_path=promotion_config,
     )
 
-    # Load ESPN injuries for late scratch detection (live mode only)
+    # Load ESPN injuries for late scratch detection (live mode only).
     espn_out_players: set[str] = set()
     normalized_mode: Mode = mode.lower()  # type: ignore[assignment]
-    if normalized_mode == "live":
-        espn_out_players = _load_espn_out_players(start_day)
-
     run_dir_path: Path | None = None
     run_summary: dict | None = None
     run_as_of_ts_value: pd.Timestamp | None = None
@@ -1660,6 +1687,8 @@ def main(
         raise typer.BadParameter("--run-id is only valid when --mode live.", param_name="run_id")
 
     run_as_of_datetime = run_as_of_ts_value.to_pydatetime() if run_as_of_ts_value is not None else None
+    if normalized_mode == "live":
+        espn_out_players = _load_espn_out_players(start_day, run_as_of_ts=run_as_of_datetime)
 
     try:
         raw_features = _load_feature_slice(
@@ -1746,7 +1775,14 @@ def main(
             scored["minutes_p90"] = scored["minutes_p90_adj"]
         typer.echo("[upside] Applied upside adjustment for Monte Carlo coverage.", err=True)
 
+    alloc_mode = resolve_minutes_alloc_mode(bundle_config)
     normalized_reconcile_mode = reconcile_team_minutes.lower()
+    if alloc_mode == "rotalloc_expk" and normalized_reconcile_mode != "none":
+        typer.echo(
+            f"[rotalloc] forcing reconcile_team_minutes=none (was {normalized_reconcile_mode})",
+            err=True,
+        )
+        normalized_reconcile_mode = "none"
     if normalized_reconcile_mode != "none":
         if normalized_reconcile_mode == "p50_and_tails":
             typer.echo(
@@ -1758,6 +1794,70 @@ def main(
         scored = reconcile_minutes_p50_all(scored, reconcile_cfg, debug_hook=debug_hook)
         if "play_prob" not in scored.columns:
             scored["play_prob"] = 1.0
+
+    alloc_summary: dict[str, Any] = {
+        "minutes_alloc_mode": "legacy",
+    }
+    if alloc_mode == "rotalloc_expk":
+        rotalloc_dir = resolve_rotalloc_bundle_dir(bundle_config)
+        if rotalloc_dir is None:
+            typer.echo("[rotalloc] warning: rotalloc_bundle_dir missing from minutes bundle config; using legacy.", err=True)
+        else:
+            try:
+                rotalloc_scored, allocator_cfg, allocator_diag = score_rotalloc_minutes(
+                    prepared,
+                    bundle_dir=rotalloc_dir,
+                )
+                scored = scored.merge(
+                    rotalloc_scored,
+                    on=["game_id", "team_id", "player_id"],
+                    how="left",
+                    suffixes=("", "_rotalloc"),
+                )
+                if "minutes_mean" not in scored.columns:
+                    raise ValueError("rotalloc merge failed to provide minutes_mean")
+
+                # Override canonical conditional minutes with the allocator output.
+                minutes_mean = pd.to_numeric(scored["minutes_mean"], errors="coerce").fillna(0.0)
+                scored["minutes_p50"] = minutes_mean
+                scored["minutes_p50_cond"] = minutes_mean
+                scored["minutes_p10"] = (minutes_mean * 0.7).astype(float)
+                scored["minutes_p90"] = (minutes_mean * 1.3).astype(float)
+                scored["minutes_p10_cond"] = scored["minutes_p10"]
+                scored["minutes_p90_cond"] = scored["minutes_p90"]
+
+                alloc_summary = {
+                    "minutes_alloc_mode": "rotalloc_expk",
+                    "bundle_dir": str(rotalloc_dir),
+                    "allocator": {
+                        "a": allocator_cfg.a,
+                        "p_cutoff": allocator_cfg.p_cutoff,
+                        "use_expected_k": allocator_cfg.use_expected_k,
+                        "k_min": allocator_cfg.k_min,
+                        "k_max": allocator_cfg.k_max,
+                        "cap_max": allocator_cfg.cap_max,
+                    },
+                    "diagnostics": {
+                        "eligible_size_p50": allocator_diag.eligible_size_p50,
+                        "eligible_size_p90": allocator_diag.eligible_size_p90,
+                        "team_sum_dev_max": allocator_diag.team_sum_dev_max,
+                        "minutes_below_cutoff_p90": allocator_diag.minutes_below_cutoff_p90,
+                        "fallback_top1_used": allocator_diag.fallback_top1_used,
+                        "cutoff_empty_events": allocator_diag.cutoff_empty_events,
+                    },
+                }
+                typer.echo(
+                    "[rotalloc] mode=rotalloc_expk "
+                    f"eligible_size p50/p90={allocator_diag.eligible_size_p50:.1f}/{allocator_diag.eligible_size_p90:.1f} "
+                    f"team_sum_dev_max={allocator_diag.team_sum_dev_max:.6f} "
+                    f"below_cutoff_minutes_p90={allocator_diag.minutes_below_cutoff_p90:.1f} "
+                    f"fallback_top1_used={allocator_diag.fallback_top1_used} "
+                    f"cutoff_empty_events={allocator_diag.cutoff_empty_events}",
+                    err=True,
+                )
+            except Exception as exc:
+                typer.echo(f"[rotalloc] ERROR: {exc} (falling back to legacy minutes)", err=True)
+
     scored = _attach_unconditional_minutes(scored)
 
     # Log predictions (Phase 3 Hardening)
@@ -1797,6 +1897,13 @@ def main(
             "blowout_risk_score",
             "close_game_score",
             "play_prob",
+            "rotation_prob",
+            "minutes_mean",
+            "minutes_alloc_mode",
+            "eligible_flag",
+            "p_rot",
+            "mu_cond",
+            "team_minutes_sum",
             "minutes_p10",
             "minutes_p50",
             "minutes_p90",
@@ -1819,6 +1926,7 @@ def main(
             run_id=run_id if normalized_mode == "live" else None,
             run_as_of_ts=run_as_of_datetime,
             minutes_output=minutes_output,
+            extra_summary=alloc_summary,
         )
 
 

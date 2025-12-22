@@ -2,6 +2,8 @@
   "mode": "single",
   "bundle_dir": "artifacts/minutes_lgbm/minutes_v1_safe_starter_20251214",
   "run_id": "minutes_v1_safe_starter_20251214",
+  "minutes_alloc_mode": "legacy",
+  "rotalloc_bundle_dir": "artifacts/experiments/lgbm_rotalloc_final_v1",
   "reconcile_team_minutes": "none",
   "enable_upside_adjustment": true
 }

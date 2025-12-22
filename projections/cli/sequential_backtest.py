@@ -477,63 +477,32 @@ def main(
     global_delta_p10 = -conformal_offsets["low_adjustment"]
     global_delta_p90 = conformal_offsets["high_adjustment"]
 
-    rolling_cfg = calibration.RollingCalibrationConfig(
-        window_days=window_days,
-        min_n=min_n,
-        tau=tau,
-        tau_bucket=tau_bucket,
-        use_buckets=use_buckets,
-        min_n_bucket=min_n_bucket,
-        use_spread_buckets=use_spread_buckets,
-        cold_start_min_n=cold_start_min_n,
-        min_recent_days=min_recent_days,
-        p10_floor_guard=p10_floor_guard,
-        p90_floor_guard=p90_floor_guard,
-        bucket_delta_cap=bucket_delta_cap,
-        bucket_floor_relief=bucket_floor_relief,
-        max_abs_delta_p10=max_abs_delta_p10,
-        max_abs_delta_p90=max_abs_delta_p90,
-        recent_target_rows=recent_target_rows,
-        recency_window_days=recency_window_days,
-        recency_half_life_days=recency_half_life_days,
-        history_months=history_months,
-        warmup_days_p10=warmup_days_p10,
-        warmup_days_p90=warmup_days_p90,
-        use_global_p10_delta=use_global_p10_delta,
-        use_global_p90_delta=use_global_p90_delta,
-        global_baseline_months=global_baseline_months,
-        global_recent_target_rows=global_recent_target_rows,
-        global_recent_target_rows_p10=global_recent_target_rows_p10,
-        global_recent_target_rows_p90=global_recent_target_rows_p90,
-        global_min_n=global_min_n,
-        global_delta_cap=global_delta_cap,
-        bucket_min_effective_sample_size=bucket_min_effective_sample_size,
-        bucket_inherit_if_low_n=bucket_inherit_if_low_n,
-        cap_guardrail_rate=cap_guardrail_rate,
-        max_width_delta_pct=max_width_delta_pct,
-        monotonicity_repair_threshold=monotonicity_repair_threshold,
-        apply_center_width_projection=apply_center_width_projection,
-        min_quantile_half_width=min_quantile_half_width,
-        one_sided_days=one_sided_days,
-        hysteresis_lower=hysteresis_lower,
-        hysteresis_upper=hysteresis_upper,
-        delta_smoothing_alpha_p10=delta_smoothing_alpha_p10,
-        delta_smoothing_alpha_p90=delta_smoothing_alpha_p90,
+    # Rolling calibration was previously implemented via compute_rolling_offsets/apply_rolling_offsets.
+    # That logic has been removed; for sequential backtests we fall back to applying the global
+    # conformal deltas on each evaluation day. This preserves the report contract (CSV + summary)
+    # while avoiding stale/unsupported calibration code paths.
+    typer.echo(
+        "[sequential] warning: rolling calibration unavailable; using global conformal deltas for rolling outputs."
     )
 
     eval_dates = scored_all.loc[eval_mask, "game_date"].drop_duplicates().sort_values()
-    rolling_offsets = calibration.compute_rolling_offsets(
-        scored_all,
-        global_delta_p10=global_delta_p10,
-        global_delta_p90=global_delta_p90,
-        label_col=target_col,
-        config=rolling_cfg,
-        score_dates=list(eval_dates),
+    rolling_offsets = pd.DataFrame(
+        {
+            "score_date": eval_dates,
+            "window_start": eval_dates - pd.Timedelta(days=int(window_days)),
+            "window_end": eval_dates,
+            "delta_p10": float(global_delta_p10),
+            "delta_p90": float(global_delta_p90),
+            "shrinkage": 0.0,
+            "bucket_name": pd.NA,
+            "strategy": "global_fallback",
+        }
     )
 
     eval_rows = scored_all.loc[eval_mask].copy()
-    rolling_applied = calibration.apply_rolling_offsets(eval_rows, rolling_offsets, config=rolling_cfg)
-    rolling_applied = rolling_applied.rename(columns={"p10": "p10_rolling", "p90": "p90_rolling"})
+    rolling_applied = eval_rows.copy()
+    rolling_applied["p10_rolling"] = rolling_applied["p10_raw"] + global_delta_p10
+    rolling_applied["p90_rolling"] = rolling_applied["p90_raw"] + global_delta_p90
     rolling_applied["p10_global"] = rolling_applied["p10_raw"] + global_delta_p10
     rolling_applied["p90_global"] = rolling_applied["p90_raw"] + global_delta_p90
 
@@ -604,7 +573,14 @@ def main(
             "delta_p10": global_delta_p10,
             "delta_p90": global_delta_p90,
         },
-        "rolling_params": rolling_cfg.to_dict(),
+        "rolling_params": {
+            "window_days": window_days,
+            "min_n": min_n,
+            "tau": tau,
+            "use_buckets": use_buckets,
+            "min_n_bucket": min_n_bucket,
+            "use_spread_buckets": use_spread_buckets,
+        },
         "meta": meta,
         "p10": {
             "overall": overall_p10,

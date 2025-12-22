@@ -10,11 +10,13 @@ from typing import Iterable
 import pandas as pd
 import typer
 
+from projections import paths
+
 PROJECTIONS_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
 LATEST_POINTER = "latest_run.json"
-DEFAULT_PROJECTIONS_ROOT = Path("artifacts/minutes_v1/daily")
-DEFAULT_QC_ROOT = Path("artifacts/minutes_v1/live_qc")
+DEFAULT_PROJECTIONS_ROOT = paths.data_path("artifacts", "minutes_v1", "daily")
+DEFAULT_QC_ROOT = paths.data_path("artifacts", "minutes_v1", "live_qc")
 OUT_MINUTES_THRESHOLD = 1.0
 
 REQUIRED_PROJECTION_COLUMNS = {

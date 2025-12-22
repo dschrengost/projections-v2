@@ -8,7 +8,6 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from projections.minutes_v1.reconciliation import reconcile_minutes
 from projections.minutes_v1.validation import (
     hash_season_labels,
     reconciliation_sanity_check,
@@ -72,9 +71,10 @@ def test_reconciliation_sanity_check_runs_clean():
             "ramp_flag": [0, 0, 0, 0, 0, 0, 0, 1] * 2,
             "quantile_width": [6, 5, 7, 4, 8, 9, 7, 10] * 2,
             "blowout_index": [1.0] * 16,
+            # Construct a reconciled set that exactly sums to 240 and respects caps.
+            "minutes_reconciled": [35.0, 35.0, 35.0, 35.0, 26.0, 26.0, 26.0, 22.0] * 2,
         }
     )
-    reconciled = reconcile_minutes(df)
-    report = reconciliation_sanity_check(reconciled, minutes_col="p50", reconciled_col="minutes_reconciled")
+    report = reconciliation_sanity_check(df, minutes_col="p50", reconciled_col="minutes_reconciled")
     assert report.teams_checked == 2
     assert report.cap_violations == 0

@@ -165,14 +165,25 @@ fi
 
 # Copy minutes to gold for sim and downstream consumers
 # Use the run we just created (LIVE_RUN_ID), not a directory search
-MINUTES_ARTIFACTS="/home/daniel/projects/projections-v2/artifacts/minutes_v1/daily/${START_DATE}"
+MINUTES_ARTIFACTS="${DATA_ROOT}/artifacts/minutes_v1/daily/${START_DATE}"
 if [[ -d "${MINUTES_ARTIFACTS}" ]]; then
   MINUTES_SRC="${MINUTES_ARTIFACTS}/run=${LIVE_RUN_ID}/minutes.parquet"
   MINUTES_DST="${DATA_ROOT}/gold/projections_minutes_v1/game_date=${START_DATE}"
+  MINUTES_RUN_DST="${MINUTES_DST}/run=${LIVE_RUN_ID}"
   if [[ -f "${MINUTES_SRC}" ]]; then
+    mkdir -p "${MINUTES_RUN_DST}"
+    cp "${MINUTES_SRC}" "${MINUTES_RUN_DST}/minutes.parquet"
+    # Legacy flat file for compatibility with older consumers.
     mkdir -p "${MINUTES_DST}"
     cp "${MINUTES_SRC}" "${MINUTES_DST}/minutes.parquet"
-    echo "[live] Copied minutes to ${MINUTES_DST}"
+    cat > "${MINUTES_DST}/latest_run.json" <<EOF
+{
+  "run_id": "${LIVE_RUN_ID}",
+  "run_as_of_ts": "${RUN_AS_OF_TS}",
+  "updated_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+}
+EOF
+    echo "[live] Copied minutes to ${MINUTES_RUN_DST} (and updated latest_run.json)"
   fi
 fi
 
@@ -211,7 +222,10 @@ if [[ "${RUN_SIM}" == "1" ]]; then
     --profile-name "${SIM_PROFILE}" \
     --num-worlds "${SIM_WORLDS}" \
     --data-root "${DATA_ROOT}" \
-    --minutes-run-id "${LIVE_RUN_ID}"
+    --run-id "${LIVE_RUN_ID}" \
+    --run-as-of-ts "${RUN_AS_OF_TS}" \
+    --minutes-run-id "${LIVE_RUN_ID}" \
+    --rates-run-id "${LIVE_RUN_ID}"
   then
     echo "[live] warning: sim_v2 live run failed; continuing without sim_v2 projections." >&2
   fi
@@ -304,6 +318,9 @@ else
   if ! /home/daniel/.local/bin/uv run python -m projections.cli.finalize_projections \
     --date "${START_DATE}" \
     --run-id "${LIVE_RUN_ID}" \
+    --minutes-run-id "${LIVE_RUN_ID}" \
+    --sim-run-id "${LIVE_RUN_ID}" \
+    --ownership-run-id "${LIVE_RUN_ID}" \
     --draft-group-id "${MAIN_DRAFT_GROUP}" \
     --data-root "${DATA_ROOT}"
   then

@@ -16,8 +16,8 @@ from projections.minutes_v1.logs import prediction_logs_base
 
 LOGGER = logging.getLogger(__name__)
 SUPPORTED_SNAPSHOT_MODES = {"last_before_tip"}
-_STATUS_OUT_TOKENS = ("OUT", "INACTIVE", "SUSPENDED", "REST", "INJURY", "COVID")
-_STATUS_Q_TOKENS = ("QUESTIONABLE", "DOUBTFUL", "GTD", "GAME-TIME", "PROB", "DAY-TO-DAY")
+_STATUS_OUT_TOKENS = ("OUT", "INACTIVE", "SUSPENDED", "REST", "INJURY", "COVID", "DOUBTFUL", "D")
+_STATUS_Q_TOKENS = ("QUESTIONABLE", "GTD", "GAME-TIME", "PROB", "DAY-TO-DAY")
 _STATUS_CLEAN_PREFIXES = ("AVA", "ACT", "CLE", "HEA")
 
 
