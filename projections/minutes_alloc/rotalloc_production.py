@@ -123,6 +123,7 @@ def _load_feature_columns(models_dir: Path) -> list[str]:
 @dataclass(frozen=True)
 class RotAllocAllocatorConfig:
     a: float
+    mu_power: float
     p_cutoff: float | None
     use_expected_k: bool
     k_min: int
@@ -150,6 +151,7 @@ def _eligibility_pre_fallback(
     mask: np.ndarray,
     *,
     a: float,
+    mu_power: float,
     p_cutoff: float | None,
     use_expected_k: bool,
     k_min: int,
@@ -158,7 +160,7 @@ def _eligibility_pre_fallback(
     p = np.clip(np.asarray(p_rot, dtype=np.float64), 0.0, 1.0)
     m = np.maximum(np.asarray(mu, dtype=np.float64), 0.0)
     mask_bool = np.asarray(mask, dtype=bool)
-    proxy = np.power(p, float(a)) * m
+    proxy = np.power(p, float(a)) * np.power(m, float(mu_power))
     proxy = np.where(np.isfinite(proxy), proxy, 0.0)
 
     eligible = mask_bool.copy()
@@ -203,6 +205,7 @@ def score_rotalloc_minutes(
             )
     allocator = RotAllocAllocatorConfig(
         a=float(allocator_payload.get("a", 1.5)),
+        mu_power=float(allocator_payload.get("mu_power", 1.5)),
         p_cutoff=(None if p_cutoff_raw is None else float(p_cutoff_raw)),
         use_expected_k=bool(allocator_payload.get("use_expected_k", True)),
         k_min=int(allocator_payload.get("k_min", 6)),
@@ -223,8 +226,12 @@ def score_rotalloc_minutes(
     feature_cols = _load_feature_columns(models_dir)
     clf = joblib.load(models_dir / "rot8_classifier.joblib")
     reg = joblib.load(models_dir / "minutes_regressor.joblib")
-    calibrator_path = models_dir / "rot8_calibrator_isotonic.joblib"
-    calibrator = joblib.load(calibrator_path) if calibrator_path.exists() else None
+    calibrator = None
+    for name in ("rot8_calibrator_sigmoid.joblib", "rot8_calibrator_isotonic.joblib"):
+        calibrator_path = models_dir / name
+        if calibrator_path.exists():
+            calibrator = joblib.load(calibrator_path)
+            break
 
     df = features.copy()
     df = ensure_infer_feature_columns(df, feature_cols)
@@ -286,6 +293,7 @@ def score_rotalloc_minutes(
             mu_g,
             mask_g,
             a=allocator.a,
+            mu_power=allocator.mu_power,
             p_cutoff=allocator.p_cutoff,
             use_expected_k=allocator.use_expected_k,
             k_min=allocator.k_min,
@@ -301,6 +309,7 @@ def score_rotalloc_minutes(
             mu_g,
             mask_g,
             a=allocator.a,
+            mu_power=allocator.mu_power,
             p_cutoff=allocator.p_cutoff,
             use_expected_k=allocator.use_expected_k,
             k_min=allocator.k_min,
@@ -314,6 +323,7 @@ def score_rotalloc_minutes(
             mu_g,
             mask_g,
             a=allocator.a,
+            mu_power=allocator.mu_power,
             cap_max=allocator.cap_max,
             p_cutoff=allocator.p_cutoff,
             use_expected_k=allocator.use_expected_k,

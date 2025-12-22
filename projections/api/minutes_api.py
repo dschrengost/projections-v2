@@ -172,50 +172,72 @@ def _extract_run_name(run_dir: Path) -> str | None:
     return None
 
 
-def _load_unified_projections(day: date, run_id: str | None, data_root: Path) -> pd.DataFrame | None:
+def _load_unified_projections(
+    day: date, run_id: str | None, data_root: Path
+) -> tuple[pd.DataFrame | None, str | None, str | None]:
     """
     Load unified projections artifact (contains minutes, sim, ownership in one file).
     
-    Returns None if not available, allowing fallback to legacy loading.
+    Returns (dataframe, run_id, updated_at) tuple.
+    Returns (None, None, None) if not available, allowing fallback to legacy loading.
     """
     unified_root = data_root / "artifacts" / "projections" / str(day)
     
+    resolved_run_id: str | None = None
+    updated_at: str | None = None
+    
     if run_id:
         run_dir = unified_root / f"run={run_id}"
+        resolved_run_id = run_id
     else:
         # Try latest pointer
         latest_pointer = unified_root / "latest_run.json"
         if latest_pointer.exists():
             try:
                 with open(latest_pointer) as f:
-                    latest = json.load(f).get("run_id")
-                if latest:
-                    run_dir = unified_root / f"run={latest}"
+                    pointer_data = json.load(f)
+                    resolved_run_id = pointer_data.get("run_id")
+                    updated_at = pointer_data.get("updated_at") or pointer_data.get("run_as_of_ts")
+                if resolved_run_id:
+                    run_dir = unified_root / f"run={resolved_run_id}"
                 else:
-                    return None
+                    return None, None, None
             except Exception:
-                return None
+                return None, None, None
         else:
             # Fall back to most recent run dir
             if not unified_root.exists():
-                return None
+                return None, None, None
             run_dirs = sorted(
                 [p for p in unified_root.iterdir() if p.is_dir() and p.name.startswith("run=")],
                 reverse=True,
             )
-            run_dir = run_dirs[0] if run_dirs else None
+            if run_dirs:
+                run_dir = run_dirs[0]
+                resolved_run_id = run_dir.name.split("=", 1)[1] if run_dir.name.startswith("run=") else None
+            else:
+                run_dir = None
     
     if run_dir is None or not run_dir.exists():
-        return None
+        return None, None, None
     
     parquet_path = run_dir / "projections.parquet"
     if not parquet_path.exists():
-        return None
+        return None, None, None
+    
+    # Try to get updated_at from file mtime if not from pointer
+    if not updated_at:
+        try:
+            mtime = parquet_path.stat().st_mtime
+            updated_at = datetime.fromtimestamp(mtime).isoformat() + "Z"
+        except Exception:
+            pass
     
     try:
-        return pd.read_parquet(parquet_path)
+        df = pd.read_parquet(parquet_path)
+        return df, resolved_run_id, updated_at
     except Exception:
-        return None
+        return None, None, None
 
 def _load_fpts(day: date, run_name: str | None, root: Path) -> pd.DataFrame | None:
     if run_name is None:
@@ -456,7 +478,7 @@ def create_app(
         # Source of truth: unified projections artifact (minutes + sim + ownership).
         # `run_id` is interpreted as projections_run_id when loading unified projections.
         data_root = paths.data_path()
-        unified_df = _load_unified_projections(slate_day, run_id, data_root)
+        unified_df, resolved_run_id, updated_at = _load_unified_projections(slate_day, run_id, data_root)
 
         if unified_df is not None and not unified_df.empty:
             # Rename sim columns to match expected dashboard format
@@ -484,7 +506,13 @@ def create_app(
                 unified_df = unified_df.rename(columns=rename_map)
             
             players = _serialize_players(unified_df)
-            payload = {"date": slate_day.isoformat(), "count": len(players), "players": players}
+            payload = {
+                "date": slate_day.isoformat(),
+                "count": len(players),
+                "players": players,
+                "run_id": resolved_run_id,
+                "last_updated": updated_at,
+            }
             return JSONResponse(payload)
 
         # Fall back to legacy loading (minutes + fpts + sim joins).
@@ -619,9 +647,24 @@ def create_app(
         """List available run_ids for a given date."""
 
         slate_day = _parse_date(date)
-        day_dir = minutes_root / slate_day.isoformat()
-        if not day_dir.exists():
+        data_root = paths.data_path()
+        
+        # Check multiple path formats in order of preference
+        candidate_paths = [
+            data_root / "artifacts" / "projections" / str(slate_day),  # Unified projections
+            minutes_root / f"game_date={slate_day.isoformat()}",  # New minutes format
+            minutes_root / slate_day.isoformat(),  # Legacy format
+        ]
+        
+        day_dir = None
+        for candidate in candidate_paths:
+            if candidate.exists():
+                day_dir = candidate
+                break
+        
+        if day_dir is None:
             raise HTTPException(status_code=404, detail="No artifact for selected date.")
+        
         runs: list[dict[str, Any]] = []
         for entry in sorted(day_dir.iterdir()):
             if not (entry.is_dir() and entry.name.startswith("run=")):

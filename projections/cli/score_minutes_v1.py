@@ -1831,6 +1831,7 @@ def main(
                     "bundle_dir": str(rotalloc_dir),
                     "allocator": {
                         "a": allocator_cfg.a,
+                        "mu_power": allocator_cfg.mu_power,
                         "p_cutoff": allocator_cfg.p_cutoff,
                         "use_expected_k": allocator_cfg.use_expected_k,
                         "k_min": allocator_cfg.k_min,

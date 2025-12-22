@@ -125,6 +125,7 @@ def build_eligible_mask(
     mask: np.ndarray | None = None,
     *,
     a: float = 1.5,
+    mu_power: float = 1.0,
     p_cutoff: float | None = None,
     topk: int | None = None,
     k_min: int = 8,
@@ -159,7 +160,7 @@ def build_eligible_mask(
 
     p = np.clip(p, 0.0, 1.0)
     m = np.maximum(m, 0.0)
-    proxy = np.power(p, float(a)) * m
+    proxy = np.power(p, float(a)) * np.power(m, float(mu_power))
     proxy = np.where(np.isfinite(proxy), proxy, 0.0)
 
     eligible = mask_bool.copy()
@@ -200,6 +201,7 @@ def allocate_team_minutes(
     mask: np.ndarray | None = None,
     *,
     a: float = 1.5,
+    mu_power: float = 1.0,
     cap_max: float = 48.0,
     target_sum: float = DEFAULT_TEAM_TOTAL_MINUTES,
     eps: float = 1e-12,
@@ -234,6 +236,7 @@ def allocate_team_minutes(
         m,
         mask_bool,
         a=float(a),
+        mu_power=float(mu_power),
         p_cutoff=p_cutoff,
         topk=topk,
         k_min=int(k_min),
@@ -245,7 +248,7 @@ def allocate_team_minutes(
 
     p = np.clip(p, 0.0, 1.0)
     m = np.maximum(m, 0.0)
-    w = np.power(p, float(a)) * m
+    w = np.power(p, float(a)) * np.power(m, float(mu_power))
     w = np.where(np.isfinite(w), w, 0.0)
     w = np.where(eligible, w, 0.0)
 
