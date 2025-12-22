@@ -189,15 +189,23 @@ def score_rotalloc_minutes(
     promote_path = bundle_dir / "promote_config.json"
     payload = json.loads(promote_path.read_text(encoding="utf-8"))
     allocator_payload = payload.get("allocator", {}) if isinstance(payload, dict) else {}
+    p_cutoff_raw = allocator_payload.get("p_cutoff")
+    if p_cutoff_raw is None:
+        # Safe default: require some rotation probability to be eligible. This matches
+        # the intent of the rotation model and avoids allocating minutes to everyone.
+        p_cutoff_raw = 0.15
+        message = "[rotalloc] warning: allocator.p_cutoff missing in promote_config.json; defaulting to 0.15"
+        print(message)
+        if os.environ.get("CI"):
+            raise ValueError(
+                "rotalloc requires allocator.p_cutoff in promote_config.json (CI strict). "
+                "Set allocator.p_cutoff explicitly."
+            )
     allocator = RotAllocAllocatorConfig(
         a=float(allocator_payload.get("a", 1.5)),
-        p_cutoff=(
-            None
-            if allocator_payload.get("p_cutoff") is None
-            else float(allocator_payload.get("p_cutoff"))
-        ),
+        p_cutoff=(None if p_cutoff_raw is None else float(p_cutoff_raw)),
         use_expected_k=bool(allocator_payload.get("use_expected_k", True)),
-        k_min=int(allocator_payload.get("k_min", 8)),
+        k_min=int(allocator_payload.get("k_min", 6)),
         k_max=int(allocator_payload.get("k_max", 11)),
         cap_max=float(allocator_payload.get("cap_max", 48.0)),
     )
