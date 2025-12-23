@@ -173,6 +173,19 @@ def _extract_run_name(run_dir: Path) -> str | None:
     return None
 
 
+def _load_pointer_run_id(path: Path) -> str | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    run_id = payload.get("run_id")
+    return str(run_id) if run_id else None
+
+
 def _load_unified_projections(
     day: date, run_id: str | None, data_root: Path
 ) -> tuple[pd.DataFrame | None, str | None, str | None]:
@@ -663,6 +676,77 @@ def create_app(
     @app.get("/api/minutes/meta")
     def get_minutes_meta(date: str | None = None, run_id: str | None = None) -> JSONResponse:
         slate_day = _parse_date(date)
+
+        # Prefer unified projections metadata when available (minutes + sim + ownership source of truth).
+        data_root = paths.data_path()
+        unified_root = data_root / "artifacts" / "projections" / str(slate_day)
+
+        pinned_run_id = _load_pointer_run_id(unified_root / PINNED_POINTER) if unified_root.exists() else None
+        latest_run_id = _load_pointer_run_id(unified_root / LATEST_POINTER) if unified_root.exists() else None
+
+        projections_run_dir: Path | None = None
+        resolved_projections_run_id: str | None = None
+        if unified_root.exists():
+            if run_id:
+                candidate = unified_root / f"run={run_id}"
+                if candidate.exists():
+                    projections_run_dir = candidate
+                    resolved_projections_run_id = run_id
+            else:
+                desired = pinned_run_id or latest_run_id
+                if desired:
+                    candidate = unified_root / f"run={desired}"
+                    if candidate.exists():
+                        projections_run_dir = candidate
+                        resolved_projections_run_id = desired
+                if projections_run_dir is None:
+                    run_dirs = sorted(
+                        [p for p in unified_root.iterdir() if p.is_dir() and p.name.startswith("run=")],
+                        reverse=True,
+                    )
+                    if run_dirs:
+                        projections_run_dir = run_dirs[0]
+                        resolved_projections_run_id = _extract_run_name(projections_run_dir)
+
+        if projections_run_dir is not None:
+            summary = _load_summary(projections_run_dir) or {}
+            parquet_path = projections_run_dir / "projections.parquet"
+            counts = {"rows": int(summary.get("rows", 0)), "players": 0, "teams": 0}
+            if parquet_path.exists():
+                try:
+                    df_keys = pd.read_parquet(parquet_path, columns=["player_id", "team_id"])
+                    counts = _build_counts(df_keys)
+                except Exception:
+                    pass
+            generated_at = summary.get("generated_at") or summary.get("generated_ts")
+            if not generated_at and parquet_path.exists():
+                try:
+                    mtime = parquet_path.stat().st_mtime
+                    generated_at = datetime.fromtimestamp(mtime).isoformat() + "Z"
+                except Exception:
+                    generated_at = None
+
+            payload: dict[str, Any] = {
+                "date": slate_day.isoformat(),
+                "counts": counts,
+                # Mirror legacy key names expected by the UI.
+                "run_id": resolved_projections_run_id,
+                "run_as_of_ts": generated_at,
+                # Unified provenance (preferred).
+                "projections_run_id": summary.get("projections_run_id") or resolved_projections_run_id,
+                "minutes_run_id": summary.get("minutes_run_id"),
+                "rates_run_id": summary.get("rates_run_id"),
+                "sim_run_id": summary.get("sim_run_id"),
+                "sim_profile": summary.get("sim_profile"),
+                "n_worlds": summary.get("n_worlds"),
+                "generated_at": generated_at,
+                "pinned_run_id": pinned_run_id,
+                "latest_run_id": latest_run_id,
+                "sim_available": bool(summary.get("sim_run_id")),
+            }
+            return JSONResponse(payload)
+
+        # Fall back to legacy minutes meta when unified projections are unavailable.
         day_dir = minutes_root / slate_day.isoformat()
         run_dir = _resolve_run_dir(day_dir, run_id)
         summary = _load_summary(run_dir)

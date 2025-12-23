@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   Bar,
@@ -45,6 +45,15 @@ type SummaryResponse = {
     players: number
     teams: number
   }
+  projections_run_id?: string | null
+  minutes_run_id?: string | null
+  rates_run_id?: string | null
+  sim_run_id?: string | null
+  sim_profile?: string | null
+  n_worlds?: number | null
+  pinned_run_id?: string | null
+  latest_run_id?: string | null
+  generated_at?: string | null
   model_run_id?: string
   bundle_dir?: string
   run_id?: string | null
@@ -129,6 +138,8 @@ function App() {
   const [runId, setRunId] = useState<string | null>(null)
   const [runOptions, setRunOptions] = useState<RunOption[]>([])
   const [latestRunId, setLatestRunId] = useState<string | null>(null)
+  const [pinnedRunId, setPinnedRunId] = useState<string | null>(null)
+  const pinnedRunRef = useRef<string | null>(null)
 
   const [showSim, setShowSim] = useState(true)
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
@@ -223,9 +234,18 @@ function App() {
         const runs: RunOption[] = data?.runs ?? []
         setRunOptions(runs)
         setLatestRunId(data?.latest ?? null)
+        setPinnedRunId(data?.pinned ?? null)
         setRunId((prev) => {
+          const prevPinned = pinnedRunRef.current
+          pinnedRunRef.current = data?.pinned ?? null
+          if (prev && prevPinned && prev === prevPinned && data?.pinned) {
+            return data.pinned
+          }
           if (prev && runs.some((run) => run.run_id === prev)) {
             return prev
+          }
+          if (data?.pinned && runs.some((run) => run.run_id === data.pinned)) {
+            return data.pinned
           }
           return data?.latest ?? null
         })
@@ -233,6 +253,7 @@ function App() {
         setRunOptions([])
         setLatestRunId(null)
         setRunId(null)
+        setPinnedRunId(null)
       }
     }
     void loadRuns()
@@ -481,23 +502,28 @@ function App() {
           <label>
             Run
             <select
-              value={runId ?? latestRunId ?? ''}
+              value={runId ?? pinnedRunId ?? latestRunId ?? ''}
               onChange={(event) => {
                 const value = event.target.value
                 setRunId(value || null)
               }}
             >
-              {latestRunId && (
+              {pinnedRunId && (
+                <option value={pinnedRunId}>
+                  {pinnedRunId === latestRunId ? `Pinned+Latest (${pinnedRunId})` : `Pinned (${pinnedRunId})`}
+                </option>
+              )}
+              {latestRunId && latestRunId !== pinnedRunId && (
                 <option value={latestRunId}>
                   {`Latest (${latestRunId})`}
                 </option>
               )}
               {runOptions
-                .filter((option) => option.run_id !== latestRunId)
+                .filter((option) => option.run_id !== latestRunId && option.run_id !== pinnedRunId)
                 .map((option) => (
                   <option key={option.run_id} value={option.run_id}>
                     {option.run_id}
-                    {option.run_as_of_ts ? ` · ${option.run_as_of_ts}` : ''}
+                    {(option.run_as_of_ts || option.generated_at) ? ` · ${option.run_as_of_ts ?? option.generated_at}` : ''}
                   </option>
                 ))}
               {!latestRunId && !runOptions.length && <option value="">No runs</option>}
@@ -538,8 +564,15 @@ function App() {
             Rows: {summary.counts.rows} · Players: {summary.counts.players} ·
             Teams: {summary.counts.teams}{' '}
             {summary.model_run_id && `· Model run: ${summary.model_run_id}`}{' '}
-            {summary.run_id && `· Artifact: ${summary.run_id}`}{' '}
+            {summary.run_id && `· Run: ${summary.run_id}`}{' '}
+            {summary.n_worlds != null && `· Worlds: ${summary.n_worlds}`}{' '}
+            {summary.sim_profile && `· Sim: ${summary.sim_profile}`}{' '}
+            {summary.minutes_run_id && `· Minutes: ${summary.minutes_run_id}`}{' '}
+            {summary.sim_run_id && `· Sim run: ${summary.sim_run_id}`}{' '}
+            {summary.rates_run_id && `· Rates: ${summary.rates_run_id}`}{' '}
             {summary.run_as_of_ts && `· As of: ${formatTime(summary.run_as_of_ts)}`}{' '}
+            {pinnedRunId && `· Pinned: ${pinnedRunId}`}{' '}
+            {latestRunId && `· Latest: ${latestRunId}`}{' '}
             {showSim && summary.sim_available === false && '· sim_v2 unavailable'}
           </span>
         )}

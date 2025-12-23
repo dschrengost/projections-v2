@@ -60,6 +60,11 @@ Pin the dashboard/API to a specific projections run (so a rescore doesn't get im
 uv run python -m projections.cli.check_health pin-projections-run --date 2025-12-22 --run-id <PROJECTIONS_RUN_ID>
 ```
 
+Auto-pin a run when invoking the live score script (useful for manual rescores):
+```bash
+LIVE_PIN_PROJECTIONS_RUN=1 /bin/bash scripts/run_live_score.sh
+```
+
 Clear the pin:
 ```bash
 uv run python -m projections.cli.check_health pin-projections-run --date 2025-12-22

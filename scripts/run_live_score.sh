@@ -27,6 +27,7 @@ SIM_PROFILE="${LIVE_SIM_PROFILE:-sim_v3}"
 SIM_WORLDS="${LIVE_SIM_WORLDS:-20000}"
 RUN_SIM="${LIVE_RUN_SIM:-1}"
 DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-0}" # enabled by default - respect game schedule
+PIN_PROJECTIONS_RUN="${LIVE_PIN_PROJECTIONS_RUN:-0}" # optional: pin unified projections run for debugging
 SCRAPE_FLAGS="${LIVE_SCRAPE_FLAGS:-}"
 
 export PROJECTIONS_DATA_ROOT="${DATA_ROOT}"
@@ -315,7 +316,7 @@ if [[ -z "${MAIN_DRAFT_GROUP}" ]]; then
   echo "[live] warning: Could not determine main draft group. Finalize skipped." >&2
 else
   echo "[live] Finalizing unified projections artifact for ${START_DATE} (draft_group=${MAIN_DRAFT_GROUP})..."
-  if ! /home/daniel/.local/bin/uv run python -m projections.cli.finalize_projections \
+  if /home/daniel/.local/bin/uv run python -m projections.cli.finalize_projections \
     --date "${START_DATE}" \
     --run-id "${LIVE_RUN_ID}" \
     --minutes-run-id "${LIVE_RUN_ID}" \
@@ -324,6 +325,17 @@ else
     --draft-group-id "${MAIN_DRAFT_GROUP}" \
     --data-root "${DATA_ROOT}"
   then
+    if [[ "${PIN_PROJECTIONS_RUN}" == "1" ]]; then
+      echo "[live] Pinning projections run ${LIVE_RUN_ID} (LIVE_PIN_PROJECTIONS_RUN=1)..."
+      if ! /home/daniel/.local/bin/uv run python -m projections.cli.check_health pin-projections-run \
+        --date "${START_DATE}" \
+        --run-id "${LIVE_RUN_ID}" \
+        --data-root "${DATA_ROOT}"
+      then
+        echo "[live] warning: Failed to pin projections run ${LIVE_RUN_ID}." >&2
+      fi
+    fi
+  else
     echo "[live] warning: Finalize projections failed." >&2
   fi
 fi
