@@ -13,6 +13,10 @@
 
 - `projections/cli/score_minutes_v1.py` writes extra columns when RotAlloc is active:
   - `minutes_mean`, `minutes_alloc_mode`, `eligible_flag`, `p_rot`, `mu_cond`, `team_minutes_sum`
+- When `minutes_alloc_mode=rotalloc_expk`, `score_minutes_v1`:
+  - disables the minutes upside adjustment (sim_v2 already provides variance)
+  - derives `minutes_p10`/`minutes_p90` by re-centering legacy tail deltas around the RotAlloc `minutes_p50`,
+    clamped to a feasible per-team cap (prevents unrealistic `minutes_p90 > 50` starters).
 - sim_v2 (`scripts/sim_v2/generate_worlds_fpts_v2.py`) masks availability/minutes by `eligible_flag` and writes `metrics.json` per run dir.
 - `promote_config.json` should set `allocator.p_cutoff` to define the rotation eligibility cutoff.
   - If missing, RotAlloc defaults to `0.15` and **fails in CI** to force explicit config.

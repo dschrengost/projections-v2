@@ -189,6 +189,56 @@ def _make_reconcile_debugger(
     return _log
 
 
+def _derive_rotalloc_minutes_tails(
+    *,
+    base_p10: pd.Series,
+    base_p50: pd.Series,
+    base_p90: pd.Series,
+    new_p50: pd.Series,
+    cap_eff: pd.Series,
+    eps: float = 1e-9,
+) -> tuple[pd.Series, pd.Series]:
+    """Derive RotAlloc minutes tail quantiles from the legacy minutes tails.
+
+    RotAlloc replaces the canonical conditional minutes central estimate (p50/mean)
+    with a deterministic allocator output (sum-to-240). RotAlloc itself does not
+    model minute tails; for sim stability we preserve the legacy tail *deltas*
+    around p50 and re-center them on the RotAlloc p50.
+
+    We also clamp to an effective per-team cap (>= cap_max, and >= 240/eligible_count)
+    to avoid impossible regulation outcomes when the eligible set is large enough to
+    make cap_max feasible.
+    """
+
+    p10_base = pd.to_numeric(base_p10, errors="coerce").fillna(0.0).astype(float)
+    p50_base = pd.to_numeric(base_p50, errors="coerce").fillna(0.0).astype(float)
+    p90_base = pd.to_numeric(base_p90, errors="coerce").fillna(0.0).astype(float)
+    p50_new = pd.to_numeric(new_p50, errors="coerce").fillna(0.0).astype(float)
+    cap = pd.to_numeric(cap_eff, errors="coerce").fillna(48.0).astype(float)
+
+    delta_low = (p50_base - p10_base).clip(lower=0.0)
+    delta_high = (p90_base - p50_base).clip(lower=0.0)
+
+    p10_new = (p50_new - delta_low).clip(lower=0.0)
+    p90_new = p50_new + delta_high
+
+    p10_new = np.minimum(p10_new, p50_new)
+    p90_new = np.maximum(p90_new, p50_new)
+
+    zero_mask = p50_new <= eps
+    if zero_mask.any():
+        p10_new = p10_new.mask(zero_mask, 0.0)
+        p90_new = p90_new.mask(zero_mask, 0.0)
+
+    p10_new = np.minimum(p10_new, cap)
+    p90_new = np.minimum(p90_new, cap)
+
+    p10_new = np.minimum(p10_new, p50_new)
+    p90_new = np.maximum(p90_new, p50_new)
+
+    return p10_new.astype(float), p90_new.astype(float)
+
+
 def _write_latest_pointer(day_dir: Path, *, run_id: str, run_as_of_ts: datetime | None) -> None:
     pointer = day_dir / LATEST_POINTER
     payload = {
@@ -1765,6 +1815,15 @@ def main(
     if player_lookup or not team_meta.empty:
         scored = _annotate_metadata(scored, player_lookup=player_lookup, team_meta=team_meta)
 
+    alloc_mode = resolve_minutes_alloc_mode(bundle_config)
+    if alloc_mode == "rotalloc_expk" and enable_upside_adjustment:
+        typer.echo(
+            "[upside] disabling upside adjustment in rotalloc_expk "
+            "(RotAlloc tails are derived from legacy deltas; sim_v2 provides variance).",
+            err=True,
+        )
+        enable_upside_adjustment = False
+
     # Apply upside adjustment before reconciliation (for DFS Monte Carlo coverage)
     if enable_upside_adjustment:
         upside_cfg = UpsideConfig()
@@ -1775,7 +1834,6 @@ def main(
             scored["minutes_p90"] = scored["minutes_p90_adj"]
         typer.echo("[upside] Applied upside adjustment for Monte Carlo coverage.", err=True)
 
-    alloc_mode = resolve_minutes_alloc_mode(bundle_config)
     normalized_reconcile_mode = reconcile_team_minutes.lower()
     if alloc_mode == "rotalloc_expk" and normalized_reconcile_mode != "none":
         typer.echo(
@@ -1818,13 +1876,69 @@ def main(
                     raise ValueError("rotalloc merge failed to provide minutes_mean")
 
                 # Override canonical conditional minutes with the allocator output.
-                minutes_mean = pd.to_numeric(scored["minutes_mean"], errors="coerce").fillna(0.0)
+                #
+                # RotAlloc provides a deterministic p50/mean but does not model tails.
+                # Preserve legacy tail deltas and re-center on the RotAlloc p50 to avoid
+                # unrealistic tails (e.g., p90>50) that destabilize sim minutes.
+                minutes_mean = pd.to_numeric(scored["minutes_mean"], errors="coerce").fillna(0.0).astype(float)
+                base_cols_present = {"minutes_p10", "minutes_p50", "minutes_p90"}.issubset(scored.columns)
+
+                cap_eff = pd.Series(float(allocator_cfg.cap_max), index=scored.index, dtype=float)
+                if {"eligible_flag", "game_id", "team_id"}.issubset(scored.columns):
+                    eligible = (
+                        pd.to_numeric(scored["eligible_flag"], errors="coerce")
+                        .fillna(0.0)
+                        .to_numpy(dtype=float)
+                        > 0.5
+                    )
+                    eligible_counts = (
+                        scored.assign(_eligible=eligible.astype(int))
+                        .groupby(["game_id", "team_id"])["_eligible"]
+                        .transform("sum")
+                    )
+                    eligible_counts = pd.to_numeric(eligible_counts, errors="coerce").fillna(0.0).astype(float)
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        cap_from_count = 240.0 / eligible_counts.replace(0.0, np.nan)
+                    cap_from_count = cap_from_count.fillna(float(allocator_cfg.cap_max))
+                    cap_eff = cap_from_count.clip(lower=float(allocator_cfg.cap_max)).astype(float)
+
+                if base_cols_present:
+                    minutes_p10_new, minutes_p90_new = _derive_rotalloc_minutes_tails(
+                        base_p10=scored["minutes_p10"],
+                        base_p50=scored["minutes_p50"],
+                        base_p90=scored["minutes_p90"],
+                        new_p50=minutes_mean,
+                        cap_eff=cap_eff,
+                    )
+                else:
+                    typer.echo(
+                        "[rotalloc] warning: legacy minutes tails missing; falling back to conservative tail multipliers",
+                        err=True,
+                    )
+                    if os.environ.get("CI"):
+                        raise ValueError(
+                            "RotAlloc requires legacy minutes tails (minutes_p10/p50/p90) for tail derivation."
+                        )
+                    minutes_p10_new = (minutes_mean * 0.85).astype(float)
+                    minutes_p90_new = (minutes_mean * 1.15).astype(float)
+                    minutes_p10_new = np.minimum(minutes_p10_new, minutes_mean)
+                    minutes_p90_new = np.maximum(minutes_p90_new, minutes_mean)
+                    minutes_p10_new = np.minimum(minutes_p10_new, cap_eff).astype(float)
+                    minutes_p90_new = np.minimum(minutes_p90_new, cap_eff).astype(float)
+
                 scored["minutes_p50"] = minutes_mean
                 scored["minutes_p50_cond"] = minutes_mean
-                scored["minutes_p10"] = (minutes_mean * 0.7).astype(float)
-                scored["minutes_p90"] = (minutes_mean * 1.3).astype(float)
-                scored["minutes_p10_cond"] = scored["minutes_p10"]
-                scored["minutes_p90_cond"] = scored["minutes_p90"]
+                scored["minutes_p10"] = minutes_p10_new
+                scored["minutes_p90"] = minutes_p90_new
+                scored["minutes_p10_cond"] = minutes_p10_new
+                scored["minutes_p90_cond"] = minutes_p90_new
+                for alias, src in {
+                    "p10_cond": "minutes_p10",
+                    "p50_cond": "minutes_p50",
+                    "p90_cond": "minutes_p90",
+                }.items():
+                    if alias in scored.columns:
+                        scored[alias] = scored[src]
 
                 alloc_summary = {
                     "minutes_alloc_mode": "rotalloc_expk",
