@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, UTC
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -16,6 +15,10 @@ from fastapi import APIRouter, HTTPException, Query
 from projections import paths
 
 router = APIRouter(prefix="/api/diagnostics", tags=["diagnostics"])
+
+LATEST_POINTER = "latest_run.json"
+PINNED_POINTER = "pinned_run.json"
+PROJECTIONS_FILENAME = "projections.parquet"
 
 # Expected ranges for anomaly detection
 EXPECTED_RANGES = {
@@ -68,17 +71,61 @@ def _load_latest_features(data_root: Path, game_date: date) -> pd.DataFrame:
     return pd.read_parquet(parquet_path)
 
 
-def _load_sim_projections(data_root: Path, game_date: date) -> pd.DataFrame:
-    """Load sim projections for a date."""
-    proj_dir = data_root / "artifacts" / "sim_v2" / "projections" / f"game_date={game_date.isoformat()}"
-    if not proj_dir.exists():
-        return pd.DataFrame()
-    
-    parquet_path = proj_dir / "projections.parquet"
+def _resolve_unified_run_dir(day_dir: Path, *, run_id: str | None) -> tuple[Path | None, str | None]:
+    if not day_dir.exists():
+        return None, None
+
+    if run_id is not None:
+        candidate = day_dir / f"run={run_id}"
+        return (candidate, run_id) if candidate.exists() else (None, None)
+
+    pinned_pointer = day_dir / PINNED_POINTER
+    if pinned_pointer.exists():
+        try:
+            payload = json.loads(pinned_pointer.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        pinned = payload.get("run_id") if isinstance(payload, dict) else None
+        if pinned:
+            candidate = day_dir / f"run={pinned}"
+            if candidate.exists():
+                return candidate, str(pinned)
+
+    latest_pointer = day_dir / LATEST_POINTER
+    if latest_pointer.exists():
+        try:
+            payload = json.loads(latest_pointer.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        latest = payload.get("run_id") if isinstance(payload, dict) else None
+        if latest:
+            candidate = day_dir / f"run={latest}"
+            if candidate.exists():
+                return candidate, str(latest)
+
+    run_dirs = sorted([p for p in day_dir.glob("run=*") if p.is_dir()], reverse=True)
+    if run_dirs:
+        run_dir = run_dirs[0]
+        resolved_run_id = run_dir.name.split("=", 1)[1] if run_dir.name.startswith("run=") else None
+        return run_dir, resolved_run_id
+    return None, None
+
+
+def _load_unified_projections(
+    data_root: Path,
+    game_date: date,
+    *,
+    run_id: str | None = None,
+) -> tuple[pd.DataFrame, str | None]:
+    """Load projections for a date from the unified projections artifact (source of truth)."""
+    day_dir = data_root / "artifacts" / "projections" / game_date.isoformat()
+    run_dir, resolved_run_id = _resolve_unified_run_dir(day_dir, run_id=run_id)
+    if run_dir is None:
+        return pd.DataFrame(), None
+    parquet_path = run_dir / PROJECTIONS_FILENAME
     if not parquet_path.exists():
-        return pd.DataFrame()
-    
-    return pd.read_parquet(parquet_path)
+        return pd.DataFrame(), resolved_run_id
+    return pd.read_parquet(parquet_path), resolved_run_id
 
 
 def _check_anomalies(df: pd.DataFrame) -> list[dict]:
@@ -163,6 +210,7 @@ async def get_feature_summary(
 async def get_projections(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     top_n: int = Query(20, description="Number of top players to return"),
+    run_id: str | None = Query(None, description="Optional projections run_id (defaults to pinned/latest)."),
 ):
     """Get sim projections for a date."""
     try:
@@ -174,7 +222,9 @@ async def get_projections(
     
     # Load features and projections
     features = _load_latest_features(data_root, game_date)
-    projections = _load_sim_projections(data_root, game_date)
+    projections, resolved_run_id = _load_unified_projections(data_root, game_date, run_id=run_id)
+    if run_id is not None and resolved_run_id is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found for {date}")
     
     if projections.empty:
         raise HTTPException(status_code=404, detail=f"No projections found for {date}")
@@ -221,6 +271,7 @@ async def get_projections(
     
     return {
         "date": date,
+        "run_id": resolved_run_id,
         "total_players": len(projections),
         "players": top_players,
     }
@@ -230,6 +281,7 @@ async def get_projections(
 async def get_player_details(
     player_id: int,
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    run_id: str | None = Query(None, description="Optional projections run_id (defaults to pinned/latest)."),
 ):
     """Get detailed projection and features for a specific player."""
     try:
@@ -240,7 +292,9 @@ async def get_player_details(
     data_root = paths.data_path()
     
     features = _load_latest_features(data_root, game_date)
-    projections = _load_sim_projections(data_root, game_date)
+    projections, resolved_run_id = _load_unified_projections(data_root, game_date, run_id=run_id)
+    if run_id is not None and resolved_run_id is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found for {date}")
     
     # Find player in features
     player_features = {}
@@ -279,6 +333,7 @@ async def get_player_details(
         "player_id": player_id,
         "player_name": ELITE_PLAYERS.get(player_id),
         "date": date,
+        "run_id": resolved_run_id,
         "features": player_features,
         "projections": player_projections,
     }

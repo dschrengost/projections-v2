@@ -1859,11 +1859,16 @@ def main(
     if alloc_mode == "rotalloc_expk":
         rotalloc_dir = resolve_rotalloc_bundle_dir(bundle_config)
         if rotalloc_dir is None:
-            typer.echo("[rotalloc] warning: rotalloc_bundle_dir missing from minutes bundle config; using legacy.", err=True)
+            typer.echo(
+                "[rotalloc] warning: rotalloc_bundle_dir missing from minutes bundle config; using legacy.",
+                err=True,
+            )
         else:
             try:
+                # Score RotAlloc on the post-scoring frame so OUT/play_prob overrides
+                # (status, lineup_role, ESPN injuries) are respected by the allocator mask.
                 rotalloc_scored, allocator_cfg, allocator_diag = score_rotalloc_minutes(
-                    prepared,
+                    scored,
                     bundle_dir=rotalloc_dir,
                 )
                 scored = scored.merge(
@@ -1972,6 +1977,8 @@ def main(
                 )
             except Exception as exc:
                 typer.echo(f"[rotalloc] ERROR: {exc} (falling back to legacy minutes)", err=True)
+                if os.environ.get("CI"):
+                    raise
 
     scored = _attach_unconditional_minutes(scored)
 

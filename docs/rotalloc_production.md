@@ -45,6 +45,7 @@ Verify run pointers:
 - Minutes: `$PROJECTIONS_DATA_ROOT/artifacts/minutes_v1/daily/<YYYY-MM-DD>/latest_run.json`
 - sim worlds: `$PROJECTIONS_DATA_ROOT/artifacts/sim_v2/worlds_fpts_v2/game_date=<YYYY-MM-DD>/latest_run.json`
 - Unified projections: `$PROJECTIONS_DATA_ROOT/artifacts/projections/<YYYY-MM-DD>/latest_run.json`
+- Optional pin (API prefers pinned over latest): `$PROJECTIONS_DATA_ROOT/artifacts/projections/<YYYY-MM-DD>/pinned_run.json`
 
 Notes:
 - Sim source of truth is `worlds_fpts_v2` (`projections.parquet` under `game_date=.../run=...`). Legacy `artifacts/sim_v2/projections` is ignored by `finalize_projections` unless `--allow-legacy-sim-projections-root` is set.
@@ -52,6 +53,16 @@ Notes:
 Validate pointer consistency for a date (fails non-zero on mismatch):
 ```bash
 uv run python -m projections.cli.check_health check-artifact-pointers --date 2025-12-20
+```
+
+Pin the dashboard/API to a specific projections run (so a rescore doesn't get immediately replaced by live updates):
+```bash
+uv run python -m projections.cli.check_health pin-projections-run --date 2025-12-22 --run-id <PROJECTIONS_RUN_ID>
+```
+
+Clear the pin:
+```bash
+uv run python -m projections.cli.check_health pin-projections-run --date 2025-12-22
 ```
 
 Debug missing minutes artifacts:

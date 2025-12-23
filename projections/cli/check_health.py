@@ -30,6 +30,13 @@ def _load_run_id(pointer: Path) -> str | None:
     return str(run_id) if run_id else None
 
 
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp_path.replace(path)
+
+
 def _newest_run_dir(day_dir: Path) -> Path | None:
     if not day_dir.exists():
         return None
@@ -375,6 +382,62 @@ def check_artifact_pointers(
             raise typer.Exit(code=1)
 
     console.print("\n[green]Artifact pointer check complete.[/green]")
+
+
+@app.command()
+def pin_projections_run(
+    date_str: Optional[str] = typer.Option(None, "--date", help="Date to pin (YYYY-MM-DD), defaults to today."),
+    run_id: Optional[str] = typer.Option(
+        None,
+        "--run-id",
+        help="Projections run_id to pin (omit to clear pin).",
+    ),
+    data_root: Path = typer.Option(
+        paths.data_path(),
+        "--data-root",
+        help="Root directory containing artifacts (defaults to PROJECTIONS_DATA_ROOT).",
+    ),
+) -> None:
+    """Pin the projections API/dashboard to a specific unified projections run.
+
+    Writes (or removes) `$DATA_ROOT/artifacts/projections/<DATE>/pinned_run.json`.
+    The API prefers this pinned pointer over latest_run.json so rescore runs can
+    be inspected without being immediately replaced by the live pipeline.
+    """
+    if date_str is None:
+        import datetime
+
+        date_str = datetime.date.today().isoformat()
+
+    projections_day = data_root / "artifacts" / "projections" / date_str
+    pinned_path = projections_day / "pinned_run.json"
+
+    if run_id is None:
+        if pinned_path.exists():
+            pinned_path.unlink()
+            console.print(f"[green]Removed pinned pointer:[/green] {pinned_path}")
+        else:
+            console.print(f"[yellow]No pinned pointer present:[/yellow] {pinned_path}")
+        raise typer.Exit(code=0)
+
+    run_dir = projections_day / f"run={run_id}"
+    parquet_path = run_dir / "projections.parquet"
+    if not parquet_path.exists():
+        console.print(f"[red]Run not found or missing projections.parquet:[/red] {parquet_path}")
+        raise typer.Exit(code=1)
+
+    payload = {
+        "run_id": run_id,
+    }
+    try:
+        from datetime import datetime as dt, timezone
+
+        payload["updated_at"] = dt.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        payload["updated_at"] = None
+
+    _atomic_write_json(pinned_path, payload)
+    console.print(f"[green]Pinned projections run:[/green] {date_str} -> run={run_id}")
 
 
 if __name__ == "__main__":

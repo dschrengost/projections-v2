@@ -260,11 +260,14 @@ def score_rotalloc_minutes(
                 "retrain required (CI strict)."
             )
 
-    # Mask candidates: padded rows are not expected here; exclude OUT rows if present.
+    # Mask candidates: padded rows are not expected here; exclude inactive rows if present.
     mask = np.ones(len(df), dtype=bool)
     if "status" in df.columns:
         status_upper = _safe_status_upper(df["status"])
         mask &= status_upper.to_numpy() != "OUT"
+    if "play_prob" in df.columns:
+        play_prob = pd.to_numeric(df["play_prob"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
+        mask &= play_prob > 0.0
 
     minutes = np.zeros(len(df), dtype=np.float64)
     eligible_flags = np.zeros(len(df), dtype=bool)

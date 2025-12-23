@@ -28,6 +28,7 @@ DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
 DEFAULT_FPTS_ROOT = paths.data_path("gold", "projections_fpts_v1")
 DEFAULT_SIM_ROOT = paths.data_path("artifacts", "sim_v2", "worlds_fpts_v2")
 LATEST_POINTER = "latest_run.json"
+PINNED_POINTER = "pinned_run.json"
 PARQUET_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
 FPTS_FILENAME = "fpts.parquet"
@@ -190,6 +191,27 @@ def _load_unified_projections(
         run_dir = unified_root / f"run={run_id}"
         resolved_run_id = run_id
     else:
+        # Prefer a pinned projections run when present so rescores can be inspected
+        # without being overwritten by the live pipeline updating latest_run.json.
+        pinned_pointer = unified_root / PINNED_POINTER
+        if pinned_pointer.exists():
+            try:
+                pinned_data = json.loads(pinned_pointer.read_text(encoding="utf-8"))
+            except Exception:
+                pinned_data = {}
+            pinned_run_id = pinned_data.get("run_id") if isinstance(pinned_data, dict) else None
+            if pinned_run_id:
+                candidate_dir = unified_root / f"run={pinned_run_id}"
+                candidate_path = candidate_dir / "projections.parquet"
+                if candidate_path.exists():
+                    resolved_run_id = pinned_run_id
+                    updated_at = pinned_data.get("updated_at") or pinned_data.get("pinned_at")
+                    try:
+                        df = pd.read_parquet(candidate_path)
+                        return df, resolved_run_id, updated_at
+                    except Exception:
+                        return None, None, None
+
         # Try latest pointer
         latest_pointer = unified_root / "latest_run.json"
         if latest_pointer.exists():
@@ -478,6 +500,27 @@ def create_app(
         # Source of truth: unified projections artifact (minutes + sim + ownership).
         # `run_id` is interpreted as projections_run_id when loading unified projections.
         data_root = paths.data_path()
+        unified_root = data_root / "artifacts" / "projections" / str(slate_day)
+        pinned_run_id = None
+        latest_run_id = None
+        if unified_root.exists():
+            pinned_pointer = unified_root / PINNED_POINTER
+            if pinned_pointer.exists():
+                try:
+                    pinned_payload = json.loads(pinned_pointer.read_text(encoding="utf-8"))
+                    if isinstance(pinned_payload, dict):
+                        pinned_run_id = pinned_payload.get("run_id")
+                except Exception:
+                    pinned_run_id = None
+            latest_pointer = unified_root / LATEST_POINTER
+            if latest_pointer.exists():
+                try:
+                    latest_payload = json.loads(latest_pointer.read_text(encoding="utf-8"))
+                    if isinstance(latest_payload, dict):
+                        latest_run_id = latest_payload.get("run_id")
+                except Exception:
+                    latest_run_id = None
+
         unified_df, resolved_run_id, updated_at = _load_unified_projections(slate_day, run_id, data_root)
 
         if unified_df is not None and not unified_df.empty:
@@ -506,12 +549,19 @@ def create_app(
                 unified_df = unified_df.rename(columns=rename_map)
             
             players = _serialize_players(unified_df)
+            run_summary = None
+            if resolved_run_id:
+                run_dir = unified_root / f"run={resolved_run_id}"
+                run_summary = _load_summary(run_dir)
             payload = {
                 "date": slate_day.isoformat(),
                 "count": len(players),
                 "players": players,
                 "run_id": resolved_run_id,
                 "last_updated": updated_at,
+                "latest_run_id": latest_run_id,
+                "pinned_run_id": pinned_run_id,
+                "run_summary": run_summary,
             }
             return JSONResponse(payload)
 
@@ -678,15 +728,25 @@ def create_app(
                     "generated_at": meta.get("generated_at"),
                 }
             )
-        pointer = day_dir / LATEST_POINTER
         latest = None
+        pointer = day_dir / LATEST_POINTER
         if pointer.exists():
             try:
                 payload = json.loads(pointer.read_text(encoding="utf-8"))
                 latest = payload.get("run_id")
             except json.JSONDecodeError:
                 latest = None
-        payload = {"date": slate_day.isoformat(), "latest": latest, "runs": runs}
+
+        pinned = None
+        pinned_pointer = day_dir / PINNED_POINTER
+        if pinned_pointer.exists():
+            try:
+                payload = json.loads(pinned_pointer.read_text(encoding="utf-8"))
+                pinned = payload.get("run_id") if isinstance(payload, dict) else None
+            except json.JSONDecodeError:
+                pinned = None
+
+        payload = {"date": slate_day.isoformat(), "latest": latest, "pinned": pinned, "runs": runs}
         return JSONResponse(payload)
 
     @app.get("/api/ownership")
