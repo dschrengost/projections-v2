@@ -1,0 +1,5315 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41267067,
+      "firstName": "Luka",
+      "lastName": "Doncic",
+      "displayName": "Luka Doncic",
+      "shortName": "L. Doncic",
+      "playerId": 1121277,
+      "playerDkId": 33005,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 19800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33005.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33005.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "65.5",
+          "sortValue": "65.5"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1121277-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267068,
+      "firstName": "LeBron",
+      "lastName": "James",
+      "displayName": "LeBron James",
+      "shortName": "L. James",
+      "playerId": 214152,
+      "playerDkId": 33114,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 15300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33114.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33114.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "39.9",
+          "sortValue": "39.9"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "214152-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267069,
+      "firstName": "James",
+      "lastName": "Harden",
+      "displayName": "James Harden",
+      "shortName": "J. Harden",
+      "playerId": 395388,
+      "playerDkId": 33070,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 15000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33070.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33070.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "48.8",
+          "sortValue": "48.8"
+        },
+        {
+          "id": -2,
+          "value": "21st",
+          "sortValue": "21",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "395388-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267070,
+      "firstName": "Austin",
+      "lastName": "Reaves",
+      "displayName": "Austin Reaves",
+      "shortName": "A. Reaves",
+      "playerId": 953291,
+      "playerDkId": 591721,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 14400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591721.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591721.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "47.4",
+          "sortValue": "47.4"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "953291-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267071,
+      "firstName": "Kawhi",
+      "lastName": "Leonard",
+      "displayName": "Kawhi Leonard",
+      "shortName": "K. Leonard",
+      "playerId": 512591,
+      "playerDkId": 33102,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 13800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33102.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33102.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "41.7",
+          "sortValue": "41.7"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "512591-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267033,
+      "firstName": "Luka",
+      "lastName": "Doncic",
+      "displayName": "Luka Doncic",
+      "shortName": "L. Doncic",
+      "playerId": 1121277,
+      "playerDkId": 33005,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 13200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33005.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33005.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "65.5",
+          "sortValue": "65.5"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1121277-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267072,
+      "firstName": "Ivica",
+      "lastName": "Zubac",
+      "displayName": "Ivica Zubac",
+      "shortName": "I. Zubac",
+      "playerId": 920093,
+      "playerDkId": 33107,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 12300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33107.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33107.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.0",
+          "sortValue": "37.0"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "920093-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267073,
+      "firstName": "Deandre",
+      "lastName": "Ayton",
+      "displayName": "Deandre Ayton",
+      "shortName": "D. Ayton",
+      "playerId": 1061507,
+      "playerDkId": 33312,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 11400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33312.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33312.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.1",
+          "sortValue": "31.1"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1061507-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267034,
+      "firstName": "LeBron",
+      "lastName": "James",
+      "displayName": "LeBron James",
+      "shortName": "L. James",
+      "playerId": 214152,
+      "playerDkId": 33114,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 10200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33114.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33114.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "39.9",
+          "sortValue": "39.9"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "214152-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267035,
+      "firstName": "James",
+      "lastName": "Harden",
+      "displayName": "James Harden",
+      "shortName": "J. Harden",
+      "playerId": 395388,
+      "playerDkId": 33070,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 10000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33070.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33070.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "48.8",
+          "sortValue": "48.8"
+        },
+        {
+          "id": -2,
+          "value": "21st",
+          "sortValue": "21",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "395388-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267036,
+      "firstName": "Austin",
+      "lastName": "Reaves",
+      "displayName": "Austin Reaves",
+      "shortName": "A. Reaves",
+      "playerId": 953291,
+      "playerDkId": 591721,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 9600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591721.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591721.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "47.4",
+          "sortValue": "47.4"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "953291-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267037,
+      "firstName": "Kawhi",
+      "lastName": "Leonard",
+      "displayName": "Kawhi Leonard",
+      "shortName": "K. Leonard",
+      "playerId": 512591,
+      "playerDkId": 33102,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 9200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33102.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33102.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "41.7",
+          "sortValue": "41.7"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "512591-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267074,
+      "firstName": "Marcus",
+      "lastName": "Smart",
+      "displayName": "Marcus Smart",
+      "shortName": "M. Smart",
+      "playerId": 697132,
+      "playerDkId": 32870,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 8700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32870.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32870.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.1",
+          "sortValue": "22.1"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "697132-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267075,
+      "firstName": "John",
+      "lastName": "Collins",
+      "displayName": "John Collins",
+      "shortName": "J. Collins",
+      "playerId": 880468,
+      "playerDkId": 32848,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 8400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32848.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32848.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.6",
+          "sortValue": "21.6"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "880468-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267038,
+      "firstName": "Ivica",
+      "lastName": "Zubac",
+      "displayName": "Ivica Zubac",
+      "shortName": "I. Zubac",
+      "playerId": 920093,
+      "playerDkId": 33107,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 8200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33107.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33107.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.0",
+          "sortValue": "37.0"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "920093-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267076,
+      "firstName": "Rui",
+      "lastName": "Hachimura",
+      "displayName": "Rui Hachimura",
+      "shortName": "R. Hachimura",
+      "playerId": 955893,
+      "playerDkId": 32883,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 8100,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32883.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32883.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.4",
+          "sortValue": "21.4"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "955893-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267039,
+      "firstName": "Deandre",
+      "lastName": "Ayton",
+      "displayName": "Deandre Ayton",
+      "shortName": "D. Ayton",
+      "playerId": 1061507,
+      "playerDkId": 33312,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 7600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33312.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33312.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.1",
+          "sortValue": "31.1"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1061507-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267077,
+      "firstName": "Kris",
+      "lastName": "Dunn",
+      "displayName": "Kris Dunn",
+      "shortName": "K. Dunn",
+      "playerId": 698968,
+      "playerDkId": 32966,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 7500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32966.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32966.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.5",
+          "sortValue": "19.5"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "698968-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267078,
+      "firstName": "Bogdan",
+      "lastName": "Bogdanovic",
+      "displayName": "Bogdan Bogdanovic",
+      "shortName": "B. Bogdanovic",
+      "playerId": 830648,
+      "playerDkId": 33339,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 7200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33339.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33339.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.5",
+          "sortValue": "19.5"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "830648-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267079,
+      "firstName": "Jaxson",
+      "lastName": "Hayes",
+      "displayName": "Jaxson Hayes",
+      "shortName": "J. Hayes",
+      "playerId": 1140887,
+      "playerDkId": 33224,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 6300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33224.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33224.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.3",
+          "sortValue": "14.3"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1140887-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267097,
+      "firstName": "Derrick",
+      "lastName": "Jones Jr.",
+      "displayName": "Derrick Jones Jr.",
+      "shortName": "D. Jones Jr.",
+      "playerId": 892925,
+      "playerDkId": 33160,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 6000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33160.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33160.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.3",
+          "sortValue": "19.3"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "892925-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267040,
+      "firstName": "Marcus",
+      "lastName": "Smart",
+      "displayName": "Marcus Smart",
+      "shortName": "M. Smart",
+      "playerId": 697132,
+      "playerDkId": 32870,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 5800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32870.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32870.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.1",
+          "sortValue": "22.1"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "697132-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267041,
+      "firstName": "John",
+      "lastName": "Collins",
+      "displayName": "John Collins",
+      "shortName": "J. Collins",
+      "playerId": 880468,
+      "playerDkId": 32848,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 5600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32848.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32848.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.6",
+          "sortValue": "21.6"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "880468-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267042,
+      "firstName": "Rui",
+      "lastName": "Hachimura",
+      "displayName": "Rui Hachimura",
+      "shortName": "R. Hachimura",
+      "playerId": 955893,
+      "playerDkId": 32883,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 5400,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32883.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32883.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.4",
+          "sortValue": "21.4"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "955893-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267080,
+      "firstName": "Kobe",
+      "lastName": "Sanders",
+      "displayName": "Kobe Sanders",
+      "shortName": "K. Sanders",
+      "playerId": 1231938,
+      "playerDkId": 906373,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906373.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906373.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.1",
+          "sortValue": "12.1"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1231938-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267043,
+      "firstName": "Kris",
+      "lastName": "Dunn",
+      "displayName": "Kris Dunn",
+      "shortName": "K. Dunn",
+      "playerId": 698968,
+      "playerDkId": 32966,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 5000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32966.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32966.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.5",
+          "sortValue": "19.5"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "698968-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267044,
+      "firstName": "Bogdan",
+      "lastName": "Bogdanovic",
+      "displayName": "Bogdan Bogdanovic",
+      "shortName": "B. Bogdanovic",
+      "playerId": 830648,
+      "playerDkId": 33339,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33339.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33339.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.5",
+          "sortValue": "19.5"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "830648-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267081,
+      "firstName": "Jake",
+      "lastName": "LaRavia",
+      "displayName": "Jake LaRavia",
+      "shortName": "J. LaRavia",
+      "playerId": 1175125,
+      "playerDkId": 649568,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649568.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649568.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.2",
+          "sortValue": "19.2"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1175125-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267098,
+      "firstName": "Gabe",
+      "lastName": "Vincent",
+      "displayName": "Gabe Vincent",
+      "shortName": "G. Vincent",
+      "playerId": 851253,
+      "playerDkId": 36560,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 4500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/36560.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/36560.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.5",
+          "sortValue": "9.5"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "851253-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267045,
+      "firstName": "Jaxson",
+      "lastName": "Hayes",
+      "displayName": "Jaxson Hayes",
+      "shortName": "J. Hayes",
+      "playerId": 1140887,
+      "playerDkId": 33224,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33224.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33224.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.3",
+          "sortValue": "14.3"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1140887-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267082,
+      "firstName": "Jordan",
+      "lastName": "Miller",
+      "displayName": "Jordan Miller",
+      "shortName": "J. Miller",
+      "playerId": 1134092,
+      "playerDkId": 713800,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713800.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713800.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.2",
+          "sortValue": "15.2"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1134092-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267063,
+      "firstName": "Derrick",
+      "lastName": "Jones Jr.",
+      "displayName": "Derrick Jones Jr.",
+      "shortName": "D. Jones Jr.",
+      "playerId": 892925,
+      "playerDkId": 33160,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 4000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33160.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33160.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.3",
+          "sortValue": "19.3"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "892925-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267083,
+      "firstName": "Maxi",
+      "lastName": "Kleber",
+      "displayName": "Maxi Kleber",
+      "shortName": "M. Kleber",
+      "playerId": 1072048,
+      "playerDkId": 33003,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 3900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33003.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33003.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.5",
+          "sortValue": "6.5"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1072048-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267046,
+      "firstName": "Kobe",
+      "lastName": "Sanders",
+      "displayName": "Kobe Sanders",
+      "shortName": "K. Sanders",
+      "playerId": 1231938,
+      "playerDkId": 906373,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906373.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906373.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.1",
+          "sortValue": "12.1"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1231938-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267084,
+      "firstName": "Jarred",
+      "lastName": "Vanderbilt",
+      "displayName": "Jarred Vanderbilt",
+      "shortName": "J. Vanderbilt",
+      "playerId": 1067852,
+      "playerDkId": 33027,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33027.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33027.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.9",
+          "sortValue": "15.9"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1067852-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267085,
+      "firstName": "Nicolas",
+      "lastName": "Batum",
+      "displayName": "Nicolas Batum",
+      "shortName": "N. Batum",
+      "playerId": 456451,
+      "playerDkId": 32930,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 3300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32930.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32930.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.1",
+          "sortValue": "12.1"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "456451-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267047,
+      "firstName": "Jake",
+      "lastName": "LaRavia",
+      "displayName": "Jake LaRavia",
+      "shortName": "J. LaRavia",
+      "playerId": 1175125,
+      "playerDkId": 649568,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 3200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649568.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649568.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.2",
+          "sortValue": "19.2"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1175125-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267064,
+      "firstName": "Gabe",
+      "lastName": "Vincent",
+      "displayName": "Gabe Vincent",
+      "shortName": "G. Vincent",
+      "playerId": 851253,
+      "playerDkId": 36560,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 3000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/36560.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/36560.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.5",
+          "sortValue": "9.5"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "851253-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267086,
+      "firstName": "Kobe",
+      "lastName": "Brown",
+      "displayName": "Kobe Brown",
+      "shortName": "K. Brown",
+      "playerId": 1176611,
+      "playerDkId": 713782,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713782.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713782.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.1",
+          "sortValue": "9.1"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1176611-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267048,
+      "firstName": "Jordan",
+      "lastName": "Miller",
+      "displayName": "Jordan Miller",
+      "shortName": "J. Miller",
+      "playerId": 1134092,
+      "playerDkId": 713800,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 2800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713800.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713800.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.2",
+          "sortValue": "15.2"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1134092-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267049,
+      "firstName": "Maxi",
+      "lastName": "Kleber",
+      "displayName": "Maxi Kleber",
+      "shortName": "M. Kleber",
+      "playerId": 1072048,
+      "playerDkId": 33003,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 2600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33003.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33003.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.5",
+          "sortValue": "6.5"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1072048-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267050,
+      "firstName": "Jarred",
+      "lastName": "Vanderbilt",
+      "displayName": "Jarred Vanderbilt",
+      "shortName": "J. Vanderbilt",
+      "playerId": 1067852,
+      "playerDkId": 33027,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33027.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33027.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.9",
+          "sortValue": "15.9"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1067852-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267087,
+      "firstName": "Brook",
+      "lastName": "Lopez",
+      "displayName": "Brook Lopez",
+      "shortName": "B. Lopez",
+      "playerId": 330047,
+      "playerDkId": 33171,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33171.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33171.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.6",
+          "sortValue": "11.6"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "330047-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267051,
+      "firstName": "Nicolas",
+      "lastName": "Batum",
+      "displayName": "Nicolas Batum",
+      "shortName": "N. Batum",
+      "playerId": 456451,
+      "playerDkId": 32930,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 2200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32930.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32930.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.1",
+          "sortValue": "12.1"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "456451-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267088,
+      "firstName": "Dalton",
+      "lastName": "Knecht",
+      "displayName": "Dalton Knecht",
+      "shortName": "D. Knecht",
+      "playerId": 1324634,
+      "playerDkId": 800374,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 2100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800374.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800374.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.8",
+          "sortValue": "10.8"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1324634-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267052,
+      "firstName": "Kobe",
+      "lastName": "Brown",
+      "displayName": "Kobe Brown",
+      "shortName": "K. Brown",
+      "playerId": 1176611,
+      "playerDkId": 713782,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 2000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713782.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713782.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.1",
+          "sortValue": "9.1"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1176611-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267053,
+      "firstName": "Brook",
+      "lastName": "Lopez",
+      "displayName": "Brook Lopez",
+      "shortName": "B. Lopez",
+      "playerId": 330047,
+      "playerDkId": 33171,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33171.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33171.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.6",
+          "sortValue": "11.6"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "330047-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267089,
+      "firstName": "Cam",
+      "lastName": "Christie",
+      "displayName": "Cam Christie",
+      "shortName": "C. Christie",
+      "playerId": 1460155,
+      "playerDkId": 800660,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800660.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800660.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.0",
+          "sortValue": "9.0"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1460155-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267090,
+      "firstName": "Yanic Konan",
+      "lastName": "Niederhauser",
+      "displayName": "Yanic Konan Niederhauser",
+      "shortName": "Y. Niederhauser",
+      "playerId": 1405278,
+      "playerDkId": 905579,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905579.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905579.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.1",
+          "sortValue": "5.1"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1405278-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267091,
+      "firstName": "RayJ",
+      "lastName": "Dennis",
+      "displayName": "RayJ Dennis",
+      "shortName": "R. Dennis",
+      "playerId": 1194704,
+      "playerDkId": 803417,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/803417.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/803417.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.3",
+          "sortValue": "10.3"
+        },
+        {
+          "id": -2,
+          "value": "21st",
+          "sortValue": "21",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1194704-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267092,
+      "firstName": "Adou",
+      "lastName": "Thiero",
+      "displayName": "Adou Thiero",
+      "shortName": "A. Thiero",
+      "playerId": 1408189,
+      "playerDkId": 906341,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906341.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906341.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.5",
+          "sortValue": "2.5"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1408189-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267093,
+      "firstName": "Nick",
+      "lastName": "Smith Jr.",
+      "displayName": "Nick Smith Jr.",
+      "shortName": "N. Smith Jr.",
+      "playerId": 1401374,
+      "playerDkId": 713779,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713779.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713779.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.3",
+          "sortValue": "12.3"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1401374-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267094,
+      "firstName": "Drew",
+      "lastName": "Timme",
+      "displayName": "Drew Timme",
+      "shortName": "D. Timme",
+      "playerId": 1191176,
+      "playerDkId": 713826,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713826.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713826.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.5",
+          "sortValue": "5.5"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1191176-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267095,
+      "firstName": "Bronny",
+      "lastName": "James",
+      "displayName": "Bronny James",
+      "shortName": "B. James",
+      "playerId": 1463593,
+      "playerDkId": 800667,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800667.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800667.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.1",
+          "sortValue": "6.1"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1463593-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267096,
+      "firstName": "Chris",
+      "lastName": "Manon",
+      "displayName": "Chris Manon",
+      "shortName": "C. Manon",
+      "playerId": 1232601,
+      "playerDkId": 909200,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/909200.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/909200.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.3",
+          "sortValue": "2.3"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1232601-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267099,
+      "firstName": "Bradley",
+      "lastName": "Beal",
+      "displayName": "Bradley Beal",
+      "shortName": "B. Beal",
+      "playerId": 606912,
+      "playerDkId": 32871,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32871.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32871.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.5",
+          "sortValue": "12.5"
+        },
+        {
+          "id": -2,
+          "value": "21st",
+          "sortValue": "21",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "606912-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267100,
+      "firstName": "Chris",
+      "lastName": "Paul",
+      "displayName": "Chris Paul",
+      "shortName": "C. Paul",
+      "playerId": 229598,
+      "playerDkId": 33246,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33246.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33246.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.3",
+          "sortValue": "11.3"
+        },
+        {
+          "id": -2,
+          "value": "21st",
+          "sortValue": "21",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "229598-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267054,
+      "firstName": "Dalton",
+      "lastName": "Knecht",
+      "displayName": "Dalton Knecht",
+      "shortName": "D. Knecht",
+      "playerId": 1324634,
+      "playerDkId": 800374,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800374.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800374.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.8",
+          "sortValue": "10.8"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1324634-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267055,
+      "firstName": "Cam",
+      "lastName": "Christie",
+      "displayName": "Cam Christie",
+      "shortName": "C. Christie",
+      "playerId": 1460155,
+      "playerDkId": 800660,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800660.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800660.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.0",
+          "sortValue": "9.0"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1460155-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267056,
+      "firstName": "Yanic Konan",
+      "lastName": "Niederhauser",
+      "displayName": "Yanic Konan Niederhauser",
+      "shortName": "Y. Niederhauser",
+      "playerId": 1405278,
+      "playerDkId": 905579,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905579.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905579.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.1",
+          "sortValue": "5.1"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1405278-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267057,
+      "firstName": "RayJ",
+      "lastName": "Dennis",
+      "displayName": "RayJ Dennis",
+      "shortName": "R. Dennis",
+      "playerId": 1194704,
+      "playerDkId": 803417,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/803417.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/803417.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.3",
+          "sortValue": "10.3"
+        },
+        {
+          "id": -2,
+          "value": "21st",
+          "sortValue": "21",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "1194704-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267058,
+      "firstName": "Adou",
+      "lastName": "Thiero",
+      "displayName": "Adou Thiero",
+      "shortName": "A. Thiero",
+      "playerId": 1408189,
+      "playerDkId": 906341,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906341.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906341.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.5",
+          "sortValue": "2.5"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1408189-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267059,
+      "firstName": "Nick",
+      "lastName": "Smith Jr.",
+      "displayName": "Nick Smith Jr.",
+      "shortName": "N. Smith Jr.",
+      "playerId": 1401374,
+      "playerDkId": 713779,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713779.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713779.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.3",
+          "sortValue": "12.3"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1401374-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267060,
+      "firstName": "Drew",
+      "lastName": "Timme",
+      "displayName": "Drew Timme",
+      "shortName": "D. Timme",
+      "playerId": 1191176,
+      "playerDkId": 713826,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713826.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713826.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.5",
+          "sortValue": "5.5"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1191176-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267061,
+      "firstName": "Bronny",
+      "lastName": "James",
+      "displayName": "Bronny James",
+      "shortName": "B. James",
+      "playerId": 1463593,
+      "playerDkId": 800667,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800667.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800667.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.1",
+          "sortValue": "6.1"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1463593-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267062,
+      "firstName": "Chris",
+      "lastName": "Manon",
+      "displayName": "Chris Manon",
+      "shortName": "C. Manon",
+      "playerId": 1232601,
+      "playerDkId": 909200,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/909200.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/909200.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC"
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC"
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.3",
+          "sortValue": "2.3"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 13,
+      "teamAbbreviation": "LAL",
+      "draftAlerts": [],
+      "playerGameHash": "1232601-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267065,
+      "firstName": "Bradley",
+      "lastName": "Beal",
+      "displayName": "Bradley Beal",
+      "shortName": "B. Beal",
+      "playerId": 606912,
+      "playerDkId": 32871,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32871.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32871.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.5",
+          "sortValue": "12.5"
+        },
+        {
+          "id": -2,
+          "value": "21st",
+          "sortValue": "21",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "606912-6130116",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41267066,
+      "firstName": "Chris",
+      "lastName": "Paul",
+      "displayName": "Chris Paul",
+      "shortName": "C. Paul",
+      "playerId": 229598,
+      "playerDkId": 33246,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33246.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33246.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130116,
+        "name": "LAL @ LAC",
+        "nameDisplay": [
+          {
+            "value": "LAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "LAC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T03:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130116,
+          "name": "LAL @ LAC",
+          "nameDisplay": [
+            {
+              "value": "LAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "LAC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T03:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.3",
+          "sortValue": "11.3"
+        },
+        {
+          "id": -2,
+          "value": "21st",
+          "sortValue": "21",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 12,
+      "teamAbbreviation": "LAC",
+      "draftAlerts": [],
+      "playerGameHash": "229598-6130116",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6130116,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 12,
+        "teamName": "Clippers",
+        "abbreviation": "LAC",
+        "city": "Los Angeles",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32925.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 13,
+        "teamName": "Lakers",
+        "abbreviation": "LAL",
+        "city": "Los Angeles",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32927.png",
+        "darkModeImageUrl": ""
+      },
+      "startTime": "2025-12-21T03:30:00.0000000Z",
+      "name": "LAL @ LAC",
+      "venue": "Intuit Dome",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 32,
+          "value": "NBAt"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}

@@ -23,10 +23,10 @@ CONFIG_RECONCILE=$(jq -r '.reconcile_team_minutes // empty' config/minutes_curre
 # Default to 'none' - sim handles reconciliation internally via game script sampling
 RECONCILE_MODE="${LIVE_RECONCILE_MODE:-${CONFIG_RECONCILE:-none}}"
 MINUTES_OUTPUT_MODE="${LIVE_MINUTES_OUTPUT:-conditional}"
-SIM_PROFILE="${LIVE_SIM_PROFILE:-sim_v3}"
+SIM_PROFILE="${LIVE_SIM_PROFILE:-today}"
 SIM_WORLDS="${LIVE_SIM_WORLDS:-20000}"
 RUN_SIM="${LIVE_RUN_SIM:-1}"
-DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-0}" # enabled by default - respect game schedule
+DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-1}" # disabled by default - always run regardless of schedule
 PIN_PROJECTIONS_RUN="${LIVE_PIN_PROJECTIONS_RUN:-0}" # optional: pin unified projections run for debugging
 SCRAPE_FLAGS="${LIVE_SCRAPE_FLAGS:-}"
 
@@ -127,6 +127,52 @@ else
     ${SCRAPE_FLAGS}
 fi
 
+# === STEP 1.5: INPUT DIGEST CHECK (skip if unchanged) ===
+# Check if inputs have changed since last run; skip if identical (saves compute)
+# Force run conditions: 
+#   - First run of the hour (retention policy: 1/hour)
+#   - Within 10 minutes of first tip (final pre-lock snapshot)
+#   - LIVE_FORCE_RUN=1 (manual override)
+FORCE_RUN="${LIVE_FORCE_RUN:-0}"
+CURRENT_MINUTE=$(date +%M)
+DIGEST_CHECK_ENABLED="${LIVE_DIGEST_CHECK:-1}"
+
+# Force run on first run of the hour (minute 00-05 window)
+if [[ "${CURRENT_MINUTE}" -lt 6 ]]; then
+  FORCE_RUN=1
+  echo "[live][digest] Forcing run: first run of hour (minute=${CURRENT_MINUTE})"
+fi
+
+# Force run if within 10 minutes of first tip (final pre-lock snapshot)
+if [[ -n "${SLATE_START_TS:-}" ]]; then
+  TIME_TO_TIP=$((${SLATE_START_TS%.*} - NOW_UTC))
+  if [[ "${TIME_TO_TIP}" -gt 0 && "${TIME_TO_TIP}" -lt 600 ]]; then
+    FORCE_RUN=1
+    echo "[live][digest] Forcing run: final pre-lock snapshot (${TIME_TO_TIP}s to first tip)"
+  fi
+fi
+
+SKIP_PIPELINE=0
+if [[ "${DIGEST_CHECK_ENABLED}" == "1" && "${FORCE_RUN}" != "1" ]]; then
+  DIGEST_OUTPUT=$(/home/daniel/.local/bin/uv run python -m projections.pipeline.input_digest \
+    --game-date "${START_DATE}" \
+    --data-root "${DATA_ROOT}" \
+    --season "${SEASON}" 2>&1) || true
+  DIGEST_STATUS=$?
+  
+  if [[ "${DIGEST_OUTPUT}" == SKIP:* ]]; then
+    echo "[live][digest] ${DIGEST_OUTPUT} - skipping pipeline"
+    SKIP_PIPELINE=1
+  else
+    echo "[live][digest] ${DIGEST_OUTPUT}"
+  fi
+fi
+
+if [[ "${SKIP_PIPELINE}" == "1" ]]; then
+  echo "[live] Pipeline skipped (inputs unchanged). Exiting."
+  exit 0
+fi
+
 # Use the current time for run_as_of_ts so faster feeds (odds) aren't filtered out
 # between slower feeds (injuries). build_minutes_live still applies per-game tip_ts bounds.
 RUN_AS_OF_TS="${LIVE_RUN_AS_OF_TS:-$(date -u '+%Y-%m-%d %H:%M:%S')}"
@@ -134,7 +180,7 @@ RUN_AS_OF_TS="${LIVE_RUN_AS_OF_TS:-$(date -u '+%Y-%m-%d %H:%M:%S')}"
 echo "[live] Building features as of ${RUN_AS_OF_TS}..."
 
 # Generate run ID using current time (ensures dashboard always shows fresh data)
-LIVE_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
+LIVE_RUN_ID="${LIVE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 BACKFILL_MODE="${LIVE_BACKFILL_MODE:-0}"
 
 BUILD_ARGS=(
@@ -342,3 +388,45 @@ fi
 
 echo "[live] Running health checks..."
 /home/daniel/.local/bin/uv run python -m projections.cli.check_health check-rates-sanity --date "${START_DATE}"
+
+# === STEP FINAL-A: SAVE INPUT DIGEST ===
+# Record the input state so next run can skip if unchanged
+if [[ "${DIGEST_CHECK_ENABLED:-1}" == "1" ]]; then
+  /home/daniel/.local/bin/uv run python -m projections.pipeline.input_digest \
+    --game-date "${START_DATE}" \
+    --data-root "${DATA_ROOT}" \
+    --season "${SEASON}" \
+    --save-on-change >/dev/null 2>&1 || true
+  echo "[live] Saved input digest for deduplication"
+fi
+
+# === STEP FINAL-B: GENERATE RUN MANIFEST ===
+# Save lineage manifest for this run
+/home/daniel/.local/bin/uv run python -m projections.pipeline.run_manifest \
+  --run-id "${LIVE_RUN_ID}" \
+  --game-date "${START_DATE}" \
+  --data-root "${DATA_ROOT}" \
+  --season "${SEASON}" \
+  --save >/dev/null 2>&1 || true
+echo "[live] Generated run manifest"
+
+# === STEP FINAL-C: VALIDATE AND PROMOTE TO BLESSED ===
+# Run validation and promote to blessed if all checks pass
+if [[ "${LIVE_SKIP_VALIDATION:-0}" != "1" ]]; then
+  VALIDATION_OUTPUT=$(/home/daniel/.local/bin/uv run python -m projections.pipeline.validation \
+    --run-id "${LIVE_RUN_ID}" \
+    --game-date "${START_DATE}" \
+    --data-root "${DATA_ROOT}" \
+    --promote 2>&1) || true
+  
+  if [[ "${VALIDATION_OUTPUT}" == *"SUCCESS"* ]]; then
+    echo "[live] ✅ Validation PASSED - promoted to blessed run"
+  else
+    echo "[live] ⚠️ Validation FAILED - blessed run unchanged"
+    echo "[live] ${VALIDATION_OUTPUT}" | head -5
+  fi
+else
+  echo "[live] Validation skipped (LIVE_SKIP_VALIDATION=1)"
+fi
+
+echo "[live] Pipeline complete. run_id=${LIVE_RUN_ID}"

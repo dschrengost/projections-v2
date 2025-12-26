@@ -1,0 +1,6 @@
+game_date,n_players,n_teams,has_labels,error,mae_A,mae_B,mae_delta,rmse_A,rmse_B,top5_sum_A,top5_sum_B,max_minutes_A,max_minutes_B,gini_A,gini_B,roster_size_A,roster_size_B,bench_crush_A,bench_crush_B,A_wins_mae,A_wins_top5
+2025-12-01,0,0,False,missing_summary,,,,,,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,False
+2025-12-02,0,0,False,missing_summary,,,,,,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,False
+2025-12-03,0,0,False,missing_summary,,,,,,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,False
+2025-12-04,0,0,False,missing_summary,,,,,,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,False
+2025-12-05,0,0,False,missing_summary,,,,,,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,False

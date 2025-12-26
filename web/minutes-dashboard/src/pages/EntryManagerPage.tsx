@@ -6,9 +6,11 @@ import {
     getEntryFile,
     listEntryFiles,
     runLateSwap,
+    selectLateSwapAlternative,
     uploadEntries,
     EntryFileState,
     EntryFileSummary,
+    EntryAlternatives,
 } from '../api/entry_manager'
 import { getSavedBuilds, getSlates, loadSavedBuild, SavedBuild, Slate } from '../api/optimizer'
 import { getSavedSimBuilds, loadSavedSimBuild, SavedSimBuildSummary } from '../api/contest_sim'
@@ -16,6 +18,27 @@ import { getSavedSimBuilds, loadSavedSimBuild, SavedSimBuildSummary } from '../a
 const todayISO = () => new Date().toISOString().slice(0, 10)
 const DK_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL']
 const ENTRIES_PER_PAGE = 25
+
+interface ContestSwapResult {
+    contestId: string
+    contestName: string
+    entryCount: number
+    lockedCount: number
+    swappedCount: number
+    totalProjDelta: number
+    missingLockedCount: number
+    heldCount: number
+    avgGap: number | null
+    maxGap: number | null
+    statusSummary: string | null
+    unmappedEntries: number
+}
+
+const extractPlayerName = (playerStr: string): string => {
+    // "Player Name (12345)" -> "Player Name"
+    const match = playerStr.match(/^(.+?)\s*\(\d+\)$/)
+    return match ? match[1] : playerStr
+}
 
 export default function EntryManagerPage() {
     const [selectedDate, setSelectedDate] = useState(todayISO())
@@ -42,6 +65,17 @@ export default function EntryManagerPage() {
     const [uploading, setUploading] = useState(false)
     const [applyLoading, setApplyLoading] = useState(false)
     const [lateSwapLoading, setLateSwapLoading] = useState(false)
+
+    // Late swap alternatives state
+    const [alternativesByEntryId, setAlternativesByEntryId] = useState<
+        Record<string, EntryAlternatives>
+    >({})
+    const [selectedAlternatives, setSelectedAlternatives] = useState<
+        Record<string, number>
+    >({})
+    const [contestResults, setContestResults] = useState<ContestSwapResult[]>([])
+    const [showResultsPanel, setShowResultsPanel] = useState(false)
+    const [randomnessPct, setRandomnessPct] = useState(0)
 
     useEffect(() => {
         const loadSlates = async () => {
@@ -238,10 +272,15 @@ export default function EntryManagerPage() {
         prevEntries: Record<string, string>[],
         nextEntries: Record<string, string>[],
     ): Record<string, string[]> => {
-        const prevMap = new Map(prevEntries.map(entry => [String(entry.entry_id || ''), entry]))
+        const prevMap = new Map(
+            prevEntries.map((entry, idx) => [
+                String(entry.entry_key || entry.entry_id || `row-${idx + 1}`),
+                entry,
+            ]),
+        )
         const diffs: Record<string, string[]> = {}
-        for (const entry of nextEntries) {
-            const entryId = String(entry.entry_id || '')
+        for (const [idx, entry] of nextEntries.entries()) {
+            const entryId = String(entry.entry_key || entry.entry_id || `row-${idx + 1}`)
             const prev = prevMap.get(entryId)
             if (!prev) continue
             const changedSlots = DK_SLOTS.filter(slot => (prev[slot] || '') !== (entry[slot] || ''))
@@ -267,12 +306,68 @@ export default function EntryManagerPage() {
         if (targetIds.length === 0) return
         setLateSwapLoading(true)
         setEntryError(null)
+
+        const results: ContestSwapResult[] = []
+
         try {
             const prevEntries = selectedContestId && entryFile && entryFile.contest_id === selectedContestId
                 ? entryFile.entries
                 : null
+
             for (const contestId of targetIds) {
-                const result = await runLateSwap(selectedDate, contestId)
+                const contestSummary = entryFiles.find(e => e.contest_id === contestId)
+                const result = await runLateSwap(selectedDate, contestId, {
+                    randomnessPct: randomnessPct > 0 ? randomnessPct : undefined,
+                })
+
+                // Calculate stats for results panel
+                let swappedCount = 0
+                let totalProjDelta = 0
+
+                if (result.alternatives_by_entry_id) {
+                    for (const alts of Object.values(result.alternatives_by_entry_id)) {
+                        const selectedAlt = alts.alternatives[alts.selected_idx]
+                        if (selectedAlt?.player_swaps?.length > 0) {
+                            swappedCount++
+                            for (const swap of selectedAlt.player_swaps) {
+                                if (swap.old_proj !== null && swap.new_proj !== null) {
+                                    totalProjDelta += swap.new_proj - swap.old_proj
+                                }
+                            }
+                        }
+                    }
+
+                    setAlternativesByEntryId(prev => ({
+                        ...prev,
+                        ...result.alternatives_by_entry_id,
+                    }))
+
+                    const newSelected: Record<string, number> = {}
+                    for (const [entryId, alts] of Object.entries(result.alternatives_by_entry_id)) {
+                        newSelected[entryId] = alts.selected_idx
+                    }
+                    setSelectedAlternatives(prev => ({ ...prev, ...newSelected }))
+                }
+
+                results.push({
+                    contestId,
+                    contestName: contestSummary?.contest_name || contestId,
+                    entryCount: result.updated_entries,
+                    lockedCount: result.locked_count,
+                    swappedCount,
+                    totalProjDelta,
+                    missingLockedCount: result.missing_locked_ids?.length ?? 0,
+                    heldCount: result.selection_summary?.entries_held ?? 0,
+                    avgGap: result.solver_summary?.avg_gap ?? null,
+                    maxGap: result.solver_summary?.max_gap ?? null,
+                    statusSummary: result.solver_summary?.status_counts
+                        ? Object.entries(result.solver_summary.status_counts)
+                            .map(([status, count]) => `${status}: ${count}`)
+                            .join(', ')
+                        : null,
+                    unmappedEntries: result.selection_summary?.entries_unmapped ?? 0,
+                })
+
                 if (contestId === selectedContestId) {
                     setEntryFile(result.entry_state)
                     if (prevEntries) {
@@ -282,6 +377,11 @@ export default function EntryManagerPage() {
                     }
                     setLockedSlotsByEntryId(result.locked_slots_by_entry_id || {})
                 }
+            }
+
+            setContestResults(results)
+            if (results.length > 0) {
+                setShowResultsPanel(true)
             }
         } catch (err) {
             setEntryError((err as Error).message)
@@ -383,6 +483,63 @@ export default function EntryManagerPage() {
                 </section>
             )}
 
+            {/* Late Swap Results Panel */}
+            {showResultsPanel && contestResults.length > 0 && (
+                <section className="late-swap-results-panel">
+                    <div className="results-header">
+                        <h4>Late Swap Results</h4>
+                        <button onClick={() => setShowResultsPanel(false)} className="close-btn">×</button>
+                    </div>
+                    <div className="results-list">
+                        {contestResults.map(result => (
+                            <div key={result.contestId} className="result-item">
+                                <div className="result-contest">{result.contestName}</div>
+                                <div className="result-stats">
+                                    <span>{result.entryCount} entries</span>
+                                    <span className="muted">|</span>
+                                    <span>{result.lockedCount} locked</span>
+                                    <span className="muted">|</span>
+                                    <span>{result.swappedCount} swapped</span>
+                                    <span className="muted">|</span>
+                                    <span>{result.heldCount} held</span>
+                                    <span className="muted">|</span>
+                                    <span className={result.totalProjDelta >= 0 ? 'positive' : 'negative'}>
+                                        {result.totalProjDelta >= 0 ? '+' : ''}{result.totalProjDelta.toFixed(1)} proj
+                                    </span>
+                                    {result.avgGap !== null && (
+                                        <>
+                                            <span className="muted">|</span>
+                                            <span className="muted">
+                                                gap {result.avgGap.toFixed(4)} avg
+                                                {result.maxGap !== null ? ` / ${result.maxGap.toFixed(4)} max` : ''}
+                                            </span>
+                                        </>
+                                    )}
+                                    {result.missingLockedCount > 0 && (
+                                        <>
+                                            <span className="muted">|</span>
+                                            <span className="negative">{result.missingLockedCount} unmapped locks</span>
+                                        </>
+                                    )}
+                                    {result.unmappedEntries > 0 && (
+                                        <>
+                                            <span className="muted">|</span>
+                                            <span className="negative">{result.unmappedEntries} entries skipped</span>
+                                        </>
+                                    )}
+                                    {result.statusSummary && (
+                                        <>
+                                            <span className="muted">|</span>
+                                            <span className="muted">{result.statusSummary}</span>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            )}
+
             <div className="optimizer-layout">
                 <aside className="optimizer-sidebar">
                     <h3>Upload Entry CSV</h3>
@@ -442,6 +599,24 @@ export default function EntryManagerPage() {
                         {lateSwapLoading ? 'Late Swapping...' : 'Late Swap (Now)'}
                     </button>
                     <div className="muted">Uses server time to lock started games.</div>
+
+                    {/* Randomness Control */}
+                    <div className="randomness-control">
+                        <label>
+                            Randomness: {randomnessPct}%
+                            <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={randomnessPct}
+                                onChange={e => setRandomnessPct(Number(e.target.value))}
+                            />
+                        </label>
+                        {randomnessPct > 0 && (
+                            <small className="hint">Adds variance-aware noise for lineup diversity</small>
+                        )}
+                    </div>
                     <button
                         className="export-btn"
                         onClick={handleExport}
@@ -540,13 +715,59 @@ export default function EntryManagerPage() {
                             </div>
                             <div className="lineups-grid">
                                 {entryPageEntries.map((entry, idx) => {
-                                    const entryId = String(entry.entry_id || `${entryPageStart + idx + 1}`)
+                                    const entryId = String(
+                                        entry.entry_key
+                                        || entry.entry_id
+                                        || `row-${entryPageStart + idx + 1}`,
+                                    )
                                     const changedSlots = new Set(entryDiffs[entryId] ?? [])
                                     const lockedSlots = new Set(lockedSlotsByEntryId[entryId] ?? [])
+                                    const alternatives = alternativesByEntryId[entryId]
+                                    const selectedAltIdx = selectedAlternatives[entryId] ?? 0
+
+                                    const handleAlternativeChange = async (newIdx: number) => {
+                                        if (!alternatives || !entryFile) return
+                                        const alt = alternatives.alternatives[newIdx]
+                                        if (!alt) return
+
+                                        setSelectedAlternatives(prev => ({
+                                            ...prev,
+                                            [entryId]: newIdx,
+                                        }))
+
+                                        try {
+                                            const updated = await selectLateSwapAlternative(
+                                                selectedDate,
+                                                entryFile.contest_id,
+                                                entryId,
+                                                newIdx,
+                                                alt.slot_values,
+                                            )
+                                            setEntryFile(updated)
+                                        } catch (err) {
+                                            setEntryError('Failed to apply alternative: ' + (err as Error).message)
+                                        }
+                                    }
+
+                                    const currentAlt = alternatives?.alternatives[selectedAltIdx]
+
                                     return (
                                         <div key={entryId} className="lineup-card">
                                             <div className="lineup-header">
                                                 <span>Entry {entryId}</span>
+                                                {alternatives && alternatives.alternatives.length > 1 && (
+                                                    <select
+                                                        value={selectedAltIdx}
+                                                        onChange={(e) => handleAlternativeChange(Number(e.target.value))}
+                                                        className="alternative-select"
+                                                    >
+                                                        {alternatives.alternatives.map((alt, i) => (
+                                                            <option key={i} value={i}>
+                                                                Alt {i + 1}: {alt.projected_score.toFixed(1)} pts
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                )}
                                                 <span className="lineup-salary">{entry.entry_fee || ''}</span>
                                             </div>
                                             <div className="lineup-players">
@@ -566,6 +787,24 @@ export default function EntryManagerPage() {
                                                     )
                                                 })}
                                             </div>
+                                            {/* Player swaps display */}
+                                            {currentAlt?.player_swaps && currentAlt.player_swaps.length > 0 && (
+                                                <div className="player-swaps">
+                                                    {currentAlt.player_swaps.map((swap, i) => (
+                                                        <div key={i} className="swap-item">
+                                                            <span className="swap-slot">{swap.slot}:</span>
+                                                            <span className="swap-old">{extractPlayerName(swap.old_player)}</span>
+                                                            <span className="swap-arrow"> → </span>
+                                                            <span className="swap-new">{extractPlayerName(swap.new_player)}</span>
+                                                            {swap.old_proj !== null && swap.new_proj !== null && (
+                                                                <span className={`swap-delta ${swap.new_proj > swap.old_proj ? 'positive' : 'negative'}`}>
+                                                                    ({swap.new_proj > swap.old_proj ? '+' : ''}{(swap.new_proj - swap.old_proj).toFixed(1)})
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     )
                                 })}

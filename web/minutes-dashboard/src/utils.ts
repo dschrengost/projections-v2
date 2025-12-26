@@ -104,3 +104,53 @@ export const formatOwnership = (value?: number) =>
 export const formatValue = (value?: number) =>
     typeof value === 'number' ? value.toFixed(2) : '—'
 
+/**
+ * Convert run ID (YYYYMMDDTHHMMSSz) to Eastern time string
+ * e.g., "20251224T020312Z" -> "9:03 PM EST"
+ */
+export const formatRunIdToEST = (runId: string): string => {
+    if (!runId || runId.length < 15) return ''
+    try {
+        // Parse: 20251224T020312Z -> 2025-12-24T02:03:12Z
+        const year = runId.slice(0, 4)
+        const month = runId.slice(4, 6)
+        const day = runId.slice(6, 8)
+        const hour = runId.slice(9, 11)
+        const minute = runId.slice(11, 13)
+        const second = runId.slice(13, 15)
+
+        const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`
+        const date = new Date(isoString)
+
+        if (isNaN(date.getTime())) return ''
+
+        return date.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: 'America/New_York',
+            timeZoneName: 'short',
+        })
+    } catch {
+        return ''
+    }
+}
+
+/**
+ * Format ISO timestamp to Eastern time
+ */
+export const formatTimestampToEST = (ts: string): string => {
+    if (!ts) return ''
+    try {
+        const date = new Date(ts)
+        if (isNaN(date.getTime())) return ''
+
+        return date.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: 'America/New_York',
+            timeZoneName: 'short',
+        })
+    } catch {
+        return ''
+    }
+}

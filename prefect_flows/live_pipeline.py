@@ -12,6 +12,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 from prefect import flow, task, get_run_logger
 from prefect.artifacts import create_markdown_artifact
 
@@ -186,7 +187,7 @@ def run_live_score_task(
     month: str | None = None,
     skip_scrape: bool = False,
     run_sim: bool = True,
-    sim_profile: str = "baseline",
+    sim_profile: str = "today",
     sim_worlds: int = 10000,
     disable_tip_window: bool = False,
 ) -> dict:
@@ -452,6 +453,183 @@ def run_nightly_eval_task(
     }
 
 
+@task(
+    name="run-schedule",
+    retries=2,
+    retry_delay_seconds=60,
+    log_prints=True,
+)
+def run_schedule_task(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    season: str | None = None,
+) -> dict:
+    """
+    Fetch NBA schedule for the specified range.
+    
+    Calls: python -m projections.etl.schedule
+    """
+    import os
+    
+    logger = get_run_logger()
+    start_ts = datetime.now(timezone.utc)
+    
+    effective_start = start_date or datetime.now().strftime("%Y-%m-%d")
+    effective_end = end_date or effective_start
+    effective_season = season or datetime.now().strftime("%Y")
+
+    # Build command
+    cmd = [
+        UV_BIN, "run", "python", "-m", "projections.etl.schedule",
+        "--start", effective_start,
+        "--end", effective_end,
+        "--season", effective_season,
+    ]
+    
+    logger.info(f"Running schedule ETL from {effective_start} to {effective_end}")
+    logger.info(f"Command: {' '.join(cmd)}")
+    
+    env = os.environ.copy()
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute timeout
+        )
+        exit_code, stdout, stderr = result.returncode, result.stdout, result.stderr
+    except subprocess.TimeoutExpired:
+        exit_code, stdout, stderr = -1, "", "Script timed out after 300s"
+    
+    end_ts = datetime.now(timezone.utc)
+    
+    # Log output
+    if stdout:
+        for line in stdout.strip().split("\n"):
+            logger.info(line)
+    if stderr:
+        for line in stderr.strip().split("\n"):
+            logger.warning(line)
+    
+    # Emit manifest
+    manifest_path = emit_manifest(
+        task_name="schedule-etl",
+        start_ts=start_ts,
+        end_ts=end_ts,
+        exit_code=exit_code,
+        output_paths=[
+            str(DATA_ROOT / "silver" / "schedule"),
+        ],
+        error_snippet=stderr[:500] if exit_code != 0 and stderr else None,
+        extra={"start_date": effective_start, "end_date": effective_end},
+    )
+    logger.info(f"Manifest written to {manifest_path}")
+    
+    if exit_code != 0:
+        raise RuntimeError(f"schedule-etl failed with exit code {exit_code}")
+    
+    return {
+        "exit_code": exit_code,
+        "duration_s": (end_ts - start_ts).total_seconds(),
+        "manifest_path": str(manifest_path),
+    }
+
+
+@task(
+    name="run-boxscores",
+    retries=2,
+    retry_delay_seconds=120,
+    log_prints=True,
+)
+def run_boxscores_task(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    season: str | None = None,
+) -> dict:
+    """
+    Fetch NBA boxscores and labels for the specified range.
+    
+    Calls: python -m projections.etl.boxscores
+    """
+    import os
+    
+    logger = get_run_logger()
+    start_ts = datetime.now(timezone.utc)
+    
+    # Default to yesterday if not provided
+    if not start_date:
+        yesterday = datetime.now() - pd.Timedelta(days=1)
+        effective_start = yesterday.strftime("%Y-%m-%d")
+    else:
+        effective_start = start_date
+        
+    effective_end = end_date or effective_start
+    effective_season = season or datetime.now().strftime("%Y")
+
+    # Build command
+    cmd = [
+        UV_BIN, "run", "python", "-m", "projections.etl.boxscores",
+        "--start", effective_start,
+        "--end", effective_end,
+        "--season", effective_season,
+    ]
+    
+    logger.info(f"Running boxscores ETL from {effective_start} to {effective_end}")
+    logger.info(f"Command: {' '.join(cmd)}")
+    
+    env = os.environ.copy()
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minute timeout
+        )
+        exit_code, stdout, stderr = result.returncode, result.stdout, result.stderr
+    except subprocess.TimeoutExpired:
+        exit_code, stdout, stderr = -1, "", "Script timed out after 600s"
+    
+    end_ts = datetime.now(timezone.utc)
+    
+    # Log output
+    if stdout:
+        for line in stdout.strip().split("\n"):
+            logger.info(line)
+    if stderr:
+        for line in stderr.strip().split("\n"):
+            logger.warning(line)
+    
+    # Emit manifest
+    manifest_path = emit_manifest(
+        task_name="boxscores-etl",
+        start_ts=start_ts,
+        end_ts=end_ts,
+        exit_code=exit_code,
+        output_paths=[
+            str(DATA_ROOT / "bronze" / "boxscores_raw"),
+            str(DATA_ROOT / "labels"),
+        ],
+        error_snippet=stderr[:500] if exit_code != 0 and stderr else None,
+        extra={"start_date": effective_start, "end_date": effective_end},
+    )
+    logger.info(f"Manifest written to {manifest_path}")
+    
+    if exit_code != 0:
+        raise RuntimeError(f"boxscores-etl failed with exit code {exit_code}")
+    
+    return {
+        "exit_code": exit_code,
+        "duration_s": (end_ts - start_ts).total_seconds(),
+        "manifest_path": str(manifest_path),
+    }
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Flows
 # ──────────────────────────────────────────────────────────────────────────────
@@ -489,9 +667,9 @@ def live_score_flow(
     month: str | None = None,
     skip_scrape: bool = False,
     run_sim: bool = True,
-    sim_profile: str = "baseline",
+    sim_profile: str = "today",
     sim_worlds: int = 10000,
-    disable_tip_window: bool = False,
+    disable_tip_window: bool = True,  # Always run regardless of game schedule
 ) -> dict:
     """
     Flow for full live scoring pipeline.
@@ -521,7 +699,7 @@ def live_pipeline_full_flow(
     season: str | None = None,
     month: str | None = None,
     run_sim: bool = True,
-    sim_profile: str = "baseline",
+    sim_profile: str = "today",
     sim_worlds: int = 10000,
 ) -> dict:
     """
@@ -595,6 +773,77 @@ def nightly_eval_flow(
     return run_nightly_eval_task(output_path=output_path)
 
 
+@flow(
+    name="morning-daily",
+    description="Daily morning flow: DK Salaries -> Schedule -> Boxscores.",
+    log_prints=True,
+)
+def morning_daily_flow(
+    game_date: str | None = None,
+    season: str | None = None,
+    force_refresh: bool = False,
+) -> dict:
+    """
+    Morning orchestration flow running at 8 AM.
+    
+    Sequence:
+    1. Fetch DraftKings salaries (for today/future).
+    2. Update Schedule (sync range).
+    3. Update Boxscores (yesterday's games).
+    """
+    logger = get_run_logger()
+    
+    # 1. DK Salaries
+    logger.info("Step 1: Fetching DraftKings salaries...")
+    dk_result = run_dk_salaries_task(
+        game_date=game_date,
+        force_refresh=force_refresh,
+    )
+    
+    # 2. Schedule
+    # If game_date is provided, ensure we cover a reasonable window around it, 
+    # or just rely on default defaults which usually fetch the whole month/season or recent range.
+    # The schedule task defaults to today-today if not specified, which might be insufficient 
+    # if we want to ensure 'today' is up to date in the morning.
+    # Actually, schedule task defaults are: start=today, end=today via defaults in this file?
+    # No, cli defaults are required options in the ETL script.
+    # In run_schedule_task above i defaulted to today.
+    # We probably want to fetch broader range usually?
+    # For now, let's fetch today-today to ensure 'today' is correct.
+    logger.info("Step 2: Updating Schedule...")
+    schedule_result = run_schedule_task(
+        start_date=game_date,
+        end_date=game_date,
+        season=season,
+    )
+
+    # 3. Boxscores
+    # We typically want to fetch YESTERDAY's boxscores in the morning.
+    # If game_date is provided (e.g. 2025-12-25), we assume that is the 'today' context,
+    # so we fetch boxscores for game_date - 1 day.
+    import pandas as pd
+    if game_date:
+        today_dt = pd.Timestamp(game_date)
+    else:
+        today_dt = pd.Timestamp.now()
+    
+    yesterday_dt = today_dt - pd.Timedelta(days=1)
+    yesterday_str = yesterday_dt.strftime("%Y-%m-%d")
+    
+    logger.info(f"Step 3: Fetching Boxscores for {yesterday_str}...")
+    boxscores_result = run_boxscores_task(
+        start_date=yesterday_str,
+        end_date=yesterday_str,
+        season=season,
+    )
+    
+    return {
+        "dk_salaries": dk_result,
+        "schedule": schedule_result,
+        "boxscores": boxscores_result,
+    }
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CLI entry point (for local testing)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -603,7 +852,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Run live pipeline flows locally")
-    parser.add_argument("flow", choices=["scrape", "score", "full", "dk-salaries", "nightly-eval"], help="Which flow to run")
+    parser.add_argument("flow", choices=["scrape", "score", "full", "dk-salaries", "nightly-eval", "morning-daily"], help="Which flow to run")
     parser.add_argument("--date", help="Game date (YYYY-MM-DD), default=today")
     parser.add_argument("--no-sim", action="store_true", help="Skip simulation")
     parser.add_argument("--force-refresh", action="store_true", help="Force refresh (dk-salaries)")
@@ -618,6 +867,8 @@ if __name__ == "__main__":
         dk_salaries_flow(game_date=args.date, force_refresh=args.force_refresh)
     elif args.flow == "nightly-eval":
         nightly_eval_flow(output_path=args.output)
+    elif args.flow == "morning-daily":
+        morning_daily_flow(game_date=args.date, force_refresh=args.force_refresh)
     else:
         live_pipeline_full_flow(game_date=args.date, run_sim=not args.no_sim)
 

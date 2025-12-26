@@ -1,0 +1,72 @@
+{
+    "version": "2.0.0",
+    "description": "Versioned production defaults for RotAlloc. Defaults preserve legacy RotAlloc; adaptive depth can be enabled via env var override.",
+    "allocator": {
+        "a": 1.5,
+        "mu_power": 1.5,
+        "p_cutoff": 0.2,
+        "use_expected_k": true,
+        "k_min": 8,
+        "k_max": 11,
+        "cap_max": 48.0
+    },
+    "adaptive_depth": {
+        "enable": false,
+        "bench_share_default": 0.12,
+        "bench_share_min": 0.05,
+        "bench_share_max": 0.35,
+        "core_k_min": 8,
+        "core_k_max": 8,
+        "fringe_cap_max": 15.0,
+        "spread_coef": -0.002,
+        "total_coef": 0.0003,
+        "out_coef": 0.015,
+        "team_prior_weight": 0.6
+    },
+    "two_tier": {
+        "enable": false,
+        "k_core": 8,
+        "core_minutes_floor": 200.0,
+        "fringe_cap_max": 15.0
+    },
+    "fringe_alpha_blend": {
+        "share_candidates": [
+            "roll_mean_5",
+            "min_last5",
+            "min_last3",
+            "roll_mean_10"
+        ],
+        "k_core": 8,
+        "alpha_core": 0.8,
+        "alpha_fringe": 0.3,
+        "share_gamma": 1.0
+    },
+    "regulation_cap": {
+        "cap_p50": 48.0,
+        "k_core": 8
+    },
+    "guardrails": {
+        "frac_p90_at_cap_max": 0.15,
+        "max_minutes_p50_max": 41.0,
+        "p95_minutes_p50_max": 40.0,
+        "eligible_size_p50_min": 9,
+        "frac_p50_ge_44_max": 0.02,
+        "sixth_man_crush_p10_min": 0.80
+    },
+    "notes": [
+        "v2.0.0: Adaptive depth allocation replaces fixed k_core with cumulative proxy mass",
+        "Core is defined by players whose cumulative proxy weight reaches (1 - bench_share)",
+        "bench_share varies by team/game context: spread, total, OUT count",
+        "Favorites (negative spread) rest starters more -> higher bench_share",
+        "Injuries spread minutes among remaining players -> higher bench_share",
+        "fringe_cap_max=15: no single fringe player exceeds 15 min",
+        "sixth_man_crush_p10 >= 0.80: protect 6th-8th man from over-crushing"
+    ],
+    "tuning_guide": {
+        "bench_share_default": "League-wide baseline fringe share (0.10-0.20)",
+        "spread_coef": "Effect of spread: negative values = favorites spread more",
+        "out_coef": "Effect of OUT players: positive values = injuries spread minutes",
+        "team_prior_weight": "Weight for team-specific prior vs context (0.5-0.8)",
+        "fringe_cap_max": "Max minutes for any single fringe player (10-20)"
+    }
+}

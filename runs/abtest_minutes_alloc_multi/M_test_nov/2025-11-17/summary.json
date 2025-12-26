@@ -1,0 +1,15 @@
+{
+  "game_date": "2025-11-17",
+  "timestamp": "2025-12-25T01:03:00.422201",
+  "quality_tier": "skipped",
+  "skip_reason": "too_many_missing_features (9/58)",
+  "missing_feature_frac": 0.15517241379310345,
+  "n_expected_features": 58,
+  "n_missing_features": 9,
+  "integrity_counts": {
+    "n_players": 281,
+    "n_games": 8,
+    "n_teams": 16
+  },
+  "metrics": {}
+}

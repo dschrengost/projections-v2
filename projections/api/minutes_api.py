@@ -29,6 +29,7 @@ DEFAULT_FPTS_ROOT = paths.data_path("gold", "projections_fpts_v1")
 DEFAULT_SIM_ROOT = paths.data_path("artifacts", "sim_v2", "worlds_fpts_v2")
 LATEST_POINTER = "latest_run.json"
 PINNED_POINTER = "pinned_run.json"
+BLESSED_POINTER = "blessed_run.json"  # Preferred over latest; set by validation pipeline
 PARQUET_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
 FPTS_FILENAME = "fpts.parquet"
@@ -204,8 +205,29 @@ def _load_unified_projections(
         run_dir = unified_root / f"run={run_id}"
         resolved_run_id = run_id
     else:
-        # Prefer a pinned projections run when present so rescores can be inspected
-        # without being overwritten by the live pipeline updating latest_run.json.
+        # Priority: blessed_run (validated) > pinned_run (manual override) > latest_run
+        
+        # 1. Check for blessed run (set by validation pipeline)
+        blessed_pointer = unified_root / BLESSED_POINTER
+        if blessed_pointer.exists():
+            try:
+                blessed_data = json.loads(blessed_pointer.read_text(encoding="utf-8"))
+            except Exception:
+                blessed_data = {}
+            blessed_run_id = blessed_data.get("run_id") if isinstance(blessed_data, dict) else None
+            if blessed_run_id:
+                candidate_dir = unified_root / f"run={blessed_run_id}"
+                candidate_path = candidate_dir / "projections.parquet"
+                if candidate_path.exists():
+                    resolved_run_id = blessed_run_id
+                    updated_at = blessed_data.get("blessed_at") or blessed_data.get("updated_at")
+                    try:
+                        df = pd.read_parquet(candidate_path)
+                        return df, resolved_run_id, updated_at
+                    except Exception:
+                        pass  # Fall through to other options
+        
+        # 2. Check for pinned run (manual override for debugging)
         pinned_pointer = unified_root / PINNED_POINTER
         if pinned_pointer.exists():
             try:
@@ -514,9 +536,20 @@ def create_app(
         # `run_id` is interpreted as projections_run_id when loading unified projections.
         data_root = paths.data_path()
         unified_root = data_root / "artifacts" / "projections" / str(slate_day)
+        blessed_run_id = None
         pinned_run_id = None
         latest_run_id = None
         if unified_root.exists():
+            # Blessed run (from validation pipeline)
+            blessed_pointer = unified_root / BLESSED_POINTER
+            if blessed_pointer.exists():
+                try:
+                    blessed_payload = json.loads(blessed_pointer.read_text(encoding="utf-8"))
+                    if isinstance(blessed_payload, dict):
+                        blessed_run_id = blessed_payload.get("run_id")
+                except Exception:
+                    blessed_run_id = None
+            # Pinned run (manual override)
             pinned_pointer = unified_root / PINNED_POINTER
             if pinned_pointer.exists():
                 try:
@@ -525,6 +558,7 @@ def create_app(
                         pinned_run_id = pinned_payload.get("run_id")
                 except Exception:
                     pinned_run_id = None
+            # Latest run
             latest_pointer = unified_root / LATEST_POINTER
             if latest_pointer.exists():
                 try:
@@ -573,6 +607,7 @@ def create_app(
                 "run_id": resolved_run_id,
                 "last_updated": updated_at,
                 "latest_run_id": latest_run_id,
+                "blessed_run_id": blessed_run_id,
                 "pinned_run_id": pinned_run_id,
                 "run_summary": run_summary,
             }
@@ -830,8 +865,178 @@ def create_app(
             except json.JSONDecodeError:
                 pinned = None
 
-        payload = {"date": slate_day.isoformat(), "latest": latest, "pinned": pinned, "runs": runs}
+        blessed = None
+        blessed_at = None
+        blessed_pointer = day_dir / BLESSED_POINTER
+        if blessed_pointer.exists():
+            try:
+                payload = json.loads(blessed_pointer.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    blessed = payload.get("run_id")
+                    blessed_at = payload.get("blessed_at")
+            except json.JSONDecodeError:
+                blessed = None
+
+        payload = {
+            "date": slate_day.isoformat(),
+            "latest": latest,
+            "pinned": pinned,
+            "blessed": blessed,
+            "blessed_at": blessed_at,
+            "runs": runs,
+        }
         return JSONResponse(payload)
+
+    @app.get("/api/lineage/{run_id}")
+    def get_lineage(run_id: str, date: str | None = None) -> JSONResponse:
+        """Get manifest/lineage for a specific run."""
+        slate_day = _parse_date(date)
+        data_root = paths.data_path()
+        
+        manifest_path = data_root / "artifacts" / "projections" / str(slate_day) / f"run={run_id}" / "manifest.json"
+        
+        if not manifest_path.exists():
+            # Try to generate manifest on the fly
+            try:
+                from projections.pipeline.run_manifest import create_run_manifest
+                manifest = create_run_manifest(
+                    run_id=run_id,
+                    game_date=str(slate_day),
+                    data_root=data_root,
+                    season=slate_day.year if slate_day.month >= 10 else slate_day.year,
+                )
+                return JSONResponse(manifest.to_dict())
+            except Exception as e:
+                raise HTTPException(status_code=404, detail=f"Manifest not found and could not generate: {e}")
+        
+        try:
+            manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return JSONResponse(manifest_data)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to load manifest: {e}")
+
+    @app.get("/api/player-diff")
+    def get_player_diff(
+        date: str | None = None,
+        run_a: str | None = None,
+        run_b: str | None = None,
+        threshold: float = 3.0,
+    ) -> JSONResponse:
+        """Compare player projections between two runs.
+        
+        If run_a/run_b not specified, compares blessed vs latest.
+        Returns players with significant changes (> threshold FPTS).
+        """
+        slate_day = _parse_date(date)
+        data_root = paths.data_path()
+        projections_dir = data_root / "artifacts" / "projections" / str(slate_day)
+        
+        if not projections_dir.exists():
+            raise HTTPException(status_code=404, detail="No projections for this date")
+        
+        # Determine runs to compare
+        if not run_b:
+            # Default to blessed
+            blessed_ptr = projections_dir / BLESSED_POINTER
+            if blessed_ptr.exists():
+                try:
+                    run_b = json.loads(blessed_ptr.read_text(encoding="utf-8")).get("run_id")
+                except Exception:
+                    pass
+        
+        if not run_a:
+            # Default to latest
+            latest_ptr = projections_dir / LATEST_POINTER
+            if latest_ptr.exists():
+                try:
+                    run_a = json.loads(latest_ptr.read_text(encoding="utf-8")).get("run_id")
+                except Exception:
+                    pass
+        
+        if not run_a or not run_b:
+            return JSONResponse({
+                "date": str(slate_day),
+                "run_a": run_a,
+                "run_b": run_b,
+                "changes": [],
+                "error": "Could not determine runs to compare",
+            })
+        
+        if run_a == run_b:
+            return JSONResponse({
+                "date": str(slate_day),
+                "run_a": run_a,
+                "run_b": run_b,
+                "changes": [],
+                "message": "Same run, no differences",
+            })
+        
+        # Load both projections
+        path_a = projections_dir / f"run={run_a}" / "projections.parquet"
+        path_b = projections_dir / f"run={run_b}" / "projections.parquet"
+        
+        if not path_a.exists() or not path_b.exists():
+            return JSONResponse({
+                "date": str(slate_day),
+                "run_a": run_a,
+                "run_b": run_b,
+                "changes": [],
+                "error": f"Missing projections: a={path_a.exists()}, b={path_b.exists()}",
+            })
+        
+        try:
+            df_a = pd.read_parquet(path_a)
+            df_b = pd.read_parquet(path_b)
+        except Exception as e:
+            return JSONResponse({
+                "date": str(slate_day),
+                "run_a": run_a,
+                "run_b": run_b,
+                "changes": [],
+                "error": f"Failed to load projections: {e}",
+            })
+        
+        # Merge on player_id
+        cols = ["player_id", "player_name", "dk_fpts_mean", "minutes_p50"]
+        df_a_slim = df_a[["player_id"] + [c for c in cols[1:] if c in df_a.columns]].copy()
+        df_b_slim = df_b[["player_id"] + [c for c in cols[1:] if c in df_b.columns]].copy()
+        
+        merged = df_a_slim.merge(df_b_slim, on="player_id", suffixes=("_new", "_old"), how="outer")
+        
+        changes = []
+        for _, row in merged.iterrows():
+            fpts_new = row.get("dk_fpts_mean_new", 0) or 0
+            fpts_old = row.get("dk_fpts_mean_old", 0) or 0
+            fpts_delta = fpts_new - fpts_old
+            
+            min_new = row.get("minutes_p50_new", 0) or 0
+            min_old = row.get("minutes_p50_old", 0) or 0
+            min_delta = min_new - min_old
+            
+            if abs(fpts_delta) >= threshold:
+                changes.append({
+                    "player_id": row["player_id"],
+                    "player_name": row.get("player_name_new") or row.get("player_name_old") or str(row["player_id"]),
+                    "fpts_old": round(fpts_old, 2),
+                    "fpts_new": round(fpts_new, 2),
+                    "fpts_delta": round(fpts_delta, 2),
+                    "minutes_old": round(min_old, 1),
+                    "minutes_new": round(min_new, 1),
+                    "minutes_delta": round(min_delta, 1),
+                })
+        
+        # Sort by absolute delta
+        changes.sort(key=lambda x: abs(x["fpts_delta"]), reverse=True)
+        
+        return JSONResponse({
+            "date": str(slate_day),
+            "run_a": run_a,
+            "run_b": run_b,
+            "threshold": threshold,
+            "total_players": len(merged),
+            "changed_count": len(changes),
+            "changes": changes[:50],  # Limit to top 50
+        })
 
     @app.get("/api/ownership")
     def get_ownership(

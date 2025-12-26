@@ -1,0 +1,5313 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41264065,
+      "firstName": "Nikola",
+      "lastName": "Jokic",
+      "displayName": "Nikola Jokic",
+      "shortName": "N. Jokic",
+      "playerId": 830650,
+      "playerDkId": 33018,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 21300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33018.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33018.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "68.0",
+          "sortValue": "68.0"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "830650-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264066,
+      "firstName": "Alperen",
+      "lastName": "Sengun",
+      "displayName": "Alperen Sengun",
+      "shortName": "A. Sengun",
+      "playerId": 1323508,
+      "playerDkId": 591017,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 16800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591017.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591017.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "51.2",
+          "sortValue": "51.2"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1323508-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264067,
+      "firstName": "Kevin",
+      "lastName": "Durant",
+      "displayName": "Kevin Durant",
+      "shortName": "K. Durant",
+      "playerId": 329525,
+      "playerDkId": 32896,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 15000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32896.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32896.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "40.1",
+          "sortValue": "40.1"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "329525-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264031,
+      "firstName": "Nikola",
+      "lastName": "Jokic",
+      "displayName": "Nikola Jokic",
+      "shortName": "N. Jokic",
+      "playerId": 830650,
+      "playerDkId": 33018,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 14200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33018.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33018.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "68.0",
+          "sortValue": "68.0"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "830650-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264068,
+      "firstName": "Jamal",
+      "lastName": "Murray",
+      "displayName": "Jamal Murray",
+      "shortName": "J. Murray",
+      "playerId": 891352,
+      "playerDkId": 33019,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 14100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33019.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33019.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "44.0",
+          "sortValue": "44.0"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "891352-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264069,
+      "firstName": "Amen",
+      "lastName": "Thompson",
+      "displayName": "Amen Thompson",
+      "shortName": "A. Thompson",
+      "playerId": 1429337,
+      "playerDkId": 713757,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 13800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713757.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713757.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.3",
+          "sortValue": "37.3"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1429337-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264070,
+      "firstName": "Jabari",
+      "lastName": "Smith Jr.",
+      "displayName": "Jabari Smith Jr.",
+      "shortName": "J. Smith Jr.",
+      "playerId": 1342755,
+      "playerDkId": 649546,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 11400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649546.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649546.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "30.5",
+          "sortValue": "30.5"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1342755-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264032,
+      "firstName": "Alperen",
+      "lastName": "Sengun",
+      "displayName": "Alperen Sengun",
+      "shortName": "A. Sengun",
+      "playerId": 1323508,
+      "playerDkId": 591017,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 11200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591017.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591017.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "51.2",
+          "sortValue": "51.2"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1323508-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264094,
+      "firstName": "Aaron",
+      "lastName": "Gordon",
+      "displayName": "Aaron Gordon",
+      "shortName": "A. Gordon",
+      "playerId": 748788,
+      "playerDkId": 33270,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 11100,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33270.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33270.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "30.8",
+          "sortValue": "30.8"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "748788-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264071,
+      "firstName": "Cameron",
+      "lastName": "Johnson",
+      "displayName": "Cameron Johnson",
+      "shortName": "C. Johnson",
+      "playerId": 843005,
+      "playerDkId": 33316,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 10200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33316.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33316.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.0",
+          "sortValue": "22.0"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "843005-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264033,
+      "firstName": "Kevin",
+      "lastName": "Durant",
+      "displayName": "Kevin Durant",
+      "shortName": "K. Durant",
+      "playerId": 329525,
+      "playerDkId": 32896,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 10000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32896.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32896.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "40.1",
+          "sortValue": "40.1"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "329525-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264034,
+      "firstName": "Jamal",
+      "lastName": "Murray",
+      "displayName": "Jamal Murray",
+      "shortName": "J. Murray",
+      "playerId": 891352,
+      "playerDkId": 33019,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 9400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33019.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33019.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "44.0",
+          "sortValue": "44.0"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "891352-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264072,
+      "firstName": "Reed",
+      "lastName": "Sheppard",
+      "displayName": "Reed Sheppard",
+      "shortName": "R. Sheppard",
+      "playerId": 1465031,
+      "playerDkId": 800350,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 9300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800350.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800350.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.6",
+          "sortValue": "26.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1465031-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264035,
+      "firstName": "Amen",
+      "lastName": "Thompson",
+      "displayName": "Amen Thompson",
+      "shortName": "A. Thompson",
+      "playerId": 1429337,
+      "playerDkId": 713757,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 9200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713757.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713757.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.3",
+          "sortValue": "37.3"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1429337-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264073,
+      "firstName": "Peyton",
+      "lastName": "Watson",
+      "displayName": "Peyton Watson",
+      "shortName": "P. Watson",
+      "playerId": 1326502,
+      "playerDkId": 649577,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 9000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649577.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649577.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.9",
+          "sortValue": "22.9"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1326502-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264036,
+      "firstName": "Jabari",
+      "lastName": "Smith Jr.",
+      "displayName": "Jabari Smith Jr.",
+      "shortName": "J. Smith Jr.",
+      "playerId": 1342755,
+      "playerDkId": 649546,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 7600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649546.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649546.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "30.5",
+          "sortValue": "30.5"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1342755-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264060,
+      "firstName": "Aaron",
+      "lastName": "Gordon",
+      "displayName": "Aaron Gordon",
+      "shortName": "A. Gordon",
+      "playerId": 748788,
+      "playerDkId": 33270,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 7400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33270.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33270.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "30.8",
+          "sortValue": "30.8"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "748788-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264095,
+      "firstName": "Tari",
+      "lastName": "Eason",
+      "displayName": "Tari Eason",
+      "shortName": "T. Eason",
+      "playerId": 1235198,
+      "playerDkId": 649566,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 7200,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649566.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649566.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.3",
+          "sortValue": "23.3"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1235198-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264074,
+      "firstName": "Steven",
+      "lastName": "Adams",
+      "displayName": "Steven Adams",
+      "shortName": "S. Adams",
+      "playerId": 679478,
+      "playerDkId": 33250,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 6900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33250.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33250.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.0",
+          "sortValue": "22.0"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "679478-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264037,
+      "firstName": "Cameron",
+      "lastName": "Johnson",
+      "displayName": "Cameron Johnson",
+      "shortName": "C. Johnson",
+      "playerId": 843005,
+      "playerDkId": 33316,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 6800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33316.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33316.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.0",
+          "sortValue": "22.0"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "843005-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264075,
+      "firstName": "Tim",
+      "lastName": "Hardaway Jr.",
+      "displayName": "Tim Hardaway Jr.",
+      "shortName": "T. Hardaway Jr.",
+      "playerId": 551771,
+      "playerDkId": 32995,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 6600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32995.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32995.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.3",
+          "sortValue": "19.3"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "551771-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264076,
+      "firstName": "Bruce",
+      "lastName": "Brown",
+      "displayName": "Bruce Brown",
+      "shortName": "B. Brown",
+      "playerId": 941834,
+      "playerDkId": 33044,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 6300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33044.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33044.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.6",
+          "sortValue": "16.6"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "941834-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264038,
+      "firstName": "Reed",
+      "lastName": "Sheppard",
+      "displayName": "Reed Sheppard",
+      "shortName": "R. Sheppard",
+      "playerId": 1465031,
+      "playerDkId": 800350,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 6200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800350.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800350.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.6",
+          "sortValue": "26.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1465031-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264039,
+      "firstName": "Peyton",
+      "lastName": "Watson",
+      "displayName": "Peyton Watson",
+      "shortName": "P. Watson",
+      "playerId": 1326502,
+      "playerDkId": 649577,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 6000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649577.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649577.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.9",
+          "sortValue": "22.9"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1326502-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264077,
+      "firstName": "Josh",
+      "lastName": "Okogie",
+      "displayName": "Josh Okogie",
+      "shortName": "J. Okogie",
+      "playerId": 941460,
+      "playerDkId": 33200,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 6000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33200.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33200.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.6",
+          "sortValue": "15.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "941460-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264078,
+      "firstName": "Spencer",
+      "lastName": "Jones",
+      "displayName": "Spencer Jones",
+      "shortName": "S. Jones",
+      "playerId": 1176586,
+      "playerDkId": 803826,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 5700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/803826.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/803826.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.6",
+          "sortValue": "10.6"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1176586-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264079,
+      "firstName": "Clint",
+      "lastName": "Capela",
+      "displayName": "Clint Capela",
+      "shortName": "C. Capela",
+      "playerId": 830647,
+      "playerDkId": 33076,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33076.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33076.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.9",
+          "sortValue": "11.9"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "830647-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264080,
+      "firstName": "Aaron",
+      "lastName": "Holiday",
+      "displayName": "Aaron Holiday",
+      "shortName": "A. Holiday",
+      "playerId": 884087,
+      "playerDkId": 33095,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 5100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33095.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33095.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "13.1",
+          "sortValue": "13.1"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "884087-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264061,
+      "firstName": "Tari",
+      "lastName": "Eason",
+      "displayName": "Tari Eason",
+      "shortName": "T. Eason",
+      "playerId": 1235198,
+      "playerDkId": 649566,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 4800,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649566.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649566.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.3",
+          "sortValue": "23.3"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1235198-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264081,
+      "firstName": "Jonas",
+      "lastName": "Valanciunas",
+      "displayName": "Jonas Valanciunas",
+      "shortName": "J. Valanciunas",
+      "playerId": 599780,
+      "playerDkId": 33132,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33132.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33132.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.1",
+          "sortValue": "17.1"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "599780-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264040,
+      "firstName": "Steven",
+      "lastName": "Adams",
+      "displayName": "Steven Adams",
+      "shortName": "S. Adams",
+      "playerId": 679478,
+      "playerDkId": 33250,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 4600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33250.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33250.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.0",
+          "sortValue": "22.0"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "679478-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264082,
+      "firstName": "Jalen",
+      "lastName": "Pickett",
+      "displayName": "Jalen Pickett",
+      "shortName": "J. Pickett",
+      "playerId": 1136567,
+      "playerDkId": 713784,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 4500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713784.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713784.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.4",
+          "sortValue": "8.4"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1136567-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264041,
+      "firstName": "Tim",
+      "lastName": "Hardaway Jr.",
+      "displayName": "Tim Hardaway Jr.",
+      "shortName": "T. Hardaway Jr.",
+      "playerId": 551771,
+      "playerDkId": 32995,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 4400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32995.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32995.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.3",
+          "sortValue": "19.3"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "551771-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264042,
+      "firstName": "Bruce",
+      "lastName": "Brown",
+      "displayName": "Bruce Brown",
+      "shortName": "B. Brown",
+      "playerId": 941834,
+      "playerDkId": 33044,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33044.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33044.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.6",
+          "sortValue": "16.6"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "941834-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264083,
+      "firstName": "Julian",
+      "lastName": "Strawther",
+      "displayName": "Julian Strawther",
+      "shortName": "J. Strawther",
+      "playerId": 1241584,
+      "playerDkId": 713781,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713781.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713781.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.0",
+          "sortValue": "6.0"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1241584-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264043,
+      "firstName": "Josh",
+      "lastName": "Okogie",
+      "displayName": "Josh Okogie",
+      "shortName": "J. Okogie",
+      "playerId": 941460,
+      "playerDkId": 33200,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 4000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33200.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33200.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.6",
+          "sortValue": "15.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "941460-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264044,
+      "firstName": "Spencer",
+      "lastName": "Jones",
+      "displayName": "Spencer Jones",
+      "shortName": "S. Jones",
+      "playerId": 1176586,
+      "playerDkId": 803826,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 3800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/803826.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/803826.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.6",
+          "sortValue": "10.6"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1176586-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264045,
+      "firstName": "Clint",
+      "lastName": "Capela",
+      "displayName": "Clint Capela",
+      "shortName": "C. Capela",
+      "playerId": 830647,
+      "playerDkId": 33076,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33076.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33076.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.9",
+          "sortValue": "11.9"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "830647-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264046,
+      "firstName": "Aaron",
+      "lastName": "Holiday",
+      "displayName": "Aaron Holiday",
+      "shortName": "A. Holiday",
+      "playerId": 884087,
+      "playerDkId": 33095,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 3400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33095.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33095.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "13.1",
+          "sortValue": "13.1"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "884087-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264047,
+      "firstName": "Jonas",
+      "lastName": "Valanciunas",
+      "displayName": "Jonas Valanciunas",
+      "shortName": "J. Valanciunas",
+      "playerId": 599780,
+      "playerDkId": 33132,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 3200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33132.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33132.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.1",
+          "sortValue": "17.1"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "599780-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264048,
+      "firstName": "Jalen",
+      "lastName": "Pickett",
+      "displayName": "Jalen Pickett",
+      "shortName": "J. Pickett",
+      "playerId": 1136567,
+      "playerDkId": 713784,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713784.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713784.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.4",
+          "sortValue": "8.4"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1136567-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264049,
+      "firstName": "Julian",
+      "lastName": "Strawther",
+      "displayName": "Julian Strawther",
+      "shortName": "J. Strawther",
+      "playerId": 1241584,
+      "playerDkId": 713781,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 2800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713781.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713781.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.0",
+          "sortValue": "6.0"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1241584-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264084,
+      "firstName": "Jae'Sean",
+      "lastName": "Tate",
+      "displayName": "Jae'Sean Tate",
+      "shortName": "J. Tate",
+      "playerId": 844040,
+      "playerDkId": 58862,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/58862.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/58862.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.3",
+          "sortValue": "6.3"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "844040-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264050,
+      "firstName": "Jae'Sean",
+      "lastName": "Tate",
+      "displayName": "Jae'Sean Tate",
+      "shortName": "J. Tate",
+      "playerId": 844040,
+      "playerDkId": 58862,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/58862.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/58862.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.3",
+          "sortValue": "6.3"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "844040-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264085,
+      "firstName": "Hunter",
+      "lastName": "Tyson",
+      "displayName": "Hunter Tyson",
+      "shortName": "H. Tyson",
+      "playerId": 1132015,
+      "playerDkId": 713789,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713789.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713789.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.6",
+          "sortValue": "3.6"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1132015-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264086,
+      "firstName": "Curtis",
+      "lastName": "Jones",
+      "displayName": "Curtis Jones",
+      "shortName": "C. Jones",
+      "playerId": 1323685,
+      "playerDkId": 907368,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/907368.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/907368.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.3",
+          "sortValue": "2.3"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1323685-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264087,
+      "firstName": "Tyler",
+      "lastName": "Smith",
+      "displayName": "Tyler Smith",
+      "shortName": "T. Smith",
+      "playerId": 1429357,
+      "playerDkId": 800798,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800798.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800798.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1429357-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264088,
+      "firstName": "DaRon",
+      "lastName": "Holmes II",
+      "displayName": "DaRon Holmes II",
+      "shortName": "D. Holmes II",
+      "playerId": 1334228,
+      "playerDkId": 800379,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800379.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800379.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.8",
+          "sortValue": "1.8"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1334228-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264089,
+      "firstName": "Isaiah",
+      "lastName": "Crawford",
+      "displayName": "Isaiah Crawford",
+      "shortName": "I. Crawford",
+      "playerId": 1176631,
+      "playerDkId": 800673,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800673.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800673.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "0.0",
+          "sortValue": "0.0"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1176631-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264090,
+      "firstName": "Tamar",
+      "lastName": "Bates",
+      "displayName": "Tamar Bates",
+      "shortName": "T. Bates",
+      "playerId": 1333783,
+      "playerDkId": 906402,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906402.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906402.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1333783-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264091,
+      "firstName": "Zeke",
+      "lastName": "Nnaji",
+      "displayName": "Zeke Nnaji",
+      "shortName": "Z. Nnaji",
+      "playerId": 1193676,
+      "playerDkId": 527231,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527231.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527231.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.1",
+          "sortValue": "5.1"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1193676-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264092,
+      "firstName": "Jeff",
+      "lastName": "Green",
+      "displayName": "Jeff Green",
+      "shortName": "J. Green",
+      "playerId": 266367,
+      "playerDkId": 33390,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33390.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33390.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.2",
+          "sortValue": "3.2"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "266367-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264093,
+      "firstName": "JD",
+      "lastName": "Davison",
+      "displayName": "JD Davison",
+      "shortName": "J. Davison",
+      "playerId": 1323515,
+      "playerDkId": 649591,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649591.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649591.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.5",
+          "sortValue": "4.5"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1323515-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264096,
+      "firstName": "Fred",
+      "lastName": "VanVleet",
+      "displayName": "Fred VanVleet",
+      "shortName": "F. VanVleet",
+      "playerId": 707832,
+      "playerDkId": 33381,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33381.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33381.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "707832-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264097,
+      "firstName": "Christian",
+      "lastName": "Braun",
+      "displayName": "Christian Braun",
+      "shortName": "C. Braun",
+      "playerId": 1174878,
+      "playerDkId": 649570,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649570.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649570.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.1",
+          "sortValue": "23.1"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1174878-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264098,
+      "firstName": "Dorian",
+      "lastName": "Finney-Smith",
+      "displayName": "Dorian Finney-Smith",
+      "shortName": "D. Finney-Smith",
+      "playerId": 606701,
+      "playerDkId": 33001,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33001.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33001.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "606701-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264051,
+      "firstName": "Hunter",
+      "lastName": "Tyson",
+      "displayName": "Hunter Tyson",
+      "shortName": "H. Tyson",
+      "playerId": 1132015,
+      "playerDkId": 713789,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713789.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713789.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.6",
+          "sortValue": "3.6"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1132015-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264052,
+      "firstName": "Curtis",
+      "lastName": "Jones",
+      "displayName": "Curtis Jones",
+      "shortName": "C. Jones",
+      "playerId": 1323685,
+      "playerDkId": 907368,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/907368.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/907368.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.3",
+          "sortValue": "2.3"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1323685-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264053,
+      "firstName": "Tyler",
+      "lastName": "Smith",
+      "displayName": "Tyler Smith",
+      "shortName": "T. Smith",
+      "playerId": 1429357,
+      "playerDkId": 800798,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800798.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800798.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1429357-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264054,
+      "firstName": "DaRon",
+      "lastName": "Holmes II",
+      "displayName": "DaRon Holmes II",
+      "shortName": "D. Holmes II",
+      "playerId": 1334228,
+      "playerDkId": 800379,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800379.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800379.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.8",
+          "sortValue": "1.8"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1334228-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264055,
+      "firstName": "Isaiah",
+      "lastName": "Crawford",
+      "displayName": "Isaiah Crawford",
+      "shortName": "I. Crawford",
+      "playerId": 1176631,
+      "playerDkId": 800673,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800673.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800673.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "0.0",
+          "sortValue": "0.0"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1176631-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264056,
+      "firstName": "Tamar",
+      "lastName": "Bates",
+      "displayName": "Tamar Bates",
+      "shortName": "T. Bates",
+      "playerId": 1333783,
+      "playerDkId": 906402,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906402.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906402.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1333783-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264057,
+      "firstName": "Zeke",
+      "lastName": "Nnaji",
+      "displayName": "Zeke Nnaji",
+      "shortName": "Z. Nnaji",
+      "playerId": 1193676,
+      "playerDkId": 527231,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527231.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527231.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.1",
+          "sortValue": "5.1"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1193676-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264058,
+      "firstName": "Jeff",
+      "lastName": "Green",
+      "displayName": "Jeff Green",
+      "shortName": "J. Green",
+      "playerId": 266367,
+      "playerDkId": 33390,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33390.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33390.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.2",
+          "sortValue": "3.2"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "266367-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264059,
+      "firstName": "JD",
+      "lastName": "Davison",
+      "displayName": "JD Davison",
+      "shortName": "J. Davison",
+      "playerId": 1323515,
+      "playerDkId": 649591,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649591.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649591.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.5",
+          "sortValue": "4.5"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "1323515-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264062,
+      "firstName": "Fred",
+      "lastName": "VanVleet",
+      "displayName": "Fred VanVleet",
+      "shortName": "F. VanVleet",
+      "playerId": 707832,
+      "playerDkId": 33381,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33381.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33381.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "707832-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264063,
+      "firstName": "Christian",
+      "lastName": "Braun",
+      "displayName": "Christian Braun",
+      "shortName": "C. Braun",
+      "playerId": 1174878,
+      "playerDkId": 649570,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649570.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649570.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.1",
+          "sortValue": "23.1"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "1174878-6130860",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264064,
+      "firstName": "Dorian",
+      "lastName": "Finney-Smith",
+      "displayName": "Dorian Finney-Smith",
+      "shortName": "D. Finney-Smith",
+      "playerId": 606701,
+      "playerDkId": 33001,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33001.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33001.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130860,
+        "name": "HOU @ DEN",
+        "nameDisplay": [
+          {
+            "value": "HOU",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-20T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130860,
+          "name": "HOU @ DEN",
+          "nameDisplay": [
+            {
+              "value": "HOU",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-20T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 10,
+      "teamAbbreviation": "HOU",
+      "draftAlerts": [],
+      "playerGameHash": "606701-6130860",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6130860,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 7,
+        "teamName": "Nuggets",
+        "abbreviation": "DEN",
+        "city": "Denver",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32913.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 10,
+        "teamName": "Rockets",
+        "abbreviation": "HOU",
+        "city": "Houston",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32919.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32919.png"
+      },
+      "startTime": "2025-12-20T22:00:00.0000000Z",
+      "name": "HOU @ DEN",
+      "venue": "Pepsi Center",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 32,
+          "value": "NBAt"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}

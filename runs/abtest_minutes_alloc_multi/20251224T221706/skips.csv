@@ -1,0 +1,4 @@
+game_date,skip_reason,missing_feature_frac,n_expected_features,n_missing_features,n_games,n_teams,n_players
+2025-12-08,too_many_missing_features (9/58),0.15517241379310345,58,9,3,6,107
+2025-12-09,too_many_missing_features (9/58),0.15517241379310345,58,9,2,4,68
+2025-12-10,too_many_missing_features (9/58),0.15517241379310345,58,9,1,2,35

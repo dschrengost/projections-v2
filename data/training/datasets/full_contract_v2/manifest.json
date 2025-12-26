@@ -1,0 +1,54 @@
+{
+  "created_at": "2025-12-24T07:17:23.842463+00:00",
+  "date_range": {
+    "end": "2025-12-15",
+    "start": "2023-10-15"
+  },
+  "enrichment": {
+    "columns": [
+      "vac_min_szn",
+      "vac_min_guard_szn",
+      "vac_min_wing_szn",
+      "vac_min_big_szn",
+      "team_pace_szn",
+      "opp_pace_szn",
+      "team_off_rtg_szn",
+      "team_def_rtg_szn",
+      "opp_def_rtg_szn"
+    ],
+    "coverage": {
+      "opp_def_rtg_szn": 0.0,
+      "opp_pace_szn": 0.0,
+      "team_def_rtg_szn": 0.0,
+      "team_off_rtg_szn": 0.0,
+      "team_pace_szn": 0.0,
+      "vac_min_big_szn": 0.7286537688217685,
+      "vac_min_guard_szn": 0.7286537688217685,
+      "vac_min_szn": 0.7286537688217685,
+      "vac_min_wing_szn": 0.7286537688217685
+    },
+    "enabled": true,
+    "partitions_found": 383,
+    "partitions_missing_days": 410,
+    "source": "rates_training_base"
+  },
+  "git_sha": "2302baab8bd1bfe30270c4d5edf5193305720b4b",
+  "input_counts": {
+    "joined_games": 641,
+    "joined_rows": 22381,
+    "label_games": 641,
+    "label_missing_days": 421,
+    "label_partitions": 372,
+    "label_rows": 22444,
+    "slate_files": 3031,
+    "slate_games": 2859,
+    "slate_rows": 106581
+  },
+  "missing_rates": {
+    "joined_minutes_missing": 0.0,
+    "label_rows_missing_slates": 0.0028069862769559794,
+    "slate_rows_missing_labels": 0.7900094763607022
+  },
+  "snapshot_type": "pretip",
+  "version": "full_contract_v2"
+}

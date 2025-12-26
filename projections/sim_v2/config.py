@@ -12,6 +12,40 @@ DEFAULT_PROFILES_PATH = get_project_root() / "config" / "sim_v2_profiles.json"
 
 
 @dataclass
+class MinutesNoiseConfig:
+    """Config for per-world minutes noise with cheap team-240 projection."""
+
+    enabled: bool = True
+    # Noise sigma for starters vs bench
+    sigma_starter: float = 2.0
+    sigma_bench: float = 3.0
+    # Minimum baseline minutes to apply noise (skip deep bench)
+    min_minutes_for_noise: float = 8.0
+    # Hard cap on absolute noise per player
+    cap_abs: float = 6.0
+    # Whether to use Student-t instead of normal
+    use_student_t: bool = False
+    t_df: float = 8.0
+    # Bounds for clamping: "zero" | "p10" for lo_source; hi_source typically "p90"
+    lo_source: str = "zero"
+    hi_source: str = "p90"
+    # Padding for bounds (additive)
+    lo_pad: float = 0.0
+    hi_pad: float = 2.0
+
+
+@dataclass
+class PreSimReconcileConfig:
+    """Config for pre-sim QP reconciliation (runs once before simulation)."""
+
+    enabled: bool = False
+    # Weight multiplier for starters (higher = more rigid, less adjustment)
+    starter_weight: float = 2.0
+    # Weight multiplier for high-minute players (base: minutes / 20)
+    minutes_weight_scale: float = 1.0
+
+
+@dataclass
 class UsageSharesConfig:
     """Config for stochastic usage share allocation within teams."""
 
@@ -72,6 +106,14 @@ class SimV2Profile:
     vacancy_mode: str = "game"  # "none" | "game"
     # Whether to sample active mask from play_prob (True = Bernoulli sampling, False = all active)
     use_play_prob_masking: bool = True
+    # When True, sim does not apply eligible_flag filtering or rotation pruning - RotAlloc already handled it
+    preserve_input_rotation: bool = False
+    # New structured minutes noise config (per-world noise + cheap team-240 projection)
+    minutes_noise_config: MinutesNoiseConfig = field(default_factory=MinutesNoiseConfig)
+    # Pre-sim QP reconciliation (runs once before simulation)
+    pre_sim_reconcile: PreSimReconcileConfig = field(default_factory=PreSimReconcileConfig)
+    # Optional explicit minutes bundle path (overrides minutes_run_id resolution)
+    minutes_bundle_path: Optional[str] = None
 
 
 def _read_json(path: Path) -> dict:
@@ -180,6 +222,38 @@ def load_sim_v2_profile(
     # Play prob masking config (defaults to True for backward compat)
     use_play_prob_masking = bool(config.get("use_play_prob_masking", True))
 
+    # Preserve input rotation: when True, sim skips eligible_flag filtering and rotation pruning
+    # (RotAlloc already handled rotation selection upstream)
+    preserve_input_rotation = bool(config.get("preserve_input_rotation", False))
+
+    # Minutes bundle path (explicit override for bundle location)
+    minutes_bundle_path_raw = config.get("minutes_bundle_path")
+    minutes_bundle_path = str(minutes_bundle_path_raw) if minutes_bundle_path_raw else None
+
+    # New structured minutes noise config
+    minutes_noise_cfg_raw = config.get("minutes_noise_config", {}) or {}
+    minutes_noise_config = MinutesNoiseConfig(
+        enabled=bool(minutes_noise_cfg_raw.get("enabled", True)),
+        sigma_starter=float(minutes_noise_cfg_raw.get("sigma_starter", 2.0)),
+        sigma_bench=float(minutes_noise_cfg_raw.get("sigma_bench", 3.0)),
+        min_minutes_for_noise=float(minutes_noise_cfg_raw.get("min_minutes_for_noise", 8.0)),
+        cap_abs=float(minutes_noise_cfg_raw.get("cap_abs", 6.0)),
+        use_student_t=bool(minutes_noise_cfg_raw.get("use_student_t", False)),
+        t_df=float(minutes_noise_cfg_raw.get("t_df", 8.0)),
+        lo_source=str(minutes_noise_cfg_raw.get("lo_source", "zero")),
+        hi_source=str(minutes_noise_cfg_raw.get("hi_source", "p90")),
+        lo_pad=float(minutes_noise_cfg_raw.get("lo_pad", 0.0)),
+        hi_pad=float(minutes_noise_cfg_raw.get("hi_pad", 2.0)),
+    )
+
+    # Pre-sim QP reconciliation config
+    pre_sim_reconcile_cfg_raw = config.get("pre_sim_reconcile", {}) or {}
+    pre_sim_reconcile = PreSimReconcileConfig(
+        enabled=bool(pre_sim_reconcile_cfg_raw.get("enabled", False)),
+        starter_weight=float(pre_sim_reconcile_cfg_raw.get("starter_weight", 2.0)),
+        minutes_weight_scale=float(pre_sim_reconcile_cfg_raw.get("minutes_weight_scale", 1.0)),
+    )
+
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
     use_game_scripts = bool(game_script_cfg.get("enabled", False))
@@ -236,7 +310,18 @@ def load_sim_v2_profile(
         usage_shares=usage_shares,
         vacancy_mode=vacancy_mode,
         use_play_prob_masking=use_play_prob_masking,
+        preserve_input_rotation=preserve_input_rotation,
+        minutes_noise_config=minutes_noise_config,
+        pre_sim_reconcile=pre_sim_reconcile,
+        minutes_bundle_path=minutes_bundle_path,
     )
 
 
-__all__ = ["SimV2Profile", "UsageSharesConfig", "load_sim_v2_profile", "DEFAULT_PROFILES_PATH"]
+__all__ = [
+    "SimV2Profile",
+    "UsageSharesConfig",
+    "MinutesNoiseConfig",
+    "PreSimReconcileConfig",
+    "load_sim_v2_profile",
+    "DEFAULT_PROFILES_PATH",
+]

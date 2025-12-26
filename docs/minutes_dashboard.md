@@ -24,6 +24,9 @@ the built React assets from `web/minutes-dashboard/dist`.
 uv run uvicorn projections.api.minutes_api:create_app --host 0.0.0.0 --port 8000
 ```
 
+- If you use systemd, **only run one** of `minutes-dashboard.service` or `live-api.service` because both bind port 8501.
+  Prefer `minutes-dashboard.service` (serves API + built UI); keep `live-api.service` disabled to avoid restarts.
+
 - Uses `artifacts/minutes_v1/daily/` for data and `web/minutes-dashboard/dist/`
   for static files (build the frontend first—see step 4).
 - Set env vars to override defaults:

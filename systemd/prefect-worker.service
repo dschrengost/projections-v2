@@ -1,0 +1,16 @@
+[Unit]
+Description=Prefect Worker for projections-local pool
+After=network.target
+
+[Service]
+Type=simple
+User=daniel
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment="PATH=/home/daniel/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PREFECT_API_URL=http://127.0.0.1:4200/api"
+ExecStart=/home/daniel/.local/bin/uv run prefect worker start --pool projections-local --type process --limit 2 --with-healthcheck
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

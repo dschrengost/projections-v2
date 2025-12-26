@@ -1,0 +1,125 @@
+{
+  "game_date": "2025-12-21",
+  "timestamp": "2025-12-24T13:01:08.200410",
+  "quality_tier": "clean",
+  "missing_feature_frac": 0.0,
+  "n_expected_features": 58,
+  "n_missing_features": 0,
+  "integrity_counts": {
+    "n_players": 209,
+    "n_games": 6,
+    "n_teams": 12
+  },
+  "config": {
+    "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/experiments/lgbm_rotalloc_final_v1",
+    "features_path": "/home/daniel/projections-data/live/features_minutes_v1/2025-12-21/run=20251222T025939Z/features.parquet",
+    "shares_col": "normalized_share",
+    "cap_max": 48.0,
+    "k_core": 8,
+    "use_share_model": true
+  },
+  "metrics": {
+    "team_sum_error_max_A": 2.842170943040401e-14,
+    "team_sum_error_mean_A": 1.4210854715202004e-14,
+    "team_sum_error_max_B": 5.684341886080802e-14,
+    "team_sum_error_mean_B": 2.842170943040401e-14,
+    "p95_minutes_A": 33.76626178115257,
+    "p99_minutes_A": 36.43309273904676,
+    "p95_minutes_B": 31.942871054418465,
+    "p99_minutes_B": 37.176837231669104,
+    "frac_ge_42_A": 0.0,
+    "frac_ge_44_A": 0.0,
+    "frac_ge_42_B": 0.0,
+    "frac_ge_44_B": 0.0,
+    "gini_mean_A": 0.43267959672366624,
+    "gini_mean_B": 0.17482430194662377,
+    "roster_size_mean_A": 16.75,
+    "roster_size_mean_B": 10.833333333333334,
+    "bench_max_mean_A": 9.268765336782339,
+    "bench_max_mean_B": 14.705716524637127,
+    "delta_mean": -5.949520514737681e-16,
+    "delta_std": 4.754971499347775,
+    "delta_abs_mean": 3.7598759591755555,
+    "delta_abs_max": 13.743670724284204,
+    "n_players": 209,
+    "n_teams": 12,
+    "mae_A": 5.88477786021781,
+    "rmse_A": 8.051242653784374,
+    "mae_B": 5.822381931544399,
+    "rmse_B": 8.781760437510782,
+    "mae_by_bucket_A": {
+      "0-10": 5.423542549179487,
+      "10-20": 5.459402332913475,
+      "20-30": 7.361502777958364,
+      "30+": 6.154259963551964
+    },
+    "mae_by_bucket_B": {
+      "0-10": 5.374356407368516,
+      "10-20": 4.230945386638612,
+      "20-30": 7.782784744186797,
+      "30+": 6.46943467073665
+    },
+    "mae_C": 5.483608094748866,
+    "rmse_C": 8.566656218195995,
+    "mae_by_bucket_C": {
+      "0-10": 4.546098822232924,
+      "10-20": 5.879481381954892,
+      "20-30": 8.898971381400994,
+      "30+": 4.924807990188491
+    },
+    "team_sum_error_max_C": 2.842170943040401e-14,
+    "team_sum_error_mean_C": 1.4210854715202004e-14,
+    "gini_mean_C": 0.26423796402584876,
+    "roster_size_mean_C": 10.833333333333334,
+    "bench_max_mean_C": 9.595884544858192
+  },
+  "starter_realism_A": {
+    "top5_sum_mean": 146.78539135682843,
+    "top5_sum_std": 11.924227199544365,
+    "max_minutes_mean": 33.928269210869594,
+    "max_minutes_std": 2.972982928165932
+  },
+  "starter_realism_B": {
+    "top5_sum_mean": 148.04670504524697,
+    "top5_sum_std": 10.184729556301933,
+    "max_minutes_mean": 31.83497495560083,
+    "max_minutes_std": 2.492335964636539
+  },
+  "starter_realism_C": {
+    "top5_sum_mean": 159.95228415394823,
+    "top5_sum_std": 11.840675572325642,
+    "max_minutes_mean": 36.96833940204467,
+    "max_minutes_std": 2.9417835204333334
+  },
+  "diagnostics_A": {
+    "n_teams": 12,
+    "n_players": 209,
+    "n_eligible": 201,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 5.684341886080802e-14,
+    "pre_cap_minutes_p95": 33.76626178115257,
+    "post_cap_minutes_p95": 33.76626178115257
+  },
+  "diagnostics_C": {
+    "n_teams": 12,
+    "n_players": 209,
+    "n_eligible": 201,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 5.684341886080802e-14,
+    "pre_cap_minutes_p95": 36.57138179412131,
+    "post_cap_minutes_p95": 36.57138179412131
+  },
+  "diagnostics_B": {
+    "eligible_size_p50": 11.0,
+    "eligible_size_p90": 11.0,
+    "fallback_top1_used": 0,
+    "cutoff_empty_events": 0,
+    "team_sum_dev_max": 2.842170943040401e-14
+  }
+}

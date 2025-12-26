@@ -1,0 +1,5465 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41264134,
+      "firstName": "Paolo",
+      "lastName": "Banchero",
+      "displayName": "Paolo Banchero",
+      "shortName": "P. Banchero",
+      "playerId": 1323993,
+      "playerDkId": 649544,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 18300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649544.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649544.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "40.1",
+          "sortValue": "40.1"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1323993-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264161,
+      "firstName": "Lauri",
+      "lastName": "Markkanen",
+      "displayName": "Lauri Markkanen",
+      "shortName": "L. Markkanen",
+      "playerId": 949131,
+      "playerDkId": 32970,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 17400,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32970.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32970.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.4",
+          "sortValue": "43.4"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "949131-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264135,
+      "firstName": "Keyonte",
+      "lastName": "George",
+      "displayName": "Keyonte George",
+      "shortName": "K. George",
+      "playerId": 1408151,
+      "playerDkId": 713769,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 16500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713769.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713769.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "41.0",
+          "sortValue": "41.0"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1408151-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264162,
+      "firstName": "Franz",
+      "lastName": "Wagner",
+      "displayName": "Franz Wagner",
+      "shortName": "F. Wagner",
+      "playerId": 1178131,
+      "playerDkId": 591008,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 16200,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591008.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591008.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "38.8",
+          "sortValue": "38.8"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1178131-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264136,
+      "firstName": "Desmond",
+      "lastName": "Bane",
+      "displayName": "Desmond Bane",
+      "shortName": "D. Bane",
+      "playerId": 944263,
+      "playerDkId": 527237,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 15900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527237.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527237.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.2",
+          "sortValue": "33.2"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "944263-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264163,
+      "firstName": "Jalen",
+      "lastName": "Suggs",
+      "displayName": "Jalen Suggs",
+      "shortName": "J. Suggs",
+      "playerId": 1241585,
+      "playerDkId": 590988,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 14100,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590988.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590988.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.7",
+          "sortValue": "31.7"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1241585-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264137,
+      "firstName": "Jusuf",
+      "lastName": "Nurkic",
+      "displayName": "Jusuf Nurkic",
+      "shortName": "J. Nurkic",
+      "playerId": 830642,
+      "playerDkId": 33325,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 13800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33325.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33325.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.5",
+          "sortValue": "29.5"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "830642-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264138,
+      "firstName": "Wendell",
+      "lastName": "Carter Jr.",
+      "displayName": "Wendell Carter Jr.",
+      "shortName": "W. Carter Jr.",
+      "playerId": 1060912,
+      "playerDkId": 32972,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 13200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32972.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32972.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "27.9",
+          "sortValue": "27.9"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1060912-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264139,
+      "firstName": "Anthony",
+      "lastName": "Black",
+      "displayName": "Anthony Black",
+      "shortName": "A. Black",
+      "playerId": 1401385,
+      "playerDkId": 713759,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 12600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713759.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713759.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.7",
+          "sortValue": "26.7"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1401385-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264099,
+      "firstName": "Paolo",
+      "lastName": "Banchero",
+      "displayName": "Paolo Banchero",
+      "shortName": "P. Banchero",
+      "playerId": 1323993,
+      "playerDkId": 649544,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 12200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649544.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649544.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "40.1",
+          "sortValue": "40.1"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1323993-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264140,
+      "firstName": "Kyle",
+      "lastName": "Filipowski",
+      "displayName": "Kyle Filipowski",
+      "shortName": "K. Filipowski",
+      "playerId": 1403609,
+      "playerDkId": 800651,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 12000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800651.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800651.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.5",
+          "sortValue": "23.5"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1403609-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264126,
+      "firstName": "Lauri",
+      "lastName": "Markkanen",
+      "displayName": "Lauri Markkanen",
+      "shortName": "L. Markkanen",
+      "playerId": 949131,
+      "playerDkId": 32970,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 11600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32970.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32970.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.4",
+          "sortValue": "43.4"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "949131-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264100,
+      "firstName": "Keyonte",
+      "lastName": "George",
+      "displayName": "Keyonte George",
+      "shortName": "K. George",
+      "playerId": 1408151,
+      "playerDkId": 713769,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 11000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713769.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713769.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "41.0",
+          "sortValue": "41.0"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1408151-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264127,
+      "firstName": "Franz",
+      "lastName": "Wagner",
+      "displayName": "Franz Wagner",
+      "shortName": "F. Wagner",
+      "playerId": 1178131,
+      "playerDkId": 591008,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 10800,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591008.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591008.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "38.8",
+          "sortValue": "38.8"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1178131-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264101,
+      "firstName": "Desmond",
+      "lastName": "Bane",
+      "displayName": "Desmond Bane",
+      "shortName": "D. Bane",
+      "playerId": 944263,
+      "playerDkId": 527237,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 10600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527237.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527237.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.2",
+          "sortValue": "33.2"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "944263-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264141,
+      "firstName": "Ace",
+      "lastName": "Bailey",
+      "displayName": "Ace Bailey",
+      "shortName": "A. Bailey",
+      "playerId": 1519363,
+      "playerDkId": 905554,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 10200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905554.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905554.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.3",
+          "sortValue": "19.3"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1519363-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264128,
+      "firstName": "Jalen",
+      "lastName": "Suggs",
+      "displayName": "Jalen Suggs",
+      "shortName": "J. Suggs",
+      "playerId": 1241585,
+      "playerDkId": 590988,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 9400,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590988.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590988.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.7",
+          "sortValue": "31.7"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1241585-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264102,
+      "firstName": "Jusuf",
+      "lastName": "Nurkic",
+      "displayName": "Jusuf Nurkic",
+      "shortName": "J. Nurkic",
+      "playerId": 830642,
+      "playerDkId": 33325,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 9200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33325.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33325.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.5",
+          "sortValue": "29.5"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "830642-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264103,
+      "firstName": "Wendell",
+      "lastName": "Carter Jr.",
+      "displayName": "Wendell Carter Jr.",
+      "shortName": "W. Carter Jr.",
+      "playerId": 1060912,
+      "playerDkId": 32972,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 8800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32972.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32972.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "27.9",
+          "sortValue": "27.9"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1060912-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264104,
+      "firstName": "Anthony",
+      "lastName": "Black",
+      "displayName": "Anthony Black",
+      "shortName": "A. Black",
+      "playerId": 1401385,
+      "playerDkId": 713759,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 8400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713759.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713759.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.7",
+          "sortValue": "26.7"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1401385-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264142,
+      "firstName": "Isaiah",
+      "lastName": "Collier",
+      "displayName": "Isaiah Collier",
+      "shortName": "I. Collier",
+      "playerId": 1463591,
+      "playerDkId": 800406,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 8400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800406.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800406.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.2",
+          "sortValue": "20.2"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1463591-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264105,
+      "firstName": "Kyle",
+      "lastName": "Filipowski",
+      "displayName": "Kyle Filipowski",
+      "shortName": "K. Filipowski",
+      "playerId": 1403609,
+      "playerDkId": 800651,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 8000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800651.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800651.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.5",
+          "sortValue": "23.5"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1403609-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264143,
+      "firstName": "Kevin",
+      "lastName": "Love",
+      "displayName": "Kevin Love",
+      "shortName": "K. Love",
+      "playerId": 395374,
+      "playerDkId": 32978,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 7500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32978.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32978.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.9",
+          "sortValue": "15.9"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "395374-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264164,
+      "firstName": "Tristan",
+      "lastName": "da Silva",
+      "displayName": "Tristan da Silva",
+      "shortName": "T. da Silva",
+      "playerId": 1232528,
+      "playerDkId": 800378,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 6900,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800378.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800378.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.7",
+          "sortValue": "18.7"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1232528-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264106,
+      "firstName": "Ace",
+      "lastName": "Bailey",
+      "displayName": "Ace Bailey",
+      "shortName": "A. Bailey",
+      "playerId": 1519363,
+      "playerDkId": 905554,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 6800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905554.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905554.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.3",
+          "sortValue": "19.3"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1519363-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264144,
+      "firstName": "Brice",
+      "lastName": "Sensabaugh",
+      "displayName": "Brice Sensabaugh",
+      "shortName": "B. Sensabaugh",
+      "playerId": 1408260,
+      "playerDkId": 713780,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 6600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713780.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713780.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.7",
+          "sortValue": "15.7"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1408260-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264145,
+      "firstName": "Moritz",
+      "lastName": "Wagner",
+      "displayName": "Moritz Wagner",
+      "shortName": "M. Wagner",
+      "playerId": 882387,
+      "playerDkId": 32880,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 6300,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32880.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32880.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "882387-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264146,
+      "firstName": "Goga",
+      "lastName": "Bitadze",
+      "displayName": "Goga Bitadze",
+      "shortName": "G. Bitadze",
+      "playerId": 1172132,
+      "playerDkId": 33097,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 6000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33097.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33097.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.2",
+          "sortValue": "18.2"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1172132-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264147,
+      "firstName": "Svi",
+      "lastName": "Mykhailiuk",
+      "displayName": "Svi Mykhailiuk",
+      "shortName": "S. Mykhailiuk",
+      "playerId": 843265,
+      "playerDkId": 33045,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 5700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33045.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33045.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.9",
+          "sortValue": "16.9"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "843265-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264107,
+      "firstName": "Isaiah",
+      "lastName": "Collier",
+      "displayName": "Isaiah Collier",
+      "shortName": "I. Collier",
+      "playerId": 1463591,
+      "playerDkId": 800406,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 5600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800406.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800406.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.2",
+          "sortValue": "20.2"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1463591-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264148,
+      "firstName": "Jett",
+      "lastName": "Howard",
+      "displayName": "Jett Howard",
+      "shortName": "J. Howard",
+      "playerId": 1408232,
+      "playerDkId": 713764,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713764.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713764.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.1",
+          "sortValue": "10.1"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1408232-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264108,
+      "firstName": "Kevin",
+      "lastName": "Love",
+      "displayName": "Kevin Love",
+      "shortName": "K. Love",
+      "playerId": 395374,
+      "playerDkId": 32978,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 5000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32978.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32978.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.9",
+          "sortValue": "15.9"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "395374-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264149,
+      "firstName": "Cody",
+      "lastName": "Williams",
+      "displayName": "Cody Williams",
+      "shortName": "C. Williams",
+      "playerId": 1458830,
+      "playerDkId": 800356,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800356.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800356.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.5",
+          "sortValue": "5.5"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1458830-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264129,
+      "firstName": "Tristan",
+      "lastName": "da Silva",
+      "displayName": "Tristan da Silva",
+      "shortName": "T. da Silva",
+      "playerId": 1232528,
+      "playerDkId": 800378,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 4600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800378.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800378.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.7",
+          "sortValue": "18.7"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1232528-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264109,
+      "firstName": "Brice",
+      "lastName": "Sensabaugh",
+      "displayName": "Brice Sensabaugh",
+      "shortName": "B. Sensabaugh",
+      "playerId": 1408260,
+      "playerDkId": 713780,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 4400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713780.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713780.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.7",
+          "sortValue": "15.7"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1408260-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264110,
+      "firstName": "Moritz",
+      "lastName": "Wagner",
+      "displayName": "Moritz Wagner",
+      "shortName": "M. Wagner",
+      "playerId": 882387,
+      "playerDkId": 32880,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 4200,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32880.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32880.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "882387-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264150,
+      "firstName": "Walter",
+      "lastName": "Clayton Jr.",
+      "displayName": "Walter Clayton Jr.",
+      "shortName": "W. Clayton Jr.",
+      "playerId": 1338969,
+      "playerDkId": 905567,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905567.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905567.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.1",
+          "sortValue": "15.1"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1338969-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264111,
+      "firstName": "Goga",
+      "lastName": "Bitadze",
+      "displayName": "Goga Bitadze",
+      "shortName": "G. Bitadze",
+      "playerId": 1172132,
+      "playerDkId": 33097,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 4000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33097.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33097.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.2",
+          "sortValue": "18.2"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1172132-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264112,
+      "firstName": "Svi",
+      "lastName": "Mykhailiuk",
+      "displayName": "Svi Mykhailiuk",
+      "shortName": "S. Mykhailiuk",
+      "playerId": 843265,
+      "playerDkId": 33045,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 3800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33045.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33045.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.9",
+          "sortValue": "16.9"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "843265-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264113,
+      "firstName": "Jett",
+      "lastName": "Howard",
+      "displayName": "Jett Howard",
+      "shortName": "J. Howard",
+      "playerId": 1408232,
+      "playerDkId": 713764,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713764.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713764.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.1",
+          "sortValue": "10.1"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1408232-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264151,
+      "firstName": "Tyus",
+      "lastName": "Jones",
+      "displayName": "Tyus Jones",
+      "shortName": "T. Jones",
+      "playerId": 842297,
+      "playerDkId": 33138,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33138.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33138.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.0",
+          "sortValue": "8.0"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "842297-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264152,
+      "firstName": "Taylor",
+      "lastName": "Hendricks",
+      "displayName": "Taylor Hendricks",
+      "shortName": "T. Hendricks",
+      "playerId": 1405861,
+      "playerDkId": 713762,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 3300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713762.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713762.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.3",
+          "sortValue": "12.3"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1405861-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264114,
+      "firstName": "Cody",
+      "lastName": "Williams",
+      "displayName": "Cody Williams",
+      "shortName": "C. Williams",
+      "playerId": 1458830,
+      "playerDkId": 800356,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 3200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800356.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800356.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.5",
+          "sortValue": "5.5"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1458830-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264153,
+      "firstName": "Kyle",
+      "lastName": "Anderson",
+      "displayName": "Kyle Anderson",
+      "shortName": "K. Anderson",
+      "playerId": 697720,
+      "playerDkId": 33137,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33137.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33137.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.6",
+          "sortValue": "17.6"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "697720-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264115,
+      "firstName": "Walter",
+      "lastName": "Clayton Jr.",
+      "displayName": "Walter Clayton Jr.",
+      "shortName": "W. Clayton Jr.",
+      "playerId": 1338969,
+      "playerDkId": 905567,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 2800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905567.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905567.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.1",
+          "sortValue": "15.1"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1338969-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264165,
+      "firstName": "Jonathan",
+      "lastName": "Isaac",
+      "displayName": "Jonathan Isaac",
+      "shortName": "J. Isaac",
+      "playerId": 940823,
+      "playerDkId": 33275,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 2700,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33275.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33275.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.5",
+          "sortValue": "8.5"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "940823-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264116,
+      "firstName": "Tyus",
+      "lastName": "Jones",
+      "displayName": "Tyus Jones",
+      "shortName": "T. Jones",
+      "playerId": 842297,
+      "playerDkId": 33138,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33138.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33138.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.0",
+          "sortValue": "8.0"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "842297-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264166,
+      "firstName": "Walker",
+      "lastName": "Kessler",
+      "displayName": "Walker Kessler",
+      "shortName": "W. Kessler",
+      "playerId": 1243728,
+      "playerDkId": 649571,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 2400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649571.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649571.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "38.4",
+          "sortValue": "38.4"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1243728-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264117,
+      "firstName": "Taylor",
+      "lastName": "Hendricks",
+      "displayName": "Taylor Hendricks",
+      "shortName": "T. Hendricks",
+      "playerId": 1405861,
+      "playerDkId": 713762,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 2200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713762.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713762.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.3",
+          "sortValue": "12.3"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1405861-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264167,
+      "firstName": "Georges",
+      "lastName": "Niang",
+      "displayName": "Georges Niang",
+      "shortName": "G. Niang",
+      "playerId": 679381,
+      "playerDkId": 33397,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 2100,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33397.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33397.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "679381-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264118,
+      "firstName": "Kyle",
+      "lastName": "Anderson",
+      "displayName": "Kyle Anderson",
+      "shortName": "K. Anderson",
+      "playerId": 697720,
+      "playerDkId": 33137,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 2000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33137.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33137.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.6",
+          "sortValue": "17.6"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "697720-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264130,
+      "firstName": "Jonathan",
+      "lastName": "Isaac",
+      "displayName": "Jonathan Isaac",
+      "shortName": "J. Isaac",
+      "playerId": 940823,
+      "playerDkId": 33275,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 1800,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33275.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33275.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.5",
+          "sortValue": "8.5"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "940823-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264154,
+      "firstName": "Jase",
+      "lastName": "Richardson",
+      "displayName": "Jase Richardson",
+      "shortName": "J. Richardson",
+      "playerId": 1528467,
+      "playerDkId": 905573,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 1800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905573.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905573.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.4",
+          "sortValue": "7.4"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1528467-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264131,
+      "firstName": "Walker",
+      "lastName": "Kessler",
+      "displayName": "Walker Kessler",
+      "shortName": "W. Kessler",
+      "playerId": 1243728,
+      "playerDkId": 649571,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649571.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649571.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "38.4",
+          "sortValue": "38.4"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1243728-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264155,
+      "firstName": "Noah",
+      "lastName": "Penda",
+      "displayName": "Noah Penda",
+      "shortName": "N. Penda",
+      "playerId": 1590551,
+      "playerDkId": 906338,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906338.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906338.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.9",
+          "sortValue": "9.9"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1590551-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264156,
+      "firstName": "Oscar",
+      "lastName": "Tshiebwe",
+      "displayName": "Oscar Tshiebwe",
+      "shortName": "O. Tshiebwe",
+      "playerId": 1175089,
+      "playerDkId": 713860,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713860.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713860.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1175089-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264157,
+      "firstName": "Jamal",
+      "lastName": "Cain",
+      "displayName": "Jamal Cain",
+      "shortName": "J. Cain",
+      "playerId": 1060409,
+      "playerDkId": 651642,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651642.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651642.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.9",
+          "sortValue": "3.9"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1060409-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264158,
+      "firstName": "EJ",
+      "lastName": "Harkless",
+      "displayName": "EJ Harkless",
+      "shortName": "E. Harkless",
+      "playerId": 1136744,
+      "playerDkId": 803416,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/803416.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/803416.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.6",
+          "sortValue": "5.6"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1136744-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264159,
+      "firstName": "John",
+      "lastName": "Tonje",
+      "displayName": "John Tonje",
+      "shortName": "J. Tonje",
+      "playerId": 1176674,
+      "playerDkId": 906385,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906385.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906385.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1176674-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264160,
+      "firstName": "Orlando",
+      "lastName": "Robinson",
+      "displayName": "Orlando Robinson",
+      "shortName": "O. Robinson",
+      "playerId": 1176770,
+      "playerDkId": 651644,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651644.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651644.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.4",
+          "sortValue": "5.4"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1176770-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264168,
+      "firstName": "Colin",
+      "lastName": "Castleton",
+      "displayName": "Colin Castleton",
+      "shortName": "C. Castleton",
+      "playerId": 1133800,
+      "playerDkId": 713824,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713824.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713824.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1133800-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264132,
+      "firstName": "Georges",
+      "lastName": "Niang",
+      "displayName": "Georges Niang",
+      "shortName": "G. Niang",
+      "playerId": 679381,
+      "playerDkId": 33397,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 1400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33397.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33397.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "679381-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264119,
+      "firstName": "Jase",
+      "lastName": "Richardson",
+      "displayName": "Jase Richardson",
+      "shortName": "J. Richardson",
+      "playerId": 1528467,
+      "playerDkId": 905573,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905573.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905573.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.4",
+          "sortValue": "7.4"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1528467-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264120,
+      "firstName": "Noah",
+      "lastName": "Penda",
+      "displayName": "Noah Penda",
+      "shortName": "N. Penda",
+      "playerId": 1590551,
+      "playerDkId": 906338,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906338.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906338.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.9",
+          "sortValue": "9.9"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1590551-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264121,
+      "firstName": "Oscar",
+      "lastName": "Tshiebwe",
+      "displayName": "Oscar Tshiebwe",
+      "shortName": "O. Tshiebwe",
+      "playerId": 1175089,
+      "playerDkId": 713860,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713860.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713860.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1175089-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264122,
+      "firstName": "Jamal",
+      "lastName": "Cain",
+      "displayName": "Jamal Cain",
+      "shortName": "J. Cain",
+      "playerId": 1060409,
+      "playerDkId": 651642,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651642.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651642.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.9",
+          "sortValue": "3.9"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1060409-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264123,
+      "firstName": "EJ",
+      "lastName": "Harkless",
+      "displayName": "EJ Harkless",
+      "shortName": "E. Harkless",
+      "playerId": 1136744,
+      "playerDkId": 803416,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/803416.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/803416.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.6",
+          "sortValue": "5.6"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1136744-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264124,
+      "firstName": "John",
+      "lastName": "Tonje",
+      "displayName": "John Tonje",
+      "shortName": "J. Tonje",
+      "playerId": 1176674,
+      "playerDkId": 906385,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906385.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906385.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1176674-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264125,
+      "firstName": "Orlando",
+      "lastName": "Robinson",
+      "displayName": "Orlando Robinson",
+      "shortName": "O. Robinson",
+      "playerId": 1176770,
+      "playerDkId": 651644,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651644.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651644.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.4",
+          "sortValue": "5.4"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1176770-6129486",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41264133,
+      "firstName": "Colin",
+      "lastName": "Castleton",
+      "displayName": "Colin Castleton",
+      "shortName": "C. Castleton",
+      "playerId": 1133800,
+      "playerDkId": 713824,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713824.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713824.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129486,
+        "name": "ORL @ UTA",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "UTA"
+          }
+        ],
+        "startTime": "2025-12-21T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129486,
+          "name": "ORL @ UTA",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "UTA"
+            }
+          ],
+          "startTime": "2025-12-21T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1133800-6129486",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6129486,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 26,
+        "teamName": "Jazz",
+        "abbreviation": "UTA",
+        "city": "Utah",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32959.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32959.png"
+      },
+      "awayTeam": {
+        "teamId": 19,
+        "teamName": "Magic",
+        "abbreviation": "ORL",
+        "city": "Orlando",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32945.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32945.png"
+      },
+      "startTime": "2025-12-21T02:30:00.0000000Z",
+      "name": "ORL @ UTA",
+      "venue": "EnergySolutions Arena",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}

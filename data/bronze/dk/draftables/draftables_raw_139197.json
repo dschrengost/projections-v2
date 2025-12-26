@@ -1,0 +1,5311 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41265700,
+      "firstName": "Jaylen",
+      "lastName": "Brown",
+      "displayName": "Jaylen Brown",
+      "shortName": "J. Brown",
+      "playerId": 883436,
+      "playerDkId": 32872,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 17100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32872.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32872.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "47.3",
+          "sortValue": "47.3"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "883436-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265701,
+      "firstName": "Scottie",
+      "lastName": "Barnes",
+      "displayName": "Scottie Barnes",
+      "shortName": "S. Barnes",
+      "playerId": 1251666,
+      "playerDkId": 590987,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 15900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590987.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590987.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.9",
+          "sortValue": "43.9"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1251666-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265702,
+      "firstName": "Brandon",
+      "lastName": "Ingram",
+      "displayName": "Brandon Ingram",
+      "shortName": "B. Ingram",
+      "playerId": 887665,
+      "playerDkId": 33215,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 14700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33215.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33215.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.3",
+          "sortValue": "37.3"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "887665-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265703,
+      "firstName": "Derrick",
+      "lastName": "White",
+      "displayName": "Derrick White",
+      "shortName": "D. White",
+      "playerId": 796009,
+      "playerDkId": 33364,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 13800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33364.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33364.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.3",
+          "sortValue": "37.3"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "796009-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265704,
+      "firstName": "Immanuel",
+      "lastName": "Quickley",
+      "displayName": "Immanuel Quickley",
+      "shortName": "I. Quickley",
+      "playerId": 1134175,
+      "playerDkId": 527232,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 12600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527232.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527232.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.8",
+          "sortValue": "33.8"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1134175-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265705,
+      "firstName": "Payton",
+      "lastName": "Pritchard",
+      "displayName": "Payton Pritchard",
+      "shortName": "P. Pritchard",
+      "playerId": 945610,
+      "playerDkId": 527233,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 12000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527233.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527233.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.8",
+          "sortValue": "31.8"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "945610-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265666,
+      "firstName": "Jaylen",
+      "lastName": "Brown",
+      "displayName": "Jaylen Brown",
+      "shortName": "J. Brown",
+      "playerId": 883436,
+      "playerDkId": 32872,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 11400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32872.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32872.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "47.3",
+          "sortValue": "47.3"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "883436-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265706,
+      "firstName": "RJ",
+      "lastName": "Barrett",
+      "displayName": "RJ Barrett",
+      "shortName": "R. Barrett",
+      "playerId": 1132031,
+      "playerDkId": 33244,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 11400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33244.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33244.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.3",
+          "sortValue": "33.3"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1132031-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265667,
+      "firstName": "Scottie",
+      "lastName": "Barnes",
+      "displayName": "Scottie Barnes",
+      "shortName": "S. Barnes",
+      "playerId": 1251666,
+      "playerDkId": 590987,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 10600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590987.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590987.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.9",
+          "sortValue": "43.9"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1251666-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265707,
+      "firstName": "Neemias",
+      "lastName": "Queta",
+      "displayName": "Neemias Queta",
+      "shortName": "N. Queta",
+      "playerId": 1142902,
+      "playerDkId": 591044,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 9900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591044.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591044.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.4",
+          "sortValue": "26.4"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1142902-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265668,
+      "firstName": "Brandon",
+      "lastName": "Ingram",
+      "displayName": "Brandon Ingram",
+      "shortName": "B. Ingram",
+      "playerId": 887665,
+      "playerDkId": 33215,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 9800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33215.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33215.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.3",
+          "sortValue": "37.3"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "887665-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265708,
+      "firstName": "Jakob",
+      "lastName": "Poeltl",
+      "displayName": "Jakob Poeltl",
+      "shortName": "J. Poeltl",
+      "playerId": 844478,
+      "playerDkId": 33361,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 9600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33361.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33361.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "25.5",
+          "sortValue": "25.5"
+        },
+        {
+          "id": -2,
+          "value": "11th",
+          "sortValue": "11",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "844478-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265669,
+      "firstName": "Derrick",
+      "lastName": "White",
+      "displayName": "Derrick White",
+      "shortName": "D. White",
+      "playerId": 796009,
+      "playerDkId": 33364,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 9200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33364.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33364.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.3",
+          "sortValue": "37.3"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "796009-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265709,
+      "firstName": "Sandro",
+      "lastName": "Mamukelashvili",
+      "displayName": "Sandro Mamukelashvili",
+      "shortName": "S. Mamukelashvili",
+      "playerId": 1060351,
+      "playerDkId": 591058,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 9000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591058.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591058.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.6",
+          "sortValue": "20.6"
+        },
+        {
+          "id": -2,
+          "value": "11th",
+          "sortValue": "11",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1060351-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265670,
+      "firstName": "Immanuel",
+      "lastName": "Quickley",
+      "displayName": "Immanuel Quickley",
+      "shortName": "I. Quickley",
+      "playerId": 1134175,
+      "playerDkId": 527232,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 8400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527232.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527232.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.8",
+          "sortValue": "33.8"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1134175-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265710,
+      "firstName": "Jordan",
+      "lastName": "Walsh",
+      "displayName": "Jordan Walsh",
+      "shortName": "J. Walsh",
+      "playerId": 1401388,
+      "playerDkId": 713790,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 8100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713790.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713790.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.3",
+          "sortValue": "19.3"
+        },
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1401388-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265671,
+      "firstName": "Payton",
+      "lastName": "Pritchard",
+      "displayName": "Payton Pritchard",
+      "shortName": "P. Pritchard",
+      "playerId": 945610,
+      "playerDkId": 527233,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 8000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527233.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527233.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.8",
+          "sortValue": "31.8"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "945610-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265672,
+      "firstName": "RJ",
+      "lastName": "Barrett",
+      "displayName": "RJ Barrett",
+      "shortName": "R. Barrett",
+      "playerId": 1132031,
+      "playerDkId": 33244,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 7600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33244.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33244.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.3",
+          "sortValue": "33.3"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1132031-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265711,
+      "firstName": "Jamal",
+      "lastName": "Shead",
+      "displayName": "Jamal Shead",
+      "shortName": "J. Shead",
+      "playerId": 1231795,
+      "playerDkId": 800661,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 7500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800661.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800661.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.6",
+          "sortValue": "19.6"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1231795-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265673,
+      "firstName": "Neemias",
+      "lastName": "Queta",
+      "displayName": "Neemias Queta",
+      "shortName": "N. Queta",
+      "playerId": 1142902,
+      "playerDkId": 591044,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 6600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591044.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591044.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.4",
+          "sortValue": "26.4"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1142902-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265712,
+      "firstName": "Anfernee",
+      "lastName": "Simons",
+      "displayName": "Anfernee Simons",
+      "shortName": "A. Simons",
+      "playerId": 1121307,
+      "playerDkId": 33330,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 6600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33330.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33330.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.1",
+          "sortValue": "21.1"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1121307-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265674,
+      "firstName": "Jakob",
+      "lastName": "Poeltl",
+      "displayName": "Jakob Poeltl",
+      "shortName": "J. Poeltl",
+      "playerId": 844478,
+      "playerDkId": 33361,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 6400,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33361.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33361.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "25.5",
+          "sortValue": "25.5"
+        },
+        {
+          "id": -2,
+          "value": "11th",
+          "sortValue": "11",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "844478-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265713,
+      "firstName": "Sam",
+      "lastName": "Hauser",
+      "displayName": "Sam Hauser",
+      "shortName": "S. Hauser",
+      "playerId": 922378,
+      "playerDkId": 591150,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 6300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591150.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591150.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.8",
+          "sortValue": "15.8"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "922378-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265675,
+      "firstName": "Sandro",
+      "lastName": "Mamukelashvili",
+      "displayName": "Sandro Mamukelashvili",
+      "shortName": "S. Mamukelashvili",
+      "playerId": 1060351,
+      "playerDkId": 591058,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 6000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591058.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591058.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.6",
+          "sortValue": "20.6"
+        },
+        {
+          "id": -2,
+          "value": "11th",
+          "sortValue": "11",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1060351-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265676,
+      "firstName": "Jordan",
+      "lastName": "Walsh",
+      "displayName": "Jordan Walsh",
+      "shortName": "J. Walsh",
+      "playerId": 1401388,
+      "playerDkId": 713790,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713790.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713790.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.3",
+          "sortValue": "19.3"
+        },
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1401388-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265677,
+      "firstName": "Jamal",
+      "lastName": "Shead",
+      "displayName": "Jamal Shead",
+      "shortName": "J. Shead",
+      "playerId": 1231795,
+      "playerDkId": 800661,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 5000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800661.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800661.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.6",
+          "sortValue": "19.6"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1231795-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265714,
+      "firstName": "Ja'Kobe",
+      "lastName": "Walter",
+      "displayName": "Ja'Kobe Walter",
+      "shortName": "J. Walter",
+      "playerId": 1458461,
+      "playerDkId": 800375,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800375.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800375.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.3",
+          "sortValue": "11.3"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1458461-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265678,
+      "firstName": "Anfernee",
+      "lastName": "Simons",
+      "displayName": "Anfernee Simons",
+      "shortName": "A. Simons",
+      "playerId": 1121307,
+      "playerDkId": 33330,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 4400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33330.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33330.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.1",
+          "sortValue": "21.1"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1121307-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265679,
+      "firstName": "Sam",
+      "lastName": "Hauser",
+      "displayName": "Sam Hauser",
+      "shortName": "S. Hauser",
+      "playerId": 922378,
+      "playerDkId": 591150,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591150.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591150.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.8",
+          "sortValue": "15.8"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "922378-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265715,
+      "firstName": "Ochai",
+      "lastName": "Agbaji",
+      "displayName": "Ochai Agbaji",
+      "shortName": "O. Agbaji",
+      "playerId": 1132831,
+      "playerDkId": 649563,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649563.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649563.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.2",
+          "sortValue": "9.2"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1132831-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265716,
+      "firstName": "Josh",
+      "lastName": "Minott",
+      "displayName": "Josh Minott",
+      "shortName": "J. Minott",
+      "playerId": 1324299,
+      "playerDkId": 649588,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 3900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649588.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649588.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.8",
+          "sortValue": "16.8"
+        },
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1324299-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265717,
+      "firstName": "Hugo",
+      "lastName": "Gonzalez",
+      "displayName": "Hugo Gonzalez",
+      "shortName": "H. Gonzalez",
+      "playerId": 1590553,
+      "playerDkId": 905578,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 3300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905578.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905578.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.5",
+          "sortValue": "9.5"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1590553-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265680,
+      "firstName": "Ja'Kobe",
+      "lastName": "Walter",
+      "displayName": "Ja'Kobe Walter",
+      "shortName": "J. Walter",
+      "playerId": 1458461,
+      "playerDkId": 800375,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 3200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800375.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800375.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.3",
+          "sortValue": "11.3"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1458461-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265718,
+      "firstName": "Collin",
+      "lastName": "Murray-Boyles",
+      "displayName": "Collin Murray-Boyles",
+      "shortName": "C. Murray-Boyles",
+      "playerId": 1465110,
+      "playerDkId": 905558,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905558.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905558.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.4",
+          "sortValue": "14.4"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1465110-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265681,
+      "firstName": "Ochai",
+      "lastName": "Agbaji",
+      "displayName": "Ochai Agbaji",
+      "shortName": "O. Agbaji",
+      "playerId": 1132831,
+      "playerDkId": 649563,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 2800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649563.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649563.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.2",
+          "sortValue": "9.2"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1132831-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265682,
+      "firstName": "Josh",
+      "lastName": "Minott",
+      "displayName": "Josh Minott",
+      "shortName": "J. Minott",
+      "playerId": 1324299,
+      "playerDkId": 649588,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 2600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649588.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649588.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.8",
+          "sortValue": "16.8"
+        },
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1324299-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265719,
+      "firstName": "Gradey",
+      "lastName": "Dick",
+      "displayName": "Gradey Dick",
+      "shortName": "G. Dick",
+      "playerId": 1416377,
+      "playerDkId": 713766,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713766.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713766.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.3",
+          "sortValue": "11.3"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1416377-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265683,
+      "firstName": "Hugo",
+      "lastName": "Gonzalez",
+      "displayName": "Hugo Gonzalez",
+      "shortName": "H. Gonzalez",
+      "playerId": 1590553,
+      "playerDkId": 905578,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 2200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905578.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905578.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.5",
+          "sortValue": "9.5"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1590553-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265720,
+      "firstName": "Baylor",
+      "lastName": "Scheierman",
+      "displayName": "Baylor Scheierman",
+      "shortName": "B. Scheierman",
+      "playerId": 1177129,
+      "playerDkId": 800408,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 2100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800408.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800408.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.4",
+          "sortValue": "7.4"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1177129-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265684,
+      "firstName": "Collin",
+      "lastName": "Murray-Boyles",
+      "displayName": "Collin Murray-Boyles",
+      "shortName": "C. Murray-Boyles",
+      "playerId": 1465110,
+      "playerDkId": 905558,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 2000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905558.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905558.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.4",
+          "sortValue": "14.4"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1465110-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265685,
+      "firstName": "Gradey",
+      "lastName": "Dick",
+      "displayName": "Gradey Dick",
+      "shortName": "G. Dick",
+      "playerId": 1416377,
+      "playerDkId": 713766,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713766.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713766.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.3",
+          "sortValue": "11.3"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1416377-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265721,
+      "firstName": "Chris",
+      "lastName": "Boucher",
+      "displayName": "Chris Boucher",
+      "shortName": "C. Boucher",
+      "playerId": 901190,
+      "playerDkId": 33383,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33383.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33383.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.6",
+          "sortValue": "8.6"
+        },
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "901190-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265722,
+      "firstName": "Max",
+      "lastName": "Shulga",
+      "displayName": "Max Shulga",
+      "shortName": "M. Shulga",
+      "playerId": 1231970,
+      "playerDkId": 906394,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906394.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906394.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1231970-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265723,
+      "firstName": "Ron",
+      "lastName": "Harper Jr.",
+      "displayName": "Ron Harper Jr.",
+      "shortName": "R. Harper Jr.",
+      "playerId": 1133934,
+      "playerDkId": 649598,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649598.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649598.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.2",
+          "sortValue": "6.2"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1133934-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265724,
+      "firstName": "Jamison",
+      "lastName": "Battle",
+      "displayName": "Jamison Battle",
+      "shortName": "J. Battle",
+      "playerId": 1174935,
+      "playerDkId": 803836,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/803836.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/803836.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.4",
+          "sortValue": "6.4"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1174935-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265725,
+      "firstName": "Luka",
+      "lastName": "Garza",
+      "displayName": "Luka Garza",
+      "shortName": "L. Garza",
+      "playerId": 1061057,
+      "playerDkId": 591056,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591056.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591056.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "13.1",
+          "sortValue": "13.1"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1061057-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265726,
+      "firstName": "Xavier",
+      "lastName": "Tillman",
+      "displayName": "Xavier Tillman",
+      "shortName": "X. Tillman",
+      "playerId": 1078665,
+      "playerDkId": 527253,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527253.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527253.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.6",
+          "sortValue": "7.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1078665-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265727,
+      "firstName": "AJ",
+      "lastName": "Lawson",
+      "displayName": "AJ Lawson",
+      "shortName": "A. Lawson",
+      "playerId": 1137214,
+      "playerDkId": 591149,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591149.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591149.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.6",
+          "sortValue": "11.6"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1137214-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265728,
+      "firstName": "Chucky",
+      "lastName": "Hepburn",
+      "displayName": "Chucky Hepburn",
+      "shortName": "C. Hepburn",
+      "playerId": 1327212,
+      "playerDkId": 906400,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906400.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906400.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.9",
+          "sortValue": "2.9"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1327212-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265729,
+      "firstName": "Alijah",
+      "lastName": "Martin",
+      "displayName": "Alijah Martin",
+      "shortName": "A. Martin",
+      "playerId": 1232344,
+      "playerDkId": 906345,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906345.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906345.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.0",
+          "sortValue": "1.0"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1232344-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265730,
+      "firstName": "Jonathan",
+      "lastName": "Mogbo",
+      "displayName": "Jonathan Mogbo",
+      "shortName": "J. Mogbo",
+      "playerId": 1404902,
+      "playerDkId": 800650,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800650.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800650.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.4",
+          "sortValue": "4.4"
+        },
+        {
+          "id": -2,
+          "value": "11th",
+          "sortValue": "11",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1404902-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265731,
+      "firstName": "Amari",
+      "lastName": "Williams",
+      "displayName": "Amari Williams",
+      "shortName": "A. Williams",
+      "playerId": 1232028,
+      "playerDkId": 906358,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906358.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906358.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.2",
+          "sortValue": "3.2"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1232028-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265732,
+      "firstName": "Garrett",
+      "lastName": "Temple",
+      "displayName": "Garrett Temple",
+      "shortName": "G. Temple",
+      "playerId": 263903,
+      "playerDkId": 32900,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32900.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32900.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.8",
+          "sortValue": "2.8"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "263903-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265733,
+      "firstName": "Jayson",
+      "lastName": "Tatum",
+      "displayName": "Jayson Tatum",
+      "shortName": "J. Tatum",
+      "playerId": 937647,
+      "playerDkId": 32876,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32876.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32876.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "937647-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265686,
+      "firstName": "Baylor",
+      "lastName": "Scheierman",
+      "displayName": "Baylor Scheierman",
+      "shortName": "B. Scheierman",
+      "playerId": 1177129,
+      "playerDkId": 800408,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800408.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800408.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.4",
+          "sortValue": "7.4"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1177129-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265687,
+      "firstName": "Chris",
+      "lastName": "Boucher",
+      "displayName": "Chris Boucher",
+      "shortName": "C. Boucher",
+      "playerId": 901190,
+      "playerDkId": 33383,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33383.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33383.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.6",
+          "sortValue": "8.6"
+        },
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "901190-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265688,
+      "firstName": "Max",
+      "lastName": "Shulga",
+      "displayName": "Max Shulga",
+      "shortName": "M. Shulga",
+      "playerId": 1231970,
+      "playerDkId": 906394,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906394.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906394.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1231970-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265689,
+      "firstName": "Ron",
+      "lastName": "Harper Jr.",
+      "displayName": "Ron Harper Jr.",
+      "shortName": "R. Harper Jr.",
+      "playerId": 1133934,
+      "playerDkId": 649598,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649598.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649598.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.2",
+          "sortValue": "6.2"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1133934-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265690,
+      "firstName": "Jamison",
+      "lastName": "Battle",
+      "displayName": "Jamison Battle",
+      "shortName": "J. Battle",
+      "playerId": 1174935,
+      "playerDkId": 803836,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/803836.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/803836.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.4",
+          "sortValue": "6.4"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1174935-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265691,
+      "firstName": "Luka",
+      "lastName": "Garza",
+      "displayName": "Luka Garza",
+      "shortName": "L. Garza",
+      "playerId": 1061057,
+      "playerDkId": 591056,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591056.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591056.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "13.1",
+          "sortValue": "13.1"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1061057-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265692,
+      "firstName": "Xavier",
+      "lastName": "Tillman",
+      "displayName": "Xavier Tillman",
+      "shortName": "X. Tillman",
+      "playerId": 1078665,
+      "playerDkId": 527253,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527253.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527253.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.6",
+          "sortValue": "7.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1078665-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265693,
+      "firstName": "AJ",
+      "lastName": "Lawson",
+      "displayName": "AJ Lawson",
+      "shortName": "A. Lawson",
+      "playerId": 1137214,
+      "playerDkId": 591149,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591149.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591149.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.6",
+          "sortValue": "11.6"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1137214-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265694,
+      "firstName": "Chucky",
+      "lastName": "Hepburn",
+      "displayName": "Chucky Hepburn",
+      "shortName": "C. Hepburn",
+      "playerId": 1327212,
+      "playerDkId": 906400,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906400.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906400.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.9",
+          "sortValue": "2.9"
+        },
+        {
+          "id": -2,
+          "value": "7th",
+          "sortValue": "7",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1327212-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265695,
+      "firstName": "Alijah",
+      "lastName": "Martin",
+      "displayName": "Alijah Martin",
+      "shortName": "A. Martin",
+      "playerId": 1232344,
+      "playerDkId": 906345,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906345.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906345.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.0",
+          "sortValue": "1.0"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1232344-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265696,
+      "firstName": "Jonathan",
+      "lastName": "Mogbo",
+      "displayName": "Jonathan Mogbo",
+      "shortName": "J. Mogbo",
+      "playerId": 1404902,
+      "playerDkId": 800650,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800650.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800650.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.4",
+          "sortValue": "4.4"
+        },
+        {
+          "id": -2,
+          "value": "11th",
+          "sortValue": "11",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "1404902-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265697,
+      "firstName": "Amari",
+      "lastName": "Williams",
+      "displayName": "Amari Williams",
+      "shortName": "A. Williams",
+      "playerId": 1232028,
+      "playerDkId": 906358,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906358.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906358.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.2",
+          "sortValue": "3.2"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "1232028-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265698,
+      "firstName": "Garrett",
+      "lastName": "Temple",
+      "displayName": "Garrett Temple",
+      "shortName": "G. Temple",
+      "playerId": 263903,
+      "playerDkId": 32900,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32900.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32900.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.8",
+          "sortValue": "2.8"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 28,
+      "teamAbbreviation": "TOR",
+      "draftAlerts": [],
+      "playerGameHash": "263903-6128562",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41265699,
+      "firstName": "Jayson",
+      "lastName": "Tatum",
+      "displayName": "Jayson Tatum",
+      "shortName": "J. Tatum",
+      "playerId": 937647,
+      "playerDkId": 32876,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32876.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32876.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6128562,
+        "name": "BOS @ TOR",
+        "nameDisplay": [
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "TOR"
+          }
+        ],
+        "startTime": "2025-12-21T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6128562,
+          "name": "BOS @ TOR",
+          "nameDisplay": [
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "TOR"
+            }
+          ],
+          "startTime": "2025-12-21T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "937647-6128562",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6128562,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 28,
+        "teamName": "Raptors",
+        "abbreviation": "TOR",
+        "city": "Toronto",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32957.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 2,
+        "teamName": "Celtics",
+        "abbreviation": "BOS",
+        "city": "Boston",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32898.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32898.png"
+      },
+      "startTime": "2025-12-21T00:00:00.0000000Z",
+      "name": "BOS @ TOR",
+      "venue": "Air Canada Centre",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}

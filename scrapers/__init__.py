@@ -23,6 +23,11 @@ from .nba_daily_lineups import (
     LINEUP_ROLE_OUT,
     LINEUP_ROLE_PROJECTED,
 )
+from .rotowire_lineups import (
+    RotowireLineupsScraper,
+    scrape_rotowire_lineups,
+    normalize_rotowire_to_nba_format,
+)
 
 __all__ = [
     "EventOdds",
@@ -46,4 +51,8 @@ __all__ = [
     "LINEUP_ROLE_CONFIRMED",
     "LINEUP_ROLE_OUT",
     "LINEUP_ROLE_PROJECTED",
+    "RotowireLineupsScraper",
+    "scrape_rotowire_lineups",
+    "normalize_rotowire_to_nba_format",
 ]
+

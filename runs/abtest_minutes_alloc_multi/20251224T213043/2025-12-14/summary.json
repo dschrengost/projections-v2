@@ -1,0 +1,539 @@
+{
+  "game_date": "2025-12-14",
+  "timestamp": "2025-12-24T21:30:47.623404",
+  "quality_tier": "clean",
+  "missing_feature_frac": 0.0,
+  "n_expected_features": 58,
+  "n_missing_features": 0,
+  "integrity_counts": {
+    "n_players": 281,
+    "n_games": 8,
+    "n_teams": 16
+  },
+  "config": {
+    "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/experiments/lgbm_rotalloc_final_v1",
+    "features_path": "/home/daniel/projections-data/live/features_minutes_v1/2025-12-14/run=20251224T150640Z_rebuild_contract/features.parquet",
+    "shares_col": "normalized_share",
+    "cap_max": 48.0,
+    "k_core": 8,
+    "alpha_core": 0.8,
+    "alpha_fringe": 0.3,
+    "use_share_model": true,
+    "alpha_grid": [
+      0.0,
+      0.3,
+      0.5,
+      0.7,
+      0.9,
+      1.0
+    ],
+    "p_grid": [
+      1.0,
+      1.1,
+      1.2,
+      1.3
+    ],
+    "default_F_p": 1.2
+  },
+  "metrics": {
+    "team_sum_error_max_A": 2.842170943040401e-14,
+    "team_sum_error_mean_A": 1.4210854715202004e-14,
+    "team_sum_error_max_B": 5.684341886080802e-14,
+    "team_sum_error_mean_B": 2.842170943040401e-14,
+    "p95_minutes_A": 35.539635480360744,
+    "p99_minutes_A": 37.42552422987378,
+    "p95_minutes_B": 31.230049353218142,
+    "p99_minutes_B": 31.978525998748108,
+    "frac_ge_42_A": 0.0035587188612099642,
+    "frac_ge_44_A": 0.0035587188612099642,
+    "frac_ge_42_B": 0.0,
+    "frac_ge_44_B": 0.0,
+    "gini_mean_A": 0.300625167194157,
+    "gini_mean_B": 0.16555852047150815,
+    "roster_size_mean_A": 13.25,
+    "roster_size_mean_B": 11.0,
+    "bench_max_mean_A": 10.405061446680525,
+    "bench_max_mean_B": 14.8677072715051,
+    "delta_mean": -2.907915110761976e-16,
+    "delta_std": 4.555782016940751,
+    "delta_abs_mean": 3.314932514092454,
+    "delta_abs_max": 13.894218830139309,
+    "n_players": 281,
+    "n_teams": 16,
+    "mae_A": 4.767480401279946,
+    "rmse_A": 6.716035680531571,
+    "mae_B": 4.811722571132779,
+    "rmse_B": 7.596159494417087,
+    "mae_by_bucket_A": {
+      "0-10": 3.4750796168402425,
+      "10-20": 4.8248337967226,
+      "20-30": 6.013639633121199,
+      "30+": 6.802271259924369
+    },
+    "mae_by_bucket_B": {
+      "0-10": 3.823653407666553,
+      "10-20": 3.817299516681288,
+      "20-30": 5.748376518951887,
+      "30+": 7.403025675242457
+    },
+    "mae_C": 4.6832556439997886,
+    "rmse_C": 7.299374079996511,
+    "mae_by_bucket_C": {
+      "0-10": 2.781267411274549,
+      "10-20": 5.410506737804259,
+      "20-30": 7.190141313110937,
+      "30+": 6.2324987298011765
+    },
+    "team_sum_error_max_C": 2.842170943040401e-14,
+    "team_sum_error_mean_C": 1.4210854715202004e-14,
+    "gini_mean_C": 0.25392423321021557,
+    "roster_size_mean_C": 11.0,
+    "bench_max_mean_C": 10.76016685880666,
+    "allocator_D": {
+      "alpha_0.0": {
+        "alpha": 0.0,
+        "mae": 4.756078030435049,
+        "rmse": 7.459578330570415,
+        "mae_by_bucket": {
+          "0-10": 2.990868194706333,
+          "10-20": 4.989607446568476,
+          "20-30": 8.20085493693909,
+          "30+": 5.269862108468956
+        },
+        "team_sum_error_max": 5.684341886080802e-14,
+        "team_sum_error_mean": 2.842170943040401e-14,
+        "gini_mean": 0.24976987926816685,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 11.71483982041722
+      },
+      "alpha_0.3": {
+        "alpha": 0.3,
+        "mae": 4.634495326083168,
+        "rmse": 7.255220412519308,
+        "mae_by_bucket": {
+          "0-10": 2.9106773221226923,
+          "10-20": 4.85010318771056,
+          "20-30": 7.780940788087623,
+          "30+": 5.412257146289728
+        },
+        "team_sum_error_max": 5.684341886080802e-14,
+        "team_sum_error_mean": 2.842170943040401e-14,
+        "gini_mean": 0.24853603529487228,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 11.496086753662064
+      },
+      "alpha_0.5": {
+        "alpha": 0.5,
+        "mae": 4.600487235316306,
+        "rmse": 7.193172104889116,
+        "mae_by_bucket": {
+          "0-10": 2.8718592963143603,
+          "10-20": 4.9129468662903255,
+          "20-30": 7.500998022186645,
+          "30+": 5.595125578568239
+        },
+        "team_sum_error_max": 5.684341886080802e-14,
+        "team_sum_error_mean": 2.842170943040401e-14,
+        "gini_mean": 0.2489281244783058,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 11.304801316991082
+      },
+      "alpha_0.7": {
+        "alpha": 0.7,
+        "mae": 4.616233083238263,
+        "rmse": 7.1924826721809225,
+        "mae_by_bucket": {
+          "0-10": 2.8330412705060284,
+          "10-20": 5.053073177209354,
+          "20-30": 7.356714710041945,
+          "30+": 5.835297560205128
+        },
+        "team_sum_error_max": 5.684341886080802e-14,
+        "team_sum_error_mean": 2.842170943040401e-14,
+        "gini_mean": 0.2503102294399492,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 11.119197107151592
+      },
+      "alpha_0.9": {
+        "alpha": 0.9,
+        "mae": 4.659962596363469,
+        "rmse": 7.250855452079212,
+        "mae_by_bucket": {
+          "0-10": 2.795602948687683,
+          "10-20": 5.291922158887492,
+          "20-30": 7.242615977211609,
+          "30+": 6.105701559365143
+        },
+        "team_sum_error_max": 2.842170943040401e-14,
+        "team_sum_error_mean": 1.4210854715202004e-14,
+        "gini_mean": 0.2525086992106401,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 10.906554828736464
+      },
+      "alpha_1.0": {
+        "alpha": 1.0,
+        "mae": 4.683255634867813,
+        "rmse": 7.299374069564677,
+        "mae_by_bucket": {
+          "0-10": 2.781267436204622,
+          "10-20": 5.41050668065975,
+          "20-30": 7.190141233226267,
+          "30+": 6.232498758527748
+        },
+        "team_sum_error_max": 5.684341886080802e-14,
+        "team_sum_error_mean": 2.842170943040401e-14,
+        "gini_mean": 0.2539242302831806,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 10.760166988062458
+      }
+    },
+    "best_D_alpha": 0.5,
+    "mae_D_best": 4.600487235316306,
+    "mae_D": 4.616233083238263,
+    "rmse_D": 7.1924826721809225,
+    "mae_by_bucket_D": {
+      "0-10": 2.8330412705060284,
+      "10-20": 5.053073177209354,
+      "20-30": 7.356714710041945,
+      "30+": 5.835297560205128
+    },
+    "gini_mean_D": 0.2503102294399492,
+    "roster_size_mean_D": 11.0,
+    "bench_max_mean_D": 11.119197107151592,
+    "mae_E": 4.583880276498624,
+    "rmse_E": 7.19835043534742,
+    "mae_by_bucket_E": {
+      "0-10": 2.92778527916509,
+      "10-20": 4.740526104536937,
+      "20-30": 7.151011044825117,
+      "30+": 5.933162888547994
+    },
+    "team_sum_error_max_E": 2.842170943040401e-14,
+    "team_sum_error_mean_E": 1.4210854715202004e-14,
+    "gini_mean_E": 0.2435603486461625,
+    "roster_size_mean_E": 11.0,
+    "bench_max_mean_E": 11.329901300765936,
+    "allocator_F": {
+      "p_1.0": {
+        "p": 1.0,
+        "mae": 4.811722571132778,
+        "rmse": 7.596159494417087,
+        "mae_by_bucket": {
+          "0-10": 3.8236534076665527,
+          "10-20": 3.817299516681288,
+          "20-30": 5.748376518951886,
+          "30+": 7.403025675242458
+        },
+        "team_sum_error_max": 2.842170943040401e-14,
+        "team_sum_error_mean": 1.4210854715202004e-14,
+        "gini_mean": 0.16555852047150807,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 14.8677072715051
+      },
+      "p_1.1": {
+        "p": 1.1,
+        "mae": 4.750162300281369,
+        "rmse": 7.513747136805806,
+        "mae_by_bucket": {
+          "0-10": 3.6812642778018887,
+          "10-20": 3.9158064292087813,
+          "20-30": 6.164868514000431,
+          "30+": 6.8303273392635875
+        },
+        "team_sum_error_max": 5.684341886080802e-14,
+        "team_sum_error_mean": 2.842170943040401e-14,
+        "gini_mean": 0.18132377176911046,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 14.235068343910097
+      },
+      "p_1.2": {
+        "p": 1.2,
+        "mae": 4.731733235290271,
+        "rmse": 7.466390765665201,
+        "mae_by_bucket": {
+          "0-10": 3.5415016372939925,
+          "10-20": 4.0983384976518895,
+          "20-30": 6.628840443813582,
+          "30+": 6.3683584774828095
+        },
+        "team_sum_error_max": 5.684341886080802e-14,
+        "team_sum_error_mean": 2.842170943040401e-14,
+        "gini_mean": 0.1968483516607911,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 13.617281724765695
+      },
+      "p_1.3": {
+        "p": 1.3,
+        "mae": 4.7355801825318675,
+        "rmse": 7.453269589413984,
+        "mae_by_bucket": {
+          "0-10": 3.4045430690434495,
+          "10-20": 4.318134521183096,
+          "20-30": 7.117765886742135,
+          "30+": 5.965022249532739
+        },
+        "team_sum_error_max": 5.684341886080802e-14,
+        "team_sum_error_mean": 2.842170943040401e-14,
+        "gini_mean": 0.21211252570763428,
+        "roster_size_mean": 11.0,
+        "bench_max_mean": 13.01498667709217
+      }
+    },
+    "best_F_p": 1.2,
+    "mae_F_best": 4.731733235290271,
+    "mae_F": 4.731733235290271,
+    "rmse_F": 7.466390765665201,
+    "mae_by_bucket_F": {
+      "0-10": 3.5415016372939925,
+      "10-20": 4.0983384976518895,
+      "20-30": 6.628840443813582,
+      "30+": 6.3683584774828095
+    },
+    "gini_mean_F": 0.1968483516607911,
+    "roster_size_mean_F": 11.0,
+    "bench_max_mean_F": 13.617281724765695,
+    "default_F_p": 1.2,
+    "ordering_10_30": {
+      "A": 0.7155934343434345,
+      "B": 0.704752886002886,
+      "C": 0.7051136363636363,
+      "D": 0.7172664141414142,
+      "E": 0.7349747474747474,
+      "F": 0.704752886002886
+    }
+  },
+  "starter_realism_A": {
+    "top5_sum_mean": 146.93834443781378,
+    "top5_sum_std": 13.024618929195565,
+    "max_minutes_mean": 34.59234549316489,
+    "max_minutes_std": 4.144521025603104
+  },
+  "starter_realism_B": {
+    "top5_sum_mean": 144.54522388569865,
+    "top5_sum_std": 3.9952494623849453,
+    "max_minutes_mean": 30.845894681184713,
+    "max_minutes_std": 1.1294160802681033
+  },
+  "starter_realism_C": {
+    "top5_sum_mean": 156.7305107993215,
+    "top5_sum_std": 10.487955473868736,
+    "max_minutes_mean": 36.837521571590706,
+    "max_minutes_std": 3.817918364314925
+  },
+  "starter_realism_D": {
+    "0.0": {
+      "top5_sum_mean": 162.1422617560123,
+      "top5_sum_std": 7.019240708884718,
+      "max_minutes_mean": 35.702758548468715,
+      "max_minutes_std": 2.013402037732184
+    },
+    "0.3": {
+      "top5_sum_mean": 159.99296102406458,
+      "top5_sum_std": 7.143695088220936,
+      "max_minutes_mean": 35.82762759218014,
+      "max_minutes_std": 2.560831009462692
+    },
+    "0.5": {
+      "top5_sum_mean": 158.79859416647184,
+      "top5_sum_std": 7.8751904873158285,
+      "max_minutes_mean": 36.14087962802935,
+      "max_minutes_std": 2.9005936985500727
+    },
+    "0.7": {
+      "top5_sum_mean": 157.9037743888538,
+      "top5_sum_std": 8.926610913669304,
+      "max_minutes_mean": 36.454131663878556,
+      "max_minutes_std": 3.3293209184826935
+    },
+    "0.9": {
+      "top5_sum_mean": 157.08090335113565,
+      "top5_sum_std": 10.023114934945632,
+      "max_minutes_mean": 36.73677612442745,
+      "max_minutes_std": 3.72385889646498
+    },
+    "1.0": {
+      "top5_sum_mean": 156.73051024573056,
+      "top5_sum_std": 10.487955369083657,
+      "max_minutes_mean": 36.83752141436885,
+      "max_minutes_std": 3.817918376347184
+    }
+  },
+  "starter_realism_E": {
+    "top5_sum_mean": 156.59394669341373,
+    "top5_sum_std": 8.28093454500791,
+    "max_minutes_mean": 36.39846612888809,
+    "max_minutes_std": 3.2751958952211715
+  },
+  "starter_realism_F": {
+    "1.0": {
+      "top5_sum_mean": 144.54522388569865,
+      "top5_sum_std": 3.9952494623849493,
+      "max_minutes_mean": 30.84589468118471,
+      "max_minutes_std": 1.1294160802681037
+    },
+    "1.1": {
+      "top5_sum_mean": 147.93360163264683,
+      "top5_sum_std": 4.3417005896896965,
+      "max_minutes_mean": 31.76909998142824,
+      "max_minutes_std": 1.2493325628531002
+    },
+    "1.2": {
+      "top5_sum_mean": 151.270270576243,
+      "top5_sum_std": 4.671197098800652,
+      "max_minutes_mean": 32.690588309315146,
+      "max_minutes_std": 1.369031368208771
+    },
+    "1.3": {
+      "top5_sum_mean": 154.55044820098533,
+      "top5_sum_std": 4.982470264107962,
+      "max_minutes_mean": 33.609113264235944,
+      "max_minutes_std": 1.4882229938896536
+    }
+  },
+  "starter_realism_M": null,
+  "diagnostics_A": {
+    "n_teams": 16,
+    "n_players": 281,
+    "n_eligible": 212,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 5.684341886080802e-14,
+    "pre_cap_minutes_p95": 35.539635480360744,
+    "post_cap_minutes_p95": 35.539635480360744
+  },
+  "diagnostics_C": {
+    "n_teams": 16,
+    "n_players": 281,
+    "n_eligible": 212,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 1,
+    "redistribution_rounds_max": 1,
+    "team_sum_dev_max": 5.684341886080802e-14,
+    "pre_cap_minutes_p95": 36.82537164218298,
+    "post_cap_minutes_p95": 36.82537164218298
+  },
+  "diagnostics_B": {
+    "eligible_size_p50": 11.0,
+    "eligible_size_p90": 11.0,
+    "fallback_top1_used": 0,
+    "cutoff_empty_events": 0,
+    "team_sum_dev_max": 5.684341886080802e-14
+  },
+  "diagnostics_D": {
+    "0.0": {
+      "n_teams": 16,
+      "n_players": 281,
+      "n_eligible": 176,
+      "alpha": 0.0,
+      "gamma": 1.0,
+      "team_sum_dev_max": 5.684341886080802e-14,
+      "cap_applied_count": 0
+    },
+    "0.3": {
+      "n_teams": 16,
+      "n_players": 281,
+      "n_eligible": 176,
+      "alpha": 0.3,
+      "gamma": 1.0,
+      "team_sum_dev_max": 5.684341886080802e-14,
+      "cap_applied_count": 0
+    },
+    "0.5": {
+      "n_teams": 16,
+      "n_players": 281,
+      "n_eligible": 176,
+      "alpha": 0.5,
+      "gamma": 1.0,
+      "team_sum_dev_max": 5.684341886080802e-14,
+      "cap_applied_count": 0
+    },
+    "0.7": {
+      "n_teams": 16,
+      "n_players": 281,
+      "n_eligible": 176,
+      "alpha": 0.7,
+      "gamma": 1.0,
+      "team_sum_dev_max": 5.684341886080802e-14,
+      "cap_applied_count": 0
+    },
+    "0.9": {
+      "n_teams": 16,
+      "n_players": 281,
+      "n_eligible": 176,
+      "alpha": 0.9,
+      "gamma": 1.0,
+      "team_sum_dev_max": 2.842170943040401e-14,
+      "cap_applied_count": 1
+    },
+    "1.0": {
+      "n_teams": 16,
+      "n_players": 281,
+      "n_eligible": 176,
+      "alpha": 1.0,
+      "gamma": 1.0,
+      "team_sum_dev_max": 5.684341886080802e-14,
+      "cap_applied_count": 1
+    }
+  },
+  "diagnostics_E": {
+    "n_teams": 16,
+    "n_players": 281,
+    "n_eligible": 176,
+    "k_core": 8,
+    "alpha_core": 0.8,
+    "alpha_fringe": 0.3,
+    "gamma": 1.0,
+    "mean_core_size": 8.0,
+    "core_size_min": 8,
+    "core_size_max": 8,
+    "fallback_used_count": 0,
+    "cap_applied_count": 0,
+    "max_redistribution_rounds": 0,
+    "team_sum_dev_max": 2.842170943040401e-14
+  },
+  "diagnostics_F": {
+    "1.0": {
+      "n_teams": 16,
+      "n_players": 281,
+      "p_value": 1.0,
+      "cap_applied_count": 0,
+      "ineligible_nonzero_count": "0",
+      "fallback_used_count": 0,
+      "max_redistribution_rounds": 0,
+      "team_sum_dev_max": 5.684341886080802e-14
+    },
+    "1.1": {
+      "n_teams": 16,
+      "n_players": 281,
+      "p_value": 1.1,
+      "cap_applied_count": 0,
+      "ineligible_nonzero_count": "0",
+      "fallback_used_count": 0,
+      "max_redistribution_rounds": 0,
+      "team_sum_dev_max": 8.526512829121202e-14
+    },
+    "1.2": {
+      "n_teams": 16,
+      "n_players": 281,
+      "p_value": 1.2,
+      "cap_applied_count": 0,
+      "ineligible_nonzero_count": "0",
+      "fallback_used_count": 0,
+      "max_redistribution_rounds": 0,
+      "team_sum_dev_max": 5.684341886080802e-14
+    },
+    "1.3": {
+      "n_teams": 16,
+      "n_players": 281,
+      "p_value": 1.3,
+      "cap_applied_count": 0,
+      "ineligible_nonzero_count": "0",
+      "fallback_used_count": 0,
+      "max_redistribution_rounds": 0,
+      "team_sum_dev_max": 5.684341886080802e-14
+    }
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "game_date": "2025-12-19",
+  "timestamp": "2025-12-24T15:20:02.907905",
+  "quality_tier": "clean",
+  "missing_feature_frac": 0.0,
+  "n_expected_features": 58,
+  "n_missing_features": 0,
+  "integrity_counts": {
+    "n_players": 172,
+    "n_games": 5,
+    "n_teams": 10
+  },
+  "config": {
+    "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/experiments/lgbm_rotalloc_final_v1",
+    "features_path": "/home/daniel/projections-data/live/features_minutes_v1/2025-12-19/run=20251224T150640Z_rebuild_contract/features.parquet",
+    "shares_col": "normalized_share",
+    "cap_max": 48.0,
+    "k_core": 8,
+    "use_share_model": true
+  },
+  "metrics": {
+    "team_sum_error_max_A": 2.842170943040401e-14,
+    "team_sum_error_mean_A": 1.4210854715202004e-14,
+    "team_sum_error_max_B": 2.842170943040401e-14,
+    "team_sum_error_mean_B": 1.4210854715202004e-14,
+    "p95_minutes_A": 38.21421383644678,
+    "p99_minutes_A": 42.03686603102847,
+    "p95_minutes_B": 32.57618807457849,
+    "p99_minutes_B": 34.60679753485621,
+    "frac_ge_42_A": 0.011627906976744186,
+    "frac_ge_44_A": 0.0,
+    "frac_ge_42_B": 0.0,
+    "frac_ge_44_B": 0.0,
+    "gini_mean_A": 0.3453286338413398,
+    "gini_mean_B": 0.179952307789862,
+    "roster_size_mean_A": 12.4,
+    "roster_size_mean_B": 10.9,
+    "bench_max_mean_A": 9.342048656299683,
+    "bench_max_mean_B": 14.778068185117116,
+    "delta_mean": -1.4975101262385832e-16,
+    "delta_std": 4.820825148226416,
+    "delta_abs_mean": 3.4118883134592197,
+    "delta_abs_max": 16.227866060323485,
+    "n_players": 172,
+    "n_teams": 10,
+    "mae_A": 4.362599871744221,
+    "rmse_A": 6.865256100277846,
+    "mae_B": 4.131754387356335,
+    "rmse_B": 6.313529872356192,
+    "mae_by_bucket_A": {
+      "0-10": 2.4480171056779754,
+      "10-20": 6.220152466817814,
+      "20-30": 7.357001267836821,
+      "30+": 4.523089843108869
+    },
+    "mae_by_bucket_B": {
+      "0-10": 3.0753748862351573,
+      "10-20": 3.820285844827621,
+      "20-30": 5.725544302975298,
+      "30+": 5.405175824953669
+    },
+    "mae_C": 4.1117487442737195,
+    "rmse_C": 6.806280040993925,
+    "mae_by_bucket_C": {
+      "0-10": 1.847335761371904,
+      "10-20": 6.51642478888241,
+      "20-30": 7.4868745714611915,
+      "30+": 4.309864754946204
+    },
+    "team_sum_error_max_C": 2.842170943040401e-14,
+    "team_sum_error_mean_C": 1.4210854715202004e-14,
+    "gini_mean_C": 0.29864152751697537,
+    "roster_size_mean_C": 10.9,
+    "bench_max_mean_C": 9.576599582004453
+  },
+  "starter_realism_A": {
+    "top5_sum_mean": 161.78542073301654,
+    "top5_sum_std": 12.227929959950217,
+    "max_minutes_mean": 37.7023955388848,
+    "max_minutes_std": 3.7474539276861525
+  },
+  "starter_realism_B": {
+    "top5_sum_mean": 148.25831576115675,
+    "top5_sum_std": 5.9905319196491735,
+    "max_minutes_mean": 32.11639871166878,
+    "max_minutes_std": 1.4987212674285237
+  },
+  "starter_realism_C": {
+    "top5_sum_mean": 166.8928771618154,
+    "top5_sum_std": 9.165934486419848,
+    "max_minutes_mean": 38.881673341930906,
+    "max_minutes_std": 3.123809066734927
+  },
+  "diagnostics_A": {
+    "n_teams": 10,
+    "n_players": 172,
+    "n_eligible": 125,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 5.684341886080802e-14,
+    "pre_cap_minutes_p95": 38.21421383644678,
+    "post_cap_minutes_p95": 38.21421383644678
+  },
+  "diagnostics_C": {
+    "n_teams": 10,
+    "n_players": 172,
+    "n_eligible": 125,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 2.842170943040401e-14,
+    "pre_cap_minutes_p95": 38.99515220951791,
+    "post_cap_minutes_p95": 38.99515220951791
+  },
+  "diagnostics_B": {
+    "eligible_size_p50": 11.0,
+    "eligible_size_p90": 11.0,
+    "fallback_top1_used": 0,
+    "cutoff_empty_events": 0,
+    "team_sum_dev_max": 2.842170943040401e-14
+  }
+}

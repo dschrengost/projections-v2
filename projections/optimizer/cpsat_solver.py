@@ -967,6 +967,23 @@ def solve_cpsat_iterative(players: List[Dict], constraints: Any, seed: int, site
     model, x = build_cpsat(spec)
     num_bool_vars = len(x)
 
+    # Slot locks (DraftKings late swap): force a specific player into a specific slot.
+    lock_slots = getattr(constraints, "lock_slots", None) or {}
+    if lock_slots:
+        seen_players = set()
+        for slot, pid in lock_slots.items():
+            slot_s = str(slot)
+            pid_s = str(pid)
+            if pid_s in seen_players:
+                raise ValueError(f"lock_slots assigns player {pid_s} to multiple slots")
+            seen_players.add(pid_s)
+            key = (pid_s, slot_s)
+            if key not in x:
+                raise ValueError(
+                    f"Locked slot {slot_s} requires player {pid_s} but no eligible variable exists (player not in pool or not eligible)."
+                )
+            model.Add(x[key] == 1)
+
     # Configure solver with strict, safe defaults
     solver = cp_model.CpSolver()
     params = spec.cp_sat_params or {}
@@ -1254,6 +1271,10 @@ def solve_cpsat_iterative_counts(
     Uses one binary variable per player and deterministic slot assignment post-solve.
     Returns (lineup_objs, diagnostics)
     """
+    # Counts-only can't enforce slot-level locks; route to per-slot solver.
+    if getattr(constraints, "lock_slots", None):
+        return solve_cpsat_iterative(players, constraints, seed, site)
+
     # Import inside function to avoid hard dependency on ortools at import time
     from ortools.sat.python import cp_model
 

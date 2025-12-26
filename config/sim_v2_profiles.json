@@ -175,7 +175,92 @@
         "fallback": "rate_weighted"
       },
       "vacancy_mode": "game",
-      "note": "sim_v3: Learned FGA usage shares (LGBM residual-on-baseline). FTA/TOV unchanged."
+      "preserve_input_rotation": true,
+      "note": "sim_v3: Learned FGA usage shares (LGBM residual-on-baseline). FTA/TOV unchanged. preserve_input_rotation=true disables sim rotation pruning."
+    },
+    "today": {
+      "mean_source": "rates",
+      "minutes_source": "minutes_v1",
+      "rates_source": "rates_v1_live",
+      "rates_run_id": null,
+      "minutes_run_id": null,
+      "fpts_run_id": null,
+      "minutes_bundle_path": "artifacts/minutes_lgbm/healthy_optimal_split_20251205",
+      "worlds": {
+        "n_worlds": 25000,
+        "batch_size": 5000
+      },
+      "noise": {
+        "epsilon_dist": "student_t",
+        "nu": 5,
+        "sigma_mode": "k_times_mu",
+        "k_default": 0.65
+      },
+      "rates_noise": {
+        "enabled": true,
+        "split": "val",
+        "run_id": "rates_v1_reconciled_20251205_093151"
+      },
+      "minutes_noise": {
+        "enabled": true,
+        "sigma_min": 1.0
+      },
+      "minutes_noise_config": {
+        "enabled": true,
+        "sigma_starter": 2.0,
+        "sigma_bench": 3.0,
+        "min_minutes_for_noise": 8.0,
+        "cap_abs": 6.0,
+        "use_student_t": false,
+        "t_df": 8,
+        "lo_source": "zero",
+        "hi_source": "p90",
+        "lo_pad": 0.0,
+        "hi_pad": 2.0
+      },
+      "pre_sim_reconcile": {
+        "enabled": true,
+        "starter_weight": 2.0,
+        "minutes_weight_scale": 1.0
+      },
+      "team_sigma_scale": 1.0,
+      "player_sigma_scale": 1.0,
+      "rates_sigma_scale": 1.0,
+      "worlds_per_chunk": 2000,
+      "seed": 42,
+      "min_play_prob": 0.0,
+      "use_play_prob_masking": false,
+      "team_factor_sigma": 0.08,
+      "team_factor_gamma": 1.0,
+      "enforce_team_240": true,
+      "vegas_anchoring": {
+        "enabled": true,
+        "drift_pct": 0.05
+      },
+      "efficiency_scoring": true,
+      "game_script": {
+        "enabled": false
+      },
+      "rotation": {
+        "max_size": 11,
+        "protected_size": 8
+      },
+      "usage_shares": {
+        "enabled": true,
+        "targets": [
+          "fga"
+        ],
+        "backend": "lgbm_residual",
+        "run_id": null,
+        "shrink": 0.75,
+        "share_temperature": 1.0,
+        "share_noise_std": 0.15,
+        "min_minutes_active_cutoff": 2.0,
+        "fallback": "rate_weighted"
+      },
+      "vacancy_mode": "game",
+      "preserve_input_rotation": false,
+      "note": "Today stabilization profile: pre-sim QP reconciliation + structured minutes noise. Sim applies rotation pruning (max_size=11, protected_size=8)."
     },
     "sim_v3_novacancy": {
       "mean_source": "rates",

@@ -96,3 +96,9 @@ class EntryFileState:
 - Store date + slate in metadata, but use contest_id as the primary key.
 - Enforce one slate per CSV for now.
 - Persist original DK CSV row order for export fidelity.
+
+### Late Swap Notes (In-Slate)
+- DK late swap locks are **slot-level**: once a game starts, that roster slot cannot change.
+- Lock detection should use either DK's `LOCKED` marker (if present in the CSV) or `game_start_utc <= server time`.
+- Optimization should enforce slot locks in the solver (not via post-processing) so exported lineups remain valid and truly optimized under constraints.
+- Late swap pool building should keep salary-only / zero-projection rows available so locked players can always be represented, then ban inactive/out players unless they are locked.

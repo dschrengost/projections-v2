@@ -22,6 +22,13 @@ try:
 except ImportError:
     ESPN_AVAILABLE = False
 
+# Rotowire lineups for faster lineup confirmations
+try:
+    from scrapers.rotowire_lineups import scrape_rotowire_lineups
+    ROTOWIRE_AVAILABLE = True
+except ImportError:
+    ROTOWIRE_AVAILABLE = False
+
 app = typer.Typer(help="Run injuries, daily lineups, odds, and roster ETLs sequentially.")
 
 
@@ -86,6 +93,7 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
     odds: bool = typer.Option(True, "--odds/--skip-odds", help="Run the odds ETL stage."),
     run_roster: bool = typer.Option(True, "--run-roster/--skip-roster", help="Run the roster nightly stage."),
     espn_injuries: bool = typer.Option(True, "--espn-injuries/--skip-espn-injuries", help="Run the ESPN injuries scrape for faster injury updates."),
+    rotowire_lineups: bool = typer.Option(True, "--rotowire-lineups/--skip-rotowire-lineups", help="Run Rotowire lineups scrape for faster lineup confirmations."),
     schedule_timeout: float = typer.Option(10.0, "--schedule-timeout", help="Timeout (seconds) for NBA schedule API fallback."),
     injury_timeout: float = typer.Option(15.0, "--injury-timeout", help="HTTP timeout (seconds) for NBA injury PDF scraping."),
     injury_player_timeout: float = typer.Option(10.0, "--injury-player-timeout", help="Timeout (seconds) for NBA player resolver."),
@@ -149,6 +157,26 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
     else:
         _echo_stage("skipping daily lineups stage")
 
+    # Rotowire lineups - faster lineup confirmations (runs independently)
+    if rotowire_lineups and ROTOWIRE_AVAILABLE:
+        _echo_stage("running Rotowire lineups scrape")
+        try:
+            rotowire_df = scrape_rotowire_lineups()
+            if not rotowire_df.empty:
+                rotowire_out_path = data_root / "silver" / "rotowire_lineups" / f"date={start_day.date()}" / "lineups.parquet"
+                rotowire_out_path.parent.mkdir(parents=True, exist_ok=True)
+                rotowire_df.to_parquet(rotowire_out_path, index=False)
+                confirmed_count = rotowire_df["is_confirmed"].sum() if "is_confirmed" in rotowire_df.columns else 0
+                _echo_stage(f"Rotowire lineups: {len(rotowire_df)} players, {confirmed_count} confirmed -> {rotowire_out_path}")
+            else:
+                _echo_stage("Rotowire lineups: no lineup data found (no games today?)")
+        except Exception as exc:
+            typer.echo(f"[live] warning: Rotowire lineups failed ({exc}); continuing", err=True)
+    elif rotowire_lineups and not ROTOWIRE_AVAILABLE:
+        _echo_stage("skipping Rotowire lineups (module not available - install beautifulsoup4 lxml)")
+    else:
+        _echo_stage("skipping Rotowire lineups stage")
+
     if odds:
         _echo_stage("running odds ETL")
         odds_etl.main(
@@ -169,22 +197,38 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
 
     if run_roster:
         _echo_stage("running roster nightly ETL")
-        roster_etl.main(
-            roster=roster,
-            schedule=schedule,
-            start=start_dt,
-            end=end_dt,
-            season=season_value,
-            month=month_value,
-            data_root=data_root,
-            bronze_root=None,
-            bronze_out=None,
-            out=None,
-            lineups_dir=lineups_dir,
-            scrape_missing=True,
-            roster_timeout=roster_timeout,
-            schedule_timeout=schedule_timeout,
-        )
+        roster_inputs = list(roster)
+        if not roster_inputs:
+            default_roster = (
+                data_root
+                / "silver"
+                / "roster_nightly"
+                / f"season={season_value}"
+                / f"month={month_value:02d}"
+                / "roster.parquet"
+            )
+            if default_roster.exists():
+                roster_inputs = [str(default_roster)]
+                _echo_stage(f"using existing roster snapshot -> {default_roster}")
+        try:
+            roster_etl.main(
+                roster=roster_inputs,
+                schedule=schedule,
+                start=start_dt,
+                end=end_dt,
+                season=season_value,
+                month=month_value,
+                data_root=data_root,
+                bronze_root=None,
+                bronze_out=None,
+                out=None,
+                lineups_dir=lineups_dir,
+                scrape_missing=True,
+                roster_timeout=roster_timeout,
+                schedule_timeout=schedule_timeout,
+            )
+        except Exception as exc:  # pragma: no cover - keep pipeline alive if roster scrape fails
+            typer.echo(f"[live] warning: roster nightly failed ({exc}); continuing", err=True)
     else:
         _echo_stage("skipping roster nightly stage")
 

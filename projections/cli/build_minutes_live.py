@@ -1,8 +1,24 @@
-"""Build same-day Minutes V1 feature slices for live inference."""
+"""Build same-day Minutes V1 feature slices for live inference.
+
+Required feature provenance (9 share-model features):
+- team_pace_szn, team_off_rtg_szn, team_def_rtg_szn:
+  Source: gold/rates_training_base/season={season}/game_date={prior_date}/
+  Join key: team_id
+  
+- opp_pace_szn, opp_def_rtg_szn:
+  Source: Same as team context, renamed columns
+  Join key: opponent_team_id
+  
+- vac_min_szn, vac_min_{guard,wing,big}_szn:
+  Computed from injuries_snapshot + roster_nightly + historical labels
+  Join key: (game_id, team_id)
+  Semantic: Season-to-date minutes played by players currently OUT
+"""
 
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Tuple
@@ -58,9 +74,48 @@ OPP_CONTEXT_COLUMNS: tuple[str, ...] = (
     "opp_def_rtg_szn",
 )
 
+# Required features for share model - builder must produce these
+REQUIRED_MINUTES_FEATURES: frozenset[str] = frozenset({
+    # Team/opponent context (from rates_training_base)
+    "team_pace_szn", "team_off_rtg_szn", "team_def_rtg_szn",
+    "opp_pace_szn", "opp_def_rtg_szn",
+    # Vacancy features (computed from injuries + historical labels)
+    "vac_min_szn", "vac_min_guard_szn", "vac_min_wing_szn", "vac_min_big_szn",
+    # Trend features (from historical labels)
+    "roll_mean_5", "roll_mean_10", "min_last3", "min_last5",
+})
+
 _OUT_LIKE_STATUS_VALUES: set[str] = {"OUT", "O", "Q", "QUESTIONABLE", "DOUBTFUL", "D", "INACTIVE"}
 
 app = typer.Typer(help=__doc__)
+
+
+def _verify_required_features(
+    df: pd.DataFrame,
+    run_id: str,
+    warnings: list[str],
+) -> None:
+    """Verify that all required features are present in the output DataFrame.
+    
+    Args:
+        df: The features DataFrame to verify
+        run_id: Run identifier for logging
+        warnings: List to append warning messages to
+        
+    Raises:
+        RuntimeError: If PROJECTIONS_REQUIRE_ALL_FEATURES=1 and features are missing
+    """
+    missing = REQUIRED_MINUTES_FEATURES - set(df.columns)
+    if missing:
+        sorted_missing = sorted(missing)
+        msg = f"[{run_id}] Missing {len(missing)} required features: {sorted_missing}"
+        warnings.append(msg)
+        typer.echo(f"[build-minutes-live] WARNING: {msg}", err=True)
+        
+        if os.environ.get("PROJECTIONS_REQUIRE_ALL_FEATURES") == "1":
+            raise RuntimeError(msg)
+    else:
+        typer.echo(f"[build-minutes-live] Required features verified ({len(REQUIRED_MINUTES_FEATURES)}/{len(REQUIRED_MINUTES_FEATURES)})", err=True)
 
 
 def _nan_rate(df: pd.DataFrame, cols: list[str]) -> float | None:
@@ -909,9 +964,82 @@ def _build_minutes_live_logic(
             injuries_df = _load_table(injuries_default, injuries_path)
     else:
         injuries_df = _load_table(injuries_default, injuries_path)
-    
+
     odds_df = _load_table(odds_default, odds_path)
     roster_df = _load_table(roster_default, roster_path)
+    
+    # Load ESPN injuries (partitioned by date) and merge
+    if injuries_path is None:  # Optional: only merge ESPN if not overriding injuries path? Or always? Always is safer for live.
+        espn_injuries_path = data_root / "silver" / "espn_injuries" / f"date={target_day.date()}" / "injuries.parquet"
+        if espn_injuries_path.exists():
+            espn_df = pd.read_parquet(espn_injuries_path)
+            if not espn_df.empty:
+                typer.echo(f"[minutes-live] Loaded {len(espn_df)} rows from ESPN injuries.")
+                
+                if "nba_team_id" in espn_df.columns:
+                    espn_df.rename(columns={"nba_team_id": "team_id"}, inplace=True)
+                
+                if not roster_df.empty and "player_id" not in espn_df.columns:
+                     roster_map = roster_df[["player_name", "team_id", "player_id", "game_id"]].drop_duplicates()
+                     espn_df["team_id"] = pd.to_numeric(espn_df["team_id"], errors="coerce").astype("Int64")
+                     roster_map["team_id"] = pd.to_numeric(roster_map["team_id"], errors="coerce").astype("Int64")
+                     
+                     espn_mapped = espn_df.merge(roster_map, on=["player_name", "team_id"], how="inner", suffixes=("", "_roster"))
+                     
+                     if not espn_mapped.empty:
+                         espn_mapped["player_id"] = espn_mapped["player_id"].astype("Int64")
+                         espn_mapped["game_id"] = espn_mapped["game_id"].astype("Int64")
+                         espn_mapped["as_of_ts"] = pd.to_datetime(espn_mapped["as_of_ts"], utc=True)
+                         
+                         cols_to_keep = ["game_id", "player_id", "team_id", "status", "as_of_ts"]
+                         subset = espn_mapped[cols_to_keep].copy()
+                         
+                         injuries_df = pd.concat([injuries_df, subset], ignore_index=True)
+                         typer.echo(f"[minutes-live] Successfully mapped and merged {len(subset)} ESPN injury rows.")
+                     else:
+                         typer.echo("[minutes-live] Warning: ESPN rows loaded but failed to map to roster (name/team mismatch).")
+
+    # Load Rotowire lineups for faster confirmed lineup updates
+    # Rotowire is prioritized over NBA.com because it typically updates faster
+    rotowire_confirmations: set[str] = set()  # Set of player names confirmed by Rotowire
+    rotowire_lineups_path = data_root / "silver" / "rotowire_lineups" / f"date={target_day.date()}" / "lineups.parquet"
+    if rotowire_lineups_path.exists():
+        try:
+            rotowire_df = pd.read_parquet(rotowire_lineups_path)
+            if not rotowire_df.empty and "is_confirmed" in rotowire_df.columns:
+                # Get confirmed starters from Rotowire
+                confirmed_mask = rotowire_df["is_confirmed"].fillna(False).astype(bool)
+                starter_roles = rotowire_df["lineup_role"].isin(["confirmed_starter", "projected_starter"])
+                rotowire_confirmed = rotowire_df[confirmed_mask & starter_roles]
+                
+                if not rotowire_confirmed.empty:
+                    rotowire_confirmations = set(rotowire_confirmed["player_name"].str.strip().str.lower().unique())
+                    typer.echo(
+                        f"[minutes-live] Loaded {len(rotowire_confirmations)} confirmed starters from Rotowire lineups."
+                    )
+                    
+                    # Upgrade is_confirmed_starter in roster_df based on Rotowire
+                    if not roster_df.empty and "player_name" in roster_df.columns:
+                        roster_df = roster_df.copy()
+                        name_normalized = roster_df["player_name"].str.strip().str.lower()
+                        rotowire_match = name_normalized.isin(rotowire_confirmations)
+                        
+                        if rotowire_match.any():
+                            # Initialize column if missing
+                            if "is_confirmed_starter" not in roster_df.columns:
+                                roster_df["is_confirmed_starter"] = False
+                            
+                            # Upgrade projected → confirmed based on Rotowire
+                            roster_df.loc[rotowire_match, "is_confirmed_starter"] = True
+                            upgraded_count = rotowire_match.sum()
+                            typer.echo(
+                                f"[minutes-live] Upgraded {upgraded_count} starters to confirmed based on Rotowire."
+                            )
+            else:
+                typer.echo("[minutes-live] Rotowire lineups file exists but is empty or missing is_confirmed column.")
+        except Exception as exc:
+            warnings.append(f"Failed to load Rotowire lineups: {exc}")
+            typer.echo(f"[minutes-live] Warning: Failed to load Rotowire lineups: {exc}")
 
     roster_slice, roster_source_day, roster_snapshot_ts = _select_roster_slice(
         roster_df,
@@ -983,11 +1111,16 @@ def _build_minutes_live_logic(
     if injuries_slice.empty:
         latest_inj_ts = pd.to_datetime(injuries_df.get("as_of_ts"), utc=True, errors="coerce")
         latest_ts_str = latest_inj_ts.max().isoformat() if not latest_inj_ts.dropna().empty else "NA"
-        raise RuntimeError(
-            "Injury snapshot is empty after as-of filtering; refusing to score. "
+        # For live mode, score_minutes_v1 uses ESPN injuries directly, so we can continue
+        # with a warning instead of failing. Vacancy features will be impacted but basic
+        # scoring will work.
+        warn_msg = (
+            f"Injury snapshot is empty after as-of filtering. "
             f"run_as_of_ts={run_ts.isoformat()} latest_injury_as_of_ts={latest_ts_str}. "
-            "Run build_minutes_live after the injury scrape completes or pass a run_as_of_ts at/after the snapshot time."
-    )
+            "Continuing with empty injury data; vacancy features may be affected."
+        )
+        warnings.append(warn_msg)
+        typer.echo(f"[minutes-live] WARNING: {warn_msg}")
     odds_slice = _filter_snapshot_by_asof(
         _filter_by_game_ids(odds_df, allowed_live_ids),
         time_col="as_of_ts",
@@ -1266,6 +1399,10 @@ def _build_minutes_live_logic(
     day_dir, run_dir = _ensure_run_output_dir(out_root, target_day, run_id)
     feature_path = run_dir / FEATURE_FILENAME
     ids_path = run_dir / IDS_FILENAME
+    
+    # Verify required features are present
+    _verify_required_features(live_slice, run_id, warnings)
+    
     live_slice.to_parquet(feature_path, index=False)
     write_ids_csv(live_slice, ids_path)
     if active_roster_df is not None and not active_roster_df.empty:

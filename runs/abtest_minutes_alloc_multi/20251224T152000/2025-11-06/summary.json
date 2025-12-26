@@ -1,0 +1,110 @@
+{
+  "game_date": "2025-11-06",
+  "timestamp": "2025-12-24T15:20:01.062528",
+  "quality_tier": "clean",
+  "missing_feature_frac": 0.0,
+  "n_expected_features": 58,
+  "n_missing_features": 0,
+  "integrity_counts": {
+    "n_players": 280,
+    "n_games": 8,
+    "n_teams": 16
+  },
+  "config": {
+    "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/experiments/lgbm_rotalloc_final_v1",
+    "features_path": "/home/daniel/projections-data/live/features_minutes_v1/2025-11-06/run=20251224T150640Z_rebuild_contract/features.parquet",
+    "shares_col": "normalized_share",
+    "cap_max": 48.0,
+    "k_core": 8,
+    "use_share_model": true
+  },
+  "metrics": {
+    "team_sum_error_max_A": 5.684341886080802e-14,
+    "team_sum_error_mean_A": 2.842170943040401e-14,
+    "team_sum_error_max_B": 2.842170943040401e-14,
+    "team_sum_error_mean_B": 1.4210854715202004e-14,
+    "p95_minutes_A": 36.71622690260708,
+    "p99_minutes_A": 39.10293563837087,
+    "p95_minutes_B": 32.96529033175291,
+    "p99_minutes_B": 33.77781424307676,
+    "frac_ge_42_A": 0.0035714285714285713,
+    "frac_ge_44_A": 0.0,
+    "frac_ge_42_B": 0.0,
+    "frac_ge_44_B": 0.0,
+    "gini_mean_A": 0.47033003456949385,
+    "gini_mean_B": 0.19071379496213048,
+    "roster_size_mean_A": 17.375,
+    "roster_size_mean_B": 11.0,
+    "bench_max_mean_A": 7.946508214837932,
+    "bench_max_mean_B": 14.265106221476472,
+    "delta_mean": 1.9032394707859827e-17,
+    "delta_std": 5.168223730409916,
+    "delta_abs_mean": 4.29180239876124,
+    "delta_abs_max": 14.087761586169314,
+    "n_players": 280,
+    "n_teams": 16,
+    "mae_A": null,
+    "rmse_A": null,
+    "mae_B": null,
+    "rmse_B": null,
+    "mae_by_bucket_A": null,
+    "mae_by_bucket_B": null,
+    "mae_C": null,
+    "rmse_C": null,
+    "mae_by_bucket_C": null,
+    "team_sum_error_max_C": 5.684341886080802e-14,
+    "team_sum_error_mean_C": 2.842170943040401e-14,
+    "gini_mean_C": 0.3079944189445376,
+    "roster_size_mean_C": 11.0,
+    "bench_max_mean_C": 8.358242446195518
+  },
+  "starter_realism_A": {
+    "top5_sum_mean": 152.56026378945168,
+    "top5_sum_std": 11.53437376360785,
+    "max_minutes_mean": 35.867902292859554,
+    "max_minutes_std": 3.866406788291587
+  },
+  "starter_realism_B": {
+    "top5_sum_mean": 148.78223099782997,
+    "top5_sum_std": 6.712525516935424,
+    "max_minutes_mean": 32.321704645000004,
+    "max_minutes_std": 1.3807516798957227
+  },
+  "starter_realism_C": {
+    "top5_sum_mean": 166.87377224156936,
+    "top5_sum_std": 11.650761894090117,
+    "max_minutes_mean": 39.19947276526656,
+    "max_minutes_std": 3.741045094912984
+  },
+  "diagnostics_A": {
+    "n_teams": 16,
+    "n_players": 280,
+    "n_eligible": 280,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 5.684341886080802e-14,
+    "pre_cap_minutes_p95": 36.71622690260708,
+    "post_cap_minutes_p95": 36.71622690260708
+  },
+  "diagnostics_C": {
+    "n_teams": 16,
+    "n_players": 280,
+    "n_eligible": 280,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 5.684341886080802e-14,
+    "pre_cap_minutes_p95": 39.76168619727502,
+    "post_cap_minutes_p95": 39.76168619727502
+  },
+  "diagnostics_B": {
+    "eligible_size_p50": 11.0,
+    "eligible_size_p90": 11.0,
+    "fallback_top1_used": 0,
+    "cutoff_empty_events": 0,
+    "team_sum_dev_max": 2.842170943040401e-14
+  }
+}

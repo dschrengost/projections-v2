@@ -119,7 +119,10 @@ def _rotation_mask(df: pd.DataFrame, config: ReconcileConfig) -> pd.Series:
         return base_mask
     # Keep starters, fill remaining slots by descending minutes.
     minutes_arr = minutes.to_numpy()
-    rotation_prob_series = pd.to_numeric(df.get("rotation_prob"), errors="coerce").fillna(0.0)
+    if "rotation_prob" in df.columns:
+        rotation_prob_series = pd.to_numeric(df["rotation_prob"], errors="coerce").fillna(0.0)
+    else:
+        rotation_prob_series = pd.Series(0.0, index=df.index, dtype=float)
     rotation_prob_arr = rotation_prob_series.to_numpy(dtype=float)
     starter_idx = np.where(starters.to_numpy())[0]
     keep = set(starter_idx.tolist())

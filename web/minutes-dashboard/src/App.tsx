@@ -27,10 +27,13 @@ import {
   formatStat,
   formatTime,
   formatValue,
+  formatRunIdToEST,
+  formatTimestampToEST,
   getStatusBadge,
   StatusBadge,
 } from './utils'
 import { GameView } from './components/GameView'
+import { PlayerChangeAlerts } from './components/PlayerChangeAlerts'
 
 type FptsMeta = {
   fpts_model_run_id?: string
@@ -53,6 +56,7 @@ type SummaryResponse = {
   n_worlds?: number | null
   pinned_run_id?: string | null
   latest_run_id?: string | null
+  blessed_run_id?: string | null
   generated_at?: string | null
   model_run_id?: string
   bundle_dir?: string
@@ -139,6 +143,7 @@ function App() {
   const [runOptions, setRunOptions] = useState<RunOption[]>([])
   const [latestRunId, setLatestRunId] = useState<string | null>(null)
   const [pinnedRunId, setPinnedRunId] = useState<string | null>(null)
+  const [blessedRunId, setBlessedRunId] = useState<string | null>(null)
   const pinnedRunRef = useRef<string | null>(null)
 
   const [showSim, setShowSim] = useState(true)
@@ -235,6 +240,7 @@ function App() {
         setRunOptions(runs)
         setLatestRunId(data?.latest ?? null)
         setPinnedRunId(data?.pinned ?? null)
+        setBlessedRunId(data?.blessed ?? null)
         setRunId((prev) => {
           const prevPinned = pinnedRunRef.current
           pinnedRunRef.current = data?.pinned ?? null
@@ -243,6 +249,10 @@ function App() {
           }
           if (prev && runs.some((run) => run.run_id === prev)) {
             return prev
+          }
+          // Priority: blessed > pinned > latest
+          if (data?.blessed && runs.some((run) => run.run_id === data.blessed)) {
+            return data.blessed
           }
           if (data?.pinned && runs.some((run) => run.run_id === data.pinned)) {
             return data.pinned
@@ -254,6 +264,7 @@ function App() {
         setLatestRunId(null)
         setRunId(null)
         setPinnedRunId(null)
+        setBlessedRunId(null)
       }
     }
     void loadRuns()
@@ -502,28 +513,37 @@ function App() {
           <label>
             Run
             <select
-              value={runId ?? pinnedRunId ?? latestRunId ?? ''}
+              value={runId ?? blessedRunId ?? pinnedRunId ?? latestRunId ?? ''}
               onChange={(event) => {
                 const value = event.target.value
                 setRunId(value || null)
               }}
             >
-              {pinnedRunId && (
+              {/* Blessed run - validated production run */}
+              {blessedRunId && (
+                <option value={blessedRunId}>
+                  ✅ Blessed · {formatRunIdToEST(blessedRunId)}{blessedRunId === latestRunId ? ' (Latest)' : ''}
+                </option>
+              )}
+              {/* Pinned run - manual override for debugging */}
+              {pinnedRunId && pinnedRunId !== blessedRunId && (
                 <option value={pinnedRunId}>
-                  {pinnedRunId === latestRunId ? `Pinned+Latest (${pinnedRunId})` : `Pinned (${pinnedRunId})`}
+                  📌 Pinned · {formatRunIdToEST(pinnedRunId)}{pinnedRunId === latestRunId ? ' (Latest)' : ''}
                 </option>
               )}
-              {latestRunId && latestRunId !== pinnedRunId && (
+              {/* Latest run - most recent */}
+              {latestRunId && latestRunId !== pinnedRunId && latestRunId !== blessedRunId && (
                 <option value={latestRunId}>
-                  {`Latest (${latestRunId})`}
+                  🕑 Latest · {formatRunIdToEST(latestRunId)}
                 </option>
               )}
+              {/* Other runs */}
               {runOptions
-                .filter((option) => option.run_id !== latestRunId && option.run_id !== pinnedRunId)
+                .filter((option) => option.run_id !== latestRunId && option.run_id !== pinnedRunId && option.run_id !== blessedRunId)
                 .map((option) => (
                   <option key={option.run_id} value={option.run_id}>
-                    {option.run_id}
-                    {(option.run_as_of_ts || option.generated_at) ? ` · ${option.run_as_of_ts ?? option.generated_at}` : ''}
+                    {formatRunIdToEST(option.run_id) || option.run_id}
+                    {(option.run_as_of_ts || option.generated_at) ? ` · ${formatTimestampToEST(option.run_as_of_ts ?? option.generated_at ?? '')}` : ''}
                   </option>
                 ))}
               {!latestRunId && !runOptions.length && <option value="">No runs</option>}
@@ -578,6 +598,13 @@ function App() {
         )}
       </section>
 
+      {/* Player Change Alerts */}
+      <PlayerChangeAlerts
+        date={selectedDate}
+        currentRunId={runId}
+        blessedRunId={blessedRunId}
+        latestRunId={latestRunId}
+      />
       {matchups.length > 0 && (
         <section className="matchup-selector">
           <button

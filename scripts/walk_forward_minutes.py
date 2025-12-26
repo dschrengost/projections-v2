@@ -1,9 +1,13 @@
 #!/usr/bin/env python
-"""Walk-forward cross-validation for minutes_lgbm model.
+"""Walk-forward cross-validation for minutes models.
 
 This script runs multiple training folds, each with a progressively advancing
 time window to simulate production deployment. Results are aggregated to
 provide robust performance estimates.
+
+Supports two model types:
+- lgbm: Standard LightGBM quantile model (projections.models.minutes_lgbm)
+- minute_share: Minute share model with team normalization (projections.cli.train_minute_share)
 
 Features:
 - NBA season-aware: automatically skips off-season periods (July-September)
@@ -11,6 +15,7 @@ Features:
 - Configurable windows for train/cal/val splits
 
 Usage:
+    # Standard LightGBM model
     uv run python scripts/walk_forward_minutes.py \
         --features /path/to/features.parquet \
         --start 2022-10-18 \
@@ -20,6 +25,16 @@ Usage:
         --val-weeks 2 \
         --step-weeks 4 \
         --season-aware
+
+    # Minute share model
+    uv run python scripts/walk_forward_minutes.py \
+        --features /path/to/features.parquet \
+        --start 2022-10-18 \
+        --end 2025-11-30 \
+        --model-type minute_share \
+        --train-months 12 \
+        --val-weeks 2 \
+        --step-weeks 4
 
 This will create folds like:
     Fold 1: Train [2022-10 → 2023-11] | Cal [2023-11 → 2023-12] | Val [2023-12]
@@ -32,14 +47,82 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import typer
+
+
+class ModelType(str, Enum):
+    """Supported model types for walk-forward CV."""
+
+    LGBM = "lgbm"
+    MINUTE_SHARE = "minute_share"
+
+
+# Model-specific configuration
+MODEL_CONFIG = {
+    ModelType.LGBM: {
+        "module": "projections.models.minutes_lgbm",
+        "artifact_dir": "artifacts/minutes_lgbm",
+        "uses_calibration": True,
+        "metric_keys": [
+            "val_mae_p50",
+            "val_p10_cond_playable",
+            "val_p90_cond_playable",
+            "val_winkler_cond_playable",
+            "val_inside_cond_playable",
+            "train_rows",
+            "cal_rows",
+            "val_rows",
+        ],
+    },
+    ModelType.MINUTE_SHARE: {
+        "module": "projections.cli.train_minute_share",
+        "artifact_dir": "artifacts/minute_share",
+        "uses_calibration": False,
+        "metric_keys": [
+            # Overall regression
+            "mae_minutes",
+            "mae_shares",
+            "rmse_minutes",
+            # MAE by bucket
+            "mae_dnp",
+            "mae_garbage_time",
+            "mae_bench",
+            "mae_rotation",
+            "mae_core",
+            "mae_stars",
+            # DNP classification
+            "dnp_auc",
+            "dnp_accuracy",
+            "dnp_precision",
+            "dnp_recall",
+            # Rotation classification
+            "rotation_accuracy",
+            "rotation_precision",
+            "rotation_recall",
+            # Share distribution
+            "raw_pred_share_sum_pre_norm_mean",
+            "raw_pred_share_sum_pre_norm_std",
+            "norm_share_sum_post_norm_mean",
+            "norm_share_sum_post_norm_std",
+            # Legacy alias (backward compat)
+            "team_share_sum_mean",
+            "team_share_sum_std",
+            "max_share_mean",
+            "max_share_std",
+            # Sample sizes
+            "n_samples",
+            "n_dnp_actual",
+            "n_rotation_actual",
+        ],
+    },
+}
 
 try:
     import mlflow
@@ -67,30 +150,41 @@ class FoldConfig:
     fold_id: str
     train_start: datetime
     train_end: datetime
-    cal_start: datetime
-    cal_end: datetime
+    cal_start: datetime | None
+    cal_end: datetime | None
     val_start: datetime
     val_end: datetime
 
-    def to_args(self) -> list[str]:
-        """Convert to CLI arguments for minutes_lgbm."""
-        return [
-            "--train-start", self.train_start.strftime("%Y-%m-%d"),
-            "--train-end", self.train_end.strftime("%Y-%m-%d"),
-            "--cal-start", self.cal_start.strftime("%Y-%m-%d"),
-            "--cal-end", self.cal_end.strftime("%Y-%m-%d"),
-            "--val-start", self.val_start.strftime("%Y-%m-%d"),
-            "--val-end", self.val_end.strftime("%Y-%m-%d"),
-            "--fold-id", self.fold_id,
-        ]
+    def to_args(self, model_type: ModelType) -> list[str]:
+        """Convert to CLI arguments for the specified model type."""
+        if model_type == ModelType.LGBM:
+            return [
+                "--train-start", self.train_start.strftime("%Y-%m-%d"),
+                "--train-end", self.train_end.strftime("%Y-%m-%d"),
+                "--cal-start", self.cal_start.strftime("%Y-%m-%d") if self.cal_start else "",
+                "--cal-end", self.cal_end.strftime("%Y-%m-%d") if self.cal_end else "",
+                "--val-start", self.val_start.strftime("%Y-%m-%d"),
+                "--val-end", self.val_end.strftime("%Y-%m-%d"),
+                "--fold-id", self.fold_id,
+            ]
+        elif model_type == ModelType.MINUTE_SHARE:
+            # minute_share doesn't use calibration window
+            return [
+                "--train-start", self.train_start.strftime("%Y-%m-%d"),
+                "--train-end", self.train_end.strftime("%Y-%m-%d"),
+                "--val-start", self.val_start.strftime("%Y-%m-%d"),
+                "--val-end", self.val_end.strftime("%Y-%m-%d"),
+            ]
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, str | None]:
         return {
             "fold_id": self.fold_id,
             "train_start": self.train_start.isoformat(),
             "train_end": self.train_end.isoformat(),
-            "cal_start": self.cal_start.isoformat(),
-            "cal_end": self.cal_end.isoformat(),
+            "cal_start": self.cal_start.isoformat() if self.cal_start else None,
+            "cal_end": self.cal_end.isoformat() if self.cal_end else None,
             "val_start": self.val_start.isoformat(),
             "val_end": self.val_end.isoformat(),
         }
@@ -121,6 +215,7 @@ def generate_folds(
     val_weeks: int,
     step_weeks: int,
     season_aware: bool = True,
+    model_type: ModelType = ModelType.LGBM,
 ) -> list[FoldConfig]:
     """Generate walk-forward fold configurations.
 
@@ -133,13 +228,15 @@ def generate_folds(
     min_train_months
         Minimum training window size in months.
     cal_weeks
-        Calibration window size in weeks.
+        Calibration window size in weeks (ignored for minute_share model).
     val_weeks
         Validation window size in weeks.
     step_weeks
         How many weeks to advance between folds.
     season_aware
         If True, skip folds where validation window overlaps NBA off-season.
+    model_type
+        Which model type to generate folds for.
 
     Returns
     -------
@@ -148,22 +245,33 @@ def generate_folds(
     folds: list[FoldConfig] = []
     skipped_offseason = 0
 
+    uses_calibration = MODEL_CONFIG[model_type]["uses_calibration"]
+
     # Start with minimum training window
     train_start = data_start
-    
+
     # Calculate first possible val_end (need min_train + cal + val)
     min_train_end = train_start + timedelta(days=min_train_months * 30)
-    
+
     fold_num = 1
-    current_val_end = min_train_end + timedelta(weeks=cal_weeks + val_weeks)
+    if uses_calibration:
+        current_val_end = min_train_end + timedelta(weeks=cal_weeks + val_weeks)
+    else:
+        current_val_end = min_train_end + timedelta(weeks=val_weeks)
 
     while current_val_end <= data_end:
         # Work backwards from val_end to determine windows
         val_end = current_val_end
         val_start = val_end - timedelta(weeks=val_weeks)
-        cal_end = val_start - timedelta(days=1)
-        cal_start = cal_end - timedelta(weeks=cal_weeks) + timedelta(days=1)
-        train_end = cal_start - timedelta(days=1)
+
+        if uses_calibration:
+            cal_end = val_start - timedelta(days=1)
+            cal_start = cal_end - timedelta(weeks=cal_weeks) + timedelta(days=1)
+            train_end = cal_start - timedelta(days=1)
+        else:
+            cal_start = None
+            cal_end = None
+            train_end = val_start - timedelta(days=1)
 
         # Skip if train window is too short
         if train_end < min_train_end:
@@ -201,22 +309,25 @@ def run_fold(
     features_path: Path,
     run_id_prefix: str,
     extra_args: list[str],
+    model_type: ModelType = ModelType.LGBM,
 ) -> FoldResult:
     """Run a single training fold."""
-    
+
+    config = MODEL_CONFIG[model_type]
     run_id = f"{run_id_prefix}_{fold.fold_id}"
-    
+
     cmd = [
-        "uv", "run", "python", "-m", "projections.models.minutes_lgbm",
+        "uv", "run", "python", "-m", config["module"],
         "--features", str(features_path),
         "--run-id", run_id,
-        *fold.to_args(),
+        *fold.to_args(model_type),
         *extra_args,
     ]
 
     typer.echo(f"\n{'='*60}")
-    typer.echo(f"Running {fold.fold_id}: Train [{fold.train_start.date()} → {fold.train_end.date()}]")
-    typer.echo(f"  Cal [{fold.cal_start.date()} → {fold.cal_end.date()}]")
+    typer.echo(f"[{model_type.value}] Running {fold.fold_id}: Train [{fold.train_start.date()} → {fold.train_end.date()}]")
+    if fold.cal_start and fold.cal_end:
+        typer.echo(f"  Cal [{fold.cal_start.date()} → {fold.cal_end.date()}]")
     typer.echo(f"  Val [{fold.val_start.date()} → {fold.val_end.date()}]")
     typer.echo(f"{'='*60}")
 
@@ -230,7 +341,7 @@ def run_fold(
 
         # Parse metrics from artifacts if successful
         metrics = {}
-        metrics_path = Path(f"artifacts/minutes_lgbm/{run_id}/metrics.json")
+        metrics_path = Path(f"{config['artifact_dir']}/{run_id}/metrics.json")
         if metrics_path.exists():
             with open(metrics_path) as f:
                 metrics = json.load(f)
@@ -280,67 +391,84 @@ def run_fold(
         )
 
 
-def aggregate_results(results: list[FoldResult]) -> dict[str, Any]:
+def aggregate_results(
+    results: list[FoldResult],
+    model_type: ModelType = ModelType.LGBM,
+) -> dict[str, Any]:
     """Aggregate metrics across all folds."""
-    
+
     successful = [r for r in results if r.success and r.metrics]
     if not successful:
         return {"error": "No successful folds"}
 
-    # Key metrics to aggregate
-    metric_keys = [
-        "val_mae_overall",
-        "val_p10_cond_playable",
-        "val_p90_cond_playable",
-        "val_winkler_cond_playable",
-        "val_inside_cond_playable",
-        "train_rows",
-        "cal_rows",
-        "val_rows",
-    ]
+    # Get metric keys for this model type
+    metric_keys = MODEL_CONFIG[model_type]["metric_keys"]
 
     aggregated: dict[str, Any] = {
         "n_folds": len(results),
         "n_successful": len(successful),
         "n_failed": len(results) - len(successful),
+        "model_type": model_type.value,
     }
 
     for key in metric_keys:
         values = [r.metrics.get(key) for r in successful if r.metrics.get(key) is not None]
         if values:
-            aggregated[f"{key}_mean"] = sum(values) / len(values)
-            aggregated[f"{key}_min"] = min(values)
-            aggregated[f"{key}_max"] = max(values)
-            aggregated[f"{key}_std"] = (
-                (sum((v - aggregated[f"{key}_mean"])**2 for v in values) / len(values)) ** 0.5
-                if len(values) > 1 else 0.0
-            )
+            # Handle boolean metrics
+            if all(isinstance(v, bool) for v in values):
+                aggregated[f"{key}_pass_rate"] = sum(values) / len(values)
+            else:
+                aggregated[f"{key}_mean"] = sum(values) / len(values)
+                aggregated[f"{key}_min"] = min(values)
+                aggregated[f"{key}_max"] = max(values)
+                aggregated[f"{key}_std"] = (
+                    (sum((v - aggregated[f"{key}_mean"])**2 for v in values) / len(values)) ** 0.5
+                    if len(values) > 1 else 0.0
+                )
 
     return aggregated
 
 
-def print_summary(results: list[FoldResult], aggregated: dict[str, Any]) -> None:
+def print_summary(
+    results: list[FoldResult],
+    aggregated: dict[str, Any],
+    model_type: ModelType = ModelType.LGBM,
+) -> None:
     """Print a summary of walk-forward results."""
-    
+
     typer.echo("\n" + "="*70)
-    typer.echo("WALK-FORWARD CROSS-VALIDATION SUMMARY")
+    typer.echo(f"WALK-FORWARD CROSS-VALIDATION SUMMARY [{model_type.value}]")
     typer.echo("="*70)
 
-    # Per-fold results
+    # Per-fold results - format depends on model type
     typer.echo("\nPer-Fold Results:")
     typer.echo("-"*70)
-    typer.echo(f"{'Fold':<10} {'MAE':<8} {'P10 Cov':<10} {'P90 Cov':<10} {'Winkler':<10} {'Status':<8}")
-    typer.echo("-"*70)
 
-    for r in results:
-        if r.success and r.metrics:
-            mae = r.metrics.get("val_mae_overall", 0)
-            p10 = r.metrics.get("val_p10_cond_playable", 0)
-            p90 = r.metrics.get("val_p90_cond_playable", 0)
-            wink = r.metrics.get("val_winkler_cond_playable", 0)
-            typer.echo(f"{r.fold_id:<10} {mae:<8.3f} {p10:<10.1%} {p90:<10.1%} {wink:<10.2f} {'✓':<8}")
-        else:
-            typer.echo(f"{r.fold_id:<10} {'-':<8} {'-':<10} {'-':<10} {'-':<10} {'✗':<8}")
+    if model_type == ModelType.LGBM:
+        typer.echo(f"{'Fold':<10} {'MAE':<8} {'P10 Cov':<10} {'P90 Cov':<10} {'Winkler':<10} {'Status':<8}")
+        typer.echo("-"*70)
+        for r in results:
+            if r.success and r.metrics:
+                mae = r.metrics.get("val_mae_p50", r.metrics.get("val_mae_overall", 0))
+                p10 = r.metrics.get("val_p10_cond_playable", 0)
+                p90 = r.metrics.get("val_p90_cond_playable", 0)
+                wink = r.metrics.get("val_winkler_cond_playable", 0)
+                typer.echo(f"{r.fold_id:<10} {mae:<8.3f} {p10:<10.1%} {p90:<10.1%} {wink:<10.2f} {'✓':<8}")
+            else:
+                typer.echo(f"{r.fold_id:<10} {'-':<8} {'-':<10} {'-':<10} {'-':<10} {'✗':<8}")
+    else:  # MINUTE_SHARE
+        typer.echo(f"{'Fold':<10} {'MAE Min':<10} {'DNP AUC':<10} {'Rot Acc':<10} {'RawSum':<10} {'Status':<8}")
+        typer.echo("-"*70)
+        for r in results:
+            if r.success and r.metrics:
+                mae_min = r.metrics.get("mae_minutes", 0)
+                dnp_auc = r.metrics.get("dnp_auc")
+                dnp_auc_str = f"{dnp_auc:.3f}" if dnp_auc is not None else "N/A"
+                rot_acc = r.metrics.get("rotation_accuracy", 0)
+                raw_sum = r.metrics.get("team_share_sum_mean", 0)
+                typer.echo(f"{r.fold_id:<10} {mae_min:<10.3f} {dnp_auc_str:<10} {rot_acc:<10.3f} {raw_sum:<10.3f} {'✓':<8}")
+            else:
+                typer.echo(f"{r.fold_id:<10} {'-':<10} {'-':<10} {'-':<10} {'-':<10} {'✗':<8}")
 
     # Aggregated metrics
     typer.echo("\n" + "="*70)
@@ -348,26 +476,74 @@ def print_summary(results: list[FoldResult], aggregated: dict[str, Any]) -> None
     typer.echo("="*70)
     typer.echo(f"\nFolds: {aggregated.get('n_successful', 0)}/{aggregated.get('n_folds', 0)} successful")
 
-    if "val_mae_overall_mean" in aggregated:
-        typer.echo(f"\nMAE (minutes):")
-        typer.echo(f"  Mean: {aggregated['val_mae_overall_mean']:.3f}")
-        typer.echo(f"  Range: [{aggregated['val_mae_overall_min']:.3f}, {aggregated['val_mae_overall_max']:.3f}]")
-        typer.echo(f"  Std: {aggregated['val_mae_overall_std']:.3f}")
+    if model_type == ModelType.LGBM:
+        if "val_mae_p50_mean" in aggregated:
+            typer.echo("\nMAE (minutes):")
+            typer.echo(f"  Mean: {aggregated['val_mae_p50_mean']:.3f}")
+            typer.echo(f"  Range: [{aggregated['val_mae_p50_min']:.3f}, {aggregated['val_mae_p50_max']:.3f}]")
+            typer.echo(f"  Std: {aggregated['val_mae_p50_std']:.3f}")
 
-    if "val_p10_cond_playable_mean" in aggregated:
-        typer.echo(f"\nP10 Coverage (target: 10%):")
-        typer.echo(f"  Mean: {aggregated['val_p10_cond_playable_mean']:.1%}")
-        typer.echo(f"  Range: [{aggregated['val_p10_cond_playable_min']:.1%}, {aggregated['val_p10_cond_playable_max']:.1%}]")
+        if "val_p10_cond_playable_mean" in aggregated:
+            typer.echo("\nP10 Coverage (target: 10%):")
+            typer.echo(f"  Mean: {aggregated['val_p10_cond_playable_mean']:.1%}")
+            typer.echo(f"  Range: [{aggregated['val_p10_cond_playable_min']:.1%}, {aggregated['val_p10_cond_playable_max']:.1%}]")
 
-    if "val_p90_cond_playable_mean" in aggregated:
-        typer.echo(f"\nP90 Coverage (target: 90%):")
-        typer.echo(f"  Mean: {aggregated['val_p90_cond_playable_mean']:.1%}")
-        typer.echo(f"  Range: [{aggregated['val_p90_cond_playable_min']:.1%}, {aggregated['val_p90_cond_playable_max']:.1%}]")
+        if "val_p90_cond_playable_mean" in aggregated:
+            typer.echo("\nP90 Coverage (target: 90%):")
+            typer.echo(f"  Mean: {aggregated['val_p90_cond_playable_mean']:.1%}")
+            typer.echo(f"  Range: [{aggregated['val_p90_cond_playable_min']:.1%}, {aggregated['val_p90_cond_playable_max']:.1%}]")
 
-    if "val_winkler_cond_playable_mean" in aggregated:
-        typer.echo(f"\nWinkler Score (lower is better):")
-        typer.echo(f"  Mean: {aggregated['val_winkler_cond_playable_mean']:.2f}")
-        typer.echo(f"  Range: [{aggregated['val_winkler_cond_playable_min']:.2f}, {aggregated['val_winkler_cond_playable_max']:.2f}]")
+        if "val_winkler_cond_playable_mean" in aggregated:
+            typer.echo("\nWinkler Score (lower is better):")
+            typer.echo(f"  Mean: {aggregated['val_winkler_cond_playable_mean']:.2f}")
+            typer.echo(f"  Range: [{aggregated['val_winkler_cond_playable_min']:.2f}, {aggregated['val_winkler_cond_playable_max']:.2f}]")
+
+    else:  # MINUTE_SHARE
+        if "mae_minutes_mean" in aggregated:
+            typer.echo("\nMAE (minutes):")
+            typer.echo(f"  Mean: {aggregated['mae_minutes_mean']:.3f}")
+            typer.echo(f"  Range: [{aggregated['mae_minutes_min']:.3f}, {aggregated['mae_minutes_max']:.3f}]")
+            typer.echo(f"  Std: {aggregated['mae_minutes_std']:.3f}")
+
+        if "mae_shares_mean" in aggregated:
+            typer.echo("\nMAE (shares):")
+            typer.echo(f"  Mean: {aggregated['mae_shares_mean']:.4f}")
+            typer.echo(f"  Range: [{aggregated['mae_shares_min']:.4f}, {aggregated['mae_shares_max']:.4f}]")
+
+        # MAE by bucket
+        bucket_names = ["dnp", "garbage_time", "bench", "rotation", "core", "stars"]
+        typer.echo("\nMAE by Bucket:")
+        for bucket in bucket_names:
+            key = f"mae_{bucket}_mean"
+            if key in aggregated and aggregated[key] is not None:
+                typer.echo(f"  {bucket:12s}: {aggregated[key]:.2f}")
+
+        # DNP classification
+        if "dnp_auc_mean" in aggregated and aggregated["dnp_auc_mean"] is not None:
+            typer.echo("\nDNP Classification:")
+            typer.echo(f"  AUC:       {aggregated['dnp_auc_mean']:.3f}")
+        if "dnp_accuracy_mean" in aggregated:
+            typer.echo(f"  Accuracy:  {aggregated['dnp_accuracy_mean']:.3f}")
+        if "dnp_precision_mean" in aggregated and aggregated["dnp_precision_mean"] is not None:
+            typer.echo(f"  Precision: {aggregated['dnp_precision_mean']:.3f}")
+        if "dnp_recall_mean" in aggregated and aggregated["dnp_recall_mean"] is not None:
+            typer.echo(f"  Recall:    {aggregated['dnp_recall_mean']:.3f}")
+
+        # Rotation classification
+        if "rotation_accuracy_mean" in aggregated:
+            typer.echo("\nRotation Classification (>=15 min):")
+            typer.echo(f"  Accuracy:  {aggregated['rotation_accuracy_mean']:.3f}")
+        if "rotation_precision_mean" in aggregated and aggregated["rotation_precision_mean"] is not None:
+            typer.echo(f"  Precision: {aggregated['rotation_precision_mean']:.3f}")
+        if "rotation_recall_mean" in aggregated and aggregated["rotation_recall_mean"] is not None:
+            typer.echo(f"  Recall:    {aggregated['rotation_recall_mean']:.3f}")
+
+        # Share distribution
+        if "team_share_sum_mean_mean" in aggregated:
+            typer.echo("\nShare Distribution:")
+            typer.echo(f"  Team sum mean: {aggregated['team_share_sum_mean_mean']:.3f}")
+        if "max_share_mean_mean" in aggregated:
+            typer.echo(f"  Max share mean: {aggregated['max_share_mean_mean']:.3f}")
 
 
 @app.command()
@@ -387,6 +563,11 @@ def main(
         "--end",
         help="End date of your dataset (YYYY-MM-DD).",
     ),
+    model_type: ModelType = typer.Option(
+        ModelType.LGBM,
+        "--model-type",
+        help="Model type to train: 'lgbm' (standard) or 'minute_share' (share-based).",
+    ),
     train_months: int = typer.Option(
         12,
         "--train-months",
@@ -395,7 +576,7 @@ def main(
     cal_weeks: int = typer.Option(
         3,
         "--cal-weeks",
-        help="Calibration window size in weeks.",
+        help="Calibration window size in weeks (ignored for minute_share).",
     ),
     val_weeks: int = typer.Option(
         2,
@@ -426,12 +607,12 @@ def main(
         False,
         "--tolerance-relaxed",
         is_flag=True,
-        help="Use relaxed coverage tolerance.",
+        help="Use relaxed coverage tolerance (lgbm only).",
     ),
     allow_guard_failure: bool = typer.Option(
         True,
         "--allow-guard-failure/--strict",
-        help="Allow runs to continue even if coverage checks fail.",
+        help="Allow runs to continue even if coverage checks fail (lgbm only).",
     ),
     season_aware: bool = typer.Option(
         True,
@@ -445,6 +626,8 @@ def main(
         typer.echo(f"Features file not found: {features}", err=True)
         raise typer.Exit(code=1)
 
+    typer.echo(f"[walk-forward] Model type: {model_type.value}")
+
     # Generate folds
     folds = generate_folds(
         data_start=start_date,
@@ -454,6 +637,7 @@ def main(
         val_weeks=val_weeks,
         step_weeks=step_weeks,
         season_aware=season_aware,
+        model_type=model_type,
     )
 
     if not folds:
@@ -462,34 +646,40 @@ def main(
 
     typer.echo(f"Generated {len(folds)} walk-forward folds:")
     for fold in folds:
-        typer.echo(f"  {fold.fold_id}: Train [{fold.train_start.date()} → {fold.train_end.date()}] | "
-                   f"Cal [{fold.cal_start.date()} → {fold.cal_end.date()}] | "
-                   f"Val [{fold.val_start.date()} → {fold.val_end.date()}]")
+        if fold.cal_start and fold.cal_end:
+            typer.echo(f"  {fold.fold_id}: Train [{fold.train_start.date()} → {fold.train_end.date()}] | "
+                       f"Cal [{fold.cal_start.date()} → {fold.cal_end.date()}] | "
+                       f"Val [{fold.val_start.date()} → {fold.val_end.date()}]")
+        else:
+            typer.echo(f"  {fold.fold_id}: Train [{fold.train_start.date()} → {fold.train_end.date()}] | "
+                       f"Val [{fold.val_start.date()} → {fold.val_end.date()}]")
 
     if dry_run:
         typer.echo("\n--dry-run specified, not executing folds.")
         return
 
-    # Build extra args
+    # Build extra args (model-type specific)
     extra_args = []
-    if tolerance_relaxed:
-        extra_args.append("--tolerance-relaxed")
-    if allow_guard_failure:
-        extra_args.append("--allow-guard-failure")
+    if model_type == ModelType.LGBM:
+        if tolerance_relaxed:
+            extra_args.append("--tolerance-relaxed")
+        if allow_guard_failure:
+            extra_args.append("--allow-guard-failure")
 
     # Run each fold
     results: list[FoldResult] = []
     for fold in folds:
-        result = run_fold(fold, features, run_id_prefix, extra_args)
+        result = run_fold(fold, features, run_id_prefix, extra_args, model_type)
         results.append(result)
 
     # Aggregate and print summary
-    aggregated = aggregate_results(results)
-    print_summary(results, aggregated)
+    aggregated = aggregate_results(results, model_type)
+    print_summary(results, aggregated, model_type)
 
     # Save results if requested
     if output:
         output_data = {
+            "model_type": model_type.value,
             "folds": [
                 {
                     "config": r.config.to_dict(),
@@ -512,6 +702,7 @@ def main(
         results=results,
         aggregated=aggregated,
         params={
+            "model_type": model_type.value,
             "features_path": str(features),
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),

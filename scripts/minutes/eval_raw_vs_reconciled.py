@@ -100,8 +100,8 @@ def _compute_by_bucket(
         actual = valid[actual_col].to_numpy(dtype=float)
         valid[bucket_col] = pd.cut(
             actual,
-            bins=[0, 10, 20, 30, 40, 50],
-            labels=["0-10", "10-20", "20-30", "30-40", "40+"],
+            bins=[0, 10, 20, 30, 1e9],
+            labels=["0-10", "10-20", "20-30", "30+"],
             include_lowest=True,
         )
     
@@ -116,6 +116,223 @@ def _compute_by_bucket(
             "n": len(group),
         }
     return results
+
+
+def _starter_vs_bench_split(
+    df: pd.DataFrame,
+    *,
+    pred_col: str,
+    actual_col: str = "minutes",
+) -> dict[str, dict]:
+    """Compute MAE/bias split by starter vs non-starter."""
+    valid = df[df[actual_col].notna() & df[pred_col].notna()].copy()
+    if valid.empty:
+        return {}
+
+    starter_col = None
+    for col in ("is_starter", "is_confirmed_starter", "is_projected_starter", "starter_flag"):
+        if col in valid.columns:
+            starter_col = col
+            break
+    if starter_col is None:
+        return {}
+
+    is_starter = valid[starter_col].fillna(0).astype(bool).to_numpy()
+    actual = valid[actual_col].to_numpy(dtype=float)
+    pred = valid[pred_col].to_numpy(dtype=float)
+    err = pred - actual
+
+    def _block(mask: np.ndarray) -> dict:
+        if mask.sum() == 0:
+            return {"n": 0, "mae": None, "bias": None, "pred_mean": None, "actual_mean": None}
+        return {
+            "n": int(mask.sum()),
+            "mae": float(np.abs(err[mask]).mean()),
+            "bias": float(err[mask].mean()),
+            "pred_mean": float(pred[mask].mean()),
+            "actual_mean": float(actual[mask].mean()),
+        }
+
+    return {
+        "starter_col": starter_col,
+        "starters": _block(is_starter),
+        "bench": _block(~is_starter),
+    }
+
+
+def _topk_vs_rest_split(
+    df: pd.DataFrame,
+    *,
+    pred_col: str,
+    actual_col: str = "minutes",
+    group_cols: list[str] | None = None,
+    k: int = 8,
+) -> dict[str, dict]:
+    """Compute MAE/bias split by actual top-k minutes per team-game."""
+    if group_cols is None:
+        group_cols = ["game_id", "team_id"]
+
+    valid = df[df[actual_col].notna() & df[pred_col].notna()].copy()
+    if valid.empty:
+        return {}
+
+    actual = valid[actual_col].to_numpy(dtype=float)
+    pred = valid[pred_col].to_numpy(dtype=float)
+    err = pred - actual
+
+    top_mask = np.zeros(len(valid), dtype=bool)
+    for _, g in valid.groupby(group_cols, sort=False):
+        if len(g) == 0:
+            continue
+        g_actual = pd.to_numeric(g[actual_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        if g_actual.size == 0:
+            continue
+        order = np.argsort(-g_actual, kind="mergesort")
+        take = min(int(k), int(order.size))
+        idx = g.index.to_numpy()[order[:take]]
+        top_mask[valid.index.get_indexer(idx)] = True
+
+    def _block(mask: np.ndarray) -> dict:
+        if mask.sum() == 0:
+            return {"n": 0, "mae": None, "bias": None}
+        return {
+            "n": int(mask.sum()),
+            "mae": float(np.abs(err[mask]).mean()),
+            "bias": float(err[mask].mean()),
+        }
+
+    return {
+        "k": int(k),
+        "topk": _block(top_mask),
+        "rest": _block(~top_mask),
+    }
+
+
+def _gini_coefficient(values: np.ndarray) -> float:
+    """Compute Gini coefficient for a non-negative distribution."""
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr) & (arr > 0.0)]
+    if arr.size < 2:
+        return 0.0
+    arr = np.sort(arr)
+    total = float(arr.sum())
+    if total <= 0.0:
+        return 0.0
+    cumsum = np.cumsum(arr)
+    n = float(arr.size)
+    gini = (n + 1.0 - 2.0 * float(cumsum.sum()) / total) / n
+    return float(max(0.0, min(1.0, gini)))
+
+
+def _hhi(values: np.ndarray, *, total: float = 240.0) -> float:
+    """Compute HHI on minute shares."""
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr) & (arr > 0.0)]
+    if arr.size == 0:
+        return 0.0
+    shares = arr / float(total)
+    return float(np.sum(shares**2))
+
+
+def _sixth_man_mae(
+    df: pd.DataFrame,
+    *,
+    pred_col: str,
+    actual_col: str = "minutes",
+    group_cols: list[str] | None = None,
+) -> dict[str, float | int | None]:
+    """Compute absolute error for the actual 6th man (by actual minutes)."""
+    if group_cols is None:
+        group_cols = ["game_id", "team_id"]
+    valid = df[df[actual_col].notna() & df[pred_col].notna()].copy()
+    if valid.empty:
+        return {"sixth_man_mae": None, "n_teams": 0}
+
+    errs: list[float] = []
+    for _, g in valid.groupby(group_cols, sort=False):
+        if len(g) < 6:
+            continue
+        actual = pd.to_numeric(g[actual_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        pred = pd.to_numeric(g[pred_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        order = np.argsort(-actual, kind="mergesort")
+        idx6 = int(order[5])
+        errs.append(abs(float(pred[idx6] - actual[idx6])))
+    return {
+        "sixth_man_mae": float(np.mean(errs)) if errs else None,
+        "n_teams": int(len(errs)),
+    }
+
+
+def _team_realism_metrics(
+    df: pd.DataFrame,
+    *,
+    minutes_col: str,
+    actual_col: str = "minutes",
+    group_cols: list[str] | None = None,
+) -> dict[str, float]:
+    """Compute team-level distribution metrics for predicted and actual minutes."""
+    if group_cols is None:
+        group_cols = ["game_id", "team_id"]
+
+    valid = df[df[actual_col].notna() & df[minutes_col].notna()].copy()
+    if valid.empty:
+        return {}
+
+    pred_gini: list[float] = []
+    act_gini: list[float] = []
+    pred_hhi: list[float] = []
+    act_hhi: list[float] = []
+    pred_top6: list[float] = []
+    act_top6: list[float] = []
+    pred_top8: list[float] = []
+    act_top8: list[float] = []
+    pred_roster: list[float] = []
+    act_roster: list[float] = []
+    pred_bench_max: list[float] = []
+    act_bench_max: list[float] = []
+
+    for _, g in valid.groupby(group_cols, sort=False):
+        pred = pd.to_numeric(g[minutes_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        act = pd.to_numeric(g[actual_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+
+        pred_sorted = np.sort(pred)[::-1]
+        act_sorted = np.sort(act)[::-1]
+        n = int(len(pred_sorted))
+        half = n // 2
+
+        pred_gini.append(_gini_coefficient(pred_sorted))
+        act_gini.append(_gini_coefficient(act_sorted))
+        pred_hhi.append(_hhi(pred_sorted))
+        act_hhi.append(_hhi(act_sorted))
+
+        pred_top6.append(float(pred_sorted[:6].sum() / 240.0) if n else 0.0)
+        act_top6.append(float(act_sorted[:6].sum() / 240.0) if n else 0.0)
+        pred_top8.append(float(pred_sorted[:8].sum() / 240.0) if n else 0.0)
+        act_top8.append(float(act_sorted[:8].sum() / 240.0) if n else 0.0)
+
+        pred_roster.append(float((pred >= 1.0).sum()))
+        act_roster.append(float((act >= 1.0).sum()))
+
+        pred_bench_max.append(float(pred_sorted[half:].max()) if half < n else 0.0)
+        act_bench_max.append(float(act_sorted[half:].max()) if half < n else 0.0)
+
+    def _mean(values: list[float]) -> float:
+        return float(np.mean(values)) if values else float("nan")
+
+    return {
+        "pred_top6_share_mean": _mean(pred_top6),
+        "act_top6_share_mean": _mean(act_top6),
+        "pred_top8_share_mean": _mean(pred_top8),
+        "act_top8_share_mean": _mean(act_top8),
+        "pred_roster_size_mean": _mean(pred_roster),
+        "act_roster_size_mean": _mean(act_roster),
+        "pred_bench_max_mean": _mean(pred_bench_max),
+        "act_bench_max_mean": _mean(act_bench_max),
+        "pred_gini_mean": _mean(pred_gini),
+        "act_gini_mean": _mean(act_gini),
+        "pred_hhi_mean": _mean(pred_hhi),
+        "act_hhi_mean": _mean(act_hhi),
+    }
 
 
 def _rotation_vs_bench_split(
@@ -335,7 +552,7 @@ def main(
     bucket_table.add_column("Recon MAE", justify="right")
     bucket_table.add_column("Δ", justify="right")
     
-    for bucket in ["0-10", "10-20", "20-30", "30-40", "40+"]:
+    for bucket in ["0-10", "10-20", "20-30", "30+"]:
         raw_b = raw_buckets.get(bucket, {})
         recon_b = recon_buckets.get(bucket, {})
         bucket_table.add_row(
@@ -347,6 +564,89 @@ def main(
         )
     
     console.print(bucket_table)
+
+    # Starter vs bench split
+    raw_starters = _starter_vs_bench_split(scored, pred_col="minutes_p50_raw")
+    recon_starters = _starter_vs_bench_split(reconciled, pred_col="minutes_p50")
+    if raw_starters:
+        console.print("\n")
+        starter_table = Table(title=f"Starters vs Bench (starter_col={raw_starters.get('starter_col')})")
+        starter_table.add_column("Segment", style="cyan")
+        starter_table.add_column("N", justify="right")
+        starter_table.add_column("Raw MAE", justify="right")
+        starter_table.add_column("Recon MAE", justify="right")
+        starter_table.add_column("Raw Bias", justify="right")
+        starter_table.add_column("Recon Bias", justify="right")
+        for key, label in (("starters", "Starters"), ("bench", "Bench")):
+            starter_table.add_row(
+                label,
+                str(raw_starters[key]["n"]),
+                _fmt(raw_starters[key]["mae"]),
+                _fmt(recon_starters.get(key, {}).get("mae")),
+                _fmt(raw_starters[key]["bias"]),
+                _fmt(recon_starters.get(key, {}).get("bias")),
+            )
+        console.print(starter_table)
+
+    # Top-8 rotation vs rest (by actual minutes rank)
+    raw_top8 = _topk_vs_rest_split(scored, pred_col="minutes_p50_raw", k=8)
+    recon_top8 = _topk_vs_rest_split(reconciled, pred_col="minutes_p50", k=8)
+    if raw_top8:
+        console.print("\n")
+        top8_table = Table(title="Top-8 (by actual minutes) vs Rest")
+        top8_table.add_column("Segment", style="cyan")
+        top8_table.add_column("N", justify="right")
+        top8_table.add_column("Raw MAE", justify="right")
+        top8_table.add_column("Recon MAE", justify="right")
+        top8_table.add_column("Raw Bias", justify="right")
+        top8_table.add_column("Recon Bias", justify="right")
+        for key, label in (("topk", "Top-8"), ("rest", "Rest")):
+            top8_table.add_row(
+                label,
+                str(raw_top8[key]["n"]),
+                _fmt(raw_top8[key]["mae"]),
+                _fmt(recon_top8.get(key, {}).get("mae")),
+                _fmt(raw_top8[key]["bias"]),
+                _fmt(recon_top8.get(key, {}).get("bias")),
+            )
+        console.print(top8_table)
+
+    # Team-level realism metrics (pred vs actual)
+    raw_realism = _team_realism_metrics(scored, minutes_col="minutes_p50_raw")
+    recon_realism = _team_realism_metrics(reconciled, minutes_col="minutes_p50")
+    if raw_realism:
+        console.print("\n")
+        realism_table = Table(title="Team-Level Realism (Means)")
+        realism_table.add_column("Metric", style="cyan")
+        realism_table.add_column("Pred Raw", justify="right")
+        realism_table.add_column("Pred Recon", justify="right")
+        realism_table.add_column("Actual", justify="right")
+        for metric, raw_key, recon_key, act_key, precision in [
+            ("Top6 share", "pred_top6_share_mean", "pred_top6_share_mean", "act_top6_share_mean", 3),
+            ("Top8 share", "pred_top8_share_mean", "pred_top8_share_mean", "act_top8_share_mean", 3),
+            ("Roster size (>=1)", "pred_roster_size_mean", "pred_roster_size_mean", "act_roster_size_mean", 2),
+            ("Bench max (bottom-half)", "pred_bench_max_mean", "pred_bench_max_mean", "act_bench_max_mean", 2),
+            ("Gini", "pred_gini_mean", "pred_gini_mean", "act_gini_mean", 3),
+            ("HHI", "pred_hhi_mean", "pred_hhi_mean", "act_hhi_mean", 4),
+        ]:
+            realism_table.add_row(
+                metric,
+                _fmt(raw_realism.get(raw_key), precision),
+                _fmt(recon_realism.get(recon_key), precision),
+                _fmt(raw_realism.get(act_key), precision),
+            )
+        console.print(realism_table)
+
+    # Sixth-man minutes error
+    raw_sixth = _sixth_man_mae(scored, pred_col="minutes_p50_raw")
+    recon_sixth = _sixth_man_mae(reconciled, pred_col="minutes_p50")
+    if raw_sixth.get("sixth_man_mae") is not None:
+        recon_val = recon_sixth.get("sixth_man_mae")
+        recon_mae = float(recon_val) if recon_val is not None else float("nan")
+        console.print(
+            f"\n[dim]6th-man MAE (actual 6th man by minutes): raw={raw_sixth['sixth_man_mae']:.3f} "
+            f"(n_teams={raw_sixth['n_teams']}), recon={recon_mae:.3f}[/dim]"
+        )
     
     # Summary
     console.print("\n[bold]Summary:[/bold]")
@@ -368,6 +668,14 @@ def main(
             "recon_split": recon_split,
             "raw_buckets": raw_buckets,
             "recon_buckets": recon_buckets,
+            "raw_starters": raw_starters,
+            "recon_starters": recon_starters,
+            "raw_top8": raw_top8,
+            "recon_top8": recon_top8,
+            "raw_realism": raw_realism,
+            "recon_realism": recon_realism,
+            "raw_sixth": raw_sixth,
+            "recon_sixth": recon_sixth,
         }
         output_json.parent.mkdir(parents=True, exist_ok=True)
         with output_json.open("w") as f:

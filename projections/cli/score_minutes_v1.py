@@ -6,6 +6,7 @@ Outputs include minutes quantiles, play_prob, and now a canonical ``is_starter``
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Optional, Set
@@ -15,11 +16,14 @@ import joblib
 import numpy as np
 import pandas as pd
 import typer
+from unidecode import unidecode
 from click.core import ParameterSource
 
 from projections import paths
 from projections.labels import derive_starter_flag_labels
 from projections.minutes_v1 import modeling
+from projections.minutes_v1.minute_share import MinuteShareArtifacts, predict_minutes
+from projections.models import feature_contract
 from projections.minutes_v1.config import load_scoring_config
 from projections.minutes_v1.production import DEFAULT_PRODUCTION_ROOT, load_production_minutes_bundle
 from projections.minutes_v1.horizons import add_odds_missing_indicator, add_time_to_tip_features
@@ -52,6 +56,7 @@ from projections.minutes_alloc.rotalloc_production import (
     resolve_rotalloc_bundle_dir,
     score_rotalloc_minutes,
 )
+from projections.models.rotalloc import allocate_fringe_alpha_blend
 from projections.models.minutes_lgbm import (
     _filter_out_players,
     apply_conformal,
@@ -74,6 +79,17 @@ OUTPUT_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
 LATEST_POINTER = "latest_run.json"
 FEATURE_FILENAME = "features.parquet"
+
+
+def _normalize_name_for_matching(name: str) -> str:
+    """Normalize player name for matching: strip, lowercase, convert Unicode to ASCII.
+    
+    ESPN uses ASCII names ('Luka Doncic') but NBA data uses Unicode ('Luka Dončić').
+    This function normalizes both to a common form for matching.
+    """
+    if not isinstance(name, str):
+        return ""
+    return unidecode(name.strip().lower())
 
 
 def _load_espn_out_players(
@@ -105,7 +121,8 @@ def _load_espn_out_players(
                 cutoff = cutoff.tz_convert(UTC)
             espn_df = espn_df[espn_df["as_of_ts"].notna() & (espn_df["as_of_ts"] <= cutoff)]
         out_players = espn_df[espn_df["status"] == "OUT"]["player_name"].dropna()
-        out_set = set(out_players.str.strip().str.lower())
+        # Use unidecode normalization for ESPN names (they're already ASCII, but normalize for consistency)
+        out_set = set(out_players.apply(_normalize_name_for_matching))
         if out_set:
             typer.echo(f"[espn] loaded {len(out_set)} OUT players from ESPN", err=True)
         return out_set
@@ -239,6 +256,76 @@ def _derive_rotalloc_minutes_tails(
     return p10_new.astype(float), p90_new.astype(float)
 
 
+def _gini_coefficient(values: np.ndarray) -> float:
+    """Compute Gini coefficient for a non-negative distribution."""
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr) & (arr > 0.0)]
+    if arr.size < 2:
+        return 0.0
+    arr = np.sort(arr)
+    total = float(arr.sum())
+    if total <= 0.0:
+        return 0.0
+    cumsum = np.cumsum(arr)
+    n = float(arr.size)
+    gini = (n + 1.0 - 2.0 * float(cumsum.sum()) / total) / n
+    return float(max(0.0, min(1.0, gini)))
+
+
+def _hhi(values: np.ndarray, *, total: float = 240.0) -> float:
+    """Compute Herfindahl-Hirschman Index (HHI) on minute shares."""
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr) & (arr > 0.0)]
+    if arr.size == 0:
+        return 0.0
+    shares = arr / float(total)
+    return float(np.sum(shares**2))
+
+
+def _compute_alloc_realism_metrics(df: pd.DataFrame, minutes_col: str) -> dict[str, float]:
+    """Compute quick team-level minutes realism metrics for diagnostics/logging."""
+    if df.empty or minutes_col not in df.columns:
+        return {}
+
+    gini_list: list[float] = []
+    hhi_list: list[float] = []
+    top6_list: list[float] = []
+    top8_list: list[float] = []
+    roster_size_list: list[float] = []
+    bench_max_list: list[float] = []
+    max_minutes_list: list[float] = []
+
+    for _, g in df.groupby(["game_id", "team_id"], sort=False):
+        mins = pd.to_numeric(g[minutes_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        if mins.size == 0:
+            continue
+        sorted_mins = np.sort(mins)[::-1]
+        n = int(sorted_mins.size)
+        half = n // 2
+        bench_max = float(sorted_mins[half:].max()) if half < n else 0.0
+
+        gini_list.append(_gini_coefficient(sorted_mins))
+        hhi_list.append(_hhi(sorted_mins))
+        top6_list.append(float(sorted_mins[:6].sum() / 240.0) if n else 0.0)
+        top8_list.append(float(sorted_mins[:8].sum() / 240.0) if n else 0.0)
+        roster_size_list.append(float((mins >= 1.0).sum()))
+        bench_max_list.append(bench_max)
+        max_minutes_list.append(float(sorted_mins[0]) if n else 0.0)
+
+    def _mean(values: list[float]) -> float:
+        return float(np.mean(values)) if values else float("nan")
+
+    return {
+        "gini_mean": _mean(gini_list),
+        "hhi_mean": _mean(hhi_list),
+        "top6_share_mean": _mean(top6_list),
+        "top8_share_mean": _mean(top8_list),
+        "roster_size_mean": _mean(roster_size_list),
+        "bench_max_mean": _mean(bench_max_list),
+        "max_minutes_mean": _mean(max_minutes_list),
+    }
+
+
 def _write_latest_pointer(day_dir: Path, *, run_id: str, run_as_of_ts: datetime | None) -> None:
     pointer = day_dir / LATEST_POINTER
     payload = {
@@ -258,12 +345,19 @@ def _ensure_bundle_defaults(bundle: dict) -> dict:
     return bundle
 
 
-def _load_bundle(bundle_dir: Path) -> dict:
-    model_path = bundle_dir / "lgbm_quantiles.joblib"
-    if not model_path.exists():
-        raise typer.BadParameter(f"Bundle missing {model_path}", param_name="bundle_dir")
-    bundle = joblib.load(model_path)
-    return _ensure_bundle_defaults(bundle)
+def _load_bundle(bundle_dir: Path) -> dict | MinuteShareArtifacts:
+    # Try legacy quantile model
+    quantile_path = bundle_dir / "lgbm_quantiles.joblib"
+    if quantile_path.exists():
+        bundle = joblib.load(quantile_path)
+        return _ensure_bundle_defaults(bundle)
+
+    # Try minute share model
+    share_path = bundle_dir / "minute_share_model.joblib"
+    if share_path.exists():
+        return joblib.load(share_path)
+
+    raise typer.BadParameter(f"Bundle missing model artifact at {bundle_dir} (checked lgbm_quantiles.joblib, minute_share_model.joblib)", param_name="bundle_dir")
 
 
 def _load_meta(bundle_dir: Path) -> dict:
@@ -758,18 +852,126 @@ def _apply_rotation_minutes_caps(df: pd.DataFrame) -> pd.DataFrame:
     return working
 
 
+def _score_rows_share(
+    df: pd.DataFrame,
+    bundle: MinuteShareArtifacts,
+    run_id: str | None = None,
+    sharpen_exponent: float = 2.0,
+) -> pd.DataFrame:
+    """
+    Score rows using the Minute Share model (contract v2).
+    
+    1. Validates feature contract (input parity).
+    2. Enforces strict zeroing for 'is_out' players.
+    3. Predicts raw shares and applies sharpening exponent.
+    4. Normalizes to ensure team sum = 240.
+    """
+    # Debug Logging
+    typer.echo(f"[minute-share] Scoring with sharpen_exponent={sharpen_exponent}", err=True)
+
+    # 1. Validate Contract
+    # We require strict parity with the training features
+    if df.empty:
+        return df
+
+    # Feature Contract Validation (Live Parity Check)
+    required_features = bundle.feature_columns
+    missing = [col for col in required_features if col not in df.columns]
+
+    if missing:
+        raise RuntimeError(f"Feature Contract Violation: Missing {len(missing)} features in live data: {missing[:5]}...")
+
+    # Validate forbidden features are NOT used (sanity check)
+    leaky = [f for f in required_features if f in feature_contract.FORBIDDEN_FEATURES]
+    if leaky:
+        raise RuntimeError(f"Feature Contract Violation: Model uses forbidden features: {leaky}")
+
+    # Prepare inputs
+    if "game_id" not in df.columns or "team_id" not in df.columns:
+         raise ValueError("Input dataframe must have game_id and team_id for minute share scoring.")
+
+    # Identify OUT players to zero out
+    is_out = pd.Series(0, index=df.index, dtype=int)
+    
+    if "is_out" in df.columns:
+        is_out = is_out | df["is_out"].fillna(0).astype(int)
+    
+    if "status" in df.columns:
+        status_out = df["status"].astype(str).str.upper() == "OUT"
+        is_out = is_out | status_out.astype(int)
+        
+    if "lineup_role" in df.columns:
+        role_out = df["lineup_role"].astype(str).str.lower() == "out"
+        is_out = is_out | role_out.astype(int)
+
+    # Call inference
+    predictions = predict_minutes(
+        bundle,
+        df,
+        game_ids=df["game_id"],
+        team_ids=df["team_id"],
+        is_out=is_out,
+        sharpen_exponent=sharpen_exponent,
+    )
+    
+    # Map to output format (legacy quantile columns)
+    working = df.copy()
+    working["minutes_p50"] = predictions["predicted_minutes"]
+    working["minutes_p10"] = predictions["predicted_minutes"]
+    working["minutes_p90"] = predictions["predicted_minutes"]
+    
+    # Conditional/Unconditional are the same for point estimate with implicit risk
+    working["play_prob"] = np.where(is_out, 0.0, 1.0)
+    
+    working["minutes_p10_cond"] = working["minutes_p10"]
+    working["minutes_p50_cond"] = working["minutes_p50"]
+    working["minutes_p90_cond"] = working["minutes_p90"]
+    
+    working["p10_pred"] = working["minutes_p10"]
+    working["p50_pred"] = working["minutes_p50"]
+    working["p90_pred"] = working["minutes_p90"]
+    
+    working["minutes_p10_uncond"] = working["minutes_p10"]
+    working["minutes_p50_uncond"] = working["minutes_p50"]
+    working["minutes_p90_uncond"] = working["minutes_p90"]
+
+    # Rotation probability (heuristic for now, could be improved)
+    working["rotation_prob"] = _derive_rotation_prob(working)
+
+    return working
+
+
 def _score_rows(
     df: pd.DataFrame,
-    bundle: dict,
+    bundle: dict | MinuteShareArtifacts,
     *,
     enable_play_prob_head: bool = True,
     enable_play_prob_mixing: bool = False,
     promotion_ctx: PromotionPriorContext | None = None,
     promotion_debug: bool = False,
     espn_out_players: set[str] | None = None,
+    run_id: str | None = None,
+    sharpen_exponent: float = 2.0,
 ) -> pd.DataFrame:
     if df.empty:
         return df
+
+    # Dispatch to Minute Share handler if new model type
+    if isinstance(bundle, MinuteShareArtifacts):
+        return _score_rows_share(
+            df,
+            bundle,
+            run_id=run_id,
+            sharpen_exponent=sharpen_exponent,
+        )
+
+    # [REMOVED: Treat Projected Starters as Confirmed]
+    # This workaround was removed on 2025-12-25 because:
+    # 1. The model was trained with distinct is_projected_starter vs is_confirmed_starter features
+    # 2. Rotowire lineups scraper now provides faster lineup confirmations
+    # 3. Keeping the distinction allows the model to properly value confirmed vs projected starters
+    # See: scrapers/rotowire_lineups.py for the new faster confirmation source
+
     feature_columns: list[str] = bundle["feature_columns"]
     quantiles = bundle["quantiles"]
     calibrator = bundle.get("calibrator")
@@ -835,8 +1037,9 @@ def _score_rows(
         out_mask = out_mask | (lineup_role_col == "out")
     # Check ESPN injuries - catches late scratches like Donovan Mitchell
     if espn_out_players and "player_name" in working.columns:
-        player_names_lower = working["player_name"].astype(str).str.strip().str.lower()
-        espn_mask = player_names_lower.isin(espn_out_players)
+        # Use unidecode normalization to match Unicode names (e.g., 'Luka Dončić') with ASCII ESPN names ('Luka Doncic')
+        player_names_normalized = working["player_name"].apply(_normalize_name_for_matching)
+        espn_mask = player_names_normalized.isin(espn_out_players)
         if espn_mask.any():
             espn_outs = working.loc[espn_mask, "player_name"].tolist()
             typer.echo(f"[espn] marking {len(espn_outs)} players OUT: {espn_outs}", err=True)
@@ -1295,6 +1498,7 @@ def score_minutes_range_to_parquet(
     enable_upside_adjustment: bool = True,
     target_dates: Optional[Set[date]] = None,
     debug_describe: bool | None = None,
+    sharpen_exponent: float = 2.0,
 ) -> pd.DataFrame:
     """Programmatic wrapper around the scoring flow used by the CLI.
 
@@ -1366,6 +1570,7 @@ def score_minutes_range_to_parquet(
             enable_play_prob_mixing=enable_play_prob_mixing,
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
+            sharpen_exponent=sharpen_exponent,
         )
         resolved_bundle_dir = Path(model["bundle_dir"])
     model_meta = model["model_meta"]
@@ -1611,6 +1816,11 @@ def main(
         "--enable-upside-adjustment/--disable-upside-adjustment",
         help="Apply upside adjustment to widen P90 for Monte Carlo (improves DFS coverage).",
     ),
+    sharpen_exponent: float = typer.Option(
+        2.0,
+        "--sharpen-exponent",
+        help="Exponent for sharpening share distribution (Minutes Share Model).",
+    ),
 ) -> None:
     cli_params: dict[str, Any] = {
         "date": date,
@@ -1640,6 +1850,8 @@ def main(
         "enable_play_prob_head": enable_play_prob_head,
         "enable_play_prob_mixing": enable_play_prob_mixing,
         "disable_play_prob": disable_play_prob,
+        "enable_upside_adjustment": enable_upside_adjustment,
+        "sharpen_exponent": sharpen_exponent,
     }
     resolved_params = _apply_scoring_overrides(ctx, cli_params, config_path)
     date = resolved_params["date"]
@@ -1648,6 +1860,9 @@ def main(
     features_path = resolved_params["features_path"]
     bundle_dir = resolved_params["bundle_dir"]
     override_run_id = resolved_params.get("override_run_id")
+    
+    typer.echo(f"[debug] Resolved CLI params: sharpen_exponent={resolved_params.get('sharpen_exponent')}", err=True)
+
     bundle_config = resolved_params["bundle_config"]
     artifact_root = resolved_params["artifact_root"]
     injuries_root = resolved_params["injuries_root"]
@@ -1788,6 +2003,7 @@ def main(
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
             espn_out_players=espn_out_players,
+            sharpen_exponent=resolved_params["sharpen_exponent"],
         )
         resolved_bundle_dir = Path(model["bundle_dir"])
     model_meta = model["model_meta"]
@@ -1816,10 +2032,10 @@ def main(
         scored = _annotate_metadata(scored, player_lookup=player_lookup, team_meta=team_meta)
 
     alloc_mode = resolve_minutes_alloc_mode(bundle_config)
-    if alloc_mode == "rotalloc_expk" and enable_upside_adjustment:
+    if alloc_mode in {"rotalloc_expk", "rotalloc_fringe_alpha", "share_with_rotalloc_elig"} and enable_upside_adjustment:
         typer.echo(
-            "[upside] disabling upside adjustment in rotalloc_expk "
-            "(RotAlloc tails are derived from legacy deltas; sim_v2 provides variance).",
+            f"[upside] disabling upside adjustment in {alloc_mode} "
+            "(allocator tails are derived from legacy deltas; sim_v2 provides variance).",
             err=True,
         )
         enable_upside_adjustment = False
@@ -1835,7 +2051,7 @@ def main(
         typer.echo("[upside] Applied upside adjustment for Monte Carlo coverage.", err=True)
 
     normalized_reconcile_mode = reconcile_team_minutes.lower()
-    if alloc_mode == "rotalloc_expk" and normalized_reconcile_mode != "none":
+    if alloc_mode in {"rotalloc_expk", "rotalloc_fringe_alpha", "share_with_rotalloc_elig"} and normalized_reconcile_mode != "none":
         typer.echo(
             f"[rotalloc] forcing reconcile_team_minutes=none (was {normalized_reconcile_mode})",
             err=True,
@@ -1849,6 +2065,7 @@ def main(
             )
         reconcile_cfg = load_reconcile_config(reconcile_config)
         debug_hook = _make_reconcile_debugger(reconcile_debug)
+
         scored = reconcile_minutes_p50_all(scored, reconcile_cfg, debug_hook=debug_hook)
         if "play_prob" not in scored.columns:
             scored["play_prob"] = 1.0
@@ -1945,6 +2162,24 @@ def main(
                     if alias in scored.columns:
                         scored[alias] = scored[src]
 
+                # Compute quantile diagnostics for summary
+                cap_val = float(allocator_cfg.cap_max)
+                n_total = len(scored)
+                if n_total > 0:
+                    frac_p90_at_cap = float((scored["minutes_p90"] >= cap_val - 0.01).sum() / n_total)
+                    frac_p50_at_cap = float((scored["minutes_p50"] >= cap_val - 0.01).sum() / n_total)
+                    p95_minutes_p50 = float(scored["minutes_p50"].quantile(0.95))
+                    p99_minutes_p50 = float(scored["minutes_p50"].quantile(0.99))
+                    p95_minutes_p90 = float(scored["minutes_p90"].quantile(0.95))
+                    p99_minutes_p90 = float(scored["minutes_p90"].quantile(0.99))
+                else:
+                    frac_p90_at_cap = 0.0
+                    frac_p50_at_cap = 0.0
+                    p95_minutes_p50 = 0.0
+                    p99_minutes_p50 = 0.0
+                    p95_minutes_p90 = 0.0
+                    p99_minutes_p90 = 0.0
+
                 alloc_summary = {
                     "minutes_alloc_mode": "rotalloc_expk",
                     "bundle_dir": str(rotalloc_dir),
@@ -1956,6 +2191,11 @@ def main(
                         "k_min": allocator_cfg.k_min,
                         "k_max": allocator_cfg.k_max,
                         "cap_max": allocator_cfg.cap_max,
+                        "cap_p50": allocator_cfg.cap_p50,
+                        "k_core": allocator_cfg.k_core,
+                        "enable_two_tier": allocator_cfg.enable_two_tier,
+                        "core_minutes_floor": allocator_cfg.core_minutes_floor,
+                        "fringe_cap_max": allocator_cfg.fringe_cap_max,
                     },
                     "diagnostics": {
                         "eligible_size_p50": allocator_diag.eligible_size_p50,
@@ -1964,8 +2204,58 @@ def main(
                         "minutes_below_cutoff_p90": allocator_diag.minutes_below_cutoff_p90,
                         "fallback_top1_used": allocator_diag.fallback_top1_used,
                         "cutoff_empty_events": allocator_diag.cutoff_empty_events,
+                        "overrides_applied": allocator_cfg.overrides_applied,
+                        "frac_p90_at_cap": frac_p90_at_cap,
+                        "frac_p50_at_cap": frac_p50_at_cap,
+                        "p95_minutes_p50": p95_minutes_p50,
+                        "p99_minutes_p50": p99_minutes_p50,
+                        "p95_minutes_p90": p95_minutes_p90,
+                        "p99_minutes_p90": p99_minutes_p90,
+                        "max_minutes_p50": float(scored["minutes_p50"].max()) if n_total > 0 else 0.0,
+                        "frac_p50_ge_42": float((scored["minutes_p50"] >= 42).sum() / n_total) if n_total > 0 else 0.0,
+                        "frac_p50_ge_44": float((scored["minutes_p50"] >= 44).sum() / n_total) if n_total > 0 else 0.0,
                     },
                 }
+                
+                # Guardrail validation: detect pathological allocations
+                # Thresholds from config/rotalloc_production.json guardrails section
+                guardrail_frac_p90_at_cap_max = 0.15  # Higher threshold with cap_max=40
+                guardrail_max_minutes_p50_max = 41.0  # No regulation mean should exceed this
+                guardrail_p95_minutes_p50_max = 40.0
+                guardrail_eligible_size_p50_min = 9
+                guardrail_frac_p50_ge_44_max = 0.02  # At most 2% of players should have p50>=44
+                
+                # Extract values for guardrail checks
+                max_p50 = float(scored["minutes_p50"].max()) if n_total > 0 else 0.0
+                frac_p50_ge_44 = float((scored["minutes_p50"] >= 44).sum() / n_total) if n_total > 0 else 0.0
+                
+                guardrail_failed = False
+                guardrail_reasons = []
+                
+                if frac_p90_at_cap > guardrail_frac_p90_at_cap_max:
+                    guardrail_reasons.append(f"frac_p90_at_cap={frac_p90_at_cap:.3f} > {guardrail_frac_p90_at_cap_max}")
+                    guardrail_failed = True
+                if max_p50 > guardrail_max_minutes_p50_max:
+                    guardrail_reasons.append(f"max_minutes_p50={max_p50:.1f} > {guardrail_max_minutes_p50_max}")
+                    guardrail_failed = True
+                if p95_minutes_p50 > guardrail_p95_minutes_p50_max:
+                    guardrail_reasons.append(f"p95_minutes_p50={p95_minutes_p50:.1f} > {guardrail_p95_minutes_p50_max}")
+                    guardrail_failed = True
+                if allocator_diag.eligible_size_p50 < guardrail_eligible_size_p50_min:
+                    guardrail_reasons.append(f"eligible_size_p50={allocator_diag.eligible_size_p50:.1f} < {guardrail_eligible_size_p50_min}")
+                    guardrail_failed = True
+                if frac_p50_ge_44 > guardrail_frac_p50_ge_44_max:
+                    guardrail_reasons.append(f"frac_p50_ge_44={frac_p50_ge_44:.3f} > {guardrail_frac_p50_ge_44_max}")
+                    guardrail_failed = True
+                
+                if guardrail_failed:
+                    alloc_summary["guardrail_failed"] = True
+                    alloc_summary["guardrail_reasons"] = guardrail_reasons
+                    typer.echo(f"[rotalloc] GUARDRAIL FAILED: {guardrail_reasons}", err=True)
+                    
+                    fail_hard = os.environ.get("PROJECTIONS_ROTALLOC_FAIL_HARD", "").lower() in ("1", "true", "yes")
+                    if fail_hard:
+                        raise ValueError(f"RotAlloc guardrail check failed: {guardrail_reasons}")
                 typer.echo(
                     "[rotalloc] mode=rotalloc_expk "
                     f"eligible_size p50/p90={allocator_diag.eligible_size_p50:.1f}/{allocator_diag.eligible_size_p90:.1f} "
@@ -1975,10 +2265,352 @@ def main(
                     f"cutoff_empty_events={allocator_diag.cutoff_empty_events}",
                     err=True,
                 )
+                if allocator_cfg.overrides_applied:
+                    typer.echo(
+                        f"[rotalloc] OVERRIDES APPLIED: {allocator_cfg.overrides_applied}",
+                        err=True,
+                    )
             except Exception as exc:
-                typer.echo(f"[rotalloc] ERROR: {exc} (falling back to legacy minutes)", err=True)
-                if os.environ.get("CI"):
+                import traceback
+                tb_str = traceback.format_exc()
+                
+                # Log error to stderr (file logging happens in caller when output_dir is available)
+                typer.echo(f"[rotalloc] ERROR: {exc}", err=True)
+                typer.echo(f"[rotalloc] Traceback (first 200 chars): {tb_str[:200]}...", err=True)
+                typer.echo("[rotalloc] falling back to legacy minutes", err=True)
+                
+                # Persist error in summary.json for visibility
+                alloc_summary = {
+                    "minutes_alloc_mode": "legacy",
+                    "rotalloc_error": repr(exc),
+                    "rotalloc_traceback_summary": tb_str[:500] if len(tb_str) > 500 else tb_str,
+                    "rotalloc_bundle_dir": str(rotalloc_dir),
+                }
+                
+                # FAIL_HARD mode: raise instead of fallback
+                fail_hard = os.environ.get("PROJECTIONS_ROTALLOC_FAIL_HARD", "").lower() in ("1", "true", "yes")
+                if fail_hard or os.environ.get("CI"):
                     raise
+
+    elif alloc_mode == "rotalloc_fringe_alpha":
+        # Allocator E: Core/fringe blend of RotAlloc proxy weights + historical minutes proxy.
+        rotalloc_dir = resolve_rotalloc_bundle_dir(bundle_config)
+        if rotalloc_dir is None:
+            typer.echo(
+                "[rotalloc_fringe_alpha] warning: rotalloc_bundle_dir missing from minutes bundle config; using legacy.",
+                err=True,
+            )
+        else:
+            try:
+                # Preserve legacy tails before any overrides.
+                base_cols_present = {"minutes_p10", "minutes_p50", "minutes_p90"}.issubset(scored.columns)
+                base_p10 = scored["minutes_p10"].copy() if "minutes_p10" in scored.columns else None
+                base_p50 = scored["minutes_p50"].copy() if "minutes_p50" in scored.columns else None
+                base_p90 = scored["minutes_p90"].copy() if "minutes_p90" in scored.columns else None
+
+                # 1) Score RotAlloc to get (p_rot, mu_cond, eligible_flag) per player-row.
+                rotalloc_scored, allocator_cfg, allocator_diag = score_rotalloc_minutes(
+                    scored,
+                    bundle_dir=rotalloc_dir,
+                )
+                scored = scored.merge(
+                    rotalloc_scored,
+                    on=["game_id", "team_id", "player_id"],
+                    how="left",
+                    suffixes=("", "_rotalloc"),
+                )
+
+                # 2) Choose share proxy column (defaults to roll_mean_5; fall back to other recent-minutes columns).
+                blend_cfg: dict[str, Any] = {}
+                prod_cfg_path = Path("config/rotalloc_production.json")
+                if prod_cfg_path.exists():
+                    try:
+                        prod_cfg = json.loads(prod_cfg_path.read_text(encoding="utf-8"))
+                        if isinstance(prod_cfg, dict):
+                            blend_cfg = prod_cfg.get("fringe_alpha_blend", {}) or {}
+                    except Exception:
+                        blend_cfg = {}
+
+                share_candidates = blend_cfg.get("share_candidates") or ["roll_mean_5", "min_last5", "min_last3", "roll_mean_10"]
+                share_candidates = [str(c) for c in share_candidates]
+                share_col = os.environ.get("ROTALLOC_BLEND_SHARE_COL")
+                if share_col:
+                    share_candidates = [share_col] + [c for c in share_candidates if c != share_col]
+                share_col_used = next((c for c in share_candidates if c in scored.columns), None)
+                if share_col_used is None:
+                    raise ValueError(
+                        "[rotalloc_fringe_alpha] missing share proxy column; tried: "
+                        + ", ".join(share_candidates)
+                    )
+                # 3) Allocate within each team-game using the pure allocator helper.
+                k_core_default = str(blend_cfg.get("k_core", 8))
+                alpha_core_default = str(blend_cfg.get("alpha_core", 0.8))
+                alpha_fringe_default = str(blend_cfg.get("alpha_fringe", 0.3))
+                share_gamma_default = str(blend_cfg.get("share_gamma", 1.0))
+
+                k_core = int(os.environ.get("ROTALLOC_BLEND_K_CORE", k_core_default))
+                alpha_core = float(os.environ.get("ROTALLOC_BLEND_ALPHA_CORE", alpha_core_default))
+                alpha_fringe = float(os.environ.get("ROTALLOC_BLEND_ALPHA_FRINGE", alpha_fringe_default))
+                share_gamma = float(os.environ.get("ROTALLOC_BLEND_SHARE_GAMMA", share_gamma_default))
+
+                minutes_out = pd.Series(0.0, index=scored.index, dtype=float)
+                team_sum_out = pd.Series(0.0, index=scored.index, dtype=float)
+                core_k_values: list[int] = []
+                sum_dev_max = 0.0
+                for _, g in scored.groupby(["game_id", "team_id"], sort=False):
+                    idx = g.index.to_numpy()
+                    eligible = pd.to_numeric(g["eligible_flag"], errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0.5
+                    p_rot = pd.to_numeric(g["p_rot"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                    mu_cond = pd.to_numeric(g["mu_cond"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                    share_g = pd.to_numeric(g[share_col_used], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+
+                    m, blend_diag = allocate_fringe_alpha_blend(
+                        p_rot,
+                        mu_cond,
+                        share_g,
+                        eligible,
+                        a=float(allocator_cfg.a),
+                        mu_power=float(allocator_cfg.mu_power),
+                        k_core=k_core,
+                        alpha_core=alpha_core,
+                        alpha_fringe=alpha_fringe,
+                        share_gamma=share_gamma,
+                        cap_max=float(allocator_cfg.cap_max),
+                    )
+                    minutes_out.loc[idx] = m
+                    total = float(m.sum())
+                    team_sum_out.loc[idx] = total
+                    dev = abs(total - 240.0)
+                    if dev > sum_dev_max:
+                        sum_dev_max = dev
+                    core_k_values.append(int(blend_diag.get("core_k", 0)))
+
+                if sum_dev_max > 1e-6:
+                    raise ValueError(f"[rotalloc_fringe_alpha] sum-to-240 violation: max_dev={sum_dev_max:.6f}")
+
+                scored["minutes_mean"] = minutes_out.astype(float)
+                scored["team_minutes_sum"] = team_sum_out.astype(float)
+                scored["minutes_alloc_mode"] = "rotalloc_fringe_alpha"
+
+                minutes_mean = pd.to_numeric(scored["minutes_mean"], errors="coerce").fillna(0.0).astype(float)
+                cap_eff = pd.Series(float(allocator_cfg.cap_max), index=scored.index, dtype=float)
+                if {"eligible_flag", "game_id", "team_id"}.issubset(scored.columns):
+                    eligible_mask = (
+                        pd.to_numeric(scored["eligible_flag"], errors="coerce")
+                        .fillna(0.0)
+                        .to_numpy(dtype=float)
+                        > 0.5
+                    )
+                    eligible_counts = (
+                        scored.assign(_eligible=eligible_mask.astype(int))
+                        .groupby(["game_id", "team_id"])["_eligible"]
+                        .transform("sum")
+                    )
+                    eligible_counts = pd.to_numeric(eligible_counts, errors="coerce").fillna(0.0).astype(float)
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        cap_from_count = 240.0 / eligible_counts.replace(0.0, np.nan)
+                    cap_from_count = cap_from_count.fillna(float(allocator_cfg.cap_max))
+                    cap_eff = cap_from_count.clip(lower=float(allocator_cfg.cap_max)).astype(float)
+
+                if base_cols_present and base_p10 is not None and base_p50 is not None and base_p90 is not None:
+                    minutes_p10_new, minutes_p90_new = _derive_rotalloc_minutes_tails(
+                        base_p10=base_p10,
+                        base_p50=base_p50,
+                        base_p90=base_p90,
+                        new_p50=minutes_mean,
+                        cap_eff=cap_eff,
+                    )
+                else:
+                    typer.echo(
+                        "[rotalloc_fringe_alpha] warning: legacy minutes tails missing; falling back to conservative tail multipliers",
+                        err=True,
+                    )
+                    minutes_p10_new = (minutes_mean * 0.85).astype(float)
+                    minutes_p90_new = (minutes_mean * 1.15).astype(float)
+                    minutes_p10_new = np.minimum(minutes_p10_new, minutes_mean)
+                    minutes_p90_new = np.maximum(minutes_p90_new, minutes_mean)
+                    minutes_p10_new = np.minimum(minutes_p10_new, cap_eff).astype(float)
+                    minutes_p90_new = np.minimum(minutes_p90_new, cap_eff).astype(float)
+
+                scored["minutes_p50"] = minutes_mean
+                scored["minutes_p50_cond"] = minutes_mean
+                scored["minutes_p10"] = minutes_p10_new
+                scored["minutes_p90"] = minutes_p90_new
+                scored["minutes_p10_cond"] = minutes_p10_new
+                scored["minutes_p90_cond"] = minutes_p90_new
+
+                alloc_summary = {
+                    "minutes_alloc_mode": "rotalloc_fringe_alpha",
+                    "bundle_dir": str(rotalloc_dir),
+                    "blend": {
+                        "share_col": share_col_used,
+                        "k_core": k_core,
+                        "alpha_core": alpha_core,
+                        "alpha_fringe": alpha_fringe,
+                        "share_gamma": share_gamma,
+                    },
+                    "diagnostics": {
+                        "eligible_size_p50": allocator_diag.eligible_size_p50,
+                        "eligible_size_p90": allocator_diag.eligible_size_p90,
+                        "team_sum_dev_max": float(sum_dev_max),
+                        "cap_max": float(allocator_cfg.cap_max),
+                        "core_k_mean": float(np.mean(core_k_values)) if core_k_values else float("nan"),
+                    },
+                }
+                typer.echo(
+                    f"[rotalloc_fringe_alpha] mode=rotalloc_fringe_alpha share_col={share_col_used} "
+                    f"core_k={k_core} alpha_core={alpha_core:.2f} alpha_fringe={alpha_fringe:.2f} "
+                    f"eligible_size p50/p90={allocator_diag.eligible_size_p50:.1f}/{allocator_diag.eligible_size_p90:.1f} "
+                    f"team_sum_dev_max={sum_dev_max:.6f}",
+                    err=True,
+                )
+            except Exception as exc:
+                import traceback
+
+                tb_str = traceback.format_exc()
+                typer.echo(f"[rotalloc_fringe_alpha] ERROR: {exc}", err=True)
+                typer.echo("[rotalloc_fringe_alpha] falling back to legacy minutes", err=True)
+                alloc_summary = {
+                    "minutes_alloc_mode": "legacy",
+                    "rotalloc_fringe_alpha_error": repr(exc),
+                    "rotalloc_fringe_alpha_traceback_summary": tb_str[:500] if len(tb_str) > 500 else tb_str,
+                    "rotalloc_bundle_dir": str(rotalloc_dir),
+                }
+
+                fail_hard = os.environ.get("PROJECTIONS_ROTALLOC_FAIL_HARD", "").lower() in ("1", "true", "yes")
+                if fail_hard or os.environ.get("CI"):
+                    raise
+
+    elif alloc_mode == "share_with_rotalloc_elig":
+        # Allocator C: Scale share predictions within RotAlloc's eligible set
+        rotalloc_dir = resolve_rotalloc_bundle_dir(bundle_config)
+        if rotalloc_dir is None:
+            typer.echo(
+                "[share_with_rotalloc_elig] warning: rotalloc_bundle_dir missing; using legacy.",
+                err=True,
+            )
+        else:
+            try:
+                from projections.eval.minutes_alloc_abtest import scale_shares_to_240
+                import joblib
+                
+                # Step 1: Run RotAlloc to get eligibility flags
+                rotalloc_scored, allocator_cfg, allocator_diag = score_rotalloc_minutes(
+                    scored,
+                    bundle_dir=rotalloc_dir,
+                )
+                
+                # Step 2: Load share model
+                share_bundle_path = Path("artifacts/minute_share")
+                share_model = None
+                if share_bundle_path.exists():
+                    candidates = sorted(
+                        [d for d in share_bundle_path.iterdir() 
+                         if d.is_dir() and ("wfcv2_fold" in d.name or "full_history_v2" in d.name)],
+                        key=lambda x: x.name,
+                        reverse=True,
+                    )
+                    for cand in candidates:
+                        model_path = cand / "minute_share_model.joblib"
+                        if model_path.exists():
+                            share_model = joblib.load(model_path)
+                            typer.echo(f"[share_with_rotalloc_elig] Loaded share model from {cand.name}", err=True)
+                            break
+                
+                if share_model is None:
+                    raise ValueError("No share model found in artifacts/minute_share")
+                
+                # Step 3: Predict shares
+                from projections.minutes_v1.minute_share import predict_minutes as predict_minute_shares
+                is_out = pd.Series(0, index=scored.index, dtype=int)
+                if "is_out" in scored.columns:
+                    is_out = is_out | scored["is_out"].fillna(0).astype(int)
+                if "status" in scored.columns:
+                    status_out = scored["status"].astype(str).str.upper() == "OUT"
+                    is_out = is_out | status_out.astype(int)
+                
+                predictions = predict_minute_shares(
+                    share_model,
+                    scored,
+                    game_ids=scored["game_id"],
+                    team_ids=scored["team_id"],
+                    is_out=is_out,
+                    sharpen_exponent=2.0,
+                )
+                
+                # Step 4: Merge eligibility and scale shares within eligible set
+                merge_cols = ["player_id", "game_id", "team_id"]
+                scored_c = scored.merge(
+                    rotalloc_scored[merge_cols + ["eligible_flag"]].rename(columns={"eligible_flag": "_rotalloc_eligible"}),
+                    on=merge_cols,
+                    how="left",
+                )
+                scored_c["_share"] = predictions["normalized_share"]
+                scored_c["_eligible_share"] = np.where(
+                    scored_c["_rotalloc_eligible"].fillna(0) == 1,
+                    scored_c["_share"],
+                    0.0,
+                )
+                
+                # Step 5: Scale within eligible to 240
+                df_c, diag_c = scale_shares_to_240(
+                    scored_c,
+                    shares_col="_eligible_share",
+                    cap_max=float(allocator_cfg.cap_max),
+                    require_positive_share=False,
+                    redistribute_after_cap=True,
+                )
+                
+                # Step 6: Apply allocator C minutes to scored
+                minutes_c = df_c["minutes_mean_A"].fillna(0.0)
+                scored["minutes_mean"] = minutes_c
+                scored["minutes_p50"] = minutes_c  # For sim compatibility
+                scored["minutes_p10"] = (minutes_c * 0.6).clip(lower=0.0)
+                scored["minutes_p90"] = (minutes_c * 1.4).clip(upper=float(allocator_cfg.cap_max))
+                
+                # Copy eligibility for downstream use
+                scored["eligible_flag"] = scored_c["_rotalloc_eligible"].fillna(0)
+                
+                alloc_summary = {
+                    "minutes_alloc_mode": "share_with_rotalloc_elig",
+                    "bundle_dir": str(rotalloc_dir),
+                    "share_model_used": True,
+                    "diagnostics": {
+                        "eligible_size_p50": allocator_diag.eligible_size_p50,
+                        "eligible_size_p90": allocator_diag.eligible_size_p90,
+                        "team_sum_dev_max": float(diag_c.team_sum_dev_max),
+                        "cap_max": float(allocator_cfg.cap_max),
+                    },
+                }
+                
+                typer.echo(
+                    f"[share_with_rotalloc_elig] mode=share_with_rotalloc_elig "
+                    f"eligible_size p50/p90={allocator_diag.eligible_size_p50:.1f}/{allocator_diag.eligible_size_p90:.1f} "
+                    f"team_sum_dev_max={diag_c.team_sum_dev_max:.6f}",
+                    err=True,
+                )
+            except Exception as exc:
+                import traceback
+                tb_str = traceback.format_exc()
+                typer.echo(f"[share_with_rotalloc_elig] ERROR: {exc}", err=True)
+                typer.echo("[share_with_rotalloc_elig] falling back to legacy minutes", err=True)
+                
+                alloc_summary = {
+                    "minutes_alloc_mode": "legacy",
+                    "share_with_rotalloc_elig_error": repr(exc),
+                }
+                
+                fail_hard = os.environ.get("PROJECTIONS_ROTALLOC_FAIL_HARD", "").lower() in ("1", "true", "yes")
+                if fail_hard or os.environ.get("CI"):
+                    raise
+
+    # Attach quick realism diagnostics for any non-legacy allocator outputs.
+    if (
+        isinstance(alloc_summary, dict)
+        and alloc_summary.get("minutes_alloc_mode") not in (None, "legacy")
+        and "minutes_mean" in scored.columns
+    ):
+        alloc_summary.setdefault("realism_metrics", _compute_alloc_realism_metrics(scored, "minutes_mean"))
 
     scored = _attach_unconditional_minutes(scored)
 

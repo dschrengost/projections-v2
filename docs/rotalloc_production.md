@@ -3,11 +3,12 @@
 ## Enable / disable
 
 - Config (default): `config/minutes_current_run.json`
-  - `minutes_alloc_mode`: `"legacy"` or `"rotalloc_expk"`
+  - `minutes_alloc_mode`: `"legacy"`, `"rotalloc_expk"`, or `"rotalloc_fringe_alpha"`
   - `rotalloc_bundle_dir`: path to a directory containing `promote_config.json` and `models/`
 - Kill switch (overrides config):
   - `PROJECTIONS_MINUTES_ALLOC_MODE=legacy` (force legacy)
   - `PROJECTIONS_MINUTES_ALLOC_MODE=rotalloc_expk` (force RotAlloc)
+  - `PROJECTIONS_MINUTES_ALLOC_MODE=rotalloc_fringe_alpha` (force RotAlloc + core/fringe blend shape layer)
 
 ## What changes in outputs
 
@@ -23,6 +24,18 @@
 - `promote_config.json` can set `allocator.mu_power` to control how aggressively minutes concentrate into high-`mu_cond` players.
   - Default is `1.5` (higher → starters/6th man get more, 8th/9th man get less; helps avoid flattened bench minutes).
 - RotAlloc will **fail in CI** if the rotation classifier outputs only a handful of discrete probabilities (guardrail against a collapsed classifier).
+
+## rotalloc_fringe_alpha knobs (Allocator E)
+
+`rotalloc_fringe_alpha` is a deterministic “shape layer” that blends RotAlloc proxy weights with a historical-minutes proxy inside the eligible set (fixes the bench spreading too wide when proxy weights are diffuse).
+
+- Config defaults: `config/rotalloc_production.json` → `fringe_alpha_blend`
+- Env overrides:
+  - `ROTALLOC_BLEND_K_CORE` (default 8)
+  - `ROTALLOC_BLEND_ALPHA_CORE` (default 0.8)
+  - `ROTALLOC_BLEND_ALPHA_FRINGE` (default 0.3)
+  - `ROTALLOC_BLEND_SHARE_GAMMA` (default 1.0)
+  - `ROTALLOC_BLEND_SHARE_COL` (default auto-select from `roll_mean_5`, `min_last5`, `min_last3`, `roll_mean_10`)
 
 ## Local commands
 

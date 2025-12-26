@@ -15,6 +15,7 @@ INJURY_SNAPSHOT_MISSING_COL = "injury_snapshot_missing"
 
 # Columns that should never be surfaced as trainable features.
 EXCLUDED_FEATURE_COLUMNS = {
+    # Key columns (identifiers, not features)
     "game_id",
     "player_id",
     "team_id",
@@ -25,6 +26,55 @@ EXCLUDED_FEATURE_COLUMNS = {
     "feature_as_of_ts",
     # Horizonized training metadata (kept for evaluation, not as a model feature).
     "horizon_min",
+    "split",
+    "ingested_ts",
+    "time_to_tip_min",
+    "odds_missing",
+    # Label columns - these are ground truth derived post-game, not pre-game features.
+    "starter_flag_label",
+    "starter_flag_x",
+    "starter_flag_y",
+    "label_frozen_ts",
+    # =========================================================================
+    # FORBIDDEN FEATURES - Post-game/leaky columns that MUST NOT be used
+    # See projections/models/feature_contract.py for the authoritative list
+    # =========================================================================
+    # Box-score stats (post-game labels, not pre-game features)
+    "pts",
+    "ast",
+    "reb",
+    "blk",
+    "stl",
+    "fg3m",
+    "tov",
+    "dk_fpts_actual",
+    # Actual/played flags that are post-game truth
+    "played_flag",
+    "active_flag",
+    "starter_flag_actual",
+    # DK salary - excluded to avoid duplication bugs
+    "salary",
+    # Biometrics - not reliably available in live
+    "age",
+    "height_in",
+    "weight_lb",
+    # Derivable but inconsistently available
+    "is_home",
+    # Enrichment suffix columns - these are training-only artifacts
+    # The live pipeline uses the non-suffix versions
+    "vac_min_szn_enrich",
+    "vac_min_guard_szn_enrich",
+    "vac_min_wing_szn_enrich",
+    "vac_min_big_szn_enrich",
+    "team_pace_szn_enrich",
+    "opp_pace_szn_enrich",
+    "team_off_rtg_szn_enrich",
+    "team_def_rtg_szn_enrich",
+    "opp_def_rtg_szn_enrich",
+    # Snapshot timestamp columns (metadata, not features)
+    "frozen_at",
+    "snapshot_ts",
+    "snapshot_type",
 }
 
 # The legacy pipeline only exposes numeric features, so the default categorical list

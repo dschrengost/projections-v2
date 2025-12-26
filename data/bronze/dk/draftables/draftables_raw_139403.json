@@ -1,0 +1,5315 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41325051,
+      "firstName": "Donovan",
+      "lastName": "Mitchell",
+      "displayName": "Donovan Mitchell",
+      "shortName": "D. Mitchell",
+      "playerId": 879707,
+      "playerDkId": 33398,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 17100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33398.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33398.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "47.9",
+          "sortValue": "47.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "879707-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325077,
+      "firstName": "Jalen",
+      "lastName": "Brunson",
+      "displayName": "Jalen Brunson",
+      "shortName": "J. Brunson",
+      "playerId": 887914,
+      "playerDkId": 33006,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 16800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33006.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33006.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "45.4",
+          "sortValue": "45.4"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "887914-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325052,
+      "firstName": "Karl-Anthony",
+      "lastName": "Towns",
+      "displayName": "Karl-Anthony Towns",
+      "shortName": "K. Towns",
+      "playerId": 837030,
+      "playerDkId": 33194,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 15900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33194.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33194.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "44.8",
+          "sortValue": "44.8"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "837030-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325078,
+      "firstName": "Evan",
+      "lastName": "Mobley",
+      "displayName": "Evan Mobley",
+      "shortName": "E. Mobley",
+      "playerId": 1231862,
+      "playerDkId": 590986,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 15600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590986.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590986.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "42.5",
+          "sortValue": "42.5"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1231862-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325053,
+      "firstName": "Darius",
+      "lastName": "Garland",
+      "displayName": "Darius Garland",
+      "shortName": "D. Garland",
+      "playerId": 1134262,
+      "playerDkId": 32989,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 14700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32989.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32989.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.9",
+          "sortValue": "32.9"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1134262-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325054,
+      "firstName": "Josh",
+      "lastName": "Hart",
+      "displayName": "Josh Hart",
+      "shortName": "J. Hart",
+      "playerId": 741892,
+      "playerDkId": 33217,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 13800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33217.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33217.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.6",
+          "sortValue": "33.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "741892-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325055,
+      "firstName": "Mikal",
+      "lastName": "Bridges",
+      "displayName": "Mikal Bridges",
+      "shortName": "M. Bridges",
+      "playerId": 846400,
+      "playerDkId": 33313,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 12900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33313.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33313.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "34.5",
+          "sortValue": "34.5"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "846400-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325079,
+      "firstName": "OG",
+      "lastName": "Anunoby",
+      "displayName": "OG Anunoby",
+      "shortName": "O. Anunoby",
+      "playerId": 900535,
+      "playerDkId": 33382,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 12600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33382.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33382.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.0",
+          "sortValue": "31.0"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "900535-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325056,
+      "firstName": "Jarrett",
+      "lastName": "Allen",
+      "displayName": "Jarrett Allen",
+      "shortName": "J. Allen",
+      "playerId": 956574,
+      "playerDkId": 32914,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 12000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32914.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32914.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.5",
+          "sortValue": "29.5"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "956574-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325017,
+      "firstName": "Donovan",
+      "lastName": "Mitchell",
+      "displayName": "Donovan Mitchell",
+      "shortName": "D. Mitchell",
+      "playerId": 879707,
+      "playerDkId": 33398,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 11400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33398.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33398.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "47.9",
+          "sortValue": "47.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "879707-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325057,
+      "firstName": "Jaylon",
+      "lastName": "Tyson",
+      "displayName": "Jaylon Tyson",
+      "shortName": "J. Tyson",
+      "playerId": 1342747,
+      "playerDkId": 800376,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 11400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800376.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800376.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.5",
+          "sortValue": "26.5"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1342747-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325043,
+      "firstName": "Jalen",
+      "lastName": "Brunson",
+      "displayName": "Jalen Brunson",
+      "shortName": "J. Brunson",
+      "playerId": 887914,
+      "playerDkId": 33006,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 11200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33006.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33006.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "45.4",
+          "sortValue": "45.4"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "887914-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325018,
+      "firstName": "Karl-Anthony",
+      "lastName": "Towns",
+      "displayName": "Karl-Anthony Towns",
+      "shortName": "K. Towns",
+      "playerId": 837030,
+      "playerDkId": 33194,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 10600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33194.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33194.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "44.8",
+          "sortValue": "44.8"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "837030-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325044,
+      "firstName": "Evan",
+      "lastName": "Mobley",
+      "displayName": "Evan Mobley",
+      "shortName": "E. Mobley",
+      "playerId": 1231862,
+      "playerDkId": 590986,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 10400,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590986.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590986.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "42.5",
+          "sortValue": "42.5"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1231862-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325058,
+      "firstName": "De'Andre",
+      "lastName": "Hunter",
+      "displayName": "De'Andre Hunter",
+      "shortName": "D. Hunter",
+      "playerId": 942857,
+      "playerDkId": 32855,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 9900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32855.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32855.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "25.6",
+          "sortValue": "25.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "942857-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325019,
+      "firstName": "Darius",
+      "lastName": "Garland",
+      "displayName": "Darius Garland",
+      "shortName": "D. Garland",
+      "playerId": 1134262,
+      "playerDkId": 32989,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 9800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32989.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32989.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.9",
+          "sortValue": "32.9"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1134262-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325080,
+      "firstName": "Max",
+      "lastName": "Strus",
+      "displayName": "Max Strus",
+      "shortName": "M. Strus",
+      "playerId": 936502,
+      "playerDkId": 32893,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 9600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32893.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32893.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "936502-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325020,
+      "firstName": "Josh",
+      "lastName": "Hart",
+      "displayName": "Josh Hart",
+      "shortName": "J. Hart",
+      "playerId": 741892,
+      "playerDkId": 33217,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 9200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33217.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33217.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.6",
+          "sortValue": "33.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "741892-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325059,
+      "firstName": "Mitchell",
+      "lastName": "Robinson",
+      "displayName": "Mitchell Robinson",
+      "shortName": "M. Robinson",
+      "playerId": 1076265,
+      "playerDkId": 33242,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 9000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33242.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33242.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.1",
+          "sortValue": "21.1"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1076265-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325060,
+      "firstName": "Lonzo",
+      "lastName": "Ball",
+      "displayName": "Lonzo Ball",
+      "shortName": "L. Ball",
+      "playerId": 946714,
+      "playerDkId": 33216,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 8700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33216.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33216.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.6",
+          "sortValue": "21.6"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "946714-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325021,
+      "firstName": "Mikal",
+      "lastName": "Bridges",
+      "displayName": "Mikal Bridges",
+      "shortName": "M. Bridges",
+      "playerId": 846400,
+      "playerDkId": 33313,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 8600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33313.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33313.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "34.5",
+          "sortValue": "34.5"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "846400-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325045,
+      "firstName": "OG",
+      "lastName": "Anunoby",
+      "displayName": "OG Anunoby",
+      "shortName": "O. Anunoby",
+      "playerId": 900535,
+      "playerDkId": 33382,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 8400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33382.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33382.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.0",
+          "sortValue": "31.0"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "900535-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325081,
+      "firstName": "Miles",
+      "lastName": "McBride",
+      "displayName": "Miles McBride",
+      "shortName": "M. McBride",
+      "playerId": 1175084,
+      "playerDkId": 591041,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 8400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591041.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591041.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1175084-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325061,
+      "firstName": "Jordan",
+      "lastName": "Clarkson",
+      "displayName": "Jordan Clarkson",
+      "shortName": "J. Clarkson",
+      "playerId": 551975,
+      "playerDkId": 32983,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 8100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32983.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32983.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.0",
+          "sortValue": "16.0"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "551975-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325022,
+      "firstName": "Jarrett",
+      "lastName": "Allen",
+      "displayName": "Jarrett Allen",
+      "shortName": "J. Allen",
+      "playerId": 956574,
+      "playerDkId": 32914,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 8000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32914.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32914.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.5",
+          "sortValue": "29.5"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "956574-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325023,
+      "firstName": "Jaylon",
+      "lastName": "Tyson",
+      "displayName": "Jaylon Tyson",
+      "shortName": "J. Tyson",
+      "playerId": 1342747,
+      "playerDkId": 800376,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 7600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800376.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800376.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.5",
+          "sortValue": "26.5"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1342747-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325062,
+      "firstName": "Dean",
+      "lastName": "Wade",
+      "displayName": "Dean Wade",
+      "shortName": "D. Wade",
+      "playerId": 880677,
+      "playerDkId": 32992,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 7500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32992.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32992.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.2",
+          "sortValue": "16.2"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "880677-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325024,
+      "firstName": "De'Andre",
+      "lastName": "Hunter",
+      "displayName": "De'Andre Hunter",
+      "shortName": "D. Hunter",
+      "playerId": 942857,
+      "playerDkId": 32855,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 6600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32855.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32855.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "25.6",
+          "sortValue": "25.6"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "942857-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325082,
+      "firstName": "Landry",
+      "lastName": "Shamet",
+      "displayName": "Landry Shamet",
+      "shortName": "L. Shamet",
+      "playerId": 893100,
+      "playerDkId": 33111,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 6600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33111.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33111.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.5",
+          "sortValue": "15.5"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "893100-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325046,
+      "firstName": "Max",
+      "lastName": "Strus",
+      "displayName": "Max Strus",
+      "shortName": "M. Strus",
+      "playerId": 936502,
+      "playerDkId": 32893,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 6400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32893.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32893.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "936502-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325063,
+      "firstName": "Sam",
+      "lastName": "Merrill",
+      "displayName": "Sam Merrill",
+      "shortName": "S. Merrill",
+      "playerId": 953106,
+      "playerDkId": 527270,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 6300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527270.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527270.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.8",
+          "sortValue": "23.8"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "953106-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325025,
+      "firstName": "Mitchell",
+      "lastName": "Robinson",
+      "displayName": "Mitchell Robinson",
+      "shortName": "M. Robinson",
+      "playerId": 1076265,
+      "playerDkId": 33242,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 6000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33242.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33242.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.1",
+          "sortValue": "21.1"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1076265-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325026,
+      "firstName": "Lonzo",
+      "lastName": "Ball",
+      "displayName": "Lonzo Ball",
+      "shortName": "L. Ball",
+      "playerId": 946714,
+      "playerDkId": 33216,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 5800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33216.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33216.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.6",
+          "sortValue": "21.6"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "946714-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325047,
+      "firstName": "Miles",
+      "lastName": "McBride",
+      "displayName": "Miles McBride",
+      "shortName": "M. McBride",
+      "playerId": 1175084,
+      "playerDkId": 591041,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 5600,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591041.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591041.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1175084-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325027,
+      "firstName": "Jordan",
+      "lastName": "Clarkson",
+      "displayName": "Jordan Clarkson",
+      "shortName": "J. Clarkson",
+      "playerId": 551975,
+      "playerDkId": 32983,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32983.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32983.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.0",
+          "sortValue": "16.0"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "551975-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325064,
+      "firstName": "Tyler",
+      "lastName": "Kolek",
+      "displayName": "Tyler Kolek",
+      "shortName": "T. Kolek",
+      "playerId": 1232325,
+      "playerDkId": 800652,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 5100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800652.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800652.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.7",
+          "sortValue": "12.7"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1232325-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325028,
+      "firstName": "Dean",
+      "lastName": "Wade",
+      "displayName": "Dean Wade",
+      "shortName": "D. Wade",
+      "playerId": 880677,
+      "playerDkId": 32992,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 5000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32992.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32992.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.2",
+          "sortValue": "16.2"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "880677-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325065,
+      "firstName": "Thomas",
+      "lastName": "Bryant",
+      "displayName": "Thomas Bryant",
+      "shortName": "T. Bryant",
+      "playerId": 896601,
+      "playerDkId": 32875,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 4500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32875.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32875.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.1",
+          "sortValue": "10.1"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "896601-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325048,
+      "firstName": "Landry",
+      "lastName": "Shamet",
+      "displayName": "Landry Shamet",
+      "shortName": "L. Shamet",
+      "playerId": 893100,
+      "playerDkId": 33111,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 4400,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33111.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33111.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.5",
+          "sortValue": "15.5"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "893100-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325029,
+      "firstName": "Sam",
+      "lastName": "Merrill",
+      "displayName": "Sam Merrill",
+      "shortName": "S. Merrill",
+      "playerId": 953106,
+      "playerDkId": 527270,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527270.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527270.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.8",
+          "sortValue": "23.8"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "953106-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325066,
+      "firstName": "Tyrese",
+      "lastName": "Proctor",
+      "displayName": "Tyrese Proctor",
+      "shortName": "T. Proctor",
+      "playerId": 1403594,
+      "playerDkId": 906386,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 3900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906386.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906386.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.1",
+          "sortValue": "10.1"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1403594-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325083,
+      "firstName": "Guerschon",
+      "lastName": "Yabusele",
+      "displayName": "Guerschon Yabusele",
+      "shortName": "G. Yabusele",
+      "playerId": 920087,
+      "playerDkId": 58783,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 3600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/58783.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/58783.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.9",
+          "sortValue": "6.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "920087-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325030,
+      "firstName": "Tyler",
+      "lastName": "Kolek",
+      "displayName": "Tyler Kolek",
+      "shortName": "T. Kolek",
+      "playerId": 1232325,
+      "playerDkId": 800652,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 3400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800652.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800652.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.7",
+          "sortValue": "12.7"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1232325-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325067,
+      "firstName": "Nae'Qwan",
+      "lastName": "Tomlin",
+      "displayName": "Nae'Qwan Tomlin",
+      "shortName": "N. Tomlin",
+      "playerId": 1403628,
+      "playerDkId": 801402,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 3300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/801402.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/801402.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.1",
+          "sortValue": "14.1"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1403628-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325031,
+      "firstName": "Thomas",
+      "lastName": "Bryant",
+      "displayName": "Thomas Bryant",
+      "shortName": "T. Bryant",
+      "playerId": 896601,
+      "playerDkId": 32875,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32875.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32875.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.1",
+          "sortValue": "10.1"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "896601-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325068,
+      "firstName": "Ariel",
+      "lastName": "Hukporti",
+      "displayName": "Ariel Hukporti",
+      "shortName": "A. Hukporti",
+      "playerId": 1350535,
+      "playerDkId": 800801,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 2700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800801.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800801.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.5",
+          "sortValue": "6.5"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1350535-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325032,
+      "firstName": "Tyrese",
+      "lastName": "Proctor",
+      "displayName": "Tyrese Proctor",
+      "shortName": "T. Proctor",
+      "playerId": 1403594,
+      "playerDkId": 906386,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 2600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906386.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906386.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.1",
+          "sortValue": "10.1"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1403594-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325049,
+      "firstName": "Guerschon",
+      "lastName": "Yabusele",
+      "displayName": "Guerschon Yabusele",
+      "shortName": "G. Yabusele",
+      "playerId": 920087,
+      "playerDkId": 58783,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 2400,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/58783.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/58783.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.9",
+          "sortValue": "6.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "920087-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325033,
+      "firstName": "Nae'Qwan",
+      "lastName": "Tomlin",
+      "displayName": "Nae'Qwan Tomlin",
+      "shortName": "N. Tomlin",
+      "playerId": 1403628,
+      "playerDkId": 801402,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 2200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/801402.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/801402.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.1",
+          "sortValue": "14.1"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1403628-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325069,
+      "firstName": "Craig",
+      "lastName": "Porter Jr.",
+      "displayName": "Craig Porter Jr.",
+      "shortName": "C. Porter Jr.",
+      "playerId": 1236197,
+      "playerDkId": 713845,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 2100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713845.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713845.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.9",
+          "sortValue": "15.9"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1236197-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325034,
+      "firstName": "Ariel",
+      "lastName": "Hukporti",
+      "displayName": "Ariel Hukporti",
+      "shortName": "A. Hukporti",
+      "playerId": 1350535,
+      "playerDkId": 800801,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800801.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800801.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.5",
+          "sortValue": "6.5"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1350535-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325070,
+      "firstName": "Trey",
+      "lastName": "Jemison",
+      "displayName": "Trey Jemison",
+      "shortName": "T. Jemison",
+      "playerId": 1132023,
+      "playerDkId": 717494,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/717494.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/717494.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.3",
+          "sortValue": "4.3"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1132023-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325071,
+      "firstName": "Luke",
+      "lastName": "Travers",
+      "displayName": "Luke Travers",
+      "shortName": "L. Travers",
+      "playerId": 1352114,
+      "playerDkId": 649708,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649708.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649708.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.7",
+          "sortValue": "7.7"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1352114-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325072,
+      "firstName": "Mohamed",
+      "lastName": "Diawara",
+      "displayName": "Mohamed Diawara",
+      "shortName": "M. Diawara",
+      "playerId": 1437712,
+      "playerDkId": 906387,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906387.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906387.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.1",
+          "sortValue": "3.1"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1437712-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325073,
+      "firstName": "Pacome",
+      "lastName": "Dadiet",
+      "displayName": "Pacome Dadiet",
+      "shortName": "P. Dadiet",
+      "playerId": 1500956,
+      "playerDkId": 800410,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800410.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800410.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.9",
+          "sortValue": "1.9"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1500956-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325074,
+      "firstName": "Chris",
+      "lastName": "Livingston",
+      "displayName": "Chris Livingston",
+      "shortName": "C. Livingston",
+      "playerId": 1408196,
+      "playerDkId": 713809,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713809.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713809.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.4",
+          "sortValue": "5.4"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1408196-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325075,
+      "firstName": "Kevin",
+      "lastName": "McCullar Jr.",
+      "displayName": "Kevin McCullar Jr.",
+      "shortName": "K. McCullar Jr.",
+      "playerId": 1156809,
+      "playerDkId": 799444,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/799444.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/799444.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.4",
+          "sortValue": "1.4"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1156809-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325076,
+      "firstName": "Tosan",
+      "lastName": "Evbuomwan",
+      "displayName": "Tosan Evbuomwan",
+      "shortName": "T. Evbuomwan",
+      "playerId": 1197249,
+      "playerDkId": 713827,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713827.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713827.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "0.5",
+          "sortValue": "0.5"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1197249-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325084,
+      "firstName": "Larry",
+      "lastName": "Nance Jr.",
+      "displayName": "Larry Nance Jr.",
+      "shortName": "L. Nance Jr.",
+      "playerId": 603640,
+      "playerDkId": 32984,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32984.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32984.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.6",
+          "sortValue": "10.6"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "603640-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325035,
+      "firstName": "Craig",
+      "lastName": "Porter Jr.",
+      "displayName": "Craig Porter Jr.",
+      "shortName": "C. Porter Jr.",
+      "playerId": 1236197,
+      "playerDkId": 713845,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713845.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713845.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.9",
+          "sortValue": "15.9"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1236197-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325036,
+      "firstName": "Trey",
+      "lastName": "Jemison",
+      "displayName": "Trey Jemison",
+      "shortName": "T. Jemison",
+      "playerId": 1132023,
+      "playerDkId": 717494,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/717494.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/717494.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.3",
+          "sortValue": "4.3"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1132023-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325037,
+      "firstName": "Luke",
+      "lastName": "Travers",
+      "displayName": "Luke Travers",
+      "shortName": "L. Travers",
+      "playerId": 1352114,
+      "playerDkId": 649708,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649708.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649708.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.7",
+          "sortValue": "7.7"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1352114-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325038,
+      "firstName": "Mohamed",
+      "lastName": "Diawara",
+      "displayName": "Mohamed Diawara",
+      "shortName": "M. Diawara",
+      "playerId": 1437712,
+      "playerDkId": 906387,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906387.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906387.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.1",
+          "sortValue": "3.1"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1437712-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325039,
+      "firstName": "Pacome",
+      "lastName": "Dadiet",
+      "displayName": "Pacome Dadiet",
+      "shortName": "P. Dadiet",
+      "playerId": 1500956,
+      "playerDkId": 800410,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800410.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800410.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.9",
+          "sortValue": "1.9"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1500956-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325040,
+      "firstName": "Chris",
+      "lastName": "Livingston",
+      "displayName": "Chris Livingston",
+      "shortName": "C. Livingston",
+      "playerId": 1408196,
+      "playerDkId": 713809,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713809.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713809.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.4",
+          "sortValue": "5.4"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1408196-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325041,
+      "firstName": "Kevin",
+      "lastName": "McCullar Jr.",
+      "displayName": "Kevin McCullar Jr.",
+      "shortName": "K. McCullar Jr.",
+      "playerId": 1156809,
+      "playerDkId": 799444,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/799444.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/799444.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.4",
+          "sortValue": "1.4"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1156809-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325042,
+      "firstName": "Tosan",
+      "lastName": "Evbuomwan",
+      "displayName": "Tosan Evbuomwan",
+      "shortName": "T. Evbuomwan",
+      "playerId": 1197249,
+      "playerDkId": 713827,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713827.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713827.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "0.5",
+          "sortValue": "0.5"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 18,
+      "teamAbbreviation": "NYK",
+      "draftAlerts": [],
+      "playerGameHash": "1197249-6127014",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41325050,
+      "firstName": "Larry",
+      "lastName": "Nance Jr.",
+      "displayName": "Larry Nance Jr.",
+      "shortName": "L. Nance Jr.",
+      "playerId": 603640,
+      "playerDkId": 32984,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32984.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32984.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127014,
+        "name": "CLE @ NYK",
+        "nameDisplay": [
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NYK"
+          }
+        ],
+        "startTime": "2025-12-25T17:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127014,
+          "name": "CLE @ NYK",
+          "nameDisplay": [
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NYK"
+            }
+          ],
+          "startTime": "2025-12-25T17:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.6",
+          "sortValue": "10.6"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "603640-6127014",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6127014,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 18,
+        "teamName": "Knicks",
+        "abbreviation": "NYK",
+        "city": "New York",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32940.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 5,
+        "teamName": "Cavaliers",
+        "abbreviation": "CLE",
+        "city": "Cleveland",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32908.png",
+        "darkModeImageUrl": ""
+      },
+      "startTime": "2025-12-25T17:00:00.0000000Z",
+      "name": "CLE @ NYK",
+      "venue": "Madison Square Garden",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 32,
+          "value": "ABC"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from unittest import mock
 
 import joblib
 import numpy as np
@@ -170,24 +172,28 @@ def test_score_minutes_v1_cli_writes_daily_artifacts(tmp_path):
     )
     schedule_df.to_parquet(month_dir / "schedule.parquet", index=False)
 
-    result = runner.invoke(
-        score_v1_app,
-        [
-            "--date",
-            "2025-12-01",
-            "--features-root",
-            str(features_root),
-            "--bundle-dir",
-            str(bundle_dir),
-            "--artifact-root",
-            str(daily_root),
-            "--injuries-root",
-            str(injuries_root),
-            "--schedule-root",
-            str(schedule_root),
-            "--disable-promotion-prior",
-        ],
-    )
+    # Clear FAIL_HARD env var to prevent guardrail exceptions on synthetic test data
+    env_override = {"PROJECTIONS_ROTALLOC_FAIL_HARD": ""}
+    with mock.patch.dict(os.environ, env_override, clear=False):
+        result = runner.invoke(
+            score_v1_app,
+            [
+                "--date",
+                "2025-12-01",
+                "--features-root",
+                str(features_root),
+                "--bundle-dir",
+                str(bundle_dir),
+                "--artifact-root",
+                str(daily_root),
+                "--injuries-root",
+                str(injuries_root),
+                "--schedule-root",
+                str(schedule_root),
+                "--disable-promotion-prior",
+            ],
+            env=env_override,
+        )
     assert result.exit_code == 0, result.output
 
     parquet_path = daily_root / "2025-12-01" / "minutes.parquet"

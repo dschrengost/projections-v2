@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import json
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,10 @@ from projections.sim_v2.minutes_noise import (
     enforce_team_240_minutes,
     load_minutes_noise_params,
     status_bucket_from_raw,
+)
+from projections.sim_v2.minutes_stabilization import (
+    apply_pre_sim_qp_reconcile,
+    sample_minutes_noise_per_world,
 )
 from projections.sim_v2.noise import load_rates_noise_params
 
@@ -1551,7 +1556,7 @@ def main(
         if use_minutes_noise_eff
         else profile_cfg.minutes_sigma_min
     )
-    seed_eff = seed if seed is not None else (profile_cfg.seed or 1234)
+    seed_eff = seed if seed is not None else (profile_cfg.seed if profile_cfg.seed is not None else int(time.time() % 2**31))
     min_play_prob_eff = min_play_prob if min_play_prob is not None else profile_cfg.min_play_prob
     team_factor_sigma_eff = team_factor_sigma if team_factor_sigma is not None else profile_cfg.team_factor_sigma
     worlds_per_chunk = max(1, (profile_cfg.worlds_batch_size or profile_cfg.worlds_per_chunk))
@@ -1875,7 +1880,7 @@ def main(
             minutes_alloc_metrics: dict[str, object] = {"minutes_alloc_mode": alloc_mode}
             eligible_flag_arr: np.ndarray | None = None
             max_rotation_size_eff: int | None = profile_cfg.max_rotation_size or DEFAULT_MAX_ROTATION_SIZE
-            if alloc_mode == "rotalloc_expk" and "eligible_flag" in mu_df.columns:
+            if alloc_mode in {"rotalloc_expk", "rotalloc_fringe_alpha", "share_with_rotalloc_elig"} and "eligible_flag" in mu_df.columns:
                 eligible_flag_arr = (
                     pd.to_numeric(mu_df["eligible_flag"], errors="coerce")
                     .fillna(0.0)
@@ -2014,6 +2019,56 @@ def main(
 
             stat_world_samples: dict[str, list[np.ndarray]] = {}
             active_mask_samples: list[np.ndarray] = []  # Track active masks for conditional aggregation
+
+            # Pre-sim QP reconciliation: when preserve_input_rotation=True and pre_sim_reconcile.enabled,
+            # run QP once before simulation to ensure team totals = 240.
+            # This replaces the per-world reconciliation in the sim loop.
+            use_pre_sim_reconcile = (
+                getattr(profile_cfg, "preserve_input_rotation", False)
+                and getattr(profile_cfg, "pre_sim_reconcile", None) is not None
+                and getattr(profile_cfg.pre_sim_reconcile, "enabled", False)
+            )
+            minutes_reconciled_arr: np.ndarray | None = None
+            if use_pre_sim_reconcile:
+                try:
+                    # Apply QP reconciliation to the minutes DataFrame
+                    reconcile_cfg = profile_cfg.pre_sim_reconcile
+                    reconciled_df = apply_pre_sim_qp_reconcile(
+                        mu_df,
+                        starter_weight=reconcile_cfg.starter_weight,
+                        minutes_weight_scale=reconcile_cfg.minutes_weight_scale,
+                    )
+                    # Use the reconciled minutes as the base for simulation
+                    if "minutes_p50" in reconciled_df.columns:
+                        minutes_reconciled_arr = reconciled_df["minutes_p50"].to_numpy(dtype=float)
+                        gs_minutes_p50 = minutes_reconciled_arr.copy()
+                        mu_df["minutes_mean"] = minutes_reconciled_arr
+                        typer.echo(
+                            f"[sim_v2] pre_sim_reconcile applied: "
+                            f"starter_weight={reconcile_cfg.starter_weight} "
+                            f"minutes_weight_scale={reconcile_cfg.minutes_weight_scale}"
+                        )
+                except Exception as exc:
+                    typer.echo(
+                        f"[sim_v2] warning: pre_sim_reconcile failed ({exc}); continuing without",
+                        err=True,
+                    )
+
+            # New structured minutes noise config (when preserve_input_rotation=True and minutes_noise_config.enabled)
+            # This replaces the legacy minutes noise + enforce_team_240 logic.
+            use_structured_minutes_noise = (
+                getattr(profile_cfg, "preserve_input_rotation", False)
+                and getattr(profile_cfg, "minutes_noise_config", None) is not None
+                and getattr(profile_cfg.minutes_noise_config, "enabled", False)
+            )
+            if use_structured_minutes_noise:
+                mnc = profile_cfg.minutes_noise_config
+                typer.echo(
+                    f"[sim_v2] structured minutes_noise enabled: "
+                    f"sigma_starter={mnc.sigma_starter} sigma_bench={mnc.sigma_bench} "
+                    f"min_minutes={mnc.min_minutes_for_noise} cap_abs={mnc.cap_abs}"
+                )
+
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
                 rng = np.random.default_rng(date_seed + chunk_start)
@@ -2028,13 +2083,51 @@ def main(
                 else:
                     # All players with play_prob > 0 are active; OUT players (play_prob=0) stay inactive
                     active_mask = np.broadcast_to(play_prob_arr > 0, (chunk_size, len(play_prob_arr)))
-                if eligible_flag_arr is not None:
+                if eligible_flag_arr is not None and not getattr(profile_cfg, 'preserve_input_rotation', False):
+                    # Only apply eligible_flag filtering when NOT preserving input rotation
+                    # sim_v3 with preserve_input_rotation=True skips this: RotAlloc already handled rotation
                     active_mask = active_mask & np.broadcast_to(eligible_flag_arr[None, :], active_mask.shape)
                 active_mask_samples.append(active_mask)
 
 
-                # 2. Sample minutes based on game script (script determines quantile position)
-                if use_game_scripts and game_script_config is not None:
+                # 2. Sample minutes based on game script OR structured minutes noise
+                if use_structured_minutes_noise:
+                    # New path: structured minutes noise with cheap team-240 projection.
+                    # When preserve_input_rotation=True, we skip the heavy per-world QP
+                    # and instead use fast bounded noise + team-240 projection.
+                    mnc = profile_cfg.minutes_noise_config
+                    minutes_worlds, noise_stats = sample_minutes_noise_per_world(
+                        minutes_reconciled=gs_minutes_p50,
+                        minutes_p10=gs_minutes_p10,
+                        minutes_p90=gs_minutes_p90,
+                        is_starter=gs_is_starter > 0,
+                        team_indices=team_indices,
+                        n_worlds=chunk_size,
+                        sigma_starter=mnc.sigma_starter,
+                        sigma_bench=mnc.sigma_bench,
+                        min_minutes_for_noise=mnc.min_minutes_for_noise,
+                        cap_abs=mnc.cap_abs,
+                        use_student_t=mnc.use_student_t,
+                        t_df=mnc.t_df,
+                        lo_source=mnc.lo_source,
+                        hi_source=mnc.hi_source,
+                        lo_pad=mnc.lo_pad,
+                        hi_pad=mnc.hi_pad,
+                        rng=rng,
+                    )
+                    # Log diagnostics on first chunk
+                    if chunk_start == 0:
+                        typer.echo(
+                            f"[sim_v2] minutes_noise stats: "
+                            f"max_delta_before={noise_stats.max_delta_before_projection:.2f} "
+                            f"mean_delta_before={noise_stats.mean_delta_before_projection:.3f} "
+                            f"frac_residual_push={noise_stats.frac_teams_residual_push:.4f} "
+                            f"sum_240_violations={noise_stats.sum_240_violations}"
+                        )
+                    # Zero out inactive players' minutes
+                    minutes_worlds = minutes_worlds * active_mask.astype(float)
+                    # No further reconciliation needed - team-240 already enforced
+                elif use_game_scripts and game_script_config is not None:
                     minutes_worlds = sample_minutes_with_scripts(
                         minutes_p10=gs_minutes_p10,
                         minutes_p50=gs_minutes_p50,
@@ -2049,6 +2142,29 @@ def main(
                         rng=rng,
                         rotation_p50_threshold=profile_cfg.game_script_rotation_threshold,
                     )
+                    # 3. Zero out inactive players' minutes (before reconciliation)
+                    minutes_worlds = minutes_worlds * active_mask.astype(float)
+
+                    # 4. Reconcile to 240 per team per world, considering only active players
+                    # When preserve_input_rotation is True, disable rotation cap (RotAlloc already handled it)
+                    max_rotation_size_for_enforce = None if getattr(profile_cfg, 'preserve_input_rotation', False) else max_rotation_size_eff
+                    if enforce_team_240 and n_teams > 0 and not getattr(profile_cfg, 'preserve_input_rotation', False):
+                        # Skip enforce_team_240 when preserve_input_rotation is True
+                        # (we already did pre-sim QP reconciliation)
+                        minutes_worlds = enforce_team_240_minutes(
+                            minutes_world=minutes_worlds,
+                            team_indices=team_indices,
+                            rotation_mask=rotation_mask,
+                            bench_mask=bench_mask,
+                            baseline_minutes=gs_minutes_p50,
+                            clamp_scale=(0.7, 1.3),
+                            active_mask=active_mask,
+                            starter_mask=gs_is_starter > 0,
+                            max_rotation_size=max_rotation_size_for_enforce,
+                            play_prob=play_prob_arr,
+                            rotation_prob=rot_prob_arr if "rotation_prob" in mu_df.columns else None,
+                            protected_rotation_size=getattr(profile_cfg, "protected_rotation_size", None),
+                        )
                 else:
                     # Fallback: sample minutes from per-player distribution.
                     z90 = 1.2815515655446004
@@ -2062,25 +2178,29 @@ def main(
                     sigma = np.where(z < 0.0, sigma_low[None, :], sigma_high[None, :])
                     minutes_worlds = np.maximum(p50[None, :] + z * sigma, 0.0)
 
-                # 3. Zero out inactive players' minutes (before reconciliation)
-                minutes_worlds = minutes_worlds * active_mask.astype(float)
+                    # 3. Zero out inactive players' minutes (before reconciliation)
+                    minutes_worlds = minutes_worlds * active_mask.astype(float)
 
-                # 4. Reconcile to 240 per team per world, considering only active players
-                if enforce_team_240 and n_teams > 0:
-                    minutes_worlds = enforce_team_240_minutes(
-                        minutes_world=minutes_worlds,
-                        team_indices=team_indices,
-                        rotation_mask=rotation_mask,
-                        bench_mask=bench_mask,
-                        baseline_minutes=gs_minutes_p50,
-                        clamp_scale=(0.7, 1.3),
-                        active_mask=active_mask,  # Pass active mask for proper redistribution
-                        starter_mask=gs_is_starter > 0,
-                        max_rotation_size=max_rotation_size_eff,
-                        play_prob=play_prob_arr,
-                        rotation_prob=rot_prob_arr if "rotation_prob" in mu_df.columns else None,
-                        protected_rotation_size=getattr(profile_cfg, "protected_rotation_size", None),
-                    )
+                    # 4. Reconcile to 240 per team per world, considering only active players
+                    # When preserve_input_rotation is True, disable rotation cap (RotAlloc already handled it)
+                    max_rotation_size_for_enforce = None if getattr(profile_cfg, 'preserve_input_rotation', False) else max_rotation_size_eff
+                    if enforce_team_240 and n_teams > 0 and not getattr(profile_cfg, 'preserve_input_rotation', False):
+                        # Skip enforce_team_240 when preserve_input_rotation is True
+                        # (we already did pre-sim QP reconciliation)
+                        minutes_worlds = enforce_team_240_minutes(
+                            minutes_world=minutes_worlds,
+                            team_indices=team_indices,
+                            rotation_mask=rotation_mask,
+                            bench_mask=bench_mask,
+                            baseline_minutes=gs_minutes_p50,
+                            clamp_scale=(0.7, 1.3),
+                            active_mask=active_mask,
+                            starter_mask=gs_is_starter > 0,
+                            max_rotation_size=max_rotation_size_for_enforce,
+                            play_prob=play_prob_arr,
+                            rotation_prob=rot_prob_arr if "rotation_prob" in mu_df.columns else None,
+                            protected_rotation_size=getattr(profile_cfg, "protected_rotation_size", None),
+                        )
                 minutes_world_samples.append(minutes_worlds)
 
                 stat_totals: dict[str, np.ndarray] = {}
@@ -2211,55 +2331,58 @@ def main(
                 n_worlds_total, n_players = all_fpts.shape
                 active_counts = all_active.sum(axis=0)  # worlds active per player
 
-                # Conditional mean: sum over active worlds / count of active worlds
-                fpts_sum = (all_fpts * all_active).sum(axis=0)
-                fpts_mean = np.where(active_counts > 0, fpts_sum / active_counts, 0.0)
+                # Suppress divide-by-zero warnings for OUT players with active_counts=0
+                # np.where handles these correctly (returns 0.0), but numpy still warns
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    # Conditional mean: sum over active worlds / count of active worlds
+                    fpts_sum = (all_fpts * all_active).sum(axis=0)
+                    fpts_mean = np.where(active_counts > 0, fpts_sum / active_counts, 0.0)
 
-                # Conditional std: std over active worlds only
-                fpts_sq_sum = ((all_fpts ** 2) * all_active).sum(axis=0)
-                fpts_var = np.where(
-                    active_counts > 1,
-                    (fpts_sq_sum / active_counts) - (fpts_mean ** 2),
-                    0.0
-                )
-                fpts_std = np.sqrt(np.maximum(fpts_var, 0.0))
-
-                # Conditional quantiles: compute per-player over active worlds only
-                quantiles = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
-                fpts_quantiles = np.zeros((len(quantiles), n_players))
-                for p in range(n_players):
-                    active_worlds_p = all_active[:, p]
-                    if active_worlds_p.sum() > 0:
-                        fpts_active = all_fpts[active_worlds_p, p]
-                        fpts_quantiles[:, p] = np.percentile(fpts_active, [q * 100 for q in quantiles])
-                    else:
-                        fpts_quantiles[:, p] = 0.0
-
-                # Conditional minutes statistics
-                if all_minutes is not None:
-                    minutes_sum = (all_minutes * all_active).sum(axis=0)
-                    minutes_mean = np.where(active_counts > 0, minutes_sum / active_counts, 0.0)
-                    minutes_sq_sum = ((all_minutes ** 2) * all_active).sum(axis=0)
-                    minutes_var = np.where(
+                    # Conditional std: std over active worlds only
+                    fpts_sq_sum = ((all_fpts ** 2) * all_active).sum(axis=0)
+                    fpts_var = np.where(
                         active_counts > 1,
-                        (minutes_sq_sum / active_counts) - (minutes_mean ** 2),
+                        (fpts_sq_sum / active_counts) - (fpts_mean ** 2),
                         0.0
                     )
-                    minutes_std = np.sqrt(np.maximum(minutes_var, 0.0))
+                    fpts_std = np.sqrt(np.maximum(fpts_var, 0.0))
 
-                    # Conditional minutes quantiles
-                    minutes_quantiles = np.zeros((3, n_players))
+                    # Conditional quantiles: compute per-player over active worlds only
+                    quantiles = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
+                    fpts_quantiles = np.zeros((len(quantiles), n_players))
                     for p in range(n_players):
                         active_worlds_p = all_active[:, p]
                         if active_worlds_p.sum() > 0:
-                            mins_active = all_minutes[active_worlds_p, p]
-                            minutes_quantiles[:, p] = np.percentile(mins_active, [10, 50, 90])
+                            fpts_active = all_fpts[active_worlds_p, p]
+                            fpts_quantiles[:, p] = np.percentile(fpts_active, [q * 100 for q in quantiles])
                         else:
-                            minutes_quantiles[:, p] = 0.0
-                else:
-                    minutes_mean = minutes_sim_base
-                    minutes_std = np.zeros_like(minutes_sim_base)
-                    minutes_quantiles = None
+                            fpts_quantiles[:, p] = 0.0
+
+                    # Conditional minutes statistics
+                    if all_minutes is not None:
+                        minutes_sum = (all_minutes * all_active).sum(axis=0)
+                        minutes_mean = np.where(active_counts > 0, minutes_sum / active_counts, 0.0)
+                        minutes_sq_sum = ((all_minutes ** 2) * all_active).sum(axis=0)
+                        minutes_var = np.where(
+                            active_counts > 1,
+                            (minutes_sq_sum / active_counts) - (minutes_mean ** 2),
+                            0.0
+                        )
+                        minutes_std = np.sqrt(np.maximum(minutes_var, 0.0))
+
+                        # Conditional minutes quantiles
+                        minutes_quantiles = np.zeros((3, n_players))
+                        for p in range(n_players):
+                            active_worlds_p = all_active[:, p]
+                            if active_worlds_p.sum() > 0:
+                                mins_active = all_minutes[active_worlds_p, p]
+                                minutes_quantiles[:, p] = np.percentile(mins_active, [10, 50, 90])
+                            else:
+                                minutes_quantiles[:, p] = 0.0
+                    else:
+                        minutes_mean = minutes_sim_base
+                        minutes_std = np.zeros_like(minutes_sim_base)
+                        minutes_quantiles = None
                 
                 # Build output projection DataFrame
                 proj_df = mu_df[["game_date", "game_id", "team_id", "player_id"]].copy()
@@ -2285,13 +2408,14 @@ def main(
                 proj_df["rates_run_id"] = rates_run_eff
                 
                 # Add individual stat means for dashboard diagnostics (CONDITIONAL)
-                for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
-                    if stat_name in stat_world_samples and stat_world_samples[stat_name]:
-                        all_stat = np.vstack(stat_world_samples[stat_name])
-                        # Conditional mean: only count worlds where player is active
-                        stat_sum = (all_stat * all_active).sum(axis=0)
-                        stat_mean = np.where(active_counts > 0, stat_sum / active_counts, 0.0)
-                        proj_df[f"{stat_name}_mean"] = stat_mean
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
+                        if stat_name in stat_world_samples and stat_world_samples[stat_name]:
+                            all_stat = np.vstack(stat_world_samples[stat_name])
+                            # Conditional mean: only count worlds where player is active
+                            stat_sum = (all_stat * all_active).sum(axis=0)
+                            stat_mean = np.where(active_counts > 0, stat_sum / active_counts, 0.0)
+                            proj_df[f"{stat_name}_mean"] = stat_mean
                 
                 # Add optional columns
                 for extra in ("is_starter", "play_prob"):
@@ -2300,12 +2424,13 @@ def main(
                 
                 # Add attempt means for diagnostics (when --export-attempt-means is set)
                 if export_attempt_means:
-                    for stat_name in ("fga2", "fga3", "fta"):
-                        if stat_name in stat_world_samples and stat_world_samples[stat_name]:
-                            all_stat = np.vstack(stat_world_samples[stat_name])
-                            stat_sum = (all_stat * all_active).sum(axis=0)
-                            stat_mean = np.where(active_counts > 0, stat_sum / active_counts, 0.0)
-                            proj_df[f"{stat_name}_mean"] = stat_mean
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        for stat_name in ("fga2", "fga3", "fta"):
+                            if stat_name in stat_world_samples and stat_world_samples[stat_name]:
+                                all_stat = np.vstack(stat_world_samples[stat_name])
+                                stat_sum = (all_stat * all_active).sum(axis=0)
+                                stat_mean = np.where(active_counts > 0, stat_sum / active_counts, 0.0)
+                                proj_df[f"{stat_name}_mean"] = stat_mean
                     # Also add vacancy cols if present
                     for vac_col in ["vac_min_szn", "vac_fga_szn"]:
                         if vac_col in mu_df.columns:
@@ -2323,6 +2448,8 @@ def main(
                         "n_worlds": int(n_worlds_eff),
                         "minutes_run_id": minutes_run_eff,
                         "rates_run_id": rates_run_eff,
+                        "minutes_column_used": minutes_col,
+                        "preserve_input_rotation": getattr(profile_cfg, 'preserve_input_rotation', False),
                     }
                     metrics_payload.update(minutes_alloc_metrics)
                     (out_dir / "metrics.json").write_text(
@@ -2331,6 +2458,113 @@ def main(
                     )
                 except Exception as exc:
                     typer.echo(f"[sim_v2] warning: failed to write metrics.json ({exc})", err=True)
+
+                # === SIM DIAGNOSTICS: active counts, minute comparisons, guardrails ===
+                try:
+                    # Compute per-team-game diagnostics
+                    team_game_diag = []
+                    for (gid, tid), player_idxs in group_map.items():
+                        player_idxs_arr = np.array(player_idxs, dtype=int)
+                        n_players_team = len(player_idxs_arr)
+                        
+                        # Active counts per player (worlds where active)
+                        team_active_counts = active_counts[player_idxs_arr]
+                        min_active_counts = int(team_active_counts.min()) if len(team_active_counts) else 0
+                        
+                        # Per-world: count active players in team
+                        team_active_per_world = all_active[:, player_idxs_arr].sum(axis=1)  # (n_worlds,)
+                        pct_worlds_zero_active = float((team_active_per_world == 0).sum()) / n_worlds_total * 100
+                        
+                        # Minutes sums
+                        team_minutes_sim = minutes_mean[player_idxs_arr]
+                        team_minutes_input = gs_minutes_p50[player_idxs_arr]
+                        
+                        team_game_diag.append({
+                            "game_id": int(gid),
+                            "team_id": int(tid),
+                            "n_players": n_players_team,
+                            "n_active_mean": float(team_active_per_world.mean()),
+                            "sum_minutes_input": float(team_minutes_input.sum()),
+                            "sum_minutes_sim_mean": float(team_minutes_sim.sum()),
+                            "min_active_counts_player": min_active_counts,
+                            "pct_worlds_zero_active": round(pct_worlds_zero_active, 4),
+                        })
+                    
+                    # Global minute comparisons
+                    max_minutes_input = float(gs_minutes_p50.max()) if len(gs_minutes_p50) else 0.0
+                    max_minutes_sim = float(minutes_mean.max()) if len(minutes_mean) else 0.0
+                    p95_minutes_input = float(np.percentile(gs_minutes_p50, 95)) if len(gs_minutes_p50) else 0.0
+                    p95_minutes_sim = float(np.percentile(minutes_mean, 95)) if len(minutes_mean) else 0.0
+                    p99_minutes_input = float(np.percentile(gs_minutes_p50, 99)) if len(gs_minutes_p50) else 0.0
+                    p99_minutes_sim = float(np.percentile(minutes_mean, 99)) if len(minutes_mean) else 0.0
+                    
+                    # Per-team scale factor
+                    team_scale_factors = []
+                    for tg in team_game_diag:
+                        if tg["sum_minutes_input"] > 0:
+                            scale = tg["sum_minutes_sim_mean"] / tg["sum_minutes_input"]
+                            team_scale_factors.append(scale)
+                    
+                    # Guardrail checks
+                    any_zero_active = any(tg["pct_worlds_zero_active"] > 0 for tg in team_game_diag)
+                    max_minutes_exceeded = max_minutes_sim > max_minutes_input + 2.0
+                    p95_exceeded = p95_minutes_sim > p95_minutes_input + 1.0
+                    
+                    diagnostics_payload = {
+                        "game_date": pd.Timestamp(game_date).date().isoformat(),
+                        "sim_profile": profile_cfg.name,
+                        "n_worlds": int(n_worlds_eff),
+                        "minutes_column_used": minutes_col,
+                        "preserve_input_rotation": getattr(profile_cfg, 'preserve_input_rotation', False),
+                        "global_minutes": {
+                            "max_input_p50": round(max_minutes_input, 2),
+                            "max_sim_mean": round(max_minutes_sim, 2),
+                            "p95_input_p50": round(p95_minutes_input, 2),
+                            "p95_sim_mean": round(p95_minutes_sim, 2),
+                            "p99_input_p50": round(p99_minutes_input, 2),
+                            "p99_sim_mean": round(p99_minutes_sim, 2),
+                        },
+                        "team_scale_factors": {
+                            "min": round(min(team_scale_factors), 4) if team_scale_factors else None,
+                            "max": round(max(team_scale_factors), 4) if team_scale_factors else None,
+                            "mean": round(float(np.mean(team_scale_factors)), 4) if team_scale_factors else None,
+                        },
+                        "guardrails": {
+                            "any_zero_active_worlds": any_zero_active,
+                            "max_minutes_exceeded_threshold": max_minutes_exceeded,
+                            "p95_exceeded_threshold": p95_exceeded,
+                        },
+                        "team_game_details": team_game_diag,
+                    }
+                    
+                    (out_dir / "sim_diagnostics.json").write_text(
+                        json.dumps(diagnostics_payload, indent=2),
+                        encoding="utf-8",
+                    )
+                    
+                    # Guardrail logging/failure
+                    if any_zero_active:
+                        fail_hard = os.environ.get("PROJECTIONS_SIM_FAIL_HARD", "0") == "1"
+                        teams_with_zero = [tg for tg in team_game_diag if tg["pct_worlds_zero_active"] > 0]
+                        msg = f"[sim_v2] WARNING: {len(teams_with_zero)} team-games have worlds with zero active players"
+                        typer.echo(msg, err=True)
+                        if fail_hard:
+                            raise RuntimeError(msg)
+                    
+                    if max_minutes_exceeded:
+                        typer.echo(
+                            f"[sim_v2] WARNING: max sim minutes ({max_minutes_sim:.1f}) exceeds input ({max_minutes_input:.1f}) + 2.0",
+                            err=True,
+                        )
+                    
+                    if p95_exceeded:
+                        typer.echo(
+                            f"[sim_v2] WARNING: p95 sim minutes ({p95_minutes_sim:.1f}) exceeds input ({p95_minutes_input:.1f}) + 1.0",
+                            err=True,
+                        )
+                    
+                except Exception as exc:
+                    typer.echo(f"[sim_v2] warning: failed to write sim_diagnostics.json ({exc})", err=True)
 
                 # Also persist the full per-player worlds matrix for downstream consumers
                 # (e.g., contest simulation). This is much smaller than writing one parquet

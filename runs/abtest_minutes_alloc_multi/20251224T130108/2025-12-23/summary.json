@@ -1,0 +1,125 @@
+{
+  "game_date": "2025-12-23",
+  "timestamp": "2025-12-24T13:01:08.438838",
+  "quality_tier": "clean",
+  "missing_feature_frac": 0.0,
+  "n_expected_features": 58,
+  "n_missing_features": 0,
+  "integrity_counts": {
+    "n_players": 492,
+    "n_games": 14,
+    "n_teams": 28
+  },
+  "config": {
+    "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/experiments/lgbm_rotalloc_final_v1",
+    "features_path": "/home/daniel/projections-data/live/features_minutes_v1/2025-12-23/run=20251224T045508Z/features.parquet",
+    "shares_col": "normalized_share",
+    "cap_max": 48.0,
+    "k_core": 8,
+    "use_share_model": true
+  },
+  "metrics": {
+    "team_sum_error_max_A": 2.842170943040401e-14,
+    "team_sum_error_mean_A": 1.4210854715202004e-14,
+    "team_sum_error_max_B": 2.842170943040401e-14,
+    "team_sum_error_mean_B": 1.4210854715202004e-14,
+    "p95_minutes_A": 33.366881255903074,
+    "p99_minutes_A": 38.293702213943114,
+    "p95_minutes_B": 32.4118274195899,
+    "p99_minutes_B": 36.522164489312075,
+    "frac_ge_42_A": 0.0,
+    "frac_ge_44_A": 0.0,
+    "frac_ge_42_B": 0.0,
+    "frac_ge_44_B": 0.0,
+    "gini_mean_A": 0.44137876364726186,
+    "gini_mean_B": 0.17118536957300182,
+    "roster_size_mean_A": 17.321428571428573,
+    "roster_size_mean_B": 10.928571428571429,
+    "bench_max_mean_A": 9.307684178141773,
+    "bench_max_mean_B": 14.631114369385983,
+    "delta_mean": -4.332577657073782e-17,
+    "delta_std": 4.993165811048979,
+    "delta_abs_mean": 4.059317694186061,
+    "delta_abs_max": 16.7614522580991,
+    "n_players": 492,
+    "n_teams": 28,
+    "mae_A": 7.139815859109228,
+    "rmse_A": 9.633955169579577,
+    "mae_B": 6.588987232502251,
+    "rmse_B": 9.429866609181127,
+    "mae_by_bucket_A": {
+      "0-10": 6.818770197866677,
+      "10-20": 7.619982651349103,
+      "20-30": 7.879759565328698,
+      "30+": 6.5643276071586145
+    },
+    "mae_by_bucket_B": {
+      "0-10": 6.681009339246723,
+      "10-20": 8.067437227368528,
+      "20-30": 6.453331162548541,
+      "30+": 5.129415785337206
+    },
+    "mae_C": 7.233444091876678,
+    "rmse_C": 10.507850348511772,
+    "mae_by_bucket_C": {
+      "0-10": 6.327470016856957,
+      "10-20": 9.807090110006156,
+      "20-30": 8.484576998547512,
+      "30+": 5.744211916544101
+    },
+    "team_sum_error_max_C": 2.842170943040401e-14,
+    "team_sum_error_mean_C": 1.4210854715202004e-14,
+    "gini_mean_C": 0.2739253418341518,
+    "roster_size_mean_C": 10.928571428571429,
+    "bench_max_mean_C": 9.793019951683744
+  },
+  "starter_realism_A": {
+    "top5_sum_mean": 143.7172874682286,
+    "top5_sum_std": 9.604353528321557,
+    "max_minutes_mean": 34.77821713458318,
+    "max_minutes_std": 3.2137813059043823
+  },
+  "starter_realism_B": {
+    "top5_sum_mean": 144.37836345473525,
+    "top5_sum_std": 8.933989820987005,
+    "max_minutes_mean": 32.32584192660816,
+    "max_minutes_std": 2.0111540024676526
+  },
+  "starter_realism_C": {
+    "top5_sum_mean": 160.0020364324051,
+    "top5_sum_std": 9.094330829488488,
+    "max_minutes_mean": 38.73824077802784,
+    "max_minutes_std": 3.5468692915516775
+  },
+  "diagnostics_A": {
+    "n_teams": 28,
+    "n_players": 492,
+    "n_eligible": 492,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 5.684341886080802e-14,
+    "pre_cap_minutes_p95": 33.366881255903074,
+    "post_cap_minutes_p95": 33.366881255903074
+  },
+  "diagnostics_C": {
+    "n_teams": 28,
+    "n_players": 492,
+    "n_eligible": 492,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 2.842170943040401e-14,
+    "pre_cap_minutes_p95": 37.181790156578266,
+    "post_cap_minutes_p95": 37.181790156578266
+  },
+  "diagnostics_B": {
+    "eligible_size_p50": 11.0,
+    "eligible_size_p90": 11.0,
+    "fallback_top1_used": 0,
+    "cutoff_empty_events": 0,
+    "team_sum_dev_max": 5.684341886080802e-14
+  }
+}

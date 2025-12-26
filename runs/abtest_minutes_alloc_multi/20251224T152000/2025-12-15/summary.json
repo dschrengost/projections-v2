@@ -1,0 +1,125 @@
+{
+  "game_date": "2025-12-15",
+  "timestamp": "2025-12-24T15:20:02.537079",
+  "quality_tier": "clean",
+  "missing_feature_frac": 0.0,
+  "n_expected_features": 58,
+  "n_missing_features": 0,
+  "integrity_counts": {
+    "n_players": 174,
+    "n_games": 5,
+    "n_teams": 10
+  },
+  "config": {
+    "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/experiments/lgbm_rotalloc_final_v1",
+    "features_path": "/home/daniel/projections-data/live/features_minutes_v1/2025-12-15/run=20251224T150640Z_rebuild_contract/features.parquet",
+    "shares_col": "normalized_share",
+    "cap_max": 48.0,
+    "k_core": 8,
+    "use_share_model": true
+  },
+  "metrics": {
+    "team_sum_error_max_A": 2.842170943040401e-14,
+    "team_sum_error_mean_A": 1.4210854715202004e-14,
+    "team_sum_error_max_B": 2.842170943040401e-14,
+    "team_sum_error_mean_B": 1.4210854715202004e-14,
+    "p95_minutes_A": 35.97026418020235,
+    "p99_minutes_A": 42.84080946214756,
+    "p95_minutes_B": 31.65341046542267,
+    "p99_minutes_B": 32.81212365946332,
+    "frac_ge_42_A": 0.011494252873563218,
+    "frac_ge_44_A": 0.005747126436781609,
+    "frac_ge_42_B": 0.0,
+    "frac_ge_44_B": 0.0,
+    "gini_mean_A": 0.34763736927861466,
+    "gini_mean_B": 0.17183248103079513,
+    "roster_size_mean_A": 12.9,
+    "roster_size_mean_B": 11.0,
+    "bench_max_mean_A": 9.071349082719385,
+    "bench_max_mean_B": 14.817695738998333,
+    "delta_mean": -3.879399994092501e-16,
+    "delta_std": 4.79873296003397,
+    "delta_abs_mean": 3.5165552688314152,
+    "delta_abs_max": 13.103797931641633,
+    "n_players": 174,
+    "n_teams": 10,
+    "mae_A": 4.8795240806030105,
+    "rmse_A": 6.887039304193434,
+    "mae_B": 5.10895251926969,
+    "rmse_B": 7.814064894282135,
+    "mae_by_bucket_A": {
+      "0-10": 3.070510835977073,
+      "10-20": 5.497642024420396,
+      "20-30": 7.1737394547971665,
+      "30+": 6.721764752410784
+    },
+    "mae_by_bucket_B": {
+      "0-10": 3.9181819884093683,
+      "10-20": 3.6404609357992097,
+      "20-30": 5.910035509669142,
+      "30+": 8.144488652420623
+    },
+    "mae_C": 4.5386269065631355,
+    "rmse_C": 6.927133086822735,
+    "mae_by_bucket_C": {
+      "0-10": 2.363532723483404,
+      "10-20": 6.012829268483943,
+      "20-30": 7.262653549963252,
+      "30+": 6.2867616495089225
+    },
+    "team_sum_error_max_C": 2.842170943040401e-14,
+    "team_sum_error_mean_C": 1.4210854715202004e-14,
+    "gini_mean_C": 0.3008978968598597,
+    "roster_size_mean_C": 11.0,
+    "bench_max_mean_C": 9.168307470751031
+  },
+  "starter_realism_A": {
+    "top5_sum_mean": 159.32682760297013,
+    "top5_sum_std": 5.480436340210732,
+    "max_minutes_mean": 37.72105642148597,
+    "max_minutes_std": 3.9050576806424084
+  },
+  "starter_realism_B": {
+    "top5_sum_mean": 146.00067818616094,
+    "top5_sum_std": 3.5370437753368025,
+    "max_minutes_mean": 31.32550831336716,
+    "max_minutes_std": 0.9668865361929192
+  },
+  "starter_realism_C": {
+    "top5_sum_mean": 166.52184315896653,
+    "top5_sum_std": 4.790085291273258,
+    "max_minutes_mean": 39.44530893507161,
+    "max_minutes_std": 4.2214477797036585
+  },
+  "diagnostics_A": {
+    "n_teams": 10,
+    "n_players": 174,
+    "n_eligible": 129,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 5.684341886080802e-14,
+    "pre_cap_minutes_p95": 35.97026418020235,
+    "post_cap_minutes_p95": 35.97026418020235
+  },
+  "diagnostics_C": {
+    "n_teams": 10,
+    "n_players": 174,
+    "n_eligible": 129,
+    "fallback_count": 0,
+    "fallback_teams": [],
+    "cap_applied_count": 0,
+    "redistribution_rounds_max": 0,
+    "team_sum_dev_max": 2.842170943040401e-14,
+    "pre_cap_minutes_p95": 38.704861666459756,
+    "post_cap_minutes_p95": 38.704861666459756
+  },
+  "diagnostics_B": {
+    "eligible_size_p50": 11.0,
+    "eligible_size_p90": 11.0,
+    "fallback_top1_used": 0,
+    "cutoff_empty_events": 0,
+    "team_sum_dev_max": 2.842170943040401e-14
+  }
+}

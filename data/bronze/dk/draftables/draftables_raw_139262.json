@@ -1,0 +1,3277 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41280434,
+      "firstName": "Nikola",
+      "lastName": "Jokic",
+      "displayName": "Nikola Jokic",
+      "shortName": "N. Jokic",
+      "playerId": 830650,
+      "playerDkId": 33018,
+      "position": "C",
+      "rosterSlotId": 415,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33018.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33018.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130890,
+        "name": "UTA @ DEN",
+        "nameDisplay": [
+          {
+            "value": "UTA"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T02:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130890,
+          "name": "UTA @ DEN",
+          "nameDisplay": [
+            {
+              "value": "UTA"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T02:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "66.9",
+          "sortValue": "66.9"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "830650-6130890",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280435,
+      "firstName": "Shai",
+      "lastName": "Gilgeous-Alexander",
+      "displayName": "Shai Gilgeous-Alexander",
+      "shortName": "S. Gilgeous-Alexander",
+      "playerId": 1067856,
+      "playerDkId": 33258,
+      "position": "PG",
+      "rosterSlotId": 415,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33258.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33258.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6134088,
+        "name": "MEM @ OKC",
+        "nameDisplay": [
+          {
+            "value": "MEM"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6134088,
+          "name": "MEM @ OKC",
+          "nameDisplay": [
+            {
+              "value": "MEM"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "52.8",
+          "sortValue": "52.8"
+        },
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1067856-6134088",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280436,
+      "firstName": "Cade",
+      "lastName": "Cunningham",
+      "displayName": "Cade Cunningham",
+      "shortName": "C. Cunningham",
+      "playerId": 1232182,
+      "playerDkId": 590962,
+      "position": "PG",
+      "rosterSlotId": 415,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590962.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590962.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6131304,
+        "name": "DET @ POR",
+        "nameDisplay": [
+          {
+            "value": "DET",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "POR"
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6131304,
+          "name": "DET @ POR",
+          "nameDisplay": [
+            {
+              "value": "DET",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "POR"
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "53.7",
+          "sortValue": "53.7"
+        },
+        {
+          "id": -2,
+          "value": "29th",
+          "sortValue": "29",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 8,
+      "teamAbbreviation": "DET",
+      "draftAlerts": [],
+      "playerGameHash": "1232182-6131304",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280437,
+      "firstName": "Deni",
+      "lastName": "Avdija",
+      "displayName": "Deni Avdija",
+      "shortName": "D. Avdija",
+      "playerId": 1257422,
+      "playerDkId": 527254,
+      "position": "PG/SF",
+      "rosterSlotId": 415,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527254.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527254.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6131304,
+        "name": "DET @ POR",
+        "nameDisplay": [
+          {
+            "value": "DET"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "POR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6131304,
+          "name": "DET @ POR",
+          "nameDisplay": [
+            {
+              "value": "DET"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "POR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "46.9",
+          "sortValue": "46.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 22,
+      "teamAbbreviation": "POR",
+      "draftAlerts": [],
+      "playerGameHash": "1257422-6131304",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280438,
+      "firstName": "Donovan",
+      "lastName": "Mitchell",
+      "displayName": "Donovan Mitchell",
+      "shortName": "D. Mitchell",
+      "playerId": 879707,
+      "playerDkId": 33398,
+      "position": "SG",
+      "rosterSlotId": 416,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33398.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33398.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129468,
+        "name": "CHA @ CLE",
+        "nameDisplay": [
+          {
+            "value": "CHA"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129468,
+          "name": "CHA @ CLE",
+          "nameDisplay": [
+            {
+              "value": "CHA"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "48.4",
+          "sortValue": "48.4"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "879707-6129468",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280439,
+      "firstName": "Jaylen",
+      "lastName": "Brown",
+      "displayName": "Jaylen Brown",
+      "shortName": "J. Brown",
+      "playerId": 883436,
+      "playerDkId": 32872,
+      "position": "SF",
+      "rosterSlotId": 416,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32872.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32872.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127908,
+        "name": "IND @ BOS",
+        "nameDisplay": [
+          {
+            "value": "IND"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T00:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127908,
+          "name": "IND @ BOS",
+          "nameDisplay": [
+            {
+              "value": "IND"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T00:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "47.3",
+          "sortValue": "47.3"
+        },
+        {
+          "id": -2,
+          "value": "13th",
+          "sortValue": "13",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "883436-6127908",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280440,
+      "firstName": "Anthony",
+      "lastName": "Davis",
+      "displayName": "Anthony Davis",
+      "shortName": "A. Davis",
+      "playerId": 603096,
+      "playerDkId": 33122,
+      "position": "PF/C",
+      "rosterSlotId": 416,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33122.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33122.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133662,
+        "name": "DAL @ NOP",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NOP"
+          }
+        ],
+        "startTime": "2025-12-23T01:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133662,
+          "name": "DAL @ NOP",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NOP"
+            }
+          ],
+          "startTime": "2025-12-23T01:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "44.5",
+          "sortValue": "44.5"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "603096-6133662",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280441,
+      "firstName": "Stephen",
+      "lastName": "Curry",
+      "displayName": "Stephen Curry",
+      "shortName": "S. Curry",
+      "playerId": 338365,
+      "playerDkId": 33049,
+      "position": "PG",
+      "rosterSlotId": 416,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33049.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33049.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129024,
+        "name": "ORL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129024,
+          "name": "ORL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "45.1",
+          "sortValue": "45.1"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "338365-6129024",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280442,
+      "firstName": "Paolo",
+      "lastName": "Banchero",
+      "displayName": "Paolo Banchero",
+      "shortName": "P. Banchero",
+      "playerId": 1323993,
+      "playerDkId": 649544,
+      "position": "PF",
+      "rosterSlotId": 416,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649544.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649544.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129024,
+        "name": "ORL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129024,
+          "name": "ORL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "40.7",
+          "sortValue": "40.7"
+        },
+        {
+          "id": -2,
+          "value": "21st",
+          "sortValue": "21",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1323993-6129024",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280443,
+      "firstName": "Jamal",
+      "lastName": "Murray",
+      "displayName": "Jamal Murray",
+      "shortName": "J. Murray",
+      "playerId": 891352,
+      "playerDkId": 33019,
+      "position": "PG",
+      "rosterSlotId": 417,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33019.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33019.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130890,
+        "name": "UTA @ DEN",
+        "nameDisplay": [
+          {
+            "value": "UTA"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T02:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130890,
+          "name": "UTA @ DEN",
+          "nameDisplay": [
+            {
+              "value": "UTA"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T02:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.7",
+          "sortValue": "43.7"
+        },
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 7,
+      "teamAbbreviation": "DEN",
+      "draftAlerts": [],
+      "playerGameHash": "891352-6130890",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280444,
+      "firstName": "LaMelo",
+      "lastName": "Ball",
+      "displayName": "LaMelo Ball",
+      "shortName": "L. Ball",
+      "playerId": 1257420,
+      "playerDkId": 527219,
+      "position": "PG",
+      "rosterSlotId": 417,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527219.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527219.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129468,
+        "name": "CHA @ CLE",
+        "nameDisplay": [
+          {
+            "value": "CHA",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "CLE"
+          }
+        ],
+        "startTime": "2025-12-23T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129468,
+          "name": "CHA @ CLE",
+          "nameDisplay": [
+            {
+              "value": "CHA",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "CLE"
+            }
+          ],
+          "startTime": "2025-12-23T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "42.3",
+          "sortValue": "42.3"
+        },
+        {
+          "id": -2,
+          "value": "12th",
+          "sortValue": "12",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5312,
+      "teamAbbreviation": "CHA",
+      "draftAlerts": [],
+      "playerGameHash": "1257420-6129468",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280445,
+      "firstName": "Pascal",
+      "lastName": "Siakam",
+      "displayName": "Pascal Siakam",
+      "shortName": "P. Siakam",
+      "playerId": 853408,
+      "playerDkId": 33379,
+      "position": "PF",
+      "rosterSlotId": 417,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33379.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33379.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127908,
+        "name": "IND @ BOS",
+        "nameDisplay": [
+          {
+            "value": "IND",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "BOS"
+          }
+        ],
+        "startTime": "2025-12-23T00:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127908,
+          "name": "IND @ BOS",
+          "nameDisplay": [
+            {
+              "value": "IND",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "BOS"
+            }
+          ],
+          "startTime": "2025-12-23T00:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "41.9",
+          "sortValue": "41.9"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 11,
+      "teamAbbreviation": "IND",
+      "draftAlerts": [],
+      "playerGameHash": "853408-6127908",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280446,
+      "firstName": "Keyonte",
+      "lastName": "George",
+      "displayName": "Keyonte George",
+      "shortName": "K. George",
+      "playerId": 1408151,
+      "playerDkId": 713769,
+      "position": "PG",
+      "rosterSlotId": 417,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713769.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713769.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130890,
+        "name": "UTA @ DEN",
+        "nameDisplay": [
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-23T02:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130890,
+          "name": "UTA @ DEN",
+          "nameDisplay": [
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-23T02:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "41.3",
+          "sortValue": "41.3"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "1408151-6130890",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280447,
+      "firstName": "Jalen",
+      "lastName": "Williams",
+      "displayName": "Jalen Williams",
+      "shortName": "J. Williams",
+      "playerId": 1182404,
+      "playerDkId": 649561,
+      "position": "SF",
+      "rosterSlotId": 417,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649561.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649561.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6134088,
+        "name": "MEM @ OKC",
+        "nameDisplay": [
+          {
+            "value": "MEM"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6134088,
+          "name": "MEM @ OKC",
+          "nameDisplay": [
+            {
+              "value": "MEM"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.3",
+          "sortValue": "36.3"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1182404-6134088",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280448,
+      "firstName": "Ja",
+      "lastName": "Morant",
+      "displayName": "Ja Morant",
+      "shortName": "J. Morant",
+      "playerId": 1065906,
+      "playerDkId": 33147,
+      "position": "PG",
+      "rosterSlotId": 417,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33147.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33147.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6134088,
+        "name": "MEM @ OKC",
+        "nameDisplay": [
+          {
+            "value": "MEM",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "OKC"
+          }
+        ],
+        "startTime": "2025-12-23T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6134088,
+          "name": "MEM @ OKC",
+          "nameDisplay": [
+            {
+              "value": "MEM",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "OKC"
+            }
+          ],
+          "startTime": "2025-12-23T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "34.7",
+          "sortValue": "34.7"
+        },
+        {
+          "id": -2,
+          "value": "2nd",
+          "sortValue": "2",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 29,
+      "teamAbbreviation": "MEM",
+      "draftAlerts": [],
+      "playerGameHash": "1065906-6134088",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280449,
+      "firstName": "Lauri",
+      "lastName": "Markkanen",
+      "displayName": "Lauri Markkanen",
+      "shortName": "L. Markkanen",
+      "playerId": 949131,
+      "playerDkId": 32970,
+      "position": "PF",
+      "rosterSlotId": 418,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32970.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32970.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6130890,
+        "name": "UTA @ DEN",
+        "nameDisplay": [
+          {
+            "value": "UTA",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "DEN"
+          }
+        ],
+        "startTime": "2025-12-23T02:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6130890,
+          "name": "UTA @ DEN",
+          "nameDisplay": [
+            {
+              "value": "UTA",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "DEN"
+            }
+          ],
+          "startTime": "2025-12-23T02:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.4",
+          "sortValue": "43.4"
+        },
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 26,
+      "teamAbbreviation": "UTA",
+      "draftAlerts": [],
+      "playerGameHash": "949131-6130890",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280450,
+      "firstName": "Jimmy",
+      "lastName": "Butler",
+      "displayName": "Jimmy Butler",
+      "shortName": "J. Butler",
+      "playerId": 458730,
+      "playerDkId": 33155,
+      "position": "SF/PF",
+      "rosterSlotId": 418,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33155.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33155.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129024,
+        "name": "ORL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "ORL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129024,
+          "name": "ORL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "ORL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.4",
+          "sortValue": "37.4"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "458730-6129024",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280451,
+      "firstName": "Jaren",
+      "lastName": "Jackson Jr.",
+      "displayName": "Jaren Jackson Jr.",
+      "shortName": "J. Jackson Jr.",
+      "playerId": 1078662,
+      "playerDkId": 33142,
+      "position": "PF/C",
+      "rosterSlotId": 418,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33142.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33142.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6134088,
+        "name": "MEM @ OKC",
+        "nameDisplay": [
+          {
+            "value": "MEM",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "OKC"
+          }
+        ],
+        "startTime": "2025-12-23T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6134088,
+          "name": "MEM @ OKC",
+          "nameDisplay": [
+            {
+              "value": "MEM",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "OKC"
+            }
+          ],
+          "startTime": "2025-12-23T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.7",
+          "sortValue": "31.7"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 29,
+      "teamAbbreviation": "MEM",
+      "draftAlerts": [],
+      "playerGameHash": "1078662-6134088",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280452,
+      "firstName": "Desmond",
+      "lastName": "Bane",
+      "displayName": "Desmond Bane",
+      "shortName": "D. Bane",
+      "playerId": 944263,
+      "playerDkId": 527237,
+      "position": "SG",
+      "rosterSlotId": 418,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527237.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527237.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129024,
+        "name": "ORL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129024,
+          "name": "ORL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.6",
+          "sortValue": "33.6"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "944263-6129024",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280453,
+      "firstName": "Miles",
+      "lastName": "Bridges",
+      "displayName": "Miles Bridges",
+      "shortName": "M. Bridges",
+      "playerId": 957479,
+      "playerDkId": 32946,
+      "position": "PF",
+      "rosterSlotId": 418,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32946.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32946.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129468,
+        "name": "CHA @ CLE",
+        "nameDisplay": [
+          {
+            "value": "CHA",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "CLE"
+          }
+        ],
+        "startTime": "2025-12-23T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129468,
+          "name": "CHA @ CLE",
+          "nameDisplay": [
+            {
+              "value": "CHA",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "CLE"
+            }
+          ],
+          "startTime": "2025-12-23T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.0",
+          "sortValue": "37.0"
+        },
+        {
+          "id": -2,
+          "value": "19th",
+          "sortValue": "19",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5312,
+      "teamAbbreviation": "CHA",
+      "draftAlerts": [],
+      "playerGameHash": "957479-6129468",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280454,
+      "firstName": "Derrick",
+      "lastName": "White",
+      "displayName": "Derrick White",
+      "shortName": "D. White",
+      "playerId": 796009,
+      "playerDkId": 33364,
+      "position": "PG/SG",
+      "rosterSlotId": 418,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33364.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33364.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127908,
+        "name": "IND @ BOS",
+        "nameDisplay": [
+          {
+            "value": "IND"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T00:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127908,
+          "name": "IND @ BOS",
+          "nameDisplay": [
+            {
+              "value": "IND"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T00:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.2",
+          "sortValue": "37.2"
+        },
+        {
+          "id": -2,
+          "value": "25th",
+          "sortValue": "25",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "796009-6127908",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280455,
+      "firstName": "Chet",
+      "lastName": "Holmgren",
+      "displayName": "Chet Holmgren",
+      "shortName": "C. Holmgren",
+      "playerId": 1343009,
+      "playerDkId": 649545,
+      "position": "PF",
+      "rosterSlotId": 418,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649545.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649545.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6134088,
+        "name": "MEM @ OKC",
+        "nameDisplay": [
+          {
+            "value": "MEM"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "OKC",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6134088,
+          "name": "MEM @ OKC",
+          "nameDisplay": [
+            {
+              "value": "MEM"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "OKC",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "35.0",
+          "sortValue": "35.0"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 25,
+      "teamAbbreviation": "OKC",
+      "draftAlerts": [],
+      "playerGameHash": "1343009-6134088",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280456,
+      "firstName": "Darius",
+      "lastName": "Garland",
+      "displayName": "Darius Garland",
+      "shortName": "D. Garland",
+      "playerId": 1134262,
+      "playerDkId": 32989,
+      "position": "PG",
+      "rosterSlotId": 419,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32989.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32989.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129468,
+        "name": "CHA @ CLE",
+        "nameDisplay": [
+          {
+            "value": "CHA"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129468,
+          "name": "CHA @ CLE",
+          "nameDisplay": [
+            {
+              "value": "CHA"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.1",
+          "sortValue": "32.1"
+        },
+        {
+          "id": -2,
+          "value": "10th",
+          "sortValue": "10",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "1134262-6129468",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280457,
+      "firstName": "Brandon",
+      "lastName": "Miller",
+      "displayName": "Brandon Miller",
+      "shortName": "B. Miller",
+      "playerId": 1401381,
+      "playerDkId": 713755,
+      "position": "SF",
+      "rosterSlotId": 419,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713755.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713755.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129468,
+        "name": "CHA @ CLE",
+        "nameDisplay": [
+          {
+            "value": "CHA",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "CLE"
+          }
+        ],
+        "startTime": "2025-12-23T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129468,
+          "name": "CHA @ CLE",
+          "nameDisplay": [
+            {
+              "value": "CHA",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "CLE"
+            }
+          ],
+          "startTime": "2025-12-23T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.8",
+          "sortValue": "32.8"
+        },
+        {
+          "id": -2,
+          "value": "30th",
+          "sortValue": "30",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5312,
+      "teamAbbreviation": "CHA",
+      "draftAlerts": [],
+      "playerGameHash": "1401381-6129468",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280458,
+      "firstName": "Zion",
+      "lastName": "Williamson",
+      "displayName": "Zion Williamson",
+      "shortName": "Z. Williamson",
+      "playerId": 1132025,
+      "playerDkId": 33223,
+      "position": "PF",
+      "rosterSlotId": 419,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33223.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33223.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133662,
+        "name": "DAL @ NOP",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NOP",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T01:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133662,
+          "name": "DAL @ NOP",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NOP",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T01:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.2",
+          "sortValue": "36.2"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 3,
+      "teamAbbreviation": "NOP",
+      "draftAlerts": [],
+      "playerGameHash": "1132025-6133662",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280459,
+      "firstName": "Jalen",
+      "lastName": "Duren",
+      "displayName": "Jalen Duren",
+      "shortName": "J. Duren",
+      "playerId": 1344765,
+      "playerDkId": 649562,
+      "position": "C",
+      "rosterSlotId": 419,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649562.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649562.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6131304,
+        "name": "DET @ POR",
+        "nameDisplay": [
+          {
+            "value": "DET",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "POR"
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6131304,
+          "name": "DET @ POR",
+          "nameDisplay": [
+            {
+              "value": "DET",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "POR"
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.8",
+          "sortValue": "37.8"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 8,
+      "teamAbbreviation": "DET",
+      "draftAlerts": [],
+      "playerGameHash": "1344765-6131304",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280460,
+      "firstName": "Trey",
+      "lastName": "Murphy III",
+      "displayName": "Trey Murphy III",
+      "shortName": "T. Murphy III",
+      "playerId": 1134570,
+      "playerDkId": 591022,
+      "position": "SG",
+      "rosterSlotId": 419,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591022.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591022.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133662,
+        "name": "DAL @ NOP",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NOP",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T01:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133662,
+          "name": "DAL @ NOP",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NOP",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T01:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "38.6",
+          "sortValue": "38.6"
+        },
+        {
+          "id": -2,
+          "value": "16th",
+          "sortValue": "16",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 3,
+      "teamAbbreviation": "NOP",
+      "draftAlerts": [],
+      "playerGameHash": "1134570-6133662",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280461,
+      "firstName": "Shaedon",
+      "lastName": "Sharpe",
+      "displayName": "Shaedon Sharpe",
+      "shortName": "S. Sharpe",
+      "playerId": 1371494,
+      "playerDkId": 649550,
+      "position": "SG",
+      "rosterSlotId": 419,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649550.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649550.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6131304,
+        "name": "DET @ POR",
+        "nameDisplay": [
+          {
+            "value": "DET"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "POR",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6131304,
+          "name": "DET @ POR",
+          "nameDisplay": [
+            {
+              "value": "DET"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "POR",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "34.1",
+          "sortValue": "34.1"
+        },
+        {
+          "id": -2,
+          "value": "6th",
+          "sortValue": "6",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 22,
+      "teamAbbreviation": "POR",
+      "draftAlerts": [],
+      "playerGameHash": "1371494-6131304",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280462,
+      "firstName": "Cooper",
+      "lastName": "Flagg",
+      "displayName": "Cooper Flagg",
+      "shortName": "C. Flagg",
+      "playerId": 1519128,
+      "playerDkId": 905515,
+      "position": "SF",
+      "rosterSlotId": 419,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905515.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905515.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133662,
+        "name": "DAL @ NOP",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NOP"
+          }
+        ],
+        "startTime": "2025-12-23T01:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133662,
+          "name": "DAL @ NOP",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NOP"
+            }
+          ],
+          "startTime": "2025-12-23T01:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "35.7",
+          "sortValue": "35.7"
+        },
+        {
+          "id": -2,
+          "value": "23rd",
+          "sortValue": "23",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1519128-6133662",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280463,
+      "firstName": "Jalen",
+      "lastName": "Suggs",
+      "displayName": "Jalen Suggs",
+      "shortName": "J. Suggs",
+      "playerId": 1241585,
+      "playerDkId": 590988,
+      "position": "PG",
+      "rosterSlotId": 419,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590988.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590988.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129024,
+        "name": "ORL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129024,
+          "name": "ORL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.7",
+          "sortValue": "31.7"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1241585-6129024",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280464,
+      "firstName": "Kon",
+      "lastName": "Knueppel",
+      "displayName": "Kon Knueppel",
+      "shortName": "K. Knueppel",
+      "playerId": 1519132,
+      "playerDkId": 905553,
+      "position": "SG",
+      "rosterSlotId": 420,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905553.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905553.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129468,
+        "name": "CHA @ CLE",
+        "nameDisplay": [
+          {
+            "value": "CHA",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "CLE"
+          }
+        ],
+        "startTime": "2025-12-23T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129468,
+          "name": "CHA @ CLE",
+          "nameDisplay": [
+            {
+              "value": "CHA",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "CLE"
+            }
+          ],
+          "startTime": "2025-12-23T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "34.3",
+          "sortValue": "34.3"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5312,
+      "teamAbbreviation": "CHA",
+      "draftAlerts": [],
+      "playerGameHash": "1519132-6129468",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280465,
+      "firstName": "Payton",
+      "lastName": "Pritchard",
+      "displayName": "Payton Pritchard",
+      "shortName": "P. Pritchard",
+      "playerId": 945610,
+      "playerDkId": 527233,
+      "position": "PG",
+      "rosterSlotId": 420,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527233.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527233.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127908,
+        "name": "IND @ BOS",
+        "nameDisplay": [
+          {
+            "value": "IND"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "BOS",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T00:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127908,
+          "name": "IND @ BOS",
+          "nameDisplay": [
+            {
+              "value": "IND"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "BOS",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T00:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.8",
+          "sortValue": "32.8"
+        },
+        {
+          "id": -2,
+          "value": "25th",
+          "sortValue": "25",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 2,
+      "teamAbbreviation": "BOS",
+      "draftAlerts": [],
+      "playerGameHash": "945610-6127908",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280466,
+      "firstName": "Santi",
+      "lastName": "Aldama",
+      "displayName": "Santi Aldama",
+      "shortName": "S. Aldama",
+      "playerId": 1177024,
+      "playerDkId": 591035,
+      "position": "PF/C",
+      "rosterSlotId": 420,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591035.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591035.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6134088,
+        "name": "MEM @ OKC",
+        "nameDisplay": [
+          {
+            "value": "MEM",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "OKC"
+          }
+        ],
+        "startTime": "2025-12-23T02:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6134088,
+          "name": "MEM @ OKC",
+          "nameDisplay": [
+            {
+              "value": "MEM",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "OKC"
+            }
+          ],
+          "startTime": "2025-12-23T02:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "30.0",
+          "sortValue": "30.0"
+        },
+        {
+          "id": -2,
+          "value": "9th",
+          "sortValue": "9",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 29,
+      "teamAbbreviation": "MEM",
+      "draftAlerts": [],
+      "playerGameHash": "1177024-6134088",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280467,
+      "firstName": "Derik",
+      "lastName": "Queen",
+      "displayName": "Derik Queen",
+      "shortName": "D. Queen",
+      "playerId": 1520787,
+      "playerDkId": 905562,
+      "position": "C",
+      "rosterSlotId": 420,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905562.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905562.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133662,
+        "name": "DAL @ NOP",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NOP",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T01:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133662,
+          "name": "DAL @ NOP",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NOP",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T01:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "30.2",
+          "sortValue": "30.2"
+        },
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 3,
+      "teamAbbreviation": "NOP",
+      "draftAlerts": [],
+      "playerGameHash": "1520787-6133662",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280468,
+      "firstName": "Bennedict",
+      "lastName": "Mathurin",
+      "displayName": "Bennedict Mathurin",
+      "shortName": "B. Mathurin",
+      "playerId": 1239596,
+      "playerDkId": 649549,
+      "position": "SF",
+      "rosterSlotId": 420,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649549.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649549.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127908,
+        "name": "IND @ BOS",
+        "nameDisplay": [
+          {
+            "value": "IND",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "BOS"
+          }
+        ],
+        "startTime": "2025-12-23T00:30:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127908,
+          "name": "IND @ BOS",
+          "nameDisplay": [
+            {
+              "value": "IND",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "BOS"
+            }
+          ],
+          "startTime": "2025-12-23T00:30:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.1",
+          "sortValue": "31.1"
+        },
+        {
+          "id": -2,
+          "value": "4th",
+          "sortValue": "4",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 11,
+      "teamAbbreviation": "IND",
+      "draftAlerts": [],
+      "playerGameHash": "1239596-6127908",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280469,
+      "firstName": "PJ",
+      "lastName": "Washington",
+      "displayName": "PJ Washington",
+      "shortName": "P. Washington",
+      "playerId": 1067857,
+      "playerDkId": 32950,
+      "position": "PF",
+      "rosterSlotId": 420,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32950.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32950.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6133662,
+        "name": "DAL @ NOP",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "NOP"
+          }
+        ],
+        "startTime": "2025-12-23T01:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6133662,
+          "name": "DAL @ NOP",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "NOP"
+            }
+          ],
+          "startTime": "2025-12-23T01:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.5",
+          "sortValue": "33.5"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1067857-6133662",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280470,
+      "firstName": "Jarrett",
+      "lastName": "Allen",
+      "displayName": "Jarrett Allen",
+      "shortName": "J. Allen",
+      "playerId": 956574,
+      "playerDkId": 32914,
+      "position": "C",
+      "rosterSlotId": 420,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32914.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32914.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129468,
+        "name": "CHA @ CLE",
+        "nameDisplay": [
+          {
+            "value": "CHA"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "CLE",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-23T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129468,
+          "name": "CHA @ CLE",
+          "nameDisplay": [
+            {
+              "value": "CHA"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "CLE",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-23T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.7",
+          "sortValue": "29.7"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 5,
+      "teamAbbreviation": "CLE",
+      "draftAlerts": [],
+      "playerGameHash": "956574-6129468",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41280471,
+      "firstName": "Anthony",
+      "lastName": "Black",
+      "displayName": "Anthony Black",
+      "shortName": "A. Black",
+      "playerId": 1401385,
+      "playerDkId": 713759,
+      "position": "PG/SG",
+      "rosterSlotId": 420,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713759.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713759.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6129024,
+        "name": "ORL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "ORL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-23T03:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6129024,
+          "name": "ORL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "ORL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-23T03:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "27.0",
+          "sortValue": "27.0"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 19,
+      "teamAbbreviation": "ORL",
+      "draftAlerts": [],
+      "playerGameHash": "1401385-6129024",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6129468,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 5,
+        "teamName": "Cavaliers",
+        "abbreviation": "CLE",
+        "city": "Cleveland",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32908.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 5312,
+        "teamName": "Hornets",
+        "abbreviation": "CHA",
+        "city": "Charlotte",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32904.png",
+        "darkModeImageUrl": ""
+      },
+      "startTime": "2025-12-23T00:00:00.0000000Z",
+      "name": "CHA @ CLE",
+      "venue": "Quicken Loans Arena",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 32,
+          "value": "PEAC"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "competitionId": 6127908,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 2,
+        "teamName": "Celtics",
+        "abbreviation": "BOS",
+        "city": "Boston",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32898.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32898.png"
+      },
+      "awayTeam": {
+        "teamId": 11,
+        "teamName": "Pacers",
+        "abbreviation": "IND",
+        "city": "Indiana",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32922.png",
+        "darkModeImageUrl": ""
+      },
+      "startTime": "2025-12-23T00:30:00.0000000Z",
+      "name": "IND @ BOS",
+      "venue": "TD Garden",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "competitionId": 6133662,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 3,
+        "teamName": "Pelicans",
+        "abbreviation": "NOP",
+        "city": "New Orleans",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32938.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 6,
+        "teamName": "Mavericks",
+        "abbreviation": "DAL",
+        "city": "Dallas",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32911.png",
+        "darkModeImageUrl": ""
+      },
+      "startTime": "2025-12-23T01:00:00.0000000Z",
+      "name": "DAL @ NOP",
+      "venue": "New Orleans Arena",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "competitionId": 6130890,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 7,
+        "teamName": "Nuggets",
+        "abbreviation": "DEN",
+        "city": "Denver",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32913.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 26,
+        "teamName": "Jazz",
+        "abbreviation": "UTA",
+        "city": "Utah",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32959.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32959.png"
+      },
+      "startTime": "2025-12-23T02:00:00.0000000Z",
+      "name": "UTA @ DEN",
+      "venue": "Pepsi Center",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "competitionId": 6134088,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 25,
+        "teamName": "Thunder",
+        "abbreviation": "OKC",
+        "city": "Oklahoma City",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32942.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32942.png"
+      },
+      "awayTeam": {
+        "teamId": 29,
+        "teamName": "Grizzlies",
+        "abbreviation": "MEM",
+        "city": "Memphis",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32929.png",
+        "darkModeImageUrl": ""
+      },
+      "startTime": "2025-12-23T02:30:00.0000000Z",
+      "name": "MEM @ OKC",
+      "venue": "Chesapeake Energy Arena",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 32,
+          "value": "PEAC"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "competitionId": 6129024,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 9,
+        "teamName": "Warriors",
+        "abbreviation": "GSW",
+        "city": "Golden State",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32917.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 19,
+        "teamName": "Magic",
+        "abbreviation": "ORL",
+        "city": "Orlando",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32945.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32945.png"
+      },
+      "startTime": "2025-12-23T03:00:00.0000000Z",
+      "name": "ORL @ GSW",
+      "venue": "Chase Center",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "competitionId": 6131304,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 22,
+        "teamName": "Trail Blazers",
+        "abbreviation": "POR",
+        "city": "Portland",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32952.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 8,
+        "teamName": "Pistons",
+        "abbreviation": "DET",
+        "city": "Detroit",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32915.png",
+        "darkModeImageUrl": ""
+      },
+      "startTime": "2025-12-23T03:00:00.0000000Z",
+      "name": "DET @ POR",
+      "venue": "Moda Center at the Rose Quarter",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}

@@ -1,0 +1,53 @@
+game_date,skip_reason,missing_feature_frac,n_expected_features,n_missing_features,n_games,n_teams,n_players
+2025-11-01,too_many_missing_features (9/58),0.15517241379310345,58,9,6,12,213
+2025-11-02,too_many_missing_features (9/58),0.15517241379310345,58,9,8,16,279
+2025-11-03,too_many_missing_features (9/58),0.15517241379310345,58,9,9,18,316
+2025-11-04,too_many_missing_features (9/58),0.15517241379310345,58,9,6,12,210
+2025-11-05,too_many_missing_features (9/58),0.15517241379310345,58,9,11,22,387
+2025-11-06,too_many_missing_features (9/58),0.15517241379310345,58,9,1,2,34
+2025-11-07,too_many_missing_features (9/58),0.15517241379310345,58,9,11,22,386
+2025-11-08,too_many_missing_features (9/58),0.15517241379310345,58,9,8,16,280
+2025-11-09,too_many_missing_features (9/58),0.15517241379310345,58,9,7,14,246
+2025-11-10,too_many_missing_features (9/58),0.15517241379310345,58,9,9,18,316
+2025-11-11,too_many_missing_features (9/58),0.15517241379310345,58,9,6,12,211
+2025-11-12,too_many_missing_features (9/58),0.15517241379310345,58,9,12,24,421
+2025-11-13,too_many_missing_features (9/58),0.15517241379310345,58,9,3,6,105
+2025-11-14,too_many_missing_features (9/58),0.15517241379310345,58,9,9,18,315
+2025-11-15,too_many_missing_features (9/58),0.15517241379310345,58,9,5,10,176
+2025-11-16,too_many_missing_features (9/58),0.15517241379310345,58,9,8,16,281
+2025-11-17,too_many_missing_features (9/58),0.15517241379310345,58,9,8,16,281
+2025-11-18,too_many_missing_features (9/58),0.15517241379310345,58,9,6,12,210
+2025-11-19,too_many_missing_features (9/58),0.15517241379310345,58,9,9,18,317
+2025-11-20,too_many_missing_features (9/58),0.15517241379310345,58,9,4,8,140
+2025-11-21,too_many_missing_features (9/58),0.15517241379310345,58,9,9,18,316
+2025-11-22,too_many_missing_features (9/58),0.15517241379310345,58,9,7,14,247
+2025-11-23,too_many_missing_features (9/58),0.15517241379310345,58,9,8,16,277
+2025-11-24,too_many_missing_features (9/58),0.15517241379310345,58,9,10,20,352
+2025-11-25,too_many_missing_features (9/58),0.15517241379310345,58,9,3,6,103
+2025-11-26,too_many_missing_features (9/58),0.15517241379310345,58,9,9,18,318
+2025-11-27,too_many_missing_features (9/58),0.15517241379310345,58,9,9,18,318
+2025-11-28,too_many_missing_features (9/58),0.15517241379310345,58,9,11,22,387
+2025-11-29,too_many_missing_features (9/58),0.15517241379310345,58,9,8,16,281
+2025-11-30,too_many_missing_features (9/58),0.15517241379310345,58,9,8,16,280
+2025-12-01,too_many_missing_features (9/58),0.15517241379310345,58,9,9,18,314
+2025-12-02,too_many_missing_features (9/58),0.15517241379310345,58,9,6,12,212
+2025-12-03,too_many_missing_features (9/58),0.15517241379310345,58,9,9,18,317
+2025-12-04,too_many_missing_features (9/58),0.15517241379310345,58,9,5,10,174
+2025-12-05,too_many_missing_features (9/58),0.15517241379310345,58,9,12,24,420
+2025-12-06,too_many_missing_features (9/58),0.15517241379310345,58,9,6,12,210
+2025-12-07,too_many_missing_features (9/58),0.15517241379310345,58,9,2,4,70
+2025-12-08,too_many_missing_features (9/58),0.15517241379310345,58,9,3,6,107
+2025-12-09,too_many_missing_features (9/58),0.15517241379310345,58,9,2,4,68
+2025-12-10,too_many_missing_features (9/58),0.15517241379310345,58,9,2,4,70
+2025-12-11,too_many_missing_features (9/58),0.15517241379310345,58,9,4,8,140
+2025-12-12,too_many_missing_features (9/58),0.15517241379310345,58,9,7,14,247
+2025-12-13,too_many_missing_features (9/58),0.15517241379310345,58,9,2,4,70
+2025-12-14,integrity_failed: incomplete_rosters (min 1 players),0.0,58,0,8,22,309
+2025-12-24,features_not_found,0.0,58,0,0,0,0
+2025-12-25,features_not_found,0.0,58,0,0,0,0
+2025-12-26,features_not_found,0.0,58,0,0,0,0
+2025-12-27,features_not_found,0.0,58,0,0,0,0
+2025-12-28,features_not_found,0.0,58,0,0,0,0
+2025-12-29,features_not_found,0.0,58,0,0,0,0
+2025-12-30,features_not_found,0.0,58,0,0,0,0
+2025-12-31,features_not_found,0.0,58,0,0,0,0

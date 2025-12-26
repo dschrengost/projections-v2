@@ -24,6 +24,7 @@ import {
     Slate,
 } from '../api/optimizer'
 import LineupCard from '../components/LineupCard'
+import PlayerExposurePanel, { ExposureBounds } from '../components/PlayerExposurePanel'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
@@ -83,6 +84,21 @@ export default function ContestSimPage() {
     const [page, setPage] = useState(1)
     const [pageSize, setPageSize] = useState(50)
     const [topN, setTopN] = useState<number | null>(null) // null = all
+    const [minUniques, setMinUniques] = useState(3)
+    const [exposureBounds, setExposureBounds] = useState<Map<string, ExposureBounds>>(new Map())
+
+    // Handler for changing exposure bounds
+    const handleExposureBoundsChange = useCallback((playerId: string, bounds: ExposureBounds | null) => {
+        setExposureBounds(prev => {
+            const next = new Map(prev)
+            if (bounds === null) {
+                next.delete(playerId)
+            } else {
+                next.set(playerId, bounds)
+            }
+            return next
+        })
+    }, [])
 
 
     // Load slates when date changes
@@ -272,8 +288,8 @@ export default function ContestSimPage() {
         })
     }, [simResult, playerMap])
 
-    // Filter and sort results
-    const filteredResults = useMemo(() => {
+    // Filter and sort results (NO Top N here - that's applied after constraint filters)
+    const sortedResults = useMemo(() => {
         let results = [...resultsWithOwnership]
 
         // Apply filters
@@ -294,18 +310,95 @@ export default function ContestSimPage() {
             return 0
         })
 
-        // Apply Top N filter (after sorting)
-        if (topN !== null) {
-            results = results.slice(0, topN)
+        return results
+    }, [resultsWithOwnership, filterPositiveEV, maxOwnership, sortKey, sortDir])
+    // Combined constraint filter: min uniques + exposure bounds, fills to target N
+    const { constrainedResults, minUniquesPassCount, exposureCapError } = useMemo(() => {
+        const targetCount = topN ?? sortedResults.length  // null means "all that fit"
+        const hasMaxBounds = Array.from(exposureBounds.values()).some(b => b.max !== undefined)
+        const hasMinBounds = Array.from(exposureBounds.values()).some(b => b.min !== undefined)
+        const hasConstraints = minUniques > 0 || hasMaxBounds
+
+        const result: typeof sortedResults = []
+        const counts = new Map<string, number>()
+        let minUniquesChecked = 0
+
+        for (const lineup of sortedResults) {
+            // Stop if we've reached target count
+            if (result.length >= targetCount) break
+
+            const pids = new Set(lineup.player_ids)
+            let valid = true
+
+            // Check min uniques constraint
+            if (minUniques > 0) {
+                for (const existing of result) {
+                    const shared = existing.player_ids.filter(p => pids.has(p)).length
+                    if (lineup.player_ids.length - shared < minUniques) {
+                        valid = false
+                        break
+                    }
+                }
+            }
+            if (!valid) continue
+            minUniquesChecked++
+
+            // Check max exposure caps
+            if (hasMaxBounds) {
+                for (const pid of lineup.player_ids) {
+                    const bounds = exposureBounds.get(pid)
+                    if (bounds?.max !== undefined) {
+                        const newCount = (counts.get(pid) || 0) + 1
+                        const newExposure = (newCount / (result.length + 1)) * 100
+                        if (newExposure > bounds.max) {
+                            valid = false
+                            break
+                        }
+                    }
+                }
+            }
+
+            if (valid) {
+                result.push(lineup)
+                lineup.player_ids.forEach(pid => counts.set(pid, (counts.get(pid) || 0) + 1))
+            }
         }
 
-        return results
-    }, [resultsWithOwnership, filterPositiveEV, maxOwnership, topN, sortKey, sortDir])
+        // Check if we hit target count
+        let error: string | null = null
+        if (result.length < targetCount && hasConstraints) {
+            error = `Only ${result.length} of ${targetCount} lineups meet constraints (pool exhausted)`
+        }
+
+        // Validate min exposures
+        if (!error && hasMinBounds) {
+            const minErrors: string[] = []
+            for (const [pid, bounds] of exposureBounds.entries()) {
+                if (bounds.min !== undefined) {
+                    const count = counts.get(pid) || 0
+                    const exposure = result.length > 0 ? (count / result.length) * 100 : 0
+                    if (exposure < bounds.min) {
+                        const playerName = playerMap.get(pid)?.name ?? pid
+                        minErrors.push(`${playerName}: ${exposure.toFixed(1)}% < ${bounds.min}%`)
+                    }
+                }
+            }
+            if (minErrors.length > 0) {
+                error = `Min not met: ${minErrors.join(', ')}`
+            }
+        }
+
+        return {
+            constrainedResults: result,
+            minUniquesPassCount: minUniquesChecked,
+            exposureCapError: error
+        }
+    }, [sortedResults, topN, minUniques, exposureBounds, playerMap])
 
     const activeResults = useMemo(() => {
-        if (selectedLineups.size === 0) return filteredResults
-        return filteredResults.filter(r => selectedLineups.has(r.lineup_id))
-    }, [filteredResults, selectedLineups])
+        if (selectedLineups.size === 0) return constrainedResults
+        return constrainedResults.filter(r => selectedLineups.has(r.lineup_id))
+    }, [constrainedResults, selectedLineups])
 
     const activeSummary = useMemo(() => {
         if (!simResult || activeResults.length === 0) {
@@ -327,15 +420,15 @@ export default function ContestSimPage() {
     // Paginated results
     const paginatedResults = useMemo(() => {
         const start = (page - 1) * pageSize
-        return filteredResults.slice(start, start + pageSize)
-    }, [filteredResults, page, pageSize])
+        return constrainedResults.slice(start, start + pageSize)
+    }, [constrainedResults, page, pageSize])
 
-    const totalPages = Math.ceil(filteredResults.length / pageSize)
+    const totalPages = Math.ceil(constrainedResults.length / pageSize)
 
     // Reset page when filters change
     useEffect(() => {
         setPage(1)
-    }, [filterPositiveEV, maxOwnership, topN, sortKey, sortDir])
+    }, [filterPositiveEV, maxOwnership, topN, sortKey, sortDir, minUniques, exposureBounds])
 
     const runSimWithLineups = useCallback(async (lineupsToRun: string[][]) => {
         if (lineupsToRun.length === 0) {
@@ -453,13 +546,13 @@ export default function ContestSimPage() {
 
     const handleSaveSimLineups = async () => {
         if (!selectedSlate) return
-        if (filteredResults.length === 0) return
-        const defaultName = `Sim lineups (${filteredResults.length})`
+        if (constrainedResults.length === 0) return
+        const defaultName = `Sim lineups (${constrainedResults.length})`
         const name = prompt('Save lineups as:', defaultName)?.trim()
         if (!name) return
         try {
-            const lineupsToSave = filteredResults.map(r => r.player_ids)
-            const resultIds = new Set(filteredResults.map(r => r.lineup_id))
+            const lineupsToSave = constrainedResults.map(r => r.player_ids)
+            const resultIds = new Set(constrainedResults.map(r => r.lineup_id))
             const resultsToSave = simResult?.results.filter(r => resultIds.has(r.lineup_id)) ?? null
             const saved = await saveSimLineups(
                 selectedDate,
@@ -511,7 +604,7 @@ export default function ContestSimPage() {
     }
 
     const selectAll = () => {
-        setSelectedLineups(new Set(filteredResults.map(r => r.lineup_id)))
+        setSelectedLineups(new Set(constrainedResults.map(r => r.lineup_id)))
     }
 
     const clearSelection = () => {
@@ -528,8 +621,8 @@ export default function ContestSimPage() {
             if (selectedLineups.size === 0) return
             lineupsToExport = resultsWithOwnership.filter(r => selectedLineups.has(r.lineup_id))
         } else {
-            // Export current filtered view (Top N)
-            lineupsToExport = filteredResults
+            // Export current filtered view (Top N + Min Uniques + Exposure Caps)
+            lineupsToExport = constrainedResults
         }
 
         const selectedPlayerIds = lineupsToExport.map(r => r.player_ids)
@@ -843,6 +936,18 @@ export default function ContestSimPage() {
 
                     {simResult && (
                         <div className="lineup-cards-container">
+                            {/* Player Exposure Panel */}
+                            <PlayerExposurePanel
+                                lineupResults={constrainedResults}
+                                playerMap={playerMap}
+                                minUniques={minUniques}
+                                onMinUniquesChange={setMinUniques}
+                                minUniquesPassCount={minUniquesPassCount}
+                                exposureBounds={exposureBounds}
+                                onExposureBoundsChange={handleExposureBoundsChange}
+                                exposureCapError={exposureCapError}
+                            />
+
                             {/* Summary Cards */}
                             <div className="sim-summary compact">
                                 <div className="summary-card">
@@ -937,7 +1042,7 @@ export default function ContestSimPage() {
 
                                 <div className="toolbar-group">
                                     <button onClick={selectAll} style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}>
-                                        Select All ({filteredResults.length})
+                                        Select All ({constrainedResults.length})
                                     </button>
                                     <button onClick={clearSelection} style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}>
                                         Clear
@@ -961,10 +1066,10 @@ export default function ContestSimPage() {
                                 <div className="toolbar-group">
                                     <button
                                         onClick={() => handleExport('view')}
-                                        disabled={filteredResults.length === 0}
+                                        disabled={constrainedResults.length === 0}
                                         style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer', marginRight: '0.5rem' }}
                                     >
-                                        Export View ({filteredResults.length})
+                                        Export View ({constrainedResults.length})
                                     </button>
                                     <button
                                         className="export-btn"
@@ -975,10 +1080,10 @@ export default function ContestSimPage() {
                                     </button>
                                     <button
                                         onClick={handleSaveSimLineups}
-                                        disabled={filteredResults.length === 0}
+                                        disabled={constrainedResults.length === 0}
                                         style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: '4px', color: '#60a5fa', cursor: 'pointer', marginLeft: '0.5rem' }}
                                     >
-                                        Save Sim Lineups ({filteredResults.length})
+                                        Save Sim Lineups ({constrainedResults.length})
                                     </button>
                                 </div>
                             </div>
@@ -986,7 +1091,7 @@ export default function ContestSimPage() {
                             {/* Pagination */}
                             <div className="pagination-controls">
                                 <div className="page-info">
-                                    Showing {((page - 1) * pageSize) + 1}-{Math.min(page * pageSize, filteredResults.length)} of {filteredResults.length}
+                                    Showing {((page - 1) * pageSize) + 1}-{Math.min(page * pageSize, constrainedResults.length)} of {constrainedResults.length}
                                 </div>
                                 <div className="page-buttons">
                                     <button

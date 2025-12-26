@@ -632,9 +632,20 @@ def enforce_team_240_minutes(
                         out[w, team_players[prot_group]] = desired[prot_group] * prot_scale
                         out[w, team_players[flex_kept]] = 0.0
                 else:
-                    scale = 240.0 / sum_total
-                    scale = float(np.clip(scale, 1.0, clamp_scale[1]))
-                    out[w, team_players[kept]] = desired[kept] * scale
+                    # Undersubscribed: keep protected core fixed, spray remaining minutes to flex.
+                    if use_protected_core and sum_flex > 1e-6:
+                        # Protected core stays at their model outputs; flex gets the remainder.
+                        remainder = 240.0 - sum_prot
+                        if remainder > 0:
+                            flex_scale = remainder / sum_flex
+                            flex_scale = float(np.clip(flex_scale, 1.0, clamp_scale[1]))
+                            out[w, team_players[flex_kept]] = desired[flex_kept] * flex_scale
+                        # Protected players unchanged.
+                    else:
+                        # Fallback: scale everyone up (legacy behavior or no flex players).
+                        scale = 240.0 / sum_total
+                        scale = float(np.clip(scale, 1.0, clamp_scale[1]))
+                        out[w, team_players[kept]] = desired[kept] * scale
 
         # Ensure inactive players stay at 0 if active_mask was provided.
         if active_mask is not None:

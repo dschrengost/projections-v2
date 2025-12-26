@@ -61,19 +61,19 @@ deployments:
     job_variables: {}
   schedules: []
 
-- name: dk-salaries
+- name: morning-daily
   version: null
   tags: []
   concurrency_limit: 1
-  description: Fetch DraftKings salaries for all slates (runs daily at 9am).
-  entrypoint: prefect_flows/live_pipeline.py:dk_salaries_flow
+  description: Daily morning pipeline (DK salaries, schedule, yesterday boxscores).
+  entrypoint: prefect_flows/live_pipeline.py:morning_daily_flow
   parameters: {}
   work_pool:
     name: projections-local
     work_queue_name: null
     job_variables: {}
   schedules:
-    - cron: "0 9 * * *"
+    - cron: "0 8 * * *"
       timezone: "America/New_York"
 
 - name: nightly-eval

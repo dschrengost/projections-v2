@@ -1308,19 +1308,26 @@ def run_quick_build(
 
 def get_slates_for_date(game_date: str, slate_type: str = "all") -> List[Dict[str, Any]]:
     """Get available draft groups for a date.
-    
+
     First tries the live DK API, then falls back to disk-based discovery
-    from scraped gold salaries.
+    from scraped gold salaries if API fails or returns empty (e.g., after games lock).
     """
+    api_slates: List[Dict[str, Any]] = []
+
     # Try live API first
     try:
         df = list_draft_groups_for_date(game_date, slate_type=slate_type)  # type: ignore
         if not df.empty:
-            return df.to_dict(orient="records")
+            api_slates = df.to_dict(orient="records")
     except Exception as exc:
         logger.warning("Failed to fetch live slates for %s: %s", game_date, exc)
 
-    # Fall back to discovering from gold salaries directory
+    # If API returned slates, use them
+    if api_slates:
+        return api_slates
+
+    # Fall back to disk if API returned empty (games already started/locked)
+    logger.info("API returned no slates for %s, falling back to disk discovery", game_date)
     return _discover_slates_from_disk(game_date, slate_type)
 
 

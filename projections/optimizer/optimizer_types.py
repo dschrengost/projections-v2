@@ -73,6 +73,8 @@ class Constraints:
     ownership_penalty: OwnershipPenaltySettings = field(
         default_factory=OwnershipPenaltySettings
     )  # PRP-15: Ownership penalty settings
+    # Slot-level locks (DraftKings late swap): slot -> player_id
+    lock_slots: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Constraints":
@@ -143,6 +145,17 @@ class Constraints:
 
         if not stddev_available and self.randomness_pct > 0:
             raise ValueError("Randomness requires stddev column in projections")
+
+        if self.lock_slots:
+            if site != "dk":
+                raise ValueError("lock_slots is only supported for DraftKings (dk)")
+            allowed = {"PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"}
+            invalid = sorted(set(self.lock_slots) - allowed)
+            if invalid:
+                raise ValueError(f"Invalid lock_slots keys: {invalid}")
+            empty = sorted(k for k, v in self.lock_slots.items() if not str(v).strip())
+            if empty:
+                raise ValueError(f"lock_slots has empty player_id for: {empty}")
 
         # Ownership penalty validations
         s = self.ownership_penalty
@@ -283,7 +296,7 @@ class LineupSet:
             engine=data["engine"],
             version=data["version"],
             runtime_sec=data["runtime_sec"],
-            lineups=[Lineup.from_dict(l) for l in data["lineups"]],
+            lineups=[Lineup.from_dict(lineup) for lineup in data["lineups"]],
         )
 
 

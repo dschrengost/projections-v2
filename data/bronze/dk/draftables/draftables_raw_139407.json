@@ -1,0 +1,5611 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41324739,
+      "firstName": "Anthony",
+      "lastName": "Davis",
+      "displayName": "Anthony Davis",
+      "shortName": "A. Davis",
+      "playerId": 603096,
+      "playerDkId": 33122,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 17100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33122.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33122.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "46.4",
+          "sortValue": "46.4"
+        },
+        {
+          "id": -2,
+          "value": "20th",
+          "sortValue": "20",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "603096-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324740,
+      "firstName": "Stephen",
+      "lastName": "Curry",
+      "displayName": "Stephen Curry",
+      "shortName": "St. Curry",
+      "playerId": 338365,
+      "playerDkId": 33049,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 16500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33049.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33049.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "45.0",
+          "sortValue": "45.0"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "338365-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324741,
+      "firstName": "Jimmy",
+      "lastName": "Butler",
+      "displayName": "Jimmy Butler",
+      "shortName": "J. Butler",
+      "playerId": 458730,
+      "playerDkId": 33155,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 14700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33155.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33155.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.2",
+          "sortValue": "37.2"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "458730-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324742,
+      "firstName": "Cooper",
+      "lastName": "Flagg",
+      "displayName": "Cooper Flagg",
+      "shortName": "C. Flagg",
+      "playerId": 1519128,
+      "playerDkId": 905515,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 14100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905515.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905515.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.6",
+          "sortValue": "36.6"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1519128-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324743,
+      "firstName": "PJ",
+      "lastName": "Washington",
+      "displayName": "PJ Washington",
+      "shortName": "P. Washington",
+      "playerId": 1067857,
+      "playerDkId": 32950,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 12900,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32950.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32950.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.1",
+          "sortValue": "33.1"
+        },
+        {
+          "id": -2,
+          "value": "20th",
+          "sortValue": "20",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1067857-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324744,
+      "firstName": "Draymond",
+      "lastName": "Green",
+      "displayName": "Draymond Green",
+      "shortName": "D. Green",
+      "playerId": 468895,
+      "playerDkId": 33052,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 11700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33052.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33052.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.0",
+          "sortValue": "26.0"
+        },
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "468895-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324703,
+      "firstName": "Anthony",
+      "lastName": "Davis",
+      "displayName": "Anthony Davis",
+      "shortName": "A. Davis",
+      "playerId": 603096,
+      "playerDkId": 33122,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 11400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33122.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33122.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "46.4",
+          "sortValue": "46.4"
+        },
+        {
+          "id": -2,
+          "value": "20th",
+          "sortValue": "20",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "603096-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324704,
+      "firstName": "Stephen",
+      "lastName": "Curry",
+      "displayName": "Stephen Curry",
+      "shortName": "St. Curry",
+      "playerId": 338365,
+      "playerDkId": 33049,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 11000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33049.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33049.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "45.0",
+          "sortValue": "45.0"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "338365-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324745,
+      "firstName": "Naji",
+      "lastName": "Marshall",
+      "displayName": "Naji Marshall",
+      "shortName": "N. Marshall",
+      "playerId": 1060704,
+      "playerDkId": 535788,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 10500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/535788.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/535788.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "25.6",
+          "sortValue": "25.6"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1060704-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324746,
+      "firstName": "Brandin",
+      "lastName": "Podziemski",
+      "displayName": "Brandin Podziemski",
+      "shortName": "B. Podziemski",
+      "playerId": 1324108,
+      "playerDkId": 713772,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 10200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713772.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713772.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "25.9",
+          "sortValue": "25.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1324108-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324705,
+      "firstName": "Jimmy",
+      "lastName": "Butler",
+      "displayName": "Jimmy Butler",
+      "shortName": "J. Butler",
+      "playerId": 458730,
+      "playerDkId": 33155,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 9800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33155.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33155.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "37.2",
+          "sortValue": "37.2"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "458730-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324706,
+      "firstName": "Cooper",
+      "lastName": "Flagg",
+      "displayName": "Cooper Flagg",
+      "shortName": "C. Flagg",
+      "playerId": 1519128,
+      "playerDkId": 905515,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 9400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905515.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905515.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.6",
+          "sortValue": "36.6"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1519128-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324747,
+      "firstName": "Quinten",
+      "lastName": "Post",
+      "displayName": "Quinten Post",
+      "shortName": "Q. Post",
+      "playerId": 1193672,
+      "playerDkId": 800666,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 8700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800666.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800666.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.5",
+          "sortValue": "18.5"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1193672-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324707,
+      "firstName": "PJ",
+      "lastName": "Washington",
+      "displayName": "PJ Washington",
+      "shortName": "P. Washington",
+      "playerId": 1067857,
+      "playerDkId": 32950,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 8600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32950.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32950.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.1",
+          "sortValue": "33.1"
+        },
+        {
+          "id": -2,
+          "value": "20th",
+          "sortValue": "20",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1067857-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324708,
+      "firstName": "Draymond",
+      "lastName": "Green",
+      "displayName": "Draymond Green",
+      "shortName": "D. Green",
+      "playerId": 468895,
+      "playerDkId": 33052,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 7800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33052.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33052.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "26.0",
+          "sortValue": "26.0"
+        },
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "468895-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324748,
+      "firstName": "Ryan",
+      "lastName": "Nembhard",
+      "displayName": "Ryan Nembhard",
+      "shortName": "R. Nembhard",
+      "playerId": 1323621,
+      "playerDkId": 906412,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 7800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906412.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906412.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.5",
+          "sortValue": "19.5"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1323621-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324749,
+      "firstName": "Moses",
+      "lastName": "Moody",
+      "displayName": "Moses Moody",
+      "shortName": "M. Moody",
+      "playerId": 1231366,
+      "playerDkId": 591015,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 7200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591015.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591015.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.9",
+          "sortValue": "21.9"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1231366-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324709,
+      "firstName": "Naji",
+      "lastName": "Marshall",
+      "displayName": "Naji Marshall",
+      "shortName": "N. Marshall",
+      "playerId": 1060704,
+      "playerDkId": 535788,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 7000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/535788.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/535788.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "25.6",
+          "sortValue": "25.6"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1060704-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324750,
+      "firstName": "Al",
+      "lastName": "Horford",
+      "displayName": "Al Horford",
+      "shortName": "A. Horford",
+      "playerId": 280587,
+      "playerDkId": 33285,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 6900,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33285.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33285.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.1",
+          "sortValue": "18.1"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "280587-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324710,
+      "firstName": "Brandin",
+      "lastName": "Podziemski",
+      "displayName": "Brandin Podziemski",
+      "shortName": "B. Podziemski",
+      "playerId": 1324108,
+      "playerDkId": 713772,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 6800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713772.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713772.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "25.9",
+          "sortValue": "25.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1324108-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324751,
+      "firstName": "Brandon",
+      "lastName": "Williams",
+      "displayName": "Brandon Williams",
+      "shortName": "B. Williams",
+      "playerId": 1134688,
+      "playerDkId": 622849,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 6600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/622849.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/622849.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.9",
+          "sortValue": "21.9"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1134688-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324752,
+      "firstName": "Pat",
+      "lastName": "Spencer",
+      "displayName": "Pat Spencer",
+      "shortName": "P. Spencer",
+      "playerId": 1176145,
+      "playerDkId": 651622,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 6300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651622.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651622.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.9",
+          "sortValue": "15.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1176145-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324753,
+      "firstName": "Max",
+      "lastName": "Christie",
+      "displayName": "Max Christie",
+      "shortName": "M. Christie",
+      "playerId": 1340703,
+      "playerDkId": 649581,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 6000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649581.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649581.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.7",
+          "sortValue": "20.7"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1340703-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324711,
+      "firstName": "Quinten",
+      "lastName": "Post",
+      "displayName": "Quinten Post",
+      "shortName": "Q. Post",
+      "playerId": 1193672,
+      "playerDkId": 800666,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 5800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800666.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800666.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.5",
+          "sortValue": "18.5"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1193672-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324754,
+      "firstName": "Klay",
+      "lastName": "Thompson",
+      "displayName": "Klay Thompson",
+      "shortName": "K. Thompson",
+      "playerId": 457611,
+      "playerDkId": 33050,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 5700,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33050.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33050.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.5",
+          "sortValue": "18.5"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "457611-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324755,
+      "firstName": "Jonathan",
+      "lastName": "Kuminga",
+      "displayName": "Jonathan Kuminga",
+      "shortName": "J. Kuminga",
+      "playerId": 1271708,
+      "playerDkId": 590990,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590990.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590990.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.8",
+          "sortValue": "23.8"
+        },
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1271708-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324712,
+      "firstName": "Ryan",
+      "lastName": "Nembhard",
+      "displayName": "Ryan Nembhard",
+      "shortName": "R. Nembhard",
+      "playerId": 1323621,
+      "playerDkId": 906412,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 5200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906412.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906412.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "19.5",
+          "sortValue": "19.5"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1323621-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324713,
+      "firstName": "Moses",
+      "lastName": "Moody",
+      "displayName": "Moses Moody",
+      "shortName": "M. Moody",
+      "playerId": 1231366,
+      "playerDkId": 591015,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591015.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591015.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.9",
+          "sortValue": "21.9"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1231366-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324714,
+      "firstName": "Al",
+      "lastName": "Horford",
+      "displayName": "Al Horford",
+      "shortName": "A. Horford",
+      "playerId": 280587,
+      "playerDkId": 33285,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 4600,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33285.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33285.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.1",
+          "sortValue": "18.1"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "280587-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324756,
+      "firstName": "Daniel",
+      "lastName": "Gafford",
+      "displayName": "Daniel Gafford",
+      "shortName": "D. Gafford",
+      "playerId": 1061647,
+      "playerDkId": 32976,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 4500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32976.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32976.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.8",
+          "sortValue": "20.8"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1061647-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324715,
+      "firstName": "Brandon",
+      "lastName": "Williams",
+      "displayName": "Brandon Williams",
+      "shortName": "B. Williams",
+      "playerId": 1134688,
+      "playerDkId": 622849,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 4400,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/622849.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/622849.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.9",
+          "sortValue": "21.9"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1134688-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324716,
+      "firstName": "Pat",
+      "lastName": "Spencer",
+      "displayName": "Pat Spencer",
+      "shortName": "P. Spencer",
+      "playerId": 1176145,
+      "playerDkId": 651622,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651622.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651622.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.9",
+          "sortValue": "15.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1176145-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324757,
+      "firstName": "De'Anthony",
+      "lastName": "Melton",
+      "displayName": "De'Anthony Melton",
+      "shortName": "D. Melton",
+      "playerId": 946801,
+      "playerDkId": 33145,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33145.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33145.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.6",
+          "sortValue": "14.6"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "946801-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324717,
+      "firstName": "Max",
+      "lastName": "Christie",
+      "displayName": "Max Christie",
+      "shortName": "M. Christie",
+      "playerId": 1340703,
+      "playerDkId": 649581,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 4000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649581.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649581.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.7",
+          "sortValue": "20.7"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1340703-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324718,
+      "firstName": "Klay",
+      "lastName": "Thompson",
+      "displayName": "Klay Thompson",
+      "shortName": "K. Thompson",
+      "playerId": 457611,
+      "playerDkId": 33050,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 3800,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33050.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33050.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.5",
+          "sortValue": "18.5"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "457611-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324719,
+      "firstName": "Jonathan",
+      "lastName": "Kuminga",
+      "displayName": "Jonathan Kuminga",
+      "shortName": "J. Kuminga",
+      "playerId": 1271708,
+      "playerDkId": 590990,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/590990.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/590990.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "23.8",
+          "sortValue": "23.8"
+        },
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1271708-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324758,
+      "firstName": "Buddy",
+      "lastName": "Hield",
+      "displayName": "Buddy Hield",
+      "shortName": "B. Hield",
+      "playerId": 697086,
+      "playerDkId": 33341,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33341.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33341.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.0",
+          "sortValue": "15.0"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "697086-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324759,
+      "firstName": "Gary",
+      "lastName": "Payton II",
+      "displayName": "Gary Payton II",
+      "shortName": "G. Payton II",
+      "playerId": 846407,
+      "playerDkId": 116047,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 3300,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/116047.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/116047.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.8",
+          "sortValue": "11.8"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "846407-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324720,
+      "firstName": "Daniel",
+      "lastName": "Gafford",
+      "displayName": "Daniel Gafford",
+      "shortName": "D. Gafford",
+      "playerId": 1061647,
+      "playerDkId": 32976,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32976.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32976.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.8",
+          "sortValue": "20.8"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1061647-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324761,
+      "firstName": "Caleb",
+      "lastName": "Martin",
+      "displayName": "Caleb Martin",
+      "shortName": "C. Martin",
+      "playerId": 842969,
+      "playerDkId": 32956,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32956.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32956.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.4",
+          "sortValue": "6.4"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "842969-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324721,
+      "firstName": "De'Anthony",
+      "lastName": "Melton",
+      "displayName": "De'Anthony Melton",
+      "shortName": "D. Melton",
+      "playerId": 946801,
+      "playerDkId": 33145,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 2800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33145.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33145.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.6",
+          "sortValue": "14.6"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "946801-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324762,
+      "firstName": "Trayce",
+      "lastName": "Jackson-Davis",
+      "displayName": "Trayce Jackson-Davis",
+      "shortName": "T. Jackson-Davis",
+      "playerId": 1187569,
+      "playerDkId": 713808,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 2700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713808.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713808.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.4",
+          "sortValue": "12.4"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1187569-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324722,
+      "firstName": "Buddy",
+      "lastName": "Hield",
+      "displayName": "Buddy Hield",
+      "shortName": "B. Hield",
+      "playerId": 697086,
+      "playerDkId": 33341,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33341.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33341.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.0",
+          "sortValue": "15.0"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "697086-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324760,
+      "firstName": "Will",
+      "lastName": "Richard",
+      "displayName": "Will Richard",
+      "shortName": "W. Richard",
+      "playerId": 1323578,
+      "playerDkId": 906393,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906393.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906393.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.3",
+          "sortValue": "15.3"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1323578-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324723,
+      "firstName": "Gary",
+      "lastName": "Payton II",
+      "displayName": "Gary Payton II",
+      "shortName": "G. Payton II",
+      "playerId": 846407,
+      "playerDkId": 116047,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 2200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/116047.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/116047.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.8",
+          "sortValue": "11.8"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "846407-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324763,
+      "firstName": "D'Angelo",
+      "lastName": "Russell",
+      "displayName": "D'Angelo Russell",
+      "shortName": "D. Russell",
+      "playerId": 844038,
+      "playerDkId": 33054,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 2100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33054.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33054.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.3",
+          "sortValue": "20.3"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "844038-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324725,
+      "firstName": "Caleb",
+      "lastName": "Martin",
+      "displayName": "Caleb Martin",
+      "shortName": "C. Martin",
+      "playerId": 842969,
+      "playerDkId": 32956,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 2000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32956.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32956.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.4",
+          "sortValue": "6.4"
+        },
+        {
+          "id": -2,
+          "value": "1st",
+          "sortValue": "1",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "842969-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324726,
+      "firstName": "Trayce",
+      "lastName": "Jackson-Davis",
+      "displayName": "Trayce Jackson-Davis",
+      "shortName": "T. Jackson-Davis",
+      "playerId": 1187569,
+      "playerDkId": 713808,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713808.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713808.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.4",
+          "sortValue": "12.4"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1187569-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324724,
+      "firstName": "Will",
+      "lastName": "Richard",
+      "displayName": "Will Richard",
+      "shortName": "W. Richard",
+      "playerId": 1323578,
+      "playerDkId": 906393,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 1600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906393.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906393.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.3",
+          "sortValue": "15.3"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1323578-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324764,
+      "firstName": "Dwight",
+      "lastName": "Powell",
+      "displayName": "Dwight Powell",
+      "shortName": "D. Powell",
+      "playerId": 552309,
+      "playerDkId": 32997,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32997.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32997.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.4",
+          "sortValue": "8.4"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "552309-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324765,
+      "firstName": "Moussa",
+      "lastName": "Cisse",
+      "displayName": "Moussa Cisse",
+      "shortName": "M. Cisse",
+      "playerId": 1231606,
+      "playerDkId": 908768,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/908768.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/908768.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.0",
+          "sortValue": "10.0"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1231606-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324766,
+      "firstName": "Malevy",
+      "lastName": "Leons",
+      "displayName": "Malevy Leons",
+      "shortName": "M. Leons",
+      "playerId": 1345014,
+      "playerDkId": 801004,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/801004.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/801004.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1345014-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324767,
+      "firstName": "L.J.",
+      "lastName": "Cryer",
+      "displayName": "L.J. Cryer",
+      "shortName": "L. Cryer",
+      "playerId": 1249996,
+      "playerDkId": 906424,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906424.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906424.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1249996-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324768,
+      "firstName": "Jaden",
+      "lastName": "Hardy",
+      "displayName": "Jaden Hardy",
+      "shortName": "J. Hardy",
+      "playerId": 1357748,
+      "playerDkId": 649607,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649607.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649607.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.1",
+          "sortValue": "9.1"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1357748-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324769,
+      "firstName": "Miles",
+      "lastName": "Kelly",
+      "displayName": "Miles Kelly",
+      "shortName": "M. Kelly",
+      "playerId": 1324019,
+      "playerDkId": 906408,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906408.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906408.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.3",
+          "sortValue": "3.3"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1324019-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324770,
+      "firstName": "Seth",
+      "lastName": "Curry",
+      "displayName": "Seth Curry",
+      "shortName": "Se. Curry",
+      "playerId": 463135,
+      "playerDkId": 32996,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32996.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32996.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.3",
+          "sortValue": "14.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "463135-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324771,
+      "firstName": "Gui",
+      "lastName": "Santos",
+      "displayName": "Gui Santos",
+      "shortName": "G. Santos",
+      "playerId": 1391940,
+      "playerDkId": 649707,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649707.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649707.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.6",
+          "sortValue": "7.6"
+        },
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1391940-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324772,
+      "firstName": "Dereck",
+      "lastName": "Lively II",
+      "displayName": "Dereck Lively II",
+      "shortName": "D. Lively II",
+      "playerId": 1401780,
+      "playerDkId": 713765,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713765.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713765.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.3",
+          "sortValue": "17.3"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1401780-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324773,
+      "firstName": "Kyrie",
+      "lastName": "Irving",
+      "displayName": "Kyrie Irving",
+      "shortName": "K. Irving",
+      "playerId": 551768,
+      "playerDkId": 32901,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32901.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32901.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "551768-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324774,
+      "firstName": "Dante",
+      "lastName": "Exum",
+      "displayName": "Dante Exum",
+      "shortName": "D. Exum",
+      "playerId": 830636,
+      "playerDkId": 33394,
+      "position": "PG/SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33394.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33394.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "830636-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324727,
+      "firstName": "D'Angelo",
+      "lastName": "Russell",
+      "displayName": "D'Angelo Russell",
+      "shortName": "D. Russell",
+      "playerId": 844038,
+      "playerDkId": 33054,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33054.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33054.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.3",
+          "sortValue": "20.3"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "844038-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324728,
+      "firstName": "Dwight",
+      "lastName": "Powell",
+      "displayName": "Dwight Powell",
+      "shortName": "D. Powell",
+      "playerId": 552309,
+      "playerDkId": 32997,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32997.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32997.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.4",
+          "sortValue": "8.4"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "552309-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324729,
+      "firstName": "Moussa",
+      "lastName": "Cisse",
+      "displayName": "Moussa Cisse",
+      "shortName": "M. Cisse",
+      "playerId": 1231606,
+      "playerDkId": 908768,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/908768.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/908768.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.0",
+          "sortValue": "10.0"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1231606-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324730,
+      "firstName": "Malevy",
+      "lastName": "Leons",
+      "displayName": "Malevy Leons",
+      "shortName": "M. Leons",
+      "playerId": 1345014,
+      "playerDkId": 801004,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/801004.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/801004.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1345014-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324731,
+      "firstName": "L.J.",
+      "lastName": "Cryer",
+      "displayName": "L.J. Cryer",
+      "shortName": "L. Cryer",
+      "playerId": 1249996,
+      "playerDkId": 906424,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906424.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906424.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1249996-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324732,
+      "firstName": "Jaden",
+      "lastName": "Hardy",
+      "displayName": "Jaden Hardy",
+      "shortName": "J. Hardy",
+      "playerId": 1357748,
+      "playerDkId": 649607,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649607.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649607.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "9.1",
+          "sortValue": "9.1"
+        },
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1357748-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324733,
+      "firstName": "Miles",
+      "lastName": "Kelly",
+      "displayName": "Miles Kelly",
+      "shortName": "M. Kelly",
+      "playerId": 1324019,
+      "playerDkId": 906408,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906408.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906408.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.3",
+          "sortValue": "3.3"
+        },
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1324019-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324734,
+      "firstName": "Seth",
+      "lastName": "Curry",
+      "displayName": "Seth Curry",
+      "shortName": "Se. Curry",
+      "playerId": 463135,
+      "playerDkId": 32996,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32996.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32996.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "14.3",
+          "sortValue": "14.3"
+        },
+        {
+          "id": -2,
+          "value": "14th",
+          "sortValue": "14",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "463135-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324735,
+      "firstName": "Gui",
+      "lastName": "Santos",
+      "displayName": "Gui Santos",
+      "shortName": "G. Santos",
+      "playerId": 1391940,
+      "playerDkId": 649707,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649707.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649707.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.6",
+          "sortValue": "7.6"
+        },
+        {
+          "id": -2,
+          "value": "26th",
+          "sortValue": "26",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 9,
+      "teamAbbreviation": "GSW",
+      "draftAlerts": [],
+      "playerGameHash": "1391940-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324736,
+      "firstName": "Dereck",
+      "lastName": "Lively II",
+      "displayName": "Dereck Lively II",
+      "shortName": "D. Lively II",
+      "playerId": 1401780,
+      "playerDkId": 713765,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713765.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713765.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.3",
+          "sortValue": "17.3"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "1401780-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324737,
+      "firstName": "Kyrie",
+      "lastName": "Irving",
+      "displayName": "Kyrie Irving",
+      "shortName": "K. Irving",
+      "playerId": 551768,
+      "playerDkId": 32901,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32901.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32901.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "5th",
+          "sortValue": "5",
+          "quality": "Low"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "551768-6127026",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41324738,
+      "firstName": "Dante",
+      "lastName": "Exum",
+      "displayName": "Dante Exum",
+      "shortName": "D. Exum",
+      "playerId": 830636,
+      "playerDkId": 33394,
+      "position": "PG/SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33394.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33394.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6127026,
+        "name": "DAL @ GSW",
+        "nameDisplay": [
+          {
+            "value": "DAL",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "GSW"
+          }
+        ],
+        "startTime": "2025-12-25T22:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6127026,
+          "name": "DAL @ GSW",
+          "nameDisplay": [
+            {
+              "value": "DAL",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "GSW"
+            }
+          ],
+          "startTime": "2025-12-25T22:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "27th",
+          "sortValue": "27",
+          "quality": "High"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 6,
+      "teamAbbreviation": "DAL",
+      "draftAlerts": [],
+      "playerGameHash": "830636-6127026",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6127026,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 9,
+        "teamName": "Warriors",
+        "abbreviation": "GSW",
+        "city": "Golden State",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32917.png",
+        "darkModeImageUrl": ""
+      },
+      "awayTeam": {
+        "teamId": 6,
+        "teamName": "Mavericks",
+        "abbreviation": "DAL",
+        "city": "Dallas",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32911.png",
+        "darkModeImageUrl": ""
+      },
+      "startTime": "2025-12-25T22:00:00.0000000Z",
+      "name": "DAL @ GSW",
+      "venue": "Chase Center",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 32,
+          "value": "ABC"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}

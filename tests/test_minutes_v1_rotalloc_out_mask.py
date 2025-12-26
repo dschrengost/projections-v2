@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest import mock
 
 import joblib
 import numpy as np
@@ -10,6 +11,7 @@ from sklearn.impute import SimpleImputer
 from typer.testing import CliRunner
 
 from projections.cli.score_minutes_v1 import app as score_v1_app
+from projections.minutes_alloc import rotalloc_production
 from projections.minutes_v1 import modeling
 from projections.minutes_v1.artifacts import compute_feature_hash
 
@@ -43,7 +45,8 @@ def _write_live_features(tmp_path: Path) -> tuple[Path, Path]:
     features_run_dir = data_root / "live" / "features_minutes_v1" / "2025-12-01" / "run=test_run"
     features_run_dir.mkdir(parents=True)
 
-    n_players = 10
+    # Use 12 players to ensure >= 9 eligible after 1 OUT and cutoff filtering
+    n_players = 12
     df = pd.DataFrame(
         {
             "game_id": [1001] * n_players,
@@ -58,7 +61,7 @@ def _write_live_features(tmp_path: Path) -> tuple[Path, Path]:
             "opponent_team_tricode": ["T20"] * n_players,
             "minutes": np.linspace(30.0, 5.0, n_players),
             "game_date": ["2025-12-01"] * n_players,
-            "starter_flag_label": [1] * 5 + [0] * 5,
+            "starter_flag_label": [1] * 5 + [0] * (n_players - 5),
             "ramp_flag": [0] * n_players,
             "tip_ts": ["2025-12-01T23:00:00Z"] * n_players,
             "feature_as_of_ts": ["2025-12-01T18:00:00Z"] * n_players,
@@ -66,7 +69,8 @@ def _write_live_features(tmp_path: Path) -> tuple[Path, Path]:
             "odds_as_of_ts": ["2025-12-01T19:00:00Z"] * n_players,
             "blowout_index": [1.0] * n_players,
             "status": ["OK"] * n_players,
-            "feat_a": np.linspace(0.1, 0.9, n_players),
+            # Ensure all players have p_rot > p_cutoff (0.15) for sufficient eligible set
+            "feat_a": np.linspace(0.15, 0.95, n_players),
             "feat_b": np.linspace(0.2, 0.8, n_players),
         }
     )
@@ -165,29 +169,41 @@ def test_rotalloc_respects_post_scoring_out_mask(tmp_path: Path) -> None:
     injuries_root = tmp_path / "data" / "bronze" / "injuries_raw"
     schedule_root = tmp_path / "data" / "silver" / "schedule"
 
-    result = runner.invoke(
-        score_v1_app,
-        [
-            "--date",
-            "2025-12-01",
-            "--mode",
-            "live",
-            "--features-path",
-            str(features_run_dir),
-            "--bundle-dir",
-            str(minutes_bundle_dir),
-            "--bundle-config",
-            str(bundle_config),
-            "--artifact-root",
-            str(daily_root),
-            "--injuries-root",
-            str(injuries_root),
-            "--schedule-root",
-            str(schedule_root),
-            "--disable-promotion-prior",
-        ],
-        env={"PROJECTIONS_DATA_ROOT": str(data_root)},
-    )
+    # Mock versioned config to not exist so test uses bundle-specific config
+    # (avoids production guardrails triggering on small test data)
+    fake_versioned_path = tmp_path / "nonexistent" / "config.json"
+
+    # Clear FAIL_HARD env var to prevent guardrail exceptions on synthetic test data
+    import os
+
+    env_override = {"PROJECTIONS_DATA_ROOT": str(data_root), "PROJECTIONS_ROTALLOC_FAIL_HARD": ""}
+    with (
+        mock.patch.object(rotalloc_production, "VERSIONED_PROD_CONFIG", fake_versioned_path),
+        mock.patch.dict(os.environ, env_override, clear=False),
+    ):
+        result = runner.invoke(
+            score_v1_app,
+            [
+                "--date",
+                "2025-12-01",
+                "--mode",
+                "live",
+                "--features-path",
+                str(features_run_dir),
+                "--bundle-dir",
+                str(minutes_bundle_dir),
+                "--bundle-config",
+                str(bundle_config),
+                "--artifact-root",
+                str(daily_root),
+                "--injuries-root",
+                str(injuries_root),
+                "--schedule-root",
+                str(schedule_root),
+                "--disable-promotion-prior",
+            ],
+            env=env_override,
+        )
     assert result.exit_code == 0, result.output
 
     parquet_path = daily_root / "2025-12-01" / "run=test_run" / "minutes.parquet"

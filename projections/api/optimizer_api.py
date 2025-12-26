@@ -205,6 +205,8 @@ DK_NBA_ROSTER_SLOT_ID_TO_SLOT = {
     463: "F",
     464: "G",
     465: "UTIL",
+    # Note: Single-game slates (rosterSlotId 569/570) use position-based fallback
+    # in _load_dk_nba_draftable_ids_by_player() instead of this mapping
 }
 
 
@@ -217,7 +219,11 @@ def _safe_filename_part(value: str) -> str:
 def _load_dk_nba_draftable_ids_by_player(
     draft_group_id: int,
 ) -> tuple[Dict[int, Dict[str, int]], Dict[int, str]]:
-    """Return {dk_player_id -> {slot -> draftableId}}, plus {dk_player_id -> displayName}."""
+    """Return {dk_player_id -> {slot -> draftableId}}, plus {dk_player_id -> displayName}.
+    
+    For classic slates, uses rosterSlotId directly.
+    For single-game slates (rosterSlotId 569/570), derives slot eligibility from position field.
+    """
     bronze_path = (
         get_data_root()
         / "bronze"
@@ -235,6 +241,15 @@ def _load_dk_nba_draftable_ids_by_player(
     if not isinstance(draftables, list):
         raise RuntimeError("Draftables payload missing 'draftables' list")
 
+    # Position to slot eligibility mapping for NBA classic format
+    POSITION_TO_SLOTS = {
+        "PG": ["PG", "G", "UTIL"],
+        "SG": ["SG", "G", "UTIL"],
+        "SF": ["SF", "F", "UTIL"],
+        "PF": ["PF", "F", "UTIL"],
+        "C": ["C", "UTIL"],
+    }
+
     ids_by_player: Dict[int, Dict[str, int]] = {}
     names_by_player: Dict[int, str] = {}
     for d in draftables:
@@ -243,20 +258,33 @@ def _load_dk_nba_draftable_ids_by_player(
         dk_player_id = d.get("playerId")
         draftable_id = d.get("draftableId") or d.get("id")
         roster_slot_id = d.get("rosterSlotId")
-        if dk_player_id is None or draftable_id is None or roster_slot_id is None:
+        position = d.get("position", "")
+        if dk_player_id is None or draftable_id is None:
             continue
         try:
             dk_player_id_i = int(dk_player_id)
             draftable_id_i = int(draftable_id)
-            roster_slot_id_i = int(roster_slot_id)
+            roster_slot_id_i = int(roster_slot_id) if roster_slot_id else None
         except (TypeError, ValueError):
             continue
 
-        slot = DK_NBA_ROSTER_SLOT_ID_TO_SLOT.get(roster_slot_id_i)
-        if not slot:
-            continue
-
-        ids_by_player.setdefault(dk_player_id_i, {})[slot] = draftable_id_i
+        # Try classic slot mapping first
+        slot = DK_NBA_ROSTER_SLOT_ID_TO_SLOT.get(roster_slot_id_i) if roster_slot_id_i else None
+        
+        if slot:
+            # Classic format - single slot from rosterSlotId
+            ids_by_player.setdefault(dk_player_id_i, {})[slot] = draftable_id_i
+        else:
+            # Single-game/showdown format - derive slots from position field
+            # Handle multi-position like "PF/C" or "SG/SF"
+            pos_parts = [p.strip() for p in position.split("/") if p.strip()]
+            eligible_slots: set[str] = set()
+            for pos in pos_parts:
+                eligible_slots.update(POSITION_TO_SLOTS.get(pos, []))
+            
+            # Map this draftable_id to all eligible slots
+            for slot in eligible_slots:
+                ids_by_player.setdefault(dk_player_id_i, {})[slot] = draftable_id_i
 
         display_name = d.get("displayName")
         if isinstance(display_name, str) and display_name.strip() and dk_player_id_i not in names_by_player:

@@ -1,0 +1,5311 @@
+{
+  "draftables": [
+    {
+      "draftableId": 41296680,
+      "firstName": "Tyrese",
+      "lastName": "Maxey",
+      "displayName": "Tyrese Maxey",
+      "shortName": "T. Maxey",
+      "playerId": 1186160,
+      "playerDkId": 527230,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 16500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527230.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527230.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "53.9",
+          "sortValue": "53.9"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1186160-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296681,
+      "firstName": "Michael",
+      "lastName": "Porter Jr.",
+      "displayName": "Michael Porter Jr.",
+      "shortName": "M. Porter Jr.",
+      "playerId": 1061724,
+      "playerDkId": 33026,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 14700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33026.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33026.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.0",
+          "sortValue": "43.0"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1061724-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296682,
+      "firstName": "Joel",
+      "lastName": "Embiid",
+      "displayName": "Joel Embiid",
+      "shortName": "J. Embiid",
+      "playerId": 794508,
+      "playerDkId": 33292,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 13800,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33292.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33292.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.6",
+          "sortValue": "36.6"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "794508-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296683,
+      "firstName": "Paul",
+      "lastName": "George",
+      "displayName": "Paul George",
+      "shortName": "P. George",
+      "playerId": 469218,
+      "playerDkId": 33100,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 12600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33100.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33100.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.5",
+          "sortValue": "31.5"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "469218-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296684,
+      "firstName": "Cam",
+      "lastName": "Thomas",
+      "displayName": "Cam Thomas",
+      "shortName": "C. Thomas",
+      "playerId": 1232020,
+      "playerDkId": 591032,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 12000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591032.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591032.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "28.3",
+          "sortValue": "28.3"
+        },
+        {
+          "id": -2,
+          "value": "20th",
+          "sortValue": "20",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1232020-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296685,
+      "firstName": "Quentin",
+      "lastName": "Grimes",
+      "displayName": "Quentin Grimes",
+      "shortName": "Q. Grimes",
+      "playerId": 1132827,
+      "playerDkId": 591030,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 11700,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591030.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591030.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.7",
+          "sortValue": "29.7"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1132827-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296686,
+      "firstName": "VJ",
+      "lastName": "Edgecombe",
+      "displayName": "VJ Edgecombe",
+      "shortName": "V. Edgecombe",
+      "playerId": 1519361,
+      "playerDkId": 905552,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 11100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905552.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905552.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.6",
+          "sortValue": "32.6"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1519361-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296646,
+      "firstName": "Tyrese",
+      "lastName": "Maxey",
+      "displayName": "Tyrese Maxey",
+      "shortName": "T. Maxey",
+      "playerId": 1186160,
+      "playerDkId": 527230,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 11000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/527230.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/527230.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "53.9",
+          "sortValue": "53.9"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1186160-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296687,
+      "firstName": "Nic",
+      "lastName": "Claxton",
+      "displayName": "Nic Claxton",
+      "shortName": "N. Claxton",
+      "playerId": 1061682,
+      "playerDkId": 32924,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 10800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32924.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32924.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.8",
+          "sortValue": "33.8"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1061682-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296688,
+      "firstName": "Andre",
+      "lastName": "Drummond",
+      "displayName": "Andre Drummond",
+      "shortName": "A. Drummond",
+      "playerId": 614746,
+      "playerDkId": 33035,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 10200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33035.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33035.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "24.6",
+          "sortValue": "24.6"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "614746-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296647,
+      "firstName": "Michael",
+      "lastName": "Porter Jr.",
+      "displayName": "Michael Porter Jr.",
+      "shortName": "M. Porter Jr.",
+      "playerId": 1061724,
+      "playerDkId": 33026,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 9800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33026.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33026.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "43.0",
+          "sortValue": "43.0"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1061724-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296689,
+      "firstName": "Kelly",
+      "lastName": "Oubre Jr.",
+      "displayName": "Kelly Oubre Jr.",
+      "shortName": "K. Oubre Jr.",
+      "playerId": 843271,
+      "playerDkId": 33310,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 9300,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33310.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33310.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.4",
+          "sortValue": "29.4"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "843271-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296648,
+      "firstName": "Joel",
+      "lastName": "Embiid",
+      "displayName": "Joel Embiid",
+      "shortName": "J. Embiid",
+      "playerId": 794508,
+      "playerDkId": 33292,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 9200,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33292.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33292.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "36.6",
+          "sortValue": "36.6"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "794508-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296649,
+      "firstName": "Paul",
+      "lastName": "George",
+      "displayName": "Paul George",
+      "shortName": "P. George",
+      "playerId": 469218,
+      "playerDkId": 33100,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 8400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33100.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33100.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "31.5",
+          "sortValue": "31.5"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "469218-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296690,
+      "firstName": "Noah",
+      "lastName": "Clowney",
+      "displayName": "Noah Clowney",
+      "shortName": "N. Clowney",
+      "playerId": 1401380,
+      "playerDkId": 713774,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 8400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713774.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713774.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "24.5",
+          "sortValue": "24.5"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1401380-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296650,
+      "firstName": "Cam",
+      "lastName": "Thomas",
+      "displayName": "Cam Thomas",
+      "shortName": "C. Thomas",
+      "playerId": 1232020,
+      "playerDkId": 591032,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 8000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591032.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591032.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "28.3",
+          "sortValue": "28.3"
+        },
+        {
+          "id": -2,
+          "value": "20th",
+          "sortValue": "20",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1232020-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296651,
+      "firstName": "Quentin",
+      "lastName": "Grimes",
+      "displayName": "Quentin Grimes",
+      "shortName": "Q. Grimes",
+      "playerId": 1132827,
+      "playerDkId": 591030,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 7800,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591030.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591030.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.7",
+          "sortValue": "29.7"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1132827-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296691,
+      "firstName": "Dominick",
+      "lastName": "Barlow",
+      "displayName": "Dominick Barlow",
+      "shortName": "D. Barlow",
+      "playerId": 1419291,
+      "playerDkId": 678122,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 7500,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/678122.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/678122.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.3",
+          "sortValue": "22.3"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1419291-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296652,
+      "firstName": "VJ",
+      "lastName": "Edgecombe",
+      "displayName": "VJ Edgecombe",
+      "shortName": "V. Edgecombe",
+      "playerId": 1519361,
+      "playerDkId": 905552,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 7400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905552.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905552.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "32.6",
+          "sortValue": "32.6"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1519361-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296653,
+      "firstName": "Nic",
+      "lastName": "Claxton",
+      "displayName": "Nic Claxton",
+      "shortName": "N. Claxton",
+      "playerId": 1061682,
+      "playerDkId": 32924,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 7200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/32924.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/32924.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "33.8",
+          "sortValue": "33.8"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1061682-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296692,
+      "firstName": "Danny",
+      "lastName": "Wolf",
+      "displayName": "Danny Wolf",
+      "shortName": "D. Wolf",
+      "playerId": 1415928,
+      "playerDkId": 905576,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 7200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905576.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905576.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.0",
+          "sortValue": "17.0"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1415928-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296693,
+      "firstName": "Jared",
+      "lastName": "McCain",
+      "displayName": "Jared McCain",
+      "shortName": "J. McCain",
+      "playerId": 1458807,
+      "playerDkId": 800373,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 6900,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800373.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800373.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.2",
+          "sortValue": "15.2"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1458807-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296654,
+      "firstName": "Andre",
+      "lastName": "Drummond",
+      "displayName": "Andre Drummond",
+      "shortName": "A. Drummond",
+      "playerId": 614746,
+      "playerDkId": 33035,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 6800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33035.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33035.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "24.6",
+          "sortValue": "24.6"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "614746-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296694,
+      "firstName": "Egor",
+      "lastName": "Demin",
+      "displayName": "Egor Demin",
+      "shortName": "E. Demin",
+      "playerId": 1523978,
+      "playerDkId": 905557,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 6600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905557.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905557.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.7",
+          "sortValue": "20.7"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1523978-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296655,
+      "firstName": "Kelly",
+      "lastName": "Oubre Jr.",
+      "displayName": "Kelly Oubre Jr.",
+      "shortName": "K. Oubre Jr.",
+      "playerId": 843271,
+      "playerDkId": 33310,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 6200,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33310.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33310.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "29.4",
+          "sortValue": "29.4"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "843271-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296695,
+      "firstName": "Trendon",
+      "lastName": "Watford",
+      "displayName": "Trendon Watford",
+      "shortName": "T. Watford",
+      "playerId": 1176529,
+      "playerDkId": 591097,
+      "position": "PF",
+      "rosterSlotId": 476,
+      "salary": 6000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591097.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591097.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1176529-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296656,
+      "firstName": "Noah",
+      "lastName": "Clowney",
+      "displayName": "Noah Clowney",
+      "shortName": "N. Clowney",
+      "playerId": 1401380,
+      "playerDkId": 713774,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 5600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713774.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713774.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "24.5",
+          "sortValue": "24.5"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1401380-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296696,
+      "firstName": "Terance",
+      "lastName": "Mann",
+      "displayName": "Terance Mann",
+      "shortName": "T. Mann",
+      "playerId": 879504,
+      "playerDkId": 33113,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 5400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33113.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33113.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.3",
+          "sortValue": "20.3"
+        },
+        {
+          "id": -2,
+          "value": "20th",
+          "sortValue": "20",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "879504-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296657,
+      "firstName": "Dominick",
+      "lastName": "Barlow",
+      "displayName": "Dominick Barlow",
+      "shortName": "D. Barlow",
+      "playerId": 1419291,
+      "playerDkId": 678122,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 5000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/678122.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/678122.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "22.3",
+          "sortValue": "22.3"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1419291-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296658,
+      "firstName": "Danny",
+      "lastName": "Wolf",
+      "displayName": "Danny Wolf",
+      "shortName": "D. Wolf",
+      "playerId": 1415928,
+      "playerDkId": 905576,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905576.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905576.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.0",
+          "sortValue": "17.0"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1415928-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296697,
+      "firstName": "Adem",
+      "lastName": "Bona",
+      "displayName": "Adem Bona",
+      "shortName": "A. Bona",
+      "playerId": 1350567,
+      "playerDkId": 800658,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 4800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800658.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800658.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.4",
+          "sortValue": "12.4"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1350567-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296659,
+      "firstName": "Jared",
+      "lastName": "McCain",
+      "displayName": "Jared McCain",
+      "shortName": "J. McCain",
+      "playerId": 1458807,
+      "playerDkId": 800373,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 4600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800373.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800373.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "15.2",
+          "sortValue": "15.2"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1458807-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296660,
+      "firstName": "Egor",
+      "lastName": "Demin",
+      "displayName": "Egor Demin",
+      "shortName": "E. Demin",
+      "playerId": 1523978,
+      "playerDkId": 905557,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 4400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905557.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905557.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.7",
+          "sortValue": "20.7"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1523978-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296698,
+      "firstName": "Day'Ron",
+      "lastName": "Sharpe",
+      "displayName": "Day'Ron Sharpe",
+      "shortName": "D. Sharpe",
+      "playerId": 1243725,
+      "playerDkId": 591034,
+      "position": "C",
+      "rosterSlotId": 476,
+      "salary": 4200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591034.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591034.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.8",
+          "sortValue": "18.8"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1243725-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296661,
+      "firstName": "Trendon",
+      "lastName": "Watford",
+      "displayName": "Trendon Watford",
+      "shortName": "T. Watford",
+      "playerId": 1176529,
+      "playerDkId": 591097,
+      "position": "PF",
+      "rosterSlotId": 475,
+      "salary": 4000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591097.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591097.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "21.3",
+          "sortValue": "21.3"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1176529-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296662,
+      "firstName": "Terance",
+      "lastName": "Mann",
+      "displayName": "Terance Mann",
+      "shortName": "T. Mann",
+      "playerId": 879504,
+      "playerDkId": 33113,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33113.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33113.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "20.3",
+          "sortValue": "20.3"
+        },
+        {
+          "id": -2,
+          "value": "20th",
+          "sortValue": "20",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "879504-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296699,
+      "firstName": "Tyrese",
+      "lastName": "Martin",
+      "displayName": "Tyrese Martin",
+      "shortName": "T. Martin",
+      "playerId": 1134107,
+      "playerDkId": 649704,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 3600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649704.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649704.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.3",
+          "sortValue": "17.3"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1134107-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296663,
+      "firstName": "Adem",
+      "lastName": "Bona",
+      "displayName": "Adem Bona",
+      "shortName": "A. Bona",
+      "playerId": 1350567,
+      "playerDkId": 800658,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 3200,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800658.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800658.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.4",
+          "sortValue": "12.4"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1350567-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296700,
+      "firstName": "Nolan",
+      "lastName": "Traore",
+      "displayName": "Nolan Traore",
+      "shortName": "N. Traore",
+      "playerId": 1590550,
+      "playerDkId": 905568,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 3000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905568.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905568.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.7",
+          "sortValue": "6.7"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1590550-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296664,
+      "firstName": "Day'Ron",
+      "lastName": "Sharpe",
+      "displayName": "Day'Ron Sharpe",
+      "shortName": "D. Sharpe",
+      "playerId": 1243725,
+      "playerDkId": 591034,
+      "position": "C",
+      "rosterSlotId": 475,
+      "salary": 2800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591034.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591034.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "18.8",
+          "sortValue": "18.8"
+        },
+        {
+          "id": -2,
+          "value": "22nd",
+          "sortValue": "22",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1243725-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296701,
+      "firstName": "Jabari",
+      "lastName": "Walker",
+      "displayName": "Jabari Walker",
+      "shortName": "J. Walker",
+      "playerId": 1232517,
+      "playerDkId": 649593,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 2700,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649593.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649593.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.8",
+          "sortValue": "10.8"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1232517-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296665,
+      "firstName": "Tyrese",
+      "lastName": "Martin",
+      "displayName": "Tyrese Martin",
+      "shortName": "T. Martin",
+      "playerId": 1134107,
+      "playerDkId": 649704,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649704.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649704.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "17.3",
+          "sortValue": "17.3"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1134107-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296702,
+      "firstName": "Justin",
+      "lastName": "Edwards",
+      "displayName": "Justin Edwards",
+      "shortName": "J. Edwards",
+      "playerId": 1465002,
+      "playerDkId": 800676,
+      "position": "SF",
+      "rosterSlotId": 476,
+      "salary": 2400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800676.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800676.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.9",
+          "sortValue": "11.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1465002-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296703,
+      "firstName": "Ziaire",
+      "lastName": "Williams",
+      "displayName": "Ziaire Williams",
+      "shortName": "Z. Williams",
+      "playerId": 1231313,
+      "playerDkId": 591011,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 2100,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591011.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591011.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.0",
+          "sortValue": "16.0"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1231313-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296666,
+      "firstName": "Nolan",
+      "lastName": "Traore",
+      "displayName": "Nolan Traore",
+      "shortName": "N. Traore",
+      "playerId": 1590550,
+      "playerDkId": 905568,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 2000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905568.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905568.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "6.7",
+          "sortValue": "6.7"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1590550-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296667,
+      "firstName": "Jabari",
+      "lastName": "Walker",
+      "displayName": "Jabari Walker",
+      "shortName": "J. Walker",
+      "playerId": 1232517,
+      "playerDkId": 649593,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1800,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649593.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649593.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "10.8",
+          "sortValue": "10.8"
+        },
+        {
+          "id": -2,
+          "value": "24th",
+          "sortValue": "24",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1232517-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296704,
+      "firstName": "Drake",
+      "lastName": "Powell",
+      "displayName": "Drake Powell",
+      "shortName": "D. Powell",
+      "playerId": 1542179,
+      "playerDkId": 905570,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 1800,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905570.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905570.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.8",
+          "sortValue": "12.8"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1542179-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296668,
+      "firstName": "Justin",
+      "lastName": "Edwards",
+      "displayName": "Justin Edwards",
+      "shortName": "J. Edwards",
+      "playerId": 1465002,
+      "playerDkId": 800676,
+      "position": "SF",
+      "rosterSlotId": 475,
+      "salary": 1600,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/800676.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/800676.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "11.9",
+          "sortValue": "11.9"
+        },
+        {
+          "id": -2,
+          "value": "18th",
+          "sortValue": "18",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1465002-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296705,
+      "firstName": "Ben",
+      "lastName": "Saraf",
+      "displayName": "Ben Saraf",
+      "shortName": "B. Saraf",
+      "playerId": 1590554,
+      "playerDkId": 905574,
+      "position": "PG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905574.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905574.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.9",
+          "sortValue": "12.9"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1590554-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296706,
+      "firstName": "Jalen",
+      "lastName": "Wilson",
+      "displayName": "Jalen Wilson",
+      "shortName": "J. Wilson",
+      "playerId": 1174884,
+      "playerDkId": 713803,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713803.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713803.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.1",
+          "sortValue": "8.1"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1174884-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296707,
+      "firstName": "Johni",
+      "lastName": "Broome",
+      "displayName": "Johni Broome",
+      "shortName": "J. Broome",
+      "playerId": 1231975,
+      "playerDkId": 906342,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906342.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906342.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.9",
+          "sortValue": "5.9"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1231975-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296708,
+      "firstName": "Eric",
+      "lastName": "Gordon",
+      "displayName": "Eric Gordon",
+      "shortName": "E. Gordon",
+      "playerId": 401085,
+      "playerDkId": 33069,
+      "position": "SG/SF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33069.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33069.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.0",
+          "sortValue": "7.0"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "401085-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296709,
+      "firstName": "E.J.",
+      "lastName": "Liddell",
+      "displayName": "E.J. Liddell",
+      "shortName": "E. Liddell",
+      "playerId": 1176246,
+      "playerDkId": 649584,
+      "position": "PF/C",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649584.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649584.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.8",
+          "sortValue": "3.8"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1176246-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296710,
+      "firstName": "Hunter",
+      "lastName": "Sallis",
+      "displayName": "Hunter Sallis",
+      "shortName": "H. Sallis",
+      "playerId": 1343005,
+      "playerDkId": 906407,
+      "position": "SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906407.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906407.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.3",
+          "sortValue": "2.3"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1343005-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296711,
+      "firstName": "Kyle",
+      "lastName": "Lowry",
+      "displayName": "Kyle Lowry",
+      "shortName": "K. Lowry",
+      "playerId": 266394,
+      "playerDkId": 33371,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33371.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33371.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.6",
+          "sortValue": "4.6"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "266394-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296712,
+      "firstName": "Tyson",
+      "lastName": "Etienne",
+      "displayName": "Tyson Etienne",
+      "shortName": "T. Etienne",
+      "playerId": 1175318,
+      "playerDkId": 651462,
+      "position": "PG/SG",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651462.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651462.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.9",
+          "sortValue": "1.9"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1175318-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296713,
+      "firstName": "Haywood",
+      "lastName": "Highsmith",
+      "displayName": "Haywood Highsmith",
+      "shortName": "H. Highsmith",
+      "playerId": 1083019,
+      "playerDkId": 33301,
+      "position": "SF/PF",
+      "rosterSlotId": 476,
+      "salary": 1500,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33301.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33301.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1083019-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296669,
+      "firstName": "Ziaire",
+      "lastName": "Williams",
+      "displayName": "Ziaire Williams",
+      "shortName": "Z. Williams",
+      "playerId": 1231313,
+      "playerDkId": 591011,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1400,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/591011.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/591011.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "16.0",
+          "sortValue": "16.0"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1231313-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296670,
+      "firstName": "Drake",
+      "lastName": "Powell",
+      "displayName": "Drake Powell",
+      "shortName": "D. Powell",
+      "playerId": 1542179,
+      "playerDkId": 905570,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1200,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905570.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905570.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.8",
+          "sortValue": "12.8"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1542179-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296671,
+      "firstName": "Ben",
+      "lastName": "Saraf",
+      "displayName": "Ben Saraf",
+      "shortName": "B. Saraf",
+      "playerId": 1590554,
+      "playerDkId": 905574,
+      "position": "PG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "Q",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Recent",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/905574.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/905574.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "12.9",
+          "sortValue": "12.9"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1590554-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296672,
+      "firstName": "Jalen",
+      "lastName": "Wilson",
+      "displayName": "Jalen Wilson",
+      "shortName": "J. Wilson",
+      "playerId": 1174884,
+      "playerDkId": 713803,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/713803.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/713803.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "8.1",
+          "sortValue": "8.1"
+        },
+        {
+          "id": -2,
+          "value": "15th",
+          "sortValue": "15",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1174884-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296673,
+      "firstName": "Johni",
+      "lastName": "Broome",
+      "displayName": "Johni Broome",
+      "shortName": "J. Broome",
+      "playerId": 1231975,
+      "playerDkId": 906342,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906342.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906342.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "5.9",
+          "sortValue": "5.9"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1231975-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296674,
+      "firstName": "Eric",
+      "lastName": "Gordon",
+      "displayName": "Eric Gordon",
+      "shortName": "E. Gordon",
+      "playerId": 401085,
+      "playerDkId": 33069,
+      "position": "SG/SF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33069.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33069.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "7.0",
+          "sortValue": "7.0"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "401085-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296675,
+      "firstName": "E.J.",
+      "lastName": "Liddell",
+      "displayName": "E.J. Liddell",
+      "shortName": "E. Liddell",
+      "playerId": 1176246,
+      "playerDkId": 649584,
+      "position": "PF/C",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/649584.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/649584.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "3.8",
+          "sortValue": "3.8"
+        },
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1176246-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296676,
+      "firstName": "Hunter",
+      "lastName": "Sallis",
+      "displayName": "Hunter Sallis",
+      "shortName": "H. Sallis",
+      "playerId": 1343005,
+      "playerDkId": 906407,
+      "position": "SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/906407.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/906407.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "2.3",
+          "sortValue": "2.3"
+        },
+        {
+          "id": -2,
+          "value": "28th",
+          "sortValue": "28",
+          "quality": "High"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "1343005-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296677,
+      "firstName": "Kyle",
+      "lastName": "Lowry",
+      "displayName": "Kyle Lowry",
+      "shortName": "K. Lowry",
+      "playerId": 266394,
+      "playerDkId": 33371,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33371.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33371.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN"
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI",
+            "isEmphasized": true
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN"
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI",
+              "isEmphasized": true
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "4.6",
+          "sortValue": "4.6"
+        },
+        {
+          "id": -2,
+          "value": "3rd",
+          "sortValue": "3",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 20,
+      "teamAbbreviation": "PHI",
+      "draftAlerts": [],
+      "playerGameHash": "266394-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296678,
+      "firstName": "Tyson",
+      "lastName": "Etienne",
+      "displayName": "Tyson Etienne",
+      "shortName": "T. Etienne",
+      "playerId": 1175318,
+      "playerDkId": 651462,
+      "position": "PG/SG",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "None",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "None",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/651462.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/651462.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": 219,
+          "value": "1.9",
+          "sortValue": "1.9"
+        },
+        {
+          "id": -2,
+          "value": "8th",
+          "sortValue": "8",
+          "quality": "Low"
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1175318-6132264",
+      "externalRequirements": {}
+    },
+    {
+      "draftableId": 41296679,
+      "firstName": "Haywood",
+      "lastName": "Highsmith",
+      "displayName": "Haywood Highsmith",
+      "shortName": "H. Highsmith",
+      "playerId": 1083019,
+      "playerDkId": 33301,
+      "position": "SF/PF",
+      "rosterSlotId": 475,
+      "salary": 1000,
+      "status": "OUT",
+      "isSwappable": true,
+      "isDisabled": false,
+      "newsStatus": "Breaking",
+      "playerImage50": "https://dkn.gs/sports/images/nba/players/50/33301.png",
+      "playerImage160": "https://dkn.gs/sports/images/nba/players/160/33301.png",
+      "altPlayerImage50": "",
+      "altPlayerImage160": "",
+      "competition": {
+        "competitionId": 6132264,
+        "name": "BKN @ PHI",
+        "nameDisplay": [
+          {
+            "value": "BKN",
+            "isEmphasized": true
+          },
+          {
+            "value": " @ "
+          },
+          {
+            "value": "PHI"
+          }
+        ],
+        "startTime": "2025-12-24T00:00:00.0000000Z"
+      },
+      "competitions": [
+        {
+          "competitionId": 6132264,
+          "name": "BKN @ PHI",
+          "nameDisplay": [
+            {
+              "value": "BKN",
+              "isEmphasized": true
+            },
+            {
+              "value": " @ "
+            },
+            {
+              "value": "PHI"
+            }
+          ],
+          "startTime": "2025-12-24T00:00:00.0000000Z"
+        }
+      ],
+      "draftStatAttributes": [
+        {
+          "id": -2,
+          "value": "17th",
+          "sortValue": "17",
+          "quality": "Medium"
+        },
+        {
+          "id": 219,
+          "value": "-",
+          "sortValue": ""
+        }
+      ],
+      "playerAttributes": [],
+      "teamLeagueSeasonAttributes": [],
+      "playerGameAttributes": [],
+      "teamId": 17,
+      "teamAbbreviation": "BKN",
+      "draftAlerts": [],
+      "playerGameHash": "1083019-6132264",
+      "externalRequirements": {}
+    }
+  ],
+  "competitions": [
+    {
+      "competitionId": 6132264,
+      "sport": "NBA",
+      "sportId": 4,
+      "homeTeam": {
+        "teamId": 20,
+        "teamName": "76ers",
+        "abbreviation": "PHI",
+        "city": "Philadelphia",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32947.png",
+        "darkModeImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/d/32947.png"
+      },
+      "awayTeam": {
+        "teamId": 17,
+        "teamName": "Nets",
+        "abbreviation": "BKN",
+        "city": "Brooklyn",
+        "teamImageUrl": "https://dkn.gs/sports/images/nba/teams/logos/160/32902.png",
+        "darkModeImageUrl": ""
+      },
+      "startTime": "2025-12-24T00:00:00.0000000Z",
+      "name": "BKN @ PHI",
+      "venue": "Wells Fargo Center",
+      "startingLineupsAvailable": false,
+      "depthChartsAvailable": true,
+      "competitionState": "Upcoming",
+      "competitionStateDetail": "",
+      "competitionStartedEarly": false,
+      "competitionAttributes": [
+        {
+          "typeId": 9,
+          "value": "Pre-Game"
+        },
+        {
+          "typeId": 23,
+          "value": "2"
+        },
+        {
+          "typeId": 27,
+          "value": "False"
+        },
+        {
+          "typeId": 52,
+          "value": "0"
+        },
+        {
+          "typeId": 53,
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "teamsWithoutCompetitions": [],
+  "draftAlerts": [],
+  "draftStats": [
+    {
+      "id": 219,
+      "abbr": "FPPG",
+      "name": "Fantasy Points Per Game",
+      "order": 11
+    },
+    {
+      "id": -2,
+      "abbr": "OPRK",
+      "name": "Opponent Rank",
+      "order": 20
+    }
+  ],
+  "playerGameAttributes": [],
+  "errorStatus": {}
+}
