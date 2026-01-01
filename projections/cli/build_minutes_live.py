@@ -42,6 +42,7 @@ from projections.minutes_v1.starter_flags import (
     derive_starter_flag_label,
     normalize_starter_signals,
 )
+from projections.labels import derive_starter_flag_labels
 from projections.etl import storage as bronze_storage
 from projections.pipeline.status import JobStatus, write_status
 from scrapers.nba_players import NbaPlayersScraper, PlayerProfile
@@ -161,6 +162,14 @@ def _ensure_run_output_dir(root: Path, day: pd.Timestamp, run_id: str) -> tuple[
 
 
 def _write_latest_pointer(day_dir: Path, *, run_id: str, run_as_of_ts: pd.Timestamp) -> None:
+    import os
+
+    if os.environ.get("PROJECTIONS_SKIP_POINTER_WRITES", "").strip().lower() in {"1", "true", "yes"}:
+        return
+
+    from projections.pipeline import writer_guard
+
+    writer_guard.assert_can_write_pointers(purpose=f"build_minutes_live promote {day_dir}")
     pointer = day_dir / LATEST_POINTER
     payload = {"run_id": run_id, "run_as_of_ts": run_as_of_ts.isoformat()}
     pointer.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -564,7 +573,27 @@ def _load_label_history(
             typer.echo(
                 f"[live] warning: dropped {dropped} label rows with NaN minutes from history ({before} -> {len(history)}).",
                 err=True,
-    )
+            )
+
+    # Historical label sources have occasionally carried unreliable starter flags (e.g. all ones).
+    # Always derive starters from *boxscore minutes* for history to ensure exactly 5 starters
+    # per team-game and prevent starter history features from becoming constant.
+    try:
+        history = derive_starter_flag_labels(
+            history,
+            minutes_col="minutes",
+            game_col="game_id",
+            team_col="team_id",
+            player_col="player_id",
+            output_col="starter_flag_label",
+        )
+        history["starter_flag"] = history["starter_flag_label"]
+    except Exception as exc:
+        typer.echo(
+            f"[live] warning: failed to derive starter_flag_label from minutes in history ({exc}); "
+            "using starter flags from the label source as-is.",
+            err=True,
+        )
     # If history still empty, bail explicitly to avoid silent flat features.
     if history.empty:
         raise RuntimeError(
@@ -947,8 +976,10 @@ def _build_minutes_live_logic(
 
     schedule_df = _load_table(schedule_default, schedule_path)
     
-    # In backfill mode, load injuries from bronze by date (has historical snapshots)
-    if backfill_mode and injuries_path is None:
+    # Prefer bronze injuries_raw for live builds as well so we retain multiple snapshots per day.
+    # This prevents situations where the silver injuries_snapshot only contains a late refresh
+    # (after tip) and gets fully filtered out by the anti-leak guard for early games.
+    if injuries_path is None:
         injuries_df = bronze_storage.read_bronze_day(
             "injuries_raw",
             data_root,
@@ -958,10 +989,15 @@ def _build_minutes_live_logic(
             prefer_history=True,
         )
         if not injuries_df.empty:
-            warnings.append(f"[backfill-mode] Loaded injuries from bronze day={target_day.date().isoformat()}")
+            tag = "[backfill-mode]" if backfill_mode else "[live]"
+            warnings.append(f"{tag} Loaded injuries_raw from bronze day={target_day.date().isoformat()}.")
         else:
-            # Fallback to silver if bronze date partition doesn't exist
+            # Fall back to silver if bronze partitions are missing (keeps pipeline unblocked).
             injuries_df = _load_table(injuries_default, injuries_path)
+            warnings.append(
+                f"[live] warning: bronze injuries_raw empty for day={target_day.date().isoformat()}; "
+                "falling back to silver injuries_snapshot."
+            )
     else:
         injuries_df = _load_table(injuries_default, injuries_path)
 
