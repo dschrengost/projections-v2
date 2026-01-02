@@ -9,23 +9,23 @@ The model registry provides lightweight version tracking and promotion for ML mo
 uv run python -m projections.registry.cli list
 
 # List versions of a specific model
-uv run python -m projections.registry.cli list minutes_v1_lgbm
+uv run python -m projections.registry.cli list minutes_v1
 
 # Show details for production version
-uv run python -m projections.registry.cli show minutes_v1_lgbm
+uv run python -m projections.registry.cli show minutes_v1
 
 # Promote a version to production
-uv run python -m projections.registry.cli promote minutes_v1_lgbm <run_id> --stage prod
+uv run python -m projections.registry.cli promote minutes_v1 <run_id> --stage prod
 
 # Get production model path (for scripts)
-MODEL_PATH=$(uv run python -m projections.registry.cli production minutes_v1_lgbm)
+MODEL_PATH=$(uv run python -m projections.registry.cli production minutes_v1)
 ```
 
 ## Registered Models
 
 | Model | Trainer | Description |
 |-------|---------|-------------|
-| `minutes_v1_lgbm` | `projections/models/minutes_lgbm.py` | LightGBM quantile regression for minutes |
+| `minutes_v1` | `projections/models/minutes_lgbm.py` | LightGBM quantile regression for minutes |
 | `fpts_v1_lgbm` | `projections/models/fpts_lgbm.py` | LightGBM for fantasy points per minute |
 | `rates_v1_lgbm` | `scripts/rates/train_rates_v1.py` | Multi-target LightGBM for per-minute rates |
 
@@ -36,7 +36,7 @@ MODEL_PATH=$(uv run python -m projections.registry.cli production minutes_v1_lgb
 After training any model, it is automatically registered:
 
 ```
-[registry] Registered minutes_v1_lgbm v20241204T220000Z (stage=dev)
+[registry] Registered minutes_v1 v20241204T220000Z (stage=dev)
 ```
 
 The registry stores:
@@ -57,17 +57,17 @@ The registry stores:
 
 ```bash
 # Promote to staging for testing
-uv run python -m projections.registry.cli promote minutes_v1_lgbm <run_id> --stage staging
+uv run python -m projections.registry.cli promote minutes_v1 <run_id> --stage staging
 
 # After validation, promote to production
-uv run python -m projections.registry.cli promote minutes_v1_lgbm <run_id> --stage prod
+uv run python -m projections.registry.cli promote minutes_v1 <run_id> --stage prod
 ```
 
 ### Using Production Models in Scripts
 
 ```bash
 #!/bin/bash
-MODEL_PATH=$(uv run python -m projections.registry.cli production minutes_v1_lgbm)
+MODEL_PATH=$(uv run python -m projections.registry.cli production minutes_v1)
 echo "Loading model from: $MODEL_PATH"
 ```
 
@@ -78,7 +78,7 @@ from projections.registry import load_manifest, get_production_model
 
 # Get production model info
 manifest = load_manifest()
-prod = get_production_model(manifest, "minutes_v1_lgbm")
+prod = get_production_model(manifest, "minutes_v1")
 if prod:
     print(f"Production: {prod.artifact_path}")
     print(f"Metrics: {prod.metrics}")

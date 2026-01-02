@@ -59,7 +59,7 @@ def test_register_model() -> None:
     manifest = ModelManifest()
     version = register_model(
         manifest,
-        model_name="minutes_v1_lgbm",
+        model_name="minutes_v1",
         version="1.0.0",
         run_id="20241201T030000Z",
         artifact_path="artifacts/minutes_lgbm/run1",
@@ -68,8 +68,8 @@ def test_register_model() -> None:
         metrics={"val_mae": 3.2},
     )
     assert version.version == "1.0.0"
-    assert manifest.get_model("minutes_v1_lgbm") is not None
-    assert len(manifest.models["minutes_v1_lgbm"].versions) == 1
+    assert manifest.get_model("minutes_v1") is not None
+    assert len(manifest.models["minutes_v1"].versions) == 1
 
 
 def test_register_duplicate_version_fails() -> None:
