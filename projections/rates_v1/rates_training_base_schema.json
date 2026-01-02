@@ -1,0 +1,36 @@
+{
+  "name": "rates_training_base",
+  "required_columns": [
+    "season",
+    "game_id",
+    "game_date",
+    "tip_ts",
+    "feature_as_of_ts",
+    "team_id",
+    "opponent_id",
+    "home_flag",
+    "player_id",
+    "minutes_actual",
+    "fga2_per_min",
+    "fga3_per_min",
+    "fta_per_min",
+    "ast_per_min",
+    "tov_per_min",
+    "oreb_per_min",
+    "dreb_per_min",
+    "stl_per_min",
+    "blk_per_min",
+    "fg2_pct_label",
+    "fg3_pct_label",
+    "ft_pct_label"
+  ],
+  "primary_key": [
+    "game_id",
+    "player_id",
+    "team_id"
+  ],
+  "notes": {
+    "tip_ts": "Game start timestamp (UTC).",
+    "feature_as_of_ts": "Safe feature snapshot timestamp strictly before tip_ts; default is tip_ts - 30 minutes."
+  }
+}

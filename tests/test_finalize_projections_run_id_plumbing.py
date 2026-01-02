@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from projections.cli.finalize_projections import finalize_projections
 from projections.cli.check_health import check_artifact_pointers
@@ -15,7 +16,11 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def test_finalize_projections_uses_explicit_run_ids_and_preserves_sim_values(tmp_path: Path) -> None:
+def test_finalize_projections_uses_explicit_run_ids_and_preserves_sim_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROJECTIONS_ALLOW_UNSAFE_POINTER_WRITES", "1")
     data_root = tmp_path
     game_date = date(2025, 1, 1)
     minutes_run_id = "MIN123"

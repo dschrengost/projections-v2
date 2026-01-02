@@ -24,6 +24,8 @@ import yaml
 from projections.dk.salaries_schema import dk_salaries_gold_path, normalize_positions
 from projections.dk.slates import list_draft_groups_for_date
 from projections.fpts_v2.scoring import compute_dk_fpts
+from projections.pipeline import control_plane
+from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
 from projections.optimizer.quick_build import (
     QuickBuildConfig,
     QuickBuildResult,
@@ -77,18 +79,8 @@ def get_minutes_daily_root() -> Path:
 
 
 def _latest_minutes_run_id(game_date: str, minutes_root: Path) -> str | None:
-    """Read artifacts/minutes_v1/daily/<date>/latest_run.json when available."""
-    import json
-
-    pointer = minutes_root / game_date / "latest_run.json"
-    if not pointer.exists():
-        return None
-    try:
-        payload = json.loads(pointer.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    run_id = payload.get("run_id")
-    return str(run_id) if run_id else None
+    """Read artifacts/minutes_v1/daily/<date> promoted run_id when available."""
+    return control_plane.read_promoted_run_id(minutes_root / game_date)
 
 
 def _load_rates_v1_live(
@@ -292,19 +284,14 @@ def load_projections_for_date(
                 run_dir = candidate
 
         if run_dir is None:
-            # Try latest_run.json pointer
-            import json
-            latest_pointer = unified_dir / "latest_run.json"
-            if latest_pointer.exists():
-                try:
-                    with open(latest_pointer) as f:
-                        latest_run_id = json.load(f).get("run_id")
-                    if latest_run_id:
-                        run_dir = unified_dir / f"run={latest_run_id}"
-                except Exception:
-                    pass
-            # Fall back to most recent run dir
-            if run_dir is None or not run_dir.exists():
+            promoted = control_plane.read_promoted_run_id(unified_dir)
+            if promoted:
+                candidate = unified_dir / f"run={promoted}"
+                if candidate.exists():
+                    run_dir = candidate
+
+            # Fall back to most recent run dir only when explicitly allowed.
+            if (run_dir is None or not run_dir.exists()) and control_plane.allow_unpromoted_run_reads():
                 run_dirs = sorted(
                     [p for p in unified_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
                     reverse=True,
@@ -333,11 +320,24 @@ def load_projections_for_date(
     if df is None:
         gold_dir = root / "gold" / "projections_minutes_v1" / f"game_date={game_date}"
         if gold_dir.exists():
-            parquet_files = list(gold_dir.glob("*.parquet"))
-            if parquet_files:
-                frames = [pd.read_parquet(p) for p in parquet_files]
-                df = pd.concat(frames, ignore_index=True)
-                logger.info("Loaded gold projections for %s (%d rows)", game_date, len(df))
+            gold_run_id = control_plane.read_promoted_run_id(gold_dir)
+            if gold_run_id is None and control_plane.allow_unpromoted_run_reads():
+                run_dirs = sorted([p for p in gold_dir.glob("run=*") if p.is_dir()], reverse=True)
+                if run_dirs:
+                    gold_run_id = run_dirs[0].name.split("=", 1)[1]
+
+            if gold_run_id:
+                run_dir = gold_dir / f"run={gold_run_id}"
+                for candidate in (run_dir / EFFECTIVE_MINUTES_FILENAME, run_dir / "minutes.parquet"):
+                    if candidate.exists():
+                        df = pd.read_parquet(candidate)
+                        logger.info(
+                            "Loaded gold projections_minutes_v1 for %s from run=%s (%d rows)",
+                            game_date,
+                            gold_run_id,
+                            len(df),
+                        )
+                        break
 
 
     if df is None:

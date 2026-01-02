@@ -10,7 +10,7 @@ Output: live/features_rates_v1/{date}/run={id}/features.parquet
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -20,14 +20,7 @@ import typer
 
 from projections import paths
 from projections.pipeline.status import JobStatus, write_status
-from projections.rates_v1.features import FEATURES_STAGE3_CONTEXT
-from projections.rates_v1.schemas import (
-    FEATURES_RATES_V1_SCHEMA,
-    FeatureSchemaMismatchError,
-    enforce_schema,
-    validate_rates_features,
-    validate_with_pandera,
-)
+from projections.rates_v1.schemas import validate_rates_features
 
 app = typer.Typer(help=__doc__)
 
@@ -308,9 +301,6 @@ def build_rates_features(
 
     df = minutes_features.copy()
 
-    # Extract key columns we need
-    key_cols = ["game_id", "player_id", "team_id", "game_date"]
-
     # Map minutes_v1 features to rates feature names
     # minutes_v1 columns that map to stage1 features:
     feature_mapping = {
@@ -509,10 +499,14 @@ def _write_output(
     )
 
     # Update latest pointer
-    pointer = {"run_id": run_id, "generated_at": datetime.now(tz=UTC).isoformat()}
-    (day_dir / LATEST_POINTER).write_text(
-        json.dumps(pointer, indent=2), encoding="utf-8"
-    )
+    import os
+
+    if os.environ.get("PROJECTIONS_SKIP_POINTER_WRITES", "").strip().lower() not in {"1", "true", "yes"}:
+        from projections.pipeline import writer_guard
+
+        writer_guard.assert_can_write_pointers(purpose=f"build_rates_features_live promote {day_dir}")
+        pointer = {"run_id": run_id, "generated_at": datetime.now(tz=UTC).isoformat()}
+        (day_dir / LATEST_POINTER).write_text(json.dumps(pointer, indent=2), encoding="utf-8")
 
     return out_path
 

@@ -6,9 +6,7 @@ These flows run the same shell scripts that systemd timers currently invoke.
 """
 
 import json
-import shlex
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +28,22 @@ UV_BIN = "/home/daniel/.local/bin/uv"
 # ──────────────────────────────────────────────────────────────────────────────
 # Manifest helpers
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _strip_wrapping_quotes(value: str) -> tuple[str, bool]:
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
+        return stripped[1:-1].strip(), True
+    return stripped, stripped != value
+
+
+def _normalize_int_string_param(name: str, value: str, logger) -> str:
+    normalized, changed = _strip_wrapping_quotes(value)
+    if not normalized.isdigit():
+        raise ValueError(f"Invalid {name}={value!r}; expected an integer-like string")
+    if changed:
+        logger.warning(f"Normalized {name} from {value!r} -> {normalized!r}")
+    return normalized
+
 
 def emit_manifest(
     task_name: str,
@@ -128,9 +142,9 @@ def run_live_scrape_task(
         env["LIVE_START_DATE"] = game_date
         env["LIVE_END_DATE"] = game_date
     if season:
-        env["LIVE_SEASON"] = season
+        env["LIVE_SEASON"] = _normalize_int_string_param("season", season, logger)
     if month:
-        env["LIVE_MONTH"] = month
+        env["LIVE_MONTH"] = _normalize_int_string_param("month", month, logger)
     
     script_path = PROJECT_ROOT / "scripts" / "run_live_scrape.sh"
     logger.info(f"Running {script_path.name} for date={game_date or 'today'}")
@@ -187,7 +201,7 @@ def run_live_score_task(
     month: str | None = None,
     skip_scrape: bool = False,
     run_sim: bool = True,
-    sim_profile: str = "today",
+    sim_profile: str = "sim_v3",
     sim_worlds: int = 10000,
     disable_tip_window: bool = False,
 ) -> dict:
@@ -212,9 +226,9 @@ def run_live_score_task(
         env["LIVE_START_DATE"] = game_date
         env["LIVE_END_DATE"] = game_date
     if season:
-        env["LIVE_SEASON"] = season
+        env["LIVE_SEASON"] = _normalize_int_string_param("season", season, logger)
     if month:
-        env["LIVE_MONTH"] = month
+        env["LIVE_MONTH"] = _normalize_int_string_param("month", month, logger)
     
     script_path = PROJECT_ROOT / "scripts" / "run_live_score.sh"
     logger.info(f"Running {script_path.name} for date={game_date or 'today'}")
@@ -667,8 +681,8 @@ def live_score_flow(
     month: str | None = None,
     skip_scrape: bool = False,
     run_sim: bool = True,
-    sim_profile: str = "today",
-    sim_worlds: int = 10000,
+    sim_profile: str = "sim_v3",
+    sim_worlds: int = 25000,
     disable_tip_window: bool = True,  # Always run regardless of game schedule
 ) -> dict:
     """
@@ -699,8 +713,8 @@ def live_pipeline_full_flow(
     season: str | None = None,
     month: str | None = None,
     run_sim: bool = True,
-    sim_profile: str = "today",
-    sim_worlds: int = 10000,
+    sim_profile: str = "sim_v3",
+    sim_worlds: int = 25000,
 ) -> dict:
     """
     Combined flow that runs scrape first, then score.
@@ -733,6 +747,29 @@ def live_pipeline_full_flow(
         "scrape": scrape_result,
         "score": score_result,
     }
+
+
+@flow(
+    name="live-pipeline",
+    description="Back-compat wrapper for older Prefect deployments; forwards to live-pipeline-full.",
+    log_prints=True,
+)
+def live_pipeline_flow(
+    game_date: str | None = None,
+    season: str | None = None,
+    month: str | None = None,
+    run_sim: bool = True,
+    sim_profile: str = "sim_v3",
+    sim_worlds: int = 10000,
+) -> dict:
+    return live_pipeline_full_flow(
+        game_date=game_date,
+        season=season,
+        month=month,
+        run_sim=run_sim,
+        sim_profile=sim_profile,
+        sim_worlds=sim_worlds,
+    )
 
 
 @flow(
@@ -871,4 +908,3 @@ if __name__ == "__main__":
         morning_daily_flow(game_date=args.date, force_refresh=args.force_refresh)
     else:
         live_pipeline_full_flow(game_date=args.date, run_sim=not args.no_sim)
-

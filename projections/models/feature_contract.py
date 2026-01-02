@@ -115,6 +115,13 @@ ALLOWED_FEATURES: frozenset[str] = frozenset({
     "roll_mean_3",
     "roll_mean_5",
     "roll_mean_10",
+    # Within-team rotation rank features (derived from roll_mean_10; leakage-safe)
+    "team_roll_mean_10_rank",
+    "team_roll_mean_10_rank_pct",
+    "team_roll_mean_10_gap_to_8th",
+    "team_roll_mean_10_gap_to_10th",
+    "team_roll_mean_10_is_top8",
+    "team_roll_mean_10_is_top10",
     "roll_iqr_5",
     "z_vs_10",
     # Team depth/structure
@@ -191,8 +198,8 @@ class FeatureContractValidation:
             "missing_in_live": self.missing_in_live,
             "forbidden_used": self.forbidden_used,
             "dtype_mismatches": [
-                {"column": c, "train_dtype": t, "live_dtype": l}
-                for c, t, l in self.dtype_mismatches
+                {"column": column, "train_dtype": train_dtype, "live_dtype": live_dtype}
+                for column, train_dtype, live_dtype in self.dtype_mismatches
             ],
             "warnings": self.warnings,
         }

@@ -169,7 +169,8 @@ def _build_filename(timestamp: datetime) -> str:
     """File names are keyed by timestamp minus 30 minutes."""
     window = timestamp - timedelta(minutes=REPORT_SLOT_MINUTE)
     date_part = window.strftime("%Y-%m-%d")
-    time_part = window.strftime("%I%p")
+    # As of 2025-26 season, NBA changed format from "03PM" to "03_00PM"
+    time_part = window.strftime("%I_%M%p")
     return REPORT_TEMPLATE.format(date=date_part, time=time_part)
 
 

@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 
 from projections.dk.salaries_schema import dk_salaries_gold_path
+from projections.pipeline import control_plane
+from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
 
 
 def get_projections_data_root() -> str:
@@ -49,29 +51,53 @@ def _load_parquet_from_candidates(globs: list[str], kind: str) -> pd.DataFrame:
 def load_minutes_for_date(game_date: str, root: Optional[str] = None) -> pd.DataFrame:
     """
     Load minutes projections for the given game_date from:
-        {root}/gold/projections_minutes_v1/game_date={game_date}/*.parquet
+        {root}/gold/projections_minutes_v1/game_date={game_date}/run=<id>/*.parquet
 
     Returns a DataFrame. If no files are found, raises FileNotFoundError.
     """
-
-    base = root or get_projections_data_root()
-    globs = [
-        os.path.join(
-            base,
-            "gold",
-            "projections_minutes_v1",
-            f"game_date={game_date}",
-            "*.parquet",
-        ),
-        os.path.join(
-            base,
-            "gold",
-            "projections_minutes_v1",
-            game_date,
-            "*.parquet",
-        ),
+    base = Path(root or get_projections_data_root())
+    day_dirs = [
+        base / "gold" / "projections_minutes_v1" / f"game_date={game_date}",
+        base / "gold" / "projections_minutes_v1" / game_date,
     ]
-    return _load_parquet_from_candidates(globs, kind="minutes projections")
+
+    allow_legacy_flat = os.environ.get("PROJECTIONS_ALLOW_LEGACY_FLAT_GOLD_READS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+    last_err: Exception | None = None
+    for day_dir in day_dirs:
+        if not day_dir.exists():
+            continue
+
+        run_id = control_plane.read_promoted_run_id(day_dir)
+        if not run_id and control_plane.allow_unpromoted_run_reads():
+            run_dirs = sorted([p for p in day_dir.glob("run=*") if p.is_dir()], reverse=True)
+            if run_dirs:
+                run_id = run_dirs[0].name.split("=", 1)[1]
+
+        if run_id:
+            run_dir = day_dir / f"run={run_id}"
+            candidates = [
+                run_dir / EFFECTIVE_MINUTES_FILENAME,
+                run_dir / "minutes.parquet",
+            ]
+            for path in candidates:
+                if path.exists():
+                    return pd.read_parquet(path)
+
+        if allow_legacy_flat:
+            flat = day_dir / "minutes.parquet"
+            if flat.exists():
+                return pd.read_parquet(flat)
+
+        last_err = FileNotFoundError(f"No minutes parquet found under {day_dir} (run_id={run_id})")
+
+    if last_err:
+        raise last_err
+    raise FileNotFoundError(f"No minutes projections found for game_date={game_date}")
 
 
 def load_fpts_for_date(game_date: str, root: Optional[str] = None) -> pd.DataFrame:

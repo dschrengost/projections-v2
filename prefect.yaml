@@ -19,61 +19,38 @@ pull:
 
 # the deployments section allows you to provide configuration for deploying flows
 deployments:
-- name: live-scrape
+- name: nba-live-pipeline
   version: null
   tags: []
-  concurrency_limit: null
-  description: Scrape live data (injuries, odds, schedule) for today's games.
-  entrypoint: prefect_flows/live_pipeline.py:live_scrape_flow
+  concurrency_limit: 1
+  description: Canonical end-to-end NBA live pipeline (Prefect-only control plane).
+  entrypoint: prefect_flows/live_nba_pipeline.py:nba_live_pipeline_flow
   parameters: {}
   work_pool:
     name: projections-local
     work_queue_name: null
-    job_variables: {}
-  schedules: []
-
-- name: live-score
-  version: null
-  tags: []
-  concurrency_limit: 1  # prevent overlapping runs
-  description: Full live scoring pipeline - features, scoring, sim, ownership.
-  entrypoint: prefect_flows/live_pipeline.py:live_score_flow
-  parameters: {}
-  work_pool:
-    name: projections-local
-    work_queue_name: null
-    job_variables: {}
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
   schedules:
     - cron: "*/5 8-23 * * *"
       timezone: "America/New_York"
 
-
-- name: live-pipeline-full
-  version: null
-  tags: []
-  concurrency_limit: 1  # prevent overlapping runs
-  description: Combined scrape + score pipeline (typical production flow).
-  entrypoint: prefect_flows/live_pipeline.py:live_pipeline_full_flow
-  parameters: {}
-  work_pool:
-    name: projections-local
-    work_queue_name: null
-    job_variables: {}
-  schedules: []
-
-- name: morning-daily
+- name: boxscores-etl
   version: null
   tags: []
   concurrency_limit: 1
-  description: Daily morning pipeline (DK salaries, schedule, yesterday boxscores).
-  entrypoint: prefect_flows/live_pipeline.py:morning_daily_flow
+  description: Scrape yesterday's NBA boxscores for evaluation/labels (Prefect-only scheduler).
+  entrypoint: prefect_flows/boxscores_etl.py:boxscores_etl_flow
   parameters: {}
   work_pool:
     name: projections-local
     work_queue_name: null
-    job_variables: {}
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
   schedules:
-    - cron: "0 8 * * *"
+    - cron: "30 3 * * *"
       timezone: "America/New_York"
 
 - name: nightly-eval
@@ -81,12 +58,14 @@ deployments:
   tags: []
   concurrency_limit: 1
   description: Nightly prediction accuracy evaluation (FPTS + ownership).
-  entrypoint: prefect_flows/live_pipeline.py:nightly_eval_flow
+  entrypoint: prefect_flows/nightly_eval.py:nightly_eval_flow
   parameters: {}
   work_pool:
     name: projections-local
     work_queue_name: null
-    job_variables: {}
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
   schedules:
     - cron: "30 5 * * *"
       timezone: "America/New_York"

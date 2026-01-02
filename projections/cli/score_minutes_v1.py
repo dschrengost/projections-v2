@@ -23,6 +23,7 @@ from projections import paths
 from projections.labels import derive_starter_flag_labels
 from projections.minutes_v1 import modeling
 from projections.minutes_v1.minute_share import MinuteShareArtifacts, predict_minutes
+from projections.minutes_v1.rotation_share import RotationShareArtifacts, predict_minutes as predict_rotshare_minutes
 from projections.models import feature_contract
 from projections.minutes_v1.config import load_scoring_config
 from projections.minutes_v1.production import DEFAULT_PRODUCTION_ROOT, load_production_minutes_bundle
@@ -133,6 +134,8 @@ def _load_espn_out_players(
 Mode = Literal["historical", "live"]
 MinutesOutputMode = Literal["conditional", "unconditional", "both"]
 ReconcileMode = Literal["none", "p50", "p50_and_tails"]
+RotshareQuantilesMode = Literal["point", "mc"]
+RotshareQuantilesCenter = Literal["mean", "p50"]
 
 app = typer.Typer(help=__doc__)
 
@@ -327,6 +330,12 @@ def _compute_alloc_realism_metrics(df: pd.DataFrame, minutes_col: str) -> dict[s
 
 
 def _write_latest_pointer(day_dir: Path, *, run_id: str, run_as_of_ts: datetime | None) -> None:
+    if os.environ.get("PROJECTIONS_SKIP_POINTER_WRITES", "").strip().lower() in {"1", "true", "yes"}:
+        return
+
+    from projections.pipeline import writer_guard
+
+    writer_guard.assert_can_write_pointers(purpose=f"score_minutes_v1 promote {day_dir}")
     pointer = day_dir / LATEST_POINTER
     payload = {
         "run_id": run_id,
@@ -345,19 +354,28 @@ def _ensure_bundle_defaults(bundle: dict) -> dict:
     return bundle
 
 
-def _load_bundle(bundle_dir: Path) -> dict | MinuteShareArtifacts:
+def _load_bundle(bundle_dir: Path) -> dict | MinuteShareArtifacts | RotationShareArtifacts:
     # Try legacy quantile model
     quantile_path = bundle_dir / "lgbm_quantiles.joblib"
     if quantile_path.exists():
         bundle = joblib.load(quantile_path)
         return _ensure_bundle_defaults(bundle)
 
+    # Try rotation share model (rotshare).
+    rotshare_path = bundle_dir / "rotation_share_model.joblib"
+    if rotshare_path.exists():
+        return joblib.load(rotshare_path)
+
     # Try minute share model
     share_path = bundle_dir / "minute_share_model.joblib"
     if share_path.exists():
         return joblib.load(share_path)
 
-    raise typer.BadParameter(f"Bundle missing model artifact at {bundle_dir} (checked lgbm_quantiles.joblib, minute_share_model.joblib)", param_name="bundle_dir")
+    raise typer.BadParameter(
+        f"Bundle missing model artifact at {bundle_dir} "
+        "(checked lgbm_quantiles.joblib, rotation_share_model.joblib, minute_share_model.joblib)",
+        param_name="bundle_dir",
+    )
 
 
 def _load_meta(bundle_dir: Path) -> dict:
@@ -374,7 +392,7 @@ def _resolve_bundle_artifacts(
     *,
     override_run_id: str | None = None,
     artifact_root: Path = DEFAULT_PRODUCTION_ROOT,
-) -> tuple[dict, Path, dict, str]:
+) -> tuple[Any, Path, dict, str]:
     if override_run_id is not None and bundle_dir is not None:
         raise ValueError("Provide only one of bundle_dir or override_run_id.")
     if override_run_id is not None:
@@ -396,13 +414,26 @@ def _resolve_bundle_artifacts(
         return bundle, resolved, model_meta, run_id
 
     production_bundle = load_production_minutes_bundle(config_path=config_path)
+    if isinstance(production_bundle, dict) and production_bundle.get("bundle_kind") in {
+        "rotation_share",
+        "minute_share",
+    }:
+        bundle_obj = production_bundle.get("bundle")
+        run_dir_str = production_bundle.get("run_dir")
+        if bundle_obj is None or not run_dir_str:
+            raise RuntimeError("Production rotshare bundle missing bundle/run_dir metadata.")
+        resolved = Path(str(run_dir_str)).expanduser()
+        model_meta = dict(production_bundle.get("meta") or {})
+        run_id = str(production_bundle.get("run_id") or resolved.name)
+        return bundle_obj, resolved, model_meta, run_id
+
     bundle = _ensure_bundle_defaults(dict(production_bundle))
     run_dir_str = bundle.get("run_dir")
     if not run_dir_str:
         raise RuntimeError("Production bundle missing run_dir metadata.")
-    resolved = Path(run_dir_str).expanduser()
+    resolved = Path(str(run_dir_str)).expanduser()
     model_meta = bundle.get("meta", {})
-    run_id = bundle.get("run_id") or resolved.name
+    run_id = str(bundle.get("run_id") or resolved.name)
     return bundle, resolved, model_meta, run_id
 
 
@@ -463,6 +494,22 @@ def _resolve_model_artifacts(
             "blend_band_min": blend_band_min,
             "early_run_id": early_run_id,
             "late_run_id": late_run_id,
+        }
+
+    if isinstance(production, dict) and production.get("bundle_kind") in {"rotation_share", "minute_share"}:
+        bundle_obj = production.get("bundle")
+        run_dir_str = production.get("run_dir")
+        if bundle_obj is None or not run_dir_str:
+            raise RuntimeError("Production rotshare bundle missing bundle/run_dir metadata.")
+        resolved = Path(str(run_dir_str)).expanduser()
+        model_meta = dict(production.get("meta") or {})
+        model_run_id = str(production.get("run_id") or resolved.name)
+        return {
+            "mode": "single",
+            "bundle": bundle_obj,
+            "bundle_dir": resolved,
+            "model_meta": model_meta,
+            "model_run_id": model_run_id,
         }
 
     bundle = _ensure_bundle_defaults(dict(production))
@@ -941,9 +988,120 @@ def _score_rows_share(
     return working
 
 
+def _derive_is_out_flag(df: pd.DataFrame, *, espn_out_players: set[str] | None = None) -> pd.Series:
+    is_out = pd.Series(0, index=df.index, dtype=int)
+    if "is_out" in df.columns:
+        is_out = is_out | df["is_out"].fillna(0).astype(int)
+    if "status" in df.columns:
+        status_out = df["status"].astype(str).str.upper() == "OUT"
+        is_out = is_out | status_out.astype(int)
+    if "lineup_role" in df.columns:
+        role_out = df["lineup_role"].astype(str).str.lower() == "out"
+        is_out = is_out | role_out.astype(int)
+    if espn_out_players and "player_name" in df.columns:
+        normalized = df["player_name"].astype(str).map(_normalize_name_for_matching)
+        is_out = is_out | normalized.isin(espn_out_players).astype(int)
+    return is_out.astype(int)
+
+
+def _score_rows_rotshare(
+    df: pd.DataFrame,
+    bundle: RotationShareArtifacts,
+    *,
+    rotshare_quantiles_mode: RotshareQuantilesMode = "point",
+    rotshare_n_worlds: int = 25_000,
+    rotshare_concentration: float = 60.0,
+    rotshare_seed: int = 42,
+    rotshare_min_active_players: int = 5,
+    rotshare_mc_center: RotshareQuantilesCenter = "mean",
+    espn_out_players: set[str] | None = None,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    if "game_id" not in df.columns or "team_id" not in df.columns:
+        raise ValueError("Input dataframe must have game_id and team_id for rotshare scoring.")
+
+    is_out = _derive_is_out_flag(df, espn_out_players=espn_out_players)
+    preds = predict_rotshare_minutes(
+        bundle,
+        df,
+        game_ids=df["game_id"],
+        team_ids=df["team_id"],
+        is_out=is_out,
+        team_total_minutes=240.0,
+    )
+
+    working = df.copy()
+    working["is_out"] = is_out
+    working["tau"] = preds.get("tau", 1.0)
+    working["play_prob"] = preds["play_prob"].astype(float)
+    working["raw_share"] = preds["raw_share"].astype(float)
+    working["weight"] = preds["weight"].astype(float)
+    working["normalized_share"] = preds["normalized_share"].astype(float)
+    working["rotation_prob"] = working["play_prob"].astype(float)
+    starter_series = None
+    for col in ("starter_flag_label", "starter_flag", "is_starter"):
+        if col in working.columns:
+            starter_series = pd.to_numeric(working[col], errors="coerce").fillna(0).astype(int)
+            break
+    if starter_series is None:
+        starter_series = pd.Series(0, index=working.index, dtype=int)
+    working["is_starter"] = (starter_series > 0).astype(int)
+
+    # Default: point estimate uses the rotshare 240-feasible minutes.
+    base_p50 = preds["predicted_minutes"].astype(float)
+    working["minutes_p50"] = base_p50
+    working["minutes_p10"] = base_p50
+    working["minutes_p90"] = base_p50
+
+    if rotshare_quantiles_mode == "mc":
+        from projections.minutes_v3.rotshare_mc import RotshareMonteCarloConfig, add_rotshare_mc_quantiles
+
+        mc_cfg = RotshareMonteCarloConfig(
+            n_worlds=int(rotshare_n_worlds),
+            concentration=float(rotshare_concentration),
+            seed=int(rotshare_seed),
+            min_active_players=int(rotshare_min_active_players),
+            center=str(rotshare_mc_center),
+        )
+        working = add_rotshare_mc_quantiles(
+            working,
+            game_col="game_id",
+            team_col="team_id",
+            base_share_col="normalized_share",
+            play_prob_col="play_prob",
+            is_out_col="is_out",
+            config=mc_cfg,
+            out_prefix="mc_minutes",
+        )
+        p10_mc = pd.to_numeric(working["mc_minutes_p10"], errors="coerce").fillna(0.0).astype(float)
+        p90_mc = pd.to_numeric(working["mc_minutes_p90"], errors="coerce").fillna(0.0).astype(float)
+        # Keep the rotshare point estimate as the exported center (health checks expect team totals near 240).
+        # Use MC only to shape tails around that center.
+        working["minutes_p50"] = base_p50
+        working["minutes_p10"] = np.minimum(p10_mc, base_p50)
+        working["minutes_p90"] = np.maximum(p90_mc, base_p50)
+        working = working.drop(columns=["mc_minutes_p10", "mc_minutes_p50", "mc_minutes_p90"], errors="ignore")
+
+    working["minutes_p10_cond"] = working["minutes_p10"]
+    working["minutes_p50_cond"] = working["minutes_p50"]
+    working["minutes_p90_cond"] = working["minutes_p90"]
+    working["p10_pred"] = working["minutes_p10"]
+    working["p50_pred"] = working["minutes_p50"]
+    working["p90_pred"] = working["minutes_p90"]
+    working["p10_cond"] = working["minutes_p10"]
+    working["p50_cond"] = working["minutes_p50"]
+    working["p90_cond"] = working["minutes_p90"]
+    working = _attach_unconditional_minutes(working)
+    working["rotation_prob"] = working["play_prob"].astype(float)
+    working["is_rotation"] = (working["rotation_prob"] >= 0.5).astype("int8")
+    return working
+
+
 def _score_rows(
     df: pd.DataFrame,
-    bundle: dict | MinuteShareArtifacts,
+    bundle: dict | MinuteShareArtifacts | RotationShareArtifacts,
     *,
     enable_play_prob_head: bool = True,
     enable_play_prob_mixing: bool = False,
@@ -952,6 +1110,12 @@ def _score_rows(
     espn_out_players: set[str] | None = None,
     run_id: str | None = None,
     sharpen_exponent: float = 2.0,
+    rotshare_quantiles_mode: RotshareQuantilesMode = "point",
+    rotshare_n_worlds: int = 25_000,
+    rotshare_concentration: float = 60.0,
+    rotshare_seed: int = 42,
+    rotshare_min_active_players: int = 5,
+    rotshare_mc_center: RotshareQuantilesCenter = "mean",
 ) -> pd.DataFrame:
     if df.empty:
         return df
@@ -963,6 +1127,19 @@ def _score_rows(
             bundle,
             run_id=run_id,
             sharpen_exponent=sharpen_exponent,
+        )
+
+    if isinstance(bundle, RotationShareArtifacts):
+        return _score_rows_rotshare(
+            df,
+            bundle,
+            rotshare_quantiles_mode=rotshare_quantiles_mode,
+            rotshare_n_worlds=rotshare_n_worlds,
+            rotshare_concentration=rotshare_concentration,
+            rotshare_seed=rotshare_seed,
+            rotshare_min_active_players=rotshare_min_active_players,
+            rotshare_mc_center=rotshare_mc_center,
+            espn_out_players=espn_out_players,
         )
 
     # [REMOVED: Treat Projected Starters as Confirmed]
@@ -1499,6 +1676,12 @@ def score_minutes_range_to_parquet(
     target_dates: Optional[Set[date]] = None,
     debug_describe: bool | None = None,
     sharpen_exponent: float = 2.0,
+    rotshare_quantiles_mode: RotshareQuantilesMode = "point",
+    rotshare_n_worlds: int = 25_000,
+    rotshare_concentration: float = 60.0,
+    rotshare_seed: int = 42,
+    rotshare_min_active_players: int = 5,
+    rotshare_mc_center: RotshareQuantilesCenter = "mean",
 ) -> pd.DataFrame:
     """Programmatic wrapper around the scoring flow used by the CLI.
 
@@ -1526,6 +1709,14 @@ def score_minutes_range_to_parquet(
         bundle_config,
         override_run_id=override_run_id,
     )
+    is_rotshare_bundle = model.get("mode") == "single" and isinstance(model.get("bundle"), RotationShareArtifacts)
+    if is_rotshare_bundle:
+        if enable_upside_adjustment:
+            typer.echo("[rotshare] forcing enable_upside_adjustment=False", err=True)
+            enable_upside_adjustment = False
+        if reconcile_team_minutes.lower() != "none":
+            typer.echo(f"[rotshare] forcing reconcile_team_minutes=none (was {reconcile_team_minutes})", err=True)
+            reconcile_team_minutes = "none"
 
     try:
         raw_features = _load_feature_slice(
@@ -1571,6 +1762,12 @@ def score_minutes_range_to_parquet(
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
             sharpen_exponent=sharpen_exponent,
+            rotshare_quantiles_mode=rotshare_quantiles_mode,
+            rotshare_n_worlds=rotshare_n_worlds,
+            rotshare_concentration=rotshare_concentration,
+            rotshare_seed=rotshare_seed,
+            rotshare_min_active_players=rotshare_min_active_players,
+            rotshare_mc_center=rotshare_mc_center,
         )
         resolved_bundle_dir = Path(model["bundle_dir"])
     model_meta = model["model_meta"]
@@ -1618,6 +1815,9 @@ def score_minutes_range_to_parquet(
         typer.echo("[upside] Applied upside adjustment for Monte Carlo coverage.", err=True)
 
     alloc_mode = resolve_minutes_alloc_mode(bundle_config)
+    if is_rotshare_bundle and alloc_mode != "legacy":
+        typer.echo(f"[rotshare] forcing minutes_alloc_mode=legacy (was {alloc_mode})", err=True)
+        alloc_mode = "legacy"
     normalized_reconcile_mode = reconcile_team_minutes.lower()
     if alloc_mode == "rotalloc_expk" and normalized_reconcile_mode != "none":
         typer.echo(
@@ -1821,6 +2021,38 @@ def main(
         "--sharpen-exponent",
         help="Exponent for sharpening share distribution (Minutes Share Model).",
     ),
+    rotshare_quantiles_mode: RotshareQuantilesMode = typer.Option(
+        "point",
+        "--rotshare-quantiles-mode",
+        case_sensitive=False,
+        help="RotShare only: point uses 240-feasible p50 as p10/p90; mc derives quantiles from simulated worlds.",
+    ),
+    rotshare_n_worlds: int = typer.Option(
+        25_000,
+        "--rotshare-n-worlds",
+        help="RotShare MC only: number of worlds used to derive minutes quantiles.",
+    ),
+    rotshare_concentration: float = typer.Option(
+        60.0,
+        "--rotshare-concentration",
+        help="RotShare MC only: Dirichlet concentration controlling minutes variance (higher = tighter).",
+    ),
+    rotshare_seed: int = typer.Option(
+        42,
+        "--rotshare-seed",
+        help="RotShare MC only: base RNG seed (deterministic per team-game).",
+    ),
+    rotshare_min_active_players: int = typer.Option(
+        5,
+        "--rotshare-min-active-players",
+        help="RotShare MC only: enforce at least this many active players per team-world.",
+    ),
+    rotshare_mc_center: RotshareQuantilesCenter = typer.Option(
+        "mean",
+        "--rotshare-mc-center",
+        case_sensitive=False,
+        help="RotShare MC only: export center as mean (team-sums to 240) or p50 (median; may not sum to 240).",
+    ),
 ) -> None:
     cli_params: dict[str, Any] = {
         "date": date,
@@ -1852,6 +2084,12 @@ def main(
         "disable_play_prob": disable_play_prob,
         "enable_upside_adjustment": enable_upside_adjustment,
         "sharpen_exponent": sharpen_exponent,
+        "rotshare_quantiles_mode": rotshare_quantiles_mode,
+        "rotshare_n_worlds": rotshare_n_worlds,
+        "rotshare_concentration": rotshare_concentration,
+        "rotshare_seed": rotshare_seed,
+        "rotshare_min_active_players": rotshare_min_active_players,
+        "rotshare_mc_center": rotshare_mc_center,
     }
     resolved_params = _apply_scoring_overrides(ctx, cli_params, config_path)
     date = resolved_params["date"]
@@ -1886,6 +2124,12 @@ def main(
     enable_play_prob_mixing = resolved_params.get("enable_play_prob_mixing", False)
     disable_play_prob = resolved_params.get("disable_play_prob", False)
     play_prob_enabled = enable_play_prob_head and not disable_play_prob
+    rotshare_quantiles_mode = resolved_params.get("rotshare_quantiles_mode", "point")
+    rotshare_n_worlds = int(resolved_params.get("rotshare_n_worlds", 25_000))
+    rotshare_concentration = float(resolved_params.get("rotshare_concentration", 60.0))
+    rotshare_seed = int(resolved_params.get("rotshare_seed", 42))
+    rotshare_min_active_players = int(resolved_params.get("rotshare_min_active_players", 5))
+    rotshare_mc_center = str(resolved_params.get("rotshare_mc_center", "mean"))
 
     if date is None:
         raise typer.BadParameter("--date is required (set via CLI or config file).")
@@ -1904,6 +2148,14 @@ def main(
     except FileNotFoundError as exc:
         typer.echo(f"[minutes] ERROR: {exc}", err=True)
         raise typer.Exit(code=1)
+    is_rotshare_bundle = model.get("mode") == "single" and isinstance(model.get("bundle"), RotationShareArtifacts)
+    if is_rotshare_bundle:
+        if enable_upside_adjustment:
+            typer.echo("[rotshare] forcing enable_upside_adjustment=False", err=True)
+            enable_upside_adjustment = False
+        if reconcile_team_minutes.lower() != "none":
+            typer.echo(f"[rotshare] forcing reconcile_team_minutes=none (was {reconcile_team_minutes})", err=True)
+            reconcile_team_minutes = "none"
 
     features_root = features_root.expanduser()
     features_path = features_path.expanduser() if features_path else None
@@ -2004,6 +2256,12 @@ def main(
             promotion_debug=promotion_prior_debug,
             espn_out_players=espn_out_players,
             sharpen_exponent=resolved_params["sharpen_exponent"],
+            rotshare_quantiles_mode=rotshare_quantiles_mode,
+            rotshare_n_worlds=rotshare_n_worlds,
+            rotshare_concentration=rotshare_concentration,
+            rotshare_seed=rotshare_seed,
+            rotshare_min_active_players=rotshare_min_active_players,
+            rotshare_mc_center=rotshare_mc_center,  # type: ignore[arg-type]
         )
         resolved_bundle_dir = Path(model["bundle_dir"])
     model_meta = model["model_meta"]
@@ -2032,6 +2290,9 @@ def main(
         scored = _annotate_metadata(scored, player_lookup=player_lookup, team_meta=team_meta)
 
     alloc_mode = resolve_minutes_alloc_mode(bundle_config)
+    if is_rotshare_bundle and alloc_mode != "legacy":
+        typer.echo(f"[rotshare] forcing minutes_alloc_mode=legacy (was {alloc_mode})", err=True)
+        alloc_mode = "legacy"
     if alloc_mode in {"rotalloc_expk", "rotalloc_fringe_alpha", "share_with_rotalloc_elig"} and enable_upside_adjustment:
         typer.echo(
             f"[upside] disabling upside adjustment in {alloc_mode} "
