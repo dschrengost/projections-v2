@@ -9,7 +9,9 @@ Start with these canonical docs:
 - [docs/20_DATA_CONTRACTS.md](docs/20_DATA_CONTRACTS.md) — Data schemas and feature contracts
 - [docs/30_DEV_PLAYBOOK.md](docs/30_DEV_PLAYBOOK.md) — Developer setup and workflows
 
-Historical planning docs are archived in `docs/archive/`.
+> [!NOTE]
+> `docs/archive/` and `obsolete/` contain historical/reference material.
+> Only `docs/00_REPO_MAP.md`, `10_...`, `20_...`, `30_...` and `README.md` are authoritative.
 
 ## Project Structure
 
