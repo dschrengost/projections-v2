@@ -27,6 +27,7 @@ from projections.minutes_v1.rotation_share import RotationShareArtifacts, predic
 from projections.models import feature_contract
 from projections.minutes_v1.config import load_scoring_config
 from projections.minutes_v1.production import DEFAULT_PRODUCTION_ROOT, load_production_minutes_bundle
+from projections.registry.model_resolver import resolve_model, _use_filesystem_fallback
 from projections.minutes_v1.horizons import add_odds_missing_indicator, add_time_to_tip_features
 from projections.minutes_v1.routing import late_model_weight, minutes_model_used_label
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
@@ -413,6 +414,37 @@ def _resolve_bundle_artifacts(
         run_id = resolved.name
         return bundle, resolved, model_meta, run_id
 
+    # Default: try MLflow registry first, fall back to filesystem
+    if not _use_filesystem_fallback():
+        try:
+            bundle_data, metadata = resolve_model("minutes_v1", alias="production")
+            if isinstance(bundle_data, dict):
+                if bundle_data.get("bundle_kind") in {"rotation_share", "minute_share"}:
+                    bundle_obj = bundle_data.get("bundle")
+                    run_dir_str = bundle_data.get("run_dir")
+                    if bundle_obj and run_dir_str:
+                        resolved = Path(str(run_dir_str)).expanduser()
+                        model_meta = dict(bundle_data.get("meta") or {})
+                        model_meta["source"] = "mlflow_registry"
+                        model_meta["mlflow_run_id"] = metadata.get("run_id")
+                        run_id = str(bundle_data.get("run_id") or resolved.name)
+                        typer.echo(f"[registry] Loaded minutes_v1 from MLflow registry (run_id={metadata.get('run_id', 'unknown')[:12]})")
+                        return bundle_obj, resolved, model_meta, run_id
+                else:
+                    bundle = _ensure_bundle_defaults(dict(bundle_data))
+                    run_dir_str = bundle.get("run_dir")
+                    if run_dir_str:
+                        resolved = Path(str(run_dir_str)).expanduser()
+                        model_meta = bundle.get("meta", {})
+                        model_meta["source"] = "mlflow_registry"
+                        model_meta["mlflow_run_id"] = metadata.get("run_id")
+                        run_id = str(bundle.get("run_id") or resolved.name)
+                        typer.echo(f"[registry] Loaded minutes_v1 from MLflow registry (run_id={metadata.get('run_id', 'unknown')[:12]})")
+                        return bundle, resolved, model_meta, run_id
+        except Exception as e:
+            typer.echo(f"[registry] MLflow registry unavailable ({e}), falling back to filesystem", err=True)
+
+    # Filesystem fallback
     production_bundle = load_production_minutes_bundle(config_path=config_path)
     if isinstance(production_bundle, dict) and production_bundle.get("bundle_kind") in {
         "rotation_share",
@@ -461,6 +493,50 @@ def _resolve_model_artifacts(
             "model_run_id": model_run_id,
         }
 
+    # Default: try MLflow registry first for single-bundle mode
+    if not _use_filesystem_fallback():
+        try:
+            bundle_data, metadata = resolve_model("minutes_v1", alias="production")
+            if isinstance(bundle_data, dict):
+                # Registry returns filesystem-like bundle format
+                if bundle_data.get("bundle_kind") in {"rotation_share", "minute_share"}:
+                    bundle_obj = bundle_data.get("bundle")
+                    run_dir_str = bundle_data.get("run_dir")
+                    if bundle_obj and run_dir_str:
+                        resolved = Path(str(run_dir_str)).expanduser()
+                        model_meta = dict(bundle_data.get("meta") or {})
+                        model_meta["source"] = "mlflow_registry"
+                        model_meta["mlflow_run_id"] = metadata.get("run_id")
+                        model_run_id = str(bundle_data.get("run_id") or resolved.name)
+                        typer.echo(f"[registry] Loaded minutes_v1 from MLflow registry (run_id={metadata.get('run_id', 'unknown')[:12]})")
+                        return {
+                            "mode": "single",
+                            "bundle": bundle_obj,
+                            "bundle_dir": resolved,
+                            "model_meta": model_meta,
+                            "model_run_id": model_run_id,
+                        }
+                else:
+                    bundle = _ensure_bundle_defaults(dict(bundle_data))
+                    run_dir_str = bundle.get("run_dir")
+                    if run_dir_str:
+                        resolved = Path(str(run_dir_str)).expanduser()
+                        model_meta = bundle.get("meta", {})
+                        model_meta["source"] = "mlflow_registry"
+                        model_meta["mlflow_run_id"] = metadata.get("run_id")
+                        model_run_id = str(bundle.get("run_id") or resolved.name)
+                        typer.echo(f"[registry] Loaded minutes_v1 from MLflow registry (run_id={metadata.get('run_id', 'unknown')[:12]})")
+                        return {
+                            "mode": "single",
+                            "bundle": bundle,
+                            "bundle_dir": resolved,
+                            "model_meta": model_meta,
+                            "model_run_id": model_run_id,
+                        }
+        except Exception as e:
+            typer.echo(f"[registry] MLflow registry unavailable ({e}), falling back to filesystem", err=True)
+
+    # Filesystem fallback
     production = load_production_minutes_bundle(config_path=config_path)
     if production.get("mode") == "dual":
         early_bundle = _ensure_bundle_defaults(dict(production["early_bundle"]))

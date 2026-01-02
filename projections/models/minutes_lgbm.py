@@ -2010,7 +2010,7 @@ def main(
         manifest = load_manifest()
         register_model(
             manifest,
-            model_name="minutes_v1_lgbm",
+            model_name="minutes_v1",
             version=run_id,
             run_id=run_id,
             artifact_path=str(run_dir),
@@ -2027,7 +2027,7 @@ def main(
             description=f"Train {windows_meta['train']['start'][:10]} to {windows_meta['train']['end'][:10]}",
         )
         save_manifest(manifest)
-        typer.echo(f"[registry] Registered minutes_v1_lgbm v{run_id} (stage=dev)")
+        typer.echo(f"[registry] Registered minutes_v1 v{run_id} (stage=dev)")
     except Exception as e:
         typer.echo(f"[registry] Warning: Failed to register model: {e}", err=True)
 
