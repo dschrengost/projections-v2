@@ -1,0 +1,36 @@
+{
+  "bench_max_delta_quantiles": {
+    "p10": -5.058105800620563,
+    "p50": -3.018802878599212,
+    "p90": -1.8093763936153775
+  },
+  "date": "2025-12-30",
+  "injury_proxy_thresholds": {
+    "min_starters_out": 1,
+    "min_team_out": 2
+  },
+  "injury_regime_proxy_team_games": 8,
+  "n_team_games": 8,
+  "slice_injury_proxy": {
+    "bench_gini_delta_mean": 0.006641440901241441,
+    "bench_hhi_delta_mean": 0.015401037875192154,
+    "bench_max_delta_mean": -3.366397984633358,
+    "n_ge10_delta_mean": 0.25,
+    "n_team_games": 8,
+    "top7_sum_delta_mean": -3.0863165700042785
+  },
+  "starter_out_count_dist": {
+    "3": 1,
+    "4": 2,
+    "5": 3,
+    "6": 1,
+    "8": 1
+  },
+  "team_out_count_p50": 5.0,
+  "team_out_count_p90": 6.6,
+  "top7_sum_delta_quantiles": {
+    "p10": -7.258820979682801,
+    "p50": -3.4325816551114485,
+    "p90": 0.6154369383148688
+  }
+}

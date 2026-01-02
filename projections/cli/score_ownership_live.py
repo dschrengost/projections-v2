@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from functools import lru_cache
 import re
 import unicodedata
@@ -32,17 +33,27 @@ from projections.ownership_v1.score import (
 from projections.paths import data_path
 
 
+
+NAME_ALIASES = {
+    "alexandresarr": "alexsarr",
+    "jimmybutleriii": "jimmybutler",
+}
+
+
 def _normalize_name(value: str | None) -> str:
     """Normalize player name for matching: fold Unicode diacritics, lowercase, strip.
     
     Handles European characters like Dončić -> doncic, Jokić -> jokic, Matković -> matkovic.
+    Also applies manual aliases (NAME_ALIASES).
     """
     if not value:
         return ""
     # Fold Unicode (e.g., Dončić -> Doncic) before stripping non-alphanumerics
     normalized = unicodedata.normalize("NFKD", value)
     ascii_folded = normalized.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9]", "", ascii_folded.lower())
+    cleaned = re.sub(r"[^a-z0-9]", "", ascii_folded.lower())
+    
+    return NAME_ALIASES.get(cleaned, cleaned)
 
 
 def _load_calibration_config() -> dict:
@@ -247,13 +258,20 @@ def _load_locked_predictions(game_date: date, draft_group_id: str, data_root: Pa
     return None
 
 
-def _save_locked_predictions(df: pd.DataFrame, game_date: date, draft_group_id: str, data_root: Path) -> None:
+def _save_locked_predictions(
+    df: pd.DataFrame,
+    game_date: date,
+    draft_group_id: str,
+    data_root: Path,
+    *,
+    overwrite: bool = False,
+) -> None:
     """Save predictions to locked file for a specific slate."""
     out_dir = data_root / "silver" / "ownership_predictions" / str(game_date)
     out_dir.mkdir(parents=True, exist_ok=True)
     locked_path = out_dir / f"{draft_group_id}_locked.parquet"
-    if not locked_path.exists():
-        df.to_parquet(locked_path)
+    if overwrite or not locked_path.exists():
+        df.to_parquet(locked_path, index=False)
         print(f"[ownership] Saved locked predictions for slate {draft_group_id}: {len(df)} players")
 
 
@@ -747,7 +765,6 @@ def score_ownership(
         # Load minutes to get player_name -> NBA player_id mapping
         # This bridges DK's display_name to sim's player_id
         import json
-        from pathlib import Path
         
         minutes_root = data_root / "artifacts" / "minutes_v1" / "daily" / str(game_date)
         latest_pointer = minutes_root / "latest_run.json"
@@ -956,6 +973,7 @@ def score_all_slates(
     *,
     ignore_lock_cache: bool = False,
     write_lock_cache: bool = True,
+    current_time: datetime | None = None,
 ) -> dict[str, pd.DataFrame]:
     """
     Score ownership predictions for all slates on a date.
@@ -973,7 +991,12 @@ def score_all_slates(
     
     # Load schedule for lock detection
     schedule = _load_schedule_with_times(game_date, data_root)
-    current_time = datetime.now(tz=UTC)
+    if current_time is None:
+        current_time = datetime.now(tz=UTC)
+    elif current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=UTC)
+    else:
+        current_time = current_time.astimezone(UTC)
     
     results = {}
     
@@ -992,11 +1015,15 @@ def score_all_slates(
             if not ignore_lock_cache:
                 # Try to load cached predictions
                 cached = _load_locked_predictions(game_date, dg_id, data_root)
-                if cached is not None and not cached.empty:
-                    cached["is_locked"] = True
-                    results[dg_id] = cached
-                    print(f"  -> Using cached predictions: {len(cached)} players")
-                    continue
+                if cached is not None and not cached.empty and slate_lock_ts is not None:
+                    cutoff = pd.to_datetime(cached.get("injuries_cutoff_ts"), utc=True, errors="coerce").max()
+                    lock_cutoff = pd.Timestamp(slate_lock_ts).tz_convert("UTC")
+                    if pd.notna(cutoff) and cutoff == lock_cutoff:
+                        cached["is_locked"] = True
+                        results[dg_id] = cached
+                        print(f"  -> Using cached predictions: {len(cached)} players")
+                        continue
+                    print("  -> WARNING: Cached predictions stale for lock; rescoring and overwriting cache")
                 else:
                     print("  -> WARNING: No cached predictions, scoring anyway")
             else:
@@ -1016,13 +1043,23 @@ def score_all_slates(
         )
         
         if predictions is not None:
+            if is_locked:
+                predictions = predictions.copy()
+                predictions["is_locked"] = True
             results[dg_id] = predictions
             
-            # Save for future lock
-            if write_lock_cache:
-                _save_locked_predictions(predictions, game_date, dg_id, data_root)
+            # Persist lock cache only after lock, to avoid freezing predictions pre-lock.
+            if is_locked and write_lock_cache:
+                _save_locked_predictions(predictions, game_date, dg_id, data_root, overwrite=True)
     
     return results
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".tmp.{datetime.now(tz=UTC).strftime('%Y%m%dT%H%M%SZ')}.json")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
 
 
 def _save_slates_metadata(
@@ -1030,10 +1067,10 @@ def _save_slates_metadata(
     game_date: date,
     schedule: pd.DataFrame,
     data_root: Path,
+    *,
+    out_dir: Path,
 ) -> None:
     """Save slates.json metadata file."""
-    import json
-    
     current_time = datetime.now(tz=UTC)
     slates_meta = {}
     
@@ -1051,12 +1088,8 @@ def _save_slates_metadata(
             "first_game_time": first_game.isoformat() if first_game else None,
             "is_locked": is_locked,
         }
-    
-    out_dir = data_root / "silver" / "ownership_predictions" / str(game_date)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    
-    with open(out_dir / "slates.json", "w") as f:
-        json.dump(slates_meta, f, indent=2)
+
+    _atomic_write_json(out_dir / "slates.json", slates_meta)
 
 
 def main():
@@ -1100,22 +1133,33 @@ def main():
     run_dir = out_dir / f"run={args.run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
     
+    allow_legacy_flat = os.environ.get("PROJECTIONS_ALLOW_LEGACY_OWNERSHIP_FLAT_WRITES", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
     for dg_id, df in results.items():
         out_path = run_dir / f"{dg_id}.parquet"
         df.to_parquet(out_path)
-        legacy_path = out_dir / f"{dg_id}.parquet"
-        df.to_parquet(legacy_path)
+        if allow_legacy_flat:
+            legacy_path = out_dir / f"{dg_id}.parquet"
+            df.to_parquet(legacy_path)
         print(f"[ownership] Saved slate {dg_id}: {len(df)} predictions -> {out_path}")
 
-    latest_payload = {
-        "run_id": args.run_id,
-        "generated_at": datetime.now(tz=UTC).isoformat(),
-    }
-    (out_dir / "latest_run.json").write_text(json.dumps(latest_payload, indent=2), encoding="utf-8")
+    if os.environ.get("PROJECTIONS_SKIP_POINTER_WRITES", "").strip().lower() not in {"1", "true", "yes"}:
+        from projections.pipeline import writer_guard
+
+        writer_guard.assert_can_write_pointers(purpose=f"score_ownership_live promote {out_dir}")
+        latest_payload = {
+            "run_id": args.run_id,
+            "generated_at": datetime.now(tz=UTC).isoformat(),
+        }
+        (out_dir / "latest_run.json").write_text(json.dumps(latest_payload, indent=2), encoding="utf-8")
     
     # Save slates metadata
     schedule = _load_schedule_with_times(game_date, root)
-    _save_slates_metadata(results, game_date, schedule, root)
+    _save_slates_metadata(results, game_date, schedule, root, out_dir=run_dir)
     
     # Print summary for largest slate
     main_dg = max(results.keys(), key=lambda k: len(results[k]))

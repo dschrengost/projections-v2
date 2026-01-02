@@ -7,7 +7,6 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 import typer
 
@@ -63,6 +62,14 @@ def _load_features_path(root: Path, slate_day: date, run_id: str, explicit: Opti
 
 
 def _write_pointer(day_dir: Path, run_id: str) -> None:
+    import os
+
+    if os.environ.get("PROJECTIONS_SKIP_POINTER_WRITES", "").strip().lower() in {"1", "true", "yes"}:
+        return
+
+    from projections.pipeline import writer_guard
+
+    writer_guard.assert_can_write_pointers(purpose=f"score_rates_live promote {day_dir}")
     payload = {"run_id": run_id, "generated_at": datetime.now(tz=UTC).isoformat()}
     (day_dir / LATEST_POINTER).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

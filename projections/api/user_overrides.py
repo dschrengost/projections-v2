@@ -13,12 +13,11 @@ import logging
 import os
 import shutil
 import tempfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -26,6 +25,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+
+ENV_ALLOW_LEGACY_USER_OVERRIDES = "PROJECTIONS_ALLOW_LEGACY_USER_OVERRIDES"
 
 SCHEMA_VERSION = 1
 DEFAULT_FPPM = 1.0
@@ -36,8 +37,24 @@ MIN_FPTS_FOR_FPPM = 1.0
 DK_LINEUP_SIZE = 8  # For ownership normalization
 
 
+def _legacy_user_overrides_enabled() -> bool:
+    return os.environ.get(ENV_ALLOW_LEGACY_USER_OVERRIDES, "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _assert_legacy_user_overrides_enabled(*, purpose: str) -> None:
+    if _legacy_user_overrides_enabled():
+        return
+    raise RuntimeError(
+        f"[legacy-override] Refusing legacy user overrides for {purpose}: "
+        f"{ENV_ALLOW_LEGACY_USER_OVERRIDES} is not enabled. "
+        "Use the GameView overrides path (artifacts/ops/overrides_v1) for production. "
+        f"Set {ENV_ALLOW_LEGACY_USER_OVERRIDES}=1 for local debugging only."
+    )
+
+
 def get_overrides_root() -> Path:
     """Get the root directory for user overrides."""
+    _assert_legacy_user_overrides_enabled(purpose="get_overrides_root")
     data_root = Path(os.environ.get("PROJECTIONS_DATA_ROOT", "/home/daniel/projections-data"))
     return data_root / "user_overrides"
 
@@ -175,6 +192,7 @@ def load_slate_overrides(
     draft_group_id: int,
 ) -> SlateOverrides:
     """Load overrides for a slate, with fallback to backup on corruption."""
+    _assert_legacy_user_overrides_enabled(purpose="load_slate_overrides")
     path = _get_override_path(game_date, draft_group_id)
     backup_path = _get_backup_path(path)
     
@@ -215,6 +233,7 @@ def save_slate_overrides(
     Returns:
         True if saved successfully, False if revision conflict
     """
+    _assert_legacy_user_overrides_enabled(purpose="save_slate_overrides")
     path = _get_override_path(overrides.game_date, overrides.draft_group_id)
     backup_path = _get_backup_path(path)
     
@@ -362,6 +381,7 @@ def apply_overrides(
         - override_minutes, override_fpts, override_own (user values or None)
         - has_override, used_fppm_fallback, is_active, fppm
     """
+    _assert_legacy_user_overrides_enabled(purpose="apply_overrides")
     df = player_df.copy()
     
     # Identify source columns

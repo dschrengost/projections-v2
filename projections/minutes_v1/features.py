@@ -42,6 +42,7 @@ class MinutesFeatureBuilder:
         base = self._attach_odds(base)
         base = self._attach_depth(base)
         base = self._player_history_features(base)
+        base = self._attach_within_team_rotation_ranks(base)
         base = self._attach_archetype_features(base)
         base = self._team_dispersion(base)
         base = self._finalize(base)
@@ -181,6 +182,63 @@ class MinutesFeatureBuilder:
         working = trend_features.attach_trend_features(working)
         working = role_features.attach_role_features(working)
         working = rest_features.attach_rest_features(working)
+        return working
+
+    def _attach_within_team_rotation_ranks(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Attach within-team rotation rank features derived from rolling minutes priors.
+
+        These features are intentionally derived from existing leakage-safe trend features
+        (e.g. roll_mean_10) to provide a robust "where are you on the depth chart"
+        signal for rotation inclusion models.
+        """
+
+        required = {"game_id", "team_id", "player_id"}
+        if not required.issubset(df.columns):
+            return df
+        if "roll_mean_10" not in df.columns:
+            return df
+
+        working = df.copy()
+        metric = pd.to_numeric(working["roll_mean_10"], errors="coerce").fillna(0.0).astype(float)
+        player_ids = pd.to_numeric(working["player_id"], errors="coerce").fillna(0).astype(int)
+
+        rank = pd.Series(pd.NA, index=working.index, dtype="Int64")
+        rank_pct = pd.Series(np.nan, index=working.index, dtype="Float64")
+        gap_to_8th = pd.Series(np.nan, index=working.index, dtype="Float64")
+        gap_to_10th = pd.Series(np.nan, index=working.index, dtype="Float64")
+        is_top8 = pd.Series(0, index=working.index, dtype="Int64")
+        is_top10 = pd.Series(0, index=working.index, dtype="Int64")
+
+        # Deterministic ordering: primary sort by roll_mean_10 (desc), tie-break by player_id (asc).
+        for (_, _), group in working.groupby(["game_id", "team_id"], sort=False):
+            idx = group.index.to_numpy()
+            if idx.size == 0:
+                continue
+            values = metric.loc[idx].to_numpy(dtype=float)
+            pids = player_ids.loc[idx].to_numpy(dtype=int)
+
+            order = np.lexsort((pids, -values))
+            ranks = np.empty(idx.size, dtype=int)
+            ranks[order] = np.arange(1, idx.size + 1, dtype=int)
+
+            rank.loc[idx] = ranks
+            denom = max(int(idx.size) - 1, 1)
+            rank_pct.loc[idx] = (ranks - 1) / float(denom)
+
+            values_sorted = values[order]
+            boundary_8 = float(values_sorted[min(7, int(values_sorted.size) - 1)])
+            boundary_10 = float(values_sorted[min(9, int(values_sorted.size) - 1)])
+            gap_to_8th.loc[idx] = values - boundary_8
+            gap_to_10th.loc[idx] = values - boundary_10
+            is_top8.loc[idx] = (ranks <= 8).astype(int)
+            is_top10.loc[idx] = (ranks <= 10).astype(int)
+
+        working["team_roll_mean_10_rank"] = rank
+        working["team_roll_mean_10_rank_pct"] = rank_pct
+        working["team_roll_mean_10_gap_to_8th"] = gap_to_8th.fillna(0.0)
+        working["team_roll_mean_10_gap_to_10th"] = gap_to_10th.fillna(0.0)
+        working["team_roll_mean_10_is_top8"] = is_top8
+        working["team_roll_mean_10_is_top10"] = is_top10
         return working
 
     def _attach_archetype_features(self, df: pd.DataFrame) -> pd.DataFrame:

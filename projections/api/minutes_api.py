@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +22,9 @@ from projections.api.contest_api import router as contest_router
 from projections.api.contest_sim_api import router as contest_sim_router
 from projections.api.entry_manager_api import router as entry_manager_router
 from projections.api.diagnostics_api import router as diagnostics_router
+from projections.api.props_api import router as props_router
+from projections.pipeline import control_plane
+from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
 
 DEFAULT_DAILY_ROOT = paths.data_path("artifacts", "minutes_v1", "daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
@@ -152,10 +155,15 @@ def _resolve_run_dir(day_dir: Path, run_id: str | None) -> Path:
 
 
 def _load_minutes(run_dir: Path) -> pd.DataFrame:
+    effective_path = run_dir / EFFECTIVE_MINUTES_FILENAME
+    if effective_path.exists():
+        return pd.read_parquet(effective_path)
+
     parquet_path = run_dir / PARQUET_FILENAME
-    if not parquet_path.exists():
-        raise HTTPException(status_code=404, detail="No artifact for selected date.")
-    return pd.read_parquet(parquet_path)
+    if parquet_path.exists():
+        return pd.read_parquet(parquet_path)
+
+    raise HTTPException(status_code=404, detail="No artifact for selected date.")
 
 
 def _load_summary(run_dir: Path) -> dict[str, Any] | None:
@@ -262,8 +270,9 @@ def _load_unified_projections(
             except Exception:
                 return None, None, None
         else:
-            # Fall back to most recent run dir
             if not unified_root.exists():
+                return None, None, None
+            if not control_plane.allow_unpromoted_run_reads():
                 return None, None, None
             run_dirs = sorted(
                 [p for p in unified_root.iterdir() if p.is_dir() and p.name.startswith("run=")],
@@ -323,6 +332,9 @@ def _resolve_sim_run_dir(base_dir: Path) -> Path | None:
         except json.JSONDecodeError:
             pass
 
+    if not control_plane.allow_unpromoted_run_reads():
+        return None
+
     run_dirs = sorted(
         [path for path in base_dir.iterdir() if path.is_dir() and path.name.startswith("run=")],
         reverse=True,
@@ -348,7 +360,7 @@ def _resolve_ownership_run_dir(base_dir: Path, run_id: str | None) -> Path | Non
             candidate = base_dir / f"run={latest}"
             if candidate.exists():
                 return candidate
-    if base_dir.exists():
+    if base_dir.exists() and control_plane.allow_unpromoted_run_reads():
         run_dirs = sorted(
             [path for path in base_dir.iterdir() if path.is_dir() and path.name.startswith("run=")],
             reverse=True,
@@ -379,10 +391,10 @@ def _load_ownership_predictions(
             except Exception:
                 pass
 
-    if run_id is not None:
+    if run_id is not None or not control_plane.allow_unpromoted_run_reads():
         return None
 
-    # Fall back to legacy single-file format
+    # Fall back to legacy single-file format (unsafe for production).
     legacy_path = data_root / "silver" / "ownership_predictions" / f"{day}.parquet"
     if legacy_path.exists():
         try:
@@ -403,6 +415,8 @@ def _load_sim_projections(day: date, root: Path, *, minutes_run_id: str | None =
         if not base.exists():
             continue
         if base.is_file() and base.suffix == ".parquet":
+            if not control_plane.allow_unpromoted_run_reads():
+                continue
             try:
                 return pd.read_parquet(base)
             except Exception:
@@ -422,6 +436,8 @@ def _load_sim_projections(day: date, root: Path, *, minutes_run_id: str | None =
         # Check for projections.parquet directly (new format from run_sim_live.py)
         direct_path = base / "projections.parquet"
         if direct_path.exists():
+            if not control_plane.allow_unpromoted_run_reads():
+                continue
             try:
                 df = pd.read_parquet(direct_path)
                 if minutes_run_id:
@@ -466,10 +482,14 @@ def _sim_projections_available(day: date, root: Path) -> bool:
         if not base.exists():
             continue
         if base.is_file() and base.suffix == ".parquet":
-            return True
+            if control_plane.allow_unpromoted_run_reads():
+                return True
+            continue
         # Check for projections.parquet directly (new format)
         if (base / "projections.parquet").exists():
-            return True
+            if control_plane.allow_unpromoted_run_reads():
+                return True
+            continue
         if base.is_dir():
             run_dir = _resolve_sim_run_dir(base)
             if run_dir is None:
@@ -527,6 +547,7 @@ def create_app(
     app.include_router(contest_sim_router, prefix="/api/contest-sim", tags=["contest-sim"])
     app.include_router(entry_manager_router, prefix="/api/entry-manager", tags=["entry-manager"])
     app.include_router(diagnostics_router)
+    app.include_router(props_router, prefix="/api")
 
     @app.get("/api/minutes")
     def get_minutes(date: str | None = None, run_id: str | None = None) -> JSONResponse:
@@ -1180,47 +1201,36 @@ def create_app(
         })
 
     @app.post("/api/trigger")
-    def trigger_pipeline(background_tasks: BackgroundTasks) -> JSONResponse:
-        """Manually trigger the live pipeline (scrape -> score)."""
-        background_tasks.add_task(_run_pipeline_background)
-        return JSONResponse({"status": "triggered", "message": "Pipeline started in background."})
+    def trigger_pipeline(date: str | None = None) -> JSONResponse:
+        """Manually trigger the canonical Prefect deployment for the given date."""
+        slate_day = _parse_date(date)
+
+        try:
+            from prefect.deployments import run_deployment
+
+            flow_run = run_deployment(
+                "nba-live-pipeline/nba-live-pipeline",
+                parameters={"game_date": slate_day.isoformat()},
+                tags=["manual", "api-trigger"],
+                as_subflow=False,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to trigger Prefect deployment nba-live-pipeline/nba-live-pipeline: {exc}",
+            ) from exc
+
+        return JSONResponse(
+            {
+                "status": "triggered",
+                "deployment": "nba-live-pipeline/nba-live-pipeline",
+                "game_date": slate_day.isoformat(),
+                "flow_run_id": str(flow_run.id),
+            }
+        )
 
     if dist_dir.exists():
         app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
 
     return app
-
-
-def _run_pipeline_background() -> None:
-    """Execute scrape and score scripts sequentially."""
-    import subprocess
-    
-    # 1. Scrape
-    print("[api] Triggering scrape...")
-    scrape_res = subprocess.run(
-        ["/bin/bash", "scripts/run_live_scrape.sh"],
-        cwd=os.getcwd(),
-        capture_output=True,
-        text=True
-    )
-    if scrape_res.returncode != 0:
-        print(f"[api] Scrape failed: {scrape_res.stderr}")
-        return
-
-    # 2. Score
-    print("[api] Triggering score...")
-    score_res = subprocess.run(
-        ["/bin/bash", "scripts/run_live_score.sh"],
-        cwd=os.getcwd(),
-        capture_output=True,
-        text=True
-    )
-    if score_res.returncode != 0:
-        print(f"[api] Score failed: {score_res.stderr}")
-        return
-        
-    print("[api] Manual pipeline run complete.")
-
-
-
 app = create_app()

@@ -337,7 +337,17 @@ def main(
     roster_df = pd.DataFrame()
     if roster:
         roster_df = _read_parquet_sources(roster, allow_empty=True)
-    if roster_df.empty and scrape_missing:
+    # Check if we have rows for the TARGET date range (not just any rows)
+    # If existing roster has no rows for target dates, scrape fresh data
+    if not roster_df.empty and scrape_missing:
+        roster_df_dates = pd.to_datetime(roster_df["game_date"]).dt.normalize()
+        target_rows = roster_df[(roster_df_dates >= start_day) & (roster_df_dates <= end_day)]
+        if target_rows.empty:
+            typer.echo(
+                f"[roster] existing roster has no rows for {start_day.date()} to {end_day.date()}; scraping fresh data"
+            )
+            roster_df = _scrape_roster_poll(schedule_df, start=start_day, end=end_day, timeout=roster_timeout)
+    elif roster_df.empty and scrape_missing:
         roster_df = _scrape_roster_poll(schedule_df, start=start_day, end=end_day, timeout=roster_timeout)
     if roster_df.empty:
         raise typer.BadParameter(

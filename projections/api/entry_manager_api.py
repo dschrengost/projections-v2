@@ -357,7 +357,7 @@ class ApplyBuildRequest(BaseModel):
 
 
 class LateSwapRequest(BaseModel):
-    use_user_overrides: bool = True
+    use_user_overrides: bool = False
     ownership_mode: str = "renormalize"
     run_id: Optional[str] = None
     n_alternatives: int = Field(default=5, ge=1, le=20, description="Number of lineup alternatives to generate")

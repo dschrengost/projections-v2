@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${PROJECTIONS_ALLOW_LEGACY_SHELL_RUNNERS:-}" != "1" ]]; then
+  echo "[legacy-runner] ERROR: scripts/run_live_score.sh is disabled in production." >&2
+  echo "[legacy-runner] Use Prefect: /home/daniel/.local/bin/uv run prefect deployment run nba-live-pipeline/nba-live-pipeline" >&2
+  exit 2
+fi
+
 # Prevent overlapping runs - exit immediately if another instance is running
 LOCKFILE="/tmp/live-score.lock"
 exec 200>"${LOCKFILE}"
@@ -23,8 +29,8 @@ CONFIG_RECONCILE=$(jq -r '.reconcile_team_minutes // empty' config/minutes_curre
 # Default to 'none' - sim handles reconciliation internally via game script sampling
 RECONCILE_MODE="${LIVE_RECONCILE_MODE:-${CONFIG_RECONCILE:-none}}"
 MINUTES_OUTPUT_MODE="${LIVE_MINUTES_OUTPUT:-conditional}"
-SIM_PROFILE="${LIVE_SIM_PROFILE:-today}"
-SIM_WORLDS="${LIVE_SIM_WORLDS:-20000}"
+SIM_PROFILE="${LIVE_SIM_PROFILE:-sim_v3}"
+SIM_WORLDS="${LIVE_SIM_WORLDS:-25000}"
 RUN_SIM="${LIVE_RUN_SIM:-1}"
 DISABLE_TIP_WINDOW="${LIVE_DISABLE_TIP_WINDOW:-1}" # disabled by default - always run regardless of schedule
 PIN_PROJECTIONS_RUN="${LIVE_PIN_PROJECTIONS_RUN:-0}" # optional: pin unified projections run for debugging
@@ -33,6 +39,32 @@ SCRAPE_FLAGS="${LIVE_SCRAPE_FLAGS:-}"
 export PROJECTIONS_DATA_ROOT="${DATA_ROOT}"
 
 cd /home/daniel/projects/projections-v2
+
+# Some runners accidentally pass quoted strings (e.g. "'2025'"). Typer expects integers.
+strip_wrapping_quotes() {
+  local s="$1"
+  s="${s#\'}"; s="${s%\'}"
+  s="${s#\"}"; s="${s%\"}"
+  printf "%s" "$s"
+}
+RAW_SEASON="${SEASON}"
+RAW_MONTH="${MONTH}"
+SEASON="$(strip_wrapping_quotes "${SEASON}")"
+MONTH="$(strip_wrapping_quotes "${MONTH}")"
+if [[ "${SEASON}" != "${RAW_SEASON}" ]]; then
+  echo "[live] WARNING: Stripped wrapping quotes from LIVE_SEASON=${RAW_SEASON} -> ${SEASON}" >&2
+fi
+if [[ "${MONTH}" != "${RAW_MONTH}" ]]; then
+  echo "[live] WARNING: Stripped wrapping quotes from LIVE_MONTH=${RAW_MONTH} -> ${MONTH}" >&2
+fi
+if ! [[ "${SEASON}" =~ ^[0-9]+$ ]]; then
+  echo "[live] ERROR: LIVE_SEASON must be an integer (got ${RAW_SEASON})" >&2
+  exit 2
+fi
+if ! [[ "${MONTH}" =~ ^[0-9]+$ ]]; then
+  echo "[live] ERROR: LIVE_MONTH must be an integer (got ${RAW_MONTH})" >&2
+  exit 2
+fi
 
 # Determine phase: PRE_WINDOW (8am-1.5h before tip), SLATE (1.5h before - last tip), POST (after last tip)
 NOW_UTC=$(date -u +%s)
@@ -125,6 +157,26 @@ else
     --data-root "${DATA_ROOT}" \
     --schedule "${SCHEDULE_PATH}" \
     ${SCRAPE_FLAGS}
+fi
+
+# === STEP 1.25: DK SALARIES (auto-fetch if missing) ===
+# Ensure DK salaries exist for finalize - if morning flow didn't run, fetch now.
+# This is critical: without salaries, finalize silently skips and dashboard shows no data.
+DK_SALARIES_DIR="${DATA_ROOT}/gold/dk_salaries/site=dk/game_date=${START_DATE}"
+if [[ ! -d "${DK_SALARIES_DIR}" ]] || [[ -z "$(ls -A "${DK_SALARIES_DIR}" 2>/dev/null)" ]]; then
+  echo "[live] Step 1.25: DK salaries missing, fetching..."
+  if ! /home/daniel/.local/bin/uv run python -m scripts.dk.run_daily_salaries --game-date "${START_DATE}"; then
+    echo "[live] warning: Failed to fetch DK salaries. Finalize may skip." >&2
+  fi
+else
+  echo "[live] Step 1.25: DK salaries present at ${DK_SALARIES_DIR}"
+fi
+
+# === STEP 1.3: PROPS SCRAPE (for props tab) ===
+# Scrape player props from rotowire for the props analysis tab.
+echo "[live] Step 1.3: Scraping player props..."
+if ! /home/daniel/.local/bin/uv run python -m projections.cli.scrape_props scrape --date "${START_DATE}"; then
+  echo "[live] warning: Props scrape failed; props tab may be empty." >&2
 fi
 
 # === STEP 1.5: INPUT DIGEST CHECK (skip if unchanged) ===
@@ -280,45 +332,17 @@ else
   echo "[live] Skipping sim_v2 live run (LIVE_RUN_SIM=${RUN_SIM})."
 fi
 
-# === STEP 7: OWNERSHIP PREDICTIONS (skip if any game has locked) ===
-# Check if the first game on the slate has already tipped
-FIRST_TIP_LOCKED=$(SCHEDULE_PATH="${SCHEDULE_PATH}" START_DATE="${START_DATE}" /home/daniel/.local/bin/uv run python - <<'PY'
-import os, sys
-import pandas as pd
-
-path = os.environ["SCHEDULE_PATH"]
-target = os.environ["START_DATE"]
-
-df = pd.read_parquet(path)
-df["game_date"] = pd.to_datetime(df["game_date"]).dt.date
-df = df[df["game_date"] == pd.to_datetime(target).date()]
-if df.empty or "tip_ts" not in df.columns:
-    print("NO_GAMES", flush=True)
-    sys.exit(0)
-tips = pd.to_datetime(df["tip_ts"], utc=True, errors="coerce").dropna()
-if tips.empty:
-    print("NOT_LOCKED", flush=True)
-    sys.exit(0)
-first_tip = tips.min()
-now = pd.Timestamp.utcnow()
-if now >= first_tip:
-    print("LOCKED", flush=True)
-else:
-    print("NOT_LOCKED", flush=True)
-PY
-)
-
-if [[ "${FIRST_TIP_LOCKED}" == "LOCKED" ]]; then
-  echo "[live] Ownership scoring SKIPPED - first game has locked, using cached predictions"
-else
-  echo "[live] Scoring ownership predictions for ${START_DATE}..."
-  if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_ownership_live \
-    --date "${START_DATE}" \
-    --run-id "${LIVE_RUN_ID}" \
-    --data-root "${DATA_ROOT}"
-  then
-    echo "[live] warning: Ownership scoring failed; continuing without ownership predictions." >&2
-  fi
+# === STEP 7: OWNERSHIP PREDICTIONS (per-slate lock handled inside CLI) ===
+# The CLI handles per-slate lock detection: locked slates use cached predictions,
+# unlocked slates get fresh scoring. This allows main slates to score even after
+# early games have locked.
+echo "[live] Scoring ownership predictions for ${START_DATE}..."
+if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_ownership_live \
+  --date "${START_DATE}" \
+  --run-id "${LIVE_RUN_ID}" \
+  --data-root "${DATA_ROOT}"
+then
+  echo "[live] warning: Ownership scoring failed; continuing without ownership predictions." >&2
 fi
 
 # === STEP 8: FINALIZE UNIFIED PROJECTIONS ===

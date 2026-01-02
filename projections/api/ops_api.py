@@ -1,0 +1,330 @@
+from __future__ import annotations
+
+import json
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+from fastapi import APIRouter, HTTPException, Query
+from fastapi import BackgroundTasks
+from pydantic import BaseModel
+
+from projections import paths
+from projections.artifacts.unified_projections import load_projections_df, load_summary, resolve_unified_run_dir
+from projections.ops.overrides import (
+    USAGE_RATE_FIELDS,
+    apply_overrides_to_minutes_df,
+    apply_overrides_to_rates_df,
+    clear_overrides,
+    list_overrides,
+    load_overrides_map,
+    upsert_overrides,
+)
+from projections.ops.worlds_patch import patch_worlds_matrix_for_game
+
+router = APIRouter(prefix="/api/ops", tags=["ops"])
+
+
+def _parse_date(value: str | None) -> date:
+    if not value:
+        raise HTTPException(status_code=400, detail="Missing date (YYYY-MM-DD).")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.") from exc
+
+
+def _read_pointer_run_id(pointer_path: Path) -> str | None:
+    if not pointer_path.exists():
+        return None
+    try:
+        payload = json.loads(pointer_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    run_id = payload.get("run_id")
+    return str(run_id) if run_id else None
+
+
+def _resolve_run_dir(base_dir: Path, *, run_id: str | None, parquet_name: str) -> tuple[Path, str | None]:
+    if run_id:
+        candidate = base_dir / f"run={run_id}"
+        if (candidate / parquet_name).exists():
+            return candidate, run_id
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found under {base_dir}.")
+
+    latest = _read_pointer_run_id(base_dir / "latest_run.json")
+    if latest:
+        candidate = base_dir / f"run={latest}"
+        if (candidate / parquet_name).exists():
+            return candidate, latest
+
+    direct = base_dir / parquet_name
+    if direct.exists():
+        return base_dir, None
+
+    run_dirs = sorted([p for p in base_dir.glob("run=*") if p.is_dir()], reverse=True)
+    for candidate in run_dirs:
+        if (candidate / parquet_name).exists():
+            resolved = candidate.name.split("=", 1)[1] if candidate.name.startswith("run=") else None
+            return candidate, resolved
+
+    raise HTTPException(status_code=404, detail=f"No artifact found under {base_dir}.")
+
+
+class OpsPlayerOverrideUpdate(BaseModel):
+    game_id: str
+    player_id: str
+
+    sticky_fields: list[str] | None = None
+
+    status: str | None = None
+    is_confirmed_starter: bool | None = None
+    is_projected_starter: bool | None = None
+    play_prob: float | None = None
+
+    minutes_p10: float | None = None
+    minutes_p50: float | None = None
+    minutes_p90: float | None = None
+    minutes_p10_cond: float | None = None
+    minutes_p50_cond: float | None = None
+    minutes_p90_cond: float | None = None
+    minutes_delta: float | None = None  # Additive adjustment to model quantiles (e.g., +5 or -3)
+
+    pred_fga2_per_min: float | None = None
+    pred_fga3_per_min: float | None = None
+    pred_fta_per_min: float | None = None
+    pred_ast_per_min: float | None = None
+    pred_tov_per_min: float | None = None
+    pred_oreb_per_min: float | None = None
+    pred_dreb_per_min: float | None = None
+    pred_stl_per_min: float | None = None
+    pred_blk_per_min: float | None = None
+    pred_fg2_pct: float | None = None
+    pred_fg3_pct: float | None = None
+    pred_ft_pct: float | None = None
+
+
+class OpsUpsertOverridesRequest(BaseModel):
+    date: str
+    updates: list[OpsPlayerOverrideUpdate]
+    note: str | None = None
+
+
+@router.get("/overrides")
+def get_overrides(date: str = Query(...)) -> dict[str, Any]:
+    game_date = _parse_date(date)
+    return {"date": game_date.isoformat(), "overrides": list_overrides(game_date)}
+
+
+@router.post("/overrides")
+def post_overrides(req: OpsUpsertOverridesRequest) -> dict[str, Any]:
+    game_date = _parse_date(req.date)
+    updates = [item.model_dump(exclude_none=True) for item in req.updates]
+    merged = upsert_overrides(game_date, updates, note=req.note)
+    return {"date": game_date.isoformat(), "overrides": merged}
+
+
+@router.delete("/overrides")
+def delete_overrides(
+    date: str = Query(...),
+    game_id: str | None = Query(None),
+    player_id: str | None = Query(None),
+) -> dict[str, Any]:
+    game_date = _parse_date(date)
+    remaining = clear_overrides(game_date, game_id=game_id, player_id=player_id)
+    return {"date": game_date.isoformat(), "overrides": remaining}
+
+
+class OpsRunWorldsRequest(BaseModel):
+    date: str
+    game_id: int
+    base_run_id: str | None = None
+    pin: bool = False
+    background: bool = True
+
+
+@router.post("/run-worlds")
+def post_run_worlds(req: OpsRunWorldsRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    game_date = _parse_date(req.date)
+    if req.background:
+        background_tasks.add_task(
+            patch_worlds_matrix_for_game,
+            game_date=game_date,
+            game_id=int(req.game_id),
+            base_projections_run_id=req.base_run_id,
+            data_root=paths.data_path(),
+            pin_projections_run=bool(req.pin),
+        )
+        return {
+            "status": "triggered",
+            "date": game_date.isoformat(),
+            "game_id": int(req.game_id),
+            "message": "Worlds patch started in background; poll /api/pipeline/status?stage=ops",
+        }
+    return patch_worlds_matrix_for_game(
+        game_date=game_date,
+        game_id=int(req.game_id),
+        base_projections_run_id=req.base_run_id,
+        data_root=paths.data_path(),
+        pin_projections_run=bool(req.pin),
+    )
+
+
+@router.get("/game")
+def get_game_ops(
+    date: str = Query(..., description="Slate date (YYYY-MM-DD)"),
+    game_id: str = Query(..., description="NBA game_id to inspect"),
+    run_id: str | None = Query(None, description="Optional unified projections run_id"),
+) -> dict[str, Any]:
+    slate_day = _parse_date(date)
+    data_root = paths.data_path()
+
+    projections_run_dir, ctx = resolve_unified_run_dir(data_root, slate_day, run_id=run_id)
+    if projections_run_dir is None:
+        raise HTTPException(status_code=404, detail=f"No unified projections found for {slate_day.isoformat()}.")
+
+    summary = load_summary(projections_run_dir) or {}
+    unified_df = load_projections_df(projections_run_dir)
+    if unified_df.empty:
+        raise HTTPException(status_code=404, detail=f"Unified projections empty for {slate_day.isoformat()}.")
+
+    gid = str(game_id)
+    unified_df = unified_df.copy()
+    unified_df["game_id"] = unified_df["game_id"].astype(str)
+    unified_game = unified_df.loc[unified_df["game_id"] == gid].copy()
+    if unified_game.empty:
+        raise HTTPException(status_code=404, detail=f"Game {gid} not found in unified projections.")
+
+    minutes_run_id = summary.get("minutes_run_id")
+    rates_run_id = summary.get("rates_run_id")
+    sim_run_id = summary.get("sim_run_id")
+
+    minutes_base_dir = data_root / "artifacts" / "minutes_v1" / "daily" / slate_day.isoformat()
+    minutes_dir, resolved_minutes_run_id = _resolve_run_dir(
+        minutes_base_dir, run_id=str(minutes_run_id) if minutes_run_id else None, parquet_name="minutes.parquet"
+    )
+    minutes_df = pd.read_parquet(minutes_dir / "minutes.parquet")
+    minutes_df = minutes_df.copy()
+    minutes_df["game_id"] = minutes_df["game_id"].astype(str)
+    minutes_game = minutes_df.loc[minutes_df["game_id"] == gid].copy()
+
+    rates_base_dir = data_root / "gold" / "rates_v1_live" / slate_day.isoformat()
+    rates_dir, resolved_rates_run_id = _resolve_run_dir(
+        rates_base_dir, run_id=str(rates_run_id) if rates_run_id else None, parquet_name="rates.parquet"
+    )
+    rates_df = pd.read_parquet(rates_dir / "rates.parquet")
+    rates_df = rates_df.copy()
+    rates_df["game_id"] = rates_df["game_id"].astype(str)
+    rates_game = rates_df.loc[rates_df["game_id"] == gid].copy()
+
+    # Apply authoritative overrides (effective inputs).
+    minutes_effective = apply_overrides_to_minutes_df(minutes_game, game_date=slate_day, data_root=data_root)
+    rates_effective = apply_overrides_to_rates_df(rates_game, game_date=slate_day, data_root=data_root)
+
+    overrides_map = load_overrides_map(slate_day, data_root=data_root)
+    game_overrides: dict[str, dict[str, Any]] = {}
+    for key, record in overrides_map.items():
+        if key.game_id != gid:
+            continue
+        fields = record.get("fields", {}) if isinstance(record.get("fields"), dict) else {}
+        game_overrides[str(key.player_id)] = {
+            "game_id": key.game_id,
+            "player_id": key.player_id,
+            "fields": fields,
+            "updated_at": record.get("updated_at"),
+            "note": record.get("note"),
+        }
+
+    # Build per-player rows keyed by player_id (string).
+    out_players: list[dict[str, Any]] = []
+    unified_game["player_id"] = unified_game["player_id"].astype(str)
+    if not minutes_game.empty:
+        minutes_game["player_id"] = minutes_game["player_id"].astype(str)
+        minutes_effective["player_id"] = minutes_effective["player_id"].astype(str)
+    if not rates_game.empty:
+        rates_game["player_id"] = rates_game["player_id"].astype(str)
+        rates_effective["player_id"] = rates_effective["player_id"].astype(str)
+
+    minutes_base_by_pid = (
+        minutes_game.set_index("player_id").to_dict(orient="index") if not minutes_game.empty else {}
+    )
+    minutes_eff_by_pid = (
+        minutes_effective.set_index("player_id").to_dict(orient="index") if not minutes_effective.empty else {}
+    )
+    rates_base_by_pid = rates_game.set_index("player_id").to_dict(orient="index") if not rates_game.empty else {}
+    rates_eff_by_pid = rates_effective.set_index("player_id").to_dict(orient="index") if not rates_effective.empty else {}
+
+    for _, row in unified_game.iterrows():
+        pid = str(row.get("player_id"))
+        base_minutes = minutes_base_by_pid.get(pid) or {}
+        eff_minutes = minutes_eff_by_pid.get(pid) or {}
+        base_rates = rates_base_by_pid.get(pid) or {}
+        eff_rates = rates_eff_by_pid.get(pid) or {}
+        override = game_overrides.get(pid)
+
+        def _pick(source: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+            return {k: source.get(k) for k in keys if k in source}
+
+        rates_keys = tuple(k for k in USAGE_RATE_FIELDS if k in base_rates or k in eff_rates)
+
+        out_players.append(
+            {
+                "player_id": pid,
+                "player_name": row.get("player_name"),
+                "team_id": row.get("team_id"),
+                "team_tricode": row.get("team_tricode"),
+                "status": row.get("status"),
+                "is_confirmed_starter": row.get("is_confirmed_starter"),
+                "is_projected_starter": row.get("is_projected_starter"),
+                "effective": row.to_dict(),
+                "minutes_baseline": _pick(base_minutes, (
+                    "status",
+                    "play_prob",
+                    "is_confirmed_starter",
+                    "is_projected_starter",
+                    "minutes_p10",
+                    "minutes_p50",
+                    "minutes_p90",
+                    "minutes_p10_cond",
+                    "minutes_p50_cond",
+                    "minutes_p90_cond",
+                    "rotation_prob",
+                    "p_rot",
+                    "mu_cond",
+                    "eligible_flag",
+                )),
+                "minutes_effective": _pick(eff_minutes, (
+                    "status",
+                    "play_prob",
+                    "is_confirmed_starter",
+                    "is_projected_starter",
+                    "minutes_p10",
+                    "minutes_p50",
+                    "minutes_p90",
+                    "minutes_p10_cond",
+                    "minutes_p50_cond",
+                    "minutes_p90_cond",
+                )),
+                "rates_baseline": _pick(base_rates, rates_keys),
+                "rates_effective": _pick(eff_rates, rates_keys),
+                "override": override,
+            }
+        )
+
+    return {
+        "date": slate_day.isoformat(),
+        "game_id": gid,
+        "run_context": {
+            "projections_run_id": ctx.resolved_run_id,
+            "minutes_run_id": resolved_minutes_run_id or minutes_run_id,
+            "rates_run_id": resolved_rates_run_id or rates_run_id,
+            "sim_run_id": sim_run_id,
+            "blessed_run_id": ctx.blessed_run_id,
+            "pinned_run_id": ctx.pinned_run_id,
+            "latest_run_id": ctx.latest_run_id,
+        },
+        "players": out_players,
+    }

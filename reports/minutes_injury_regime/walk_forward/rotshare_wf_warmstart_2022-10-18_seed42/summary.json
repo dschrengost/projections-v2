@@ -1,0 +1,172 @@
+{
+  "aggregates": {
+    "all_games": {
+      "bench_core_mae_candidate": 5.550872145385595,
+      "bench_core_mae_current": 2.061318126423055,
+      "bench_core_mae_delta": 3.48955401896254,
+      "player_mae_candidate": 4.061995831012516,
+      "player_mae_current": 2.6189250770525425,
+      "player_mae_delta": 1.4430707539599736,
+      "top7_sum_mae_candidate": 14.122793262669777,
+      "top7_sum_mae_current": 16.922839885816398,
+      "top7_sum_mae_delta": -2.8000466231466206
+    },
+    "injury_regime": {
+      "bench_core_mae_candidate": 5.599096007869485,
+      "bench_core_mae_current": 2.207625942513864,
+      "bench_core_mae_delta": 3.391470065355621,
+      "player_mae_candidate": 4.012251850929091,
+      "player_mae_current": 2.6138311962160565,
+      "player_mae_delta": 1.3984206547130342,
+      "top7_sum_mae_candidate": 14.024044935629064,
+      "top7_sum_mae_current": 16.393004103906947,
+      "top7_sum_mae_delta": -2.3689591682778826
+    },
+    "non_injury": {
+      "bench_core_mae_candidate": 5.400359628385819,
+      "bench_core_mae_current": 1.731806835322722,
+      "bench_core_mae_delta": 3.668552793063097,
+      "player_mae_candidate": 4.65546187068788,
+      "player_mae_current": 3.033404612988356,
+      "player_mae_delta": 1.6220572576995238,
+      "top7_sum_mae_candidate": 16.12900647108455,
+      "top7_sum_mae_current": 26.919283666269337,
+      "top7_sum_mae_delta": -10.790277195184785
+    }
+  },
+  "bundle_root": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward",
+  "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds",
+  "months": [
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2023-10",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2023-10",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2023-10.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2023-11",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2023-11",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2023-11.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2023-12",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2023-12",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2023-12.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-01",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2024-01",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-01.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-02",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2024-02",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-02.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-03",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2024-03",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-03.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-04",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2024-04",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-04.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-10",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2024-10",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-10.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-11",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2024-11",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-11.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-12",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2024-12",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2024-12.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-01",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2025-01",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-01.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-02",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2025-02",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-02.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-03",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2025-03",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-03.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-04",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2025-04",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-04.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-10",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2025-10",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-10.json",
+      "skipped": false
+    },
+    {
+      "bundle_dir": "/home/daniel/projects/projections-v2/artifacts/minutes_rotation_share/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-11",
+      "candidate_root": "/home/daniel/projects/projections-v2/artifacts/rotshare_walk_forward_preds/rotshare_wf_warmstart_2022-10-18_seed42",
+      "month": "2025-11",
+      "report": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward/rotshare_wf_warmstart_2022-10-18_seed42/2025-11.json",
+      "skipped": false
+    }
+  ],
+  "params": {
+    "baseline_top_k": 8,
+    "lookback_days": 30,
+    "min_starters_out": 1,
+    "min_team_out": 2,
+    "random_state": 42,
+    "rotshare_min_players": 10,
+    "rotshare_play_prob_exponent": 1.0
+  },
+  "report_root": "/home/daniel/projects/projections-v2/reports/minutes_injury_regime/walk_forward",
+  "run_prefix": "rotshare_wf_warmstart_2022-10-18_seed42",
+  "train_window": {
+    "end": "2025-11-30",
+    "start": "2022-10-18"
+  },
+  "window": {
+    "end": "2025-11-30",
+    "start": "2023-10-01"
+  }
+}

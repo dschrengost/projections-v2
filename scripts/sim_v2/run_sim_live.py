@@ -76,9 +76,17 @@ def main(
 
     # Write latest_run.json pointer if run_id specified
     if sim_run_id and worlds_output is not None:
+        import os
+
+        if os.environ.get("PROJECTIONS_SKIP_POINTER_WRITES", "").strip().lower() in {"1", "true", "yes"}:
+            return
+
+        from projections.pipeline import writer_guard
+
         import json
         from datetime import datetime, timezone
 
+        writer_guard.assert_can_write_pointers(purpose=f"run_sim_live promote {worlds_output}/{target_date}")
         payload = {
             "run_id": sim_run_id,
             "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

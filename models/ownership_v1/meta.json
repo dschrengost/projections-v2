@@ -1,0 +1,59 @@
+{
+  "created_at": "2025-12-07T20:26:07.655873+00:00",
+  "feature_cols": [
+    "value_per_k",
+    "salary_rank",
+    "proj_fpts_rank",
+    "proj_fpts_zscore",
+    "salary",
+    "is_value_tier",
+    "is_mid_tier",
+    "is_high_tier",
+    "pos_PG",
+    "pos_SG",
+    "pos_SF",
+    "pos_PF",
+    "pos_C",
+    "player_is_questionable",
+    "team_outs_count",
+    "player_own_avg_10",
+    "slate_size",
+    "salary_pct_of_max",
+    "is_min_salary",
+    "slate_near_min_count"
+  ],
+  "params": {
+    "objective": "regression",
+    "metric": "mae",
+    "boosting_type": "gbdt",
+    "num_leaves": 32,
+    "learning_rate": 0.05,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 1,
+    "min_data_in_leaf": 100,
+    "max_depth": -1,
+    "lambda_l2": 1.0,
+    "verbose": -1,
+    "target_transform": "none",
+    "sample_weighting": true,
+    "chalk_weight": 5.0,
+    "chalk_classifier": false
+  },
+  "metrics": {
+    "train_mae": 13.083320571503338,
+    "train_rmse": 16.69540097805534,
+    "val_mae": 15.678706609740697,
+    "val_rmse": 20.24731783577668,
+    "val_corr": NaN,
+    "best_iteration": 1000,
+    "num_features": 20
+  },
+  "train_seasons": [
+    2023,
+    2024
+  ],
+  "val_seasons": [
+    2025
+  ]
+}

@@ -962,6 +962,8 @@ def _read_latest_run_id(base_dir: Path) -> Optional[str]:
 def _load_minutes_projection(
     root: Path, game_date: pd.Timestamp, *, run_id: Optional[str], minutes_source: str
 ) -> tuple[pd.DataFrame, Optional[str], Path, str]:
+    from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
+
     date_token = pd.Timestamp(game_date).date().isoformat()
     if minutes_source != "minutes_v1":
         raise ValueError(f"Unsupported minutes_source={minutes_source}")
@@ -975,18 +977,28 @@ def _load_minutes_projection(
 
     candidates: list[tuple[Path, Optional[str], str]] = []
     if run_id:
+        candidates.append((daily_base / f"run={run_id}" / EFFECTIVE_MINUTES_FILENAME, run_id, "minutes_v1_daily_effective"))
         candidates.append((daily_base / f"run={run_id}" / "minutes.parquet", run_id, "minutes_v1_daily"))
+        candidates.append((gold_base / f"run={run_id}" / EFFECTIVE_MINUTES_FILENAME, run_id, "projections_minutes_v1_effective"))
         candidates.append((gold_base / f"run={run_id}" / "minutes.parquet", run_id, "projections_minutes_v1"))
     else:
         if resolved_run:
             candidates.append(
+                (daily_base / f"run={resolved_run}" / EFFECTIVE_MINUTES_FILENAME, resolved_run, "minutes_v1_daily_effective")
+            )
+            candidates.append(
                 (daily_base / f"run={resolved_run}" / "minutes.parquet", resolved_run, "minutes_v1_daily")
+            )
+            candidates.append(
+                (gold_base / f"run={resolved_run}" / EFFECTIVE_MINUTES_FILENAME, resolved_run, "projections_minutes_v1_effective")
             )
             candidates.append(
                 (gold_base / f"run={resolved_run}" / "minutes.parquet", resolved_run, "projections_minutes_v1")
             )
-        gold_path = gold_base / "minutes.parquet"
-        candidates.append((gold_path, resolved_gold, "projections_minutes_v1_flat"))
+        allow_legacy_flat = os.environ.get("PROJECTIONS_ALLOW_LEGACY_FLAT_GOLD_READS", "").strip().lower() in {"1", "true", "yes"}
+        if allow_legacy_flat:
+            gold_path = gold_base / "minutes.parquet"
+            candidates.append((gold_path, resolved_gold, "projections_minutes_v1_flat"))
 
     project_root = get_project_root()
     if project_root != root:
@@ -998,9 +1010,23 @@ def _load_minutes_projection(
         if run_id:
             candidates.append(
                 (
+                    daily_base_project / f"run={run_id}" / EFFECTIVE_MINUTES_FILENAME,
+                    run_id,
+                    "minutes_v1_daily_effective_project",
+                )
+            )
+            candidates.append(
+                (
                     daily_base_project / f"run={run_id}" / "minutes.parquet",
                     run_id,
                     "minutes_v1_daily_project",
+                )
+            )
+            candidates.append(
+                (
+                    gold_base_project / f"run={run_id}" / EFFECTIVE_MINUTES_FILENAME,
+                    run_id,
+                    "projections_minutes_v1_effective_project",
                 )
             )
             candidates.append(
@@ -1015,9 +1041,23 @@ def _load_minutes_projection(
             if resolved_project_run:
                 candidates.append(
                     (
+                        daily_base_project / f"run={resolved_project_run}" / EFFECTIVE_MINUTES_FILENAME,
+                        resolved_project_run,
+                        "minutes_v1_daily_effective_project",
+                    )
+                )
+                candidates.append(
+                    (
                         daily_base_project / f"run={resolved_project_run}" / "minutes.parquet",
                         resolved_project_run,
                         "minutes_v1_daily_project",
+                    )
+                )
+                candidates.append(
+                    (
+                        gold_base_project / f"run={resolved_project_run}" / EFFECTIVE_MINUTES_FILENAME,
+                        resolved_project_run,
+                        "projections_minutes_v1_effective_project",
                     )
                 )
                 candidates.append(
@@ -1027,13 +1067,15 @@ def _load_minutes_projection(
                         "projections_minutes_v1_project",
                     )
                 )
-            candidates.append(
-                (
-                    gold_base_project / "minutes.parquet",
-                    resolved_gold_project,
-                    "projections_minutes_v1_flat_project",
+            allow_legacy_flat = os.environ.get("PROJECTIONS_ALLOW_LEGACY_FLAT_GOLD_READS", "").strip().lower() in {"1", "true", "yes"}
+            if allow_legacy_flat:
+                candidates.append(
+                    (
+                        gold_base_project / "minutes.parquet",
+                        resolved_gold_project,
+                        "projections_minutes_v1_flat_project",
+                    )
                 )
-            )
 
     for path, rid, label in candidates:
         if path.exists():
@@ -1655,10 +1697,13 @@ def main(
                     root, game_date, run_id=resolved_minutes_run, minutes_source=minutes_source
                 )
             except FileNotFoundError:
-                typer.echo(f"[sim_v2] {pd.Timestamp(game_date).date()} missing minutes ({minutes_source}); skipping.")
+                typer.echo(
+                    f"[sim_v2] {pd.Timestamp(game_date).date()} missing minutes ({minutes_source}); skipping."
+                )
                 continue
 
             minutes_df = minutes_df.copy()
+
             typer.echo(
                 f"[sim_v2] {pd.Timestamp(game_date).date()} minutes source={minutes_label} "
                 f"run={minutes_run_eff or 'latest'} path={minutes_path}"

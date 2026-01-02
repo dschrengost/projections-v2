@@ -174,7 +174,7 @@ export async function runLateSwap(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                use_user_overrides: options?.useUserOverrides ?? true,
+                use_user_overrides: options?.useUserOverrides ?? false,
                 ownership_mode: options?.ownershipMode ?? 'renormalize',
                 run_id: options?.runId ?? null,
                 n_alternatives: options?.nAlternatives ?? 5,

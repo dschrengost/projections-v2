@@ -41,21 +41,62 @@ def _resolve_dir(raw: str | Path, *, base: Path | None = None) -> Path:
 
 
 def _load_bundle_from_dir(run_dir: Path, run_id: str | None) -> dict[str, Any]:
-    bundle_path = run_dir / "lgbm_quantiles.joblib"
-    if not bundle_path.exists():
-        raise FileNotFoundError(f"Production bundle missing at {bundle_path}")
-    bundle = joblib.load(bundle_path)
-    meta_path = run_dir / "meta.json"
-    meta: dict[str, Any] = {}
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            meta = {}
-    bundle.setdefault("run_dir", str(run_dir))
-    bundle.setdefault("run_id", run_id or run_dir.name)
-    bundle.setdefault("meta", meta)
-    return bundle
+    quantile_path = run_dir / "lgbm_quantiles.joblib"
+    if quantile_path.exists():
+        bundle = joblib.load(quantile_path)
+        meta_path = run_dir / "meta.json"
+        meta: dict[str, Any] = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                meta = {}
+        bundle.setdefault("bundle_kind", "lgbm_quantiles")
+        bundle.setdefault("run_dir", str(run_dir))
+        bundle.setdefault("run_id", run_id or run_dir.name)
+        bundle.setdefault("meta", meta)
+        return bundle
+
+    rotshare_path = run_dir / "rotation_share_model.joblib"
+    if rotshare_path.exists():
+        bundle_obj = joblib.load(rotshare_path)
+        meta_path = run_dir / "meta.json"
+        meta: dict[str, Any] = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                meta = {}
+        return {
+            "bundle_kind": "rotation_share",
+            "bundle": bundle_obj,
+            "run_dir": str(run_dir),
+            "run_id": run_id or run_dir.name,
+            "meta": meta,
+        }
+
+    share_path = run_dir / "minute_share_model.joblib"
+    if share_path.exists():
+        bundle_obj = joblib.load(share_path)
+        meta_path = run_dir / "meta.json"
+        meta: dict[str, Any] = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                meta = {}
+        return {
+            "bundle_kind": "minute_share",
+            "bundle": bundle_obj,
+            "run_dir": str(run_dir),
+            "run_id": run_id or run_dir.name,
+            "meta": meta,
+        }
+
+    raise FileNotFoundError(
+        f"Production bundle missing under {run_dir} "
+        "(expected lgbm_quantiles.joblib, rotation_share_model.joblib, or minute_share_model.joblib)"
+    )
 
 
 def resolve_production_run_dir(config_path: Path | None = None) -> tuple[Path, str | None]:

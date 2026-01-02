@@ -18,19 +18,30 @@ from typing import Any, Optional
 import pandas as pd
 
 from projections.paths import data_path, get_project_root
+from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
+
+
+
+NAME_ALIASES = {
+    "alexandresarr": "alexsarr",
+    "jimmybutleriii": "jimmybutler",
+}
 
 
 def _normalize_name(value: str | None) -> str:
     """Normalize player name for matching: fold Unicode diacritics, lowercase, strip.
     
     Handles European characters like Dončić -> doncic, Jokić -> jokic.
+    Also applies manual aliases (NAME_ALIASES).
     """
     if not value:
         return ""
     # Fold Unicode (e.g., Dončić -> Doncic) before stripping non-alphanumerics
     normalized = unicodedata.normalize("NFKD", value)
     ascii_folded = normalized.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9]", "", ascii_folded.lower())
+    cleaned = re.sub(r"[^a-z0-9]", "", ascii_folded.lower())
+    
+    return NAME_ALIASES.get(cleaned, cleaned)
 
 UTC = timezone.utc
 
@@ -40,6 +51,7 @@ PROJECTIONS_FILENAME = "projections.parquet"
 SUMMARY_FILENAME = "summary.json"
 
 ENV_MINUTES_DAILY_ROOT = "MINUTES_DAILY_ROOT"
+ENV_ALLOW_LEGACY_FLAT_GOLD_READS = "PROJECTIONS_ALLOW_LEGACY_FLAT_GOLD_READS"
 
 
 # Columns to include from each source
@@ -195,42 +207,58 @@ def _load_minutes(
                 candidate_run_ids.append(inferred_gold_project)
 
     if not candidate_run_ids:
-        run_dirs: list[Path] = []
-        for day_dir in daily_day_dirs:
-            if not day_dir.exists():
-                continue
-            run_dirs.extend([p for p in day_dir.iterdir() if p.is_dir() and p.name.startswith("run=")])
-        run_dirs = sorted(run_dirs, reverse=True)
-        if run_dirs:
-            fallback_id = run_dirs[0].name.split("=", 1)[1]
-            candidate_run_ids.append(fallback_id)
-            print(
-                f"[finalize] warning: minutes_run_id missing and {LATEST_POINTER} not found; "
-                f"falling back to newest run dir run={fallback_id}"
-            )
+        from projections.pipeline import control_plane
+
+        if control_plane.allow_unpromoted_run_reads():
+            run_dirs: list[Path] = []
+            for day_dir in daily_day_dirs:
+                if not day_dir.exists():
+                    continue
+                run_dirs.extend([p for p in day_dir.iterdir() if p.is_dir() and p.name.startswith("run=")])
+            run_dirs = sorted(run_dirs, reverse=True)
+            if run_dirs:
+                fallback_id = run_dirs[0].name.split("=", 1)[1]
+                candidate_run_ids.append(fallback_id)
+                print(
+                    f"[finalize] warning: minutes_run_id missing and {LATEST_POINTER} not found; "
+                    f"falling back to newest run dir run={fallback_id}"
+                )
 
     candidates: list[tuple[Path, str, str | None]] = []
     for run_id in candidate_run_ids:
         for day_dir in daily_day_dirs:
             candidates.append(
+                (day_dir / f"run={run_id}" / EFFECTIVE_MINUTES_FILENAME, "minutes_v1_daily_effective", run_id)
+            )
+            candidates.append(
                 (day_dir / f"run={run_id}" / MINUTES_FILENAME, "minutes_v1_daily", run_id)
             )
+
+        candidates.append(
+            (gold_day_dir / f"run={run_id}" / EFFECTIVE_MINUTES_FILENAME, "projections_minutes_v1_gold_effective", run_id)
+        )
         candidates.append(
             (gold_day_dir / f"run={run_id}" / MINUTES_FILENAME, "projections_minutes_v1_gold", run_id)
         )
         if gold_day_dir_project is not None:
             candidates.append(
+                (
+                    gold_day_dir_project / f"run={run_id}" / EFFECTIVE_MINUTES_FILENAME,
+                    "projections_minutes_v1_gold_effective_project",
+                    run_id,
+                )
+            )
+            candidates.append(
                 (gold_day_dir_project / f"run={run_id}" / MINUTES_FILENAME, "projections_minutes_v1_gold_project", run_id)
             )
 
-    # Allow legacy flat-file gold outputs (single-file minutes.parquet).
-    candidates.extend(
-        [
-            (gold_day_dir / MINUTES_FILENAME, "projections_minutes_v1_gold_flat", None),
-        ]
-    )
-    if gold_day_dir_project is not None:
-        candidates.append((gold_day_dir_project / MINUTES_FILENAME, "projections_minutes_v1_gold_flat_project", None))
+    # Legacy flat-file gold outputs (single-file minutes.parquet) are unsafe for production consumers
+    # because they can be observed mid-write. Only enable when explicitly requested.
+    allow_legacy_flat = os.environ.get(ENV_ALLOW_LEGACY_FLAT_GOLD_READS, "").strip().lower() in {"1", "true", "yes"}
+    if allow_legacy_flat:
+        candidates.append((gold_day_dir / MINUTES_FILENAME, "projections_minutes_v1_gold_flat", None))
+        if gold_day_dir_project is not None:
+            candidates.append((gold_day_dir_project / MINUTES_FILENAME, "projections_minutes_v1_gold_flat_project", None))
 
     for path, label, resolved_run_id in candidates:
         if not path.exists():
@@ -672,8 +700,12 @@ def finalize_projections(
     _atomic_write_json(out_dir / SUMMARY_FILENAME, summary_payload)
     
     # Update latest_run.json
-    latest_pointer = out_dir.parent / "latest_run.json"
-    _atomic_write_json(latest_pointer, {"run_id": projections_run_id})
+    if os.environ.get("PROJECTIONS_SKIP_POINTER_WRITES", "").strip().lower() not in {"1", "true", "yes"}:
+        from projections.pipeline import writer_guard
+
+        writer_guard.assert_can_write_pointers(purpose=f"finalize_projections promote {out_dir.parent}")
+        latest_pointer = out_dir.parent / "latest_run.json"
+        _atomic_write_json(latest_pointer, {"run_id": projections_run_id})
     
     print(f"[finalize] Saved unified projections ({len(unified)} players) to {out_path}")
     

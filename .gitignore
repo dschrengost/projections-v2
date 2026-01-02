@@ -77,7 +77,8 @@ data/
 
 # -------------------------
 # Command-paste accidents
-# Prevent files created by accidental terminal paste
+# Prevent files created by accidental terminal paste at repo root
 # -------------------------
-udo *
-sudo *
+/udo *
+/sudo *
+/systemctl *

@@ -1,0 +1,45 @@
+{
+  "bench_gini_delta_mean": -0.1741554904612173,
+  "bench_hhi_delta_mean": -0.05017951745210963,
+  "bench_max_delta_quantiles": {
+    "p10": -8.02449430010709,
+    "p50": -6.450381884362652,
+    "p90": -5.5427590030804135
+  },
+  "bundle_dir": "artifacts/minutes_rotation_share/rotshare_inrot10_20251230",
+  "date": "2025-12-30",
+  "n_ge10_delta_quantiles": {
+    "p10": 2.0,
+    "p50": 2.0,
+    "p90": 3.0
+  },
+  "n_ge10_rotshare": [
+    13,
+    11,
+    11,
+    12,
+    12,
+    12,
+    13,
+    13
+  ],
+  "n_team_games": 8,
+  "shadow_run": "rotshare_inrot10_shadow_20251230T152959Z",
+  "sum_play_prob_rotshare": [
+    12.411249845819547,
+    10.771963110979867,
+    10.283597616602382,
+    11.813332339471213,
+    12.094212225363616,
+    11.925767092687744,
+    11.481881461309452,
+    12.51383950895972
+  ],
+  "team_sum_prod_max_abs_dev_from_240": 5.684341886080802e-14,
+  "team_sum_rotshare_max_abs_dev_from_240": 2.3578650143463165e-10,
+  "top7_sum_delta_quantiles": {
+    "p10": -31.589510596128072,
+    "p50": -27.918600615093254,
+    "p90": -10.889915320364977
+  }
+}
