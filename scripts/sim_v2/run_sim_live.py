@@ -87,16 +87,44 @@ def main(
         from datetime import datetime, timezone
 
         writer_guard.assert_can_write_pointers(purpose=f"run_sim_live promote {worlds_output}/{target_date}")
+        
+        # Build provenance for model tracking
+        try:
+            from projections.registry.bundle_resolver import (
+                resolve_minutes_bundle,
+                resolve_rates_bundle,
+                build_provenance,
+            )
+            
+            # Get metadata about which models produced predictions
+            _, minutes_meta = resolve_minutes_bundle("minutes_v1", "production")
+            _, rates_meta = resolve_rates_bundle("rates_v1", "production")
+            
+            provenance = build_provenance(
+                minutes_meta=minutes_meta,
+                rates_meta=rates_meta,
+                sim_profile=profile_name,
+                seed=None,  # Could be passed via generate_worlds_main if needed
+                n_worlds=num_worlds,
+            )
+        except Exception as e:
+            typer.echo(f"[sim_v2] warning: could not build provenance: {e}", err=True)
+            provenance = {
+                "sim_profile": profile_name,
+                "n_worlds": num_worlds,
+            }
+        
         payload = {
             "run_id": sim_run_id,
             "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "provenance": provenance,
         }
         if run_as_of_ts:
             payload["run_as_of_ts"] = run_as_of_ts
 
         day_dir = worlds_output / f"game_date={target_date}"
         day_dir.mkdir(parents=True, exist_ok=True)
-        (day_dir / "latest_run.json").write_text(json.dumps(payload), encoding="utf-8")
+        (day_dir / "latest_run.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 

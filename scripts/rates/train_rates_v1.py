@@ -48,6 +48,16 @@ from projections.registry.manifest import (
     register_model,
 )
 
+try:
+    from projections.mlflow_utils import (
+        log_dataset_manifest,
+        log_schema,
+        get_tracking_uri,
+    )
+    MLFLOW_UTILS_AVAILABLE = True
+except ImportError:
+    MLFLOW_UTILS_AVAILABLE = False
+
 app = typer.Typer(add_completion=False)
 
 RATE_TARGETS = [
@@ -358,8 +368,11 @@ def main(
         f"features={feature_set_key}"
     )
 
-    # Configure MLFlow
-    mlflow.set_tracking_uri("http://localhost:5000")
+    # Configure MLFlow - prefer env var, fall back to localhost
+    tracking_uri = None
+    if MLFLOW_UTILS_AVAILABLE:
+        tracking_uri = get_tracking_uri()
+    mlflow.set_tracking_uri(tracking_uri or "http://localhost:5000")
     mlflow.set_experiment("rates_v1")
     mlflow.start_run(run_name=resolved_run_id)
     mlflow.log_params({
@@ -469,6 +482,22 @@ def main(
     mlflow.log_artifact(str(run_dir / "metrics.json"))
     mlflow.log_artifact(str(run_dir / "feature_cols.json"))
 
+    # Log dataset manifest and schema for promotion gates
+    if MLFLOW_UTILS_AVAILABLE:
+        log_dataset_manifest({
+            "train_start": start_date or "2023-10-01",
+            "train_end": train_end_date,
+            "cal_end": cal_end_date,
+            "val_end": end_date,
+            "feature_set": feature_set_key,
+            "train_rows": len(train_df),
+            "cal_rows": len(cal_df),
+            "val_rows": len(val_df),
+            "targets": TARGETS,
+            "run_dir": str(run_dir),
+        })
+        log_schema(feature_cols)
+
     mlflow.end_run()
 
     typer.echo(f"[train] completed. artifacts at {run_dir}")
@@ -491,7 +520,7 @@ def main(
         avg_val_mae = float(np.mean(val_maes)) if val_maes else None
         register_model(
             manifest,
-            model_name="rates_v1_lgbm",
+            model_name="rates_v1",
             version=resolved_run_id,
             run_id=resolved_run_id,
             artifact_path=str(run_dir),
@@ -507,7 +536,7 @@ def main(
             description=f"Train to {train_end_date} | {feature_set_key} | {len(TARGETS)} targets",
         )
         save_manifest(manifest)
-        typer.echo(f"[registry] Registered rates_v1_lgbm v{resolved_run_id} (stage=dev)")
+        typer.echo(f"[registry] Registered rates_v1 v{resolved_run_id} (stage=dev)")
     except Exception as e:
         typer.echo(f"[registry] Warning: Failed to register model: {e}", err=True)
 
