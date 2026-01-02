@@ -53,18 +53,44 @@ uv run ruff check --fix .
 uv run ruff format .
 ```
 
-### CLI Tools
+### CLI Tools (Development Only)
+
+These commands are for local development and debugging. **Production execution
+must go through Prefect** (see below).
 
 ```bash
-# Score minutes model
-uv run python -m projections.cli.score_minutes_v1 --game-date 2025-01-01
+# Score minutes model (dev only)
+uv run python -m projections.cli.score_minutes_v1 --date 2025-01-01
 
-# Build features
-uv run python -m projections.cli.build_minutes_features_live --game-date 2025-01-01
+# Build features (dev only)
+uv run python -m projections.cli.build_minutes_live --date 2025-01-01
 
-# Finalize projections
-uv run python -m projections.cli.finalize_projections --game-date 2025-01-01
+# Finalize projections (dev only)
+uv run python -m projections.cli.finalize_projections --date 2025-01-01
 ```
+
+### Production Pipeline (Prefect)
+
+**Prefect is the single source of truth** for production orchestration.
+
+```bash
+# Trigger the canonical live pipeline
+uv run prefect deployment run nba-live-pipeline/nba-live-pipeline
+
+# Trigger for a specific date
+uv run prefect deployment run nba-live-pipeline/nba-live-pipeline \
+    --param game_date=2025-01-01
+
+# Check deployment status
+uv run prefect deployment ls
+
+# View recent flow runs
+uv run prefect flow-run ls --limit 10
+```
+
+Legacy shell scripts (`scripts/run_live_*.sh`) are gated and will refuse to run
+unless `PROJECTIONS_ALLOW_LEGACY_SHELL_RUNNERS=1` is set. This gate exists to
+prevent accidental direct execution in production.
 
 ### Running Services Locally
 

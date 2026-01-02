@@ -20,6 +20,9 @@ import pandas as pd
 from prefect import flow, get_run_logger, task
 
 from projections import paths
+from projections.builders import build_shared_features
+from projections.cli import build_minutes_live as live_minutes_builder
+from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline import effective_inputs, health
 
@@ -124,16 +127,102 @@ def scrape_props_task(*, game_date: str, data_root: Path) -> None:
 
 @task(name="build-minutes-features", retries=1, retry_delay_seconds=60)
 def build_minutes_features_task(*, game_date: str, run_id: str, run_as_of_ts: str, data_root: Path) -> Path:
-    args = [
-        "--date",
-        game_date,
-        "--run-as-of-ts",
-        run_as_of_ts,
-        "--run-id",
-        run_id,
-    ]
-    _run_python_module("projections.cli.build_minutes_live", args, data_root=data_root, timeout_s=900)
-    out_path = data_root / "live" / "features_minutes_v1" / game_date / f"run={run_id}" / "features.parquet"
+    logger = get_run_logger()
+    target_day = pd.Timestamp(game_date).normalize()
+    run_ts = pd.Timestamp(run_as_of_ts)
+    if run_ts.tzinfo is None:
+        run_ts = run_ts.tz_localize("UTC")
+    else:
+        run_ts = run_ts.tz_convert("UTC")
+    season, _ = _resolve_season_month(game_date)
+
+    warnings: list[str] = []
+    labels_source_df, label_source = live_minutes_builder._load_label_sources(
+        data_root=data_root,
+        season_value=season,
+        override_path=None,
+        warnings=warnings,
+    )
+    history_labels = live_minutes_builder._load_label_history(
+        labels_source_df,
+        target_day=target_day,
+        history_days=None,
+        run_as_of_ts=run_ts,
+        label_source=label_source,
+    )
+
+    roster_default = data_root / "silver" / "roster_nightly" / f"season={season}"
+    roster_df = live_minutes_builder._load_table(roster_default, None)
+    roster_slice, roster_source_day, _ = live_minutes_builder._select_roster_slice(
+        roster_df,
+        target_day=target_day,
+        run_as_of_ts=run_ts,
+        fallback_days=0,
+        max_age_hours=18,
+    )
+    if roster_slice.empty:
+        raise RuntimeError(
+            f"Roster snapshot does not include rows for {target_day.date()} and no fallback within 0 day(s) was found."
+        )
+    if roster_source_day is not None and roster_source_day != target_day:
+        warnings.append(
+            f"Roster fallback: using snapshot from {roster_source_day.date()} for {target_day.date()} (max 0d)."
+        )
+    live_labels = live_minutes_builder._build_live_labels(
+        roster_slice,
+        target_day=target_day,
+        season_label=live_minutes_builder._season_label(season),
+    )
+
+    labels = pd.concat([history_labels, live_labels], ignore_index=True, sort=False)
+    live_game_ids = (
+        pd.to_numeric(live_labels["game_id"], errors="coerce")
+        .dropna()
+        .astype(int)
+        .unique()
+        .tolist()
+    )
+    if not live_game_ids:
+        raise RuntimeError("No live game_ids available after building roster-based labels.")
+
+    schedule_default = data_root / "silver" / "schedule" / f"season={season}"
+    schedule_df = live_minutes_builder._load_table(schedule_default, None)
+
+    result = build_shared_features(
+        data_root=data_root,
+        season=season,
+        target_day=target_day.date(),
+        as_of_ts=run_ts,
+        labels=labels,
+        schedule=schedule_df,
+        game_ids=live_game_ids,
+        backfill_mode=False,
+    )
+    if warnings:
+        for warning in warnings:
+            logger.warning(warning)
+    if result.warnings:
+        for warning in result.warnings:
+            logger.warning(warning)
+
+    features = result.features.copy()
+    features["game_date"] = pd.to_datetime(features["game_date"]).dt.normalize()
+    live_slice = features.loc[features["game_date"] == target_day].copy()
+    live_slice = live_slice[
+        pd.to_numeric(live_slice["game_id"], errors="coerce").astype("Int64").isin(live_game_ids)
+    ].copy()
+    if {"feature_as_of_ts", *KEY_COLUMNS}.issubset(live_slice.columns):
+        live_slice = deduplicate_latest(
+            live_slice,
+            key_cols=KEY_COLUMNS,
+            order_cols=["feature_as_of_ts"],
+        )
+        live_slice = live_slice.drop_duplicates(subset=list(KEY_COLUMNS), keep="last")
+
+    run_dir = data_root / "live" / "features_minutes_v1" / game_date / f"run={run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    out_path = run_dir / "features.parquet"
+    live_slice.to_parquet(out_path, index=False)
     health.require_file(out_path, label="minutes features.parquet")
     df = pd.read_parquet(out_path)
     health.require_row_count(df, min_rows=20, max_rows=5000, label="minutes features")
