@@ -100,7 +100,12 @@ def attach_availability_features(
     *,
     prepared_injuries: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Attach status priors and availability indicators to the base label frame."""
+    """Attach status priors and availability indicators to the base label frame.
+    
+    Key invariant: injury_as_of_ts is broadcast to ALL rows in a game if ANY
+    injury data exists for that game. This ensures the injury snapshot timestamp
+    is available for provenance even for players without an injury record.
+    """
 
     if prepared_injuries is None:
         if injuries_snapshot is None or injuries_snapshot.empty:
@@ -112,6 +117,7 @@ def attach_availability_features(
             enriched["is_prob"] = 0
             enriched["injury_as_of_ts"] = pd.NaT
             enriched["injury_snapshot_missing"] = 1
+            enriched["injury_row_present"] = False
             return enriched
         prepared_injuries = prepare_injuries_snapshot(injuries_snapshot)
 
@@ -125,19 +131,46 @@ def attach_availability_features(
 
     prepared_injuries = _select_latest_injury_snapshot(base_df, prepared_injuries)
 
-    available_cols = [col for col in _INJURY_COLUMNS if col in prepared_injuries.columns]
+    # Step 1: Create per-game injury snapshot timestamp table
+    # This will be broadcast to ALL rows in a game
+    if not prepared_injuries.empty and "as_of_ts" in prepared_injuries.columns:
+        game_injury_ts = (
+            prepared_injuries.groupby("game_id")["as_of_ts"]
+            .max()
+            .reset_index()
+            .rename(columns={"as_of_ts": "injury_as_of_ts"})
+        )
+    else:
+        game_injury_ts = pd.DataFrame(columns=["game_id", "injury_as_of_ts"])
+
+    # Step 2: Merge per-game injury_as_of_ts to ALL rows by game_id
+    merged = base_df.merge(game_injury_ts, on="game_id", how="left")
+    
+    # Step 3: Player-level injury join for status/is_out
+    available_cols = [col for col in _INJURY_COLUMNS if col in prepared_injuries.columns and col != "as_of_ts"]
     optional_cols = [col for col in _OPTIONAL_INJURY_COLUMNS if col in prepared_injuries.columns]
     merge_cols = available_cols + optional_cols
-    merged = base_df.merge(
-        prepared_injuries[merge_cols],
-        on=["game_id", "player_id"],
-        how="left",
-    )
-    merged["status"] = merged["status"].fillna(AvailabilityStatus.UNKNOWN)
+    
+    if merge_cols and not prepared_injuries.empty:
+        player_injuries = prepared_injuries[merge_cols].copy()
+        # Add indicator for player-level join
+        player_injuries["injury_row_present"] = True
+        merged = merged.merge(
+            player_injuries,
+            on=["game_id", "player_id"],
+            how="left",
+        )
+    else:
+        merged["injury_row_present"] = False
+    
+    # Fill defaults for players without injury records
+    merged["injury_row_present"] = merged["injury_row_present"].fillna(False).astype(bool)
+    merged["status"] = merged["status"].fillna(AvailabilityStatus.UNKNOWN) if "status" in merged.columns else AvailabilityStatus.UNKNOWN
     merged["prior_play_prob"] = merged["status"].map(STATUS_PRIORS)
     merged["is_out"] = (merged["status"] == AvailabilityStatus.OUT).astype(int)
     merged["is_q"] = (merged["status"] == AvailabilityStatus.QUESTIONABLE).astype(int)
     merged["is_prob"] = (merged["status"] == AvailabilityStatus.PROBABLE).astype(int)
+    
     # Fill missing return/ramp metadata to avoid NaNs at inference.
     for col in ("restriction_flag", "ramp_flag"):
         if col in merged.columns:
@@ -146,11 +179,13 @@ def attach_availability_features(
         if col in merged.columns:
             merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0).astype("Int64")
 
-    merged.rename(columns={"as_of_ts": "injury_as_of_ts"}, inplace=True)
+    # Step 4: injury_snapshot_missing = 1 only if NO usable snapshot for that GAME
+    # (not if player is missing from snapshot - that's injury_row_present=False)
     if "snapshot_missing" in merged.columns:
-        # Treat missing snapshot indicator as missing (conservative).
         merged["injury_snapshot_missing"] = merged["snapshot_missing"].fillna(1).astype(int)
         merged.drop(columns=["snapshot_missing"], inplace=True)
     else:
         merged["injury_snapshot_missing"] = merged["injury_as_of_ts"].isna().astype(int)
+    
     return merged
+
