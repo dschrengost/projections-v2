@@ -27,7 +27,48 @@ from projections.pipeline import control_plane, writer_guard
 from projections.pipeline import effective_inputs, health
 
 
+import shutil
+
 PROJECT_ROOT = paths.get_project_root()
+
+# Default absolute path for uv (works under systemd where PATH may not include ~/.local/bin)
+_DEFAULT_UV_PATH = Path("/home/daniel/.local/bin/uv")
+
+
+def _uv_bin() -> str:
+    """Resolve path to uv binary.
+    
+    Resolution order:
+    1. UV_BIN environment variable (explicit override)
+    2. Absolute path at /home/daniel/.local/bin/uv (works under systemd)
+    3. shutil.which("uv") (finds uv in PATH)
+    4. Raises FileNotFoundError with instructions
+    """
+    # 1. Check env override
+    env_uv = os.environ.get("UV_BIN")
+    if env_uv:
+        if Path(env_uv).exists():
+            return env_uv
+        raise FileNotFoundError(
+            f"UV_BIN={env_uv} specified but file does not exist"
+        )
+    
+    # 2. Check default absolute path
+    if _DEFAULT_UV_PATH.exists():
+        return str(_DEFAULT_UV_PATH)
+    
+    # 3. Fall back to shutil.which
+    which_uv = shutil.which("uv")
+    if which_uv:
+        return which_uv
+    
+    # 4. Not found - raise with instructions
+    raise FileNotFoundError(
+        "Could not find 'uv' executable. Either:\n"
+        "  1. Set UV_BIN=/path/to/uv environment variable, or\n"
+        "  2. Install uv and ensure it's in PATH, or\n"
+        f"  3. Install uv to {_DEFAULT_UV_PATH}"
+    )
 
 
 def _run_python_module(
@@ -39,8 +80,9 @@ def _run_python_module(
 ) -> None:
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
-    # Use 'uv run python' instead of sys.executable to ensure correct SSL/network stack
-    cmd = ["uv", "run", "python", "-m", module, *args]
+    # Resolve uv path (handles systemd PATH issues)
+    uv_path = _uv_bin()
+    cmd = [uv_path, "run", "python", "-m", module, *args]
     result = subprocess.run(
         cmd,
         cwd=str(PROJECT_ROOT),
