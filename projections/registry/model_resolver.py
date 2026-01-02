@@ -80,16 +80,52 @@ def resolve_model(
             f"or use {ENV_USE_FILESYSTEM}=1 for filesystem bundles."
         )
 
+    # Map alias to MLflow stage for fallback
+    ALIAS_TO_STAGE = {
+        "production": "Production",
+        "staging": "Staging",
+        "archived": "Archived",
+    }
+
     try:
         client = MlflowClient(tracking_uri=uri)
 
-        # Get model version by alias
-        model_version = client.get_model_version_by_alias(model_name, alias)
+        # Try alias first (newer MLflow API)
+        model_version = None
+        resolution_method = None
+        try:
+            model_version = client.get_model_version_by_alias(model_name, alias)
+            resolution_method = "alias"
+        except Exception as alias_err:
+            # Fallback to stage (older MLflow API)
+            stage = ALIAS_TO_STAGE.get(alias)
+            if stage:
+                try:
+                    versions = client.search_model_versions(f"name='{model_name}'")
+                    for v in versions:
+                        if v.current_stage == stage:
+                            model_version = v
+                            resolution_method = "stage"
+                            break
+                except Exception:
+                    pass
+
+            if model_version is None:
+                raise RuntimeError(
+                    f"No model '{model_name}' with alias='{alias}' or stage='{stage}'. "
+                    f"Alias error: {alias_err}. "
+                    f"Use 'uv run python -m projections.cli.promote_model' to promote a model, "
+                    f"or set {ENV_USE_FILESYSTEM}=1 to use filesystem bundles."
+                ) from alias_err
+
         version = model_version.version
         run_id = model_version.run_id
 
         # Load the model
-        model_uri = f"models:/{model_name}@{alias}"
+        if resolution_method == "alias":
+            model_uri = f"models:/{model_name}@{alias}"
+        else:
+            model_uri = f"models:/{model_name}/{version}"
         model = mlflow.pyfunc.load_model(model_uri)
 
         # Get run metadata
@@ -100,6 +136,7 @@ def resolve_model(
             "model_name": model_name,
             "version": version,
             "alias": alias,
+            "resolution_method": resolution_method,
             "run_id": run_id,
             "run_name": run.data.tags.get("mlflow.runName"),
             "experiment_id": run.info.experiment_id,

@@ -351,7 +351,7 @@ class SharedFeaturesBuilder:
             "status",
             "is_out",
             "injury_snapshot_missing",
-            "injuries_as_of_ts",
+            "injury_as_of_ts",  # canonical singular form
         ]
         for col in injury_cols:
             if col not in df.columns:
