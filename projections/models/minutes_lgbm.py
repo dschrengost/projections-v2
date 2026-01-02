@@ -117,9 +117,10 @@ app = typer.Typer(help=__doc__)
 
 _DEFAULT_PARAMETER_SOURCES = {ParameterSource.DEFAULT, ParameterSource.DEFAULT_MAP}
 
-# MLFlow tracking URI - uses same SQLite backend as the systemd service
-MLFLOW_TRACKING_URI = "sqlite:////home/daniel/projections-data/mlflow/mlflow.db"
-MLFLOW_EXPERIMENT_NAME = "minutes_v1_training"
+# MLFlow tracking - uses environment variables via mlflow_utils
+# Legacy constants kept for backward compatibility during migration
+_LEGACY_MLFLOW_TRACKING_URI = "sqlite:////home/daniel/projections-data/mlflow/mlflow.db"
+_LEGACY_MLFLOW_EXPERIMENT_NAME = "minutes_v1_training"
 
 
 def _log_to_mlflow(
@@ -131,17 +132,48 @@ def _log_to_mlflow(
     feature_columns: list[str],
     run_dir: Path,
     windows_meta: dict[str, Any],
+    data_hash: str | None = None,
+    row_count: int | None = None,
 ) -> None:
-    """Log training run to MLFlow with params, metrics, feature importance, and artifacts."""
-    if not MLFLOW_AVAILABLE:
+    """Log training run to MLFlow with params, metrics, feature importance, and artifacts.
+
+    Uses centralized mlflow_utils for configuration (MLFLOW_TRACKING_URI, MLFLOW_EXPERIMENT_NAME
+    from environment variables).
+    """
+    # Try to use centralized mlflow_utils
+    try:
+        from projections.mlflow_utils import (
+            start_run,
+            log_params as utils_log_params,
+            log_metrics as utils_log_metrics,
+            log_dataset_manifest,
+            log_schema,
+            get_tracking_uri,
+            get_experiment_name,
+            MLFLOW_AVAILABLE as UTILS_AVAILABLE,
+        )
+        use_utils = UTILS_AVAILABLE
+    except ImportError:
+        use_utils = False
+
+    if not MLFLOW_AVAILABLE and not use_utils:
         typer.echo("[mlflow] MLFlow not available, skipping logging", err=True)
         return
 
     try:
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
+        # Configure MLflow - prefer env vars via utils, fall back to legacy
+        if use_utils:
+            tracking_uri = get_tracking_uri()
+            experiment_name = get_experiment_name()
+        else:
+            tracking_uri = _LEGACY_MLFLOW_TRACKING_URI
+            experiment_name = _LEGACY_MLFLOW_EXPERIMENT_NAME
 
-        with mlflow.start_run(run_name=run_id):
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(experiment_name)
+
+        with mlflow.start_run(run_name=run_id) as active_run:
             # Log parameters
             flat_params = {
                 "run_id": run_id,
@@ -160,13 +192,12 @@ def _log_to_mlflow(
 
             # Log metrics - flatten nested dicts
             def sanitize_name(name: str) -> str:
-                """Sanitize metric name for MLFlow (alphanumerics, underscores, dashes, periods, spaces, colons, slashes)."""
+                """Sanitize metric name for MLFlow."""
                 return name.replace("|", "_").replace("<", "lt").replace(">", "gt").replace("(", "").replace(")", "")
 
             flat_metrics: dict[str, float] = {}
             for key, value in metrics.items():
                 if isinstance(value, dict):
-                    # Handle per_bucket and other nested dicts
                     for sub_key, sub_value in value.items():
                         if isinstance(sub_value, dict):
                             for sub_sub_key, sub_sub_value in sub_value.items():
@@ -180,8 +211,23 @@ def _log_to_mlflow(
                     flat_metrics[key] = float(value)
             mlflow.log_metrics(flat_metrics)
 
+            # Log dataset manifest (for promotion gates)
+            if use_utils:
+                log_dataset_manifest({
+                    "data_hash": data_hash or "unknown",
+                    "train_start": windows_meta["train"]["start"],
+                    "train_end": windows_meta["train"]["end"],
+                    "val_start": windows_meta["val"]["start"],
+                    "val_end": windows_meta["val"]["end"],
+                    "feature_count": len(feature_columns),
+                    "row_count": row_count,
+                    "run_dir": str(run_dir),
+                })
+
+                # Log feature schema (for promotion gates)
+                log_schema(feature_columns)
+
             # Log feature importance from the p50 quantile model
-            # Handle both QuantileArtifacts and dict types
             models_dict = getattr(quantiles, "models", quantiles) if hasattr(quantiles, "models") else quantiles
             if isinstance(models_dict, dict) and 0.5 in models_dict:
                 model_p50 = models_dict[0.5]
@@ -191,28 +237,27 @@ def _log_to_mlflow(
                     "importance_gain": importance_gain,
                 }).sort_values("importance_gain", ascending=False)
 
-                # Log as artifact
                 importance_path = run_dir / "feature_importance.csv"
                 importance_df.to_csv(importance_path, index=False)
                 mlflow.log_artifact(str(importance_path))
 
-                # Log top features as metrics for quick comparison
                 for i, row in importance_df.head(20).iterrows():
                     safe_name = str(row["feature"]).replace(".", "_")[:50]
                     mlflow.log_metric(f"importance_{safe_name}", float(row["importance_gain"]))
 
-            # Log bucket-level MAE as metrics for easy comparison
+            # Log bucket-level MAE as metrics
             for key in metrics:
                 if key.startswith("val_mae_"):
                     mlflow.log_metric(key, float(metrics[key]))
 
             # Log key artifacts
-            for artifact_name in ["metrics.json", "meta.json", "conformal_offsets.json", "feature_columns.json"]:
+            for artifact_name in ["metrics.json", "meta.json", "conformal_offsets.json", "feature_columns.json", "lgbm_quantiles.joblib"]:
                 artifact_path = run_dir / artifact_name
                 if artifact_path.exists():
                     mlflow.log_artifact(str(artifact_path))
 
-            typer.echo(f"[mlflow] Logged run '{run_id}' to experiment '{MLFLOW_EXPERIMENT_NAME}'")
+            mlflow_run_id = active_run.info.run_id
+            typer.echo(f"[mlflow] Logged run '{run_id}' (mlflow_id={mlflow_run_id[:12]}) to experiment '{experiment_name}'")
 
     except Exception as e:
         typer.echo(f"[mlflow] Warning: Failed to log to MLFlow: {e}", err=True)
