@@ -35,7 +35,7 @@ prefect deployment ls
 
 ## Systemd Services
 
-Services live in `systemd/` and are installed to `~/.config/systemd/user/`.
+Services live in `infra/systemd/` and are installed to `~/.config/systemd/user/`.
 
 ### Core Services
 
