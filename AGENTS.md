@@ -1,42 +1,59 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-- `projections/`: CLI and pipeline entry points (e.g., `scrape.py`).
+## Documentation
+
+Start with these canonical docs:
+
+- [docs/00_REPO_MAP.md](docs/00_REPO_MAP.md) — Repository structure and entry points
+- [docs/10_CONTROL_PLANE.md](docs/10_CONTROL_PLANE.md) — Prefect flows and systemd services
+- [docs/20_DATA_CONTRACTS.md](docs/20_DATA_CONTRACTS.md) — Data schemas and feature contracts
+- [docs/30_DEV_PLAYBOOK.md](docs/30_DEV_PLAYBOOK.md) — Developer setup and workflows
+
+Historical planning docs are archived in `docs/archive/`.
+
+## Project Structure
+
+- `projections/`: Core Python package (CLI, API, models, ETL).
 - `scrapers/`: Web/API scrapers (NBA injuries, schedule, box scores, odds).
-- `tests/`: Pytest suite; mirrors module layout (e.g., `tests/test_scrapers/`).
-- `data/`: Local artifacts and cached outputs (JSON/Parquet).
-- `docs/`: Project reports and design notes (e.g., `minutes_model_report.md`).
+- `prefect_flows/`: Prefect workflow definitions.
+- `tests/`: Pytest suite; mirrors module layout.
+- `tools/`: One-off inspection and debugging scripts.
+- `docs/`: Project documentation.
 
-## Build, Test, and Development Commands
-- Install deps: `uv sync` (requires Python ≥ 3.11).
-- Run tests: `uv run pytest -q`.
-- Lint (ruff): `uv run ruff check .`.
-- CLI examples:
-  - Injuries (range): `uv run projections/scrape.py injuries --mode range --start 2024-10-21T00:30-04:00 --end 2025-04-13T23:30-04:00 --out data/injuries.json`.
-  - Schedule (season): `uv run projections/scrape.py schedule --mode season --season 2025-26 --out data/schedule.json`.
+## Build & Test
 
-## Coding Style & Naming Conventions
-- Python, 4-space indentation, type hints required for public APIs.
+```bash
+uv sync                    # Install dependencies
+uv run pytest -q           # Run tests
+uv run ruff check .        # Lint
+```
+
+## Coding Style
+
+- Python 3.11+, 4-space indentation, type hints for public APIs.
 - Naming: `snake_case` for functions/variables, `PascalCase` for classes.
-- Keep modules focused; prefer dataclasses for simple models.
 - Use `ruff` for linting; keep code formatted and imports ordered.
 
 ## Testing Guidelines
+
 - Use `pytest`; place tests under `tests/` with names like `test_<module>.py`.
 - Mock network calls; avoid hitting live endpoints in unit tests.
-- Add tests for new scrapers, CLI paths, and edge cases (empty/malformed responses).
+- Add tests for new scrapers, CLI paths, and edge cases.
 
-## Commit & Pull Request Guidelines
+## Commit & PR Guidelines
+
 - Commits: short, imperative subject; include scope when helpful (e.g., `scraper:`).
-- PRs: describe motivation, summary of changes, testing notes, and any breaking changes.
+- PRs: describe motivation, summary of changes, testing notes, breaking changes.
 - Link related issues; include sample commands or before/after snippets.
 
 ## Agent-Specific Notes
+
 - Keep changes minimal and targeted; avoid drive-by refactors.
 - Update docs and tests alongside code changes.
-- Scrapers may require Java (tabula-py) and `jpype1`; call out prerequisites in PRs.
-- Prefer resilient parsing and clear error messages; guard against schema drift.
+- Scrapers may require Java (tabula-py); call out prerequisites in PRs.
+- Prefer resilient parsing and clear error messages.
 
 ## Tools
-- Serena mcp memories -- create a memory when ending a session, or when making major changes / refactors
-- Chrome Devtools mcp -- use this when researching anything on the web, creating scrapers. It is a very powerful web
+
+- Serena MCP memories — create a memory when ending a session or making major changes.
+- Chrome DevTools MCP — use for web research and scraper development.
