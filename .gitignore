@@ -1,37 +1,83 @@
-# Bytecode / caches
+# -------------------------
+# Python / caches
+# -------------------------
 __pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.coverage
+htmlcov/
 
+# -------------------------
 # Environments
+# -------------------------
 .venv/
+.venv-user/
+.uv-cache/
 .env
 .env.*
+pip-wheel-metadata/
 
+# -------------------------
 # Editors / OS
+# -------------------------
 .DS_Store
 .idea/
 .vscode/
 .serena/
 
-# Data + model artifacts (retain placeholders)
-data/raw/*
-data/external/*
-data/interim/*
-data/processed/*
-!data/raw/.gitkeep
-!data/external/.gitkeep
-!data/interim/.gitkeep
-!data/processed/.gitkeep
+# -------------------------
+# Jupyter
+# -------------------------
+.ipynb_checkpoints/
 
-models/*
-!models/.gitkeep
-
-notebooks/.ipynb_checkpoints/
-.env
+# -------------------------
+# Logs / profiles / crashes
+# -------------------------
+*.log
+nohup.out
 hs_err_pid*.log
 replay_pid*.log
+scalene-profile.html
+profile*.json
+*.prof
 
-# Generated artifacts
+# -------------------------
+# Local scratch (ephemeral work)
+# -------------------------
+scratch/
+tmp/
+local/
+
+# -------------------------
+# Data files (ignored by default)
+# -------------------------
+*.csv
+*.parquet
+
+# Allow test fixtures
+!tests/fixtures/**/*.csv
+!tests/fixtures/**/*.parquet
+
+# -------------------------
+# Runtime artifacts (should live outside repo)
+# -------------------------
+mlruns/
 artifacts/
+runs/
+data/
+
+# Keep .gitkeep for empty directory structure
+!data/**/.gitkeep
+!artifacts/**/.gitkeep
+!runs/**/.gitkeep
+
+# -------------------------
+# Command-paste accidents
+# Prevent files created by accidental terminal paste
+# -------------------------
+udo *
+sudo *
