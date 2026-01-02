@@ -781,6 +781,78 @@ def _snapshot_stats(df: pd.DataFrame, *, time_col: str, run_as_of_ts: pd.Timesta
     }
 
 
+def _compute_injury_diagnostics(
+    injuries_raw: pd.DataFrame,
+    injuries_slice: pd.DataFrame,
+    live_features: pd.DataFrame,
+    *,
+    tip_lookup: dict[int, pd.Timestamp],
+    source: str,
+) -> dict:
+    """Compute per-game injury resolution diagnostics for summary.json.
+    
+    Returns:
+        Dict with overall stats and per-game breakdown for debugging missing injury_as_of_ts.
+    """
+    diagnostics: dict = {
+        "source": source,  # "bronze" or "silver"
+        "raw_rows": len(injuries_raw),
+        "filtered_rows": len(injuries_slice),
+        "per_game": [],
+    }
+    
+    # Get unique game_ids from live features
+    if "game_id" not in live_features.columns:
+        return diagnostics
+        
+    game_ids = pd.to_numeric(live_features["game_id"], errors="coerce").dropna().unique()
+    
+    # Compute overall missing rate
+    if "injury_as_of_ts" in live_features.columns:
+        missing_rate = float(live_features["injury_as_of_ts"].isna().mean())
+        diagnostics["injury_as_of_ts_missing_rate"] = round(missing_rate, 3)
+    
+    # Per-game breakdown
+    for game_id in sorted(game_ids):
+        game_id_int = int(game_id)
+        game_info: dict = {"game_id": game_id_int}
+        
+        # Tip time for this game
+        tip_ts = tip_lookup.get(game_id_int)
+        if tip_ts:
+            game_info["tip_ts"] = tip_ts.isoformat()
+        
+        # Raw injuries for this game
+        raw_game = injuries_raw[injuries_raw["game_id"] == game_id_int] if not injuries_raw.empty else pd.DataFrame()
+        game_info["raw_rows"] = len(raw_game)
+        
+        if not raw_game.empty and "as_of_ts" in raw_game.columns:
+            raw_ts = pd.to_datetime(raw_game["as_of_ts"], utc=True, errors="coerce").dropna()
+            if not raw_ts.empty:
+                game_info["raw_latest_ts"] = raw_ts.max().isoformat()
+        
+        # Filtered injuries for this game
+        filtered_game = injuries_slice[injuries_slice["game_id"] == game_id_int] if not injuries_slice.empty else pd.DataFrame()
+        game_info["filtered_rows"] = len(filtered_game)
+        
+        if not filtered_game.empty and "as_of_ts" in filtered_game.columns:
+            filtered_ts = pd.to_datetime(filtered_game["as_of_ts"], utc=True, errors="coerce").dropna()
+            if not filtered_ts.empty:
+                game_info["selected_ts"] = filtered_ts.max().isoformat()
+        
+        # Features for this game
+        features_game = live_features[live_features["game_id"] == game_id_int]
+        game_info["feature_rows"] = len(features_game)
+        
+        if "injury_as_of_ts" in features_game.columns:
+            missing = features_game["injury_as_of_ts"].isna().sum()
+            game_info["injury_as_of_ts_missing"] = int(missing)
+        
+        diagnostics["per_game"].append(game_info)
+    
+    return diagnostics
+
+
 def _write_summary(
     path: Path,
     *,
@@ -988,18 +1060,21 @@ def _build_minutes_live_logic(
             include_runs=False,
             prefer_history=True,
         )
+        injuries_source = "bronze"
         if not injuries_df.empty:
             tag = "[backfill-mode]" if backfill_mode else "[live]"
             warnings.append(f"{tag} Loaded injuries_raw from bronze day={target_day.date().isoformat()}.")
         else:
             # Fall back to silver if bronze partitions are missing (keeps pipeline unblocked).
             injuries_df = _load_table(injuries_default, injuries_path)
+            injuries_source = "silver"
             warnings.append(
                 f"[live] warning: bronze injuries_raw empty for day={target_day.date().isoformat()}; "
                 "falling back to silver injuries_snapshot."
             )
     else:
         injuries_df = _load_table(injuries_default, injuries_path)
+        injuries_source = "override"
 
     odds_df = _load_table(odds_default, odds_path)
     roster_df = _load_table(roster_default, roster_path)
@@ -1453,6 +1528,9 @@ def _build_minutes_live_logic(
     }
     snapshot_meta = {
         "injuries": _snapshot_stats(injuries_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
+        "injuries_source": injuries_source,
+        "injuries_raw_rows": len(injuries_df),
+        "injuries_filtered_rows": len(injuries_slice),
         "odds": _snapshot_stats(odds_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
         "roster": _snapshot_stats(roster_builder_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
     }
