@@ -11,6 +11,7 @@ Environment variables:
 from __future__ import annotations
 
 import os
+import sys
 from functools import lru_cache
 from typing import Any
 
@@ -84,7 +85,13 @@ def resolve_minutes_bundle(
     """
     # Check filesystem fallback
     if _use_minutes_filesystem_fallback():
-        return _load_minutes_from_filesystem()
+        bundle, meta = _load_minutes_from_filesystem()
+        print(
+            f"[registry-fallback] model={model} alias={alias} "
+            f"reason=MINUTES_USE_FILESYSTEM_BUNDLE=1 run_id={meta.get('run_id')}",
+            file=sys.stderr,
+        )
+        return bundle, meta
 
     # Try MLflow registry
     uri = tracking_uri or _get_tracking_uri()
@@ -96,11 +103,24 @@ def resolve_minutes_bundle(
             meta["model_name"] = model
             meta["alias"] = alias
             return bundle, meta
-        except Exception:
-            pass  # Fall through to filesystem
+        except Exception as e:
+            # Fall through to filesystem with warning
+            bundle, meta = _load_minutes_from_filesystem()
+            print(
+                f"[registry-fallback] model={model} alias={alias} "
+                f"reason=registry_error({e}) run_id={meta.get('run_id')}",
+                file=sys.stderr,
+            )
+            return bundle, meta
 
-    # Fallback to filesystem
-    return _load_minutes_from_filesystem()
+    # Fallback to filesystem (no registry available)
+    bundle, meta = _load_minutes_from_filesystem()
+    print(
+        f"[registry-fallback] model={model} alias={alias} "
+        f"reason=no_mlflow_tracking_uri run_id={meta.get('run_id')}",
+        file=sys.stderr,
+    )
+    return bundle, meta
 
 
 def _load_minutes_from_filesystem() -> tuple[Any, dict[str, Any]]:
@@ -137,7 +157,13 @@ def resolve_rates_bundle(
     """
     # Check filesystem fallback
     if _use_rates_filesystem_fallback():
-        return _load_rates_from_filesystem()
+        bundle, meta = _load_rates_from_filesystem()
+        print(
+            f"[registry-fallback] model={model} alias={alias} "
+            f"reason=RATES_USE_FILESYSTEM_BUNDLE=1 run_id={meta.get('run_id')}",
+            file=sys.stderr,
+        )
+        return bundle, meta
 
     # Try MLflow registry
     uri = tracking_uri or _get_tracking_uri()
@@ -149,11 +175,24 @@ def resolve_rates_bundle(
             meta["model_name"] = model
             meta["alias"] = alias
             return bundle, meta
-        except Exception:
-            pass  # Fall through to filesystem
+        except Exception as e:
+            # Fall through to filesystem with warning
+            bundle, meta = _load_rates_from_filesystem()
+            print(
+                f"[registry-fallback] model={model} alias={alias} "
+                f"reason=registry_error({e}) run_id={meta.get('run_id')}",
+                file=sys.stderr,
+            )
+            return bundle, meta
 
-    # Fallback to filesystem
-    return _load_rates_from_filesystem()
+    # Fallback to filesystem (no registry available)
+    bundle, meta = _load_rates_from_filesystem()
+    print(
+        f"[registry-fallback] model={model} alias={alias} "
+        f"reason=no_mlflow_tracking_uri run_id={meta.get('run_id')}",
+        file=sys.stderr,
+    )
+    return bundle, meta
 
 
 def _load_rates_from_filesystem() -> tuple[Any, dict[str, Any]]:

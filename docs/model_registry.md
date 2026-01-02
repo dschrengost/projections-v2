@@ -27,7 +27,7 @@ MODEL_PATH=$(uv run python -m projections.registry.cli production minutes_v1)
 |-------|---------|-------------|
 | `minutes_v1` | `projections/models/minutes_lgbm.py` | LightGBM quantile regression for minutes |
 | `fpts_v1_lgbm` | `projections/models/fpts_lgbm.py` | LightGBM for fantasy points per minute |
-| `rates_v1_lgbm` | `scripts/rates/train_rates_v1.py` | Multi-target LightGBM for per-minute rates |
+| `rates_v1` | `scripts/rates/train_rates_v1.py` | Multi-target LightGBM for per-minute rates |
 
 ## How It Works
 
@@ -124,3 +124,49 @@ register_model(
 )
 save_manifest(manifest)
 ```
+
+## MLflow Promotion (Recommended)
+
+For MLflow-backed promotion with promotion gates:
+
+```bash
+# Promote minutes model
+uv run python -m projections.cli.promote_model \
+    --model minutes_v1 --run-id <run_id> --alias production --reason "Improved MAE"
+
+# Promote rates model
+uv run python -m projections.cli.promote_model \
+    --model rates_v1 --run-id <run_id> --alias production --reason "Updated training window"
+```
+
+## Sim Provenance
+
+When `run_sim_live.py` writes `latest_run.json`, it includes a `provenance` block recording which model versions produced the simulation:
+
+```json
+{
+  "run_id": "20241225T120000Z",
+  "provenance": {
+    "minutes_v1": {
+      "alias": "production",
+      "run_id": "minutes_run_abc123",
+      "source": "mlflow_registry"
+    },
+    "rates_v1": {
+      "alias": "production", 
+      "run_id": "rates_run_xyz789",
+      "source": "filesystem"
+    },
+    "sim_profile": "baseline",
+    "seed": "random",
+    "n_worlds": 1000,
+    "git_sha": "d28225ca"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `alias` | Registry alias used (e.g., "production") |
+| `run_id` | The specific model run ID |
+| `source` | "mlflow_registry" or "filesystem" |
