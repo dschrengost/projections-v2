@@ -99,8 +99,8 @@ def load_odds(
     
     # Ensure sorted for asof merge
     df = df.dropna(subset=["game_id"])
-    df["game_id"] = df["game_id"].astype(int)
-    df = df.sort_values("as_of_ts")
+    df["game_id_norm"] = df["game_id"].astype(str).str.zfill(10)
+    df = df.sort_values(["game_id_norm", "as_of_ts"])
     return df
 
 def load_injuries(

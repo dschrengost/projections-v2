@@ -38,6 +38,7 @@ dependencies = [
   "beautifulsoup4 (>=4.14.3,<5.0.0)",
   "lxml (>=6.0.2,<7.0.0)",
   "repomix>=0.3.4",
+  "nba_api>=1.4",
 ]
 
 [project.optional-dependencies]

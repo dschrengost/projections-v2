@@ -21,6 +21,7 @@ def _select_latest_odds_snapshot(
     *,
     tip_col: str = "tip_ts",
     as_of_col: str = "as_of_ts",
+    game_id_col: str = "game_id",
 ) -> pd.DataFrame:
     """Return at most one odds row per game_id.
 
@@ -35,26 +36,26 @@ def _select_latest_odds_snapshot(
 
     working = ensure_as_of_column(odds_snapshot.copy(), column=as_of_col)
     working[as_of_col] = pd.to_datetime(working[as_of_col], utc=True, errors="coerce")
-    working = working.dropna(subset=["game_id"])
+    working = working.dropna(subset=[game_id_col])
 
     tip_lookup: pd.DataFrame | None = None
-    if tip_col in base_df.columns and "game_id" in base_df.columns:
-        tip_lookup = base_df.loc[:, ["game_id", tip_col]].drop_duplicates().copy()
+    if tip_col in base_df.columns and game_id_col in base_df.columns:
+        tip_lookup = base_df.loc[:, [game_id_col, tip_col]].drop_duplicates().copy()
         tip_lookup[tip_col] = pd.to_datetime(tip_lookup[tip_col], utc=True, errors="coerce")
 
     if tip_lookup is not None and not tip_lookup.empty:
-        working = working.merge(tip_lookup, on="game_id", how="left")
+        working = working.merge(tip_lookup, on=game_id_col, how="left")
         valid = working[as_of_col].notna() & working[tip_col].notna() & (working[as_of_col] <= working[tip_col])
         eligible = working.loc[valid].copy()
         if eligible.empty:
             return working.iloc[0:0].drop(columns=[tip_col], errors="ignore")
-        idx = eligible.groupby("game_id")[as_of_col].idxmax()
+        idx = eligible.groupby(game_id_col)[as_of_col].idxmax()
         return eligible.loc[idx].drop(columns=[tip_col], errors="ignore").reset_index(drop=True)
 
     eligible = working.dropna(subset=[as_of_col])
     if eligible.empty:
         return working.iloc[0:0].copy()
-    idx = eligible.groupby("game_id")[as_of_col].idxmax()
+    idx = eligible.groupby(game_id_col)[as_of_col].idxmax()
     return eligible.loc[idx].reset_index(drop=True)
 
 
@@ -75,16 +76,23 @@ def attach_game_environment_features(
         merged["close_game_score"] = 0.5
         return merged
 
+    base = base_df.copy()
+    had_game_id_norm = "game_id_norm" in base.columns
+    if not had_game_id_norm and "game_id" in base.columns:
+        base["game_id_norm"] = base["game_id"].astype(str).str.zfill(10)
+
     odds = odds_snapshot.copy()
     odds = odds.rename(columns={"home_line": "spread_home"})
     odds = ensure_as_of_column(odds)
-    for required in ("game_id", "spread_home", "total"):
+    if "game_id_norm" not in odds.columns and "game_id" in odds.columns:
+        odds["game_id_norm"] = odds["game_id"].astype(str).str.zfill(10)
+    for required in ("game_id_norm", "spread_home", "total"):
         if required not in odds.columns:
             odds[required] = pd.NA
-    odds = _select_latest_odds_snapshot(base_df, odds)
-    merged = base_df.merge(
-        odds[["game_id", "spread_home", "total", "as_of_ts"]],
-        on="game_id",
+    odds = _select_latest_odds_snapshot(base, odds, game_id_col="game_id_norm")
+    merged = base.merge(
+        odds[["game_id_norm", "spread_home", "total", "as_of_ts"]],
+        on="game_id_norm",
         how="left",
     )
     merged.rename(columns={"as_of_ts": "odds_as_of_ts"}, inplace=True)
@@ -96,4 +104,6 @@ def attach_game_environment_features(
     close_score = ((8.0 - spread_abs).clip(lower=0) / 8.0).clip(upper=1.0)
     merged["blowout_risk_score"] = blowout_risk.fillna(0.5)
     merged["close_game_score"] = close_score.fillna(0.5)
+    if not had_game_id_norm:
+        merged.drop(columns=["game_id_norm"], inplace=True, errors="ignore")
     return merged

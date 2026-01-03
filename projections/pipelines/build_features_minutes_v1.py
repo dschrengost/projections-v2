@@ -82,6 +82,15 @@ def _normalize_game_id(value: Any) -> str | None:
     return f"{number:010d}"
 
 
+def _normalize_game_ids(values: Iterable) -> set[str]:
+    normalized = set()
+    for value in values:
+        norm = _normalize_game_id(value)
+        if norm is not None:
+            normalized.add(norm)
+    return normalized
+
+
 def _is_regular_season_game(game_id: Any) -> bool:
     normalized = _normalize_game_id(game_id)
     if normalized is None:
@@ -190,7 +199,10 @@ def _load_snapshot(data_root: Path, name: str, game_ids: Iterable) -> pd.DataFra
     dataset_dir = data_root / "silver" / name
     df = _read_parquet_tree(dataset_dir)
     if "game_id" in df.columns:
-        df = df[df["game_id"].isin(game_ids)]
+        df["game_id_norm"] = df["game_id"].astype(str).str.zfill(10)
+        normalized = _normalize_game_ids(game_ids)
+        if normalized:
+            df = df[df["game_id_norm"].isin(normalized)]
     return df.copy()
 
 
@@ -202,14 +214,25 @@ def _filter_games_with_snapshot(
 ) -> tuple[pd.DataFrame, list[int]]:
     if dataset.empty or "game_id" not in dataset.columns:
         return dataset, game_ids
-    available = set(dataset["game_id"].dropna().astype(int))
-    missing = [gid for gid in game_ids if gid not in available]
+    normalized_ids = _normalize_game_ids(game_ids)
+    if "game_id_norm" in dataset.columns:
+        available = set(dataset["game_id_norm"].dropna().astype(str))
+        missing = [gid for gid in game_ids if _normalize_game_id(gid) not in available]
+    else:
+        available = set(dataset["game_id"].dropna().astype(int))
+        missing = [gid for gid in game_ids if gid not in available]
     if missing:
         typer.echo(
             f"[features] warning: dropping {len(missing)} game_ids missing {label} rows"
         )
-        filtered_ids = [gid for gid in game_ids if gid in available]
-        dataset = dataset[dataset["game_id"].isin(filtered_ids)].copy()
+        if "game_id_norm" in dataset.columns:
+            filtered_ids = [
+                gid for gid in game_ids if _normalize_game_id(gid) in available
+            ]
+            dataset = dataset[dataset["game_id_norm"].isin(normalized_ids)].copy()
+        else:
+            filtered_ids = [gid for gid in game_ids if gid in available]
+            dataset = dataset[dataset["game_id"].isin(filtered_ids)].copy()
         return dataset, filtered_ids
     return dataset, game_ids
 

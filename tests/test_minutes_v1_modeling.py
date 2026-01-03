@@ -88,15 +88,16 @@ def test_reconcile_minutes_appends_column():
 def test_reconcile_minutes_preserves_quantiles():
     df = pd.DataFrame(
         {
-            "game_id": [1] * 4,
-            "team_id": [30] * 4,
-            "player_id": list(range(4)),
-            "minutes_p50": [32, 28, 24, 22],
-            "minutes_p10": [20, 18, 16, 15],
-            "minutes_p90": [40, 36, 33, 30],
-            "is_projected_starter": [True, True, False, False],
-            "play_prob": [1.0] * 4,
-            "rotation_prob": [1.0] * 4,
+            "game_id": [1] * 8,
+            "team_id": [30] * 8,
+            "player_id": list(range(8)),
+            "minutes_p50": [32, 28, 24, 22, 18, 16, 12, 10],
+            # Keep tails wide so monotonic clamping is a no-op.
+            "minutes_p10": [0.0] * 8,
+            "minutes_p90": [60.0] * 8,
+            "is_projected_starter": [True, True, True, True, True, False, False, False],
+            "play_prob": [1.0] * 8,
+            "rotation_prob": [1.0] * 8,
         }
     )
     pre = df[["minutes_p10", "minutes_p90"]].copy()

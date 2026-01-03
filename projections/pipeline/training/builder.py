@@ -65,6 +65,7 @@ def build_features(
     spine["game_id"] = spine["game_id"].astype("int64")
     spine["player_id"] = spine["player_id"].astype("int64")
     spine["team_id"] = spine["team_id"].astype("int64")
+    spine["game_id_norm"] = spine["game_id"].astype(str).str.zfill(10)
     
     # 2. Determine "As Of" Time (Per Game)
     # If target_as_of_ts is global (e.g. daily backfill), used as is?
@@ -93,22 +94,50 @@ def build_features(
         # Ensure ns precision
         odds["as_of_ts"] = odds["as_of_ts"].astype("datetime64[ns, UTC]")
         spine["feature_as_of_ts"] = spine["feature_as_of_ts"].astype("datetime64[ns, UTC]")
-        
-        odds = odds.sort_values("as_of_ts")
-        spine = spine.sort_values("feature_as_of_ts") # spine must be sorted by on key
+
+        if "game_id_norm" not in odds.columns:
+            odds["game_id_norm"] = odds["game_id"].astype(str).str.zfill(10)
+
+        odds = odds.sort_values(["game_id_norm", "as_of_ts"])
+        spine = spine.sort_values(["game_id_norm", "feature_as_of_ts"]) # spine must be sorted by on key
         
         spine = pd.merge_asof(
             spine,
-            odds[["game_id", "as_of_ts", "spread_home", "total"]], # Add book preference logic if needed?
+            odds[["game_id_norm", "as_of_ts", "spread_home", "total"]], # Add book preference logic if needed?
             left_on="feature_as_of_ts",
             right_on="as_of_ts",
-            by="game_id",
+            by="game_id_norm",
             direction="backward",
             allow_exact_matches=True
         )
         # Drop the join timestamp if present
         if "as_of_ts" in spine.columns:
             spine = spine.drop(columns=["as_of_ts"])
+
+        spine_games = spine["game_id_norm"].dropna().unique().tolist()
+        odds_games = odds["game_id_norm"].dropna().unique().tolist()
+        overlap_games = len(set(spine_games) & set(odds_games))
+        logger.info(
+            "Odds join coverage: spine_games=%s odds_games=%s overlap_games=%s",
+            len(spine_games),
+            len(odds_games),
+            overlap_games,
+        )
+        odds_coverage = (
+            float(((spine["spread_home"].notna()) & (spine["total"].notna())).mean())
+            if not spine.empty
+            else float("nan")
+        )
+        logger.info("Odds non-null rate (spread_home & total): %.2f%%", odds_coverage * 100.0)
+        for prefix in ("00222", "00223", "00224", "00225"):
+            mask = spine["game_id_norm"].astype(str).str.startswith(prefix)
+            if not mask.any():
+                continue
+            prefix_rate = float(
+                ((spine.loc[mask, "spread_home"].notna()) & (spine.loc[mask, "total"].notna())).mean()
+            )
+            logger.info("Odds non-null rate for %s*: %.2f%%", prefix, prefix_rate * 100.0)
+        spine = spine.drop(columns=["game_id_norm"])
         
     # Injuries
     injuries = loaders.load_injuries(game_date, game_date, season)
@@ -180,6 +209,7 @@ def build_features(
     spine = assert_unique_primary_key(spine, game_date=game_date)
     
     # Final Schema shaping
+    spine = spine.drop(columns=["game_id_norm"], errors="ignore")
     return spine
 
 

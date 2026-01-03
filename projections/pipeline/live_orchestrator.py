@@ -128,7 +128,14 @@ def _run_python_module(
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
 
-    cmd = [sys.executable, "-m", module, *args]
+    # Prefer uv-managed environment (systemd/PREFECT runners may not have deps on sys.executable).
+    uv_bin = os.environ.get("UV_BIN")
+    if uv_bin and not Path(uv_bin).exists():
+        uv_bin = None
+    uv_bin = uv_bin or (str(Path("/home/daniel/.local/bin/uv")) if Path("/home/daniel/.local/bin/uv").exists() else None)
+    uv_bin = uv_bin or shutil.which("uv")
+
+    cmd = [uv_bin, "run", "python", "-m", module, *args] if uv_bin else [sys.executable, "-m", module, *args]
     logger.info(f"Running: {' '.join(cmd)}")
 
     result = subprocess.run(

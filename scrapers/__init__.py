@@ -28,6 +28,11 @@ from .rotowire_lineups import (
     scrape_rotowire_lineups,
     normalize_rotowire_to_nba_format,
 )
+from .nba_playbyplay import (
+    GamePlayByPlay,
+    NbaPlayByPlayScraper,
+    PlayByPlayAction,
+)
 
 __all__ = [
     "EventOdds",
@@ -54,5 +59,8 @@ __all__ = [
     "RotowireLineupsScraper",
     "scrape_rotowire_lineups",
     "normalize_rotowire_to_nba_format",
+    "GamePlayByPlay",
+    "NbaPlayByPlayScraper",
+    "PlayByPlayAction",
 ]
 

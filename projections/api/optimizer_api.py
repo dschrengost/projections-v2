@@ -188,6 +188,16 @@ class ExportLineupsRequest(BaseModel):
     lineups: List[List[str]] = Field(..., description="List of lineups (each a list of player_ids)")
 
 
+class SaveCustomBuildRequest(BaseModel):
+    """Request to save a custom/merged build."""
+
+    date: str = Field(..., description="Game date YYYY-MM-DD")
+    draft_group_id: int = Field(..., description="DraftKings draft group ID")
+    site: str = Field(default="dk", description="Site: dk or fd")
+    name: Optional[str] = Field(default=None, description="Optional name for the build")
+    lineups: List[LineupRow] = Field(..., description="List of lineups to save")
+
+
 # ---------------------------------------------------------------------------
 # DK CSV Export Helpers
 # ---------------------------------------------------------------------------
@@ -690,6 +700,42 @@ async def list_saved_builds_endpoint(
     
     builds = list_saved_builds(date, draft_group_id)
     return builds
+
+
+@router.post("/saved-builds", response_model=SavedBuildSummary)
+async def save_custom_build_endpoint(request: SaveCustomBuildRequest):
+    """Save a custom/merged build to disk.
+    
+    Used for saving merged builds created in the UI.
+    Returns the saved build summary.
+    """
+    from .optimizer_service import save_custom_build
+
+    # Convert LineupRow models to dicts
+    lineups = [
+        {
+            "lineup_id": lu.lineup_id,
+            "player_ids": lu.player_ids,
+            "mean": lu.mean,
+            "p10": lu.p10,
+            "p50": lu.p50,
+            "p75": lu.p75,
+            "p90": lu.p90,
+            "stdev": lu.stdev,
+            "ceiling_upside": lu.ceiling_upside,
+        }
+        for lu in request.lineups
+    ]
+
+    result = save_custom_build(
+        game_date=request.date,
+        draft_group_id=request.draft_group_id,
+        site=request.site,
+        lineups=lineups,
+        name=request.name,
+    )
+
+    return SavedBuildSummary(**result)
 
 
 @router.get("/saved-builds/{job_id}", response_model=SavedBuildFull)

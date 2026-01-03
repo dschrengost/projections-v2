@@ -26,6 +26,19 @@ from projections.ops.worlds_patch import patch_worlds_matrix_for_game
 router = APIRouter(prefix="/api/ops", tags=["ops"])
 
 
+def _normalize_id_str_series(series: pd.Series) -> pd.Series:
+    """Normalize identifier values to stable string tokens (e.g., 123.0 -> '123')."""
+
+    if series.empty:
+        return pd.Series([], index=series.index, dtype="string")
+    out = series.astype("string", copy=False).fillna("")
+    numeric = pd.to_numeric(series, errors="coerce")
+    int_like = numeric.notna() & (numeric % 1 == 0)
+    if int_like.any():
+        out = out.where(~int_like, numeric.where(int_like).astype("Int64").astype("string"))
+    return out.str.replace(r"\.0$", "", regex=True)
+
+
 def _parse_date(value: str | None) -> date:
     if not value:
         raise HTTPException(status_code=400, detail="Missing date (YYYY-MM-DD).")
@@ -193,7 +206,7 @@ def get_game_ops(
 
     gid = str(game_id)
     unified_df = unified_df.copy()
-    unified_df["game_id"] = unified_df["game_id"].astype(str)
+    unified_df["game_id"] = _normalize_id_str_series(unified_df["game_id"])
     unified_game = unified_df.loc[unified_df["game_id"] == gid].copy()
     if unified_game.empty:
         raise HTTPException(status_code=404, detail=f"Game {gid} not found in unified projections.")
@@ -208,7 +221,7 @@ def get_game_ops(
     )
     minutes_df = pd.read_parquet(minutes_dir / "minutes.parquet")
     minutes_df = minutes_df.copy()
-    minutes_df["game_id"] = minutes_df["game_id"].astype(str)
+    minutes_df["game_id"] = _normalize_id_str_series(minutes_df["game_id"])
     minutes_game = minutes_df.loc[minutes_df["game_id"] == gid].copy()
 
     rates_base_dir = data_root / "gold" / "rates_v1_live" / slate_day.isoformat()
@@ -217,7 +230,7 @@ def get_game_ops(
     )
     rates_df = pd.read_parquet(rates_dir / "rates.parquet")
     rates_df = rates_df.copy()
-    rates_df["game_id"] = rates_df["game_id"].astype(str)
+    rates_df["game_id"] = _normalize_id_str_series(rates_df["game_id"])
     rates_game = rates_df.loc[rates_df["game_id"] == gid].copy()
 
     # Apply authoritative overrides (effective inputs).
@@ -240,13 +253,13 @@ def get_game_ops(
 
     # Build per-player rows keyed by player_id (string).
     out_players: list[dict[str, Any]] = []
-    unified_game["player_id"] = unified_game["player_id"].astype(str)
+    unified_game["player_id"] = _normalize_id_str_series(unified_game["player_id"])
     if not minutes_game.empty:
-        minutes_game["player_id"] = minutes_game["player_id"].astype(str)
-        minutes_effective["player_id"] = minutes_effective["player_id"].astype(str)
+        minutes_game["player_id"] = _normalize_id_str_series(minutes_game["player_id"])
+        minutes_effective["player_id"] = _normalize_id_str_series(minutes_effective["player_id"])
     if not rates_game.empty:
-        rates_game["player_id"] = rates_game["player_id"].astype(str)
-        rates_effective["player_id"] = rates_effective["player_id"].astype(str)
+        rates_game["player_id"] = _normalize_id_str_series(rates_game["player_id"])
+        rates_effective["player_id"] = _normalize_id_str_series(rates_effective["player_id"])
 
     minutes_base_by_pid = (
         minutes_game.set_index("player_id").to_dict(orient="index") if not minutes_game.empty else {}

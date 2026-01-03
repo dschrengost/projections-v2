@@ -1016,7 +1016,8 @@ def score_all_slates(
                 # Try to load cached predictions
                 cached = _load_locked_predictions(game_date, dg_id, data_root)
                 if cached is not None and not cached.empty and slate_lock_ts is not None:
-                    cutoff = pd.to_datetime(cached.get("injuries_cutoff_ts"), utc=True, errors="coerce").max()
+                    cutoff_col = cached.get("injuries_cutoff_ts")
+                    cutoff = pd.to_datetime(cutoff_col, utc=True, errors="coerce").max() if cutoff_col is not None else pd.NaT
                     lock_cutoff = pd.Timestamp(slate_lock_ts).tz_convert("UTC")
                     if pd.notna(cutoff) and cutoff == lock_cutoff:
                         cached["is_locked"] = True

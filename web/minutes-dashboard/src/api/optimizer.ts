@@ -227,6 +227,40 @@ export async function deleteSavedBuild(date: string, jobId: string): Promise<voi
     }
 }
 
+export async function saveCustomBuild(
+    date: string,
+    draftGroupId: number,
+    lineups: LineupRow[],
+    name?: string,
+    site = 'dk',
+): Promise<SavedBuild> {
+    const res = await fetch(apiUrl('/api/optimizer/saved-builds'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            date,
+            draft_group_id: draftGroupId,
+            site,
+            name,
+            lineups,
+        }),
+    })
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        // Handle FastAPI validation errors which come as an array
+        let errorMsg = `Failed to save build: ${res.status}`
+        if (Array.isArray(body.detail)) {
+            errorMsg = body.detail.map((e: { msg?: string; loc?: string[] }) =>
+                `${e.loc?.join('.') || 'field'}: ${e.msg || 'validation error'}`
+            ).join('; ')
+        } else if (typeof body.detail === 'string') {
+            errorMsg = body.detail
+        }
+        throw new Error(errorMsg)
+    }
+    return res.json()
+}
+
 // ---------------------------------------------------------------------------
 // User Overrides
 // ---------------------------------------------------------------------------

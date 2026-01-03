@@ -24,8 +24,11 @@ except ImportError:
 
 # Rotowire lineups for faster lineup confirmations
 try:
-    from scrapers.rotowire_lineups import scrape_rotowire_lineups
-    ROTOWIRE_AVAILABLE = True
+    from scrapers.rotowire_lineups import (
+        rotowire_dependencies_available,
+        scrape_rotowire_lineups,
+    )
+    ROTOWIRE_AVAILABLE = rotowire_dependencies_available()
 except ImportError:
     ROTOWIRE_AVAILABLE = False
 
@@ -226,6 +229,7 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
                 scrape_missing=True,
                 roster_timeout=roster_timeout,
                 schedule_timeout=schedule_timeout,
+                min_freshness_hours=1.0,
             )
         except Exception as exc:  # pragma: no cover - keep pipeline alive if roster scrape fails
             typer.echo(f"[live] warning: roster nightly failed ({exc}); continuing", err=True)

@@ -25,6 +25,7 @@ from typing import Iterable, List, Tuple
 
 import pandas as pd
 import typer
+from unidecode import unidecode
 
 from projections import paths
 
@@ -58,6 +59,10 @@ LATEST_POINTER = "latest_run.json"
 ACTIVE_ROSTER_FILENAME = "active_roster.parquet"
 INACTIVE_PLAYERS_FILENAME = "inactive_players.csv"
 RATES_TRAINING_BASE_FILENAME = "rates_training_base.parquet"
+
+
+def _normalize_name_for_matching(name: str) -> str:
+    return unidecode(str(name)).strip().lower()
 
 VACANCY_FEATURE_COLUMNS: tuple[str, ...] = (
     "vac_min_szn",
@@ -1110,44 +1115,83 @@ def _build_minutes_live_logic(
                      else:
                          typer.echo("[minutes-live] Warning: ESPN rows loaded but failed to map to roster (name/team mismatch).")
 
-    # Load Rotowire lineups for faster confirmed lineup updates
+    # Load Rotowire lineups for starter updates (both projected and confirmed)
     # Rotowire is prioritized over NBA.com because it typically updates faster
-    rotowire_confirmations: set[str] = set()  # Set of player names confirmed by Rotowire
+    rotowire_confirmed_names: set[str] = set()  # Players with confirmed_starter role
+    rotowire_projected_names: set[str] = set()  # Players with projected_starter role
     rotowire_lineups_path = data_root / "silver" / "rotowire_lineups" / f"date={target_day.date()}" / "lineups.parquet"
     if rotowire_lineups_path.exists():
         try:
             rotowire_df = pd.read_parquet(rotowire_lineups_path)
-            if not rotowire_df.empty and "is_confirmed" in rotowire_df.columns:
-                # Get confirmed starters from Rotowire
-                confirmed_mask = rotowire_df["is_confirmed"].fillna(False).astype(bool)
+            if not rotowire_df.empty and "lineup_role" in rotowire_df.columns:
+                # Filter to starters (both confirmed and projected) - lineup_role encodes status
                 starter_roles = rotowire_df["lineup_role"].isin(["confirmed_starter", "projected_starter"])
-                rotowire_confirmed = rotowire_df[confirmed_mask & starter_roles]
-                
-                if not rotowire_confirmed.empty:
-                    rotowire_confirmations = set(rotowire_confirmed["player_name"].str.strip().str.lower().unique())
-                    typer.echo(
-                        f"[minutes-live] Loaded {len(rotowire_confirmations)} confirmed starters from Rotowire lineups."
+                rotowire_starters = rotowire_df[starter_roles]
+
+                if not rotowire_starters.empty:
+                    # Separate confirmed from projected
+                    confirmed_mask = rotowire_starters["lineup_role"] == "confirmed_starter"
+                    rotowire_confirmed_names = set(
+                        rotowire_starters.loc[confirmed_mask, "player_name"]
+                        .astype(str)
+                        .map(_normalize_name_for_matching)
+                        .unique()
                     )
-                    
-                    # Upgrade is_confirmed_starter in roster_df based on Rotowire
+                    rotowire_projected_names = set(
+                        rotowire_starters.loc[~confirmed_mask, "player_name"]
+                        .astype(str)
+                        .map(_normalize_name_for_matching)
+                        .unique()
+                    )
+                    typer.echo(
+                        f"[minutes-live] Loaded {len(rotowire_starters)} starters from Rotowire "
+                        f"({len(rotowire_confirmed_names)} confirmed, {len(rotowire_projected_names)} projected)."
+                    )
+
+                    # Upgrade starter flags in roster_df based on Rotowire
                     if not roster_df.empty and "player_name" in roster_df.columns:
                         roster_df = roster_df.copy()
-                        name_normalized = roster_df["player_name"].str.strip().str.lower()
-                        rotowire_match = name_normalized.isin(rotowire_confirmations)
-                        
-                        if rotowire_match.any():
-                            # Initialize column if missing
+                        name_normalized = roster_df["player_name"].map(_normalize_name_for_matching)
+                        all_starter_names = rotowire_confirmed_names | rotowire_projected_names
+                        rotowire_match = name_normalized.isin(all_starter_names)
+
+                        # Avoid conflicts: do not mark players as starters if our other feeds already
+                        # consider them inactive/out for the slate.
+                        eligible = rotowire_match.copy()
+                        if "active_flag" in roster_df.columns:
+                            eligible = eligible & roster_df["active_flag"].fillna(False).astype(bool)
+                        if "lineup_role" in roster_df.columns:
+                            role_norm = (
+                                roster_df["lineup_role"]
+                                .astype("string", copy=False)
+                                .str.strip()
+                                .str.lower()
+                                .fillna("")
+                            )
+                            eligible = eligible & ~role_norm.eq("out")
+
+                        if eligible.any():
+                            # Initialize columns if missing
                             if "is_confirmed_starter" not in roster_df.columns:
                                 roster_df["is_confirmed_starter"] = False
-                            
-                            # Upgrade projected → confirmed based on Rotowire
-                            roster_df.loc[rotowire_match, "is_confirmed_starter"] = True
-                            upgraded_count = rotowire_match.sum()
+                            if "is_projected_starter" not in roster_df.columns:
+                                roster_df["is_projected_starter"] = False
+
+                            # Upgrade is_projected_starter for all starters (confirmed or projected)
+                            roster_df.loc[eligible, "is_projected_starter"] = True
+
+                            # Upgrade is_confirmed_starter only for confirmed starters
+                            confirmed_eligible = eligible & name_normalized.isin(rotowire_confirmed_names)
+                            roster_df.loc[confirmed_eligible, "is_confirmed_starter"] = True
+
+                            projected_count = int(eligible.sum())
+                            confirmed_count = int(confirmed_eligible.sum())
                             typer.echo(
-                                f"[minutes-live] Upgraded {upgraded_count} starters to confirmed based on Rotowire."
+                                f"[minutes-live] Upgraded {projected_count} players to projected starters, "
+                                f"{confirmed_count} to confirmed based on Rotowire."
                             )
             else:
-                typer.echo("[minutes-live] Rotowire lineups file exists but is empty or missing is_confirmed column.")
+                typer.echo("[minutes-live] Rotowire lineups file exists but is empty or missing lineup_role column.")
         except Exception as exc:
             warnings.append(f"Failed to load Rotowire lineups: {exc}")
             typer.echo(f"[minutes-live] Warning: Failed to load Rotowire lineups: {exc}")

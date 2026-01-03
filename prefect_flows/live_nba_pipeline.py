@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 from prefect import flow, get_run_logger, task
+from zoneinfo import ZoneInfo
 
 from projections import paths
 from projections.builders import build_shared_features
@@ -420,6 +421,23 @@ def score_rates_task(*, game_date: str, run_id: str, data_root: Path) -> Path:
     return out_path
 
 
+@task(name="effective-rates", retries=0)
+def effective_rates_task(*, game_date: str, run_id: str, rates_path: Path, data_root: Path) -> Path:
+    run_dir = rates_path.parent
+    eff_path = effective_inputs.write_effective_rates_layer(
+        game_date=pd.Timestamp(game_date).date(),
+        rates_path=rates_path,
+        out_dir=run_dir,
+        data_root=data_root,
+        source="gameview",
+    )
+    health.require_file(eff_path, label="effective_rates.parquet")
+    eff = pd.read_parquet(eff_path)
+    health.require_row_count(eff, min_rows=20, max_rows=1200, label="effective rates")
+    health.require_game_date(eff, game_date=game_date, label="effective rates")
+    return eff_path
+
+
 @task(name="run-sim", retries=1, retry_delay_seconds=120)
 def run_sim_task(
     *,
@@ -544,7 +562,10 @@ def nba_live_pipeline_flow(
     data_root = paths.get_data_root()
 
     if game_date is None:
-        game_date = datetime.now(tz=UTC).date().isoformat()
+        # Use Eastern Time for NBA slate date (games are scheduled for ET dates).
+        # A 10pm ET game on Jan 2 should still be game_date=2026-01-02.
+        et = ZoneInfo("America/New_York")
+        game_date = datetime.now(tz=et).date().isoformat()
 
     run_id = run_id_override or control_plane.canonical_run_id()
 
@@ -641,6 +662,9 @@ def nba_live_pipeline_flow(
         # Stage 5: score rates
         rates_path = score_rates_task(game_date=game_date, run_id=run_id, data_root=data_root)
         control_plane.copy_manifest_to_dir(manifest_path, rates_path.parent)
+
+        # Stage 5.5: effective rates inputs (overrides from GameView only)
+        _ = effective_rates_task(game_date=game_date, run_id=run_id, rates_path=rates_path, data_root=data_root)
 
         # Stage 6: sim worlds (sim_v3 only)
         sim_dir = run_sim_task(

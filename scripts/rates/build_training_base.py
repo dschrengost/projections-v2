@@ -568,6 +568,114 @@ def _compute_vacated_team_features(
     return grouped
 
 
+def _compute_vacated_team_features_from_minutes_preds(
+    stats: pd.DataFrame,
+    labels: pd.DataFrame,
+    minutes_preds: pd.DataFrame,
+) -> pd.DataFrame:
+    """Aggregate season-to-date totals for players flagged OUT-like in minutes predictions.
+
+    This is a lightweight helper used by unit tests and mirrors the live
+    inference vacancy feature construction where injuries snapshots may be
+    unavailable.
+    """
+    if minutes_preds.empty or stats.empty:
+        return pd.DataFrame()
+
+    tips = (
+        stats.drop_duplicates(subset=["game_id"])[["game_id", "tip_ts", "season", "game_date"]]
+        .dropna(subset=["tip_ts"])
+        .copy()
+    )
+    tips["tip_ts"] = pd.to_datetime(tips["tip_ts"], errors="coerce", utc=True)
+    tips["game_id"] = pd.to_numeric(tips["game_id"], errors="coerce").astype("Int64")
+    tips = tips.dropna(subset=["game_id", "tip_ts"]).copy()
+    if tips.empty:
+        return pd.DataFrame()
+
+    preds = minutes_preds.copy()
+    preds["game_id"] = pd.to_numeric(preds["game_id"], errors="coerce").astype("Int64")
+    preds["team_id"] = pd.to_numeric(preds["team_id"], errors="coerce").astype("Int64")
+    preds["player_id"] = pd.to_numeric(preds["player_id"], errors="coerce").astype("Int64")
+    preds = preds.dropna(subset=["game_id", "team_id", "player_id"]).copy()
+    preds["game_id"] = preds["game_id"].astype(int)
+    preds["team_id"] = preds["team_id"].astype(int)
+    preds["player_id"] = preds["player_id"].astype(int)
+    preds = preds.merge(tips[["game_id", "tip_ts"]], on="game_id", how="left")
+    preds = preds.dropna(subset=["tip_ts"]).copy()
+
+    status_col = "status_min" if "status_min" in preds.columns else "status"
+    preds["status_norm"] = preds.get(status_col, pd.Series("", index=preds.index)).astype(str).str.upper().str.strip()
+    out_like_values = {"OUT", "O", "DOUBTFUL", "D", "QUESTIONABLE", "Q", "INACTIVE"}
+    preds = preds[preds["status_norm"].isin(out_like_values)].copy()
+    if preds.empty:
+        return pd.DataFrame()
+
+    # Position buckets from minutes predictions.
+    pos_col = "pos_bucket_min" if "pos_bucket_min" in preds.columns else "pos_bucket"
+    preds["pos_bucket"] = preds.get(pos_col, pd.Series("UNK", index=preds.index)).fillna("UNK").astype(str)
+    preds["pos_bucket"] = preds["pos_bucket"].apply(canonical_pos_bucket)
+    preds["pos_group"] = preds["pos_bucket"].map({"G": "G", "W": "W", "BIG": "B"}).fillna("UNK")
+
+    # Per-player season-to-date cumulative totals from stats (inclusive).
+    label_minutes = labels[["game_id", "player_id", "minutes_actual"]] if "minutes_actual" in labels.columns else pd.DataFrame()
+    hist = stats.merge(label_minutes, on=["game_id", "player_id"], how="left", suffixes=("", "_label"))
+    hist["tip_ts"] = pd.to_datetime(hist["tip_ts"], errors="coerce", utc=True)
+    hist = hist.dropna(subset=["season", "player_id", "tip_ts"]).copy()
+    hist["season"] = pd.to_numeric(hist["season"], errors="coerce").astype(int)
+    hist["player_id"] = pd.to_numeric(hist["player_id"], errors="coerce").astype(int)
+
+    hist["minutes_hist"] = hist["minutes_actual"].fillna(hist["minutes_played"]).astype(float)
+    hist = hist.sort_values(["season", "player_id", "tip_ts"]).reset_index(drop=True)
+    hist["cum_minutes_szn"] = hist.groupby(["season", "player_id"])["minutes_hist"].cumsum()
+    hist["cum_fga_szn"] = hist.groupby(["season", "player_id"])["fga"].cumsum()
+    hist["cum_3pa_szn"] = hist.groupby(["season", "player_id"])["three_pa"].cumsum()
+    hist["cum_fta_szn"] = hist.groupby(["season", "player_id"])["fta"].cumsum()
+    hist["cum_ast_szn"] = hist.groupby(["season", "player_id"])["assists"].cumsum()
+
+    hist_cols = ["cum_minutes_szn", "cum_fga_szn", "cum_3pa_szn", "cum_fta_szn", "cum_ast_szn"]
+    hist_key = hist[["season", "player_id", "tip_ts"] + hist_cols].copy()
+
+    preds["season"] = pd.to_numeric(preds.get("season"), errors="coerce").fillna(hist_key["season"].max()).astype(int)
+    preds = preds.sort_values(["season", "player_id", "tip_ts"]).reset_index(drop=True)
+    hist_key = hist_key.sort_values(["season", "player_id", "tip_ts"]).reset_index(drop=True)
+
+    merged = pd.merge_asof(
+        preds,
+        hist_key,
+        by=["season", "player_id"],
+        left_on="tip_ts",
+        right_on="tip_ts",
+        direction="backward",
+        allow_exact_matches=True,
+    )
+    for col in hist_cols:
+        merged[col] = merged[col].fillna(0.0)
+
+    group_cols = ["season", "game_id", "team_id"]
+    grouped = merged.groupby(group_cols, as_index=False).agg(
+        vac_min_szn=("cum_minutes_szn", "sum"),
+        vac_fga_szn=("cum_fga_szn", "sum"),
+        vac_ast_szn=("cum_ast_szn", "sum"),
+    )
+
+    for bucket, col_name in [("G", "vac_min_guard_szn"), ("W", "vac_min_wing_szn"), ("B", "vac_min_big_szn")]:
+        pos_agg = (
+            merged[merged["pos_group"] == bucket]
+            .groupby(group_cols)["cum_minutes_szn"]
+            .sum()
+            .reset_index(name=col_name)
+        )
+        grouped = grouped.merge(pos_agg, on=group_cols, how="left")
+
+    for col in ["vac_min_szn", "vac_fga_szn", "vac_ast_szn", "vac_min_guard_szn", "vac_min_wing_szn", "vac_min_big_szn"]:
+        if col not in grouped.columns:
+            grouped[col] = 0.0
+        grouped[col] = grouped[col].fillna(0.0)
+
+    return grouped
+
+
 def _compute_team_context(stats: pd.DataFrame) -> pd.DataFrame:
     """Season-to-date pace/off/def context per team/game (excluding current game)."""
 

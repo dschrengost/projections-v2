@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Dict, List, Optional
 
 import httpx
@@ -33,6 +32,9 @@ LINEUP_ROLE_PROJECTED = "projected_starter"
 LINEUP_ROLE_CONFIRMED = "confirmed_starter"
 LINEUP_ROLE_BENCH = "bench"
 LINEUP_ROLE_OUT = "out"
+
+def rotowire_dependencies_available() -> bool:
+    return BeautifulSoup is not None
 
 
 @dataclass(frozen=True)
@@ -122,13 +124,13 @@ class RotowireLineupsScraper:
         games: List[RotowireGameLineup] = []
         ingested_ts = pd.Timestamp.now(tz="UTC")
 
-        # Find all lineup cards/boxes
-        # Rotowire uses divs with class "lineup" or similar
-        lineup_cards = soup.find_all("div", class_=re.compile(r"lineup\s*$|lineup__main"))
-
+        # Rotowire markup (2026): each game is a `div.lineup.is-nba` container.
+        # Fall back to historical selectors if the primary one misses.
+        lineup_cards = soup.select("div.lineup.is-nba")
         if not lineup_cards:
-            # Try alternative selectors
-            lineup_cards = soup.find_all("div", class_="lineup is-nba")
+            lineup_cards = soup.find_all(
+                "div", class_=re.compile(r"(^|\\s)lineup(\\s|$)|lineup__main")
+            )
 
         for card in lineup_cards:
             game = self._parse_game_card(card, ingested_ts)
@@ -142,20 +144,24 @@ class RotowireLineupsScraper:
     ) -> Optional[RotowireGameLineup]:
         """Parse a single game's lineup card."""
         try:
-            # Find teams - look for lineup__abbr or team abbreviation elements
-            team_elements = card.find_all(class_=re.compile(r"lineup__abbr|lineup__team"))
-            if len(team_elements) < 2:
-                # Try finding in the header
-                header = card.find(class_=re.compile(r"lineup__header|lineup__teams"))
-                if header:
-                    team_elements = header.find_all("a") or header.find_all("span")
+            # Extract team abbreviations. Prefer `.lineup__teams .lineup__abbr` to avoid
+            # accidentally grabbing both the team container and the nested abbr element.
+            away_team = None
+            home_team = None
+            teams_container = card.select_one(".lineup__teams")
+            if teams_container is not None:
+                abbr_elems = teams_container.select(".lineup__abbr")
+                if len(abbr_elems) >= 2:
+                    away_team = self._extract_team_abbr(abbr_elems[0])
+                    home_team = self._extract_team_abbr(abbr_elems[1])
 
-            if len(team_elements) < 2:
-                return None
-
-            # Extract team abbreviations
-            away_team = self._extract_team_abbr(team_elements[0])
-            home_team = self._extract_team_abbr(team_elements[1])
+            if not away_team or not home_team:
+                # Fallback: locate explicit visit/home team blocks if present.
+                visit = card.select_one(".lineup__team.is-visit .lineup__abbr")
+                home = card.select_one(".lineup__team.is-home .lineup__abbr")
+                if visit is not None and home is not None:
+                    away_team = self._extract_team_abbr(visit)
+                    home_team = self._extract_team_abbr(home)
 
             if not away_team or not home_team:
                 return None
@@ -171,7 +177,9 @@ class RotowireLineupsScraper:
                 game_time = time_elem.get_text(strip=True)
 
             # Find player sections for each team
-            player_sections = card.find_all(class_=re.compile(r"lineup__list|lineup__players"))
+            player_sections = card.find_all(
+                class_=re.compile(r"lineup__list|lineup__players")
+            )
 
             away_players: List[RotowireLineupRecord] = []
             home_players: List[RotowireLineupRecord] = []
@@ -223,6 +231,14 @@ class RotowireLineupsScraper:
 
     def _extract_team_abbr(self, element) -> Optional[str]:
         """Extract team abbreviation from an element."""
+        nested = getattr(element, "find", None)
+        if nested is not None:
+            abbr = element.find(class_=re.compile(r"lineup__abbr"))
+            if abbr is not None:
+                text = abbr.get_text(strip=True)
+                if text and len(text) <= 4:
+                    return text.upper()
+
         # Try text content first
         text = element.get_text(strip=True)
         if text and len(text) <= 4:
@@ -326,7 +342,7 @@ class RotowireLineupsScraper:
 
             # Check for injury status
             injury_status = None
-            injury_elem = element.find(class_=re.compile(r"injury|status"))
+            injury_elem = element.find(class_=re.compile(r"lineup__inj|injury|status"))
             if injury_elem:
                 injury_status = injury_elem.get_text(strip=True)
 
@@ -336,7 +352,9 @@ class RotowireLineupsScraper:
             is_out = (
                 "is-out" in element_classes
                 or "out" in element_classes
-                or injury_status and "out" in injury_status.lower()
+                or (injury_status and "out" in injury_status.lower())
+                or element_text.endswith("out")
+                or element_text.split()[-1:] == ["out"]
             )
 
             if is_out:
@@ -409,7 +427,29 @@ def scrape_rotowire_lineups() -> pd.DataFrame:
             "ingested_ts",
         ])
 
-    return pd.DataFrame.from_records(records)
+    df = pd.DataFrame.from_records(records)
+
+    # Deduplicate: keep only first 5 starters per team per game.
+    # Rotowire lists actual starters first with proper positions (PG, SG, SF, PF, C).
+    # Additional entries are from depth/bench sections and should be excluded.
+    if not df.empty and "lineup_role" in df.columns:
+        starter_roles = {LINEUP_ROLE_PROJECTED, LINEUP_ROLE_CONFIRMED}
+
+        def cap_starters(group: pd.DataFrame) -> pd.DataFrame:
+            """Keep only first 5 starters per team-game, plus all non-starters (OUT)."""
+            starters = group[group["lineup_role"].isin(starter_roles)]
+            non_starters = group[~group["lineup_role"].isin(starter_roles)]
+            # Keep first 5 starters only (they're the real starters listed first)
+            starters_capped = starters.head(5)
+            return pd.concat([starters_capped, non_starters], ignore_index=True)
+
+        df = (
+            df.groupby(["team_abbreviation", "opponent_abbreviation"], group_keys=False, sort=False)
+            .apply(cap_starters)
+            .reset_index(drop=True)
+        )
+
+    return df
 
 
 def normalize_rotowire_to_nba_format(
@@ -455,6 +495,7 @@ __all__ = [
     "LINEUP_ROLE_CONFIRMED",
     "LINEUP_ROLE_PROJECTED",
     "LINEUP_ROLE_OUT",
+    "rotowire_dependencies_available",
 ]
 
 

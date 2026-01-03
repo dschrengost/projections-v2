@@ -45,6 +45,12 @@ ENRICHMENT_COLUMNS = (
 
 app = typer.Typer(help=__doc__)
 
+# Smoke test (manual):
+#   uv run python -m projections.cli.build_training_dataset \
+#     --version v1_enriched_smoke_20251204 \
+#     --start-date 2025-12-01 --end-date 2025-12-04 --snapshot-type pretip --force
+# Expect: opp_ctx_missing < 1.0 and vac_missing < 1.0 when rates_training_base has coverage.
+
 
 def _normalize_date(value: datetime) -> pd.Timestamp:
     ts = pd.Timestamp(value)
@@ -219,29 +225,43 @@ def _load_enrichment(
 ) -> pd.DataFrame:
     """Load enrichment features from rates_training_base partitions.
 
-    Returns deduplicated DataFrame with game_id, player_id, team_id + enrichment columns.
+    Returns deduplicated DataFrame with game_id, team_id + enrichment columns.
     """
     if not paths:
         return pd.DataFrame()
 
     frames: list[pd.DataFrame] = []
-    join_keys = ["game_id", "player_id", "team_id"]
-    cols_to_load = join_keys + [c for c in enrichment_columns if c not in join_keys]
+    join_keys = ["game_id", "team_id"]
+    cols_to_load = join_keys + list(enrichment_columns)
+    skipped_missing_cols = 0
+    skipped_read_errors = 0
 
     for path in paths:
         try:
             df = pd.read_parquet(path, columns=cols_to_load)
-            frames.append(df)
-        except Exception:  # noqa: BLE001
-            # Skip files missing required columns
+        except Exception as exc:  # noqa: BLE001
+            skipped_read_errors += 1
+            typer.echo(f"[training-dataset] enrichment read failed: {path} ({exc})")
             continue
+        missing = [col for col in cols_to_load if col not in df.columns]
+        if missing:
+            skipped_missing_cols += 1
+            typer.echo(f"[training-dataset] enrichment missing columns: {path} -> {missing}")
+            continue
+        frames.append(df)
+    if skipped_missing_cols or skipped_read_errors:
+        typer.echo(
+            "[training-dataset] enrichment load summary: "
+            f"files={len(paths)} loaded={len(frames)} "
+            f"skipped_missing_cols={skipped_missing_cols} skipped_read_errors={skipped_read_errors}"
+        )
 
     if not frames:
         return pd.DataFrame()
 
     combined = pd.concat(frames, ignore_index=True)
     # Normalize join keys
-    for col in join_keys:
+    for col in [*join_keys, "opponent_id"]:
         if col in combined.columns:
             combined[col] = pd.to_numeric(combined[col], errors="coerce").astype("Int64")
     # Deduplicate by join keys (keep last in case of multiple entries)
@@ -255,57 +275,301 @@ def _apply_enrichment(
     *,
     enrichment_columns: list[str],
 ) -> tuple[pd.DataFrame, dict[str, float]]:
-    """Merge enrichment features into joined dataset and fill missing values.
+    """Merge enrichment features into joined dataset and compute coverage stats.
 
     Returns (enriched DataFrame, coverage stats dict).
     """
     if enrichment.empty:
-        # Add empty enrichment columns with appropriate fill values
-        for col in ENRICHMENT_COLUMNS_VACANCY:
-            joined[col] = 0.0
-        for col in ENRICHMENT_COLUMNS_PACE + ENRICHMENT_COLUMNS_TEAM_STRENGTH:
+        for col in enrichment_columns:
             joined[col] = np.nan
+        joined["team_ctx_missing"] = 1
+        joined["opp_ctx_missing"] = 1
+        joined["vac_missing"] = 1
         coverage = {col: 0.0 for col in enrichment_columns}
         return joined, coverage
 
-    join_keys = ["game_id", "player_id", "team_id"]
-    # Ensure join keys are compatible types
-    for col in join_keys:
-        if col in joined.columns:
-            joined[col] = pd.to_numeric(joined[col], errors="coerce").astype("Int64")
+    working = joined.copy()
+    had_opponent_id = "opponent_id" in working.columns
+    for col in ("game_id", "team_id", "player_id"):
+        if col in working.columns:
+            working[col] = _coerce_int_series(working[col])
 
-    # Merge enrichment
-    enriched = joined.merge(
-        enrichment,
-        on=join_keys,
-        how="left",
-        suffixes=("", "_enrich"),
+    opponent_id: pd.Series
+    if "opponent_id" in working.columns:
+        opponent_id = _coerce_int_series(working["opponent_id"])
+    elif "opponent_team_id" in working.columns:
+        opponent_id = _coerce_int_series(working["opponent_team_id"])
+    elif {"home_team_id", "away_team_id", "team_id"}.issubset(working.columns):
+        home = _coerce_int_series(working["home_team_id"])
+        away = _coerce_int_series(working["away_team_id"])
+        team = _coerce_int_series(working["team_id"])
+
+        opponent_id = pd.Series(pd.NA, index=working.index, dtype="Int64")
+        is_home = team == home
+        is_away = team == away
+        opponent_id.loc[is_home] = away.loc[is_home]
+        opponent_id.loc[is_away] = home.loc[is_away]
+    else:
+        opponent_id = pd.Series(pd.NA, index=working.index, dtype="Int64")
+
+    working["opponent_id"] = opponent_id
+
+    enriched_source = enrichment.copy()
+    for col in ("game_id", "team_id", "opponent_id", "player_id"):
+        if col in enriched_source.columns:
+            enriched_source[col] = _coerce_int_series(enriched_source[col])
+
+    missing_cols = [col for col in enrichment_columns if col not in enriched_source.columns]
+    if missing_cols:
+        debug_cols = ["game_id", "team_id"] + [
+            c for c in enrichment_columns if c in enriched_source.columns
+        ]
+        debug_head = (
+            enriched_source.loc[:, debug_cols].head(5).to_string(index=False)
+            if debug_cols
+            else "<no columns>"
+        )
+        raise ValueError(
+            "rates_training_base missing enrichment columns: "
+            f"{missing_cols}. enrichment_source_cols={sorted(enriched_source.columns)} "
+            f"enrichment_source_head=\n{debug_head}"
+        )
+
+    team_ctx_cols = [c for c in ("team_pace_szn", "team_off_rtg_szn", "team_def_rtg_szn") if c in enriched_source.columns]
+
+    spine_game_teams = (
+        working.loc[:, ["game_id", "team_id"]].dropna().drop_duplicates().copy()
+        if {"game_id", "team_id"}.issubset(working.columns)
+        else pd.DataFrame(columns=["game_id", "team_id"])
     )
+    enrich_game_teams = (
+        enriched_source.loc[:, ["game_id", "team_id"]].dropna().drop_duplicates().copy()
+        if {"game_id", "team_id"}.issubset(enriched_source.columns)
+        else pd.DataFrame(columns=["game_id", "team_id"])
+    )
+    overlap_games = int(
+        len(set(spine_game_teams["game_id"].tolist()) & set(enrich_game_teams["game_id"].tolist()))
+        if not spine_game_teams.empty and not enrich_game_teams.empty
+        else 0
+    )
+    overlap_game_team = int(
+        len(spine_game_teams.merge(enrich_game_teams, on=["game_id", "team_id"], how="inner"))
+        if not spine_game_teams.empty and not enrich_game_teams.empty
+        else 0
+    )
+    typer.echo(
+        f"[training-dataset] enrichment overlap: overlap_games={overlap_games} overlap_game_team={overlap_game_team}"
+    )
+    if overlap_games == 0:
+        spine_sample = spine_game_teams["game_id"].dropna().astype(int).astype(str).head(10).tolist()
+        enrich_sample = enrich_game_teams["game_id"].dropna().astype(int).astype(str).head(10).tolist()
+        typer.echo(f"[training-dataset] sample spine game_ids: {spine_sample}")
+        typer.echo(f"[training-dataset] sample enrich game_ids: {enrich_sample}")
+    if overlap_game_team == 0:
+        spine_pairs_df = spine_game_teams.dropna().head(10)
+        enrich_pairs_df = enrich_game_teams.dropna().head(10)
+        spine_pairs = [
+            f"({int(gid)},{int(tid)})" for gid, tid in spine_pairs_df.itertuples(index=False, name=None)
+        ]
+        enrich_pairs = [
+            f"({int(gid)},{int(tid)})" for gid, tid in enrich_pairs_df.itertuples(index=False, name=None)
+        ]
+        typer.echo(f"[training-dataset] sample spine (game_id, team_id): {spine_pairs}")
+        typer.echo(f"[training-dataset] sample enrich (game_id, team_id): {enrich_pairs}")
 
-    # Calculate coverage and fill missing values
+    def _enrichment_merge_debug(label: str, df: pd.DataFrame) -> None:
+        expected = set(enrichment_columns)
+        present = sorted(expected & set(df.columns))
+        missing = sorted(expected - set(df.columns))
+        xy_cols = sorted(
+            [
+                c
+                for c in df.columns
+                if (c.endswith("_x") or c.endswith("_y")) and c.rsplit("_", 1)[0] in expected
+            ]
+        )
+        nn_vac = int(df["vac_min_szn"].notna().sum()) if "vac_min_szn" in df.columns else 0
+        nn_opp_pace = int(df["opp_pace_szn"].notna().sum()) if "opp_pace_szn" in df.columns else 0
+        nn_opp_def = int(df["opp_def_rtg_szn"].notna().sum()) if "opp_def_rtg_szn" in df.columns else 0
+        typer.echo(
+            "[training-dataset] enrichment merge "
+            f"{label}: present={len(present)}/{len(expected)} "
+            f"nn(vac_min_szn)={nn_vac} nn(opp_pace_szn)={nn_opp_pace} nn(opp_def_rtg_szn)={nn_opp_def} "
+            f"suffixed_xy={len(xy_cols)}"
+        )
+        if missing:
+            typer.echo(f"[training-dataset] enrichment merge {label}: missing_cols={missing}")
+        if xy_cols:
+            typer.echo(f"[training-dataset] enrichment merge {label}: suffixed_xy_cols={xy_cols}")
+
+    def _coalesce_xy(df: pd.DataFrame, base_col: str) -> None:
+        col_x = f"{base_col}_x"
+        col_y = f"{base_col}_y"
+        if col_x not in df.columns and col_y not in df.columns:
+            return
+        if base_col not in df.columns:
+            df[base_col] = np.nan
+        if col_y in df.columns:
+            df[base_col] = df[base_col].fillna(df[col_y])
+        if col_x in df.columns:
+            df[base_col] = df[base_col].fillna(df[col_x])
+        df.drop(columns=[c for c in (col_x, col_y) if c in df.columns], inplace=True)
+
+    # TEAM enrichment: join on (game_id, team_id)
+    team_features_cols = ["game_id", "team_id", *enrichment_columns]
+    team_features = enriched_source.loc[:, [c for c in team_features_cols if c in enriched_source.columns]].copy()
+    team_features = team_features.dropna(subset=["game_id", "team_id"]).drop_duplicates(
+        subset=["game_id", "team_id"], keep="last"
+    )
+    if overlap_game_team > 0:
+        check_cols = ["opp_pace_szn", "opp_def_rtg_szn", *ENRICHMENT_COLUMNS_VACANCY]
+        zero_non_null = [
+            col for col in check_cols
+            if col in team_features.columns and int(team_features[col].notna().sum()) == 0
+        ]
+        missing_in_team = [col for col in check_cols if col not in team_features.columns]
+        if zero_non_null or missing_in_team:
+            debug_cols = ["game_id", "team_id"] + [
+                col for col in check_cols if col in team_features.columns or col in enriched_source.columns
+            ]
+            team_head = (
+                team_features.loc[:, debug_cols].head(5).to_string(index=False)
+                if debug_cols
+                else "<no columns>"
+            )
+            source_head = (
+                enriched_source.loc[:, debug_cols].head(5).to_string(index=False)
+                if debug_cols
+                else "<no columns>"
+            )
+            raise ValueError(
+                "Team enrichment missing expected columns: "
+                f"missing={missing_in_team} zero_non_null={zero_non_null} "
+                f"team_features_head=\n{team_head}\n"
+                f"enrichment_source_head=\n{source_head}"
+            )
+
+    team_suffix = "__rtb_team"
+    rename_team = {col: f"{col}{team_suffix}" for col in enrichment_columns if col in team_features.columns}
+    team_features = team_features.rename(columns=rename_team)
+    enriched = working.merge(team_features, on=["game_id", "team_id"], how="left", validate="m:1")
+    for col in enrichment_columns:
+        rtb_col = f"{col}{team_suffix}"
+        if rtb_col not in enriched.columns:
+            continue
+        if col in enriched.columns:
+            enriched[col] = enriched[rtb_col].where(enriched[rtb_col].notna(), enriched[col])
+        else:
+            enriched[col] = enriched[rtb_col]
+        enriched.drop(columns=[rtb_col], inplace=True)
+    for col in enrichment_columns:
+        _coalesce_xy(enriched, col)
+    _enrichment_merge_debug("team", enriched)
+
+    # OPPONENT enrichment: join opponent_id to rates team context.
+    opp_features_cols = ["game_id", "team_id", "team_pace_szn", "team_def_rtg_szn"]
+    opp_features_cols = [c for c in opp_features_cols if c in enriched_source.columns]
+    opp_features = enriched_source.loc[:, opp_features_cols].copy()
+    opp_features = opp_features.dropna(subset=["game_id", "team_id"]).drop_duplicates(
+        subset=["game_id", "team_id"], keep="last"
+    )
+    opp_suffix = "__rtb_opp"
+    rename_opp = {
+        "team_id": "opponent_id",
+        "team_pace_szn": f"opp_pace_szn{opp_suffix}",
+        "team_def_rtg_szn": f"opp_def_rtg_szn{opp_suffix}",
+    }
+    opp_features = opp_features.rename(columns={k: v for k, v in rename_opp.items() if k in opp_features.columns})
+    enriched = enriched.merge(opp_features, on=["game_id", "opponent_id"], how="left", validate="m:1")
+
+    opp_pace_from_team = f"opp_pace_szn{opp_suffix}"
+    if opp_pace_from_team in enriched.columns:
+        if "opp_pace_szn" in enriched.columns:
+            enriched["opp_pace_szn"] = enriched["opp_pace_szn"].fillna(enriched[opp_pace_from_team])
+        else:
+            enriched["opp_pace_szn"] = enriched[opp_pace_from_team]
+        enriched.drop(columns=[opp_pace_from_team], inplace=True)
+
+    opp_def_from_team = f"opp_def_rtg_szn{opp_suffix}"
+    if opp_def_from_team in enriched.columns:
+        if "opp_def_rtg_szn" in enriched.columns:
+            enriched["opp_def_rtg_szn"] = enriched["opp_def_rtg_szn"].fillna(enriched[opp_def_from_team])
+        else:
+            enriched["opp_def_rtg_szn"] = enriched[opp_def_from_team]
+        enriched.drop(columns=[opp_def_from_team], inplace=True)
+
+    for col in enrichment_columns:
+        _coalesce_xy(enriched, col)
+    _enrichment_merge_debug("opp", enriched)
+
+    if overlap_game_team > 0:
+        zero_cols: list[str] = []
+        for col in [*ENRICHMENT_COLUMNS_VACANCY, "opp_pace_szn", "opp_def_rtg_szn"]:
+            if col in enriched.columns and int(enriched[col].notna().sum()) == 0:
+                zero_cols.append(col)
+        if zero_cols:
+            debug_cols = ["game_id", "team_id"] + [
+                c for c in enrichment_columns if c in enriched_source.columns
+            ]
+            debug_head = (
+                enriched_source.loc[:, debug_cols].head(5).to_string(index=False)
+                if debug_cols
+                else "<no columns>"
+            )
+            raise ValueError(
+                "Enrichment merge produced 0% non-null columns: "
+                f"{zero_cols}. enrichment_source_cols={sorted(enriched_source.columns)} "
+                f"enrichment_source_head=\n{debug_head}"
+            )
+
+    for col in enrichment_columns:
+        if col not in enriched.columns:
+            enriched[col] = np.nan
+        enriched[col] = pd.to_numeric(enriched[col], errors="coerce")
+
+    enriched["team_ctx_missing"] = (
+        enriched[team_ctx_cols].isna().all(axis=1).astype(int) if team_ctx_cols else 1
+    )
+    enriched["opp_ctx_missing"] = (
+        enriched[["opp_pace_szn", "opp_def_rtg_szn"]].isna().all(axis=1).astype(int)
+    )
+    enriched["vac_missing"] = enriched[ENRICHMENT_COLUMNS_VACANCY].isna().all(axis=1).astype(int)
+    if overlap_game_team > 0:
+        opp_missing_rate = float(pd.to_numeric(enriched["opp_ctx_missing"], errors="coerce").fillna(1).mean())
+        vac_missing_rate = float(pd.to_numeric(enriched["vac_missing"], errors="coerce").fillna(1).mean())
+        if opp_missing_rate >= 1.0:
+            typer.echo(
+                "[training-dataset] WARNING: opp_ctx_missing=100% despite overlap_game_team > 0."
+            )
+        if vac_missing_rate >= 1.0:
+            typer.echo(
+                "[training-dataset] WARNING: vac_missing=100% despite overlap_game_team > 0."
+            )
+
+    if overlap_game_team > 0 and not spine_game_teams.empty and not enrich_game_teams.empty:
+        overlap_keys = spine_game_teams.merge(enrich_game_teams, on=["game_id", "team_id"], how="inner")
+        source_overlap = enriched_source.merge(overlap_keys, on=["game_id", "team_id"], how="inner")
+        enriched_overlap = enriched.merge(overlap_keys, on=["game_id", "team_id"], how="inner")
+
+        for col in ("vac_min_szn", "opp_pace_szn", "opp_def_rtg_szn"):
+            source_non_null = int(source_overlap[col].notna().sum()) if col in source_overlap.columns else 0
+            output_non_null = int(enriched_overlap[col].notna().sum()) if col in enriched_overlap.columns else 0
+            if source_non_null > 0 and output_non_null == 0:
+                raise ValueError(
+                    "Enrichment invariant failed: "
+                    f"overlap_game_team={overlap_game_team} source_non_null({col})={source_non_null} "
+                    f"output_non_null({col})={output_non_null}"
+                )
+
+    # Calculate coverage (no default fills)
     coverage: dict[str, float] = {}
     n_rows = len(enriched)
+    for col in enrichment_columns:
+        n_present = int(enriched[col].notna().sum()) if col in enriched.columns else 0
+        coverage[col] = n_present / n_rows if n_rows > 0 else 0.0
 
-    for col in ENRICHMENT_COLUMNS_VACANCY:
-        if col in enriched.columns:
-            n_present = enriched[col].notna().sum()
-            coverage[col] = n_present / n_rows if n_rows > 0 else 0.0
-            enriched[col] = enriched[col].fillna(0.0)
-        else:
-            enriched[col] = 0.0
-            coverage[col] = 0.0
-
-    for col in ENRICHMENT_COLUMNS_PACE + ENRICHMENT_COLUMNS_TEAM_STRENGTH:
-        if col in enriched.columns:
-            n_present = enriched[col].notna().sum()
-            coverage[col] = n_present / n_rows if n_rows > 0 else 0.0
-            # Fill with global mean (or fallback)
-            mean_val = enriched[col].mean(skipna=True)
-            fill_val = mean_val if pd.notna(mean_val) else 100.0  # reasonable default pace/rating
-            enriched[col] = enriched[col].fillna(fill_val)
-        else:
-            enriched[col] = 100.0  # default pace/rating
-            coverage[col] = 0.0
+    if not had_opponent_id:
+        enriched.drop(columns=["opponent_id"], inplace=True, errors="ignore")
 
     return enriched, coverage
 
@@ -376,6 +640,37 @@ def _compute_missing_rates(
     }
 
 
+def _compute_odds_coverage(df: pd.DataFrame) -> dict[str, Any]:
+    if df.empty or "game_id" not in df.columns:
+        return {"odds_columns_present": False}
+    if "spread_home" not in df.columns or "total" not in df.columns:
+        return {"odds_columns_present": False}
+
+    working = df.copy()
+    working["game_id_norm"] = working["game_id"].astype(str).str.zfill(10)
+    has_odds = working["spread_home"].notna() & working["total"].notna()
+
+    coverage_rate = float(has_odds.mean()) if len(working) > 0 else float("nan")
+    slate_games = int(working["game_id_norm"].nunique())
+    odds_games = int(working.loc[has_odds, "game_id_norm"].nunique())
+
+    coverage_by_prefix: dict[str, float] = {}
+    for prefix in ("00222", "00223", "00224", "00225"):
+        mask = working["game_id_norm"].astype(str).str.startswith(prefix)
+        if not mask.any():
+            continue
+        coverage_by_prefix[prefix] = float(has_odds[mask].mean())
+
+    return {
+        "odds_columns_present": True,
+        "odds_coverage_rate": coverage_rate,
+        "slate_games": slate_games,
+        "odds_games": odds_games,
+        "overlap_games": odds_games,
+        "coverage_by_prefix": coverage_by_prefix,
+    }
+
+
 def _build_manifest(
     *,
     version: str,
@@ -387,6 +682,7 @@ def _build_manifest(
     slates: pd.DataFrame,
     labels: pd.DataFrame,
     joined: pd.DataFrame,
+    odds_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     joined_minutes_missing = int(pd.to_numeric(joined.get("minutes"), errors="coerce").isna().sum())
     missing_rates = _compute_missing_rates(
@@ -416,6 +712,10 @@ def _build_manifest(
             "joined_rows": int(len(joined)),
         },
         "missing_rates": missing_rates,
+        "odds_join": {
+            "game_id_norm_zfill10": True,
+            **(odds_coverage or {}),
+        },
     }
 
 
@@ -439,6 +739,11 @@ def main(
         "--out-root",
         help="Optional override for training/datasets root (defaults to <data_root>/training/datasets).",
     ),
+    out_dir: Path | None = typer.Option(
+        None,
+        "--out-dir",
+        help="Optional explicit output directory (overrides --out-root/--version).",
+    ),
     force: bool = typer.Option(False, "--force", help="Overwrite outputs for an existing dataset version."),
     enable_enrichment: bool = typer.Option(
         True,
@@ -459,7 +764,7 @@ def main(
         raise typer.BadParameter("--snapshot-type must be 'lock' or 'pretip'.")
 
     datasets_root = (out_root or (data_root / "training" / "datasets")).expanduser().resolve()
-    out_dir = datasets_root / version
+    out_dir = (out_dir or (datasets_root / version)).expanduser().resolve()
     if out_dir.exists() and not force:
         existing = [p.name for p in out_dir.glob("*.json")] + [p.name for p in out_dir.glob("*.parquet")]
         if existing:
@@ -521,6 +826,21 @@ def main(
     # Ensure minutes column exists (from labels) and is numeric.
     joined["minutes"] = pd.to_numeric(joined["minutes"], errors="coerce")
 
+    odds_coverage = _compute_odds_coverage(joined)
+    if odds_coverage.get("odds_columns_present"):
+        typer.echo(
+            f"[training-dataset] odds coverage: {odds_coverage.get('odds_coverage_rate', float('nan')):.1%} "
+            f"({odds_coverage.get('odds_games', 0)}/{odds_coverage.get('slate_games', 0)} games)"
+        )
+        typer.echo(
+            "[training-dataset] odds games: "
+            f"slates={odds_coverage.get('slate_games', 0)} "
+            f"odds={odds_coverage.get('odds_games', 0)} "
+            f"overlap={odds_coverage.get('overlap_games', 0)}"
+        )
+        for prefix, rate in sorted(odds_coverage.get("coverage_by_prefix", {}).items()):
+            typer.echo(f"[training-dataset] odds coverage {prefix}*: {rate:.1%}")
+
     # Enrichment from rates_training_base (vacancy, pace, team context)
     enrichment_discovery: EnrichmentDiscovery | None = None
     enrichment_coverage: dict[str, float] = {}
@@ -545,24 +865,44 @@ def main(
                 enrichment_df,
                 enrichment_columns=ENRICHMENT_COLUMNS,
             )
-            # Log enrichment coverage
-            avg_coverage = sum(enrichment_coverage.values()) / len(enrichment_coverage) if enrichment_coverage else 0.0
-            typer.echo(f"[training-dataset] enrichment coverage: {avg_coverage:.1%} average")
-            for col, cov in sorted(enrichment_coverage.items()):
-                typer.echo(f"  {col}: {cov:.1%}")
+            typer.echo("[training-dataset] enrichment stats:")
+            for col in ENRICHMENT_COLUMNS:
+                non_null_rate = float(joined[col].notna().mean()) if col in joined.columns else 0.0
+                nunique = int(joined[col].nunique(dropna=True)) if col in joined.columns else 0
+                typer.echo(f"  {col}: non_null={non_null_rate:.1%} nunique={nunique}")
+                if non_null_rate > 0.95 and nunique <= 1 and col not in ENRICHMENT_COLUMNS_VACANCY:
+                    raise ValueError(
+                        f"Enrichment sanity check failed: column '{col}' appears constant "
+                        f"(nunique={nunique}, non_null={non_null_rate:.1%})."
+                    )
+                if non_null_rate > 0.95 and nunique <= 1 and col in ENRICHMENT_COLUMNS_VACANCY:
+                    typer.echo(
+                        f"[training-dataset] WARNING: enrichment column '{col}' appears constant "
+                        f"(nunique={nunique}, non_null={non_null_rate:.1%})."
+                    )
+            for flag in ("team_ctx_missing", "opp_ctx_missing", "vac_missing"):
+                if flag not in joined.columns:
+                    continue
+                rate = float(pd.to_numeric(joined[flag], errors="coerce").fillna(1).mean()) if len(joined) else 1.0
+                typer.echo(f"  {flag}: {rate:.1%}")
         else:
             typer.echo(
                 f"[training-dataset] WARNING: no rates_training_base partitions found "
                 f"({len(enrichment_discovery.missing_days)} days missing); skipping enrichment."
             )
-            # Add empty enrichment columns
-            for col in ENRICHMENT_COLUMNS_VACANCY:
-                joined[col] = 0.0
-            for col in ENRICHMENT_COLUMNS_PACE + ENRICHMENT_COLUMNS_TEAM_STRENGTH:
+            for col in ENRICHMENT_COLUMNS:
                 joined[col] = np.nan
+            joined["team_ctx_missing"] = 1
+            joined["opp_ctx_missing"] = 1
+            joined["vac_missing"] = 1
             enrichment_coverage = {col: 0.0 for col in ENRICHMENT_COLUMNS}
     else:
         typer.echo("[training-dataset] enrichment disabled; skipping rates_training_base features.")
+        for col in ENRICHMENT_COLUMNS:
+            joined[col] = np.nan
+        joined["team_ctx_missing"] = 1
+        joined["opp_ctx_missing"] = 1
+        joined["vac_missing"] = 1
 
     out_dir.mkdir(parents=True, exist_ok=True)
     features_path = out_dir / "features.parquet"
@@ -582,6 +922,7 @@ def main(
         slates=slates,
         labels=labels,
         joined=joined,
+        odds_coverage=odds_coverage,
     )
 
     # Add enrichment metadata to manifest

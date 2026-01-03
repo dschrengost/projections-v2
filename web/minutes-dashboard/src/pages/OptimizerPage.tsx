@@ -11,6 +11,7 @@ import {
     getSavedBuilds,
     loadSavedBuild,
     deleteSavedBuild,
+    saveCustomBuild,
     getOverrides,
     saveOverrides,
     clearOverrides,
@@ -473,7 +474,7 @@ export default function OptimizerPage() {
 
     // Join selected builds
     const handleJoinBuilds = async () => {
-        if (selectedBuildIds.size < 2) return
+        if (selectedBuildIds.size < 2 || !selectedSlate) return
 
         const buildName = prompt('Name for merged build:', `Merged (${selectedBuildIds.size} builds)`)
         if (!buildName) return
@@ -499,9 +500,14 @@ export default function OptimizerPage() {
                 }
             }
 
+            // Save the merged build to the server
+            await saveCustomBuild(selectedDate, selectedSlate, unique, buildName)
+
+            // Update local state and refresh saved builds list
             setLineups(unique)
             setCurrentJob(null)
             setSelectedBuildIds(new Set())
+            await refreshSavedBuilds()
             alert(`Merged ${selectedBuildIds.size} builds into "${buildName}": ${unique.length} unique lineups`)
         } catch (err) {
             alert('Failed to join builds: ' + (err as Error).message)

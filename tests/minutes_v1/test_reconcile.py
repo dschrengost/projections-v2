@@ -33,7 +33,7 @@ def test_reconcile_enforces_team_total() -> None:
     minutes = [32.0, 30.0, 28.0, 26.0, 20.0, 18.0, 12.0, 10.0]
     starters = [1, 1, 1, 1, 0, 0, 0, 0]
     df = _make_team_frame(minutes, starters=starters)
-    config = ReconcileConfig(team_minutes=TeamMinutesConfig(target=200.0, tolerance=0.0))
+    config = ReconcileConfig(method="qp", team_minutes=TeamMinutesConfig(target=200.0, tolerance=0.0))
 
     reconciled = reconcile_minutes_p50_all(df, config)
     total = reconciled["minutes_p50"].sum()
@@ -50,7 +50,7 @@ def test_reconcile_respects_bounds() -> None:
     df = _make_team_frame(minutes, starters=[1, 1, 1, 1, 0, 0, 0, 0])
     df.loc[0, "minutes_cap"] = 24.0
     df.loc[1, "minutes_cap"] = 20.0
-    config = ReconcileConfig(team_minutes=TeamMinutesConfig(target=200.0, tolerance=0.0))
+    config = ReconcileConfig(method="qp", team_minutes=TeamMinutesConfig(target=200.0, tolerance=0.0))
 
     reconciled = reconcile_minutes_p50_all(df, config)
 
@@ -64,7 +64,7 @@ def test_rotation_mask_excludes_low_probability_players() -> None:
     df = _make_team_frame(minutes, starters=[1, 1, 1, 0, 0, 0, 0, 0])
     df.loc[6:, "p_play"] = 0.01
     df.loc[6:, "minutes_p50"] = 0.0
-    config = ReconcileConfig(team_minutes=TeamMinutesConfig(target=150.0, tolerance=0.0))
+    config = ReconcileConfig(method="qp", team_minutes=TeamMinutesConfig(target=150.0, tolerance=0.0))
 
     reconciled = reconcile_minutes_p50_all(df, config)
     low_prob = reconciled.loc[df["player_id"] >= 6, "minutes_p50"]

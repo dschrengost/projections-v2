@@ -327,6 +327,11 @@ def main(
     ),
     roster_timeout: float = typer.Option(10.0, "--roster-timeout", help="NBA.com roster scraper timeout (seconds)."),
     schedule_timeout: float = typer.Option(10.0, "--schedule-timeout", help="Schedule API fallback timeout (seconds)."),
+    min_freshness_hours: float = typer.Option(
+        1.0,
+        "--min-freshness-hours",
+        help="Max age (hours) of existing roster data before forcing a re-scrape.",
+    ),
 ) -> None:
     start_day = pd.Timestamp(start).normalize()
     end_day = pd.Timestamp(end).normalize()
@@ -338,17 +343,34 @@ def main(
     if roster:
         roster_df = _read_parquet_sources(roster, allow_empty=True)
     # Check if we have rows for the TARGET date range (not just any rows)
-    # If existing roster has no rows for target dates, scrape fresh data
-    if not roster_df.empty and scrape_missing:
+    # If existing roster has no rows for target dates, OR if data is stale, scrape fresh data.
+    should_scrape = False
+    if roster_df.empty and scrape_missing:
+        should_scrape = True
+    elif not roster_df.empty and scrape_missing:
         roster_df_dates = pd.to_datetime(roster_df["game_date"]).dt.normalize()
         target_rows = roster_df[(roster_df_dates >= start_day) & (roster_df_dates <= end_day)]
         if target_rows.empty:
             typer.echo(
                 f"[roster] existing roster has no rows for {start_day.date()} to {end_day.date()}; scraping fresh data"
             )
-            roster_df = _scrape_roster_poll(schedule_df, start=start_day, end=end_day, timeout=roster_timeout)
-    elif roster_df.empty and scrape_missing:
+            should_scrape = True
+        else:
+            # Check freshness
+            latest_ts = pd.to_datetime(target_rows["as_of_ts"]).max()
+            if latest_ts.tzinfo is None:
+                latest_ts = latest_ts.tz_localize("UTC")
+            now = pd.Timestamp.now(tz="UTC")
+            age_hours = (now - latest_ts).total_seconds() / 3600.0
+            if age_hours > min_freshness_hours:
+                typer.echo(
+                    f"[roster] existing roster snapshot is {age_hours:.1f}h old (> {min_freshness_hours}h limit); scraping fresh data"
+                )
+                should_scrape = True
+
+    if should_scrape:
         roster_df = _scrape_roster_poll(schedule_df, start=start_day, end=end_day, timeout=roster_timeout)
+    
     if roster_df.empty:
         raise typer.BadParameter(
             "No roster rows were loaded. Provide --roster inputs or enable --scrape-missing."

@@ -50,6 +50,31 @@ def _utc_now_iso() -> str:
     return datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _normalize_id_str_series(series: pd.Series) -> pd.Series:
+    """Normalize identifier values to stable string tokens (e.g., 123.0 -> '123')."""
+
+    if series.empty:
+        return pd.Series([], index=series.index, dtype="string")
+
+    # Start with string view (preserves non-numeric ids).
+    out = series.astype("string", copy=False).fillna("")
+
+    # For numeric ids stored as floats (common when parquet contains NA), coerce to Int64
+    # when integer-like to avoid '123.0' string mismatches.
+    numeric = pd.to_numeric(series, errors="coerce")
+    int_like = numeric.notna() & (numeric % 1 == 0)
+    if int_like.any():
+        out = out.where(~int_like, numeric.where(int_like).astype("Int64").astype("string"))
+
+    # Defensive cleanup for any remaining '.0' suffixes.
+    out = out.str.replace(r"\.0$", "", regex=True)
+    return out
+
+
+def _ops_key_for_df(df: pd.DataFrame) -> pd.Series:
+    return _normalize_id_str_series(df["game_id"]) + "|" + _normalize_id_str_series(df["player_id"])
+
+
 def _overrides_dir(data_root: Path, game_date: date) -> Path:
     return data_root / "artifacts" / "ops" / "overrides_v1" / f"game_date={game_date.isoformat()}"
 
@@ -538,7 +563,7 @@ def apply_overrides_to_minutes_df(
         return minutes_df
 
     work = minutes_df.copy()
-    work["_ops_key"] = work["game_id"].astype(str) + "|" + work["player_id"].astype(str)
+    work["_ops_key"] = _ops_key_for_df(work)
     merged = work.merge(ops_df, on="_ops_key", how="left", suffixes=("", "_ops"))
 
     locked_mask = pd.Series(False, index=merged.index)
@@ -614,7 +639,7 @@ def apply_overrides_to_rates_df(rates_df: pd.DataFrame, *, game_date: date, data
         return rates_df
 
     work = rates_df.copy()
-    work["_ops_key"] = work["game_id"].astype(str) + "|" + work["player_id"].astype(str)
+    work["_ops_key"] = _ops_key_for_df(work)
     merged = work.merge(ops_df, on="_ops_key", how="left", suffixes=("", "_ops"))
 
     for col in USAGE_RATE_FIELDS:

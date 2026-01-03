@@ -4,7 +4,6 @@ After=network.target
 
 [Service]
 Type=simple
-User=daniel
 WorkingDirectory=/home/daniel/projects/projections-v2
 Environment="PATH=/home/daniel/.local/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PREFECT_API_URL=http://127.0.0.1:4200/api"

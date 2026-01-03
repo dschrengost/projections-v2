@@ -1,8 +1,12 @@
 l2_reconcile:
-  # Reconciliation disabled by request; keep defaults here for future use.
+  # Live minutes allocator / reconciler.
+  # Goal: team sums to 240 with realistic depth + non-uniform splits.
+  method: qp
   p_play_min_rotation: 0.05
   min_minutes_for_rotation: 4.0
-  max_rotation_size: 10
+  min_rotation_size: 8
+  max_rotation_size: 13
+  rotation_mass_cutoff: 0.995
   clamp_tails: true
   team_minutes:
     target: 240.0

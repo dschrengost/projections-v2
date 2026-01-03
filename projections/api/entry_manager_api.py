@@ -328,6 +328,115 @@ def _load_draftable_start_times(draft_group_id: int) -> Dict[int, datetime]:
     return start_times
 
 
+@dataclass(frozen=True)
+class DraftGroupCandidate:
+    """Candidate DraftKings draft group match for an entry file."""
+
+    draft_group_id: int
+    match_count: int
+    slate_type: str
+
+
+def _sample_entry_draftable_ids(entry_state: "EntryFileState", max_entries: int = 20) -> list[int]:
+    """Sample draftable IDs from a DK entry file payload."""
+    out: list[int] = []
+    if not entry_state.entries:
+        return out
+
+    seen: set[int] = set()
+    for entry in entry_state.entries[:max_entries]:
+        for slot in DK_NBA_SLOTS:
+            draftable_id = _extract_draftable_id(str(entry.get(slot, "")).strip())
+            if draftable_id is None or draftable_id in seen:
+                continue
+            seen.add(draftable_id)
+            out.append(draftable_id)
+    return out
+
+
+def _detect_draft_group_candidates(
+    sample_draftable_ids: list[int],
+    *,
+    game_date: str | None = None,
+    max_files: int = 50,
+    min_match_count: int = 5,
+) -> list[DraftGroupCandidate]:
+    """Detect likely draft group IDs by matching sampled draftable IDs to bronze draftables files."""
+    import json
+
+    ids: set[int] = set()
+    for raw in sample_draftable_ids or []:
+        try:
+            ids.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return []
+
+    bronze_dir = paths.data_path() / "bronze" / "dk" / "draftables"
+    if not bronze_dir.exists():
+        return []
+
+    files = sorted(bronze_dir.glob("draftables_raw_*.json"), reverse=True)[:max_files]
+    candidates: list[DraftGroupCandidate] = []
+
+    for path in files:
+        m = re.search(r"draftables_raw_(\\d+)\\.json$", path.name)
+        if not m:
+            continue
+        try:
+            draft_group_id = int(m.group(1))
+        except ValueError:
+            continue
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        competitions = payload.get("competitions") or []
+        slate_type = "showdown" if isinstance(competitions, list) and len(competitions) == 1 else "classic"
+
+        if game_date:
+            start_times: list[datetime] = []
+            for comp in competitions:
+                if not isinstance(comp, dict):
+                    continue
+                start_time = _parse_game_start(str(comp.get("startTime") or ""))
+                if start_time:
+                    start_times.append(start_time)
+            if start_times:
+                comp_game_dates = {t.date().isoformat() for t in start_times}
+                if game_date not in comp_game_dates:
+                    continue
+
+        draftables = payload.get("draftables") or []
+        draftable_ids: set[int] = set()
+        for d in draftables:
+            if not isinstance(d, dict):
+                continue
+            raw = d.get("draftableId") or d.get("id")
+            if raw is None:
+                continue
+            try:
+                draftable_ids.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+
+        match_count = len(ids.intersection(draftable_ids))
+        if match_count >= min_match_count:
+            candidates.append(
+                DraftGroupCandidate(
+                    draft_group_id=draft_group_id,
+                    match_count=match_count,
+                    slate_type=slate_type,
+                )
+            )
+
+    candidates.sort(key=lambda c: (c.match_count, c.draft_group_id), reverse=True)
+    return candidates
+
+
 class EntryFileSummary(BaseModel):
     contest_id: str
     contest_name: str

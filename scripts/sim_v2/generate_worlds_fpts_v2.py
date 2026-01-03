@@ -1101,15 +1101,27 @@ def _load_schedule_for_date(root: Path, game_date: pd.Timestamp) -> pd.DataFrame
 def _load_rates_live_frame(
     root: Path, game_date: pd.Timestamp, *, run_id: Optional[str]
 ) -> tuple[pd.DataFrame, Optional[str], Path]:
+    from projections.pipeline.effective_inputs import EFFECTIVE_RATES_FILENAME
+
     date_token = pd.Timestamp(game_date).date().isoformat()
     base = root / "gold" / "rates_v1_live" / date_token
     resolved_run = run_id or _read_latest_run_id(base)
     candidate = base / "rates.parquet"
+    candidates: list[Path] = [base / EFFECTIVE_RATES_FILENAME, base / "rates.parquet"]
     if resolved_run:
-        candidate = base / f"run={resolved_run}" / "rates.parquet"
-    if not candidate.exists():
-        raise FileNotFoundError(f"No rates_v1_live parquet found at {candidate}")
-    df = pd.read_parquet(candidate)
+        candidates = [
+            base / f"run={resolved_run}" / EFFECTIVE_RATES_FILENAME,
+            base / f"run={resolved_run}" / "rates.parquet",
+            *candidates,
+        ]
+        candidate = candidates[0]
+    for path in candidates:
+        if path.exists():
+            df = pd.read_parquet(path)
+            candidate = path
+            break
+    else:
+        raise FileNotFoundError(f"No rates_v1_live parquet found under {base}")
     if "game_date" not in df.columns:
         df["game_date"] = pd.to_datetime(date_token)
     return df, resolved_run, candidate
@@ -2371,6 +2383,21 @@ def main(
                 all_minutes = np.vstack(minutes_world_samples) if minutes_world_samples else None
                 all_active = np.vstack(active_mask_samples)  # shape: (n_worlds, n_players)
 
+
+                # Sanitize inf/nan values AND physically impossible values that cause instability.
+                # We interpret any valid NBA fantasy score as < 2000. Anything higher is numerical noise.
+                # This protects against float32 overflow (max ~3.4e38) and variance explosion.
+                MAX_VALID_FPTS = 2000.0
+                bad_mask = ~np.isfinite(all_fpts) | (np.abs(all_fpts) > MAX_VALID_FPTS)
+                if bad_mask.any():
+                    n_bad = bad_mask.sum()
+                    typer.echo(
+                        f"[sim_v2] warning: {n_bad} invalid FPTS values (> {MAX_VALID_FPTS} or inf/nan) detected, marking as inactive",
+                        err=True,
+                    )
+                    all_fpts = np.where(bad_mask, 0.0, all_fpts)
+                    all_active = all_active & ~bad_mask
+
                 # Compute CONDITIONAL statistics (only worlds where player is active)
                 # This is what DFS lineup builders want: E[FPTS | plays]
                 n_worlds_total, n_players = all_fpts.shape
@@ -2457,6 +2484,10 @@ def main(
                     for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
                         if stat_name in stat_world_samples and stat_world_samples[stat_name]:
                             all_stat = np.vstack(stat_world_samples[stat_name])
+                            # Sanitize inf/nan values
+                            stat_inf_mask = ~np.isfinite(all_stat)
+                            if stat_inf_mask.any():
+                                all_stat = np.where(stat_inf_mask, 0.0, all_stat)
                             # Conditional mean: only count worlds where player is active
                             stat_sum = (all_stat * all_active).sum(axis=0)
                             stat_mean = np.where(active_counts > 0, stat_sum / active_counts, 0.0)
@@ -2473,6 +2504,10 @@ def main(
                         for stat_name in ("fga2", "fga3", "fta"):
                             if stat_name in stat_world_samples and stat_world_samples[stat_name]:
                                 all_stat = np.vstack(stat_world_samples[stat_name])
+                                # Sanitize inf/nan values
+                                stat_inf_mask = ~np.isfinite(all_stat)
+                                if stat_inf_mask.any():
+                                    all_stat = np.where(stat_inf_mask, 0.0, all_stat)
                                 stat_sum = (all_stat * all_active).sum(axis=0)
                                 stat_mean = np.where(active_counts > 0, stat_sum / active_counts, 0.0)
                                 proj_df[f"{stat_name}_mean"] = stat_mean
@@ -2614,10 +2649,13 @@ def main(
                 # Also persist the full per-player worlds matrix for downstream consumers
                 # (e.g., contest simulation). This is much smaller than writing one parquet
                 # per world and keeps the fast in-memory aggregation path.
+                # NOTE: We use the sanitized `all_fpts` which has inf/nan values replaced with 0.0,
+                # rather than re-stacking `world_fpts_samples` which contains raw unsanitized values.
                 if world_fpts_samples:
                     try:
                         player_ids = mu_df["player_id"].astype(str).tolist()
-                        worlds_matrix = np.vstack(world_fpts_samples).astype(np.float32, copy=False)
+                        # Use sanitized all_fpts (already stacked and inf-sanitized) instead of raw samples
+                        worlds_matrix = all_fpts.astype(np.float32, copy=True)
                         worlds_path = out_dir / "worlds_matrix.parquet"
                         pd.DataFrame(worlds_matrix, columns=player_ids).to_parquet(worlds_path, index=False)
                     except Exception as exc:

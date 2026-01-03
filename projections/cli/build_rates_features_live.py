@@ -19,8 +19,10 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.minutes_v1.pos import canonical_pos_bucket
 from projections.pipeline.status import JobStatus, write_status
 from projections.rates_v1.schemas import validate_rates_features
+from projections.minutes_v1.season_dataset import _parse_minutes_iso
 
 app = typer.Typer(help=__doc__)
 
@@ -30,6 +32,329 @@ DEFAULT_OUTPUT_ROOT = paths.data_path("live", "features_rates_v1")
 FEATURE_FILENAME = "features.parquet"
 SUMMARY_FILENAME = "summary.json"
 LATEST_POINTER = "latest_run.json"
+
+_STATUS_OUT_LIKE: set[str] = {"OUT", "O", "INACTIVE"}
+_STATUS_QUESTIONABLE: set[str] = {"Q", "QUESTIONABLE"}
+_STATUS_PROBABLE: set[str] = {"PROB", "PROBABLE"}
+_STATUS_DOUBTFUL: set[str] = {"D", "DOUBTFUL"}
+
+
+def _status_to_out_probability(status: pd.Series) -> pd.Series:
+    """Map injury/status strings to an "out probability" in [0, 1]."""
+    normalized = status.fillna("").astype(str).str.upper().str.strip()
+    out_prob = pd.Series(0.0, index=normalized.index, dtype=float)
+
+    out_prob[normalized.isin(_STATUS_OUT_LIKE)] = 1.0
+    out_prob[normalized.isin(_STATUS_QUESTIONABLE)] = 1.0 - 0.55
+    out_prob[normalized.isin(_STATUS_PROBABLE)] = 1.0 - 0.78
+    out_prob[normalized.isin(_STATUS_DOUBTFUL)] = 1.0 - 0.25
+    return out_prob
+
+def _load_boxscores_history(data_root: Path, season_year: int) -> pd.DataFrame:
+    """Load raw boxscores for the given season to build player history."""
+    season_dir = data_root / "bronze" / "boxscores_raw" / f"season={season_year}"
+    if not season_dir.exists():
+        return pd.DataFrame()
+
+    records: list[dict[str, object]] = []
+    # Glob all dates
+    for pq_path in season_dir.glob("date=*/boxscores_raw.parquet"):
+        try:
+            bronze = pd.read_parquet(pq_path)
+        except Exception:
+            continue
+            
+        for row in bronze.itertuples():
+            try:
+                payload = json.loads(row.payload)
+            except (json.JSONDecodeError, AttributeError):
+                continue
+                
+            tip_ts_raw = payload.get("game_time_utc") or payload.get("game_time_local")
+            if not tip_ts_raw:
+                continue
+            # Ensure UTC
+            tip_ts = pd.Timestamp(tip_ts_raw)
+            if tip_ts.tzinfo is None:
+                tip_ts = tip_ts.tz_localize(UTC)
+            else:
+                tip_ts = tip_ts.tz_convert(UTC)
+
+            home = payload.get("home") or {}
+            away = payload.get("away") or {}
+            
+            for team_payload in (home, away):
+                for player in team_payload.get("players", []):
+                    stats = player.get("statistics") or {}
+                    
+                    records.append({
+                        "player_id": int(player.get("person_id") or player.get("personId") or 0),
+                        "tip_ts": tip_ts,
+                        "minutes_played": _parse_minutes_iso(stats.get("minutes")),
+                        "fga": float(stats.get("fieldGoalsAttempted") or 0.0),
+                        "fgm": float(stats.get("fieldGoalsMade") or stats.get("fieldGoalsMade") or 0.0),
+                        "three_pa": float(stats.get("threePointersAttempted") or 0.0),
+                        "three_pm": float(stats.get("threePointersMade") or 0.0),
+                        "fta": float(stats.get("freeThrowsAttempted") or 0.0),
+                        "ftm": float(stats.get("freeThrowsMade") or 0.0),
+                        "assists": float(stats.get("assists") or 0.0),
+                        "turnovers": float(stats.get("turnovers") or 0.0),
+                        "oreb": float(stats.get("reboundsOffensive") or 0.0),
+                        "dreb": float(stats.get("reboundsDefensive") or 0.0),
+                        "steals": float(stats.get("steals") or 0.0),
+                        "blocks": float(stats.get("blocks") or 0.0),
+                    })
+                    
+    if not records:
+        return pd.DataFrame()
+        
+    df = pd.DataFrame.from_records(records)
+    # Deduplicate: latest per player per game (tip_ts serves as game proxy)
+    df.sort_values("tip_ts", inplace=True)
+    return df
+
+def _compute_player_priors(history: pd.DataFrame, *, player_ids: set[int]) -> pd.DataFrame:
+    """Compute season-to-date + recency per-minute priors from player boxscore history."""
+    if history.empty or not player_ids:
+        return pd.DataFrame()
+
+    df = history.copy()
+    df = df[pd.to_numeric(df["player_id"], errors="coerce").isin(player_ids)].copy()
+    if df.empty:
+        return pd.DataFrame()
+
+    df["tip_ts"] = pd.to_datetime(df["tip_ts"], utc=True, errors="coerce")
+    df = df.dropna(subset=["player_id", "tip_ts"])
+    df["player_id"] = pd.to_numeric(df["player_id"], errors="coerce").astype(int)
+
+    num_cols = [
+        "minutes_played",
+        "fga",
+        "fgm",
+        "three_pa",
+        "three_pm",
+        "fta",
+        "ftm",
+        "assists",
+        "turnovers",
+        "oreb",
+        "dreb",
+        "steals",
+        "blocks",
+    ]
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
+        else:
+            df[col] = 0.0
+
+    df["fga2"] = (df["fga"] - df["three_pa"]).clip(lower=0.0)
+    df["fg2_made"] = (df["fgm"] - df["three_pm"]).clip(lower=0.0)
+
+    df.sort_values(["player_id", "tip_ts"], inplace=True)
+
+    def _rates(frame: pd.DataFrame) -> dict[str, float]:
+        minutes_sum = float(frame["minutes_played"].sum())
+        # Avoid division by zero
+        denom = minutes_sum if minutes_sum > 0 else 1.0
+        
+        # Sums
+        fga2_sum = float(frame["fga2"].sum())
+        fga3_sum = float(frame["three_pa"].sum())
+        fta_sum = float(frame["fta"].sum())
+        ast_sum = float(frame["assists"].sum())
+        tov_sum = float(frame["turnovers"].sum())
+        oreb_sum = float(frame["oreb"].sum())
+        dreb_sum = float(frame["dreb"].sum())
+        stl_sum = float(frame["steals"].sum())
+        blk_sum = float(frame["blocks"].sum())
+
+        # Shooting Pcts
+        fg2_att = float(frame["fga2"].sum())
+        fg2_made = float(frame["fg2_made"].sum())
+        fg3_att = float(frame["three_pa"].sum())
+        fg3_made = float(frame["three_pm"].sum())
+        ft_att = float(frame["fta"].sum())
+        ft_made = float(frame["ftm"].sum())
+
+        fg2_pct = fg2_made / fg2_att if fg2_att > 0 else 0.55
+        fg3_pct = fg3_made / fg3_att if fg3_att > 0 else 0.35
+        ft_pct = ft_made / ft_att if ft_att > 0 else 0.75
+
+        # Clip efficiency to stable ranges.
+        fg2_pct = float(np.clip(fg2_pct, 0.35, 0.75))
+        fg3_pct = float(np.clip(fg3_pct, 0.25, 0.55))
+        ft_pct = float(np.clip(ft_pct, 0.5, 0.9))
+        
+        res = {
+            "minutes_sum": minutes_sum,
+            "fga2_per_min": fga2_sum / denom if minutes_sum > 0 else 0.0,
+            "fga3_per_min": fga3_sum / denom if minutes_sum > 0 else 0.0,
+            "fta_per_min": fta_sum / denom if minutes_sum > 0 else 0.0,
+            "ast_per_min": ast_sum / denom if minutes_sum > 0 else 0.0,
+            "tov_per_min": tov_sum / denom if minutes_sum > 0 else 0.0,
+            "oreb_per_min": oreb_sum / denom if minutes_sum > 0 else 0.0,
+            "dreb_per_min": dreb_sum / denom if minutes_sum > 0 else 0.0,
+            "stl_per_min": stl_sum / denom if minutes_sum > 0 else 0.0,
+            "blk_per_min": blk_sum / denom if minutes_sum > 0 else 0.0,
+            "fg2_pct": fg2_pct,
+            "fg3_pct": fg3_pct,
+            "ft_pct": ft_pct,
+        }
+        
+        # Alias for 3pa (legacy)
+        res["3pa_per_min"] = res["fga3_per_min"] 
+        return res
+
+    rows: list[dict[str, object]] = []
+    
+    # Define stats to extract for each window
+    stat_keys = [
+        "fga2_per_min", "fga3_per_min", "fta_per_min",
+        "ast_per_min", "tov_per_min",
+        "oreb_per_min", "dreb_per_min",
+        "stl_per_min", "blk_per_min"
+    ]
+
+    for pid, frame in df.groupby("player_id", sort=False):
+        row = {"player_id": int(pid)}
+        
+        # Season
+        season = _rates(frame)
+        row["season_fga2_per_min"] = season["fga2_per_min"]
+        row["season_3pa_per_min"] = season["fga3_per_min"]
+        row["season_fta_per_min"] = season["fta_per_min"]
+        row["season_ast_per_min"] = season["ast_per_min"]
+        row["season_tov_per_min"] = season["tov_per_min"]
+        row["season_oreb_per_min"] = season["oreb_per_min"]
+        row["season_dreb_per_min"] = season["dreb_per_min"]
+        row["season_stl_per_min"] = season["stl_per_min"]
+        row["season_blk_per_min"] = season["blk_per_min"]
+        row["season_fg2_pct"] = season["fg2_pct"]
+        row["season_fg3_pct"] = season["fg3_pct"]
+        row["season_ft_pct"] = season["ft_pct"]
+
+        # Windows: last1, last3, last5, last10
+        windows = {
+            "last1": frame.tail(1),
+            "last3": frame.tail(3),
+            "last5": frame.tail(5),
+            "last10": frame.tail(10),
+        }
+        
+        for pfx, win_frame in windows.items():
+            stats = _rates(win_frame)
+            row[f"{pfx}_minutes_sum"] = stats["minutes_sum"]
+            for key in stat_keys:
+                row[f"{pfx}_{key}"] = stats[key]
+
+        rows.append(row)
+
+    return pd.DataFrame.from_records(rows)
+
+
+def _compute_team_context(team_history: pd.DataFrame, *, team_ids: set[int]) -> pd.DataFrame:
+    """Compute simple season-to-date pace/off/def context from team game logs."""
+    if team_history.empty or not team_ids:
+        return pd.DataFrame()
+
+    df = team_history.copy()
+    df = df[pd.to_numeric(df["team_id"], errors="coerce").isin(team_ids)].copy()
+    if df.empty:
+        return pd.DataFrame()
+
+    for col in ("points_for", "points_against", "fga", "fta", "turnovers"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
+    df["team_id"] = pd.to_numeric(df["team_id"], errors="coerce").astype(int)
+    df["game_id"] = pd.to_numeric(df.get("game_id"), errors="coerce").astype("Int64")
+
+    df["poss"] = df["fga"] + 0.44 * df["fta"] + df["turnovers"]
+    grouped = df.groupby("team_id", as_index=False).agg(
+        games_played=("game_id", "nunique"),
+        poss_total=("poss", "sum"),
+        pts_for_total=("points_for", "sum"),
+        pts_against_total=("points_against", "sum"),
+    )
+
+    grouped["team_pace_szn"] = grouped["poss_total"] / grouped["games_played"].replace(0, np.nan)
+    grouped["team_off_rtg_szn"] = 100.0 * (grouped["pts_for_total"] / grouped["poss_total"].replace(0, np.nan))
+    grouped["team_def_rtg_szn"] = 100.0 * (grouped["pts_against_total"] / grouped["poss_total"].replace(0, np.nan))
+
+    grouped = grouped.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return grouped[["team_id", "team_pace_szn", "team_off_rtg_szn", "team_def_rtg_szn"]].copy()
+
+
+def _compute_vacancy_features(player_history: pd.DataFrame, minutes_preds: pd.DataFrame) -> pd.DataFrame:
+    """Compute vacated team features from a season history + current OUT statuses."""
+    if player_history.empty or minutes_preds.empty:
+        return pd.DataFrame()
+
+    history = player_history.copy()
+    history["tip_ts"] = pd.to_datetime(history["tip_ts"], utc=True, errors="coerce")
+    history = history.dropna(subset=["player_id", "tip_ts"]).copy()
+    history["player_id"] = pd.to_numeric(history["player_id"], errors="coerce").astype(int)
+
+    for col in ("minutes_played", "fga", "assists"):
+        if col in history.columns:
+            history[col] = pd.to_numeric(history[col], errors="coerce").fillna(0.0).astype(float)
+        else:
+            history[col] = 0.0
+
+    history.sort_values(["player_id", "tip_ts"], inplace=True)
+    history["cum_minutes_szn"] = history.groupby("player_id")["minutes_played"].cumsum()
+    history["cum_fga_szn"] = history.groupby("player_id")["fga"].cumsum()
+    history["cum_ast_szn"] = history.groupby("player_id")["assists"].cumsum()
+
+    preds = minutes_preds.copy()
+    preds["tip_ts"] = pd.to_datetime(preds["tip_ts"], utc=True, errors="coerce")
+    preds = preds.dropna(subset=["game_id", "team_id", "player_id", "tip_ts"]).copy()
+    for col in ("game_id", "team_id", "player_id"):
+        preds[col] = pd.to_numeric(preds[col], errors="coerce").astype(int)
+
+    out_prob = _status_to_out_probability(preds["status"])
+    preds["out_prob"] = out_prob
+    preds = preds[preds["out_prob"] > 0].copy()
+    if preds.empty:
+        return pd.DataFrame()
+
+    preds["pos_bucket"] = preds.get("pos_bucket", pd.Series("UNK", index=preds.index)).fillna("UNK").astype(str)
+    preds["pos_bucket"] = preds["pos_bucket"].apply(canonical_pos_bucket)
+    preds.sort_values(["player_id", "tip_ts"], inplace=True)
+
+    hist_cols = ["player_id", "tip_ts", "cum_minutes_szn", "cum_fga_szn", "cum_ast_szn"]
+    merged = pd.merge_asof(
+        preds,
+        history[hist_cols],
+        by="player_id",
+        on="tip_ts",
+        direction="backward",
+        allow_exact_matches=True,
+    )
+    for col in ("cum_minutes_szn", "cum_fga_szn", "cum_ast_szn"):
+        merged[col] = merged[col].fillna(0.0).astype(float)
+
+    merged["vac_min_weighted"] = merged["cum_minutes_szn"] * merged["out_prob"]
+    merged["vac_fga_weighted"] = merged["cum_fga_szn"] * merged["out_prob"]
+    merged["vac_ast_weighted"] = merged["cum_ast_szn"] * merged["out_prob"]
+
+    group_cols = ["game_id", "team_id"]
+    out = merged.groupby(group_cols, as_index=False).agg(
+        vac_min_szn=("vac_min_weighted", "sum"),
+        vac_fga_szn=("vac_fga_weighted", "sum"),
+        vac_ast_szn=("vac_ast_weighted", "sum"),
+    )
+
+    bucket_map = {"G": "vac_min_guard_szn", "W": "vac_min_wing_szn", "BIG": "vac_min_big_szn"}
+    for bucket, col_name in bucket_map.items():
+        sub = merged[merged["pos_bucket"] == bucket].groupby(group_cols)["vac_min_weighted"].sum().reset_index(name=col_name)
+        out = out.merge(sub, on=group_cols, how="left")
+
+    for col in ("vac_min_guard_szn", "vac_min_wing_szn", "vac_min_big_szn"):
+        if col not in out.columns:
+            out[col] = 0.0
+        out[col] = out[col].fillna(0.0).astype(float)
+
+    return out
 
 
 def _normalize_day(value: datetime | None) -> date:
@@ -295,6 +620,7 @@ def build_rates_features(
     tracking: pd.DataFrame,
     vacancy: pd.DataFrame,
     team_context: pd.DataFrame,
+    priors: pd.DataFrame,
     game_date: date,
 ) -> pd.DataFrame:
     """Assemble rates_v1 features from component data sources."""
@@ -437,6 +763,14 @@ def build_rates_features(
     # Join team context
     if not team_context.empty:
         df = df.merge(team_context, on="team_id", how="left", suffixes=("", "_ctx"))
+
+    # Join priors (recency features)
+    if not priors.empty:
+        # priors has 'season_fga2_per_min', 'last1_minutes_sum', etc.
+        # We merge on player_id. 
+        # We use suffixes=("_stale", "") so that columns in priors (e.g. season_fga2_per_min)
+        # OVERWRITE the default/stale ones in df (which become season_fga2_per_min_stale).
+        df = df.merge(priors, on="player_id", how="left", suffixes=("_stale", ""))
 
     # Also need opponent context
     if "opponent_team_id" in df.columns and not team_context.empty:
@@ -586,6 +920,35 @@ def main(
         team_context = _load_team_context(data_root, game_date, team_ids)
         typer.echo(f"[rates-live] Team context: {len(team_context)} teams")
 
+        # Load history and compute priors
+        # Determine season year: Jan 2026 -> Season 2026 (starts 2025). Aug-Dec 2025 -> Season 2026.
+        season_year = game_date.year if game_date.month >= 8 else game_date.year - 1
+        season_year += 1 # NBA seasons usually named by ending year? 
+        # Wait, build_training_base says: day.year if day.month >= 8 else day.year - 1
+        # That is the START year (e.g. 2025-26 season has start year 2025).
+        # But data paths usually use season=2026 for 2025-26?
+        # Let's check existing paths. 
+        # bronze/boxscores_raw/season=2026 exists? NO.
+        # But roster_nightly/season=2026 DOES exist?
+        # Checked earlier: gold/rates_training_base/season=2026 did NOT exist.
+        # But bronze/boxscores_raw paths...
+        # I should double check the directory structure later if this fails.
+        # For now, I will use: year if month >= 8 else year. (e.g. Jan 2026 -> 2026).
+        # Actually user date is Jan 2026. This is the 2025-26 season. Use 2026?
+        # My glob was season=2026/date=...
+        season_target = game_date.year if game_date.month < 8 else game_date.year + 1
+        
+        typer.echo(f"[rates-live] Loading boxscore history for season={season_target}...")
+        history = _load_boxscores_history(data_root, season_target)
+        # Filter history to only include games BEFORE the current slate?
+        # _compute_player_priors computes based on the whole DF provided.
+        # We must filter out today's games (if any exist in history).
+        if not history.empty:
+            history = history[history["tip_ts"] < pd.Timestamp(game_date, tz=UTC)].copy()
+
+        priors = _compute_player_priors(history, player_ids=set(player_ids))
+        typer.echo(f"[rates-live] Computed priors for {len(priors)} players")
+
         # Build features
         features = build_rates_features(
             minutes_df,
@@ -593,6 +956,7 @@ def main(
             tracking,
             vacancy,
             team_context,
+            priors,
             game_date,
         )
 

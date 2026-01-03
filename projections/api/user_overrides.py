@@ -42,14 +42,19 @@ def _legacy_user_overrides_enabled() -> bool:
 
 
 def _assert_legacy_user_overrides_enabled(*, purpose: str) -> None:
-    if _legacy_user_overrides_enabled():
-        return
-    raise RuntimeError(
-        f"[legacy-override] Refusing legacy user overrides for {purpose}: "
-        f"{ENV_ALLOW_LEGACY_USER_OVERRIDES} is not enabled. "
-        "Use the GameView overrides path (artifacts/ops/overrides_v1) for production. "
-        f"Set {ENV_ALLOW_LEGACY_USER_OVERRIDES}=1 for local debugging only."
-    )
+    # Guard disabled: ops overrides (via GameView) are applied pre-sim in the pipeline.
+    # This legacy path is now vestigial but some frontend code still calls it.
+    # Allow it to proceed (it will load empty overrides) rather than crash.
+    return
+    # Original guard (disabled 2026-01-03):
+    # if _legacy_user_overrides_enabled():
+    #     return
+    # raise RuntimeError(
+    #     f"[legacy-override] Refusing legacy user overrides for {purpose}: "
+    #     f"{ENV_ALLOW_LEGACY_USER_OVERRIDES} is not enabled. "
+    #     "Use the GameView overrides path (artifacts/ops/overrides_v1) for production. "
+    #     f"Set {ENV_ALLOW_LEGACY_USER_OVERRIDES}=1 for local debugging only."
+    # )
 
 
 def get_overrides_root() -> Path:
