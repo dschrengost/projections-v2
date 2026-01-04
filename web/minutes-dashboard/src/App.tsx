@@ -16,6 +16,7 @@ import ContestPage from './pages/ContestPage'
 import ContestSimPage from './pages/ContestSimPage'
 import DiagnosticsPage from './pages/DiagnosticsPage'
 import EntryManagerPage from './pages/EntryManagerPage'
+import PropsPage from './pages/PropsPage'
 import { MinutesResponse, PlayerRow } from './types'
 import {
   formatFpts,
@@ -112,10 +113,11 @@ const SORT_LABELS: Record<SortKey, string> = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics' => {
+const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics' | 'props' => {
   if (typeof window === 'undefined') {
     return 'minutes'
   }
+  if (window.location.pathname.includes('props')) return 'props'
   if (window.location.pathname.includes('diagnostics')) return 'diagnostics'
   if (window.location.pathname.includes('contest-sim')) return 'contest-sim'
   if (window.location.pathname.includes('contest')) return 'contest'
@@ -129,7 +131,7 @@ const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'en
 
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics' | 'props'>(initialTab)
   const [selectedDate, setSelectedDate] = useState(todayISO())
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
@@ -164,7 +166,7 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer', 'entry-manager': '/entry-manager', contest: '/contest', 'contest-sim': '/contest-sim', diagnostics: '/diagnostics' }
+    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer', 'entry-manager': '/entry-manager', contest: '/contest', 'contest-sim': '/contest-sim', diagnostics: '/diagnostics', props: '/props' }
     window.history.replaceState({}, '', pathMap[activeTab])
   }, [activeTab])
 
@@ -420,6 +422,12 @@ function App() {
         Contest Sim
       </button>
       <button
+        className={activeTab === 'props' ? 'active' : ''}
+        onClick={() => setActiveTab('props')}
+      >
+        Props
+      </button>
+      <button
         className={activeTab === 'diagnostics' ? 'active' : ''}
         onClick={() => setActiveTab('diagnostics')}
       >
@@ -478,6 +486,15 @@ function App() {
       <div className="app-shell">
         {nav}
         <ContestSimPage />
+      </div>
+    )
+  }
+
+  if (activeTab === 'props') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <PropsPage />
       </div>
     )
   }

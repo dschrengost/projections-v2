@@ -8,6 +8,7 @@ import {
     formatValue,
     getStatusBadge,
 } from '../utils'
+import { PlayerOpsPanel } from './PlayerOpsPanel'
 
 type GameViewProps = {
     rows: PlayerRow[]
@@ -125,6 +126,14 @@ export const GameView: React.FC<GameViewProps> = ({ rows, gameId }) => {
                 {teams.map(([teamName, { players }]) => (
                     <TeamSummaryCard key={teamName} teamName={teamName} players={players} />
                 ))}
+
+                {/* Player Ops Panel (Manual Overrides) */}
+                <PlayerOpsPanel
+                    players={rows}
+                    teams={teams.map(([name]) => name)}
+                    gameId={gameId}
+                    date={rows[0]?.game_date || new Date().toISOString().slice(0, 10)}
+                />
 
                 {/* Minutes Distribution Chart */}
                 {selectedPlayer && (

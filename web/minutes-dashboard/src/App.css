@@ -3628,3 +3628,253 @@ th.override-col {
 .min-input {
   border-color: #22c55e !important;
 }
+
+/* === Ops Panel Styling === */
+.ops-panel {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.ops-panel .ops-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.ops-panel .ops-header .sidebar-card-title {
+  margin: 0;
+}
+
+.ops-panel .delta-total {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.ops-panel .delta-total.positive {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+.ops-panel .delta-total.negative {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.ops-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ops-team-group {
+  background: #0f172a;
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+
+.ops-team-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+  padding: 0 0.25rem;
+}
+
+.ops-team-header .team-total {
+  font-family: monospace;
+  font-size: 0.7rem;
+}
+
+.ops-team-header .team-total.balanced {
+  color: #4ade80;
+}
+
+.ops-team-header .team-total.over {
+  color: #f87171;
+}
+
+.ops-team-header .team-total.under {
+  color: #fbbf24;
+}
+
+.ops-player-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.ops-player-table tr {
+  border-bottom: 1px solid #1e293b;
+}
+
+.ops-player-table tr:last-child {
+  border-bottom: none;
+}
+
+.ops-player-table tr.modified {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.ops-player-table .name-cell {
+  padding: 0.3rem 0.25rem;
+  max-width: 100px;
+}
+
+.ops-player-table .name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.ops-player-table .name {
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.7rem;
+}
+
+.ops-player-table .starter-dot {
+  color: #4ade80;
+  font-size: 0.6rem;
+  font-weight: 600;
+  background: rgba(74, 222, 128, 0.2);
+  padding: 0.1rem 0.25rem;
+  border-radius: 2px;
+}
+
+.ops-player-table .base-minutes-cell {
+  text-align: right;
+  color: #64748b;
+  padding: 0.3rem 0.25rem;
+  font-family: monospace;
+  font-size: 0.7rem;
+}
+
+.ops-player-table .delta-cell {
+  width: 45px;
+  padding: 0.2rem;
+}
+
+.ops-player-table .delta-input {
+  width: 100%;
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 3px;
+  color: #e2e8f0;
+  padding: 0.2rem 0.25rem;
+  font-size: 0.7rem;
+  text-align: center;
+  font-family: monospace;
+}
+
+.ops-player-table .delta-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  background: #334155;
+}
+
+.ops-player-table .delta-input::placeholder {
+  color: #475569;
+}
+
+.ops-player-table .final-minutes-cell {
+  text-align: right;
+  color: #94a3b8;
+  padding: 0.3rem 0.25rem;
+  font-family: monospace;
+  font-size: 0.7rem;
+  min-width: 35px;
+}
+
+.ops-player-table .final-minutes-cell.adjusted {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.ops-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #334155;
+}
+
+.ops-save-btn,
+.ops-run-btn {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.ops-save-btn {
+  background: #3b82f6;
+  color: white;
+}
+
+.ops-save-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.ops-save-btn:disabled {
+  background: #475569;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.ops-save-btn.saved {
+  background: #22c55e;
+}
+
+.ops-save-btn.error {
+  background: #ef4444;
+}
+
+.ops-run-btn {
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+}
+
+.ops-run-btn:hover:not(:disabled) {
+  background: #1e293b;
+  border-color: #60a5fa;
+}
+
+.ops-run-btn:disabled {
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.ops-worlds-message {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.ops-worlds-message.success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.ops-worlds-message.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}

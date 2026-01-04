@@ -26,6 +26,7 @@ MODEL_CONFIG_FILENAME = "config.json"
 
 GAME_ID_NORM_COL = "game_id_norm"
 KEY_COLS = ("game_id", "team_id", "player_id")
+OPPONENT_TEAM_ID_COL = "opponent_team_id"
 
 
 def zfill_game_id_series(series: pd.Series) -> pd.Series:
@@ -95,6 +96,9 @@ class RotationSetModelConfig:
     feature_columns: list[str]
     feature_mean: list[float]
     feature_std: list[float]
+    use_team_embeddings: bool = False
+    team_id_vocab: list[int] | None = None
+    team_embedding_dim: int = 8
     embed_dim: int = 128
     hidden_dim: int = 128
     dropout: float = 0.1
@@ -148,11 +152,26 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+class TeamOpponentEmbedding(nn.Module):
+    def __init__(self, *, num_embeddings: int, embedding_dim: int) -> None:
+        super().__init__()
+        self.team_emb = nn.Embedding(num_embeddings, embedding_dim)
+        self.opp_emb = nn.Embedding(num_embeddings, embedding_dim)
+
+    def forward(self, team_idx: torch.Tensor, opp_idx: torch.Tensor) -> torch.Tensor:
+        team_e = self.team_emb(team_idx)
+        opp_e = self.opp_emb(opp_idx)
+        return torch.cat([team_e, opp_e], dim=-1)
+
+
 class DeepSetsMinutesModel(nn.Module):
     def __init__(
         self,
         num_features: int,
         *,
+        use_team_embeddings: bool = False,
+        num_teams: int | None = None,
+        team_embedding_dim: int = 8,
         embed_dim: int = 128,
         hidden_dim: int = 128,
         dropout: float = 0.1,
@@ -162,18 +181,37 @@ class DeepSetsMinutesModel(nn.Module):
         super().__init__()
         self.total_minutes = float(total_minutes)
         self.eps = float(eps)
-        self.phi = MLP(num_features, embed_dim, hidden_dim=hidden_dim, num_layers=2, dropout=dropout)
+        self.use_team_embeddings = bool(use_team_embeddings)
+        if self.use_team_embeddings:
+            if not num_teams or num_teams <= 1:
+                raise ValueError("num_teams must be provided when use_team_embeddings=True")
+            self.embeddings = TeamOpponentEmbedding(num_embeddings=num_teams, embedding_dim=team_embedding_dim)
+            in_dim = num_features + 2 * team_embedding_dim
+        else:
+            self.embeddings = None
+            in_dim = num_features
+
+        self.phi = MLP(in_dim, embed_dim, hidden_dim=hidden_dim, num_layers=2, dropout=dropout)
         self.rho = MLP(embed_dim * 2, 1, hidden_dim=hidden_dim, num_layers=2, dropout=dropout)
 
-    def forward_logits(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        h = self.phi(x)
+    def _build_inputs(self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor) -> torch.Tensor:
+        if not self.use_team_embeddings:
+            return x
+        if self.embeddings is None:
+            raise RuntimeError("embeddings module missing")
+        emb = self.embeddings(team_idx, opp_idx)
+        return torch.cat([x, emb], dim=-1)
+
+    def forward_logits(self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        inputs = self._build_inputs(x, team_idx, opp_idx)
+        h = self.phi(inputs)
         pooled = masked_mean(h, mask)
         pooled_rep = pooled.unsqueeze(1).expand(-1, h.shape[1], -1)
         logits = self.rho(torch.cat([h, pooled_rep], dim=-1)).squeeze(-1)
         return logits
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        logits = self.forward_logits(x, mask)
+    def forward(self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        logits = self.forward_logits(x, team_idx, opp_idx, mask)
         return minutes_from_logits(logits, mask, total_minutes=self.total_minutes, eps=self.eps)
 
 
@@ -182,6 +220,9 @@ class SetTransformerMinutesModel(nn.Module):
         self,
         num_features: int,
         *,
+        use_team_embeddings: bool = False,
+        num_teams: int | None = None,
+        team_embedding_dim: int = 8,
         embed_dim: int = 128,
         hidden_dim: int = 256,
         dropout: float = 0.1,
@@ -193,7 +234,17 @@ class SetTransformerMinutesModel(nn.Module):
         super().__init__()
         self.total_minutes = float(total_minutes)
         self.eps = float(eps)
-        self.input_proj = nn.Linear(num_features, embed_dim)
+        self.use_team_embeddings = bool(use_team_embeddings)
+        if self.use_team_embeddings:
+            if not num_teams or num_teams <= 1:
+                raise ValueError("num_teams must be provided when use_team_embeddings=True")
+            self.embeddings = TeamOpponentEmbedding(num_embeddings=num_teams, embedding_dim=team_embedding_dim)
+            in_dim = num_features + 2 * team_embedding_dim
+        else:
+            self.embeddings = None
+            in_dim = num_features
+
+        self.input_proj = nn.Linear(in_dim, embed_dim)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dim,
             nhead=num_attention_heads,
@@ -205,22 +256,36 @@ class SetTransformerMinutesModel(nn.Module):
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_transformer_layers)
         self.head = MLP(embed_dim, 1, hidden_dim=hidden_dim, num_layers=2, dropout=dropout)
 
-    def forward_logits(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        h = self.input_proj(x)
+    def _build_inputs(self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor) -> torch.Tensor:
+        if not self.use_team_embeddings:
+            return x
+        if self.embeddings is None:
+            raise RuntimeError("embeddings module missing")
+        emb = self.embeddings(team_idx, opp_idx)
+        return torch.cat([x, emb], dim=-1)
+
+    def forward_logits(self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        inputs = self._build_inputs(x, team_idx, opp_idx)
+        h = self.input_proj(inputs)
         padding_mask = ~mask
         h = self.encoder(h, src_key_padding_mask=padding_mask)
         return self.head(h).squeeze(-1)
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        logits = self.forward_logits(x, mask)
+    def forward(self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        logits = self.forward_logits(x, team_idx, opp_idx, mask)
         return minutes_from_logits(logits, mask, total_minutes=self.total_minutes, eps=self.eps)
 
 
 def build_model(config: RotationSetModelConfig) -> nn.Module:
     num_features = len(config.feature_columns)
+    use_team_embeddings = bool(config.use_team_embeddings)
+    num_teams = (len(config.team_id_vocab) + 1) if (use_team_embeddings and config.team_id_vocab) else None
     if config.model == "deepsets":
         return DeepSetsMinutesModel(
             num_features,
+            use_team_embeddings=use_team_embeddings,
+            num_teams=num_teams,
+            team_embedding_dim=config.team_embedding_dim,
             embed_dim=config.embed_dim,
             hidden_dim=config.hidden_dim,
             dropout=config.dropout,
@@ -230,6 +295,9 @@ def build_model(config: RotationSetModelConfig) -> nn.Module:
     if config.model == "settransformer":
         return SetTransformerMinutesModel(
             num_features,
+            use_team_embeddings=use_team_embeddings,
+            num_teams=num_teams,
+            team_embedding_dim=config.team_embedding_dim,
             embed_dim=config.embed_dim,
             hidden_dim=max(config.hidden_dim, 2 * config.embed_dim),
             dropout=config.dropout,
@@ -265,6 +333,22 @@ class TeamGameSet:
     team_id: int
     row_indices: np.ndarray
     x: np.ndarray
+    team_idx: np.ndarray
+    opp_idx: np.ndarray
+
+
+def _build_team_id_mapping(vocab: list[int] | None) -> dict[int, int]:
+    if not vocab:
+        return {}
+    return {int(team_id): i + 1 for i, team_id in enumerate(vocab)}
+
+
+def _map_ids_to_index(series: pd.Series, mapping: dict[int, int]) -> np.ndarray:
+    if series.empty:
+        return np.zeros(0, dtype=np.int64)
+    coerced = pd.to_numeric(series, errors="coerce").astype("Int64")
+    mapped = coerced.map(lambda x: mapping.get(int(x), 0) if pd.notna(x) else 0)
+    return mapped.fillna(0).to_numpy(dtype=np.int64, copy=False)
 
 
 class RotationSetMinutesPredictor:
@@ -280,6 +364,8 @@ class RotationSetMinutesPredictor:
             raise ValueError("feature_mean length does not match feature_columns")
         if self._feature_std.shape != (len(config.feature_columns),):
             raise ValueError("feature_std length does not match feature_columns")
+
+        self._team_id_mapping = _build_team_id_mapping(config.team_id_vocab)
 
     @classmethod
     def load(cls, model_dir: Path, *, device: str = "cpu") -> "RotationSetMinutesPredictor":
@@ -304,6 +390,21 @@ class RotationSetMinutesPredictor:
             feature_std=self._feature_std,
         )
 
+        if self.config.use_team_embeddings and not self._team_id_mapping:
+            raise ValueError("Model config requires team embeddings, but team_id_vocab is empty/missing")
+        team_idx_all = (
+            _map_ids_to_index(df["team_id"], self._team_id_mapping)
+            if self.config.use_team_embeddings
+            else np.zeros(len(df), dtype=np.int64)
+        )
+        if self.config.use_team_embeddings:
+            if OPPONENT_TEAM_ID_COL in df.columns:
+                opp_idx_all = _map_ids_to_index(df[OPPONENT_TEAM_ID_COL], self._team_id_mapping)
+            else:
+                opp_idx_all = np.zeros(len(df), dtype=np.int64)
+        else:
+            opp_idx_all = np.zeros(len(df), dtype=np.int64)
+
         groups: list[TeamGameSet] = []
         for (game_id, team_id), idx in df.groupby([GAME_ID_NORM_COL, "team_id"], sort=False).indices.items():
             idx_arr = np.asarray(idx, dtype=np.int64)
@@ -313,6 +414,8 @@ class RotationSetMinutesPredictor:
                     team_id=int(team_id),
                     row_indices=idx_arr,
                     x=feature_matrix[idx_arr],
+                    team_idx=team_idx_all[idx_arr],
+                    opp_idx=opp_idx_all[idx_arr],
                 )
             )
 
@@ -325,13 +428,17 @@ class RotationSetMinutesPredictor:
                 max_n = max(g.x.shape[0] for g in batch)
                 x = torch.zeros((len(batch), max_n, num_features), dtype=torch.float32, device=self.device)
                 mask = torch.zeros((len(batch), max_n), dtype=torch.bool, device=self.device)
+                team_idx = torch.zeros((len(batch), max_n), dtype=torch.long, device=self.device)
+                opp_idx = torch.zeros((len(batch), max_n), dtype=torch.long, device=self.device)
 
                 for i, group in enumerate(batch):
                     n = group.x.shape[0]
                     x[i, :n] = torch.from_numpy(group.x).to(self.device)
                     mask[i, :n] = True
+                    team_idx[i, :n] = torch.from_numpy(group.team_idx).to(self.device)
+                    opp_idx[i, :n] = torch.from_numpy(group.opp_idx).to(self.device)
 
-                minutes = self.model(x, mask).cpu().numpy()
+                minutes = self.model(x, team_idx, opp_idx, mask).cpu().numpy()
                 for i, group in enumerate(batch):
                     n = group.x.shape[0]
                     preds[group.row_indices] = minutes[i, :n]
@@ -358,4 +465,3 @@ def predict_minutes(
         raise ValueError(f"model_dir must be provided or {MODEL_DIR_ENV} must be set")
     predictor = RotationSetMinutesPredictor.load(Path(resolved_dir), device=device)
     return predictor.predict(df_features, batch_size=batch_size)
-
