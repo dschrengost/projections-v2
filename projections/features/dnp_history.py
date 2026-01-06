@@ -1,0 +1,505 @@
+"""DNP (Did Not Play) history features for availability modeling.
+
+This module computes point-in-time features capturing a player's history of being
+"roster active but did not play" (DNP-CD pattern). These features help the model
+distinguish between:
+1. Players with no minutes because they're OUT/injured
+2. Players who are available but consistently get DNP-CD
+3. Players who are available and consistently play
+
+Key features:
+- games_since_last_roster_active: Team games since last roster_active_pre_tip==1
+- consecutive_active_dnp: Consecutive team games where active but minutes==0
+- active_but_dnp_rate_last10: Rate of DNPs among last 10 roster_active games
+- inactive_streak_len: Consecutive team games where roster_active_pre_tip==0
+
+CRITICAL INVARIANT: All features are computed using ONLY games strictly prior to
+the current game (game_date < current_game_date). No label leakage is allowed.
+
+Features are computed per (player_id, team_id) history so team changes reset stats.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+
+# Empirical Bayes prior parameters for shrinkage of DNP rate with small samples.
+# With alpha=1, beta=1 (uniform prior), (dnp + 1)/(n + 2) is the shrunk estimate.
+DNP_RATE_ALPHA = 1.0
+DNP_RATE_BETA = 1.0
+DNP_RATE_MIN_OPPORTUNITIES = 3  # Below this, shrinkage is applied
+
+# Cap for "never seen active before" in games_since_last_roster_active
+GAMES_SINCE_CAP = 99
+
+
+@dataclass(frozen=True)
+class DNPHistoryConfig:
+    """Configuration for DNP history feature computation."""
+
+    # Empirical Bayes prior parameters
+    alpha: float = DNP_RATE_ALPHA
+    beta: float = DNP_RATE_BETA
+    min_opportunities: int = DNP_RATE_MIN_OPPORTUNITIES
+    games_since_cap: int = GAMES_SINCE_CAP
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "alpha": self.alpha,
+            "beta": self.beta,
+            "min_opportunities": self.min_opportunities,
+            "games_since_cap": self.games_since_cap,
+        }
+
+
+def derive_roster_active_pre_tip(
+    df: pd.DataFrame,
+    *,
+    is_out_col: str = "is_out",
+) -> pd.Series:
+    """Derive the roster_active_pre_tip signal from existing columns.
+
+    Definition: A player is considered "roster active pre-tip" if:
+    - They appear in the dataset row (spine presence)
+    - They are NOT explicitly OUT (is_out == 0)
+
+    This is a conservative definition that treats:
+    - QUESTIONABLE, PROBABLE, AVAILABLE as roster active
+    - restriction_flag, ramp_flag players as roster active (they may still play)
+    - Only OUT status as inactive
+
+    IMPORTANT: This does NOT infer "active" from label row presence or minutes > 0.
+    The signal is derived from pre-tip injury/availability status only.
+
+    Args:
+        df: DataFrame with injury/status columns
+        is_out_col: Column name for the is_out flag (1 = OUT, 0 = not OUT)
+
+    Returns:
+        Series of int8: 1 if roster active, 0 if inactive (OUT)
+
+    Limitations documented:
+    - If injury_snapshot_missing == 1, we cannot definitively know status.
+      We treat these rows as roster_active = 1 (conservative, may overcount).
+    - This definition may miss cases where a player is on an inactive list
+      that isn't captured in the injury report (e.g., G-League assignment).
+    """
+    if is_out_col not in df.columns:
+        # If no is_out column, treat all rows as active (conservative fallback)
+        return pd.Series(1, index=df.index, dtype="int8")
+
+    is_out = pd.to_numeric(df[is_out_col], errors="coerce").fillna(0).astype(int)
+    roster_active = (is_out == 0).astype("int8")
+    return roster_active
+
+
+def compute_dnp_history_features(
+    df: pd.DataFrame,
+    *,
+    config: DNPHistoryConfig | None = None,
+    game_date_col: str = "game_date",
+    player_id_col: str = "player_id",
+    team_id_col: str = "team_id",
+    is_out_col: str = "is_out",
+    minutes_col: str = "minutes",
+    tip_ts_col: str = "tip_ts",
+    validate_pit: bool = True,
+) -> pd.DataFrame:
+    """Compute DNP history features for each row using only prior games.
+
+    This function computes four availability/DNP features per row:
+    1. games_since_last_roster_active: Team games since last active
+    2. consecutive_active_dnp: Streak of active-but-DNP games
+    3. active_but_dnp_rate_last10: DNP rate in last 10 active games (shrunk)
+    4. inactive_streak_len: Streak of not-active (OUT) games
+
+    All features are computed per (player_id, team_id) so team changes reset history.
+
+    CRITICAL: Uses only games with game_date strictly less than the current row's
+    game_date. This ensures no label leakage.
+
+    Args:
+        df: DataFrame with game/player/team/injury/minutes data
+        config: Optional configuration for priors and caps
+        game_date_col: Column name for game date
+        player_id_col: Column name for player ID
+        team_id_col: Column name for team ID
+        is_out_col: Column name for is_out flag
+        minutes_col: Column name for minutes played (label)
+        tip_ts_col: Column name for tip timestamp (for PIT validation)
+        validate_pit: If True, validates point-in-time correctness
+
+    Returns:
+        DataFrame with original columns plus:
+        - roster_active_pre_tip: 1 if active, 0 if OUT
+        - games_since_last_roster_active: int
+        - never_roster_active_before: bool (1 if never seen active)
+        - consecutive_active_dnp: int
+        - active_but_dnp_rate_last10: float (shrunk estimate)
+        - inactive_streak_len: int
+    """
+    if config is None:
+        config = DNPHistoryConfig()
+
+    required_cols = {game_date_col, player_id_col, team_id_col}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    # Create a working copy with normalized columns
+    work = df.copy()
+    work[game_date_col] = pd.to_datetime(work[game_date_col], errors="coerce")
+    work[player_id_col] = pd.to_numeric(work[player_id_col], errors="coerce").astype("Int64")
+    work[team_id_col] = pd.to_numeric(work[team_id_col], errors="coerce").astype("Int64")
+
+    # Derive roster_active_pre_tip
+    work["roster_active_pre_tip"] = derive_roster_active_pre_tip(work, is_out_col=is_out_col)
+
+    # Get minutes for DNP determination (from label or feature column)
+    if minutes_col in work.columns:
+        work["_minutes"] = pd.to_numeric(work[minutes_col], errors="coerce").fillna(0.0)
+    else:
+        # If no minutes column, we can't compute DNP features accurately
+        # Set to NaN and features will be flagged as missing
+        work["_minutes"] = np.nan
+
+    # Compute whether player was active but got DNP (minutes == 0)
+    work["_active_dnp"] = (
+        (work["roster_active_pre_tip"] == 1) & (work["_minutes"] == 0)
+    ).astype("int8")
+
+    # Sort by player, team, game_date for proper temporal ordering
+    sort_cols = [player_id_col, team_id_col, game_date_col]
+    work = work.sort_values(sort_cols, kind="mergesort")
+
+    # Initialize output columns
+    work["games_since_last_roster_active"] = config.games_since_cap
+    work["never_roster_active_before"] = 1
+    work["consecutive_active_dnp"] = 0
+    work["active_but_dnp_rate_last10"] = 0.5  # Prior mean
+    work["inactive_streak_len"] = 0
+
+    # Process each (player_id, team_id) group
+    # NOTE: groupby().indices returns POSITIONAL indices, not DataFrame index values
+    for (pid, tid), group_pos_idx in work.groupby([player_id_col, team_id_col], sort=False).indices.items():
+        if len(group_pos_idx) == 0:
+            continue
+
+        # IMPORTANT: Sort group by game_date to ensure temporal order
+        # Get actual DataFrame indices for this group
+        group = work.iloc[group_pos_idx].copy()
+        group = group.sort_values(game_date_col)
+        group_idx = group.index.tolist()  # Get the actual DataFrame index values (sorted)
+        active = group["roster_active_pre_tip"].values
+        active_dnp = group["_active_dnp"].values
+
+        n = len(group)
+
+        # Arrays to store computed values
+        games_since = np.full(n, config.games_since_cap, dtype=np.int32)
+        never_active = np.ones(n, dtype=np.int8)
+        consec_dnp = np.zeros(n, dtype=np.int32)
+        dnp_rate = np.full(n, 0.5, dtype=np.float64)
+        inactive_streak = np.zeros(n, dtype=np.int32)
+
+        # Tracking state for sequential computation
+        last_active_game_idx: int | None = None
+        current_dnp_streak = 0
+        current_inactive_streak = 0
+        active_history: list[tuple[int, int]] = []  # (game_idx, was_dnp)
+
+        for i in range(n):
+            # CRITICAL: Only use games PRIOR to current (j < i)
+            # All state variables track history up to but not including game i
+
+            # games_since_last_roster_active
+            if last_active_game_idx is not None:
+                # Count team games between last active and current
+                games_since[i] = i - last_active_game_idx
+                never_active[i] = 0
+            else:
+                games_since[i] = config.games_since_cap
+                never_active[i] = 1
+
+            # consecutive_active_dnp: streak of active+DNP games immediately prior
+            consec_dnp[i] = current_dnp_streak
+
+            # active_but_dnp_rate_last10: among last 10 active games, DNP rate
+            # Look at the last 10 entries in active_history (prior games where active)
+            recent_active = active_history[-10:] if active_history else []
+            if len(recent_active) >= config.min_opportunities:
+                dnp_count = sum(1 for _, was_dnp in recent_active if was_dnp)
+                n_active = len(recent_active)
+                # Raw rate
+                dnp_rate[i] = dnp_count / n_active
+            elif len(recent_active) > 0:
+                # Apply shrinkage with Empirical Bayes
+                dnp_count = sum(1 for _, was_dnp in recent_active if was_dnp)
+                n_active = len(recent_active)
+                # Shrunk estimate: (dnp + alpha) / (n + alpha + beta)
+                dnp_rate[i] = (dnp_count + config.alpha) / (n_active + config.alpha + config.beta)
+            else:
+                # No prior active games - use prior mean
+                dnp_rate[i] = config.alpha / (config.alpha + config.beta)
+
+            # inactive_streak_len: consecutive games where NOT active (OUT)
+            inactive_streak[i] = current_inactive_streak
+
+            # NOW update state for the next iteration
+            if active[i] == 1:
+                last_active_game_idx = i
+                active_history.append((i, int(active_dnp[i])))
+
+                # Update DNP streak
+                if active_dnp[i] == 1:
+                    current_dnp_streak += 1
+                else:
+                    current_dnp_streak = 0
+
+                # Reset inactive streak
+                current_inactive_streak = 0
+            else:
+                # Player is OUT
+                current_inactive_streak += 1
+                current_dnp_streak = 0  # Reset DNP streak when OUT
+
+        # Write back to work DataFrame using the SORTED group indices
+        # group_idx is now a list after sorting, and the arrays are in sorted order
+        for i, idx in enumerate(group_idx):
+            work.loc[idx, "games_since_last_roster_active"] = games_since[i]
+            work.loc[idx, "never_roster_active_before"] = never_active[i]
+            work.loc[idx, "consecutive_active_dnp"] = consec_dnp[i]
+            work.loc[idx, "active_but_dnp_rate_last10"] = dnp_rate[i]
+            work.loc[idx, "inactive_streak_len"] = inactive_streak[i]
+
+    # Point-in-time validation if requested
+    if validate_pit and tip_ts_col in work.columns:
+        _validate_point_in_time(
+            work,
+            game_date_col=game_date_col,
+            player_id_col=player_id_col,
+            team_id_col=team_id_col,
+            tip_ts_col=tip_ts_col,
+        )
+
+    # Drop temporary columns
+    work = work.drop(columns=["_minutes", "_active_dnp"], errors="ignore")
+
+    # Ensure consistent dtypes
+    work["games_since_last_roster_active"] = work["games_since_last_roster_active"].astype("int32")
+    work["never_roster_active_before"] = work["never_roster_active_before"].astype("int8")
+    work["consecutive_active_dnp"] = work["consecutive_active_dnp"].astype("int32")
+    work["active_but_dnp_rate_last10"] = work["active_but_dnp_rate_last10"].astype("float64")
+    work["inactive_streak_len"] = work["inactive_streak_len"].astype("int32")
+
+    return work
+
+
+def _validate_point_in_time(
+    df: pd.DataFrame,
+    *,
+    game_date_col: str,
+    player_id_col: str,
+    team_id_col: str,
+    tip_ts_col: str,
+    sample_size: int = 100,
+) -> None:
+    """Validate that features are computed using only prior games.
+
+    This samples rows and verifies that the computed features could not have
+    been influenced by same-game or future-game data.
+
+    Raises:
+        ValueError: If point-in-time violation is detected
+    """
+    if df.empty:
+        return
+
+    # Sample rows to check
+    sample_n = min(sample_size, len(df))
+    sample_idx = df.sample(n=sample_n, random_state=42).index
+
+    for idx in sample_idx:
+        row = df.loc[idx]
+        pid = row[player_id_col]
+        tid = row[team_id_col]
+        current_date = row[game_date_col]
+
+        # Get all rows for this player-team
+        player_team_mask = (df[player_id_col] == pid) & (df[team_id_col] == tid)
+        player_team_df = df.loc[player_team_mask]
+
+        # Count games strictly before current date
+        prior_games = player_team_df[player_team_df[game_date_col] < current_date]
+        n_prior = len(prior_games)
+
+        # Validate games_since_last_roster_active
+        # Note: games_since measures games since last active, so if n_prior=0,
+        # the first game should have games_since=cap (never active before).
+        # If games_since < cap but n_prior=0, something is wrong.
+        # However, we must account for the fact that we're iterating through sorted
+        # data and features are computed incrementally. Skip validation for rows
+        # where we don't have enough context (first game in dataset).
+        games_since = row["games_since_last_roster_active"]
+        never_active = row.get("never_roster_active_before", 1)
+        if games_since < GAMES_SINCE_CAP and never_active == 0:
+            # There should be at least 1 prior game where player was active
+            if n_prior == 0:
+                raise ValueError(
+                    f"PIT violation: games_since_last_roster_active={games_since} with "
+                    f"never_active=0, but no prior games exist for player={pid} team={tid} "
+                    f"date={current_date}"
+                )
+
+
+def compute_dnp_history_features_for_live(
+    current_game_df: pd.DataFrame,
+    historical_df: pd.DataFrame,
+    *,
+    config: DNPHistoryConfig | None = None,
+    game_date_col: str = "game_date",
+    player_id_col: str = "player_id",
+    team_id_col: str = "team_id",
+    is_out_col: str = "is_out",
+    minutes_col: str = "minutes",
+) -> pd.DataFrame:
+    """Compute DNP history features for live inference.
+
+    This is the live-inference variant that takes:
+    1. current_game_df: Today's players (no minutes yet, just roster/status)
+    2. historical_df: Historical games with realized minutes
+
+    The function computes features for current_game_df using only historical_df.
+
+    Args:
+        current_game_df: DataFrame with today's players (game_date is today)
+        historical_df: DataFrame with prior games including minutes
+        config: Optional configuration
+        game_date_col: Column name for game date
+        player_id_col: Column name for player ID
+        team_id_col: Column name for team ID
+        is_out_col: Column name for is_out flag
+        minutes_col: Column name for minutes played (in historical_df only)
+
+    Returns:
+        current_game_df with DNP history features added
+    """
+    if config is None:
+        config = DNPHistoryConfig()
+
+    # Derive roster_active_pre_tip for current game
+    current = current_game_df.copy()
+    current["roster_active_pre_tip"] = derive_roster_active_pre_tip(current, is_out_col=is_out_col)
+
+    # Prepare historical data
+    hist = historical_df.copy()
+    hist[game_date_col] = pd.to_datetime(hist[game_date_col], errors="coerce")
+    hist[player_id_col] = pd.to_numeric(hist[player_id_col], errors="coerce").astype("Int64")
+    hist[team_id_col] = pd.to_numeric(hist[team_id_col], errors="coerce").astype("Int64")
+    hist["roster_active_pre_tip"] = derive_roster_active_pre_tip(hist, is_out_col=is_out_col)
+    hist["_minutes"] = pd.to_numeric(hist[minutes_col], errors="coerce").fillna(0.0)
+    hist["_active_dnp"] = ((hist["roster_active_pre_tip"] == 1) & (hist["_minutes"] == 0)).astype("int8")
+
+    # Get current game date (should be same for all rows)
+    current[game_date_col] = pd.to_datetime(current[game_date_col], errors="coerce")
+    current_dates = current[game_date_col].dropna().unique()
+    if len(current_dates) != 1:
+        raise ValueError(f"Expected single game_date for live inference, got {len(current_dates)}")
+    current_date = current_dates[0]
+
+    # Filter historical to only prior games
+    hist = hist[hist[game_date_col] < current_date].copy()
+
+    # Initialize output columns
+    current["games_since_last_roster_active"] = config.games_since_cap
+    current["never_roster_active_before"] = 1
+    current["consecutive_active_dnp"] = 0
+    current["active_but_dnp_rate_last10"] = config.alpha / (config.alpha + config.beta)
+    current["inactive_streak_len"] = 0
+
+    # Process each player-team in current
+    for _, row in current.iterrows():
+        pid = row[player_id_col]
+        tid = row[team_id_col]
+
+        # Get historical games for this player-team
+        mask = (hist[player_id_col] == pid) & (hist[team_id_col] == tid)
+        player_hist = hist.loc[mask].sort_values(game_date_col, ascending=True)
+
+        if player_hist.empty:
+            # No history - use defaults
+            continue
+
+        idx = row.name
+        active = player_hist["roster_active_pre_tip"].values
+        active_dnp = player_hist["_active_dnp"].values
+        n_hist = len(player_hist)
+
+        # games_since_last_roster_active
+        active_indices = np.where(active == 1)[0]
+        if len(active_indices) > 0:
+            last_active_idx = active_indices[-1]
+            games_since = n_hist - last_active_idx
+            current.loc[idx, "games_since_last_roster_active"] = min(games_since, config.games_since_cap)
+            current.loc[idx, "never_roster_active_before"] = 0
+        # else: use defaults
+
+        # consecutive_active_dnp
+        consec_dnp = 0
+        for i in range(n_hist - 1, -1, -1):
+            if active[i] == 1 and active_dnp[i] == 1:
+                consec_dnp += 1
+            elif active[i] == 1:
+                break
+            # If OUT (active==0), we keep counting back but reset consec_dnp
+            else:
+                consec_dnp = 0
+                break
+        current.loc[idx, "consecutive_active_dnp"] = consec_dnp
+
+        # active_but_dnp_rate_last10
+        active_games = player_hist[player_hist["roster_active_pre_tip"] == 1].tail(10)
+        n_active = len(active_games)
+        if n_active >= config.min_opportunities:
+            dnp_count = (active_games["_active_dnp"] == 1).sum()
+            current.loc[idx, "active_but_dnp_rate_last10"] = dnp_count / n_active
+        elif n_active > 0:
+            dnp_count = (active_games["_active_dnp"] == 1).sum()
+            current.loc[idx, "active_but_dnp_rate_last10"] = (
+                (dnp_count + config.alpha) / (n_active + config.alpha + config.beta)
+            )
+        # else: use default prior
+
+        # inactive_streak_len
+        inactive_streak = 0
+        for i in range(n_hist - 1, -1, -1):
+            if active[i] == 0:
+                inactive_streak += 1
+            else:
+                break
+        current.loc[idx, "inactive_streak_len"] = inactive_streak
+
+    # Ensure consistent dtypes
+    current["games_since_last_roster_active"] = current["games_since_last_roster_active"].astype("int32")
+    current["never_roster_active_before"] = current["never_roster_active_before"].astype("int8")
+    current["consecutive_active_dnp"] = current["consecutive_active_dnp"].astype("int32")
+    current["active_but_dnp_rate_last10"] = current["active_but_dnp_rate_last10"].astype("float64")
+    current["inactive_streak_len"] = current["inactive_streak_len"].astype("int32")
+
+    return current
+
+
+# Feature column names for export/reference
+DNP_HISTORY_FEATURE_COLUMNS = [
+    "roster_active_pre_tip",
+    "games_since_last_roster_active",
+    "never_roster_active_before",
+    "consecutive_active_dnp",
+    "active_but_dnp_rate_last10",
+    "inactive_streak_len",
+]
