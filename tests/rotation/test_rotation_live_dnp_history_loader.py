@@ -5,45 +5,24 @@ from projections.cli.score_minutes_rotation_set_v1 import _load_rotation_histori
 
 def test_load_rotation_historical_features_for_dnp_uses_latest_run_and_filters(tmp_path) -> None:
     data_root = tmp_path
-    season_dir = data_root / "gold" / "prediction_logs_minutes" / "season=2025" / "month=12"
-    season_dir.mkdir(parents=True)
+    injuries_dir = data_root / "bronze" / "injuries_raw" / "season=2025" / "date=2025-12-10"
+    injuries_dir.mkdir(parents=True)
+    labels_dir = data_root / "labels" / "season=2025"
+    labels_dir.mkdir(parents=True)
 
-    # Two runs for the same day; the loader should pick the lexicographically-latest run id.
-    early = pd.DataFrame(
+    pd.DataFrame(
         [
-            {
-                "game_date": "2025-12-10",
-                "team_id": 1,
-                "player_id": 10,
-                "minutes": 5.0,
-                "is_out": 0,
-                "status": "AVAIL",
-            },
-            {
-                "game_date": "2025-12-10",
-                "team_id": 1,
-                "player_id": 11,
-                "minutes": 7.0,
-                "is_out": 0,
-                "status": "AVAIL",
-            },
+            {"team_id": 1, "player_id": 11, "status": "OUT"},
         ]
-    )
-    late = pd.DataFrame(
-        [
-            {
-                "game_date": "2025-12-10",
-                "team_id": 1,
-                "player_id": 10,
-                "minutes": 12.0,
-                "is_out": 0,
-                "status": "AVAIL",
-            },
-        ]
-    )
+    ).to_parquet(injuries_dir / "injuries.parquet", index=False)
 
-    early.to_parquet(season_dir / "2025-12-10_20260101T000000Z.parquet", index=False)
-    late.to_parquet(season_dir / "2025-12-10_20260101T010000Z.parquet", index=False)
+    pd.DataFrame(
+        [
+            {"game_date": "2025-12-10", "team_id": 1, "player_id": 10, "minutes": 12.0},
+            {"game_date": "2025-12-10", "team_id": 1, "player_id": 11, "minutes": 0.0},
+            {"game_date": "2025-12-10", "team_id": 2, "player_id": 10, "minutes": 30.0},
+        ]
+    ).to_parquet(labels_dir / "boxscore_labels.parquet", index=False)
 
     hist = _load_rotation_historical_features_for_dnp(
         data_root,
@@ -62,3 +41,14 @@ def test_load_rotation_historical_features_for_dnp_uses_latest_run_and_filters(t
     assert float(row["minutes"]) == 12.0
     assert int(row["is_out"]) == 0
 
+    hist_out = _load_rotation_historical_features_for_dnp(
+        data_root,
+        season=2025,
+        target_day=pd.Timestamp("2025-12-12"),
+        team_ids={1},
+        player_ids={11},
+        lookback_days=10,
+    )
+    assert len(hist_out) == 1
+    row_out = hist_out.iloc[0].to_dict()
+    assert int(row_out["is_out"]) == 1

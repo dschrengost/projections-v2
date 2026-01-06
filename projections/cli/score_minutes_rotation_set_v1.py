@@ -22,7 +22,6 @@ import pandas as pd
 import typer
 
 from projections import paths
-from projections.minutes_v1.logs import prediction_logs_base
 from projections.minutes_v1.reconcile import load_reconcile_config
 from projections.rotation.guardrails import apply_rotation_minutes_guardrails
 from projections.rotation.live_features_v1 import (
@@ -97,86 +96,101 @@ def _load_rotation_historical_features_for_dnp(
 ) -> pd.DataFrame:
     """Load realized minutes + pre-tip availability for DNP history features.
 
-    Live rotation features need DNP-history columns to match training. We source
-    the historical frame from minutes prediction logs (one parquet per slate/run),
-    selecting the latest run per day and filtering to the requested entities.
+    To match training semantics, we build the historical frame from:
+      - `labels/season={season}/boxscore_labels.parquet` for realized minutes, and
+      - `bronze/injuries_raw/season={season}/date=*/injuries.parquet` for
+        pre-tip injury report status to derive `is_out`.
+
+    This approximates the training signal where `is_out` comes from a pre-tip
+    injury snapshot. We consider a player OUT on a given game_date if they appear
+    in that date partition with `status == OUT`.
     """
     if not team_ids or not player_ids:
-        return pd.DataFrame()
-
-    logs_root = prediction_logs_base(data_root)
-    season_dir = logs_root / f"season={int(season)}"
-    if not season_dir.exists():
         return pd.DataFrame()
 
     end_day = pd.Timestamp(target_day).normalize()
     cutoff = (end_day - timedelta(days=int(lookback_days))).normalize()
     days = pd.date_range(cutoff, end_day - timedelta(days=1), freq="D")
 
-    frames: list[pd.DataFrame] = []
-    for day in days:
-        month_dir = season_dir / f"month={int(day.month):02d}"
-        if not month_dir.exists():
-            continue
-        pattern = f"{day.strftime('%Y-%m-%d')}_*.parquet"
-        candidates = sorted(month_dir.glob(pattern))
-        if not candidates:
-            continue
-        best = max(
-            candidates,
-            key=lambda path: path.stem.split("_", 1)[1] if "_" in path.stem else "",
-        )
-        try:
-            df = pd.read_parquet(
-                best,
-                columns=["game_date", "team_id", "player_id", "minutes", "is_out", "status"],
-            )
-        except Exception:  # noqa: BLE001
-            try:
-                df = pd.read_parquet(best)
-            except Exception:  # noqa: BLE001
-                continue
+    labels_path = data_root / "labels" / f"season={int(season)}" / "boxscore_labels.parquet"
+    if not labels_path.exists():
+        return pd.DataFrame()
+    try:
+        labels = pd.read_parquet(labels_path, columns=["game_date", "team_id", "player_id", "minutes"])
+    except Exception:  # noqa: BLE001
+        labels = pd.read_parquet(labels_path)
+        if not {"game_date", "team_id", "player_id", "minutes"}.issubset(labels.columns):
+            return pd.DataFrame()
+        labels = labels.loc[:, ["game_date", "team_id", "player_id", "minutes"]]
 
-        if df.empty:
-            continue
-
-        df["game_date"] = pd.to_datetime(df.get("game_date"), errors="coerce").dt.normalize()
-        df["team_id"] = pd.to_numeric(df.get("team_id"), errors="coerce").astype("Int64")
-        df["player_id"] = pd.to_numeric(df.get("player_id"), errors="coerce").astype("Int64")
-        df = df.dropna(subset=["game_date", "team_id", "player_id"]).copy()
-        if df.empty:
-            continue
-
-        # Filter early for speed.
-        df = df.loc[
-            df["team_id"].astype(int).isin(team_ids) & df["player_id"].astype(int).isin(player_ids)
-        ].copy()
-        if df.empty:
-            continue
-
-        if "minutes" not in df.columns:
-            continue
-        df["minutes"] = pd.to_numeric(df["minutes"], errors="coerce").fillna(0.0).astype(float)
-
-        if "is_out" in df.columns:
-            df["is_out"] = pd.to_numeric(df["is_out"], errors="coerce").fillna(0).astype(int)
-        elif "status" in df.columns:
-            status = df["status"].astype("string").str.upper().str.strip()
-            df["is_out"] = status.eq("OUT").fillna(False).astype(int)
-        else:
-            df["is_out"] = 0
-
-        df = df.loc[df["game_date"] < end_day].copy()
-        if df.empty:
-            continue
-
-        frames.append(df.loc[:, ["game_date", "team_id", "player_id", "is_out", "minutes"]])
-
-    if not frames:
+    labels["game_date"] = pd.to_datetime(labels["game_date"], errors="coerce").dt.normalize()
+    labels["team_id"] = pd.to_numeric(labels["team_id"], errors="coerce").astype("Int64")
+    labels["player_id"] = pd.to_numeric(labels["player_id"], errors="coerce").astype("Int64")
+    labels = labels.dropna(subset=["game_date", "team_id", "player_id"]).copy()
+    if labels.empty:
         return pd.DataFrame()
 
-    hist = pd.concat(frames, ignore_index=True)
-    hist = hist.drop_duplicates(subset=["game_date", "team_id", "player_id"], keep="last")
+    labels = labels.loc[
+        (labels["game_date"] >= cutoff)
+        & (labels["game_date"] < end_day)
+        & labels["team_id"].astype(int).isin(team_ids)
+        & labels["player_id"].astype(int).isin(player_ids)
+    ].copy()
+    if labels.empty:
+        return pd.DataFrame()
+
+    labels["minutes"] = pd.to_numeric(labels["minutes"], errors="coerce").fillna(0.0).astype(float)
+
+    # Derive is_out from injuries_raw partitions (keyed by date folder).
+    injuries_root = data_root / "bronze" / "injuries_raw" / f"season={int(season)}"
+    out_frames: list[pd.DataFrame] = []
+    if injuries_root.exists():
+        for day in days:
+            day_dir = injuries_root / f"date={day.strftime('%Y-%m-%d')}"
+            pq_path = day_dir / "injuries.parquet"
+            if not pq_path.exists():
+                continue
+            try:
+                inj = pd.read_parquet(pq_path, columns=["team_id", "player_id", "status"])
+            except Exception:  # noqa: BLE001
+                try:
+                    inj = pd.read_parquet(pq_path)
+                except Exception:  # noqa: BLE001
+                    continue
+                if not {"team_id", "player_id", "status"}.issubset(inj.columns):
+                    continue
+                inj = inj.loc[:, ["team_id", "player_id", "status"]]
+
+            if inj.empty:
+                continue
+            inj["team_id"] = pd.to_numeric(inj["team_id"], errors="coerce").astype("Int64")
+            inj["player_id"] = pd.to_numeric(inj["player_id"], errors="coerce").astype("Int64")
+            inj = inj.dropna(subset=["team_id", "player_id"]).copy()
+            if inj.empty:
+                continue
+            inj = inj.loc[
+                inj["team_id"].astype(int).isin(team_ids) & inj["player_id"].astype(int).isin(player_ids)
+            ].copy()
+            if inj.empty:
+                continue
+            status = inj["status"].astype("string").str.upper().str.strip()
+            out_like = status.eq("OUT").fillna(False)
+            inj = inj.loc[out_like, ["team_id", "player_id"]].drop_duplicates()
+            if inj.empty:
+                continue
+            inj["game_date"] = pd.Timestamp(day).normalize()
+            inj["is_out"] = 1
+            out_frames.append(inj.loc[:, ["game_date", "team_id", "player_id", "is_out"]])
+
+    if out_frames:
+        out_hist = pd.concat(out_frames, ignore_index=True).drop_duplicates(
+            subset=["game_date", "team_id", "player_id"], keep="last"
+        )
+    else:
+        out_hist = pd.DataFrame(columns=["game_date", "team_id", "player_id", "is_out"])
+
+    hist = labels.merge(out_hist, on=["game_date", "team_id", "player_id"], how="left")
+    hist["is_out"] = pd.to_numeric(hist["is_out"], errors="coerce").fillna(0).astype(int)
     return hist.reset_index(drop=True)
 
 
