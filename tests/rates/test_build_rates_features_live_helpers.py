@@ -1,10 +1,13 @@
 import pytest
 import pandas as pd
+from datetime import date
 
 from projections.cli.build_rates_features_live import (
     _compute_player_priors,
     _compute_team_context,
     _compute_vacancy_features,
+    _load_team_context,
+    _load_vacancy_features,
     _status_to_out_probability,
 )
 
@@ -176,3 +179,72 @@ def test_compute_vacancy_features_weights_season_totals_by_out_prob() -> None:
     assert row["vac_ast_szn"] == pytest.approx(6.0)
     assert row["vac_min_guard_szn"] == pytest.approx(30.0)
 
+
+def test_load_vacancy_features_backfills_and_reindexes(tmp_path, capsys) -> None:
+    data_root = tmp_path
+    base = data_root / "gold" / "rates_training_base" / "season=2025"
+    (base / "game_date=2026-01-04").mkdir(parents=True)
+    (base / "game_date=2026-01-03").mkdir(parents=True)
+
+    pd.DataFrame(
+        [
+            {"team_id": 1, "vac_min_szn": 10.0, "vac_fga_szn": 2.0, "vac_ast_szn": 1.0},
+            {"team_id": 2, "vac_min_szn": 20.0, "vac_fga_szn": 4.0, "vac_ast_szn": 2.0},
+        ]
+    ).to_parquet(base / "game_date=2026-01-04" / "rates_training_base.parquet", index=False)
+
+    pd.DataFrame(
+        [
+            {"team_id": 3, "vac_min_szn": 30.0, "vac_fga_szn": 6.0, "vac_ast_szn": 3.0},
+        ]
+    ).to_parquet(base / "game_date=2026-01-03" / "rates_training_base.parquet", index=False)
+
+    vac = _load_vacancy_features(data_root, date(2026, 1, 5), team_ids=[1, 2, 3, 4])
+    assert set(vac["team_id"].tolist()) == {1, 2, 3, 4}
+    assert len(vac) == 4
+
+    vac_by_team = vac.set_index("team_id").to_dict(orient="index")
+    assert vac_by_team[1]["vac_min_szn"] == pytest.approx(10.0)
+    assert vac_by_team[2]["vac_min_szn"] == pytest.approx(20.0)
+    assert vac_by_team[3]["vac_min_szn"] == pytest.approx(30.0)  # backfilled from older partition
+    assert vac_by_team[4]["vac_min_szn"] == pytest.approx(0.0)  # reindexed default
+
+    captured = capsys.readouterr()
+    assert "Vacancy raw teams" in captured.out
+    assert "Vacancy missing teams" in captured.err
+    assert "4" in captured.err
+
+
+def test_load_team_context_backfills_and_reindexes(tmp_path, capsys) -> None:
+    data_root = tmp_path
+    base = data_root / "gold" / "rates_training_base" / "season=2025"
+    (base / "game_date=2026-01-04").mkdir(parents=True)
+    (base / "game_date=2026-01-03").mkdir(parents=True)
+
+    pd.DataFrame(
+        [
+            {"team_id": 1, "team_pace_szn": 98.0, "team_off_rtg_szn": 112.0, "team_def_rtg_szn": 110.0},
+            {"team_id": 2, "team_pace_szn": 101.0, "team_off_rtg_szn": 108.0, "team_def_rtg_szn": 109.0},
+        ]
+    ).to_parquet(base / "game_date=2026-01-04" / "rates_training_base.parquet", index=False)
+
+    pd.DataFrame(
+        [
+            {"team_id": 3, "team_pace_szn": 99.0, "team_off_rtg_szn": 111.0, "team_def_rtg_szn": 107.0},
+        ]
+    ).to_parquet(base / "game_date=2026-01-03" / "rates_training_base.parquet", index=False)
+
+    ctx = _load_team_context(data_root, date(2026, 1, 5), team_ids=[1, 2, 3, 4])
+    assert set(ctx["team_id"].tolist()) == {1, 2, 3, 4}
+    assert len(ctx) == 4
+
+    ctx_by_team = ctx.set_index("team_id").to_dict(orient="index")
+    assert ctx_by_team[1]["team_pace_szn"] == pytest.approx(98.0)
+    assert ctx_by_team[2]["team_pace_szn"] == pytest.approx(101.0)
+    assert ctx_by_team[3]["team_pace_szn"] == pytest.approx(99.0)  # backfilled from older partition
+    assert ctx_by_team[4]["team_pace_szn"] == pytest.approx(100.0)  # reindexed default
+
+    captured = capsys.readouterr()
+    assert "Team context raw teams" in captured.out
+    assert "Team context missing teams" in captured.err
+    assert "4" in captured.err

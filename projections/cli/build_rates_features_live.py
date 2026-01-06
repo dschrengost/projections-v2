@@ -511,60 +511,197 @@ def _load_tracking_features(
     return latest[available].copy()
 
 
+_VACANCY_DEFAULTS: dict[str, float] = {
+    "vac_min_szn": 0.0,
+    "vac_fga_szn": 0.0,
+    "vac_ast_szn": 0.0,
+    "vac_min_guard_szn": 0.0,
+    "vac_min_wing_szn": 0.0,
+    "vac_min_big_szn": 0.0,
+}
+
+_TEAM_CONTEXT_DEFAULTS: dict[str, float] = {
+    # Keep aligned with build_rates_features() fallback.
+    "team_pace_szn": 100.0,
+    "team_off_rtg_szn": 100.0,
+    "team_def_rtg_szn": 100.0,
+}
+
+
+def _normalize_team_ids(team_ids: list[int]) -> list[int]:
+    normalized: list[int] = []
+    for value in team_ids:
+        try:
+            normalized.append(int(value))
+        except Exception:  # noqa: BLE001
+            continue
+    return sorted(set(normalized))
+
+
+def _load_team_features_from_rates_training_base(
+    *,
+    season_dir: Path,
+    game_date: date,
+    team_ids: set[int],
+    required_cols: list[str],
+    max_days_back: int,
+) -> pd.DataFrame:
+    """Backfill team features per team_id from prior rates_training_base partitions."""
+    if not team_ids:
+        return pd.DataFrame(columns=required_cols)
+
+    candidates: list[tuple[pd.Timestamp, Path]] = []
+    target_day = pd.Timestamp(game_date).normalize()
+    for day_dir in season_dir.glob("game_date=*"):
+        try:
+            day_str = day_dir.name.split("=", 1)[1]
+            day = pd.Timestamp(day_str).normalize()
+        except Exception:  # noqa: BLE001
+            continue
+        if day >= target_day:
+            continue
+        pq_path = day_dir / "rates_training_base.parquet"
+        if pq_path.exists():
+            candidates.append((day, pq_path))
+
+    if not candidates:
+        return pd.DataFrame(columns=required_cols)
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    remaining = set(team_ids)
+    frames: list[pd.DataFrame] = []
+
+    for idx, (_day, pq_path) in enumerate(candidates):
+        if not remaining or idx >= max_days_back:
+            break
+        try:
+            day_df = pd.read_parquet(pq_path, columns=required_cols)
+        except Exception:  # noqa: BLE001
+            try:
+                day_df = pd.read_parquet(pq_path)
+            except Exception:  # noqa: BLE001
+                continue
+            if "team_id" not in day_df.columns:
+                continue
+
+        if day_df.empty:
+            continue
+        day_df["team_id"] = pd.to_numeric(day_df["team_id"], errors="coerce").astype("Int64")
+        day_df = day_df.dropna(subset=["team_id"])
+        if day_df.empty:
+            continue
+        day_df = day_df.loc[day_df["team_id"].astype(int).isin(remaining)].copy()
+        if day_df.empty:
+            continue
+
+        feature_cols = [col for col in required_cols if col != "team_id" and col in day_df.columns]
+        if not feature_cols:
+            continue
+        grouped = day_df.groupby("team_id", as_index=False)[feature_cols].mean()
+        frames.append(grouped)
+        found = set(grouped["team_id"].dropna().astype(int).tolist())
+        remaining -= found
+
+    if not frames:
+        return pd.DataFrame(columns=required_cols)
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined.dropna(subset=["team_id"]).drop_duplicates(subset=["team_id"], keep="first")
+    combined["team_id"] = combined["team_id"].astype(int)
+    for col in required_cols:
+        if col == "team_id":
+            continue
+        if col in combined.columns:
+            combined[col] = pd.to_numeric(combined[col], errors="coerce")
+    return combined.reset_index(drop=True)
+
+
+def _reindex_team_features(
+    *,
+    slate_team_ids: list[int],
+    df: pd.DataFrame,
+    feature_defaults: dict[str, float],
+) -> pd.DataFrame:
+    """Ensure one row per slate team_id, filling feature defaults."""
+    slate = pd.DataFrame({"team_id": _normalize_team_ids(slate_team_ids)})
+    if slate.empty:
+        out = pd.DataFrame(columns=["team_id", *feature_defaults.keys()])
+        for col, default in feature_defaults.items():
+            out[col] = out.get(col, pd.Series(dtype=float)).fillna(default)
+        return out
+
+    if df is None or df.empty or "team_id" not in df.columns:
+        out = slate.copy()
+        for col, default in feature_defaults.items():
+            out[col] = default
+        return out.reset_index(drop=True)
+
+    work = df.copy()
+    work["team_id"] = pd.to_numeric(work["team_id"], errors="coerce").astype("Int64")
+    work = work.dropna(subset=["team_id"])
+    work["team_id"] = work["team_id"].astype(int)
+
+    keep_cols = ["team_id", *[c for c in feature_defaults.keys() if c in work.columns]]
+    work = work.loc[:, keep_cols].drop_duplicates(subset=["team_id"], keep="first")
+
+    out = slate.merge(work, on="team_id", how="left")
+    for col, default in feature_defaults.items():
+        if col not in out.columns:
+            out[col] = default
+        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(default).astype(float)
+    return out.reset_index(drop=True)
+
+
 def _load_vacancy_features(
     data_root: Path,
     game_date: date,
     team_ids: list[int],
 ) -> pd.DataFrame:
-    """Load vacancy features from injuries.
+    """Load vacancy features for the slate teams.
 
-    For live scoring, we compute these from the most recent training base
-    that has vacated team features.
+    rates_training_base is partitioned by game_date and only contains teams active
+    on that date. For a slate, many teams may not have played on the most recent
+    prior date, so we backfill per-team from earlier partitions and then reindex
+    to the slate teams, filling defaults for any teams still missing.
     """
     training_base_root = data_root / "gold" / "rates_training_base"
     season_year = game_date.year if game_date.month >= 8 else game_date.year - 1
     season_dir = training_base_root / f"season={season_year}"
 
     if not season_dir.exists():
-        return pd.DataFrame()
+        return _reindex_team_features(
+            slate_team_ids=team_ids,
+            df=pd.DataFrame(),
+            feature_defaults=_VACANCY_DEFAULTS,
+        )
 
-    # Get the most recent day's vacancy features per team
-    frames = []
-    for day_dir in sorted(season_dir.glob("game_date=*"), reverse=True):
-        try:
-            day = pd.Timestamp(day_dir.name.split("=", 1)[1]).date()
-        except (ValueError, IndexError):
-            continue
-        if day >= game_date:
-            continue
-        parquet_path = day_dir / "rates_training_base.parquet"
-        if parquet_path.exists():
-            df = pd.read_parquet(parquet_path)
-            if not frames:
-                frames.append(df)
-            break  # Only need the most recent
+    slate_team_ids = _normalize_team_ids(team_ids)
+    raw = _load_team_features_from_rates_training_base(
+        season_dir=season_dir,
+        game_date=game_date,
+        team_ids=set(slate_team_ids),
+        required_cols=["team_id", *_VACANCY_DEFAULTS.keys()],
+        max_days_back=21,
+    )
 
-    if not frames:
-        return pd.DataFrame()
+    present = (
+        sorted(set(raw["team_id"].dropna().astype(int).tolist()))
+        if (raw is not None and not raw.empty and "team_id" in raw.columns)
+        else []
+    )
+    missing = sorted(set(slate_team_ids) - set(present))
+    typer.echo(f"[rates-live] Vacancy raw teams: {present}")
+    if missing:
+        typer.echo(
+            f"[rates-live] Vacancy missing teams (filled defaults): {missing}",
+            err=True,
+        )
 
-    df = pd.concat(frames, ignore_index=True)
-    vac_cols = [
-        "team_id",
-        "vac_min_szn",
-        "vac_fga_szn",
-        "vac_ast_szn",
-        "vac_min_guard_szn",
-        "vac_min_wing_szn",
-        "vac_min_big_szn",
-    ]
-    available = [c for c in vac_cols if c in df.columns]
-    if not available:
-        return pd.DataFrame()
-
-    # Get team-level averages from the most recent games
-    team_vac = df.groupby("team_id")[available[1:]].mean().reset_index()
-    team_vac = team_vac[team_vac["team_id"].isin(team_ids)]
-    return team_vac
+    return _reindex_team_features(
+        slate_team_ids=slate_team_ids,
+        df=raw,
+        feature_defaults=_VACANCY_DEFAULTS,
+    )
 
 
 def _load_team_context(
@@ -572,46 +709,51 @@ def _load_team_context(
     game_date: date,
     team_ids: list[int],
 ) -> pd.DataFrame:
-    """Load team pace/rating context features."""
+    """Load team pace/rating context features for the slate teams.
+
+    rates_training_base is partitioned by game_date and only contains teams active
+    on that date. For a slate, many teams may not have played on the most recent
+    prior date, so we backfill per-team from earlier partitions and then reindex
+    to the slate teams, filling defaults for any teams still missing.
+    """
     training_base_root = data_root / "gold" / "rates_training_base"
     season_year = game_date.year if game_date.month >= 8 else game_date.year - 1
     season_dir = training_base_root / f"season={season_year}"
 
     if not season_dir.exists():
-        return pd.DataFrame()
+        return _reindex_team_features(
+            slate_team_ids=team_ids,
+            df=pd.DataFrame(),
+            feature_defaults=_TEAM_CONTEXT_DEFAULTS,
+        )
 
-    frames = []
-    for day_dir in sorted(season_dir.glob("game_date=*"), reverse=True):
-        try:
-            day = pd.Timestamp(day_dir.name.split("=", 1)[1]).date()
-        except (ValueError, IndexError):
-            continue
-        if day >= game_date:
-            continue
-        parquet_path = day_dir / "rates_training_base.parquet"
-        if parquet_path.exists():
-            df = pd.read_parquet(parquet_path)
-            if not frames:
-                frames.append(df)
-            break
+    slate_team_ids = _normalize_team_ids(team_ids)
+    raw = _load_team_features_from_rates_training_base(
+        season_dir=season_dir,
+        game_date=game_date,
+        team_ids=set(slate_team_ids),
+        required_cols=["team_id", *_TEAM_CONTEXT_DEFAULTS.keys()],
+        max_days_back=21,
+    )
 
-    if not frames:
-        return pd.DataFrame()
+    present = (
+        sorted(set(raw["team_id"].dropna().astype(int).tolist()))
+        if (raw is not None and not raw.empty and "team_id" in raw.columns)
+        else []
+    )
+    missing = sorted(set(slate_team_ids) - set(present))
+    typer.echo(f"[rates-live] Team context raw teams: {present}")
+    if missing:
+        typer.echo(
+            f"[rates-live] Team context missing teams (filled defaults): {missing}",
+            err=True,
+        )
 
-    df = pd.concat(frames, ignore_index=True)
-    ctx_cols = [
-        "team_id",
-        "team_pace_szn",
-        "team_off_rtg_szn",
-        "team_def_rtg_szn",
-    ]
-    available = [c for c in ctx_cols if c in df.columns]
-    if len(available) < 2:
-        return pd.DataFrame()
-
-    team_ctx = df.groupby("team_id")[available[1:]].mean().reset_index()
-    team_ctx = team_ctx[team_ctx["team_id"].isin(team_ids)]
-    return team_ctx
+    return _reindex_team_features(
+        slate_team_ids=slate_team_ids,
+        df=raw,
+        feature_defaults=_TEAM_CONTEXT_DEFAULTS,
+    )
 
 
 def build_rates_features(
@@ -906,6 +1048,7 @@ def main(
         typer.echo(
             f"[rates-live] Found {len(player_ids)} players, {len(team_ids)} teams"
         )
+        typer.echo(f"[rates-live] Slate team_ids: {_normalize_team_ids(team_ids)}")
 
         # Load component data
         season_aggs = _load_season_aggregates(data_root, game_date, player_ids)
