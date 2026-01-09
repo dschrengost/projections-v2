@@ -57,8 +57,10 @@ def apply_rotation_minutes_guardrails(
     dnp_tail_minutes_threshold: float = 8.0,
     cap_max_minutes: float | None = None,
     pathology_max_minutes_threshold: float = 48.0,
+    pathology_min_max_minutes_threshold: float = 30.0,
     pathology_n_gt_40_threshold: int = 3,
     pathology_top5_sum_threshold: float = 210.0,
+    pathology_min_top5_sum_threshold: float = 125.0,
     team_target_minutes: float = 240.0,
 ) -> RotationGuardrailResult:
     """Apply guardrails and return guarded p50 minutes.
@@ -139,8 +141,9 @@ def apply_rotation_minutes_guardrails(
     )
     fixed_sum = df_team.loc[df_team["fixed"]].groupby(group_cols, sort=False)["guarded"].sum()
     total_sum = df_team.groupby(group_cols, sort=False)["guarded"].sum()
-    adjustable_sum = (total_sum - fixed_sum).fillna(total_sum)
-    target_minus_fixed = (float(team_target_minutes) - fixed_sum).fillna(float(team_target_minutes))
+    fixed_sum = fixed_sum.reindex(total_sum.index, fill_value=0.0)
+    adjustable_sum = total_sum - fixed_sum
+    target_minus_fixed = float(team_target_minutes) - fixed_sum
     # Avoid divide-by-zero; if adjustable_sum==0, keep as-is.
     scale = (target_minus_fixed / adjustable_sum.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
     scale = scale.clip(lower=0.0)
@@ -211,33 +214,56 @@ def apply_rotation_minutes_guardrails(
     max_thr = float(pathology_max_minutes_threshold)
     if not np.isfinite(max_thr) or max_thr <= 0.0:
         raise ValueError("pathology_max_minutes_threshold must be a positive, finite float")
+    min_max_thr = float(pathology_min_max_minutes_threshold)
+    if not np.isfinite(min_max_thr):
+        min_max_thr = 0.0
+    if min_max_thr < 0.0:
+        min_max_thr = 0.0
     n_thr = int(pathology_n_gt_40_threshold)
     if n_thr < 1:
         n_thr = 1
     top5_thr = float(pathology_top5_sum_threshold)
     if not np.isfinite(top5_thr) or top5_thr <= 0.0:
         raise ValueError("pathology_top5_sum_threshold must be a positive, finite float")
+    min_top5_thr = float(pathology_min_top5_sum_threshold)
+    if not np.isfinite(min_top5_thr):
+        min_top5_thr = 0.0
+    if min_top5_thr < 0.0:
+        min_top5_thr = 0.0
 
     max_trigger = metrics_team["max_minutes"] > max_thr
+    min_max_trigger = metrics_team["max_minutes"] < min_max_thr if min_max_thr > 0.0 else pd.Series(False, index=metrics_team.index)
     n_trigger = metrics_team["n_gt_40"] >= n_thr
     top5_trigger = metrics_team["top5_sum"] >= top5_thr
+    min_top5_trigger = metrics_team["top5_sum"] < min_top5_thr if min_top5_thr > 0.0 else pd.Series(False, index=metrics_team.index)
 
-    fallback_team = max_trigger | n_trigger | top5_trigger
+    # Flatness trigger: avoid overlays that spread minutes unrealistically thin.
+    # This is conservative: we fall back if either the max minutes or the top-5
+    # concentration is below the configured floor.
+    flat_trigger = min_max_trigger | min_top5_trigger
+
+    fallback_team = max_trigger | n_trigger | top5_trigger | flat_trigger
     if fallback_team.any():
         def _reason_row(row: pd.Series) -> str:
             parts: list[str] = []
             if bool(row.get("max_trigger", False)):
                 parts.append("max_minutes")
+            if bool(row.get("min_max_trigger", False)):
+                parts.append("min_max_minutes")
             if bool(row.get("n_trigger", False)):
                 parts.append("n_gt_40")
             if bool(row.get("top5_trigger", False)):
                 parts.append("top5_sum")
+            if bool(row.get("min_top5_trigger", False)):
+                parts.append("min_top5_sum")
             return ",".join(parts) if parts else "unknown"
 
         metrics_team = metrics_team.copy()
         metrics_team["max_trigger"] = max_trigger.to_numpy(dtype=bool)
+        metrics_team["min_max_trigger"] = min_max_trigger.to_numpy(dtype=bool)
         metrics_team["n_trigger"] = n_trigger.to_numpy(dtype=bool)
         metrics_team["top5_trigger"] = top5_trigger.to_numpy(dtype=bool)
+        metrics_team["min_top5_trigger"] = min_top5_trigger.to_numpy(dtype=bool)
         metrics_team["pathology_fallback"] = fallback_team.to_numpy(dtype=bool)
         metrics_team["pathology_reason"] = metrics_team.apply(_reason_row, axis=1)
 
@@ -366,8 +392,10 @@ def apply_rotation_minutes_guardrails(
         "tail_minutes_dnp_pre_clamp_max": float(team_game["tail_minutes_dnp_pre_clamp"].max()) if len(team_game) else 0.0,
         "pathology": {
             "max_minutes_threshold": float(max_thr),
+            "min_max_minutes_threshold": float(min_max_thr),
             "n_gt_40_threshold": int(n_thr),
             "top5_sum_threshold": float(top5_thr),
+            "min_top5_sum_threshold": float(min_top5_thr),
             "fallback_team_games": int(team_game.get("pathology_fallback", pd.Series(dtype=bool)).sum()) if len(team_game) else 0,
         },
     }

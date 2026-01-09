@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -11,7 +13,6 @@ import typer
 
 from projections import paths
 from projections.etl import daily_lineups as daily_lineups_etl
-from projections.etl import injuries as injuries_etl
 from projections.etl import odds as odds_etl
 from projections.etl import roster_nightly as roster_etl
 
@@ -55,6 +56,62 @@ def _resolve_month(target_day: pd.Timestamp, month_override: Optional[int]) -> i
 
 def _echo_stage(message: str) -> None:
     typer.echo(f"[live] {message}")
+
+
+def _run_injuries_subprocess(
+    *,
+    start_dt: datetime,
+    end_dt: datetime,
+    season_value: int,
+    month_value: int,
+    data_root: Path,
+    schedule: List[str],
+    injury_player_timeout: float,
+    schedule_timeout: float,
+    injury_timeout: float,
+) -> bool:
+    """Run injuries ETL in a subprocess to isolate JVM/tabula crashes."""
+    cmd = [
+        sys.executable,
+        "-m",
+        "projections.etl.injuries",
+        "--start",
+        start_dt.date().isoformat(),
+        "--end",
+        end_dt.date().isoformat(),
+        "--season",
+        str(season_value),
+        "--month",
+        str(month_value),
+        "--data-root",
+        str(data_root),
+        "--timeout",
+        str(injury_player_timeout),
+        "--schedule-timeout",
+        str(schedule_timeout),
+        "--injury-timeout",
+        str(injury_timeout),
+    ]
+    for schedule_path in schedule:
+        cmd.extend(["--schedule", schedule_path])
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.stdout:
+        typer.echo(result.stdout.rstrip())
+    if result.stderr:
+        typer.echo(result.stderr.rstrip(), err=True)
+    if result.returncode != 0:
+        typer.echo(
+            f"[live] warning: injuries ETL exited with code {result.returncode}; continuing",
+            err=True,
+        )
+        return False
+    return True
 
 
 @app.command()
@@ -124,19 +181,14 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
 
     if injuries:
         _echo_stage("running injuries ETL")
-        injuries_etl.main(
-            injuries_json=None,
-            schedule=schedule,
-            use_scraper=True,
-            start=start_dt,
-            end=end_dt,
-            season=season_value,
-            month=month_value,
+        _run_injuries_subprocess(
+            start_dt=start_dt,
+            end_dt=end_dt,
+            season_value=season_value,
+            month_value=month_value,
             data_root=data_root,
-            bronze_root=None,
-            bronze_out=None,
-            silver_out=None,
-            scraper_timeout=injury_player_timeout,
+            schedule=schedule,
+            injury_player_timeout=injury_player_timeout,
             schedule_timeout=schedule_timeout,
             injury_timeout=injury_timeout,
         )
@@ -182,19 +234,22 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
 
     if odds:
         _echo_stage("running odds ETL")
-        odds_etl.main(
-            start=start_dt,
-            end=end_dt,
-            season=season_value,
-            month=month_value,
-            schedule=schedule,
-            data_root=data_root,
-            bronze_root=None,
-            bronze_out=None,
-            silver_out=None,
-            scraper_timeout=odds_timeout,
-            schedule_timeout=schedule_timeout,
-        )
+        try:
+            odds_etl.main(
+                start=start_dt,
+                end=end_dt,
+                season=season_value,
+                month=month_value,
+                schedule=schedule,
+                data_root=data_root,
+                bronze_root=None,
+                bronze_out=None,
+                silver_out=None,
+                scraper_timeout=odds_timeout,
+                schedule_timeout=schedule_timeout,
+            )
+        except Exception as exc:  # pragma: no cover - keep pipeline alive when odds feed is down
+            typer.echo(f"[live] warning: odds ETL failed ({exc}); continuing without odds", err=True)
     else:
         _echo_stage("skipping odds stage")
 

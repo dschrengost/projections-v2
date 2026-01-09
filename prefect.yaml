@@ -69,3 +69,41 @@ deployments:
   schedules:
     - cron: "30 5 * * *"
       timezone: "America/New_York"
+
+- name: gamerotation-scrape
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: Scrape NBA Stats GameRotation daily (updates rotation_v1 inputs).
+  entrypoint: prefect_flows/gamerotation_scrape.py:gamerotation_scrape_flow
+  parameters: {}
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+  schedules:
+    - cron: "15 4 * * *"
+      timezone: "America/New_York"
+
+- name: rotation-priors-update
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: Build rotation_v1 + rotation_priors_v1 after gamerotation scrape.
+  entrypoint: prefect_flows/rotation_priors_update.py:rotation_priors_update_flow
+  parameters:
+    overwrite_rotation_v1: false
+    retry_quarantined: true
+    clean_priors: false
+    priors_windows: null
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+  schedules:
+    - cron: "45 4 * * *"
+      timezone: "America/New_York"

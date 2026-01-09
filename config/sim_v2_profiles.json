@@ -110,7 +110,73 @@
         "k_default": 0.65
       },
       "rates_noise": {
-        "enabled": false,
+        "enabled": true,
+        "split": "val",
+        "run_id": "rates_v1_stage5_fta_20260107_231545"
+      },
+      "minutes_noise": {
+        "enabled": true,
+        "sigma_min": 1.0
+      },
+      "team_sigma_scale": 1.0,
+      "player_sigma_scale": 1.0,
+      "rates_sigma_scale": 1.0,
+      "worlds_per_chunk": 2000,
+      "seed": 12345,
+      "min_play_prob": 0.0,
+      "use_play_prob_masking": false,
+      "team_factor_sigma": 0.08,
+      "team_factor_gamma": 1.0,
+      "enforce_team_240": true,
+      "vegas_anchoring": {
+        "enabled": true,
+        "drift_pct": 0.05
+      },
+      "efficiency_scoring": true,
+      "game_script": {
+        "enabled": false
+      },
+      "usage_shares": {
+        "enabled": true,
+        "targets": [
+          "fga",
+          "tov"
+        ],
+        "backend": "rate_weighted",
+        "run_id": null,
+        "shrink": 0.75,
+        "share_temperature": 0.7,
+        "share_noise_std": 0.25,
+        "min_minutes_active_cutoff": 2.0,
+        "fallback": "rate_weighted"
+      },
+      "vacancy_mode": "game",
+      "preserve_input_rotation": true,
+      "note": "sim_v3: rates_noise.enabled=true (Normal team/player shocks). preserve_input_rotation=true disables sim rotation pruning."
+    },
+    "sim_v3_rates_noise": {
+      "mean_source": "rates",
+      "minutes_source": "minutes_v1",
+      "rates_source": "rates_v1_live",
+      "rates_run_id": null,
+      "minutes_run_id": null,
+      "fpts_run_id": null,
+      "rotation": {
+        "max_size": 8,
+        "protected_size": 6
+      },
+      "worlds": {
+        "n_worlds": 25000,
+        "batch_size": 5000
+      },
+      "noise": {
+        "epsilon_dist": "student_t",
+        "nu": 5,
+        "sigma_mode": "k_times_mu",
+        "k_default": 0.65
+      },
+      "rates_noise": {
+        "enabled": true,
         "split": "val",
         "run_id": "rates_v1_reconciled_20251205_093151"
       },
@@ -134,32 +200,7 @@
       },
       "efficiency_scoring": true,
       "game_script": {
-        "enabled": false,
-        "margin_std": 13.4,
-        "spread_coef": -0.726,
-        "quantile_targets": {
-          "blowout_win": {
-            "starter": 0.35,
-            "bench": 0.55
-          },
-          "comfortable_win": {
-            "starter": 0.45,
-            "bench": 0.52
-          },
-          "close": {
-            "starter": 0.75,
-            "bench": 0.48
-          },
-          "comfortable_loss": {
-            "starter": 0.50,
-            "bench": 0.50
-          },
-          "blowout_loss": {
-            "starter": 0.30,
-            "bench": 0.45
-          }
-        },
-        "rotation_p50_threshold": 20.0
+        "enabled": false
       },
       "usage_shares": {
         "enabled": false,
@@ -176,7 +217,7 @@
       },
       "vacancy_mode": "game",
       "preserve_input_rotation": true,
-      "note": "sim_v3: Learned FGA usage shares (LGBM residual-on-baseline). FTA/TOV unchanged. preserve_input_rotation=true disables sim rotation pruning."
+      "note": "sim_v3_rates_noise: Same as sim_v3 but with rates_noise.enabled=true (Normal team/player shocks instead of student-t heuristic)."
     },
     "today": {
       "mean_source": "rates",

@@ -690,8 +690,8 @@ def _compute_team_context(stats: pd.DataFrame) -> pd.DataFrame:
     )
     team_game["poss"] = team_game["fga"] + 0.44 * team_game["fta"] + team_game["tov"]
 
-    opp_map = team_game[["season", "game_id", "team_id", "pts_for", "poss"]].rename(
-        columns={"team_id": "opponent_id", "pts_for": "pts_against", "poss": "opp_poss"}
+    opp_map = team_game[["season", "game_id", "team_id", "pts_for", "poss", "fta"]].rename(
+        columns={"team_id": "opponent_id", "pts_for": "pts_against", "poss": "opp_poss", "fta": "fta_against"}
     )
     team_game = team_game.merge(opp_map, on=["season", "game_id", "opponent_id"], how="left")
 
@@ -700,14 +700,18 @@ def _compute_team_context(stats: pd.DataFrame) -> pd.DataFrame:
     team_game["cum_poss"] = team_game.groupby(["season", "team_id"])["poss"].cumsum().shift(1)
     team_game["cum_pts_for"] = team_game.groupby(["season", "team_id"])["pts_for"].cumsum().shift(1)
     team_game["cum_pts_against"] = team_game.groupby(["season", "team_id"])["pts_against"].cumsum().shift(1)
+    # FTA allowed = opponent's FTA when playing against this team (defensive foul-drawing exposure)
+    team_game["cum_fta_allowed"] = team_game.groupby(["season", "team_id"])["fta_against"].cumsum().shift(1)
 
     games = team_game["games_played_prior"].replace(0, np.nan)
     poss_denom = team_game["cum_poss"].replace(0.0, np.nan)
     team_game["team_pace_szn"] = team_game["cum_poss"] / games
     team_game["team_off_rtg_szn"] = 100.0 * (team_game["cum_pts_for"] / poss_denom)
     team_game["team_def_rtg_szn"] = 100.0 * (team_game["cum_pts_against"] / poss_denom)
+    # FTA allowed per game (how many FTA the team gives up on defense)
+    team_game["team_fta_allowed_per_game"] = team_game["cum_fta_allowed"] / games
 
-    return team_game[["season", "game_id", "team_id", "team_pace_szn", "team_off_rtg_szn", "team_def_rtg_szn"]]
+    return team_game[["season", "game_id", "team_id", "team_pace_szn", "team_off_rtg_szn", "team_def_rtg_szn", "team_fta_allowed_per_game"]]
 
 
 def build_features(
@@ -783,7 +787,9 @@ def build_features(
 
     # Labels (per-minute rates)
     minutes = df["minutes_actual"]
-    df["fga2_per_min"] = (df["fga"] - df["three_pa"]) / minutes
+    # Raw fga2 (2-point attempts) for cumulative stats
+    df["fga2"] = (df["fga"] - df["three_pa"]).clip(lower=0.0)
+    df["fga2_per_min"] = df["fga2"] / minutes
     df["fga3_per_min"] = df["three_pa"] / minutes
     df["fta_per_min"] = df["fta"] / minutes
     df["ast_per_min"] = df["assists"] / minutes
@@ -866,6 +872,10 @@ def build_features(
         ("rebounds_total", "season_reb_per_min"),
         ("steals", "season_stl_per_min"),
         ("blocks", "season_blk_per_min"),
+        # Additional split features for stage4+
+        ("fga2", "season_fga2_per_min"),
+        ("oreb", "season_oreb_per_min"),
+        ("dreb", "season_dreb_per_min"),
     ]
     for col, out_col in cumulative_specs:
         values = df["oreb"] + df["dreb"] if col == "rebounds_total" else df[col]
@@ -876,6 +886,95 @@ def build_features(
             seasons=df["season"],
             min_weight=10.0,
         )
+
+    # Sample size features (for shrinkage calibration)
+    df["n_games_season"] = (
+        df.groupby(["season", "player_id"]).cumcount()  # 0-indexed count of prior games
+    )
+    df["season_minutes_sum"] = (
+        df.groupby(["season", "player_id"])["minutes_actual"]
+        .cumsum()
+        .shift(1)
+        .fillna(0.0)
+    )
+
+    # Recency features: rolling windows of last 1/3/5/10 games
+    # These capture recent form and are important predictors
+    typer.echo("[rates_base] computing recency features (last 1/3/5/10 games)...")
+    df = df.sort_values(["player_id", "season", "tip_ts"]).reset_index(drop=True)
+
+    recency_stat_cols = [
+        ("fga2", "fga2_per_min"),
+        ("fga3", "fga3_per_min"),
+        ("fta", "fta_per_min"),
+        ("ast", "ast_per_min"),
+        ("tov", "tov_per_min"),
+        ("oreb", "oreb_per_min"),
+        ("dreb", "dreb_per_min"),
+        ("stl", "stl_per_min"),
+        ("blk", "blk_per_min"),
+    ]
+
+    # We need raw stats for rolling, compute them from per-min rates * minutes
+    for stat_name, rate_col in recency_stat_cols:
+        df[f"_raw_{stat_name}"] = df[rate_col] * df["minutes_actual"]
+
+    windows = [1, 3, 5, 10]
+    for window in windows:
+        pfx = f"last{window}"
+        # Rolling sum of minutes (shifted to exclude current game)
+        df[f"{pfx}_minutes_sum"] = (
+            df.groupby(["season", "player_id"])["minutes_actual"]
+            .apply(lambda x: x.shift(1).rolling(window, min_periods=1).sum())
+            .reset_index(level=[0, 1], drop=True)
+            .fillna(0.0)
+        )
+        # Rolling per-minute rates for each stat
+        for stat_name, rate_col in recency_stat_cols:
+            raw_col = f"_raw_{stat_name}"
+            # Rolling sum of stat (shifted)
+            stat_sum = (
+                df.groupby(["season", "player_id"])[raw_col]
+                .apply(lambda x: x.shift(1).rolling(window, min_periods=1).sum())
+                .reset_index(level=[0, 1], drop=True)
+                .fillna(0.0)
+            )
+            # Divide by rolling minutes sum to get per-minute rate
+            df[f"{pfx}_{stat_name}_per_min"] = np.where(
+                df[f"{pfx}_minutes_sum"] > 0,
+                stat_sum / df[f"{pfx}_minutes_sum"],
+                np.nan,
+            )
+
+    # Clean up temporary raw stat columns
+    for stat_name, _ in recency_stat_cols:
+        df.drop(columns=[f"_raw_{stat_name}"], inplace=True)
+
+    # Fill NaN recency features with season-to-date values (fallback for early-season games)
+    for window in windows:
+        pfx = f"last{window}"
+        df[f"{pfx}_minutes_sum"] = df[f"{pfx}_minutes_sum"].fillna(0.0)
+        for stat_name, rate_col in recency_stat_cols:
+            szn_col = f"season_{stat_name}_per_min" if f"season_{stat_name}_per_min" in df.columns else None
+            # Map stat names to season column names
+            szn_map = {
+                "fga2": "season_fga_per_min",  # Approximate with total FGA
+                "fga3": "season_3pa_per_min",
+                "fta": "season_fta_per_min",
+                "ast": "season_ast_per_min",
+                "tov": "season_tov_per_min",
+                "oreb": "season_reb_per_min",  # Approximate with total REB
+                "dreb": "season_reb_per_min",  # Approximate with total REB
+                "stl": "season_stl_per_min",
+                "blk": "season_blk_per_min",
+            }
+            fallback_col = szn_map.get(stat_name)
+            if fallback_col and fallback_col in df.columns:
+                df[f"{pfx}_{stat_name}_per_min"] = df[f"{pfx}_{stat_name}_per_min"].fillna(df[fallback_col])
+            else:
+                df[f"{pfx}_{stat_name}_per_min"] = df[f"{pfx}_{stat_name}_per_min"].fillna(0.0)
+
+    typer.echo("[rates_base] recency features computed")
 
     # Days rest (clipped 0–3+)
     df["days_rest"] = (
@@ -950,6 +1049,7 @@ def build_features(
         df["team_def_rtg_szn"] = np.nan
         df["opp_pace_szn"] = np.nan
         df["opp_def_rtg_szn"] = np.nan
+        df["opp_fta_allowed_per_game"] = np.nan
         pace_non_null = 0.0
         def_non_null = 0.0
     else:
@@ -960,9 +1060,10 @@ def build_features(
                 "team_pace_szn": "opp_pace_szn",
                 "team_off_rtg_szn": "opp_off_rtg_szn",
                 "team_def_rtg_szn": "opp_def_rtg_szn",
+                "team_fta_allowed_per_game": "opp_fta_allowed_per_game",
             }
         )
-        df = df.merge(opp_context[["season", "game_id", "opponent_id", "opp_pace_szn", "opp_def_rtg_szn"]], on=["season", "game_id", "opponent_id"], how="left")
+        df = df.merge(opp_context[["season", "game_id", "opponent_id", "opp_pace_szn", "opp_def_rtg_szn", "opp_fta_allowed_per_game"]], on=["season", "game_id", "opponent_id"], how="left")
         pace_non_null = 1.0 - df["team_pace_szn"].isna().mean()
         def_non_null = 1.0 - df["team_def_rtg_szn"].isna().mean()
     typer.echo(f"[rates_base] team_pace_szn coverage: {pace_non_null:.3%}; team_def_rtg_szn coverage: {def_non_null:.3%}")
@@ -973,6 +1074,11 @@ def build_features(
         mean_val = df[col].mean(skipna=True)
         fill_val = 0.0 if pd.isna(mean_val) else mean_val
         df[col] = df[col].fillna(fill_val)
+    # FTA allowed default is league average (~24 FTA/game)
+    if "opp_fta_allowed_per_game" not in df.columns:
+        df["opp_fta_allowed_per_game"] = np.nan
+    fta_mean = df["opp_fta_allowed_per_game"].mean(skipna=True)
+    df["opp_fta_allowed_per_game"] = df["opp_fta_allowed_per_game"].fillna(fta_mean if not pd.isna(fta_mean) else 24.0)
     # Legacy placeholders retained for compatibility
     df["season_pace_team"] = df["team_pace_szn"]
     df["season_pace_opp"] = df["opp_pace_szn"]
@@ -1048,6 +1154,9 @@ def build_features(
         "season_reb_per_min",
         "season_stl_per_min",
         "season_blk_per_min",
+        "season_fga2_per_min",
+        "season_oreb_per_min",
+        "season_dreb_per_min",
         "season_fg2_pct",
         "season_fg3_pct",
         "season_ft_pct",
@@ -1063,6 +1172,7 @@ def build_features(
         "team_def_rtg_szn",
         "opp_pace_szn",
         "opp_def_rtg_szn",
+        "opp_fta_allowed_per_game",
         "vac_min_szn",
         "vac_fga_szn",
         "vac_ast_szn",
@@ -1085,6 +1195,49 @@ def build_features(
         "minutes_pred_p50",
         "minutes_pred_p90",
         "minutes_pred_play_prob",
+        "n_games_season",
+        "season_minutes_sum",
+        # Recency features (last 1/3/5/10 games)
+        "last1_minutes_sum",
+        "last3_minutes_sum",
+        "last5_minutes_sum",
+        "last10_minutes_sum",
+        "last1_fga2_per_min",
+        "last1_fga3_per_min",
+        "last1_fta_per_min",
+        "last1_ast_per_min",
+        "last1_tov_per_min",
+        "last1_oreb_per_min",
+        "last1_dreb_per_min",
+        "last1_stl_per_min",
+        "last1_blk_per_min",
+        "last3_fga2_per_min",
+        "last3_fga3_per_min",
+        "last3_fta_per_min",
+        "last3_ast_per_min",
+        "last3_tov_per_min",
+        "last3_oreb_per_min",
+        "last3_dreb_per_min",
+        "last3_stl_per_min",
+        "last3_blk_per_min",
+        "last5_fga2_per_min",
+        "last5_fga3_per_min",
+        "last5_fta_per_min",
+        "last5_ast_per_min",
+        "last5_tov_per_min",
+        "last5_oreb_per_min",
+        "last5_dreb_per_min",
+        "last5_stl_per_min",
+        "last5_blk_per_min",
+        "last10_fga2_per_min",
+        "last10_fga3_per_min",
+        "last10_fta_per_min",
+        "last10_ast_per_min",
+        "last10_tov_per_min",
+        "last10_oreb_per_min",
+        "last10_dreb_per_min",
+        "last10_stl_per_min",
+        "last10_blk_per_min",
     ]
     return df[columns]
 
@@ -1214,6 +1367,10 @@ def main(
             "track_sec_per_touch_szn",
             "track_pot_ast_per_min_szn",
             "track_drives_per_min_szn",
+            "track_drive_fta_per_min_szn",
+            "track_drive_pf_per_min_szn",
+            "track_paint_touches_per_min_szn",
+            "track_fta_per_drive_szn",
             "track_role_cluster",
             "track_role_is_low_minutes",
         ]
@@ -1228,6 +1385,10 @@ def main(
         features["track_sec_per_touch_szn"] = np.nan
         features["track_pot_ast_per_min_szn"] = np.nan
         features["track_drives_per_min_szn"] = np.nan
+        features["track_drive_fta_per_min_szn"] = np.nan
+        features["track_drive_pf_per_min_szn"] = np.nan
+        features["track_paint_touches_per_min_szn"] = np.nan
+        features["track_fta_per_drive_szn"] = np.nan
         features["track_role_cluster"] = np.nan
         features["track_role_is_low_minutes"] = np.nan
     n_total = len(features)
@@ -1256,6 +1417,10 @@ def main(
         "track_sec_per_touch_szn",
         "track_pot_ast_per_min_szn",
         "track_drives_per_min_szn",
+        "track_drive_fta_per_min_szn",
+        "track_drive_pf_per_min_szn",
+        "track_paint_touches_per_min_szn",
+        "track_fta_per_drive_szn",
     ]
     for col in track_fill_cols:
         if col not in features.columns:

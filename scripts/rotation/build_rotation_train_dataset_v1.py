@@ -31,6 +31,12 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from projections import paths
+from projections.features.dnp_history import (
+    DNP_HISTORY_FEATURE_COLUMNS,
+    DNPHistoryConfig,
+    compute_dnp_history_features,
+)
+from projections.rotation.rotation_set_minutes_features_v1 import join_rotation_priors
 
 
 MINUTES_DATASET_DIRNAME = "v1_enriched_20251214"
@@ -54,8 +60,17 @@ DROP_FEATURES = {
     "starter_prev_game_asof",
     "role_change_rate_10g",
     "rotation_minutes_std_5g",
+    # These features only consider games where player got minutes (>0), ignoring DNPs.
+    # This is misleading for rotation prediction - use minutes_from_stints_prior_* instead
+    # which correctly includes DNP games as 0 minutes.
+    "min_last1",
     "min_last3",
     "min_last5",
+    "roll_mean_3",
+    "roll_mean_5",
+    "roll_mean_10",
+    "roll_iqr_5",
+    "z_vs_10",
 }
 
 ODDS_COLS = ("spread_home", "total")
@@ -88,6 +103,11 @@ DEFAULT_MAX_TEAM_MINUTES_GAP = 2.0
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _season_for_date(day: pd.Timestamp) -> int:
+    # Match the convention used elsewhere in the repo (Aug–Jul season boundary).
+    return int(day.year) if int(day.month) >= 8 else int(day.year) - 1
 
 
 def _zfill_game_id(series: pd.Series) -> pd.Series:
@@ -370,6 +390,68 @@ def _load_rotation_team_shape(data_root: Path) -> pd.DataFrame:
     return df
 
 
+def _load_rotation_priors_v1(
+    data_root: Path, *, game_id_norm_by_season: dict[int, list[str]]
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, object]]:
+    """Load rotation_priors_v1 partitions for the given (season -> game_id_norm) map."""
+
+    root = data_root / "silver" / "rotation_priors_v1"
+    team_root = root / "team_game_priors"
+    player_root = root / "player_game_priors"
+    if not team_root.exists() or not player_root.exists():
+        raise FileNotFoundError(f"Missing rotation_priors_v1 roots under {root}")
+
+    def _read_many(dir_root: Path, *, season: int, game_ids: list[str]) -> tuple[pd.DataFrame, list[str]]:
+        season_dir = dir_root / f"season={int(season)}"
+        frames: list[pd.DataFrame] = []
+        missing: list[str] = []
+        for gid in game_ids:
+            path = season_dir / f"game_id={gid}.parquet"
+            if not path.exists():
+                missing.append(gid)
+                continue
+            frames.append(pd.read_parquet(path))
+        if not frames:
+            return pd.DataFrame(), missing
+        return pd.concat(frames, ignore_index=True), missing
+
+    team_frames: list[pd.DataFrame] = []
+    player_frames: list[pd.DataFrame] = []
+    missing_team: list[str] = []
+    missing_player: list[str] = []
+
+    for season, game_ids in sorted(game_id_norm_by_season.items()):
+        gids = [str(g) for g in game_ids if str(g).strip()]
+        if not gids:
+            continue
+        team_df, miss_team = _read_many(team_root, season=season, game_ids=gids)
+        player_df, miss_player = _read_many(player_root, season=season, game_ids=gids)
+        if not team_df.empty:
+            team_frames.append(team_df)
+        if not player_df.empty:
+            player_frames.append(player_df)
+        missing_team.extend([f"season={season}:game_id={gid}" for gid in miss_team])
+        missing_player.extend([f"season={season}:game_id={gid}" for gid in miss_player])
+
+    team_priors = pd.concat(team_frames, ignore_index=True) if team_frames else pd.DataFrame()
+    player_priors = pd.concat(player_frames, ignore_index=True) if player_frames else pd.DataFrame()
+
+    meta: dict[str, object] = {
+        "root": str(root),
+        "seasons": sorted(int(s) for s in game_id_norm_by_season.keys()),
+        "counts": {
+            "team_rows": int(len(team_priors)),
+            "player_rows": int(len(player_priors)),
+            "missing_team_partitions": int(len(missing_team)),
+            "missing_player_partitions": int(len(missing_player)),
+        },
+        "missing_team_partitions_sample": missing_team[:25],
+        "missing_player_partitions_sample": missing_player[:25],
+    }
+
+    return team_priors, player_priors, meta
+
+
 def _apply_feature_pruning(features_df: pd.DataFrame, *, allowlist: list[str]) -> tuple[pd.DataFrame, list[str]]:
     kept = [c for c in allowlist if c not in DROP_FEATURES]
     missing = [c for c in kept if c not in features_df.columns]
@@ -611,6 +693,8 @@ def _write_manifest(
     require_rotation: bool,
     max_rows: int | None,
     team_game_validation: dict[str, Any] | None,
+    dnp_history_config: DNPHistoryConfig | None = None,
+    rotation_priors_v1: dict[str, object] | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "created_at": _utc_now_iso(),
@@ -641,6 +725,13 @@ def _write_manifest(
     }
     if team_game_validation is not None:
         payload["team_game_validation"] = team_game_validation
+    if dnp_history_config is not None:
+        payload["dnp_history_features"] = {
+            "config": dnp_history_config.to_dict(),
+            "columns": DNP_HISTORY_FEATURE_COLUMNS,
+        }
+    if rotation_priors_v1 is not None:
+        payload["rotation_priors_v1"] = rotation_priors_v1
     (out_dir / "manifest.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
@@ -694,9 +785,65 @@ def main() -> None:
         _report_match_diagnostics(features_df, player_rotation=player_rotation, team_rotation=team_rotation)
     joined = _join_rotation(pruned_df, player_rotation=player_rotation, team_rotation=team_rotation)
 
+    # Attach rotation_priors_v1 (pre-game priors windows) so the set model can learn
+    # who plays vs DNP without relying on same-game rotation features (leakage).
+    game_map = joined.loc[:, ["game_id", "game_date"]].drop_duplicates().copy()
+    game_map["game_date"] = pd.to_datetime(game_map["game_date"], errors="coerce").dt.normalize()
+    game_map = game_map.dropna(subset=["game_date"]).copy()
+    if not game_map.empty:
+        game_map["season"] = game_map["game_date"].map(_season_for_date).astype(int)
+        game_map["game_id_norm"] = _zfill_game_id(game_map["game_id"])
+        season_map = (
+            game_map.groupby("season", sort=False)["game_id_norm"].apply(lambda s: sorted(set(s.dropna().astype(str))))
+        )
+        game_id_norm_by_season = {int(season): ids for season, ids in season_map.items()}
+        team_priors, player_priors, priors_meta = _load_rotation_priors_v1(
+            data_root, game_id_norm_by_season=game_id_norm_by_season
+        )
+        joined = join_rotation_priors(joined, team_priors=team_priors, player_priors=player_priors)
+    else:
+        priors_meta = {"warning": "game_date missing; skipping rotation_priors_v1 join"}
+
     if args.require_rotation:
         joined = joined.loc[joined["rotation_team_missing"] == 0].copy()
     label_col = _infer_label_column(labels_df)
+    labels_df = _align_labels_to_features(joined, labels_df)
+
+    # Compute DNP history features using labels for minutes
+    # Merge labels temporarily to get minutes for DNP computation
+    print("[rotation_train_v1] Computing DNP history features...")
+    labels_for_dnp = labels_df[["game_id", "team_id", "player_id", label_col]].copy()
+    labels_for_dnp = labels_for_dnp.rename(columns={label_col: "_label_minutes"})
+    joined_with_labels = joined.merge(
+        labels_for_dnp,
+        on=["game_id", "team_id", "player_id"],
+        how="left",
+    )
+    joined_with_labels["_label_minutes"] = (
+        pd.to_numeric(joined_with_labels["_label_minutes"], errors="coerce").fillna(0.0)
+    )
+
+    # Compute DNP history features
+    dnp_config = DNPHistoryConfig()
+    joined_with_labels = compute_dnp_history_features(
+        joined_with_labels,
+        config=dnp_config,
+        game_date_col="game_date",
+        player_id_col="player_id",
+        team_id_col="team_id",
+        is_out_col="is_out",
+        minutes_col="_label_minutes",
+        validate_pit=True,
+    )
+
+    # Report DNP feature stats
+    for col in DNP_HISTORY_FEATURE_COLUMNS:
+        if col in joined_with_labels.columns:
+            vals = pd.to_numeric(joined_with_labels[col], errors="coerce")
+            print(f"  {col}: missing={vals.isna().mean():.4f}, p50={vals.median():.2f}, mean={vals.mean():.2f}")
+
+    # Drop temporary label column but keep DNP features
+    joined = joined_with_labels.drop(columns=["_label_minutes"])
     labels_df = _align_labels_to_features(joined, labels_df)
 
     team_game_validation: dict[str, Any] | None = None
@@ -766,6 +913,8 @@ def main() -> None:
         require_rotation=bool(args.require_rotation),
         max_rows=args.max_rows,
         team_game_validation=team_game_validation,
+        dnp_history_config=dnp_config,
+        rotation_priors_v1=priors_meta,
     )
 
     print(f"[rotation_train_v1] Wrote features -> {out_features_path}")

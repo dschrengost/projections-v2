@@ -99,12 +99,80 @@ def _infer_label_column(labels_df: pd.DataFrame) -> str:
     raise ValueError(f"Could not infer label column; candidates={candidates}, numeric_minute_like={numeric}")
 
 
+# Features to exclude from training - these only count games where player got minutes (>0),
+# ignoring DNPs. This is misleading for rotation prediction since we're trying to predict
+# who plays vs DNPs. Use minutes_from_stints_prior_* instead which correctly includes DNPs as 0.
+EXCLUDE_DNP_BLIND_FEATURES = {
+    "min_last1",
+    "min_last3",
+    "min_last5",
+    "roll_mean_3",
+    "roll_mean_5",
+    "roll_mean_10",
+    "roll_iqr_5",
+    "z_vs_10",
+}
+
+# Injury status flags that conflate "available to play" with "will get minutes".
+# is_prob/is_q indicate injury report status, NOT rotation likelihood.
+# The model learns these as strong positive signals for minutes because in training data,
+# players with PROB/Q status who appear in the dataset typically ARE rotation players.
+# But at inference, deep bench players can have PROB status and should still get ~0 minutes.
+# The priors (minutes_from_stints_prior_*) already capture who actually plays.
+EXCLUDE_INJURY_STATUS_FEATURES = {
+    "is_prob",
+    "is_q",
+}
+
+# Same-game rotation features that are ONLY available post-game (from gamerotation data).
+# These are labels/targets, not features - including them is data leakage.
+# At inference time, we don't have this data; we only have priors (_prior_5, _prior_10, _prior_20).
+EXCLUDE_SAME_GAME_ROTATION_FEATURES = {
+    # Team-level same-game shape metrics
+    "depth_6",
+    "depth_10",
+    "depth_14",
+    "effective_n",
+    "bench_conc_top1",
+    "bench_conc_top2",
+    "starter_pool_minutes",
+    "bench_pool_minutes",
+    "team_total_minutes_from_stints",
+    # Player-level same-game stint data
+    "num_stints",
+    "first_in_time_real",
+    "last_out_time_real",
+    "max_stint_len_real",
+    "minutes_from_stints",
+    "started_proxy",
+    # Missing flags for same-game data
+    "rotation_team_missing",
+    "rotation_missing",
+    "rotation_player_row_missing_raw",
+    "rotation_player_filled_zero",
+}
+
+# These features are currently unstable/misaligned between the historical minutes
+# training dataset and live minutes feature builder (large distribution shift).
+# Including them has been observed to produce overly-flat live allocations.
+EXCLUDE_UNSTABLE_FEATURES = {
+    "vac_min_szn",
+    "vac_min_guard_szn",
+    "vac_min_wing_szn",
+    "vac_min_big_szn",
+}
+
+
 def _infer_feature_columns(features_df: pd.DataFrame, *, labels_df: pd.DataFrame, label_col: str) -> list[str]:
     cols: list[str] = []
     excluded = {"game_id", "team_id", "player_id", "game_id_norm", label_col}
     excluded.update(TEAM_ID_COLS)
     excluded.update({TEAM_EMBED_TEAM_IDX_COL, TEAM_EMBED_OPP_IDX_COL})
     excluded.update(set(labels_df.columns))
+    excluded.update(EXCLUDE_DNP_BLIND_FEATURES)
+    excluded.update(EXCLUDE_INJURY_STATUS_FEATURES)
+    excluded.update(EXCLUDE_SAME_GAME_ROTATION_FEATURES)
+    excluded.update(EXCLUDE_UNSTABLE_FEATURES)
     for col in features_df.columns:
         if col in excluded:
             continue
@@ -311,11 +379,11 @@ def _filter_invalid_team_games_for_training(
                 "game_id_norm": str(row["game_id_norm"]),
                 "team_id": int(row["team_id"]),
                 "n_players": int(row["n_players"]),
-                "label_sum": float(row["label_sum"]),
-                "stints_team_total": float(row["stints_team_total"]),
-                "minutes_from_stints_sum": float(row["minutes_from_stints_sum"]),
-                "coverage_gap": float(row["coverage_gap"]),
-                "label_gap": float(row["label_gap"]),
+                "label_sum": float(row["label_sum"]) if row["label_sum"] is not None else None,
+                "stints_team_total": float(row["stints_team_total"]) if row["stints_team_total"] is not None else None,
+                "minutes_from_stints_sum": float(row["minutes_from_stints_sum"]) if row["minutes_from_stints_sum"] is not None else None,
+                "coverage_gap": float(row["coverage_gap"]) if row["coverage_gap"] is not None else None,
+                "label_gap": float(row["label_gap"]) if row["label_gap"] is not None else None,
             }
         )
 

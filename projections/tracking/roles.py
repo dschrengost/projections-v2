@@ -82,7 +82,7 @@ def load_tracking_window(data_root: Path, start: pd.Timestamp, end: pd.Timestamp
             data_root,
             day,
             "Possessions",
-            ["game_date", "team_id", "player_id", "min", "touches", "time_of_poss"],
+            ["game_date", "team_id", "player_id", "min", "touches", "time_of_poss", "paint_touches"],
         )
         if poss is None or poss.empty:
             continue
@@ -96,7 +96,7 @@ def load_tracking_window(data_root: Path, start: pd.Timestamp, end: pd.Timestamp
             data_root,
             day,
             "Drives",
-            ["game_date", "team_id", "player_id", "drives"],
+            ["game_date", "team_id", "player_id", "drives", "drive_fta", "drive_pf"],
         )
         base = poss.rename(columns={"min": "minutes_tracking"}).copy()
         for col in ("touches", "time_of_poss", "minutes_tracking"):
@@ -110,14 +110,21 @@ def load_tracking_window(data_root: Path, start: pd.Timestamp, end: pd.Timestamp
                 how="left",
             )
         if drives is not None:
+            drive_cols = ["season", "game_date", "team_id", "player_id", "drives"]
+            for col in ["drive_fta", "drive_pf"]:
+                if col in drives.columns:
+                    drive_cols.append(col)
             base = base.merge(
-                drives[["season", "game_date", "team_id", "player_id", "drives"]],
+                drives[drive_cols],
                 on=["season", "game_date", "team_id", "player_id"],
                 how="left",
             )
-        base["potential_ast_raw"] = pd.to_numeric(base.get("potential_ast_raw"), errors="coerce").fillna(0.0)
-        base["passes_made"] = pd.to_numeric(base.get("passes_made"), errors="coerce").fillna(0.0)
-        base["drives"] = pd.to_numeric(base.get("drives"), errors="coerce").fillna(0.0)
+        # Ensure numeric columns exist and fill missing with 0
+        for col in ["potential_ast_raw", "passes_made", "drives", "drive_fta", "drive_pf", "paint_touches"]:
+            if col in base.columns:
+                base[col] = pd.to_numeric(base[col], errors="coerce").fillna(0.0)
+            else:
+                base[col] = 0.0
         records.append(base)
     if not records:
         return pd.DataFrame()
@@ -148,6 +155,9 @@ def compute_cumulative_tracking(df: pd.DataFrame) -> pd.DataFrame:
     df["potential_ast_raw"] = pd.to_numeric(df.get("potential_ast_raw"), errors="coerce").fillna(0.0)
     df["passes_made"] = pd.to_numeric(df.get("passes_made"), errors="coerce").fillna(0.0)
     df["drives"] = pd.to_numeric(df.get("drives"), errors="coerce").fillna(0.0)
+    df["drive_fta"] = pd.to_numeric(df.get("drive_fta"), errors="coerce").fillna(0.0)
+    df["drive_pf"] = pd.to_numeric(df.get("drive_pf"), errors="coerce").fillna(0.0)
+    df["paint_touches"] = pd.to_numeric(df.get("paint_touches"), errors="coerce").fillna(0.0)
     df.sort_values(["season", "player_id", "game_date", "game_id"], inplace=True)
     group = df.groupby(["season", "player_id"], sort=False)
     df["cumu_minutes"] = group["minutes_tracking"].cumsum().shift(1).fillna(0.0)
@@ -156,6 +166,9 @@ def compute_cumulative_tracking(df: pd.DataFrame) -> pd.DataFrame:
     df["cumu_potential_ast"] = group["potential_ast_raw"].cumsum().shift(1).fillna(0.0)
     df["cumu_passes_made"] = group["passes_made"].cumsum().shift(1).fillna(0.0)
     df["cumu_drives"] = group["drives"].cumsum().shift(1).fillna(0.0)
+    df["cumu_drive_fta"] = group["drive_fta"].cumsum().shift(1).fillna(0.0)
+    df["cumu_drive_pf"] = group["drive_pf"].cumsum().shift(1).fillna(0.0)
+    df["cumu_paint_touches"] = group["paint_touches"].cumsum().shift(1).fillna(0.0)
 
     df["track_touches_per_min_szn"] = _safe_div(df["cumu_touches"], df["cumu_minutes"])
     df["track_sec_per_touch_szn"] = _safe_div(df["cumu_time_of_poss"] * 60.0, df["cumu_touches"])
@@ -164,6 +177,12 @@ def compute_cumulative_tracking(df: pd.DataFrame) -> pd.DataFrame:
     pot_total = np.where(pot_source.notna(), pot_source, fallback)
     df["track_pot_ast_per_min_szn"] = _safe_div(pot_total, df["cumu_minutes"])
     df["track_drives_per_min_szn"] = _safe_div(df["cumu_drives"], df["cumu_minutes"])
+    # New tracking features for FTA prediction
+    df["track_drive_fta_per_min_szn"] = _safe_div(df["cumu_drive_fta"], df["cumu_minutes"])
+    df["track_drive_pf_per_min_szn"] = _safe_div(df["cumu_drive_pf"], df["cumu_minutes"])
+    df["track_paint_touches_per_min_szn"] = _safe_div(df["cumu_paint_touches"], df["cumu_minutes"])
+    # Foul-drawing efficiency: FTA per drive (measures skill at drawing contact)
+    df["track_fta_per_drive_szn"] = _safe_div(df["cumu_drive_fta"], df["cumu_drives"])
     df["track_role_is_low_minutes"] = df["cumu_minutes"] < MIN_ROLE_MINUTES
     return df
 
@@ -261,6 +280,10 @@ def write_tracking_partitions(df: pd.DataFrame, output_root: Path, overwrite_exi
             "track_sec_per_touch_szn",
             "track_pot_ast_per_min_szn",
             "track_drives_per_min_szn",
+            "track_drive_fta_per_min_szn",
+            "track_drive_pf_per_min_szn",
+            "track_paint_touches_per_min_szn",
+            "track_fta_per_drive_szn",
             "track_role_cluster",
             "track_role_is_low_minutes",
         ]

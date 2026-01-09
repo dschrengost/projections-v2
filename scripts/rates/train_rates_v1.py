@@ -92,6 +92,8 @@ FEATURES_STAGE1 = STAGE1_FEATURES
 FEATURES_STAGE2_TRACKING = _FEATURE_SETS["stage2_tracking"]
 CONTEXT_FEATURES = [c for c in _FEATURE_SETS["stage3_context"] if c not in FEATURES_STAGE2_TRACKING]
 FEATURES_STAGE3_CONTEXT = _FEATURE_SETS["stage3_context"]
+FEATURES_STAGE4_RECENCY = _FEATURE_SETS["stage4_recency"]
+FEATURES_STAGE5_FTA_TRACKING = _FEATURE_SETS["stage5_fta_tracking"]
 
 BASE_PARAMS: dict[str, object] = {
     "objective": "regression",
@@ -326,7 +328,7 @@ def main(
     ),
     feature_set: str = typer.Option(
         "stage1",
-        help="Feature set to use: stage0, stage1 (minutes_pred), stage2_tracking (minutes_pred + tracking roles), or stage3_context (tracking + pace/injury context).",
+        help="Feature set to use: stage0, stage1 (minutes_pred), stage2_tracking (+tracking), stage3_context (+vacancy/pace), stage4_recency (+last1/3/5/10 rolling), stage5_fta_tracking (+FTA tracking).",
         case_sensitive=False,
     ),
     allow_minutes_actual_fallback: bool = typer.Option(
@@ -354,13 +356,15 @@ def main(
         "stage1": FEATURES_STAGE1,
         "stage2_tracking": FEATURES_STAGE2_TRACKING,
         "stage3_context": FEATURES_STAGE3_CONTEXT,
+        "stage4_recency": FEATURES_STAGE4_RECENCY,
+        "stage5_fta_tracking": FEATURES_STAGE5_FTA_TRACKING,
     }
     if feature_set_key not in feature_map:
         raise typer.BadParameter(f"feature_set must be one of {list(feature_map.keys())}")
     feature_cols = feature_map[feature_set_key]
-    use_predicted_minutes = feature_set_key in {"stage1", "stage2_tracking", "stage3_context"}
+    use_predicted_minutes = feature_set_key in {"stage1", "stage2_tracking", "stage3_context", "stage4_recency", "stage5_fta_tracking"}
     fallback_minutes = use_predicted_minutes and allow_minutes_actual_fallback
-    use_tracking_features = feature_set_key in {"stage2_tracking", "stage3_context"}
+    use_tracking_features = feature_set_key in {"stage2_tracking", "stage3_context", "stage4_recency", "stage5_fta_tracking"}
 
     typer.echo(
         f"[train] run_id={resolved_run_id} data_root={root} "

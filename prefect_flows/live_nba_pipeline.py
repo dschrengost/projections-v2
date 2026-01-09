@@ -297,11 +297,16 @@ def score_minutes_task(
     rotshare_min_active_players: int | None = None,
     rotshare_mc_center: str | None = None,
 ) -> Path:
+    """Score minutes with rotation set overlay (if enabled).
+
+    Uses score_minutes_rotation_set_v1 which:
+    1. Runs baseline minutes_v1 scoring
+    2. If rotation_set_minutes_live.json is enabled, builds rotation features + predicts
+    3. Applies guardrails and blends rotation predictions with baseline
+    """
     args = [
         "--date",
         game_date,
-        "--mode",
-        "live",
         "--run-id",
         run_id,
         "--reconcile-team-minutes",
@@ -323,7 +328,8 @@ def score_minutes_task(
         args.extend(["--rotshare-min-active-players", str(int(rotshare_min_active_players))])
     if rotshare_mc_center:
         args.extend(["--rotshare-mc-center", rotshare_mc_center])
-    _run_python_module("projections.cli.score_minutes_v1", args, data_root=data_root, timeout_s=1200)
+    # Use rotation_set_v1 scorer which runs baseline + rotation overlay if enabled
+    _run_python_module("projections.cli.score_minutes_rotation_set_v1", args, data_root=data_root, timeout_s=1200)
     out_path = data_root / "artifacts" / "minutes_v1" / "daily" / game_date / f"run={run_id}" / "minutes.parquet"
     health.require_file(out_path, label="minutes.parquet")
     df = pd.read_parquet(out_path)
@@ -494,19 +500,26 @@ def select_main_draft_group_task(*, game_date: str, data_root: Path) -> str:
     if not base.exists():
         raise RuntimeError(f"DK salaries missing at {base}")
 
-    slates: list[tuple[int, int]] = []
+    slates: list[tuple[int, int, int]] = []
     for dg_dir in base.glob("draft_group_id=*"):
         parquet_path = dg_dir / "salaries.parquet"
         if parquet_path.exists():
-            df = pd.read_parquet(parquet_path)
             dg_id = int(dg_dir.name.split("=", 1)[1])
-            slates.append((dg_id, len(df)))
+            try:
+                df = pd.read_parquet(parquet_path, columns=["salary"])
+            except Exception:
+                df = pd.read_parquet(parquet_path)
+            n_rows = int(len(df))
+            n_salary = int(df["salary"].notna().sum()) if "salary" in df.columns else 0
+            slates.append((dg_id, n_rows, n_salary))
 
     if not slates:
         raise RuntimeError(f"No DK slates found under {base}")
 
-    slates.sort(key=lambda x: (-x[1], x[0]))
-    return str(slates[0][0])
+    has_salaries = any(n_salary > 0 for _, _, n_salary in slates)
+    candidates = [s for s in slates if (s[2] > 0)] if has_salaries else slates
+    candidates.sort(key=lambda x: (-x[2], -x[1], x[0]))
+    return str(candidates[0][0])
 
 
 @task(name="finalize-projections", retries=1, retry_delay_seconds=120)

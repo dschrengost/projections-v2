@@ -218,9 +218,11 @@ def _compute_player_priors(history: pd.DataFrame, *, player_ids: set[int]) -> pd
 
     for pid, frame in df.groupby("player_id", sort=False):
         row = {"player_id": int(pid)}
-        
+
         # Season
         season = _rates(frame)
+        row["n_games_season"] = len(frame)  # Sample size for shrinkage calibration
+        row["season_minutes_sum"] = season["minutes_sum"]  # Total minutes played
         row["season_fga2_per_min"] = season["fga2_per_min"]
         row["season_3pa_per_min"] = season["fga3_per_min"]
         row["season_fta_per_min"] = season["fta_per_min"]
@@ -506,6 +508,11 @@ def _load_tracking_features(
         "track_drives_per_min_szn",
         "track_role_cluster",
         "track_role_is_low_minutes",
+        # Extended FTA tracking features (stage5+)
+        "track_drive_fta_per_min_szn",
+        "track_drive_pf_per_min_szn",
+        "track_paint_touches_per_min_szn",
+        "track_fta_per_drive_szn",
     ]
     available = [c for c in track_cols if c in latest.columns]
     return latest[available].copy()
@@ -525,6 +532,7 @@ _TEAM_CONTEXT_DEFAULTS: dict[str, float] = {
     "team_pace_szn": 100.0,
     "team_off_rtg_szn": 100.0,
     "team_def_rtg_szn": 100.0,
+    "team_fta_allowed_per_game": 24.0,  # League average FTA allowed per game
 }
 
 
@@ -876,6 +884,11 @@ def build_rates_features(
         "track_drives_per_min_szn",
         "track_role_cluster",
         "track_role_is_low_minutes",
+        # Extended FTA tracking features (stage5+)
+        "track_drive_fta_per_min_szn",
+        "track_drive_pf_per_min_szn",
+        "track_paint_touches_per_min_szn",
+        "track_fta_per_drive_szn",
     ]
     for col in track_cols:
         if col not in df.columns:
@@ -920,8 +933,9 @@ def build_rates_features(
             "team_id": "opponent_team_id",
             "team_pace_szn": "opp_pace_szn",
             "team_def_rtg_szn": "opp_def_rtg_szn",
+            "team_fta_allowed_per_game": "opp_fta_allowed_per_game",
         })
-        opp_cols = ["opponent_team_id", "opp_pace_szn", "opp_def_rtg_szn"]
+        opp_cols = ["opponent_team_id", "opp_pace_szn", "opp_def_rtg_szn", "opp_fta_allowed_per_game"]
         opp_cols = [c for c in opp_cols if c in opp_ctx.columns]
         if len(opp_cols) > 1:
             df = df.merge(opp_ctx[opp_cols], on="opponent_team_id", how="left", suffixes=("", "_opp"))
@@ -937,6 +951,10 @@ def build_rates_features(
         if col not in df.columns:
             df[col] = 100.0 if "rtg" in col else 100.0  # Default pace/rating
         df[col] = df[col].fillna(100.0)
+    # FTA allowed defaults to league average (~24 FTA/game)
+    if "opp_fta_allowed_per_game" not in df.columns:
+        df["opp_fta_allowed_per_game"] = 24.0
+    df["opp_fta_allowed_per_game"] = df["opp_fta_allowed_per_game"].fillna(24.0)
 
     # Ensure game_date is present
     df["game_date"] = pd.Timestamp(game_date).normalize()

@@ -18,6 +18,7 @@ _STATUS_ALIASES: dict[str, AvailabilityStatus] = {
     "AVAILABLE": AvailabilityStatus.AVAILABLE,
     "ACTIVE": AvailabilityStatus.AVAILABLE,
     "A": AvailabilityStatus.AVAILABLE,
+    "AVA": AvailabilityStatus.AVAILABLE,
 }
 
 _INJURY_COLUMNS: tuple[str, ...] = (
@@ -33,12 +34,16 @@ _INJURY_COLUMNS: tuple[str, ...] = (
 _OPTIONAL_INJURY_COLUMNS: tuple[str, ...] = ("snapshot_missing",)
 
 
-def normalize_status(value: str | None) -> AvailabilityStatus:
+def normalize_status(value: str | AvailabilityStatus | None) -> AvailabilityStatus:
     """Map raw injury text into the canonical enum."""
 
-    if value is None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
         return AvailabilityStatus.UNKNOWN
-    normalized = value.strip().upper()
+    if isinstance(value, AvailabilityStatus):
+        return value
+    if value is pd.NA:
+        return AvailabilityStatus.UNKNOWN
+    normalized = str(value).strip().upper()
     return _STATUS_ALIASES.get(normalized, AvailabilityStatus.UNKNOWN)
 
 
@@ -165,8 +170,11 @@ def attach_availability_features(
     
     # Fill defaults for players without injury records
     merged["injury_row_present"] = merged["injury_row_present"].fillna(False).astype(bool)
-    merged["status"] = merged["status"].fillna(AvailabilityStatus.UNKNOWN) if "status" in merged.columns else AvailabilityStatus.UNKNOWN
-    merged["prior_play_prob"] = merged["status"].map(STATUS_PRIORS)
+    merged["status"] = (
+        merged["status"].fillna(AvailabilityStatus.UNKNOWN) if "status" in merged.columns else AvailabilityStatus.UNKNOWN
+    )
+    merged["status"] = merged["status"].apply(normalize_status)
+    merged["prior_play_prob"] = merged["status"].map(STATUS_PRIORS).fillna(STATUS_PRIORS[AvailabilityStatus.UNKNOWN])
     merged["is_out"] = (merged["status"] == AvailabilityStatus.OUT).astype(int)
     merged["is_q"] = (merged["status"] == AvailabilityStatus.QUESTIONABLE).astype(int)
     merged["is_prob"] = (merged["status"] == AvailabilityStatus.PROBABLE).astype(int)
@@ -188,4 +196,3 @@ def attach_availability_features(
         merged["injury_snapshot_missing"] = merged["injury_as_of_ts"].isna().astype(int)
     
     return merged
-

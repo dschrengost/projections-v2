@@ -2398,6 +2398,28 @@ def main(
                     all_fpts = np.where(bad_mask, 0.0, all_fpts)
                     all_active = all_active & ~bad_mask
 
+                # Sanity guardrail: warn about extreme but plausible FPTS values (> 120).
+                # NBA all-time single-game record is ~80 DK FPTS. Values > 120 indicate noise issues.
+                EXTREME_FPTS_THRESHOLD = 120.0
+                extreme_mask = (all_fpts > EXTREME_FPTS_THRESHOLD) & all_active
+                if extreme_mask.any():
+                    n_extreme = extreme_mask.sum()
+                    max_extreme = float(all_fpts[extreme_mask].max())
+                    # Find which players have extreme values
+                    extreme_per_player = extreme_mask.sum(axis=0)
+                    players_with_extreme = int((extreme_per_player > 0).sum())
+                    typer.echo(
+                        f"[sim_v2] GUARDRAIL: {n_extreme} player-worlds have FPTS > {EXTREME_FPTS_THRESHOLD:.0f} "
+                        f"(max={max_extreme:.2f}, {players_with_extreme} players affected)",
+                        err=True,
+                    )
+                    # Optionally fail if env var is set
+                    if os.environ.get("PROJECTIONS_SIM_FAIL_ON_EXTREME_FPTS", "").lower() in {"1", "true", "yes"}:
+                        raise RuntimeError(
+                            f"Extreme FPTS values detected (max={max_extreme:.2f}). "
+                            f"Set PROJECTIONS_SIM_FAIL_ON_EXTREME_FPTS=0 to disable this check."
+                        )
+
                 # Compute CONDITIONAL statistics (only worlds where player is active)
                 # This is what DFS lineup builders want: E[FPTS | plays]
                 n_worlds_total, n_players = all_fpts.shape
@@ -2538,6 +2560,61 @@ def main(
                     )
                 except Exception as exc:
                     typer.echo(f"[sim_v2] warning: failed to write metrics.json ({exc})", err=True)
+
+                # Write sim_manifest.json with full provenance for audit/reproducibility.
+                try:
+                    import subprocess
+                    git_commit = None
+                    try:
+                        git_commit = subprocess.check_output(
+                            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
+                        ).strip()[:12]
+                    except Exception:
+                        pass
+
+                    manifest_payload = {
+                        "date": pd.Timestamp(game_date).date().isoformat(),
+                        "run_id": sim_run_id or "default",
+                        "profile": profile_cfg.name,
+                        "seed": int(seed_eff),
+                        "n_worlds": int(n_worlds_eff),
+                        "chunk_size": int(worlds_per_chunk),
+                        "minutes_run_id": minutes_run_eff,
+                        "minutes_path": str(minutes_path),
+                        "rates_run_id": rates_run_eff,
+                        "rates_path": str(rates_path) if rates_path else None,
+                        "mean_source": mean_source,
+                        "use_rates_noise": use_rates_noise_eff,
+                        "use_minutes_noise": use_minutes_noise_eff,
+                        "noise": {
+                            "epsilon_dist": epsilon_dist,
+                            "nu": float(nu),
+                            "k_default": float(k_default),
+                        },
+                        "team_factor_sigma": float(team_factor_sigma_eff),
+                        "team_sigma_scale": float(team_sigma_scale_eff),
+                        "player_sigma_scale": float(player_sigma_scale_eff),
+                        "game_scripts": use_game_scripts,
+                        "play_prob_masking": getattr(profile_cfg, 'use_play_prob_masking', True),
+                        "preserve_input_rotation": getattr(profile_cfg, 'preserve_input_rotation', False),
+                        "git_commit": git_commit,
+                    }
+                    # Add minutes_noise_config if present
+                    if getattr(profile_cfg, 'minutes_noise_config', None) is not None:
+                        mnc = profile_cfg.minutes_noise_config
+                        manifest_payload["minutes_noise_config"] = {
+                            "enabled": getattr(mnc, 'enabled', False),
+                            "sigma_starter": getattr(mnc, 'sigma_starter', None),
+                            "sigma_bench": getattr(mnc, 'sigma_bench', None),
+                            "min_minutes_for_noise": getattr(mnc, 'min_minutes_for_noise', None),
+                            "cap_abs": getattr(mnc, 'cap_abs', None),
+                        }
+                    (out_dir / "sim_manifest.json").write_text(
+                        json.dumps(manifest_payload, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception as exc:
+                    typer.echo(f"[sim_v2] warning: failed to write sim_manifest.json ({exc})", err=True)
 
                 # === SIM DIAGNOSTICS: active counts, minute comparisons, guardrails ===
                 try:
