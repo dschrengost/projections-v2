@@ -24,6 +24,7 @@ import yaml
 from projections.dk.salaries_schema import dk_salaries_gold_path, normalize_positions
 from projections.dk.slates import list_draft_groups_for_date
 from projections.fpts_v2.scoring import compute_dk_fpts
+from projections.names import normalize_player_name
 from projections.pipeline import control_plane
 from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
 from projections.optimizer.quick_build import (
@@ -616,22 +617,23 @@ def load_salaries_for_date(
 
 def _normalize_name(val: object) -> str:
     """Normalize player name for fuzzy matching."""
-    import unicodedata
-
-    if val is None:
-        return ""
-    s = str(val).strip()
-    # Strip accents
-    nfkd = unicodedata.normalize("NFKD", s)
-    ascii_only = nfkd.encode("ascii", "ignore").decode("ascii")
-    return ascii_only.lower()
+    return normalize_player_name(val)
 
 
 def _normalize_team(val: object) -> str:
     """Normalize team abbreviation."""
     if val is None:
         return ""
-    return str(val).strip().upper()
+    text = str(val).strip().upper()
+    aliases = {
+        "PHO": "PHX",
+        "GS": "GSW",
+        "SA": "SAS",
+        "NO": "NOP",
+        "NY": "NYK",
+        "BRK": "BKN",
+    }
+    return aliases.get(text, text)
 
 
 def build_player_pool(
@@ -1322,13 +1324,18 @@ def get_slates_for_date(game_date: str, slate_type: str = "all") -> List[Dict[st
     except Exception as exc:
         logger.warning("Failed to fetch live slates for %s: %s", game_date, exc)
 
-    # If API returned slates, use them
-    if api_slates:
-        return api_slates
+    # Merge API slates with disk slates to include in-progress slates for late swap
+    disk_slates = _discover_slates_from_disk(game_date, slate_type)
 
-    # Fall back to disk if API returned empty (games already started/locked)
-    logger.info("API returned no slates for %s, falling back to disk discovery", game_date)
-    return _discover_slates_from_disk(game_date, slate_type)
+    # Build set of draft_group_ids from API
+    api_dg_ids = {s["draft_group_id"] for s in api_slates}
+
+    # Add disk slates that aren't in API (in-progress slates)
+    for ds in disk_slates:
+        if ds["draft_group_id"] not in api_dg_ids:
+            api_slates.append(ds)
+
+    return sorted(api_slates, key=lambda s: s["draft_group_id"])
 
 
 def _discover_slates_from_disk(game_date: str, slate_type: str = "all") -> List[Dict[str, Any]]:
