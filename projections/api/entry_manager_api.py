@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
 import logging
+import os
+import secrets
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +29,8 @@ from projections.optimizer.optimizer_types import Constraints, OwnershipPenaltyS
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_EXPORT_ID_SUFFIX_BYTES = 3  # 6 hex chars
 
 
 def _entries_dir(game_date: str) -> Path:
@@ -175,6 +183,95 @@ def _extract_draftable_id(value: str) -> Optional[int]:
         return int(match.group(1))
     except ValueError:
         return None
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _generate_export_id() -> str:
+    ts = datetime.now(tz=timezone.utc).replace(microsecond=0).strftime("%Y%m%dT%H%M%SZ")
+    suffix = secrets.token_hex(_EXPORT_ID_SUFFIX_BYTES)
+    return f"{ts}_{suffix}"
+
+
+def _contest_root_for_export(*, site: str, game_date: str, draft_group_id: int | None) -> Path:
+    dg_part = f"dg={int(draft_group_id)}" if draft_group_id is not None else "dg=UNKNOWN"
+    return paths.data_path("contests", site, f"game_date={game_date}", dg_part)
+
+
+def _safe_git_sha() -> str | None:
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            text=True,
+            cwd=str(paths.get_project_root()),
+        ).strip()
+        return sha or None
+    except Exception:
+        return None
+
+
+def _resolve_latest_sim_v2_worlds(*, game_date: str) -> dict[str, object]:
+    """Best-effort resolve of the base sim_v2 worlds run for this date."""
+    base_dir = paths.data_path("artifacts", "sim_v2", "worlds_fpts_v2", f"game_date={game_date}")
+    out: dict[str, object] = {
+        "base_worlds_run_id": None,
+        "base_worlds_path": None,
+        "base_sim_manifest_path": None,
+        "base_sim_manifest_sha256": None,
+        "sim_profile": None,
+    }
+    if not base_dir.exists():
+        return out
+
+    run_id: str | None = None
+    pointer = base_dir / "latest_run.json"
+    if pointer.exists():
+        try:
+            payload = json.loads(pointer.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                run_id = str(payload.get("run_id") or "").strip() or None
+        except Exception:
+            run_id = None
+
+    run_dir: Path | None = None
+    if run_id:
+        candidate = base_dir / f"run={run_id}"
+        if candidate.exists():
+            run_dir = candidate
+
+    if run_dir is None:
+        run_dirs = sorted(
+            [p for p in base_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
+            reverse=True,
+        )
+        if run_dirs:
+            run_dir = run_dirs[0]
+            run_id = run_dir.name.replace("run=", "", 1)
+
+    if run_dir is None:
+        return out
+
+    worlds_matrix = run_dir / "worlds_matrix.parquet"
+    base_worlds_path = worlds_matrix if worlds_matrix.exists() else run_dir
+
+    out["base_worlds_run_id"] = run_id
+    out["base_worlds_path"] = str(base_worlds_path.resolve())
+
+    sim_manifest_path = run_dir / "sim_manifest.json"
+    if sim_manifest_path.exists():
+        out["base_sim_manifest_path"] = str(sim_manifest_path.resolve())
+        try:
+            raw = sim_manifest_path.read_bytes()
+            out["base_sim_manifest_sha256"] = hashlib.sha256(raw).hexdigest()
+            sim_manifest = json.loads(raw.decode("utf-8"))
+            if isinstance(sim_manifest, dict):
+                out["sim_profile"] = sim_manifest.get("profile") or sim_manifest.get("sim_profile")
+        except Exception:
+            pass
+
+    return out
 
 
 def _parse_game_start(value: str) -> Optional[datetime]:
@@ -1054,6 +1151,17 @@ async def export_entry_file(contest_id: str, date: str):
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     entry_state = EntryFileState.model_validate_json(path.read_text())
 
+    export_id = _generate_export_id()
+    contest_root = _contest_root_for_export(
+        site=str(entry_state.site or "dk"),
+        game_date=date,
+        draft_group_id=int(entry_state.draft_group_id),
+    )
+    exports_dir = contest_root / "exports"
+    eval_dir = contest_root / "eval_pre" / f"export_{export_id}"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    eval_dir.mkdir(parents=True, exist_ok=True)
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(entry_state.header)
@@ -1068,10 +1176,81 @@ async def export_entry_file(contest_id: str, date: str):
             row.append(entry.get(slot, ""))
         writer.writerow(row)
 
+    csv_text = output.getvalue()
+    export_csv_path = exports_dir / f"export_{export_id}.csv"
+    manifest_path = exports_dir / f"export_{export_id}_manifest.json"
+    status_path = eval_dir / "eval_status.json"
+
+    worlds_info = _resolve_latest_sim_v2_worlds(game_date=date)
+    manifest: dict[str, object] = {
+        "export_id": export_id,
+        "created_at_utc": _utc_now_iso(),
+        "site": str(entry_state.site or "dk"),
+        "game_date": date,
+        "draft_group_id": int(entry_state.draft_group_id),
+        "contest_ids": [str(contest_id)],
+        "export_csv_path": str(export_csv_path.resolve()),
+        "lineup_count": int(len(entry_state.entries)),
+        "git_sha": _safe_git_sha(),
+        # Evaluation config defaults (passed explicitly by runner).
+        "train_frac": 0.7,
+        "eval_seed": 123,
+        "k_runtime_holdouts": 3,
+        "num_worlds_runtime": 10000,
+        **worlds_info,
+    }
+
+    try:
+        export_csv_path.write_text(csv_text, encoding="utf-8")
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        status_payload = {
+            "status": "PENDING",
+            "export_id": export_id,
+            "created_at": manifest["created_at_utc"],
+            "started_at": None,
+            "finished_at": None,
+            "pid": None,
+            "return_code": None,
+            "report_dir": str(eval_dir.resolve()),
+            "error_message": None,
+            "warnings": [],
+        }
+        status_path.write_text(json.dumps(status_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+        subprocess.Popen(
+            [sys.executable, "-m", "projections.jobs.eval_runner", "--manifest", str(manifest_path)],
+            cwd=str(paths.get_project_root()),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        logger.exception("Export eval setup failed (export will still succeed): %s", exc)
+        try:
+            status_payload = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
+            if not isinstance(status_payload, dict):
+                status_payload = {}
+            status_payload.update(
+                {
+                    "status": "FAILED",
+                    "export_id": export_id,
+                    "finished_at": _utc_now_iso(),
+                    "error_message": str(exc),
+                    "report_dir": str(eval_dir.resolve()),
+                }
+            )
+            status_path.write_text(json.dumps(status_payload, indent=2, sort_keys=True), encoding="utf-8")
+        except Exception:
+            pass
+
     return Response(
-        content=output.getvalue(),
+        content=csv_text,
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=entries_{date}_{contest_id}.csv"},
+        headers={
+            "Content-Disposition": f"attachment; filename=entries_{date}_{contest_id}.csv",
+            "X-Export-Id": export_id,
+            "Access-Control-Expose-Headers": "X-Export-Id",
+        },
     )
 
 
@@ -1083,11 +1262,16 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest):
     output = io.StringIO()
     writer = csv.writer(output)
     header_written = False
+    total_entries = 0
+    draft_group_ids: set[int] = set()
+    sites: set[str] = set()
     for contest_id in request.contest_ids:
         path = _entry_path(date, contest_id)
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
         entry_state = EntryFileState.model_validate_json(path.read_text())
+        draft_group_ids.add(int(entry_state.draft_group_id))
+        sites.add(str(entry_state.site or "dk"))
         if not header_written:
             writer.writerow(entry_state.header)
             header_written = True
@@ -1101,10 +1285,188 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest):
             for slot in DK_NBA_SLOTS:
                 row.append(entry.get(slot, ""))
             writer.writerow(row)
+            total_entries += 1
+
+    export_id = _generate_export_id()
+    draft_group_id: int | None = next(iter(draft_group_ids)) if len(draft_group_ids) == 1 else None
+    site = next(iter(sites)) if len(sites) == 1 else "dk"
+    contest_root = _contest_root_for_export(site=site, game_date=date, draft_group_id=draft_group_id)
+    exports_dir = contest_root / "exports"
+    eval_dir = contest_root / "eval_pre" / f"export_{export_id}"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    eval_dir.mkdir(parents=True, exist_ok=True)
 
     filename = f"entries_{date}_combined.csv"
+    csv_text = output.getvalue()
+    export_csv_path = exports_dir / f"export_{export_id}.csv"
+    manifest_path = exports_dir / f"export_{export_id}_manifest.json"
+    status_path = eval_dir / "eval_status.json"
+
+    worlds_info = _resolve_latest_sim_v2_worlds(game_date=date)
+    manifest: dict[str, object] = {
+        "export_id": export_id,
+        "created_at_utc": _utc_now_iso(),
+        "site": site,
+        "game_date": date,
+        "draft_group_id": int(draft_group_id) if draft_group_id is not None else None,
+        "draft_group_id_candidates": sorted(draft_group_ids),
+        "contest_ids": [str(cid) for cid in request.contest_ids],
+        "export_csv_path": str(export_csv_path.resolve()),
+        "lineup_count": int(total_entries),
+        "git_sha": _safe_git_sha(),
+        # Evaluation config defaults (passed explicitly by runner).
+        "train_frac": 0.7,
+        "eval_seed": 123,
+        "k_runtime_holdouts": 3,
+        "num_worlds_runtime": 10000,
+        **worlds_info,
+    }
+
+    try:
+        export_csv_path.write_text(csv_text, encoding="utf-8")
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        status_payload = {
+            "status": "PENDING",
+            "export_id": export_id,
+            "created_at": manifest["created_at_utc"],
+            "started_at": None,
+            "finished_at": None,
+            "pid": None,
+            "return_code": None,
+            "report_dir": str(eval_dir.resolve()),
+            "error_message": None,
+            "warnings": [],
+        }
+        if draft_group_id is None:
+            status_payload["status"] = "FAILED"
+            status_payload["finished_at"] = _utc_now_iso()
+            status_payload["error_message"] = f"ambiguous draft_group_id candidates={sorted(draft_group_ids)}"
+        status_path.write_text(json.dumps(status_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+        if draft_group_id is not None:
+            subprocess.Popen(
+                [sys.executable, "-m", "projections.jobs.eval_runner", "--manifest", str(manifest_path)],
+                cwd=str(paths.get_project_root()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+    except Exception as exc:
+        logger.exception("Export eval setup failed (export will still succeed): %s", exc)
+        try:
+            status_payload = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
+            if not isinstance(status_payload, dict):
+                status_payload = {}
+            status_payload.update(
+                {
+                    "status": "FAILED",
+                    "export_id": export_id,
+                    "finished_at": _utc_now_iso(),
+                    "error_message": str(exc),
+                    "report_dir": str(eval_dir.resolve()),
+                }
+            )
+            status_path.write_text(json.dumps(status_payload, indent=2, sort_keys=True), encoding="utf-8")
+        except Exception:
+            pass
+
     return Response(
-        content=output.getvalue(),
+        content=csv_text,
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "X-Export-Id": export_id,
+            "Access-Control-Expose-Headers": "X-Export-Id",
+        },
     )
+
+
+def _find_export_manifest(export_id: str) -> Path:
+    root = paths.data_path("contests")
+    pattern = f"export_{export_id}_manifest.json"
+    matches = list(root.rglob(pattern))
+    if not matches:
+        raise FileNotFoundError(f"export_id not found: {export_id}")
+    if len(matches) > 1:
+        raise RuntimeError(f"export_id is not unique on disk: {export_id} ({len(matches)} matches)")
+    return matches[0]
+
+
+def _tail_text(path: Path, *, max_lines: int) -> str:
+    max_lines = max(1, min(int(max_lines), 2000))
+    try:
+        with path.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            end = f.tell()
+            start = max(0, end - 256_000)
+            f.seek(start, os.SEEK_SET)
+            data = f.read()
+        text = data.decode("utf-8", errors="replace")
+    except Exception:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()[-max_lines:]
+    return "\n".join(lines) + "\n"
+
+
+@router.get("/exports/{export_id}/eval-status")
+async def get_export_eval_status(export_id: str):
+    try:
+        manifest_path = _find_export_manifest(export_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    eval_dir = manifest_path.parent.parent / "eval_pre" / f"export_{export_id}"
+    status_path = eval_dir / "eval_status.json"
+    if not status_path.exists():
+        raise HTTPException(status_code=404, detail=f"Missing eval_status.json for export_id={export_id}")
+
+    # Stale-run detection: if RUNNING too long and PID is gone, mark FAILED.
+    try:
+        from projections.jobs.eval_runner import _maybe_mark_stale_running
+
+        status = _maybe_mark_stale_running(status_path)
+    except Exception:
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+
+    return status
+
+
+@router.get("/exports/{export_id}/eval-report")
+async def get_export_eval_report(export_id: str, format: str = "md"):
+    try:
+        manifest_path = _find_export_manifest(export_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    eval_dir = manifest_path.parent.parent / "eval_pre" / f"export_{export_id}"
+    if format.lower() == "json":
+        report_path = eval_dir / "eval_report.json"
+        if not report_path.exists():
+            raise HTTPException(status_code=404, detail=f"Missing eval_report.json for export_id={export_id}")
+        return json.loads(report_path.read_text(encoding="utf-8"))
+
+    report_path = eval_dir / "eval_report.md"
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail=f"Missing eval_report.md for export_id={export_id}")
+    return Response(content=report_path.read_text(encoding="utf-8"), media_type="text/markdown")
+
+
+@router.get("/exports/{export_id}/eval-log")
+async def get_export_eval_log(export_id: str, lines: int = 200):
+    try:
+        manifest_path = _find_export_manifest(export_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    eval_dir = manifest_path.parent.parent / "eval_pre" / f"export_{export_id}"
+    log_path = eval_dir / "eval.log"
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail=f"Missing eval.log for export_id={export_id}")
+
+    return Response(content=_tail_text(log_path, max_lines=lines), media_type="text/plain")

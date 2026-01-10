@@ -63,8 +63,8 @@ def scrape(
         df = scrape_rotowire_props()
 
     if df.empty:
-        typer.echo("No props data found", err=True)
-        raise typer.Exit(1)
+        typer.echo("No props data found (this is normal if games haven't started)")
+        raise typer.Exit(0)
 
     n_players = df["player_name"].nunique() if "player_name" in df.columns else len(df)
     typer.echo(f"Found {len(df)} rows for {n_players} players")

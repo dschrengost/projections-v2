@@ -446,6 +446,18 @@ def run_contest_simulation(
     lineup_p90 = np.percentile(user_scores, 90, axis=1)
     lineup_p95 = np.percentile(user_scores, 95, axis=1)
 
+    # Compute UCVaR90: mean of top 10% scores (above p90) for each lineup
+    # Vectorized: for each lineup, mask scores >= p90 and compute mean
+    lineup_ucv90 = np.zeros(n_user_lineups, dtype=np.float64)
+    for idx in range(n_user_lineups):
+        scores = user_scores[idx]
+        q90 = lineup_p90[idx]
+        tail_mask = scores >= q90
+        if tail_mask.any():
+            lineup_ucv90[idx] = scores[tail_mask].mean()
+        else:
+            lineup_ucv90[idx] = q90  # fallback if no scores above threshold
+
     # Compute dupe penalties if ownership data is provided.
     #
     # Note: the payout engine already tie-splits when a user lineup matches a
@@ -479,17 +491,33 @@ def run_contest_simulation(
         dupe_penalty_disabled_for_matches = 0
 
     # Build results
+    # Tail score config (could be exposed as params if needed)
+    tail_weight_p90 = 0.6
+    tail_weight_ucv = 0.4
+
     results: List[LineupEVResult] = []
     for idx in range(n_user_lineups):
         unadjusted_payout = float(payout_result.expected_payouts[idx])
         dupe_penalty = dupe_penalties[idx]
         expected_payout = unadjusted_payout * dupe_penalty
+
+        p90_val = float(lineup_p90[idx])
+        ucv90_val = float(lineup_ucv90[idx])
+        tail_score_val = tail_weight_p90 * p90_val + tail_weight_ucv * ucv90_val
+        # select_score subtracts the "penalty" portion: (1 - dupe_penalty) scaled
+        # We use the raw tail_score - penalty_impact where penalty_impact reflects
+        # the fractional reduction. The dupe_penalty is in [0,1] where 1=no penalty.
+        # A dupe_penalty of 0.8 means we lose 20% due to duplication.
+        # We scale the penalty by mean FPTS to make it comparable to tail_score units.
+        penalty_impact = (1.0 - dupe_penalty) * float(lineup_means[idx])
+        select_score_val = tail_score_val - penalty_impact
+
         result = LineupEVResult(
             lineup_id=idx,
             player_ids=user_lineups[idx],
             mean=float(lineup_means[idx]),
             std=float(lineup_stds[idx]),
-            p90=float(lineup_p90[idx]),
+            p90=p90_val,
             p95=float(lineup_p95[idx]),
             expected_payout=expected_payout,
             expected_value=expected_payout - entry_fee,
@@ -502,6 +530,9 @@ def run_contest_simulation(
             dupe_penalty=dupe_penalty,
             unadjusted_expected_payout=unadjusted_payout,
             adjusted_expected_payout=expected_payout,
+            ucv90=ucv90_val,
+            tail_score=tail_score_val,
+            select_score=select_score_val,
         )
         results.append(result)
 
@@ -510,6 +541,19 @@ def run_contest_simulation(
     rois = [r.roi for r in results]
     win_rates = [r.win_rate for r in results]
     top1_rates = [r.top_1pct_rate for r in results]
+
+    # Log tail metrics summary for debugging
+    ucv90_vals = [r.ucv90 for r in results if r.ucv90 is not None]
+    tail_scores = [r.tail_score for r in results if r.tail_score is not None]
+    select_scores = [r.select_score for r in results if r.select_score is not None]
+    if ucv90_vals:
+        logger.info(
+            "Tail metrics: ucv90=[%.1f, %.1f, %.1f], tail_score=[%.1f, %.1f, %.1f], "
+            "select_score=[%.1f, %.1f, %.1f] (min/med/max)",
+            min(ucv90_vals), float(np.median(ucv90_vals)), max(ucv90_vals),
+            min(tail_scores), float(np.median(tail_scores)), max(tail_scores),
+            min(select_scores), float(np.median(select_scores)), max(select_scores),
+        )
 
     stats = SummaryStats(
         lineup_count=n_user_lineups,

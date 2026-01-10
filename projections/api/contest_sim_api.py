@@ -209,6 +209,10 @@ class LineupEVResultResponse(BaseModel):
     dupe_penalty: float = 1.0  # E[1/K], 1.0 = no penalty
     unadjusted_expected_payout: Optional[float] = None  # expected_payout before dupe penalty
     adjusted_expected_payout: Optional[float] = None  # expected_payout * dupe_penalty
+    # Tail / upside selection metrics
+    ucv90: Optional[float] = None  # Upper CVaR at 90th pctile (mean of top 10% scores)
+    tail_score: Optional[float] = None  # Weighted combo: 0.6*p90 + 0.4*ucv90
+    select_score: Optional[float] = None  # tail_score - dupe penalty impact
 
 
 class ContestConfigResponse(BaseModel):
@@ -497,6 +501,30 @@ async def list_saved_sim_builds(
     return builds
 
 
+def _backfill_tail_metrics(results: List[Dict]) -> List[Dict]:
+    """Backfill ucv90/tail_score/select_score for legacy saved builds."""
+    tail_weight_p90 = 0.6
+    tail_weight_ucv = 0.4
+    for r in results:
+        # Skip if already has tail metrics
+        if r.get("ucv90") is not None:
+            continue
+        # Compute from p90 - for legacy builds we estimate UCVaR as ~p90 * 1.05
+        # (a rough heuristic since we don't have the full score distribution)
+        p90 = r.get("p90")
+        mean = r.get("mean")
+        dupe_penalty = r.get("dupe_penalty", 1.0)
+        if p90 is not None and mean is not None:
+            # Estimate UCVaR90 as p90 + 0.5 * (p90 - mean) based on typical distributions
+            ucv90_est = p90 + 0.5 * max(0, p90 - mean)
+            r["ucv90"] = round(ucv90_est, 2)
+            tail_score = tail_weight_p90 * p90 + tail_weight_ucv * ucv90_est
+            r["tail_score"] = round(tail_score, 2)
+            penalty_impact = (1.0 - dupe_penalty) * mean
+            r["select_score"] = round(tail_score - penalty_impact, 2)
+    return results
+
+
 @router.get("/saved-builds/{build_id}", response_model=SavedSimBuildDetail)
 async def load_saved_sim_build(build_id: str, date: str):
     """Load a saved contest sim build with lineups/results."""
@@ -504,6 +532,9 @@ async def load_saved_sim_build(build_id: str, date: str):
     if not data:
         raise HTTPException(status_code=404, detail=f"Sim build {build_id} not found for date {date}")
     results = data.get("results")
+    # Backfill tail metrics for legacy builds
+    if results:
+        results = _backfill_tail_metrics(results)
     return SavedSimBuildDetail(
         build_id=data.get("build_id", build_id),
         game_date=data.get("game_date", date),

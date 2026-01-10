@@ -128,8 +128,25 @@ export default function LineupCard({
                             <span className="value">{result.p90.toFixed(1)}</span>
                         </div>
                         <div className="stat-box">
+                            <span className="label" title="Mean of top 10% scores">UCVaR</span>
+                            <span className="value">{result.ucv90?.toFixed(1) ?? '—'}</span>
+                        </div>
+                        <div className="stat-box">
+                            <span className="label" title="0.6×p90 + 0.4×UCVaR90">Tail</span>
+                            <span className="value">{result.tail_score?.toFixed(1) ?? '—'}</span>
+                        </div>
+
+                        <div className="stat-box">
+                            <span className="label" title="Tail score minus dupe penalty">Sel Score</span>
+                            <span className="value">{result.select_score?.toFixed(1) ?? '—'}</span>
+                        </div>
+                        <div className="stat-box">
                             <span className="label">Top 5%</span>
                             <span className="value">{formatPct(result.top_5pct_rate)}</span>
+                        </div>
+                        <div className="stat-box">
+                            <span className="label">Top 10%</span>
+                            <span className="value">{formatPct(result.top_10pct_rate)}</span>
                         </div>
                         <div className="stat-box">
                             <span className="label">p95</span>

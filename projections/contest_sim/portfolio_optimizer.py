@@ -16,6 +16,7 @@ requiring explicit min-uniques or exposure caps.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Iterable, Literal, Mapping, Sequence
 
@@ -82,6 +83,10 @@ class DecorrelatedPortfolioConfig:
     ev_retention: float = 0.99
     worlds_sample: int = 5000
     seed: int = 42
+    # Optional guardrail: restrict risk modeling to a deterministic train-only
+    # subset of the provided worlds (split permutation uses `seed`).
+    # When unset (default), behavior is unchanged (all worlds eligible).
+    worlds_train_frac: float | None = None
     max_passes: int = 3
     max_swaps: int = 50
 
@@ -286,6 +291,7 @@ def build_decorrelated_portfolio(
     *,
     worlds_matrix,
     player_index: Mapping[str, int],
+    world_indices: Sequence[int] | None = None,
     config: DecorrelatedPortfolioConfig | None = None,
     exposure_bounds: Mapping[str, ExposureBoundsPct] | None = None,
 ) -> tuple[PortfolioSelection, DecorrelatedPortfolioDiagnostics]:
@@ -308,6 +314,14 @@ def build_decorrelated_portfolio(
             f"portfolio_size={portfolio_size} exceeds candidate count={len(candidates)}"
         )
     cfg = config or DecorrelatedPortfolioConfig()
+    if (
+        world_indices is None
+        and cfg.worlds_train_frac is None
+        and os.environ.get("PROJECTIONS_SELECTION_REQUIRE_WORLD_IDX", "").strip().lower() in {"1", "true", "yes", "y"}
+    ):
+        raise ValueError(
+            "Selection guardrail active: pass world_indices=... or set DecorrelatedPortfolioConfig(worlds_train_frac=...)."
+        )
     if not (0.0 < float(cfg.ev_retention) <= 1.0):
         raise ValueError("ev_retention must be in (0, 1]")
     if int(cfg.worlds_sample) <= 0:
@@ -343,6 +357,27 @@ def build_decorrelated_portfolio(
     W = int(worlds_sub.shape[0])
     if W < 2:
         raise ValueError("Need at least 2 worlds to compute covariance")
+
+    # Optional: restrict to an explicit subset of worlds, or a deterministic train split.
+    if world_indices is not None:
+        idx = np.asarray(world_indices, dtype=np.int64)
+        if idx.ndim != 1:
+            raise ValueError("world_indices must be a 1D array of row indices")
+        if idx.size < 2:
+            raise ValueError("world_indices must include at least 2 worlds")
+        worlds_sub = worlds_sub[idx, :]
+        W = int(worlds_sub.shape[0])
+    elif cfg.worlds_train_frac is not None:
+        train_frac = float(cfg.worlds_train_frac)
+        if not (0.0 < train_frac < 1.0):
+            raise ValueError("worlds_train_frac must be in (0, 1)")
+        rng_split = np.random.default_rng(int(cfg.seed))
+        perm = rng_split.permutation(int(W))
+        n_train = int(np.floor(train_frac * float(W)))
+        n_train = max(1, min(n_train, int(W) - 1))
+        rows = np.sort(perm[:n_train])
+        worlds_sub = worlds_sub[rows, :]
+        W = int(worlds_sub.shape[0])
     target_W = min(W, int(cfg.worlds_sample))
     if target_W < W:
         rng = np.random.default_rng(int(cfg.seed))

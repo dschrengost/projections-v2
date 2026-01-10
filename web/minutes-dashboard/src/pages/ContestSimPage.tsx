@@ -28,7 +28,7 @@ import PlayerExposurePanel, { ExposureBounds } from '../components/PlayerExposur
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-type SortKey = 'lineup_id' | 'mean' | 'p90' | 'p95' | 'expected_value' | 'roi' | 'win_rate' | 'top_1pct_rate' | 'top_10pct_rate' | 'cash_rate' | 'total_own'
+type SortKey = 'lineup_id' | 'mean' | 'p90' | 'p95' | 'expected_value' | 'roi' | 'win_rate' | 'top_1pct_rate' | 'top_10pct_rate' | 'cash_rate' | 'total_own' | 'ucv90' | 'tail_score' | 'select_score'
 
 export default function ContestSimPage() {
     // Date and slate selection
@@ -300,14 +300,13 @@ export default function ContestSimPage() {
             results = results.filter(r => r.total_own <= maxOwnership)
         }
 
-        // Sort
+        // Sort (handle null/undefined values by treating them as -Infinity for desc, +Infinity for asc)
         results.sort((a, b) => {
             const aVal = a[sortKey as keyof typeof a]
             const bVal = b[sortKey as keyof typeof b]
-            if (typeof aVal === 'number' && typeof bVal === 'number') {
-                return sortDir === 'asc' ? aVal - bVal : bVal - aVal
-            }
-            return 0
+            const aNum = typeof aVal === 'number' && !isNaN(aVal) ? aVal : (sortDir === 'desc' ? -Infinity : Infinity)
+            const bNum = typeof bVal === 'number' && !isNaN(bVal) ? bVal : (sortDir === 'desc' ? -Infinity : Infinity)
+            return sortDir === 'asc' ? aNum - bNum : bNum - aNum
         })
 
         return results
@@ -996,6 +995,9 @@ export default function ContestSimPage() {
                                     >
                                         <option value="expected_value">EV</option>
                                         <option value="roi">ROI</option>
+                                        <option value="select_score">Tail Select</option>
+                                        <option value="tail_score">Tail Score</option>
+                                        <option value="ucv90">UCVaR90</option>
                                         <option value="win_rate">Win%</option>
                                         <option value="top_1pct_rate">Top 1%</option>
                                         <option value="cash_rate">Cash%</option>

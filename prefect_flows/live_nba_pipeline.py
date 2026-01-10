@@ -157,15 +157,23 @@ def dk_salaries_task(*, game_date: str, data_root: Path) -> None:
     )
 
 
-@task(name="scrape-props", retries=2, retry_delay_seconds=60)
+@task(name="scrape-props", retries=1, retry_delay_seconds=60)
 def scrape_props_task(*, game_date: str, data_root: Path) -> None:
-    """Scrape player props from RotoWire for the props analysis tab."""
-    _run_python_module(
-        "projections.cli.scrape_props",
-        ["scrape", "--date", game_date],
-        data_root=data_root,
-        timeout_s=300,
-    )
+    """Scrape player props from RotoWire for the props analysis tab.
+
+    This is a non-blocking task - props failures should not fail the pipeline.
+    Props may be unavailable early in the day or during off-season.
+    """
+    try:
+        _run_python_module(
+            "projections.cli.scrape_props",
+            ["scrape", "--date", game_date],
+            data_root=data_root,
+            timeout_s=300,
+        )
+    except Exception as e:
+        logger = get_run_logger()
+        logger.warning(f"Props scrape failed (continuing): {e}")
 
 
 @task(name="build-minutes-features", retries=1, retry_delay_seconds=60)

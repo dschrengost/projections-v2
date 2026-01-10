@@ -64,6 +64,11 @@ class LineupEVResult:
     unadjusted_expected_payout: Optional[float] = None  # Expected payout before dupe penalty
     adjusted_expected_payout: Optional[float] = None  # expected_payout * dupe_penalty
 
+    # Tail / upside selection metrics
+    ucv90: Optional[float] = None  # Upper CVaR at 90th pctile (mean of top 10% scores)
+    tail_score: Optional[float] = None  # Weighted combo: 0.6*p90 + 0.4*ucv90
+    select_score: Optional[float] = None  # tail_score - (1 - dupe_penalty) penalty
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -86,6 +91,9 @@ class LineupEVResult:
             if self.unadjusted_expected_payout is not None
             else None,
             "adjusted_expected_payout": round(self.adjusted_expected_payout, 4) if self.adjusted_expected_payout is not None else None,
+            "ucv90": round(self.ucv90, 2) if self.ucv90 is not None else None,
+            "tail_score": round(self.tail_score, 2) if self.tail_score is not None else None,
+            "select_score": round(self.select_score, 2) if self.select_score is not None else None,
         }
 
 

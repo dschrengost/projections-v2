@@ -19,6 +19,13 @@ export interface LineupEVResult {
     top_5pct_rate: number
     top_10pct_rate: number
     cash_rate: number
+    dupe_penalty?: number
+    unadjusted_expected_payout?: number | null
+    adjusted_expected_payout?: number | null
+    // Tail / upside selection metrics
+    ucv90?: number | null  // Upper CVaR at 90th pctile (mean of top 10% scores)
+    tail_score?: number | null  // Weighted combo: 0.6*p90 + 0.4*ucv90
+    select_score?: number | null  // tail_score - dupe penalty impact
 }
 
 export interface ContestConfig {
