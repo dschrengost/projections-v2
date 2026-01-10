@@ -21,11 +21,21 @@ class MinutesNoiseConfig:
     sigma_bench: float = 3.0
     # Minimum baseline minutes to apply noise (skip deep bench)
     min_minutes_for_noise: float = 8.0
+    # Optional override for the noise eligibility threshold (None = use min_minutes_for_noise).
+    # Set to 0.0 to apply noise to all adjustable players (including tail).
+    min_minutes_for_noise_override: float | None = None
     # Hard cap on absolute noise per player
     cap_abs: float = 6.0
     # Whether to use Student-t instead of normal
     use_student_t: bool = False
     t_df: float = 8.0
+    # When enabled, include the tail in the team-240 projection adjustable set.
+    # This can reduce core concentration by allowing minutes corrections to flow to/from
+    # lower-minute players during projection, without necessarily adding noise to them.
+    include_tail_in_projection: bool = False
+    # Minimum minutes (baseline) for a player to be adjustable in team-240 projection when
+    # include_tail_in_projection=True.
+    tail_min_adjustable_minutes: float = 0.0
     # Bounds for clamping: "zero" | "p10" for lo_source; hi_source typically "p90"
     lo_source: str = "zero"
     hi_source: str = "p90"
@@ -232,14 +242,22 @@ def load_sim_v2_profile(
 
     # New structured minutes noise config
     minutes_noise_cfg_raw = config.get("minutes_noise_config", {}) or {}
+    min_minutes_for_noise_override_raw = minutes_noise_cfg_raw.get("min_minutes_for_noise_override")
     minutes_noise_config = MinutesNoiseConfig(
         enabled=bool(minutes_noise_cfg_raw.get("enabled", True)),
         sigma_starter=float(minutes_noise_cfg_raw.get("sigma_starter", 2.0)),
         sigma_bench=float(minutes_noise_cfg_raw.get("sigma_bench", 3.0)),
         min_minutes_for_noise=float(minutes_noise_cfg_raw.get("min_minutes_for_noise", 8.0)),
+        min_minutes_for_noise_override=(
+            float(min_minutes_for_noise_override_raw)
+            if min_minutes_for_noise_override_raw is not None
+            else None
+        ),
         cap_abs=float(minutes_noise_cfg_raw.get("cap_abs", 6.0)),
         use_student_t=bool(minutes_noise_cfg_raw.get("use_student_t", False)),
         t_df=float(minutes_noise_cfg_raw.get("t_df", 8.0)),
+        include_tail_in_projection=bool(minutes_noise_cfg_raw.get("include_tail_in_projection", False)),
+        tail_min_adjustable_minutes=float(minutes_noise_cfg_raw.get("tail_min_adjustable_minutes", 0.0)),
         lo_source=str(minutes_noise_cfg_raw.get("lo_source", "zero")),
         hi_source=str(minutes_noise_cfg_raw.get("hi_source", "p90")),
         lo_pad=float(minutes_noise_cfg_raw.get("lo_pad", 0.0)),

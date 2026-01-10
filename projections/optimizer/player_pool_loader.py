@@ -6,7 +6,6 @@ import glob
 import os
 import re
 import sys
-import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Optional, Sequence
@@ -15,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from projections.dk.salaries_schema import dk_salaries_gold_path
+from projections.names import normalize_player_name
 from projections.pipeline import control_plane
 from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
 
@@ -205,12 +205,7 @@ def _normalize_positions(val: object) -> list[str]:
 
 
 def _normalize_name_value(val: object) -> str:
-    if val is None:
-        return ""
-    # Strip accents so "Jokić" matches "Jokic" when joining on names.
-    normalized = unicodedata.normalize("NFKD", str(val))
-    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
-    return ascii_only.strip().lower()
+    return normalize_player_name(val)
 
 
 def _normalize_team_value(val: object) -> str:

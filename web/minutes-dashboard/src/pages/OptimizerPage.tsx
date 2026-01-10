@@ -79,6 +79,7 @@ export default function OptimizerPage() {
     const [minProj, setMinProj] = useState<number | null>(null)
     const [randomnessPct, setRandomnessPct] = useState(0)
     const [useUserOverrides, setUseUserOverrides] = useState(false)
+    const [lateSwapEnabled, setLateSwapEnabled] = useState(false)
 
     const overridesRef = useRef(overrides)
     const savedOverridesRef = useRef(savedOverrides)
@@ -605,6 +606,7 @@ export default function OptimizerPage() {
                 enum_enable: maxPool >= 5000,
                 randomness_pct: randomnessPct > 0 && hasStddev ? randomnessPct : undefined,
                 use_user_overrides: useUserOverrides,
+                late_swap_enabled: lateSwapEnabled,
             }
             const job = await startBuild(request)
             setCurrentJob(job)
@@ -1050,6 +1052,26 @@ export default function OptimizerPage() {
                             {useUserOverrides
                                 ? 'Using your manual projection overrides'
                                 : 'Using model projections (set overrides via API)'}
+                        </small>
+                    </div>
+
+                    {/* Late Swap Toggle */}
+                    <div className="override-toggle">
+                        <label className="toggle-switch">
+                            <input
+                                type="checkbox"
+                                checked={lateSwapEnabled}
+                                onChange={e => setLateSwapEnabled(e.target.checked)}
+                            />
+                            <span className="toggle-slider"></span>
+                            <span className="toggle-label">
+                                {lateSwapEnabled ? 'Late Swap Mode' : 'Standard Mode'}
+                            </span>
+                        </label>
+                        <small className="hint">
+                            {lateSwapEnabled
+                                ? 'Favors later games for swap optionality'
+                                : 'No late swap preference'}
                         </small>
                     </div>
 

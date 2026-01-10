@@ -129,6 +129,11 @@ class QuickBuildRequest(BaseModel):
     ownership_lambda: float = Field(default=1.0, ge=0.0, le=10.0, description="Ownership lambda")
     ownership_curve: str = Field(default="sigmoid", description="Curve: sigmoid/linear/power/neglog")
 
+    # Late swap bonus (favors later-starting games for swap optionality)
+    late_swap_enabled: bool = Field(default=False, description="Enable late swap bonus")
+    late_swap_bonus_per_hour: float = Field(default=0.2, ge=0.0, le=1.0, description="Bonus per hour after earliest game")
+    late_swap_max_bonus: float = Field(default=1.5, ge=0.0, le=5.0, description="Maximum late swap bonus")
+
     # Randomness
     randomness_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="Randomness %")
 

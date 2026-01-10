@@ -26,6 +26,22 @@
         "enabled": true,
         "sigma_min": 1.0
       },
+      "minutes_noise_config": {
+        "enabled": true,
+        "sigma_starter": 2.0,
+        "sigma_bench": 3.0,
+        "min_minutes_for_noise": 8.0,
+        "min_minutes_for_noise_override": null,
+        "cap_abs": 6.0,
+        "use_student_t": false,
+        "t_df": 8,
+        "include_tail_in_projection": false,
+        "tail_min_adjustable_minutes": 0.0,
+        "lo_source": "zero",
+        "hi_source": "p90",
+        "lo_pad": 0.0,
+        "hi_pad": 2.0
+      },
       "team_sigma_scale": 1.0,
       "player_sigma_scale": 1.0,
       "rates_sigma_scale": 1.0,
@@ -117,6 +133,11 @@
       "minutes_noise": {
         "enabled": true,
         "sigma_min": 1.0
+      },
+      "minutes_noise_config": {
+        "include_tail_in_projection": true,
+        "tail_min_adjustable_minutes": 2.0,
+        "min_minutes_for_noise_override": null
       },
       "team_sigma_scale": 1.0,
       "player_sigma_scale": 1.0,
@@ -251,9 +272,12 @@
         "sigma_starter": 2.0,
         "sigma_bench": 3.0,
         "min_minutes_for_noise": 8.0,
+        "min_minutes_for_noise_override": null,
         "cap_abs": 6.0,
         "use_student_t": false,
         "t_df": 8,
+        "include_tail_in_projection": false,
+        "tail_min_adjustable_minutes": 0.0,
         "lo_source": "zero",
         "hi_source": "p90",
         "lo_pad": 0.0,

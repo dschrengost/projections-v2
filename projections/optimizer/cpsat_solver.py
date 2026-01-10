@@ -6,11 +6,13 @@ from typing import Dict, Tuple, List, Any, Optional
 
 # New objective penalty wiring (global config getter)
 try:  # local import
-    from .objective import get_active_ownership_penalty
+    from .objective import get_active_ownership_penalty, get_active_late_swap_bonus
     from .objective.own_penalty import build_ownership_penalty
+    from .objective.late_swap_bonus import build_late_swap_bonus
 except Exception:  # fallback when relative import fails
-    from objective import get_active_ownership_penalty  # type: ignore
+    from objective import get_active_ownership_penalty, get_active_late_swap_bonus  # type: ignore
     from objective.own_penalty import build_ownership_penalty  # type: ignore
+    from objective.late_swap_bonus import build_late_swap_bonus  # type: ignore
 
 
 # ============================================================================
@@ -495,13 +497,14 @@ def build_cpsat(spec: Any):
         if vars_:
             m.Add(sum(vars_) == 0)
 
-    # Objective (PRP-16/OWN): projected points with optional ownership penalty
+    # Objective (PRP-16/OWN): projected points with optional ownership penalty and late swap bonus
     # Initial objective; iterative solvers will override per lineup when aggro is enabled
     SCALE = 1000
     obj_terms = []
     # Prefer new functional API if a config is published; else fall back to legacy dict
     cfg, aggro = get_active_ownership_penalty()
-    if cfg is not None:
+    late_swap_cfg = get_active_late_swap_bonus()
+    if cfg is not None or late_swap_cfg is not None:
         try:
             import pandas as _pd
 
@@ -513,13 +516,23 @@ def build_cpsat(spec: Any):
                         None if getattr(p, "own_proj", None) is None else float(p.own_proj)
                         for p in spec.players
                     ],
+                    "game_start_utc": [
+                        getattr(p, "game_start_utc", None) for p in spec.players
+                    ],
                 }
             )
-            # lineup_idx=None here; iterative loop may override objective later
-            pen = build_ownership_penalty(
-                df, cfg, own_col="own_proj", lineup_idx=None, aggro=None
-            )
-            weights = (df["proj"].astype(float).to_numpy() + pen)
+            # Start with base projections
+            weights = df["proj"].astype(float).to_numpy().copy()
+            # Apply ownership penalty (negative) if configured
+            if cfg is not None:
+                pen = build_ownership_penalty(
+                    df, cfg, own_col="own_proj", lineup_idx=None, aggro=None
+                )
+                weights = weights + pen
+            # Apply late swap bonus (positive) if configured
+            if late_swap_cfg is not None:
+                bonus = build_late_swap_bonus(df, late_swap_cfg, game_start_col="game_start_utc")
+                weights = weights + bonus
             pid_to_w = {row[0]: float(w) for row, w in zip(df[["player_id"]].itertuples(index=False, name=None), weights)}
             for (pid, pos), var in x.items():
                 obj_terms.append(int(round(pid_to_w[pid] * SCALE)) * var)
@@ -632,7 +645,8 @@ def build_cpsat_counts(spec):
     SCALE = 1000
     objective_terms = []
     cfg, aggro = get_active_ownership_penalty()
-    if cfg is not None:
+    late_swap_cfg = get_active_late_swap_bonus()
+    if cfg is not None or late_swap_cfg is not None:
         try:
             import pandas as _pd
 
@@ -644,10 +658,21 @@ def build_cpsat_counts(spec):
                         None if getattr(p, "own_proj", None) is None else float(p.own_proj)
                         for p in spec.players
                     ],
+                    "game_start_utc": [
+                        getattr(p, "game_start_utc", None) for p in spec.players
+                    ],
                 }
             )
-            pen = build_ownership_penalty(df, cfg, own_col="own_proj", lineup_idx=None, aggro=None)
-            weights = (df["proj"].astype(float).to_numpy() + pen)
+            # Start with base projections
+            weights = df["proj"].astype(float).to_numpy().copy()
+            # Apply ownership penalty (negative) if configured
+            if cfg is not None:
+                pen = build_ownership_penalty(df, cfg, own_col="own_proj", lineup_idx=None, aggro=None)
+                weights = weights + pen
+            # Apply late swap bonus (positive) if configured
+            if late_swap_cfg is not None:
+                bonus = build_late_swap_bonus(df, late_swap_cfg, game_start_col="game_start_utc")
+                weights = weights + bonus
             pid_to_w = {row[0]: float(w) for row, w in zip(df[["player_id"]].itertuples(index=False, name=None), weights)}
             for pid in y:
                 objective_terms.append(int(round(pid_to_w[pid] * SCALE)) * y[pid])
@@ -1051,9 +1076,10 @@ def solve_cpsat_iterative(players: List[Dict], constraints: Any, seed: int, site
     last_status = None
 
     while built < spec.N_lineups:
-        # Rebuild objective weights per iteration if new penalty config is active
+        # Rebuild objective weights per iteration if penalty/bonus configs are active
         cfg_active, aggro_active = get_active_ownership_penalty()
-        if cfg_active is not None:
+        late_swap_cfg_active = get_active_late_swap_bonus()
+        if cfg_active is not None or late_swap_cfg_active is not None:
             try:
                 import pandas as _pd
                 SCALE = 1000
@@ -1065,28 +1091,40 @@ def solve_cpsat_iterative(players: List[Dict], constraints: Any, seed: int, site
                             None if getattr(p, "own_proj", None) is None else float(p.own_proj)
                             for p in spec.players
                         ],
+                        "game_start_utc": [
+                            getattr(p, "game_start_utc", None) for p in spec.players
+                        ],
                     }
                 )
-                _pen = build_ownership_penalty(
-                    _df,
-                    cfg_active,
-                    own_col="own_proj",
-                    lineup_idx=built,
-                    aggro=aggro_active,
-                )
-                _w = (_df["proj"].astype(float).to_numpy() + _pen)
+                # Start with base projections
+                _w = _df["proj"].astype(float).to_numpy().copy()
+                # Apply ownership penalty (negative) if configured
+                if cfg_active is not None:
+                    _pen = build_ownership_penalty(
+                        _df,
+                        cfg_active,
+                        own_col="own_proj",
+                        lineup_idx=built,
+                        aggro=aggro_active,
+                    )
+                    _w = _w + _pen
+                # Apply late swap bonus (positive) if configured
+                if late_swap_cfg_active is not None:
+                    _bonus = build_late_swap_bonus(_df, late_swap_cfg_active, game_start_col="game_start_utc")
+                    _w = _w + _bonus
                 _pid2w = {row[0]: float(w) for row, w in zip(_df[["player_id"]].itertuples(index=False, name=None), _w)}
                 _terms = [int(round(_pid2w[pid] * SCALE)) * var for (pid, _pos), var in x.items()]
                 model.Maximize(sum(_terms))
                 # Minimal logging of curve + lambda
                 try:
-                    eff_lambda = (
-                        aggro_active.lambda_for(built) if aggro_active is not None else cfg_active.lambda1
-                    )
-                    if aggro_active is not None:
-                        print(
-                            f"[own] curve={cfg_active.curve.value} lambda1={cfg_active.lambda1:.3f} eff_lambda={eff_lambda:.3f} (lineup {built})"
+                    if cfg_active is not None:
+                        eff_lambda = (
+                            aggro_active.lambda_for(built) if aggro_active is not None else cfg_active.lambda1
                         )
+                        if aggro_active is not None:
+                            print(
+                                f"[own] curve={cfg_active.curve.value} lambda1={cfg_active.lambda1:.3f} eff_lambda={eff_lambda:.3f} (lineup {built})"
+                            )
                 except Exception:
                     pass
             except Exception:
@@ -1476,9 +1514,10 @@ def solve_cpsat_iterative_counts(
     last_status = None
 
     while built < spec.N_lineups:
-        # Rebuild objective per iteration if active cfg present
+        # Rebuild objective per iteration if penalty/bonus configs are active
         cfg_active, aggro_active = get_active_ownership_penalty()
-        if cfg_active is not None:
+        late_swap_cfg_active = get_active_late_swap_bonus()
+        if cfg_active is not None or late_swap_cfg_active is not None:
             try:
                 import pandas as _pd
                 SCALE = 1000
@@ -1490,28 +1529,40 @@ def solve_cpsat_iterative_counts(
                             None if getattr(p, "own_proj", None) is None else float(p.own_proj)
                             for p in spec.players
                         ],
+                        "game_start_utc": [
+                            getattr(p, "game_start_utc", None) for p in spec.players
+                        ],
                     }
                 )
-                _pen = build_ownership_penalty(
-                    _df,
-                    cfg_active,
-                    own_col="own_proj",
-                    lineup_idx=built,
-                    aggro=aggro_active,
-                )
-                _w = (_df["proj"].astype(float).to_numpy() + _pen)
+                # Start with base projections
+                _w = _df["proj"].astype(float).to_numpy().copy()
+                # Apply ownership penalty (negative) if configured
+                if cfg_active is not None:
+                    _pen = build_ownership_penalty(
+                        _df,
+                        cfg_active,
+                        own_col="own_proj",
+                        lineup_idx=built,
+                        aggro=aggro_active,
+                    )
+                    _w = _w + _pen
+                # Apply late swap bonus (positive) if configured
+                if late_swap_cfg_active is not None:
+                    _bonus = build_late_swap_bonus(_df, late_swap_cfg_active, game_start_col="game_start_utc")
+                    _w = _w + _bonus
                 _pid2w = {row[0]: float(w) for row, w in zip(_df[["player_id"]].itertuples(index=False, name=None), _w)}
                 _terms = [int(round(_pid2w[pid] * SCALE)) * y[pid] for pid in y]
                 model.Maximize(sum(_terms))
                 # Minimal logging of curve + lambda when aggro is enabled
                 try:
-                    eff_lambda = (
-                        aggro_active.lambda_for(built) if aggro_active is not None else cfg_active.lambda1
-                    )
-                    if aggro_active is not None:
-                        print(
-                            f"[own] curve={cfg_active.curve.value} lambda1={cfg_active.lambda1:.3f} eff_lambda={eff_lambda:.3f} (lineup {built})"
+                    if cfg_active is not None:
+                        eff_lambda = (
+                            aggro_active.lambda_for(built) if aggro_active is not None else cfg_active.lambda1
                         )
+                        if aggro_active is not None:
+                            print(
+                                f"[own] curve={cfg_active.curve.value} lambda1={cfg_active.lambda1:.3f} eff_lambda={eff_lambda:.3f} (lineup {built})"
+                            )
                 except Exception:
                     pass
             except Exception:

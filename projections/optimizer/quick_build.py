@@ -564,6 +564,7 @@ def _build_spec_from_payload(
                 dk_id=_player_field(raw, "dk_id", None),
                 own_proj=_player_field(raw, "own_proj", None),
                 stddev=_player_field(raw, "stddev", None),
+                game_start_utc=_player_field(raw, "game_start_utc", None),
             )
         )
 

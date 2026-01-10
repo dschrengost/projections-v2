@@ -9,39 +9,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
-import unicodedata
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd
 
+from projections.names import normalize_player_name
 from projections.paths import data_path, get_project_root
 from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
 
-
-
-NAME_ALIASES = {
-    "alexandresarr": "alexsarr",
-    "jimmybutleriii": "jimmybutler",
-}
-
-
-def _normalize_name(value: str | None) -> str:
-    """Normalize player name for matching: fold Unicode diacritics, lowercase, strip.
-    
-    Handles European characters like Dončić -> doncic, Jokić -> jokic.
-    Also applies manual aliases (NAME_ALIASES).
-    """
-    if not value:
-        return ""
-    # Fold Unicode (e.g., Dončić -> Doncic) before stripping non-alphanumerics
-    normalized = unicodedata.normalize("NFKD", value)
-    ascii_folded = normalized.encode("ascii", "ignore").decode("ascii")
-    cleaned = re.sub(r"[^a-z0-9]", "", ascii_folded.lower())
-    
-    return NAME_ALIASES.get(cleaned, cleaned)
 
 UTC = timezone.utc
 
@@ -605,8 +582,8 @@ def finalize_projections(
     ownership = _load_ownership(game_date, draft_group_id, data_root, run_id=ownership_run_id)
     if ownership is not None and not ownership.empty:
         # Normalize names for matching (handles Unicode like Dončić -> doncic)
-        unified["_name_norm"] = unified["player_name"].apply(_normalize_name)
-        ownership["_name_norm"] = ownership["player_name"].apply(_normalize_name)
+        unified["_name_norm"] = unified["player_name"].apply(normalize_player_name)
+        ownership["_name_norm"] = ownership["player_name"].apply(normalize_player_name)
         
         ownership_cols = ["_name_norm"] + [c for c in OWNERSHIP_COLUMNS if c in ownership.columns]
         unified = unified.merge(
@@ -627,8 +604,8 @@ def finalize_projections(
         salaries = _load_salaries(game_date, draft_group_id, data_root)
         if salaries is not None:
             # Join on player_name (normalized handles Unicode like Dončić)
-            unified["_name_norm"] = unified["player_name"].apply(_normalize_name)
-            salaries["_name_norm"] = salaries["player_name"].apply(_normalize_name)
+            unified["_name_norm"] = unified["player_name"].apply(normalize_player_name)
+            salaries["_name_norm"] = salaries["player_name"].apply(normalize_player_name)
             unified = unified.merge(
                 salaries[["_name_norm", "salary"]],
                 on="_name_norm",

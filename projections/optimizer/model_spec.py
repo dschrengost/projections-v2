@@ -17,6 +17,7 @@ class SpecPlayer:
         None  # PRP-16: Ownership percentage for penalty calculation
     )
     stddev: Optional[float] = None
+    game_start_utc: Optional[str] = None  # ISO format UTC for late swap bonus
 
 
 @dataclass

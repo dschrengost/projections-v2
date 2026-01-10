@@ -58,6 +58,9 @@ export interface QuickBuildRequest {
     exclude_games?: string[]
     ownership_penalty_enabled?: boolean
     ownership_lambda?: number
+    late_swap_enabled?: boolean
+    late_swap_bonus_per_hour?: number
+    late_swap_max_bonus?: number
     randomness_pct?: number | null
     use_user_overrides?: boolean
     ownership_mode?: string

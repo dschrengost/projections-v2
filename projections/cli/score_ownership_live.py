@@ -6,14 +6,13 @@ import argparse
 import json
 import os
 from functools import lru_cache
-import re
-import unicodedata
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
+from projections.names import normalize_player_name
 from projections.ownership_v1.calibration import (
     PowerCalibrator,
     SoftmaxCalibrator,
@@ -33,27 +32,8 @@ from projections.ownership_v1.score import (
 from projections.paths import data_path
 
 
-
-NAME_ALIASES = {
-    "alexandresarr": "alexsarr",
-    "jimmybutleriii": "jimmybutler",
-}
-
-
 def _normalize_name(value: str | None) -> str:
-    """Normalize player name for matching: fold Unicode diacritics, lowercase, strip.
-    
-    Handles European characters like Dončić -> doncic, Jokić -> jokic, Matković -> matkovic.
-    Also applies manual aliases (NAME_ALIASES).
-    """
-    if not value:
-        return ""
-    # Fold Unicode (e.g., Dončić -> Doncic) before stripping non-alphanumerics
-    normalized = unicodedata.normalize("NFKD", value)
-    ascii_folded = normalized.encode("ascii", "ignore").decode("ascii")
-    cleaned = re.sub(r"[^a-z0-9]", "", ascii_folded.lower())
-    
-    return NAME_ALIASES.get(cleaned, cleaned)
+    return normalize_player_name(value)
 
 
 def _load_calibration_config() -> dict:

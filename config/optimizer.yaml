@@ -66,6 +66,17 @@ ownership_penalty:
   clamp_max: 0.80
   shrink_gamma: 1.0
 
+# Late swap bonus (disabled by default)
+# Adds a small bonus to players in later-starting games for swap optionality.
+# When two players have similar projections, optimizer prefers the later game.
+late_swap_bonus:
+  enabled: false
+  # Points bonus per hour after earliest game on slate
+  # Example: 0.2 means a player in a 10pm game gets +0.6 pts vs 7pm game
+  bonus_per_hour: 0.2
+  # Maximum total bonus (cap to prevent extreme late-game bias)
+  max_bonus: 1.5
+
 # Job management
 jobs:
   # How long to keep completed jobs in memory (seconds)

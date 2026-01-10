@@ -1246,6 +1246,34 @@ def _compute_fpts_from_stats(stats: dict[str, np.ndarray]) -> np.ndarray:
     return fpts
 
 
+def _minutes_concentration_metrics(vec: np.ndarray) -> dict[str, float]:
+    arr = np.asarray(vec, dtype=float)
+    arr = np.where(np.isfinite(arr), arr, 0.0)
+    arr = np.clip(arr, 0.0, None)
+    total = float(arr.sum())
+    if total <= 1e-9:
+        return {
+            "top8_share": 0.0,
+            "entropy": 0.0,
+            "count_gt_18": 0.0,
+            "count_gt_10": 0.0,
+        }
+
+    if arr.size <= 8:
+        top8_sum = float(arr.sum())
+    else:
+        top8_sum = float(np.partition(arr, -8)[-8:].sum())
+
+    p = arr / total
+    entropy = float(-(p * np.log(np.maximum(p, 1e-12))).sum())
+    return {
+        "top8_share": float(top8_sum / total),
+        "entropy": entropy,
+        "count_gt_18": float((arr > 18.0).sum()),
+        "count_gt_10": float((arr > 10.0).sum()),
+    }
+
+
 def _resolve_minutes_column(df: pd.DataFrame) -> str:
     for candidate in ("minutes_p50_cond", "minutes_p50", "minutes_pred_p50"):
         if candidate in df.columns:
@@ -2120,10 +2148,21 @@ def main(
             )
             if use_structured_minutes_noise:
                 mnc = profile_cfg.minutes_noise_config
+                extra_bits: list[str] = []
+                if getattr(mnc, "min_minutes_for_noise_override", None) is not None:
+                    extra_bits.append(
+                        f"min_minutes_for_noise_override={getattr(mnc, 'min_minutes_for_noise_override', None)}"
+                    )
+                if getattr(mnc, "include_tail_in_projection", False):
+                    extra_bits.append("include_tail_in_projection=True")
+                    extra_bits.append(
+                        f"tail_min_adjustable_minutes={getattr(mnc, 'tail_min_adjustable_minutes', 0.0)}"
+                    )
+                extra = (" " + " ".join(extra_bits)) if extra_bits else ""
                 typer.echo(
                     f"[sim_v2] structured minutes_noise enabled: "
                     f"sigma_starter={mnc.sigma_starter} sigma_bench={mnc.sigma_bench} "
-                    f"min_minutes={mnc.min_minutes_for_noise} cap_abs={mnc.cap_abs}"
+                    f"min_minutes={mnc.min_minutes_for_noise} cap_abs={mnc.cap_abs}{extra}"
                 )
 
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
@@ -2163,9 +2202,12 @@ def main(
                         sigma_starter=mnc.sigma_starter,
                         sigma_bench=mnc.sigma_bench,
                         min_minutes_for_noise=mnc.min_minutes_for_noise,
+                        min_minutes_for_noise_override=getattr(mnc, "min_minutes_for_noise_override", None),
                         cap_abs=mnc.cap_abs,
                         use_student_t=mnc.use_student_t,
                         t_df=mnc.t_df,
+                        include_tail_in_projection=getattr(mnc, "include_tail_in_projection", False),
+                        tail_min_adjustable_minutes=getattr(mnc, "tail_min_adjustable_minutes", 0.0),
                         lo_source=mnc.lo_source,
                         hi_source=mnc.hi_source,
                         lo_pad=mnc.lo_pad,
@@ -2181,6 +2223,50 @@ def main(
                             f"frac_residual_push={noise_stats.frac_teams_residual_push:.4f} "
                             f"sum_240_violations={noise_stats.sum_240_violations}"
                         )
+                        if getattr(mnc, "include_tail_in_projection", False):
+                            noise_threshold = getattr(mnc, "min_minutes_for_noise_override", None)
+                            if noise_threshold is None:
+                                noise_threshold = mnc.min_minutes_for_noise
+                            noise_threshold = float(max(0.0, noise_threshold))
+                            adj_threshold = float(max(0.0, getattr(mnc, "tail_min_adjustable_minutes", 0.0)))
+
+                            noisy_mask = gs_minutes_p50 >= noise_threshold
+                            adjustable_mask = gs_minutes_p50 >= adj_threshold
+
+                            for (gid, tid), idxs in group_map.items():
+                                base_vec = gs_minutes_p50[idxs]
+                                post_vec = minutes_worlds[:, idxs].mean(axis=0)
+                                frozen_sum = float(base_vec[~adjustable_mask[idxs]].sum()) if len(idxs) else 0.0
+
+                                base_m = _minutes_concentration_metrics(base_vec)
+                                post_m = _minutes_concentration_metrics(post_vec)
+                                typer.echo(
+                                    "[sim_v2][tail_proj] game_id=%s team_id=%s adj=%d noisy=%d frozen_sum=%.2f "
+                                    "top8_share pre=%.3f post=%.3f | gt18 pre=%.0f post=%.0f | gt10 pre=%.0f post=%.0f | "
+                                    "entropy pre=%.3f post=%.3f"
+                                    % (
+                                        int(gid),
+                                        int(tid),
+                                        int(adjustable_mask[idxs].sum()),
+                                        int(noisy_mask[idxs].sum()),
+                                        frozen_sum,
+                                        base_m["top8_share"],
+                                        post_m["top8_share"],
+                                        base_m["count_gt_18"],
+                                        post_m["count_gt_18"],
+                                        base_m["count_gt_10"],
+                                        post_m["count_gt_10"],
+                                        base_m["entropy"],
+                                        post_m["entropy"],
+                                    )
+                                )
+                                if (post_m["top8_share"] - base_m["top8_share"]) > 0.05:
+                                    typer.echo(
+                                        "[sim_v2][tail_proj] WARNING: more concentrated after projection "
+                                        f"(game_id={int(gid)} team_id={int(tid)} "
+                                        f"top8_share_delta={post_m['top8_share']-base_m['top8_share']:.3f})",
+                                        err=True,
+                                    )
                     # Zero out inactive players' minutes
                     minutes_worlds = minutes_worlds * active_mask.astype(float)
                     # No further reconciliation needed - team-240 already enforced
@@ -2607,7 +2693,16 @@ def main(
                             "sigma_starter": getattr(mnc, 'sigma_starter', None),
                             "sigma_bench": getattr(mnc, 'sigma_bench', None),
                             "min_minutes_for_noise": getattr(mnc, 'min_minutes_for_noise', None),
+                            "min_minutes_for_noise_override": getattr(mnc, "min_minutes_for_noise_override", None),
                             "cap_abs": getattr(mnc, 'cap_abs', None),
+                            "use_student_t": getattr(mnc, "use_student_t", None),
+                            "t_df": getattr(mnc, "t_df", None),
+                            "include_tail_in_projection": getattr(mnc, "include_tail_in_projection", None),
+                            "tail_min_adjustable_minutes": getattr(mnc, "tail_min_adjustable_minutes", None),
+                            "lo_source": getattr(mnc, "lo_source", None),
+                            "hi_source": getattr(mnc, "hi_source", None),
+                            "lo_pad": getattr(mnc, "lo_pad", None),
+                            "hi_pad": getattr(mnc, "hi_pad", None),
                         }
                     (out_dir / "sim_manifest.json").write_text(
                         json.dumps(manifest_payload, indent=2),

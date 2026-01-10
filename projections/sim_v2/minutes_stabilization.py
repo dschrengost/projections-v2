@@ -36,6 +36,26 @@ class MinutesNoiseStats:
     sum_240_violations: int  # teams with abs(sum - 240) > 1e-6
 
 
+def _position_aware_target_cv(minutes_p50: float) -> float:
+    """
+    Target coefficient of variation (std/mean) as a function of expected minutes.
+
+    This is a simple tiered heuristic used by tests and optional simulation modes.
+    """
+    m = float(minutes_p50)
+    if m >= 32.0:
+        return 0.10
+    if m >= 26.0:
+        return 0.11
+    if m >= 20.0:
+        return 0.13
+    if m >= 14.0:
+        return 0.18
+    if m >= 8.0:
+        return 0.28
+    return 0.45
+
+
 def sample_minutes_noise_per_world(
     *,
     minutes_reconciled: np.ndarray,  # (P,) reconciled minutes per player
@@ -44,12 +64,17 @@ def sample_minutes_noise_per_world(
     is_starter: np.ndarray,  # (P,) bool
     team_indices: np.ndarray,  # (P,) int, team code per player
     n_worlds: int,
+    active_mask: np.ndarray | None = None,  # (W, P) bool - inactive players are fixed at 0 in that world
     sigma_starter: float = 2.0,
     sigma_bench: float = 3.0,
+    use_position_aware_sigma: bool = False,
     min_minutes_for_noise: float = 8.0,
+    min_minutes_for_noise_override: float | None = None,
     cap_abs: float = 6.0,
     use_student_t: bool = False,
     t_df: float = 8.0,
+    include_tail_in_projection: bool = False,
+    tail_min_adjustable_minutes: float = 0.0,
     lo_source: str = "zero",  # "zero" | "p10"
     hi_source: str = "p90",
     lo_pad: float = 0.0,
@@ -89,11 +114,31 @@ def sample_minutes_noise_per_world(
     m_base = np.broadcast_to(minutes_reconciled[None, :], (n_worlds, n_players)).copy()
 
     # Compute sigma per player (starter vs bench)
-    is_starter_arr = np.asarray(is_starter, dtype=bool)
-    sigma_per_player = np.where(is_starter_arr, sigma_starter, sigma_bench)
+    if use_position_aware_sigma:
+        cv = np.vectorize(_position_aware_target_cv, otypes=[float])(minutes_reconciled)
+        sigma_per_player = np.maximum(np.asarray(minutes_reconciled, dtype=float) * cv, 0.0)
+    else:
+        is_starter_arr = np.asarray(is_starter, dtype=bool)
+        sigma_per_player = np.where(is_starter_arr, sigma_starter, sigma_bench)
 
-    # Mask: only apply noise to players with enough minutes
-    noise_mask = minutes_reconciled >= min_minutes_for_noise
+    noise_threshold = (
+        float(min_minutes_for_noise_override)
+        if min_minutes_for_noise_override is not None
+        else float(min_minutes_for_noise)
+    )
+    noise_threshold = max(0.0, noise_threshold)
+
+    # Mask: only apply noise to players with enough minutes.
+    noise_mask = minutes_reconciled >= noise_threshold
+
+    # Adjustable mask for projection:
+    # - default: same as noise_mask (legacy behavior)
+    # - when include_tail_in_projection=True: expand adjustable set to include tail.
+    if include_tail_in_projection:
+        adj_threshold = max(0.0, float(tail_min_adjustable_minutes))
+        adjustable_mask = minutes_reconciled >= adj_threshold
+    else:
+        adjustable_mask = noise_mask.copy()
 
     # Sample noise
     if use_student_t:
@@ -129,7 +174,14 @@ def sample_minutes_noise_per_world(
 
     # Project back to 240 per team per world
     m_final, stats = _project_team_240_fast(
-        m_noisy, team_indices, lo, hi, noise_mask, n_worlds, n_teams
+        m_noisy,
+        team_indices,
+        lo,
+        hi,
+        adjustable_mask,
+        n_worlds,
+        n_teams,
+        active_mask=active_mask,
     )
 
     return m_final, stats
@@ -143,6 +195,7 @@ def _project_team_240_fast(
     adjustable_mask: np.ndarray,  # (P,) bool - which players can be adjusted
     n_worlds: int,
     n_teams: int,
+    active_mask: np.ndarray | None = None,  # (W, P) bool - inactive are fixed at 0 in that world
 ) -> tuple[np.ndarray, MinutesNoiseStats]:
     """
     Fast projection to team=240 via iterative redistribution.
@@ -168,11 +221,22 @@ def _project_team_240_fast(
 
         lo_team = lo[team_players]
         hi_team = hi[team_players]
-        adjustable_team = adjustable_mask[team_players]
+        adjustable_team_base = adjustable_mask[team_players]
 
         for w in range(n_worlds):
             total_team_worlds += 1
             m = out[w, team_players].copy()
+
+            if active_mask is not None:
+                active_team = np.asarray(active_mask[w, team_players], dtype=bool)
+                if not active_team.any():
+                    out[w, team_players] = 0.0
+                    continue
+                m = m * active_team.astype(float)
+                adjustable_team = adjustable_team_base & active_team
+            else:
+                adjustable_team = adjustable_team_base
+
             current_sum = float(m.sum())
             delta = 240.0 - current_sum
 
@@ -201,7 +265,10 @@ def _project_team_240_fast(
                         m = np.minimum(m + add, hi_team)
                     else:
                         # No headroom in adjustable set - push to max-minute player
-                        max_idx = int(np.argmax(m))
+                        if active_mask is not None:
+                            max_idx = int(np.argmax(np.where(active_team, m, -np.inf)))
+                        else:
+                            max_idx = int(np.argmax(m))
                         m[max_idx] = min(m[max_idx] + delta, 48.0)
                         teams_residual_push += 1
                         max_residual = max(max_residual, abs(delta))
@@ -215,7 +282,10 @@ def _project_team_240_fast(
                         m = np.maximum(m - sub, lo_team)
                     else:
                         # No removable in adjustable set - push to max-minute player
-                        max_idx = int(np.argmax(m))
+                        if active_mask is not None:
+                            max_idx = int(np.argmax(np.where(active_team, m, -np.inf)))
+                        else:
+                            max_idx = int(np.argmax(m))
                         m[max_idx] = max(m[max_idx] + delta, 0.0)
                         teams_residual_push += 1
                         max_residual = max(max_residual, abs(delta))
@@ -224,7 +294,10 @@ def _project_team_240_fast(
             final_sum = float(m.sum())
             final_delta = 240.0 - final_sum
             if abs(final_delta) > 1e-6:
-                max_idx = int(np.argmax(m))
+                if active_mask is not None:
+                    max_idx = int(np.argmax(np.where(active_team, m, -np.inf)))
+                else:
+                    max_idx = int(np.argmax(m))
                 m[max_idx] = np.clip(m[max_idx] + final_delta, 0.0, 48.0)
                 if abs(final_delta) > 0.01:
                     teams_residual_push += 1
@@ -344,6 +417,7 @@ def apply_pre_sim_qp_reconcile(
 
 __all__ = [
     "MinutesNoiseStats",
+    "_position_aware_target_cv",
     "apply_pre_sim_qp_reconcile",
     "sample_minutes_noise_per_world",
 ]

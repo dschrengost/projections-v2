@@ -36,6 +36,10 @@ from projections.optimizer.lineup_sim_stats import (
     compute_lineup_distribution_stats,
     load_world_fpts_matrix,
 )
+from projections.optimizer.objective import (
+    set_active_late_swap_bonus,
+    LateSwapBonusConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1151,6 +1155,31 @@ def _build_constraints(
     return constraints
 
 
+def _build_late_swap_config(
+    config: Dict[str, Any],
+    defaults: Dict[str, Any],
+) -> Optional[LateSwapBonusConfig]:
+    """Build late swap bonus config from request or defaults."""
+    late_swap_defaults = defaults.get("late_swap_bonus", {})
+
+    enabled = config.get(
+        "late_swap_enabled",
+        late_swap_defaults.get("enabled", False),
+    )
+    if not enabled:
+        return None
+
+    return LateSwapBonusConfig(
+        enabled=True,
+        bonus_per_hour=float(
+            config.get("late_swap_bonus_per_hour", late_swap_defaults.get("bonus_per_hour", 0.2))
+        ),
+        max_bonus=float(
+            config.get("late_swap_max_bonus", late_swap_defaults.get("max_bonus", 1.5))
+        ),
+    )
+
+
 def run_quick_build(
     job: OptimizerJob,
     player_pool: List[Dict[str, Any]],
@@ -1169,20 +1198,30 @@ def run_quick_build(
         qb_cfg = _build_qb_config(job.config, defaults)
         constraints = _build_constraints(job.config, job.site, defaults)
 
+        # Set late swap bonus config for the main process
+        # (Note: multiprocess workers may not inherit this global state)
+        late_swap_cfg = _build_late_swap_config(job.config, defaults)
+        set_active_late_swap_bonus(late_swap_cfg)
+
         logger.info(
-            "Starting QuickBuild job %s: max_pool=%d, builds=%d",
+            "Starting QuickBuild job %s: max_pool=%d, builds=%d, late_swap=%s",
             job.job_id,
             qb_cfg.max_pool,
             qb_cfg.worker_count,
+            late_swap_cfg.bonus_per_hour if late_swap_cfg else "off",
         )
 
-        result = quick_build_pool(
-            slate=player_pool,
-            site=job.site,
-            constraints=constraints,
-            qb_cfg=qb_cfg,
-            run_id=job.job_id[:8],
-        )
+        try:
+            result = quick_build_pool(
+                slate=player_pool,
+                site=job.site,
+                constraints=constraints,
+                qb_cfg=qb_cfg,
+                run_id=job.job_id[:8],
+            )
+        finally:
+            # Clear global state after build
+            set_active_late_swap_bonus(None)
 
         lineup_stats: List[Dict[str, Any]] = []
         try:
