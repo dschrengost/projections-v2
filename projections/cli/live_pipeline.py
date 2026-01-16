@@ -149,7 +149,11 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
         help="Optional override for the daily lineups silver directory consumed by roster nightly.",
     ),
     injuries: bool = typer.Option(True, "--injuries/--skip-injuries", help="Run the injuries ETL stage."),
-    lineups: bool = typer.Option(True, "--lineups/--skip-lineups", help="Run the daily lineups ETL stage."),
+    lineups: bool = typer.Option(
+        False,
+        "--lineups/--skip-lineups",
+        help="Run the NBA.com daily lineups ETL stage (disabled by default; Rotowire is the lineup source of truth).",
+    ),
     odds: bool = typer.Option(True, "--odds/--skip-odds", help="Run the odds ETL stage."),
     run_roster: bool = typer.Option(True, "--run-roster/--skip-roster", help="Run the roster nightly stage."),
     espn_injuries: bool = typer.Option(True, "--espn-injuries/--skip-espn-injuries", help="Run the ESPN injuries scrape for faster injury updates."),

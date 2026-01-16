@@ -450,15 +450,19 @@ def compute_dnp_history_features_for_live(
         # else: use defaults
 
         # consecutive_active_dnp
+        # Count consecutive games where player was active but got 0 minutes (DNP-CD).
+        # When we hit an OUT game, stop counting (don't include OUT in streak).
+        # When we hit a game where player was active and played, stop counting.
         consec_dnp = 0
         for i in range(n_hist - 1, -1, -1):
             if active[i] == 1 and active_dnp[i] == 1:
                 consec_dnp += 1
             elif active[i] == 1:
+                # Active but played (got minutes) - end of DNP streak
                 break
-            # If OUT (active==0), we keep counting back but reset consec_dnp
             else:
-                consec_dnp = 0
+                # OUT (active==0) - end of streak, but keep the count
+                # OUT games are not part of the active-DNP streak
                 break
         current.loc[idx, "consecutive_active_dnp"] = consec_dnp
 

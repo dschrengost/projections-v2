@@ -163,6 +163,8 @@ def _load_rotation_historical_features_for_dnp(
     )
 
     # Derive is_out from injuries_raw partitions (keyed by date folder).
+    # IMPORTANT: Use the LATEST snapshot per player per date, not "any OUT".
+    # The source_row_id format is "{unix_ts}_{row_id}" - we parse the timestamp to sort.
     injuries_root = data_root / "bronze" / "injuries_raw" / f"season={int(season)}"
     out_frames: list[pd.DataFrame] = []
     if injuries_root.exists():
@@ -173,7 +175,7 @@ def _load_rotation_historical_features_for_dnp(
                 continue
             try:
                 inj = pd.read_parquet(
-                    pq_path, columns=["team_id", "player_id", "status"]
+                    pq_path, columns=["team_id", "player_id", "status", "source_row_id"]
                 )
             except Exception:  # noqa: BLE001
                 try:
@@ -182,7 +184,10 @@ def _load_rotation_historical_features_for_dnp(
                     continue
                 if not {"team_id", "player_id", "status"}.issubset(inj.columns):
                     continue
-                inj = inj.loc[:, ["team_id", "player_id", "status"]]
+                cols = ["team_id", "player_id", "status"]
+                if "source_row_id" in inj.columns:
+                    cols.append("source_row_id")
+                inj = inj.loc[:, cols]
 
             if inj.empty:
                 continue
@@ -201,6 +206,24 @@ def _load_rotation_historical_features_for_dnp(
             ].copy()
             if inj.empty:
                 continue
+
+            # Extract timestamp from source_row_id to get the LATEST snapshot per player.
+            # Format: "{unix_ts}_{row_id}" e.g., "1767501000_2066"
+            if "source_row_id" in inj.columns:
+                inj["_sort_ts"] = (
+                    inj["source_row_id"]
+                    .astype(str)
+                    .str.split("_")
+                    .str[0]
+                    .pipe(pd.to_numeric, errors="coerce")
+                    .fillna(0)
+                )
+                # Keep only the LATEST snapshot per player
+                inj = inj.sort_values("_sort_ts", ascending=False)
+                inj = inj.drop_duplicates(subset=["team_id", "player_id"], keep="first")
+                inj = inj.drop(columns=["_sort_ts"])
+
+            # Now check if the FINAL status is OUT
             status = inj["status"].astype("string").str.upper().str.strip()
             out_like = status.eq("OUT").fillna(False)
             inj = inj.loc[out_like, ["team_id", "player_id"]].drop_duplicates()
@@ -751,6 +774,36 @@ def main(
         cap_max_minutes=cap_max_minutes,
     )
     new_p50 = guardrail.minutes_p50
+
+    # 4b) Post-guardrail DNP override: for players with strong DNP-CD signals,
+    # override their minutes to 0 regardless of baseline. This allows us to use
+    # baseline for normal players while still catching players like Kuminga who
+    # are healthy scratches with a consistent DNP pattern.
+    dnp_cols_needed = ["consecutive_active_dnp", "active_but_dnp_rate_last10"]
+    dnp_cols_present = [c for c in dnp_cols_needed if c in rot_features.columns]
+    if len(dnp_cols_present) == len(dnp_cols_needed):
+        # Merge DNP features for override check
+        dnp_check = guard.merge(
+            rot_features[["game_id", "team_id", "player_id"] + dnp_cols_needed],
+            on=["game_id", "team_id", "player_id"],
+            how="left",
+        )
+        consec_dnp = pd.to_numeric(
+            dnp_check["consecutive_active_dnp"], errors="coerce"
+        ).fillna(0)
+        dnp_rate = pd.to_numeric(
+            dnp_check["active_but_dnp_rate_last10"], errors="coerce"
+        ).fillna(0)
+        # Override to 0 if: consecutive DNP >= 3 AND DNP rate >= 80%
+        dnp_override_mask = (consec_dnp >= 3) & (dnp_rate >= 0.8)
+        n_overridden = int(dnp_override_mask.sum())
+        if n_overridden > 0:
+            new_p50 = new_p50.where(~dnp_override_mask, 0.0)
+            typer.echo(
+                f"[rotation_minutes] DNP override: zeroed {n_overridden} players with "
+                f"consecutive_active_dnp>=3 AND dnp_rate>=0.8",
+                err=True,
+            )
 
     # 5) Map rotation p50 to minutes quantiles using baseline tail deltas.
     out_df = base_df.copy()

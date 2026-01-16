@@ -318,7 +318,10 @@ def main(
     lineups_dir: Path | None = typer.Option(
         None,
         "--lineups-dir",
-        help="Optional override for normalized nba_daily_lineups parquet root (defaults to <data_root>/silver/nba_daily_lineups).",
+        help=(
+            "Optional override for normalized lineups parquet root. "
+            "When omitted, lineup metadata is skipped (NBA.com lineups are deprecated)."
+        ),
     ),
     scrape_missing: bool = typer.Option(
         True,
@@ -370,7 +373,7 @@ def main(
 
     if should_scrape:
         roster_df = _scrape_roster_poll(schedule_df, start=start_day, end=end_day, timeout=roster_timeout)
-    
+
     if roster_df.empty:
         raise typer.BadParameter(
             "No roster rows were loaded. Provide --roster inputs or enable --scrape-missing."
@@ -380,17 +383,22 @@ def main(
     validate_with_pandera(roster_raw, ROSTER_NIGHTLY_RAW_SCHEMA)
     cfg = SnapshotConfig(start_date=start_day, end_date=end_day)
     schedule_slice = schedule_df.loc[:, ["game_id", "game_date", "tip_ts"]]
-    lineup_root = (lineups_dir or (data_root / "silver" / "nba_daily_lineups")).resolve()
-    if lineup_root.exists():
-        lineup_df = _load_lineups_tree(lineup_root, season=season, start=start_day, end=end_day)
-        typer.echo(
-            f"[roster] loaded {len(lineup_df):,} lineup rows from {lineup_root}"
-            if not lineup_df.empty
-            else f"[roster] lineup partitions present at {lineup_root} but no rows matched window"
-        )
+    lineup_df = pd.DataFrame()
+    if lineups_dir:
+        lineup_root = lineups_dir.resolve()
+        if lineup_root.exists():
+            lineup_df = _load_lineups_tree(lineup_root, season=season, start=start_day, end=end_day)
+            typer.echo(
+                f"[roster] loaded {len(lineup_df):,} lineup rows from {lineup_root}"
+                if not lineup_df.empty
+                else f"[roster] lineup partitions present at {lineup_root} but no rows matched window"
+            )
+        else:
+            typer.echo(
+                f"[roster] lineup directory {lineup_root} not found; continuing without lineup metadata."
+            )
     else:
-        typer.echo(f"[roster] lineup directory {lineup_root} not found; continuing without lineup metadata.")
-        lineup_df = pd.DataFrame()
+        typer.echo("[roster] lineup directory not provided; skipping lineup metadata.")
     snapshot = build_roster_snapshot(roster_raw.copy(), schedule_slice, config=cfg, lineups=lineup_df)
 
     silver_path = out or _default_silver_path(data_root, season, month)

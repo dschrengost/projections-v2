@@ -28,6 +28,10 @@ except ImportError:
         return s  # Fallback: no unicode normalization
 
 from projections.builders.injuries_resolver import InjuriesResolver, InjuriesResolutionResult
+from projections.features.dnp_history import (
+    DNP_HISTORY_FEATURE_COLUMNS,
+    compute_dnp_history_features_for_live,
+)
 from projections.minutes_v1.features import MinutesFeatureBuilder
 from projections.minutes_v1.pos import canonical_pos_bucket_series
 
@@ -247,6 +251,13 @@ class SharedFeaturesBuilder:
             labels_source=labels,
             injuries_snapshot=injuries_result.injuries,
             roster_nightly=filtered_roster,
+            warnings=warnings,
+        )
+
+        # Attach DNP history features (consecutive_active_dnp, etc.)
+        features = self._attach_dnp_history_features(
+            features,
+            labels_source=labels,
             warnings=warnings,
         )
 
@@ -524,6 +535,18 @@ class SharedFeaturesBuilder:
             return roster
 
         cfg = self.config
+        roster = roster.copy()
+        # Drop NBA.com lineup signals; Rotowire is the single source of truth for starters.
+        for column in ("lineup_role", "lineup_status", "lineup_roster_status"):
+            if column in roster.columns:
+                roster[column] = pd.NA
+        if "lineup_timestamp" in roster.columns:
+            roster["lineup_timestamp"] = pd.NaT
+        if "is_projected_starter" in roster.columns:
+            roster["is_projected_starter"] = False
+        if "is_confirmed_starter" in roster.columns:
+            roster["is_confirmed_starter"] = False
+
         rotowire_path = (
             cfg.data_root
             / "silver"
@@ -575,7 +598,6 @@ class SharedFeaturesBuilder:
                 warnings.append("[rotowire] Roster missing player_name column; skipping starter merge")
                 return roster
 
-            roster = roster.copy()
             name_normalized = roster["player_name"].map(_normalize_name_for_matching)
             all_starter_names = rotowire_confirmed_names | rotowire_projected_names
             rotowire_match = name_normalized.isin(all_starter_names)
@@ -600,6 +622,8 @@ class SharedFeaturesBuilder:
                     roster["is_confirmed_starter"] = False
                 if "is_projected_starter" not in roster.columns:
                     roster["is_projected_starter"] = False
+                if "lineup_role" not in roster.columns:
+                    roster["lineup_role"] = pd.NA
 
                 # Upgrade is_projected_starter for all starters (confirmed or projected)
                 roster.loc[eligible, "is_projected_starter"] = True
@@ -607,6 +631,8 @@ class SharedFeaturesBuilder:
                 # Upgrade is_confirmed_starter only for confirmed starters
                 confirmed_eligible = eligible & name_normalized.isin(rotowire_confirmed_names)
                 roster.loc[confirmed_eligible, "is_confirmed_starter"] = True
+                roster.loc[eligible, "lineup_role"] = "projected_starter"
+                roster.loc[confirmed_eligible, "lineup_role"] = "confirmed_starter"
 
                 projected_count = int(eligible.sum())
                 confirmed_count = int(confirmed_eligible.sum())
@@ -1172,6 +1198,74 @@ class SharedFeaturesBuilder:
         for col in _VACANCY_FEATURE_COLUMNS:
             merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0.0).astype(float)
         return merged
+
+    def _attach_dnp_history_features(
+        self,
+        df: pd.DataFrame,
+        *,
+        labels_source: pd.DataFrame,
+        warnings: list[str],
+    ) -> pd.DataFrame:
+        """Attach DNP history features (consecutive_active_dnp, etc.) from historical labels.
+
+        These features track active-but-DNP patterns critical for availability modeling.
+        The rotation model uses these to down-weight dust players with DNP-CD streaks.
+        """
+        if df.empty:
+            return df
+
+        # Validate required columns in labels_source
+        required = {"player_id", "team_id", "game_date", "minutes"}
+        if not required.issubset(labels_source.columns):
+            missing = sorted(required - set(labels_source.columns))
+            warnings.append(f"[dnp_history] labels_source missing columns {missing}; skipping.")
+            # Initialize with defaults
+            for col in DNP_HISTORY_FEATURE_COLUMNS:
+                if col not in df.columns:
+                    df[col] = 0 if "streak" in col or "consecutive" in col or "games_since" in col else 0.0
+            return df
+
+        try:
+            # Prepare current game DataFrame (today's players)
+            current_df = df.copy()
+
+            # Prepare historical DataFrame (prior games with realized minutes)
+            target_day = pd.Timestamp(self.config.target_day).normalize()
+            historical = labels_source.copy()
+            historical["game_date"] = pd.to_datetime(historical["game_date"]).dt.normalize()
+            historical = historical[historical["game_date"] < target_day].copy()
+
+            if historical.empty:
+                warnings.append(f"[dnp_history] No historical data before {target_day.date()}; using defaults.")
+                for col in DNP_HISTORY_FEATURE_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = 0 if "streak" in col or "consecutive" in col or "games_since" in col else 0.0
+                return df
+
+            # Call the live inference function
+            result = compute_dnp_history_features_for_live(
+                current_game_df=current_df,
+                historical_df=historical,
+                game_date_col="game_date",
+                player_id_col="player_id",
+                team_id_col="team_id",
+                is_out_col="is_out",
+                minutes_col="minutes",
+            )
+
+            # Copy computed columns to original DataFrame
+            for col in DNP_HISTORY_FEATURE_COLUMNS:
+                if col in result.columns:
+                    df[col] = result[col].values
+
+            return df
+
+        except Exception as exc:  # pragma: no cover - defensive
+            warnings.append(f"[dnp_history] Failed to compute features: {exc}")
+            for col in DNP_HISTORY_FEATURE_COLUMNS:
+                if col not in df.columns:
+                    df[col] = 0 if "streak" in col or "consecutive" in col or "games_since" in col else 0.0
+            return df
 
 
 def build_features_unified(

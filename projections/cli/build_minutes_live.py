@@ -1115,6 +1115,19 @@ def _build_minutes_live_logic(
                      else:
                          typer.echo("[minutes-live] Warning: ESPN rows loaded but failed to map to roster (name/team mismatch).")
 
+    # Drop NBA.com lineup signals; Rotowire is the single source of truth for starters.
+    if not roster_df.empty:
+        roster_df = roster_df.copy()
+        for column in ("lineup_role", "lineup_status", "lineup_roster_status"):
+            if column in roster_df.columns:
+                roster_df[column] = pd.NA
+        if "lineup_timestamp" in roster_df.columns:
+            roster_df["lineup_timestamp"] = pd.NaT
+        if "is_projected_starter" in roster_df.columns:
+            roster_df["is_projected_starter"] = False
+        if "is_confirmed_starter" in roster_df.columns:
+            roster_df["is_confirmed_starter"] = False
+
     # Load Rotowire lineups for starter updates (both projected and confirmed)
     # Rotowire is prioritized over NBA.com because it typically updates faster
     rotowire_confirmed_names: set[str] = set()  # Players with confirmed_starter role
@@ -1176,6 +1189,8 @@ def _build_minutes_live_logic(
                                 roster_df["is_confirmed_starter"] = False
                             if "is_projected_starter" not in roster_df.columns:
                                 roster_df["is_projected_starter"] = False
+                            if "lineup_role" not in roster_df.columns:
+                                roster_df["lineup_role"] = pd.NA
 
                             # Upgrade is_projected_starter for all starters (confirmed or projected)
                             roster_df.loc[eligible, "is_projected_starter"] = True
@@ -1183,6 +1198,8 @@ def _build_minutes_live_logic(
                             # Upgrade is_confirmed_starter only for confirmed starters
                             confirmed_eligible = eligible & name_normalized.isin(rotowire_confirmed_names)
                             roster_df.loc[confirmed_eligible, "is_confirmed_starter"] = True
+                            roster_df.loc[eligible, "lineup_role"] = "projected_starter"
+                            roster_df.loc[confirmed_eligible, "lineup_role"] = "confirmed_starter"
 
                             projected_count = int(eligible.sum())
                             confirmed_count = int(confirmed_eligible.sum())
