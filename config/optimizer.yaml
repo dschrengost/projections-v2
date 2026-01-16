@@ -15,6 +15,9 @@ pool:
   
   # Minimum unique players between consecutive lineups
   min_uniq: 1
+
+  # Global max exposure cap per player (percentage of pool; null disables)
+  max_exposure_pct: null
   
   # Projection jitter for lineup diversity (fraction, e.g., 5e-4 = 0.05%)
   jitter: 0.0005

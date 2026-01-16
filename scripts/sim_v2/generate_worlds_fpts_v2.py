@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import json
 import time
+import math
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
@@ -110,6 +111,43 @@ def _apply_team_points_vegas_anchor(
         if (scale != 1.0).any():
             pts_worlds[:, idxs] *= scale[:, None]
     return pts_worlds
+
+
+_NORM_PDF_COEF = 1.0 / math.sqrt(2.0 * math.pi)
+
+
+def _norm_pdf(x: np.ndarray) -> np.ndarray:
+    return np.exp(-0.5 * x * x) * _NORM_PDF_COEF
+
+
+def _norm_cdf(x: np.ndarray) -> np.ndarray:
+    # Abramowitz-Stegun approximation; fast and accurate for our use.
+    x_abs = np.abs(x)
+    t = 1.0 / (1.0 + 0.2316419 * x_abs)
+    d = _norm_pdf(x_abs)
+    poly = t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))))
+    prob = 1.0 - d * poly
+    return np.where(x >= 0.0, prob, 1.0 - prob)
+
+
+def _adjust_mean_for_clip(mu: np.ndarray, sigma: float, max_iter: int = 6) -> np.ndarray:
+    """
+    Solve for m so that E[max(N(m, sigma), 0)] == mu (mu >= 0).
+    """
+    sigma_f = float(sigma)
+    if sigma_f <= 0.0:
+        return mu
+    target = np.maximum(mu, 0.0)
+    m = target.copy()
+    for _ in range(max_iter):
+        a = m / sigma_f
+        Phi = _norm_cdf(a)
+        phi = _norm_pdf(a)
+        f = m * Phi + sigma_f * phi
+        denom = np.maximum(Phi, 1e-6)
+        m = m - (f - target) / denom
+    min_m = -8.0 * sigma_f
+    return np.maximum(m, min_m)
 
 
 def _compute_usage_shares(
@@ -2364,7 +2402,12 @@ def main(
                                 ts = rng.normal(loc=0.0, scale=sigma_team, size=chunk_size)
                                 team_shock[:, idxs] = ts[:, None]
                         player_eps = rng.normal(loc=0.0, scale=sigma_player, size=mu_stat.shape) if sigma_player > 0.0 else 0.0
-                        total = np.clip(mu_stat + team_shock + player_eps, 0.0, None)
+                        mu_world = mu_stat + team_shock
+                        if sigma_player > 0.0:
+                            mu_adj = _adjust_mean_for_clip(mu_world, sigma_player)
+                            total = np.clip(mu_adj + player_eps, 0.0, None)
+                        else:
+                            total = np.clip(mu_world, 0.0, None)
                     else:
                         # Heuristic independent noise (legacy): relative scale to mean.
                         if epsilon_dist == "normal":

@@ -238,9 +238,9 @@ def apply_rotation_minutes_guardrails(
     min_top5_trigger = metrics_team["top5_sum"] < min_top5_thr if min_top5_thr > 0.0 else pd.Series(False, index=metrics_team.index)
 
     # Flatness trigger: avoid overlays that spread minutes unrealistically thin.
-    # This is conservative: we fall back if either the max minutes or the top-5
-    # concentration is below the configured floor.
-    flat_trigger = min_max_trigger | min_top5_trigger
+    # Require BOTH a low max and low top-5 concentration to reduce false positives
+    # on reasonable (but slightly flatter) rotations.
+    flat_trigger = min_max_trigger & min_top5_trigger
 
     fallback_team = max_trigger | n_trigger | top5_trigger | flat_trigger
     if fallback_team.any():

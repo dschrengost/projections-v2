@@ -1432,6 +1432,95 @@ def _build_minutes_live_logic(
     except Exception as exc:  # pragma: no cover - defensive
         warnings.append(f"trend recompute failed: {exc}")
 
+    # ---------------------------------------------------------------------------
+    # Recompute rest/schedule features from historical labels
+    # These require per-player game history which the builder doesn't have in live mode
+    # ---------------------------------------------------------------------------
+    try:
+        history_work = history_labels.copy()
+        history_work["game_date"] = pd.to_datetime(history_work["game_date"]).dt.normalize()
+        history_work = history_work[history_work["game_date"] < target_day].copy()
+        if not history_work.empty:
+            history_work["player_id"] = pd.to_numeric(history_work["player_id"], errors="coerce").astype("Int64")
+            history_work = history_work.dropna(subset=["player_id"])
+            history_work.sort_values(["player_id", "game_date"], inplace=True)
+
+            rest_features: list[dict[str, object]] = []
+            for pid, group in history_work.groupby("player_id"):
+                dates = pd.to_datetime(group["game_date"]).dt.normalize().sort_values()
+                if dates.empty:
+                    continue
+
+                last_game_date = dates.iloc[-1]
+                days_since = (target_day - last_game_date).days
+
+                # Count games in last N days for is_3in4, is_4in6
+                games_in_4d = int((dates >= (target_day - pd.Timedelta(days=4))).sum())
+                games_in_6d = int((dates >= (target_day - pd.Timedelta(days=6))).sum())
+
+                rest_features.append({
+                    "player_id": pid,
+                    "days_since_last_recomp": float(days_since) if days_since >= 0 else 0.0,
+                    "is_b2b_recomp": int(days_since == 1),
+                    "is_3in4_recomp": int(games_in_4d >= 2),  # 3rd game in 4 days = already played 2
+                    "is_4in6_recomp": int(games_in_6d >= 3),  # 4th game in 6 days = already played 3
+                })
+
+            if rest_features:
+                rest_frame = pd.DataFrame(rest_features)
+                rest_frame["player_id"] = pd.to_numeric(rest_frame["player_id"], errors="coerce").astype("Int64")
+                live_slice = live_slice.merge(rest_frame, on="player_id", how="left")
+
+                for col in ["days_since_last", "is_b2b", "is_3in4", "is_4in6"]:
+                    recomp_col = f"{col}_recomp"
+                    if recomp_col in live_slice.columns:
+                        live_slice[col] = (
+                            pd.to_numeric(live_slice[recomp_col], errors="coerce")
+                            .combine_first(pd.to_numeric(live_slice.get(col), errors="coerce"))
+                            .fillna(0.0)
+                        )
+                        live_slice.drop(columns=[recomp_col], inplace=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        warnings.append(f"rest feature recompute failed: {exc}")
+
+    # ---------------------------------------------------------------------------
+    # Recompute recency features (recent_start_pct_10) from historical starter flags
+    # ---------------------------------------------------------------------------
+    try:
+        history_work = history_labels.copy()
+        history_work["game_date"] = pd.to_datetime(history_work["game_date"]).dt.normalize()
+        history_work = history_work[history_work["game_date"] < target_day].copy()
+        if not history_work.empty and "starter_flag" in history_work.columns:
+            history_work["player_id"] = pd.to_numeric(history_work["player_id"], errors="coerce").astype("Int64")
+            history_work["starter_flag"] = pd.to_numeric(history_work["starter_flag"], errors="coerce").fillna(0)
+            history_work = history_work.dropna(subset=["player_id"])
+            history_work.sort_values(["player_id", "game_date"], inplace=True)
+
+            recency_features: list[dict[str, object]] = []
+            for pid, group in history_work.groupby("player_id"):
+                last_10 = group.tail(10)
+                start_pct = float(last_10["starter_flag"].mean()) if len(last_10) > 0 else 0.0
+                recency_features.append({
+                    "player_id": pid,
+                    "recent_start_pct_10_recomp": start_pct,
+                })
+
+            if recency_features:
+                recency_frame = pd.DataFrame(recency_features)
+                recency_frame["player_id"] = pd.to_numeric(recency_frame["player_id"], errors="coerce").astype("Int64")
+                live_slice = live_slice.merge(recency_frame, on="player_id", how="left")
+
+                if "recent_start_pct_10_recomp" in live_slice.columns:
+                    live_slice["recent_start_pct_10"] = (
+                        pd.to_numeric(live_slice["recent_start_pct_10_recomp"], errors="coerce")
+                        .combine_first(pd.to_numeric(live_slice.get("recent_start_pct_10"), errors="coerce"))
+                        .fillna(0.0)
+                        .clip(0.0, 1.0)
+                    )
+                    live_slice.drop(columns=["recent_start_pct_10_recomp"], inplace=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        warnings.append(f"recency feature recompute failed: {exc}")
+
     # Reinstate starter signals from roster slice if the builder dropped them.
     starter_cols = ["is_projected_starter", "is_confirmed_starter"]
     if not roster_slice.empty and set(starter_cols).issubset(roster_slice.columns):
@@ -1483,6 +1572,25 @@ def _build_minutes_live_logic(
         for col in VACANCY_FEATURE_COLUMNS:
             live_slice[col] = pd.to_numeric(live_slice[col], errors="coerce").fillna(0.0).astype(float)
 
+    # ---------------------------------------------------------------------------
+    # Normalize vacancy features to match training distribution
+    # Training was built from Oct 2023 - Oct 2024 data (~10-15 games into each season)
+    # Live inference may be later in the season with higher cumulative minutes
+    # Scale factor = training_mean / live_mean to bring values into training range
+    # ---------------------------------------------------------------------------
+    TRAINING_VACANCY_MEAN = 183.0  # From rotation_train_v1_20260103 config
+    TRAINING_VACANCY_MAX = 2400.0  # Reasonable max from training (99th percentile)
+    for col in VACANCY_FEATURE_COLUMNS:
+        if col in live_slice.columns:
+            raw_values = pd.to_numeric(live_slice[col], errors="coerce").fillna(0.0)
+            live_mean = float(raw_values.mean()) if len(raw_values) > 0 else 0.0
+            if live_mean > 0 and live_mean > TRAINING_VACANCY_MEAN * 2:
+                # Apply scaling only if live values are significantly higher than training
+                scale_factor = TRAINING_VACANCY_MEAN / live_mean
+                # Cap at training max to avoid extreme values
+                live_slice[col] = (raw_values * scale_factor).clip(upper=TRAINING_VACANCY_MAX).astype(float)
+            else:
+                live_slice[col] = raw_values.clip(upper=TRAINING_VACANCY_MAX).astype(float)
     team_ids = set(pd.to_numeric(live_slice["team_id"], errors="coerce").dropna().astype(int).tolist())
     opponent_ids = set(
         pd.to_numeric(live_slice["opponent_team_id"], errors="coerce").dropna().astype(int).tolist()

@@ -252,6 +252,7 @@ class QuickBuildStats:
     duplicates: int = 0
     near_duplicates: int = 0
     dropped_low_quality: int = 0
+    dropped_exposure: int = 0
     emitted: int = 0
     wall_time_s: float = 0.0
     # Centralized dedup telemetry (optional)
@@ -278,6 +279,7 @@ class QuickBuildConfig:
     # 0.0 means "unset" and defers to cp_sat_params.max_time_seconds
     timeout: float = 0.0
     min_uniq: int = 1
+    max_exposure_pct: Optional[float] = None
     nogood_rate: int = 20
     jitter: float = 5e-4
     seed: Optional[int] = None
@@ -1142,6 +1144,15 @@ def quick_build_pool(
     start_time = time.time()
     # Track last accepted lineup to enforce consecutive min-uniques globally
     last_accepted_set: Optional[set[str]] = None
+    exposure_counts: dict[str, int] = {}
+    max_exposure_count: Optional[int] = None
+    if cfg.max_exposure_pct is not None:
+        try:
+            pct = float(cfg.max_exposure_pct)
+            if 0.0 < pct < 100.0:
+                max_exposure_count = max(1, int(math.floor((pct / 100.0) * pool.max_size)))
+        except Exception:
+            max_exposure_count = None
     try:
         while len(pool) < pool.max_size:
             try:
@@ -1167,6 +1178,15 @@ def quick_build_pool(
                     # If anything goes wrong in the check, fall back to accepting logic
                     pass
 
+            # Enforce global max exposure cap across accepted lineups.
+            if max_exposure_count is not None:
+                try:
+                    if any(exposure_counts.get(pid, 0) + 1 > max_exposure_count for pid in lineup):
+                        stats.dropped_exposure += 1
+                        continue
+                except Exception:
+                    pass
+
             # Apply near-dup filtering if configured
             nd_thresh = float(getattr(cfg, "near_dup_jaccard", 0.0) or 0.0)
             if nd_thresh > 0.0:
@@ -1179,6 +1199,8 @@ def quick_build_pool(
                     last_accepted_set = set(lineup)
                 except Exception:
                     pass
+                for pid in lineup:
+                    exposure_counts[pid] = exposure_counts.get(pid, 0) + 1
             elif add_status == "dup":
                 stats.duplicates += 1
             elif add_status == "near_dup":

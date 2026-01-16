@@ -46,6 +46,7 @@ export interface QuickBuildRequest {
     builds?: number
     per_build?: number
     min_uniq?: number
+    max_exposure_pct?: number | null
     jitter?: number
     near_dup_jaccard?: number
     enum_enable?: boolean

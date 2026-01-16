@@ -177,3 +177,77 @@ def test_guardrail_pathology_fallback_reverts_team_game_to_baseline() -> None:
     assert float(out.sum()) == pytest.approx(240.0, abs=1e-6)
     assert out.to_numpy(dtype=float) == pytest.approx(df["baseline_p50"].to_numpy(dtype=float), abs=1e-6)
     assert bool(result.team_game_summary.loc[0, "pathology_fallback"]) is True
+
+
+def test_guardrail_flatness_does_not_fallback_on_low_max_if_top5_ok() -> None:
+    """Regression: avoid over-triggering flatness fallback on reasonable rotations."""
+
+    df = pd.DataFrame(
+        {
+            "game_id": [1] * 9,
+            "team_id": [10] * 9,
+            "player_id": list(range(1, 10)),
+            # Sums to 240, max < 30, but top5_sum is still healthy (>125).
+            "rotation_p50": [27.0] * 6 + [26.0] * 3,
+            "baseline_p50": [35.0, 34.0, 33.0, 30.0, 28.0, 25.0, 20.0, 18.0, 17.0],
+            "minutes_features_row_missing": [0] * 9,
+            "lineup_timestamp": [pd.Timestamp("2026-01-01T00:00:00Z")] * 9,
+            "lineup_status": [pd.NA] * 9,
+            "lineup_roster_status": [pd.NA] * 9,
+            "injury_snapshot_missing": [0] * 9,
+            "status": ["Ava"] * 9,
+        }
+    )
+
+    result = apply_rotation_minutes_guardrails(
+        df,
+        rotation_p50_col="rotation_p50",
+        baseline_p50_col="baseline_p50",
+        pathology_max_minutes_threshold=1e9,
+        pathology_n_gt_40_threshold=999,
+        pathology_top5_sum_threshold=1e9,
+        pathology_min_max_minutes_threshold=30.0,
+        pathology_min_top5_sum_threshold=125.0,
+        team_target_minutes=240.0,
+    )
+
+    out = result.minutes_p50
+    assert float(out.sum()) == pytest.approx(240.0, abs=1e-6)
+    assert out.to_numpy(dtype=float) == pytest.approx(df["rotation_p50"].to_numpy(dtype=float), abs=1e-6)
+    assert bool(result.team_game_summary.loc[0, "pathology_fallback"]) is False
+
+
+def test_guardrail_flatness_fallback_triggers_when_max_and_top5_both_low() -> None:
+    df = pd.DataFrame(
+        {
+            "game_id": [1] * 10,
+            "team_id": [10] * 10,
+            "player_id": list(range(1, 11)),
+            # Uniform 10-man split: max < 30 AND top5_sum < 125 -> treat as flat overlay.
+            "rotation_p50": [24.0] * 10,
+            "baseline_p50": [35.0, 34.0, 33.0, 30.0, 28.0, 25.0, 20.0, 18.0, 10.0, 7.0],
+            "minutes_features_row_missing": [0] * 10,
+            "lineup_timestamp": [pd.Timestamp("2026-01-01T00:00:00Z")] * 10,
+            "lineup_status": [pd.NA] * 10,
+            "lineup_roster_status": [pd.NA] * 10,
+            "injury_snapshot_missing": [0] * 10,
+            "status": ["Ava"] * 10,
+        }
+    )
+
+    result = apply_rotation_minutes_guardrails(
+        df,
+        rotation_p50_col="rotation_p50",
+        baseline_p50_col="baseline_p50",
+        pathology_max_minutes_threshold=1e9,
+        pathology_n_gt_40_threshold=999,
+        pathology_top5_sum_threshold=1e9,
+        pathology_min_max_minutes_threshold=30.0,
+        pathology_min_top5_sum_threshold=125.0,
+        team_target_minutes=240.0,
+    )
+
+    out = result.minutes_p50
+    assert float(out.sum()) == pytest.approx(240.0, abs=1e-6)
+    assert out.to_numpy(dtype=float) == pytest.approx(df["baseline_p50"].to_numpy(dtype=float), abs=1e-6)
+    assert bool(result.team_game_summary.loc[0, "pathology_fallback"]) is True

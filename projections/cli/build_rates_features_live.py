@@ -856,11 +856,14 @@ def build_rates_features(
             df[col] = 0.0
         df[col] = df[col].fillna(0.0)
 
-    # Vegas context
+    # Vegas context - ensure numeric dtype even when source data has None values
     if "spread_close" not in df.columns:
         df["spread_close"] = df.get("spread_home", np.nan)
     if "total_close" not in df.columns:
         df["total_close"] = df.get("total", np.nan)
+    # Coerce to numeric to handle Python None (which creates object dtype)
+    df["spread_close"] = pd.to_numeric(df["spread_close"], errors="coerce")
+    df["total_close"] = pd.to_numeric(df["total_close"], errors="coerce")
 
     # Compute implied totals
     df["has_odds"] = (~df["spread_close"].isna()) & (~df["total_close"].isna())

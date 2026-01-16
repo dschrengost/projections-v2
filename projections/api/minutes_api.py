@@ -12,6 +12,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from projections import paths
@@ -1232,7 +1233,23 @@ def create_app(
         )
 
     if dist_dir.exists():
-        app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
+        # Mount static assets at /assets for CSS/JS bundles
+        assets_dir = dist_dir / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+        # SPA fallback: serve index.html for all non-API routes
+        # This must come after all API routes but handles paths like /optimizer, /entry-manager, etc.
+        index_html = dist_dir / "index.html"
+
+        @app.get("/{full_path:path}")
+        async def spa_fallback(full_path: str):
+            # Serve static files if they exist in dist
+            file_path = dist_dir / full_path
+            if file_path.is_file():
+                return FileResponse(file_path)
+            # Otherwise serve index.html for SPA routing
+            return FileResponse(index_html)
 
     return app
 app = create_app()

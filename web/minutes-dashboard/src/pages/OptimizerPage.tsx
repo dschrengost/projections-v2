@@ -73,6 +73,7 @@ export default function OptimizerPage() {
     const [maxPool, setMaxPool] = useState(5000)
     const [builds, setBuilds] = useState(22)
     const [minUniq, setMinUniq] = useState(1)
+    const [maxExposurePct, setMaxExposurePct] = useState(0)
     const [globalTeamLimit, setGlobalTeamLimit] = useState(4)
     const [minSalary, setMinSalary] = useState<number | null>(null)
     const [maxSalary, setMaxSalary] = useState<number | null>(50000)
@@ -597,6 +598,7 @@ export default function OptimizerPage() {
                 builds,
                 per_build: Math.ceil(maxPool / builds) + 500,
                 min_uniq: minUniq,
+                max_exposure_pct: maxExposurePct > 0 ? maxExposurePct : null,
                 global_team_limit: globalTeamLimit,
                 min_salary: minSalary,
                 max_salary: maxSalary,
@@ -962,6 +964,21 @@ export default function OptimizerPage() {
                             max={8}
                         />
                     </label>
+
+                    <div className="randomness-control">
+                        <label>
+                            Max Exposure: {maxExposurePct}%
+                            <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={maxExposurePct}
+                                onChange={e => setMaxExposurePct(Number(e.target.value))}
+                            />
+                        </label>
+                        <small className="hint">0% disables exposure cap</small>
+                    </div>
 
                     <label>
                         Team Limit

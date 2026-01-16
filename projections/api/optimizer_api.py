@@ -109,6 +109,12 @@ class QuickBuildRequest(BaseModel):
     builds: int = Field(default=22, ge=1, le=24, description="Number of parallel workers")
     per_build: int = Field(default=3000, ge=100, le=50000, description="Target lineups per worker")
     min_uniq: int = Field(default=1, ge=1, le=8, description="Min unique players between lineups")
+    max_exposure_pct: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+        description="Global max exposure per player as % of pool (null disables)",
+    )
     jitter: float = Field(default=0.0005, ge=0.0, le=0.1, description="Projection jitter")
     near_dup_jaccard: float = Field(default=0.0, ge=0.0, le=1.0, description="Near-dup threshold")
     enum_enable: bool = Field(default=True, description="Enable enumeration phase")

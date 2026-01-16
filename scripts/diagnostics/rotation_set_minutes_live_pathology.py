@@ -151,12 +151,14 @@ def _drift_report(
     train = pd.read_parquet(train_path, columns=features)
 
     stats = pd.DataFrame({"feature": features})
-    train_vals = train[features]
-    stats["train_mean"] = train_vals.mean(numeric_only=True).to_numpy()
-    stats["train_std"] = train_vals.std(numeric_only=True).replace(0, np.nan).to_numpy()
+    # Coerce to numeric so boolean/object columns don't crash quantiles.
+    train_vals = train.loc[:, features].apply(lambda s: pd.to_numeric(s, errors="coerce"))
+    train_vals = train_vals.fillna(0.0).astype("float64")
+    stats["train_mean"] = train_vals.mean(axis=0).to_numpy()
+    stats["train_std"] = train_vals.std(axis=0, ddof=0).replace(0, np.nan).to_numpy()
 
     qs = [0.01, 0.5, 0.99]
-    qdf = train_vals.quantile(qs, numeric_only=True).T
+    qdf = train_vals.quantile(qs).T
     qdf.columns = [f"p{int(q * 100):02d}" for q in qs]
     stats = stats.merge(qdf, left_on="feature", right_index=True, how="left")
 
@@ -167,7 +169,7 @@ def _drift_report(
         print(f"\n[drift] player={name} player_id={int(row['player_id'])}")
         out_rows: list[dict[str, object]] = []
         for feat in features:
-            live_val = float(row[feat])
+            live_val = float(pd.to_numeric(row.get(feat), errors="coerce") or 0.0)
             ref = stats[stats["feature"] == feat].iloc[0]
             mean = float(ref["train_mean"])
             std = float(ref["train_std"]) if pd.notna(ref["train_std"]) else float("nan")
@@ -392,4 +394,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

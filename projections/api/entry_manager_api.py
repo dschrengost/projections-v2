@@ -809,14 +809,40 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
     if len(lineups) < len(entry_state.entries):
         raise HTTPException(status_code=400, detail="Not enough lineups to populate entries")
 
+    # Refresh draftables to ensure we have current DK data (handles locked games)
+    try:
+        _refresh_draftables_for_late_swap(entry_state.draft_group_id)
+    except Exception as exc:
+        logger.warning("Failed to refresh draftables for apply_build: %s", exc)
+
+    # Pre-build maps once for all entries
+    try:
+        maps = _build_dk_maps(entry_state.game_date, entry_state.draft_group_id)
+        internal_to_dk, internal_to_name, draftable_ids_by_player, dk_names = maps
+    except Exception as exc:
+        logger.exception("Failed to build DK maps for apply_build")
+        raise HTTPException(status_code=500, detail=f"Failed to map players to DK IDs: {exc}")
+
+    unmapped_players: set[str] = set()
     updated_entries = []
     for idx, entry in enumerate(entry_state.entries):
         entry_key = entry.get("entry_key") or entry.get("entry_id") or f"row-{idx + 1}"
-        slot_values = _assign_lineup_to_slots(
+        slot_values = _assign_lineup_to_slots_with_maps(
             lineups[idx],
-            draft_group_id=entry_state.draft_group_id,
-            game_date=entry_state.game_date,
+            internal_to_dk,
+            internal_to_name,
+            draftable_ids_by_player,
+            dk_names,
         )
+        # Track players that couldn't be mapped
+        for pid in lineups[idx]:
+            pid_str = str(pid)
+            if pid_str not in internal_to_dk:
+                unmapped_players.add(pid_str)
+            else:
+                dk_id = internal_to_dk[pid_str]
+                if dk_id not in draftable_ids_by_player:
+                    unmapped_players.add(f"{pid_str}(dk={dk_id})")
         updated_entries.append(
             {
                 "entry_id": entry.get("entry_id", ""),
@@ -826,6 +852,13 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
                 "entry_fee": entry_state.entry_fee,
                 **{slot: slot_values.get(slot, "") for slot in DK_NBA_SLOTS},
             }
+        )
+
+    if unmapped_players:
+        logger.warning(
+            "apply_build: %d players could not be mapped to DK draftable IDs: %s",
+            len(unmapped_players),
+            sorted(unmapped_players)[:20],  # Log first 20 to avoid spam
         )
 
     entry_state.entries = updated_entries

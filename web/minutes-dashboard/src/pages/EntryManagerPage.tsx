@@ -174,12 +174,16 @@ export default function EntryManagerPage() {
     }, [buildSource, savedBuilds, savedSimBuilds])
 
     const handleUpload = async (file: File) => {
-        if (!selectedSlate) return
+        if (!selectedSlate) {
+            setEntryError('Please select a slate before uploading')
+            return
+        }
         setUploading(true)
         setEntryError(null)
         try {
             const summaries = await uploadEntries(selectedDate, selectedSlate, file)
             setEntryFiles(summaries)
+            setContestOrder(summaries.map(s => s.contest_id))
             setSelectedContestId(summaries[0]?.contest_id ?? null)
         } catch (err) {
             setEntryError((err as Error).message)

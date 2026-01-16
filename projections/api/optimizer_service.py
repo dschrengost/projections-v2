@@ -1102,6 +1102,7 @@ def _build_qb_config(config: Dict[str, Any], defaults: Dict[str, Any]) -> QuickB
         per_build=config.get("per_build", pool_defaults.get("per_build", 6000)),
         max_pool=config.get("max_pool", pool_defaults.get("max_pool", 20000)),
         min_uniq=config.get("min_uniq", pool_defaults.get("min_uniq", 1)),
+        max_exposure_pct=config.get("max_exposure_pct", pool_defaults.get("max_exposure_pct")),
         jitter=config.get("jitter", pool_defaults.get("jitter", 5e-4)),
         near_dup_jaccard=config.get("near_dup_jaccard", pool_defaults.get("near_dup_jaccard", 0.0)),
         enum_enable=config.get("enum_enable", pool_defaults.get("enum_enable", True)),

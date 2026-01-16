@@ -15,8 +15,8 @@ NBA_SCORES_PATH = "/nba/"
 
 FANDUEL_PROVIDER_ID = 98
 CAESARS_PROVIDER_ID = 101
-BOOK_PRIORITY = (FANDUEL_PROVIDER_ID, CAESARS_PROVIDER_ID)
-BOOK_LABELS = {
+DEFAULT_BOOK_PRIORITY = (FANDUEL_PROVIDER_ID, CAESARS_PROVIDER_ID)
+DEFAULT_BOOK_LABELS = {
     FANDUEL_PROVIDER_ID: "FanDuel",
     CAESARS_PROVIDER_ID: "Caesars",
 }
@@ -129,10 +129,11 @@ class OddstraderScraper:
         if not events:
             return []
 
+        provider_priority, book_labels = self._resolve_book_priority(initial_state, max_providers=2)
         event_ids = [meta.eid for meta in events]
         api_headers, endpoint = self._build_api_headers(config_state)
-        lines = self._fetch_current_lines(event_ids, api_headers, endpoint)
-        return self._merge_lines_with_events(events, lines)
+        lines = self._fetch_current_lines(event_ids, api_headers, endpoint, provider_priority)
+        return self._merge_lines_with_events(events, lines, provider_priority, book_labels)
 
     def _scoreboard_url(self, day: date) -> str:
         return (
@@ -280,8 +281,9 @@ class OddstraderScraper:
         event_ids: List[int],
         headers: Dict[str, str],
         endpoint: str,
+        provider_priority: Iterable[int],
     ) -> List[Dict[str, Any]]:
-        provider_ids = ",".join(str(pid) for pid in BOOK_PRIORITY)
+        provider_ids = ",".join(str(pid) for pid in provider_priority)
         event_list = ",".join(str(eid) for eid in event_ids)
         market_ids = ",".join(str(mid) for mid in MARKET_TYPES.keys())
         query = (
@@ -299,7 +301,11 @@ class OddstraderScraper:
         return data.get("A_CL", [])
 
     def _merge_lines_with_events(
-        self, events: Iterable[EventMetadata], line_rows: List[Dict[str, Any]]
+        self,
+        events: Iterable[EventMetadata],
+        line_rows: List[Dict[str, Any]],
+        provider_priority: Iterable[int],
+        book_labels: Dict[int, str],
     ) -> List[EventOdds]:
         grouped: Dict[Tuple[int, int, int], List[Dict[str, Any]]] = {}
 
@@ -314,7 +320,7 @@ class OddstraderScraper:
             for (eid, mtid, partid), candidates in grouped.items():
                 if eid != event.eid:
                     continue
-                selected = self._pick_preferred_line(candidates)
+                selected = self._pick_preferred_line(candidates, provider_priority)
                 if not selected:
                     continue
                 market_key = MARKET_TYPES.get(mtid)
@@ -325,7 +331,7 @@ class OddstraderScraper:
                     continue
                 markets.setdefault(market_key, {})
                 markets[market_key][selection_label] = self._build_market_line(
-                    market_key, selection_label, selected
+                    market_key, selection_label, selected, book_labels
                 )
 
             results.append(
@@ -340,9 +346,9 @@ class OddstraderScraper:
         return results
 
     def _pick_preferred_line(
-        self, candidates: List[Dict[str, Any]]
+        self, candidates: List[Dict[str, Any]], provider_priority: Iterable[int]
     ) -> Dict[str, Any] | None:
-        for provider in BOOK_PRIORITY:
+        for provider in provider_priority:
             for row in candidates:
                 if row.get("paid") == provider:
                     return row
@@ -362,7 +368,7 @@ class OddstraderScraper:
         return str(partid)
 
     def _build_market_line(
-        self, market: str, selection: str, line: Dict[str, Any]
+        self, market: str, selection: str, line: Dict[str, Any], book_labels: Dict[int, str]
     ) -> MarketLine:
         updated_at = datetime.fromtimestamp(
             float(line.get("tim", "0")) / 1000, tz=timezone.utc
@@ -375,6 +381,62 @@ class OddstraderScraper:
             selection=selection,
             price=price,
             point=point_value,
-            book=BOOK_LABELS.get(provider, str(provider)),
+            book=book_labels.get(provider, str(provider)),
             updated_at=updated_at,
         )
+
+    def _resolve_book_priority(
+        self, state: Dict[str, Any], *, max_providers: int = 2
+    ) -> Tuple[List[int], Dict[int, str]]:
+        sportsbooks_state = state.get("sportsbooks", {}) if isinstance(state, dict) else {}
+        sportsbook_list = sportsbooks_state.get("sportsbooks", []) if isinstance(sportsbooks_state, dict) else []
+
+        if not sportsbook_list:
+            default = list(DEFAULT_BOOK_PRIORITY)[:max_providers]
+            return default, {pid: DEFAULT_BOOK_LABELS.get(pid, str(pid)) for pid in default}
+
+        paid_to_name: Dict[int, str] = {}
+        sbid_to_paid: Dict[int, int] = {}
+        for sb in sportsbook_list:
+            if not isinstance(sb, dict):
+                continue
+            paid = sb.get("paid")
+            if paid is None:
+                continue
+            name = sb.get("nam") or sb.get("name") or str(paid)
+            paid_to_name.setdefault(int(paid), str(name))
+            sbid = sb.get("sbid")
+            if sbid is not None:
+                sbid_to_paid[int(sbid)] = int(paid)
+
+        ordered: List[int] = []
+        for sbid in sportsbooks_state.get("defaultOrder", []) or []:
+            paid = sbid_to_paid.get(int(sbid))
+            if paid is None or paid in ordered:
+                continue
+            ordered.append(paid)
+
+        if not ordered:
+            for paid in sportsbooks_state.get("paids", []) or []:
+                paid_int = int(paid)
+                if paid_int not in ordered:
+                    ordered.append(paid_int)
+
+        if not ordered:
+            for sb in sportsbook_list:
+                paid = sb.get("paid")
+                if paid is None:
+                    continue
+                paid_int = int(paid)
+                if paid_int not in ordered:
+                    ordered.append(paid_int)
+
+        preferred = [pid for pid in DEFAULT_BOOK_PRIORITY if pid in ordered]
+        if preferred:
+            ordered = preferred + [pid for pid in ordered if pid not in preferred]
+
+        if max_providers > 0:
+            ordered = ordered[:max_providers]
+
+        labels = {pid: paid_to_name.get(pid, str(pid)) for pid in ordered}
+        return ordered, labels
