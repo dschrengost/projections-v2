@@ -639,28 +639,63 @@ def _compute_player_swaps(
     player_pool: List[Dict],
     draftable_to_internal: Dict[int, str],
 ) -> List[PlayerSwap]:
-    """Compute player-level diffs between original and new lineup."""
+    """Compute player-level diffs between original and new lineup (ignore slot shuffles)."""
     # Build lookup for projections by internal player_id
     proj_by_internal = {str(p.get("player_id")): p.get("proj", 0.0) for p in player_pool}
 
-    swaps = []
+    old_by_id: Dict[int, str] = {}
+    old_slot_by_id: Dict[int, str] = {}
+    new_by_id: Dict[int, str] = {}
+
     for slot in DK_NBA_SLOTS:
         old_val = original_entry.get(slot, "")
+        old_id = _extract_draftable_id(old_val)
+        if old_id is not None:
+            old_by_id[old_id] = old_val
+            old_slot_by_id[old_id] = slot
+
         new_val = new_slot_values.get(slot, "")
-        if old_val != new_val:
-            old_draftable = _extract_draftable_id(old_val)
-            new_draftable = _extract_draftable_id(new_val)
-            old_internal = draftable_to_internal.get(old_draftable) if old_draftable else None
-            new_internal = draftable_to_internal.get(new_draftable) if new_draftable else None
-            swaps.append(
-                PlayerSwap(
-                    slot=slot,
-                    old_player=old_val,
-                    new_player=new_val,
-                    old_proj=proj_by_internal.get(old_internal) if old_internal else None,
-                    new_proj=proj_by_internal.get(new_internal) if new_internal else None,
-                )
+        new_id = _extract_draftable_id(new_val)
+        if new_id is not None:
+            new_by_id[new_id] = new_val
+
+    out_ids: List[int] = []
+    for slot in DK_NBA_SLOTS:
+        old_val = original_entry.get(slot, "")
+        old_id = _extract_draftable_id(old_val)
+        if old_id is not None and old_id not in new_by_id:
+            out_ids.append(old_id)
+
+    in_ids: List[int] = []
+    for slot in DK_NBA_SLOTS:
+        new_val = new_slot_values.get(slot, "")
+        new_id = _extract_draftable_id(new_val)
+        if new_id is not None and new_id not in old_by_id:
+            in_ids.append(new_id)
+
+    if not out_ids and not in_ids:
+        return []
+
+    swaps: List[PlayerSwap] = []
+    max_len = max(len(out_ids), len(in_ids))
+    for idx in range(max_len):
+        out_id = out_ids[idx] if idx < len(out_ids) else None
+        in_id = in_ids[idx] if idx < len(in_ids) else None
+        old_val = old_by_id.get(out_id, "") if out_id is not None else ""
+        new_val = new_by_id.get(in_id, "") if in_id is not None else ""
+        old_internal = draftable_to_internal.get(out_id) if out_id is not None else None
+        new_internal = draftable_to_internal.get(in_id) if in_id is not None else None
+        slot = old_slot_by_id.get(out_id, "swap") if out_id is not None else "swap"
+        swaps.append(
+            PlayerSwap(
+                slot=slot,
+                old_player=old_val,
+                new_player=new_val,
+                old_proj=proj_by_internal.get(old_internal) if old_internal else None,
+                new_proj=proj_by_internal.get(new_internal) if new_internal else None,
             )
+        )
+
     return swaps
 
 
