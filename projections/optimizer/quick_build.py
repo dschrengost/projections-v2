@@ -30,9 +30,13 @@ except Exception:  # pragma: no cover - fallback for tests
     from model_spec import Spec, SpecPlayer  # type: ignore
 
 try:
-    from .cpsat_solver import build_cpsat_model, build_objective_weights
+    from .cpsat_solver import (
+        build_cpsat_counts,
+        build_cpsat_model,
+        build_objective_weights,
+    )
 except Exception:  # pragma: no cover
-    from cpsat_solver import build_cpsat_model, build_objective_weights  # type: ignore
+    from cpsat_solver import build_cpsat_counts, build_cpsat_model, build_objective_weights  # type: ignore
 
 FNV_OFFSET_BASIS = 0xCBF29CE484222325
 FNV_PRIME = 0x100000001B3
@@ -81,6 +85,21 @@ def fnv1a_64(parts: Sequence[str]) -> int:
             h ^= byte
             h = (h * FNV_PRIME) & 0xFFFFFFFFFFFFFFFF
     return h
+
+
+def _max_overlap_from_jaccard(threshold: float, lineup_size: int) -> int:
+    """Return max allowed overlap count to keep Jaccard < threshold for equal-size lineups."""
+    try:
+        t = float(threshold)
+    except Exception:
+        return max(0, lineup_size - 1)
+    if t <= 0:
+        return lineup_size
+    denom = 1.0 + t
+    if denom <= 0:
+        return max(0, lineup_size - 1)
+    raw = (2.0 * float(lineup_size) * t) / denom
+    return max(0, int(math.ceil(raw) - 1))
 
 
 class CrossWorkerBloom:
@@ -264,6 +283,21 @@ class QuickBuildStats:
     warm_solve_is_optimal: bool = False
     warm_solve_best_obj: float = 0.0
     warm_solve_time_s: float = 0.0
+    # Raw optimal diagnostics for max-offoptimal constraint
+    raw_optimal_status: str = ""
+    raw_optimal_is_optimal: bool = False
+    raw_optimal_best_obj: float = 0.0
+    raw_optimal_time_s: float = 0.0
+    raw_optimal_min_proj_sum: Optional[float] = None
+    raw_optimal_max_offoptimal_pct: Optional[float] = None
+    # Rejection diagnostics
+    rejected_near_dup: int = 0
+    rejected_infeasible: int = 0
+    rejected_offoptimal_floor: int = 0
+    near_dup_last_jaccard: Optional[float] = None
+    near_dup_max_jaccard: Optional[float] = None
+    near_dup_last_overlap: Optional[int] = None
+    near_dup_max_overlap: Optional[int] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -302,6 +336,7 @@ class QuickBuildConfig:
     enum_k: int = 0
     enum_time: Optional[float] = 20.0
     enum_warm_time: Optional[float] = 5.0
+    max_empty_cycles: int = 3
     output_path: Optional[Path] = None
     stats_path: Optional[Path] = None
     spill_dir: Optional[Path] = None
@@ -367,6 +402,7 @@ class QuickBuildConfig:
                 if getattr(args, "qb_enum_warm_time", None) not in (None, "")
                 else 5.0
             ),
+            max_empty_cycles=int(getattr(args, "qb_max_empty_cycles", 3) or 3),
             output_path=Path(getattr(args, "qb_out", "")).expanduser().resolve() if getattr(args, "qb_out", None) else None,
             stats_path=Path(getattr(args, "qb_stats", "")).expanduser().resolve() if getattr(args, "qb_stats", None) else None,
             spill_dir=Path(getattr(args, "qb_spill_dir", "")).expanduser().resolve() if getattr(args, "qb_spill_dir", None) else None,
@@ -446,21 +482,24 @@ class InMemoryPool:
         self._rows.append((key, h))
         return "ok"
 
-    def try_add_with_jacc(self, lineup: Sequence[str], threshold: float, window: int = 2000) -> str:
+    def try_add_with_jacc(
+        self, lineup: Sequence[str], threshold: float, window: int = 2000
+    ) -> tuple[str, Optional[float]]:
         """Add lineup if it's not an exact dup and not a near-dup by Jaccard.
 
         threshold: Jaccard similarity in [0,1]. If <= 0, behaves like try_add.
         window: compare against at most this many most-recent accepted lineups.
         """
         if threshold is None or threshold <= 0.0:
-            return self.try_add(lineup)
+            return self.try_add(lineup), None
         key = tuple(sorted(lineup))
         h = fnv1a_64(key)
         if h in self._seen:
-            return "dup"
+            return "dup", None
         # Near-dup check on a bounded recent window to keep cost small
         a = set(key)
         limit = max(0, len(self._rows) - int(window))
+        best_jacc = None
         for idx in range(len(self._rows) - 1, limit - 1, -1):
             b_key, _ = self._rows[idx]
             b = set(b_key)
@@ -471,13 +510,17 @@ class InMemoryPool:
             if union_sz == 0:
                 continue
             j = inter / union_sz
-            if j >= threshold:
-                return "near_dup"
+            if best_jacc is None or j > best_jacc:
+                best_jacc = j
+            if best_jacc is not None and best_jacc >= 1.0:
+                break
+        if best_jacc is not None and best_jacc >= threshold:
+            return "near_dup", best_jacc
         if len(self._rows) >= self.max_size:
-            return "full"
+            return "full", best_jacc
         self._seen.add(h)
         self._rows.append((key, h))
-        return "ok"
+        return "ok", best_jacc
 
     def rows(self) -> List[Tuple[Tuple[str, ...], int]]:
         return list(self._rows)
@@ -610,6 +653,8 @@ class PoolingCallback(cp_model.CpSolverSolutionCallback):
         emit_fn: Callable[[Tuple[str, ...], Sequence[int]], bool],
         stop_event: Event,
         target_emissions: Optional[int],
+        overlap_cut_fn: Optional[Callable[[Sequence[int], int], None]] = None,
+        overlap_max: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.player_vars = player_vars
@@ -621,6 +666,8 @@ class PoolingCallback(cp_model.CpSolverSolutionCallback):
         self.last_set: Optional[set[str]] = None
         self.emitted = 0
         self.restart_requested = False
+        self.overlap_cut_fn = overlap_cut_fn
+        self.overlap_max = overlap_max
 
     def on_solution_callback(self) -> None:  # pragma: no cover - exercised in integration tests
         if self.stop_event.is_set():
@@ -657,6 +704,17 @@ class PoolingCallback(cp_model.CpSolverSolutionCallback):
 
         self.emitted += 1
         self.last_set = lineup_set
+
+        # Add overlap cut for near-dup constraints (solver-side) and restart.
+        if (
+            self.overlap_cut_fn is not None
+            and self.overlap_max is not None
+            and idx_sel
+        ):
+            self.overlap_cut_fn(idx_sel, self.overlap_max)
+            self.restart_requested = True
+            self.StopSearch()
+            return
 
         # Sparse no-good cuts based on accepted count; also apply deferred rejects
         if self.cfg.nogood_rate > 0 and self.cfg.nogood_cut_fn is not None and idx_sel:
@@ -730,7 +788,7 @@ def _configure_solver(solver: cp_model.CpSolver, spec: Spec, cfg: QuickBuildConf
 
 def _solve_best_objective(spec: Spec, cfg: QuickBuildConfig, seed: int) -> tuple[int | None, dict]:
     """Find best objective value for enumeration floors.
-    
+
     Returns:
         (best_objective, diagnostics_dict) where diagnostics contains:
         - status: solver status string
@@ -753,7 +811,7 @@ def _solve_best_objective(spec: Spec, cfg: QuickBuildConfig, seed: int) -> tuple
         solver.parameters.max_time_in_seconds = float(warm)
     status = solver.Solve(artifacts.model)
     diag["time_s"] = round(time.time() - start_t, 3)
-    
+
     # Map status to string
     status_map = {
         cp_model.OPTIMAL: "OPTIMAL",
@@ -764,13 +822,77 @@ def _solve_best_objective(spec: Spec, cfg: QuickBuildConfig, seed: int) -> tuple
     }
     diag["status"] = status_map.get(status, f"STATUS_{status}")
     diag["is_optimal"] = (status == cp_model.OPTIMAL)
-    
+
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None, diag
     try:
         best = int(round(solver.ObjectiveValue()))
         diag["best_obj"] = float(best)
         return best, diag
+    except Exception:
+        return None, diag
+
+
+def _solve_best_raw_objective(
+    spec: Spec, cfg: QuickBuildConfig, seed: int
+) -> tuple[float | None, dict]:
+    """Find best raw-projection objective (no jitter/randomness/bonus/penalty)."""
+    diag: dict = {"status": "", "is_optimal": False, "best_obj": 0.0, "time_s": 0.0}
+    start_t = time.time()
+    try:
+        model, y = build_cpsat_counts(spec)
+    except Exception:
+        return None, diag
+
+    scale = 1000
+    try:
+        obj_terms = [
+            int(round(float(p.proj) * scale)) * y[p.player_id] for p in spec.players
+        ]
+    except Exception:
+        obj_terms = []
+    if not obj_terms:
+        return None, diag
+    obj_expr = cp_model.LinearExpr.Sum(obj_terms)
+    model.Maximize(obj_expr)
+    if getattr(spec, "min_proj_sum", None) is not None:
+        try:
+            floor_val = int(math.floor(float(spec.min_proj_sum) * float(scale)))
+            model.Add(obj_expr >= floor_val)
+        except Exception:
+            pass
+    if getattr(spec, "max_proj_sum", None) is not None:
+        try:
+            ceil_val = int(math.ceil(float(spec.max_proj_sum) * float(scale)))
+            model.Add(obj_expr <= ceil_val)
+        except Exception:
+            pass
+
+    solver = cp_model.CpSolver()
+    _configure_solver(solver, spec, cfg, seed)
+    warm = cfg.enum_warm_time if cfg.enum_warm_time is not None else min(cfg.timeout or 60.0, 5.0)
+    if warm and warm > 0:
+        solver.parameters.max_time_in_seconds = float(warm)
+    status = solver.Solve(model)
+    diag["time_s"] = round(time.time() - start_t, 3)
+
+    status_map = {
+        cp_model.OPTIMAL: "OPTIMAL",
+        cp_model.FEASIBLE: "FEASIBLE",
+        cp_model.INFEASIBLE: "INFEASIBLE",
+        cp_model.MODEL_INVALID: "MODEL_INVALID",
+        cp_model.UNKNOWN: "UNKNOWN",
+    }
+    diag["status"] = status_map.get(status, f"STATUS_{status}")
+    diag["is_optimal"] = (status == cp_model.OPTIMAL)
+
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return None, diag
+    try:
+        best_scaled = float(solver.ObjectiveValue())
+        best_raw = best_scaled / scale
+        diag["best_obj"] = best_raw
+        return best_raw, diag
     except Exception:
         return None, diag
 
@@ -890,6 +1012,7 @@ def _worker_main(
     cross_bloom: "CrossWorkerBloom | None" = None,
     *,
     use_central_dedup: bool = False,
+    no_solution_cycles: "mp.Value | None" = None,
 ) -> None:  # pragma: no cover - exercised via integration
     logger = logging.getLogger("optimizer.quick_build.worker")
     try:
@@ -939,6 +1062,18 @@ def _worker_main(
     seen_hashes: set[int] = set()
     emit_fn = _make_emit_fn(queue, stop_event, seen_hashes, cross_bloom, use_central_dedup=use_central_dedup)
 
+    overlap_cut_fn: Optional[Callable[[Sequence[int], int], None]] = None
+    overlap_max: Optional[int] = None
+    if getattr(cfg, "near_dup_jaccard", 0.0) and float(cfg.near_dup_jaccard) > 0:
+        overlap_max = _max_overlap_from_jaccard(float(cfg.near_dup_jaccard), cfg.lineup_size)
+
+        def add_overlap_cut(idx_sel: Sequence[int], max_overlap: int) -> None:
+            if not idx_sel:
+                return
+            model.Add(sum(player_vars[i] for i in idx_sel) <= max_overlap)
+
+        overlap_cut_fn = add_overlap_cut
+
     if cfg.nogood_rate > 0:
         def add_nogood_cut(idx_sel: Sequence[int]) -> None:
             if not idx_sel:
@@ -963,6 +1098,8 @@ def _worker_main(
             emit_fn=emit_fn,
             stop_event=stop_event,
             target_emissions=remaining_target,
+            overlap_cut_fn=overlap_cut_fn,
+            overlap_max=overlap_max,
         )
 
         solver.SolveWithSolutionCallback(model, cb)
@@ -987,13 +1124,20 @@ def _worker_main(
             )
             break
         if cb.emitted == 0:
+            if no_solution_cycles is not None:
+                try:
+                    with no_solution_cycles.get_lock():
+                        no_solution_cycles.value += 1
+                except Exception:
+                    pass
             # Allow a few consecutive empty cycles before stopping to avoid
             # premature termination when centralized dedup filters heavily.
             if cb.restart_requested:
                 empty_cycles = 0
                 continue
             empty_cycles += 1
-            if empty_cycles < 3:
+            max_empty_cycles = int(getattr(cfg, "max_empty_cycles", 3) or 3)
+            if empty_cycles < max_empty_cycles:
                 continue
             logger.info(
                 "[quick-build] worker seed=%s stop: no new solutions after %d empty cycles (total=%d)",
@@ -1046,6 +1190,40 @@ def quick_build_pool(
     pool = InMemoryPool(max(1, cfg.effective_max_pool))
     stats = QuickBuildStats()
 
+    # Optional max-off-optimal constraint (raw projections only)
+    max_offoptimal = _get_value(constraints, "max_offoptimal_pct", None)
+    if max_offoptimal is not None:
+        try:
+            max_offoptimal = float(max_offoptimal)
+        except Exception as exc:
+            raise ValueError("max_offoptimal_pct must be a float in [0, 1]") from exc
+        if not (0.0 <= max_offoptimal <= 1.0):
+            raise ValueError(
+                "max_offoptimal_pct must be between 0 and 1 (e.g., 0.05 for 5%)"
+            )
+        # Search longer under tight optimality constraints
+        cfg = replace(
+            cfg,
+            timeout=max(float(cfg.timeout or 0.0), 1.5),
+            max_empty_cycles=max(int(getattr(cfg, "max_empty_cycles", 3) or 3), 8),
+        )
+        base_seed = cfg.seed if cfg.seed is not None else int(time.time())
+        best_raw, raw_diag = _solve_best_raw_objective(spec, cfg, base_seed)
+        stats.raw_optimal_status = raw_diag.get("status", "")
+        stats.raw_optimal_is_optimal = bool(raw_diag.get("is_optimal", False))
+        stats.raw_optimal_best_obj = float(raw_diag.get("best_obj", 0.0) or 0.0)
+        stats.raw_optimal_time_s = float(raw_diag.get("time_s", 0.0) or 0.0)
+        stats.raw_optimal_max_offoptimal_pct = max_offoptimal
+        if best_raw is None or best_raw <= 0:
+            raise RuntimeError(
+                "Unable to compute raw optimal projection for max_offoptimal_pct."
+            )
+        min_proj_sum = best_raw * (1.0 - max_offoptimal)
+        if spec.min_proj_sum is not None:
+            min_proj_sum = max(float(spec.min_proj_sum), min_proj_sum)
+        spec.min_proj_sum = float(min_proj_sum)
+        stats.raw_optimal_min_proj_sum = float(min_proj_sum)
+
     # Run warm solve in main process to capture diagnostics for stats
     if cfg.enum_enable:
         base_seed = cfg.seed if cfg.seed is not None else int(time.time())
@@ -1091,6 +1269,7 @@ def quick_build_pool(
     bloom_rejects = mp.Value('Q', 0)
     seen_dups = mp.Value('Q', 0)
     forwarded = mp.Value('Q', 0)
+    no_solution_cycles = mp.Value('Q', 0)
 
     def _collector():
         seen: set[int] = set()
@@ -1135,6 +1314,7 @@ def quick_build_pool(
                 "seed": seed_i,
                 "cross_bloom": None,  # handled in collector
                 "use_central_dedup": True,
+                "no_solution_cycles": no_solution_cycles,
             },
             daemon=True,
         )
@@ -1153,6 +1333,15 @@ def quick_build_pool(
                 max_exposure_count = max(1, int(math.floor((pct / 100.0) * pool.max_size)))
         except Exception:
             max_exposure_count = None
+    # Optional: raw projection map for off-optimal floor validation
+    floor_min_proj = getattr(spec, "min_proj_sum", None)
+    proj_map = None
+    if floor_min_proj is not None:
+        try:
+            proj_map = {p.player_id: float(p.proj) for p in spec.players}
+        except Exception:
+            proj_map = None
+
     try:
         while len(pool) < pool.max_size:
             try:
@@ -1187,12 +1376,23 @@ def quick_build_pool(
                 except Exception:
                     pass
 
+            # Optional: validate off-optimal floor (diagnostic guardrail)
+            if floor_min_proj is not None and proj_map is not None:
+                try:
+                    proj_sum = sum(proj_map.get(pid, 0.0) for pid in lineup)
+                    if proj_sum < float(floor_min_proj):
+                        stats.rejected_offoptimal_floor += 1
+                        continue
+                except Exception:
+                    pass
+
             # Apply near-dup filtering if configured
             nd_thresh = float(getattr(cfg, "near_dup_jaccard", 0.0) or 0.0)
             if nd_thresh > 0.0:
-                add_status = pool.try_add_with_jacc(lineup, nd_thresh)
+                add_status, near_jacc = pool.try_add_with_jacc(lineup, nd_thresh)
             else:
                 add_status = pool.try_add(lineup)
+                near_jacc = None
             if add_status == "ok":
                 stats.accepted += 1
                 try:
@@ -1205,6 +1405,19 @@ def quick_build_pool(
                 stats.duplicates += 1
             elif add_status == "near_dup":
                 stats.near_duplicates += 1
+                stats.rejected_near_dup += 1
+                if near_jacc is not None:
+                    stats.near_dup_last_jaccard = float(near_jacc)
+                    prev_max = stats.near_dup_max_jaccard or 0.0
+                    stats.near_dup_max_jaccard = max(prev_max, float(near_jacc))
+                    try:
+                        overlap_est = int(round((2.0 * cfg.lineup_size * float(near_jacc)) / (1.0 + float(near_jacc))))
+                    except Exception:
+                        overlap_est = None
+                    if overlap_est is not None:
+                        stats.near_dup_last_overlap = overlap_est
+                        prev_ov = stats.near_dup_max_overlap or 0
+                        stats.near_dup_max_overlap = max(prev_ov, overlap_est)
             else:  # full
                 stats.emitted = len(pool.rows())
                 break
@@ -1215,6 +1428,11 @@ def quick_build_pool(
         stop.set()
         for proc in processes:
             proc.join(timeout=1.0)
+
+    try:
+        stats.rejected_infeasible = int(no_solution_cycles.value)
+    except Exception:
+        pass
         for proc in processes:
             if proc.is_alive():
                 proc.terminate()

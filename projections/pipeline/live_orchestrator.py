@@ -51,6 +51,9 @@ class PipelineConfig:
     minutes_output_mode: str = "conditional"
     lock_buffer_minutes: int = 0
 
+    # Ownership source: "internal" (LightGBM model) or "linestar" (commercial)
+    ownership_source: str = "linestar"
+
     # Skip options
     skip_digest_check: bool = False
     skip_validation: bool = False
@@ -428,7 +431,12 @@ def step_run_sim(cfg: PipelineConfig) -> StepResult:
 
 
 def step_score_ownership(cfg: PipelineConfig) -> StepResult:
-    """Step 7: Score ownership predictions."""
+    """Step 7: Score ownership predictions.
+
+    Supports two ownership sources:
+    - "linestar": Fetch projected ownership from LineStar (commercial source)
+    - "internal": Run internal LightGBM ownership model
+    """
     start = datetime.now(timezone.utc)
     name = "score_ownership"
 
@@ -438,10 +446,19 @@ def step_score_ownership(cfg: PipelineConfig) -> StepResult:
             "--run-id", cfg.run_id,
             "--data-root", str(cfg.data_root),
         ]
-        _run_python_module(
-            "projections.cli.score_ownership_live", args, cfg.data_root,
-            check=False  # ownership is optional
-        )
+
+        if cfg.ownership_source == "linestar":
+            logger.info("Using LineStar for ownership projections")
+            _run_python_module(
+                "projections.cli.score_ownership_linestar", args, cfg.data_root,
+                check=False  # ownership is optional
+            )
+        else:
+            logger.info("Using internal model for ownership projections")
+            _run_python_module(
+                "projections.cli.score_ownership_live", args, cfg.data_root,
+                check=False  # ownership is optional
+            )
 
         duration = (datetime.now(timezone.utc) - start).total_seconds()
         return StepResult(name=name, success=True, duration_s=duration)
@@ -695,6 +712,12 @@ if __name__ == "__main__":
     parser.add_argument("--no-sim", action="store_true", help="Skip simulation")
     parser.add_argument("--sim-profile", default="sim_v3", help="Simulation profile")
     parser.add_argument("--sim-worlds", type=int, default=20000, help="Number of sim worlds")
+    parser.add_argument(
+        "--ownership-source",
+        choices=["linestar", "internal"],
+        default="linestar",
+        help="Ownership source: 'linestar' (commercial) or 'internal' (LightGBM model)",
+    )
     args = parser.parse_args()
 
     result = run_live_pipeline(
@@ -703,6 +726,7 @@ if __name__ == "__main__":
         run_sim=not args.no_sim,
         sim_profile=args.sim_profile,
         sim_worlds=args.sim_worlds,
+        ownership_source=args.ownership_source,
     )
 
     # Print summary

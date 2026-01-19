@@ -27,6 +27,7 @@ The QuickBuild optimizer generates thousands of unique lineups in seconds using 
    - **Min Uniques**: Minimum unique players between lineups
    - **Team Limit**: Maximum players from same team
    - **Min/Max Salary**: Salary constraints
+   - **Max % Off Optimal**: Constrain lineups within X% of the raw optimal projection (may return fewer)
 4. Lock/ban players using checkboxes in the player pool
 5. Click **Generate Lineups**
 6. Use the lineup filter bar to search/sort results
@@ -73,11 +74,14 @@ constraints:
   min_salary: null
   max_salary: 50000
   global_team_limit: 4
+  max_offoptimal_pct: null
 
 jobs:
   max_concurrent: 4
   job_ttl_minutes: 60
 ```
+
+`max_offoptimal_pct` is a fraction (e.g., `0.05` = 5% off optimal).
 
 ## Architecture
 

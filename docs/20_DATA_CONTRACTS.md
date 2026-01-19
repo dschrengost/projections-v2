@@ -57,6 +57,10 @@ artifacts/sim_v2/worlds_fpts_v2/game_date=YYYY-MM-DD/
 └── index.parquet          # Player index mapping
 ```
 
+`projections.parquet` includes two semantics for world-aggregated metrics:
+- **Conditional-on-playing** (historical default): `dk_fpts_*`, `minutes_sim_*` are computed over only worlds where the player is active.
+- **Unconditional (DNP=0)**: `*_uncond` variants (e.g., `dk_fpts_mean_uncond`, `minutes_sim_p50_uncond`) include inactive/DNP worlds as 0 and should be preferred for decision metrics.
+
 ## Schema Evolution
 
 When modifying schemas:

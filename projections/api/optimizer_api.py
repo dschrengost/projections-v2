@@ -125,6 +125,12 @@ class QuickBuildRequest(BaseModel):
     global_team_limit: int = Field(default=4, ge=1, le=8, description="Max players per team")
     lock_ids: List[str] = Field(default_factory=list, description="Player IDs to lock")
     ban_ids: List[str] = Field(default_factory=list, description="Player IDs to ban")
+    max_offoptimal_pct: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Max % off optimal projection (fraction, e.g. 0.05)",
+    )
     
     # Game filters
     include_games: List[str] = Field(default_factory=list, description="Only include players from these games (e.g., ['MIN@DAL'])")

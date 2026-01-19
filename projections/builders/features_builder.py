@@ -34,6 +34,7 @@ from projections.features.dnp_history import (
 )
 from projections.minutes_v1.features import MinutesFeatureBuilder
 from projections.minutes_v1.pos import canonical_pos_bucket_series
+from projections.names import normalize_player_name
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +56,9 @@ _OPP_CONTEXT_COLUMNS: tuple[str, ...] = (
 )
 
 
-def _normalize_name_for_matching(name: str) -> str:
-    """Normalize player name for matching between data sources."""
-    return unidecode(str(name)).strip().lower()
+# Use the central normalize_player_name for consistent matching across all data sources.
+# This handles suffixes (Jr, III, etc.), accents, and aliases.
+_normalize_name_for_matching = normalize_player_name
 
 
 @dataclass

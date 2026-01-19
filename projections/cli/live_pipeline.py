@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
+from projections.runtime_safety import configure_runtime_safety
+
+configure_runtime_safety()
+
 import subprocess
 import sys
 from datetime import datetime

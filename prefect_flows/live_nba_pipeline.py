@@ -9,12 +9,32 @@ Each stage is an explicit Prefect task and the flow enforces:
 
 from __future__ import annotations
 
+import faulthandler
 import os
 import json
 import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+
+_STABILITY_ENV_DEFAULTS: dict[str, str] = {
+    # Reduce thread/BLAS/Arrow concurrency to avoid occasional hard crashes (SIGSEGV / GPF)
+    # observed under heavy parquet I/O + ML workloads.
+    "ARROW_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+}
+
+
+def _apply_stability_env(env: dict[str, str]) -> None:
+    for k, v in _STABILITY_ENV_DEFAULTS.items():
+        env.setdefault(k, v)
+
+
+_apply_stability_env(os.environ)  # must run before importing pandas/pyarrow
+faulthandler.enable(all_threads=True)
 
 import pandas as pd
 from prefect import flow, get_run_logger, task
@@ -81,6 +101,7 @@ def _run_python_module(
 ) -> None:
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
+    _apply_stability_env(env)
     # Resolve uv path (handles systemd PATH issues)
     uv_path = _uv_bin()
     cmd = [uv_path, "run", "python", "-m", module, *args]
@@ -489,8 +510,13 @@ def run_sim_task(
     return out_dir
 
 
-@task(name="score-ownership", retries=1, retry_delay_seconds=120)
+@task(name="score-ownership", retries=2, retry_delay_seconds=120)
 def score_ownership_task(*, game_date: str, run_id: str, data_root: Path) -> None:
+    """Score ownership using LineStar commercial projections.
+
+    LineStar provides projected ownership % for all players on DK slates.
+    The CLI handles auto-refresh of session if premium session expires.
+    """
     args = [
         "--date",
         game_date,
@@ -499,7 +525,7 @@ def score_ownership_task(*, game_date: str, run_id: str, data_root: Path) -> Non
         "--data-root",
         str(data_root),
     ]
-    _run_python_module("projections.cli.score_ownership_live", args, data_root=data_root, timeout_s=1200)
+    _run_python_module("projections.cli.score_ownership_linestar", args, data_root=data_root, timeout_s=1200)
 
 
 @task(name="select-main-draft-group")

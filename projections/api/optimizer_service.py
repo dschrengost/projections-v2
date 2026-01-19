@@ -349,7 +349,14 @@ def load_projections_for_date(
         raise FileNotFoundError(f"No projections found for {game_date}")
 
     # Check if we have FPTS data, if not try to merge from sim_v2
-    fpts_cols = ["sim_dk_fpts_mean", "dk_fpts_mean", "proj_fpts", "fpts_mean"]
+    fpts_cols = [
+        "sim_dk_fpts_mean_uncond",
+        "dk_fpts_mean_uncond",
+        "sim_dk_fpts_mean",
+        "dk_fpts_mean",
+        "proj_fpts",
+        "fpts_mean",
+    ]
     has_fpts = any(c in df.columns and df[c].notna().any() for c in fpts_cols)
 
     if not has_fpts:
@@ -803,7 +810,16 @@ def build_player_pool(
     proj_col = next(
         (
             c
-            for c in ["sim_dk_fpts_mean", "dk_fpts_mean", "proj_fpts", "fpts_mean", "proj"]
+            for c in [
+                # Prefer unconditional (DNP=0) world aggregates when available.
+                "sim_dk_fpts_mean_uncond",
+                "dk_fpts_mean_uncond",
+                "sim_dk_fpts_mean",
+                "dk_fpts_mean",
+                "proj_fpts",
+                "fpts_mean",
+                "proj",
+            ]
             if c in merged.columns
         ),
         None,
@@ -816,8 +832,12 @@ def build_player_pool(
         (
             c
             for c in [
+                "sim_minutes_sim_mean_uncond",
+                "minutes_sim_mean_uncond",
                 "sim_minutes_sim_mean",
                 "minutes_sim_mean",
+                "sim_minutes_sim_p50_uncond",
+                "minutes_sim_p50_uncond",
                 "sim_minutes_sim_p50",
                 "minutes_sim_p50",
                 "minutes_p50",
@@ -837,13 +857,33 @@ def build_player_pool(
 
     # Identify stddev column
     stddev_col = next(
-        (c for c in ["sim_dk_fpts_std", "stddev", "fpts_std"] if c in merged.columns),
+        (
+            c
+            for c in [
+                "sim_dk_fpts_std_uncond",
+                "dk_fpts_std_uncond",
+                "sim_dk_fpts_std",
+                "stddev",
+                "fpts_std",
+            ]
+            if c in merged.columns
+        ),
         None,
     )
     
     # Identify p90 column for upside projection
     p90_col = next(
-        (c for c in ["sim_dk_fpts_p90", "dk_fpts_p90", "fpts_p90"] if c in merged.columns),
+        (
+            c
+            for c in [
+                "sim_dk_fpts_p90_uncond",
+                "dk_fpts_p90_uncond",
+                "sim_dk_fpts_p90",
+                "dk_fpts_p90",
+                "fpts_p90",
+            ]
+            if c in merged.columns
+        ),
         None,
     )
     
@@ -903,6 +943,17 @@ def build_player_pool(
             has_override = False
             used_fppm_fallback = False
             fppm = float(proj / model_minutes) if model_minutes and model_minutes > 0 else 1.0
+
+            # Back-compat guardrail: older sim_v2 outputs expose dk_fpts_* conditional on playing.
+            # For decision metrics (optimizer objective), treat DNP as 0 by multiplying by play_prob
+            # when an explicit *_uncond metric is not available.
+            if proj_col in {"sim_dk_fpts_mean", "dk_fpts_mean"} and "play_prob" in merged.columns:
+                try:
+                    p_play = float(row.get("play_prob", 1.0))
+                    if 0.0 <= p_play <= 1.0 and proj is not None and not pd.isna(proj):
+                        proj = float(proj) * p_play
+                except Exception:
+                    pass
         
         if pd.isna(proj) or float(proj) <= 0:
             if not allow_zero_projections:
@@ -1121,7 +1172,8 @@ def _build_constraints(
     defaults: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build constraints dict for QuickBuild."""
-    site_defaults = defaults.get("constraints", {}).get(site, {})
+    constraints_defaults = defaults.get("constraints", {})
+    site_defaults = constraints_defaults.get(site, {})
     ownership_defaults = defaults.get("ownership_penalty", {})
 
     constraints = {
@@ -1134,6 +1186,11 @@ def _build_constraints(
         "unique_players": config.get("unique_players", 1),
         "N_lineups": 1,  # QuickBuild handles this differently
     }
+    max_offoptimal_default = constraints_defaults.get("max_offoptimal_pct")
+    if config.get("max_offoptimal_pct", max_offoptimal_default) is not None:
+        constraints["max_offoptimal_pct"] = config.get(
+            "max_offoptimal_pct", max_offoptimal_default
+        )
 
     # Ownership penalty
     if config.get("ownership_penalty_enabled", ownership_defaults.get("enabled", False)):

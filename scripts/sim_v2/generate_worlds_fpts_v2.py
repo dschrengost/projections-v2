@@ -1794,7 +1794,11 @@ def main(
                 continue
             minutes_df[minutes_col] = pd.to_numeric(minutes_df[minutes_col], errors="coerce")
             minutes_df["is_starter"] = pd.to_numeric(
-                minutes_df.get("is_projected_starter", minutes_df.get("starter_flag")), errors="coerce"
+                minutes_df.get(
+                    "is_starter",
+                    minutes_df.get("is_projected_starter", minutes_df.get("starter_flag")),
+                ),
+                errors="coerce",
             )
             minutes_df["play_prob"] = pd.to_numeric(minutes_df.get("play_prob"), errors="coerce").fillna(1.0)
             minutes_df = _ensure_status_bucket(minutes_df)
@@ -2475,6 +2479,13 @@ def main(
                             rng=rng,
                         )
 
+                # Enforce DNP semantics: inactive players must contribute exactly 0 stats/FPTS.
+                # Rates noise uses additive shocks; without masking, inactive players can accrue non-zero stats.
+                if stat_totals:
+                    active_float = active_mask.astype(float)
+                    for key, arr in stat_totals.items():
+                        stat_totals[key] = arr * active_float
+
                 if not stat_totals:
                     fpts_chunk = mu_arr[:, None]  # fallback: no stat noise
                     stat_box = {}
@@ -2482,6 +2493,10 @@ def main(
                     fpts_chunk, stat_box = _compute_fpts_and_boxscore(
                         stat_totals, efficiency_pct=eff_arrays, use_efficiency=use_efficiency
                     )
+                    # Defense-in-depth: ensure inactive worlds are hard-zero in outputs.
+                    fpts_chunk = np.where(active_mask, fpts_chunk, 0.0)
+                    for stat_name, values in list(stat_box.items()):
+                        stat_box[stat_name] = np.where(active_mask, values, 0.0)
 
                     # Optional vegas anchoring: keep team points within implied*(1±drift_pct).
                     if (
@@ -2498,6 +2513,8 @@ def main(
                             drift_pct=profile_cfg.vegas_points_drift_pct,
                         )
                         fpts_chunk = fpts_chunk + (stat_box["pts"] - pts_before)
+                        # Preserve DNP=0 after post-processing.
+                        fpts_chunk = np.where(active_mask, fpts_chunk, 0.0)
                 world_fpts_samples.append(fpts_chunk)
                 # Track individual stat worlds for aggregation
                 for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov", "fga2", "fga3", "fta"):
@@ -2607,6 +2624,55 @@ def main(
                         minutes_std = np.zeros_like(minutes_sim_base)
                         minutes_quantiles = None
                 
+                # Compute UNCONDITIONAL statistics (include inactive worlds as 0).
+                # This is the required semantics for any decision metric: DNP => 0.
+                fpts_mean_uncond = all_fpts.mean(axis=0, dtype=float)
+                fpts_std_uncond = all_fpts.std(axis=0, ddof=0, dtype=float)
+                fpts_quantiles_uncond = np.percentile(
+                    all_fpts, [q * 100 for q in quantiles], axis=0
+                ).astype(float)
+                active_rate_sim = (active_counts / float(max(1, n_worlds_total))).astype(float)
+
+                if all_minutes is not None:
+                    minutes_mean_uncond = all_minutes.mean(axis=0, dtype=float)
+                    minutes_std_uncond = all_minutes.std(axis=0, ddof=0, dtype=float)
+                    minutes_quantiles_uncond = np.percentile(all_minutes, [10, 50, 90], axis=0).astype(float)
+                else:
+                    minutes_mean_uncond = None
+                    minutes_std_uncond = None
+                    minutes_quantiles_uncond = None
+
+                # Lightweight worlds integrity report (aggregates only; no heavy output).
+                if all_minutes is not None:
+                    zero_mask = all_minutes == 0.0
+                else:
+                    zero_mask = all_fpts == 0.0
+                worlds_integrity_payload = {
+                    "worlds_shape": [int(n_worlds_total), int(n_players)],
+                    "invalid_fpts_values": int(bad_mask.sum()) if "bad_mask" in locals() else 0,
+                    "active_rate_sim": {
+                        "mean": float(active_rate_sim.mean()) if active_rate_sim.size else 0.0,
+                        "p10": float(np.percentile(active_rate_sim, 10)) if active_rate_sim.size else 0.0,
+                        "p50": float(np.percentile(active_rate_sim, 50)) if active_rate_sim.size else 0.0,
+                        "p90": float(np.percentile(active_rate_sim, 90)) if active_rate_sim.size else 0.0,
+                    },
+                    "zero_cells": {
+                        "total": int(zero_mask.sum()),
+                        "inactive": int((zero_mask & (~all_active)).sum()),
+                        "active": int((zero_mask & all_active).sum()),
+                    },
+                }
+                if "play_prob" in mu_df.columns:
+                    play_prob_vals = pd.to_numeric(mu_df["play_prob"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                    worlds_integrity_payload["play_prob"] = {
+                        "mean": float(np.mean(play_prob_vals)) if play_prob_vals.size else 0.0,
+                        "p10": float(np.percentile(play_prob_vals, 10)) if play_prob_vals.size else 0.0,
+                        "p50": float(np.percentile(play_prob_vals, 50)) if play_prob_vals.size else 0.0,
+                        "p90": float(np.percentile(play_prob_vals, 90)) if play_prob_vals.size else 0.0,
+                        "n_zero": int(np.sum(play_prob_vals <= 0.0)),
+                        "n_one": int(np.sum(play_prob_vals >= 1.0)),
+                    }
+
                 # Build output projection DataFrame
                 proj_df = mu_df[["game_date", "game_id", "team_id", "player_id"]].copy()
                 proj_df["minutes_mean"] = minutes_sim_base
@@ -2616,6 +2682,14 @@ def main(
                     proj_df["minutes_sim_p10"] = minutes_quantiles[0]
                     proj_df["minutes_sim_p50"] = minutes_quantiles[1]
                     proj_df["minutes_sim_p90"] = minutes_quantiles[2]
+                # Unconditional minutes summaries (DNP => 0)
+                if minutes_mean_uncond is not None and minutes_std_uncond is not None:
+                    proj_df["minutes_sim_mean_uncond"] = minutes_mean_uncond
+                    proj_df["minutes_sim_std_uncond"] = minutes_std_uncond
+                if minutes_quantiles_uncond is not None:
+                    proj_df["minutes_sim_p10_uncond"] = minutes_quantiles_uncond[0]
+                    proj_df["minutes_sim_p50_uncond"] = minutes_quantiles_uncond[1]
+                    proj_df["minutes_sim_p90_uncond"] = minutes_quantiles_uncond[2]
                 proj_df["dk_fpts_mean"] = fpts_mean
                 proj_df["dk_fpts_std"] = fpts_std
                 proj_df["dk_fpts_p05"] = fpts_quantiles[0]
@@ -2625,6 +2699,17 @@ def main(
                 proj_df["dk_fpts_p75"] = fpts_quantiles[4]
                 proj_df["dk_fpts_p90"] = fpts_quantiles[5]
                 proj_df["dk_fpts_p95"] = fpts_quantiles[6]
+                # Unconditional FPTS summaries (DNP => 0)
+                proj_df["dk_fpts_mean_uncond"] = fpts_mean_uncond
+                proj_df["dk_fpts_std_uncond"] = fpts_std_uncond
+                proj_df["dk_fpts_p05_uncond"] = fpts_quantiles_uncond[0]
+                proj_df["dk_fpts_p10_uncond"] = fpts_quantiles_uncond[1]
+                proj_df["dk_fpts_p25_uncond"] = fpts_quantiles_uncond[2]
+                proj_df["dk_fpts_p50_uncond"] = fpts_quantiles_uncond[3]
+                proj_df["dk_fpts_p75_uncond"] = fpts_quantiles_uncond[4]
+                proj_df["dk_fpts_p90_uncond"] = fpts_quantiles_uncond[5]
+                proj_df["dk_fpts_p95_uncond"] = fpts_quantiles_uncond[6]
+                proj_df["sim_p_active"] = active_rate_sim
                 proj_df["sim_profile"] = profile_cfg.name
                 proj_df["n_worlds"] = n_worlds_eff
                 proj_df["minutes_run_id"] = minutes_run_eff
@@ -2683,6 +2768,8 @@ def main(
                         "preserve_input_rotation": getattr(profile_cfg, 'preserve_input_rotation', False),
                     }
                     metrics_payload.update(minutes_alloc_metrics)
+                    if "worlds_integrity_payload" in locals():
+                        metrics_payload["worlds_integrity"] = worlds_integrity_payload
                     (out_dir / "metrics.json").write_text(
                         json.dumps(metrics_payload, indent=2),
                         encoding="utf-8",

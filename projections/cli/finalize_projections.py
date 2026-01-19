@@ -6,12 +6,18 @@ per-run parquet file with complete projection data.
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 import argparse
 import json
 import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from projections.runtime_safety import configure_runtime_safety
+
+configure_runtime_safety()
 
 import pandas as pd
 
@@ -78,6 +84,16 @@ SIM_COLUMNS = [
     "dk_fpts_p75",
     "dk_fpts_p90",
     "dk_fpts_p95",
+    # Unconditional (DNP=0) FPTS quantiles
+    "dk_fpts_mean_uncond",
+    "dk_fpts_std_uncond",
+    "dk_fpts_p05_uncond",
+    "dk_fpts_p10_uncond",
+    "dk_fpts_p25_uncond",
+    "dk_fpts_p50_uncond",
+    "dk_fpts_p75_uncond",
+    "dk_fpts_p90_uncond",
+    "dk_fpts_p95_uncond",
     # Box score stats
     "pts_mean",
     "reb_mean",
@@ -92,11 +108,18 @@ SIM_COLUMNS = [
     "minutes_sim_p10",    # sim p10
     "minutes_sim_p50",    # sim p50
     "minutes_sim_p90",    # sim p90
+    # Unconditional (DNP=0) minutes summaries
+    "minutes_sim_mean_uncond",
+    "minutes_sim_std_uncond",
+    "minutes_sim_p10_uncond",
+    "minutes_sim_p50_uncond",
+    "minutes_sim_p90_uncond",
     # Metadata
     "sim_profile",
     "n_worlds",
     "rates_run_id",
     "is_starter",  # sim's view of starter
+    "sim_p_active",
 ]
 
 OWNERSHIP_COLUMNS = [

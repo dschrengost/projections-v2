@@ -17,13 +17,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from projections import paths
-from projections.api.optimizer_api import DK_NBA_SLOTS, _load_dk_nba_draftable_ids_by_player
+from projections.api.optimizer_api import (
+    DK_NBA_ROSTER_SLOT_ID_TO_SLOT,
+    DK_NBA_SLOTS,
+    _load_dk_nba_draftable_ids_by_player,
+)
 from projections.api.optimizer_service import build_player_pool, load_saved_build
+from projections.dk.slates import build_contest_id_to_draft_group
 from projections.optimizer.cpsat_solver import solve_cpsat_iterative_counts
 from projections.optimizer.optimizer_types import Constraints, OwnershipPenaltySettings
 
@@ -73,6 +78,70 @@ def _parse_entry_csv(content: str) -> tuple[List[str], List[EntryRow]]:
             )
         )
     return header, rows
+
+
+def _is_dk_nba_classic_entry_header(header: List[str]) -> bool:
+    cols = {str(c).strip() for c in header if c is not None}
+    return all(slot in cols for slot in DK_NBA_SLOTS)
+
+
+def _draft_group_looks_like_dk_nba_classic(draft_group_id: int, *, game_date: str) -> tuple[bool, int]:
+    bronze_path = (
+        paths.data_path()
+        / "bronze"
+        / "dk"
+        / "draftables"
+        / f"draftables_raw_{draft_group_id}.json"
+    )
+    if not bronze_path.exists():
+        return False, 0
+    try:
+        payload = json.loads(bronze_path.read_text(encoding="utf-8"))
+        draftables = payload.get("draftables", [])
+        if not isinstance(draftables, list) or not draftables:
+            return False, 0
+        classic_slot_ids = set(DK_NBA_ROSTER_SLOT_ID_TO_SLOT.keys())
+        roster_slot_ids = set()
+        for d in draftables[:500]:
+            if not isinstance(d, dict):
+                continue
+            rs = d.get("rosterSlotId")
+            if rs is None:
+                continue
+            try:
+                roster_slot_ids.add(int(rs))
+            except (TypeError, ValueError):
+                continue
+        looks_classic = bool(roster_slot_ids.intersection(classic_slot_ids))
+        return looks_classic, len(draftables)
+    except Exception:
+        return False, 0
+
+
+def _guess_best_classic_draft_group_id(*, game_date: str) -> int | None:
+    """Best-effort guess for NBA Classic DK slate DG for this date."""
+    root = paths.data_path() / "gold" / "dk_salaries" / "site=dk" / f"game_date={game_date}"
+    candidates: List[int] = []
+    if root.exists():
+        for dg_dir in root.iterdir():
+            if not dg_dir.is_dir() or not dg_dir.name.startswith("draft_group_id="):
+                continue
+            try:
+                candidates.append(int(dg_dir.name.split("=", 1)[1]))
+            except (ValueError, IndexError):
+                continue
+    if not candidates:
+        return None
+
+    best: tuple[int, int] | None = None  # (draftables_count, dg)
+    for dg in candidates:
+        looks_classic, n_draftables = _draft_group_looks_like_dk_nba_classic(dg, game_date=game_date)
+        if not looks_classic:
+            continue
+        score = (n_draftables, dg)
+        if best is None or score > best:
+            best = score
+    return best[1] if best else None
 
 
 def _build_dk_maps(
@@ -537,6 +606,7 @@ def _detect_draft_group_candidates(
 class EntryFileSummary(BaseModel):
     contest_id: str
     contest_name: str
+    draft_group_id: int
     entry_count: int
     created_at: str
     updated_at: str
@@ -633,6 +703,93 @@ class SelectAlternativeRequest(BaseModel):
     slot_values: Dict[str, str]
 
 
+class EntryValidationIssue(BaseModel):
+    """A single validation issue for an entry."""
+    entry_id: str
+    severity: str  # "error" | "warning"
+    issue_type: str  # "empty_slot" | "invalid_draftable" | "duplicate" | "salary_exceeded"
+    message: str
+    slot: Optional[str] = None
+
+
+class ExportValidationResult(BaseModel):
+    """Result of validating entries before export."""
+    valid: bool
+    entry_count: int
+    issues: List[EntryValidationIssue] = Field(default_factory=list)
+    warnings_count: int = 0
+    errors_count: int = 0
+    duplicate_lineup_count: int = 0
+    empty_slot_count: int = 0
+
+
+def _validate_entries_for_export(
+    entries: List[Dict[str, str]],
+    draft_group_id: int,
+) -> ExportValidationResult:
+    """Validate entries before export to catch issues early."""
+    issues: List[EntryValidationIssue] = []
+    seen_lineups: Dict[str, str] = {}  # hash -> first entry_id that had it
+
+    for entry in entries:
+        entry_id = entry.get("entry_id", "unknown")
+
+        # Check each slot
+        slot_ids: List[int] = []
+        for slot in DK_NBA_SLOTS:
+            slot_value = entry.get(slot, "").strip()
+
+            if not slot_value:
+                issues.append(EntryValidationIssue(
+                    entry_id=entry_id,
+                    severity="error",
+                    issue_type="empty_slot",
+                    message=f"Empty slot {slot}",
+                    slot=slot,
+                ))
+                continue
+
+            draftable_id = _extract_draftable_id(slot_value)
+            if draftable_id is None:
+                issues.append(EntryValidationIssue(
+                    entry_id=entry_id,
+                    severity="error",
+                    issue_type="invalid_draftable",
+                    message=f"Cannot parse draftable ID from '{slot_value}'",
+                    slot=slot,
+                ))
+            else:
+                slot_ids.append(draftable_id)
+
+        # Check for duplicate lineups (same set of draftable IDs)
+        if len(slot_ids) == len(DK_NBA_SLOTS):
+            lineup_hash = ",".join(str(x) for x in sorted(slot_ids))
+            if lineup_hash in seen_lineups:
+                issues.append(EntryValidationIssue(
+                    entry_id=entry_id,
+                    severity="warning",
+                    issue_type="duplicate",
+                    message=f"Duplicate lineup (same as entry {seen_lineups[lineup_hash]})",
+                ))
+            else:
+                seen_lineups[lineup_hash] = entry_id
+
+    errors = [i for i in issues if i.severity == "error"]
+    warnings = [i for i in issues if i.severity == "warning"]
+    duplicates = [i for i in issues if i.issue_type == "duplicate"]
+    empty_slots = [i for i in issues if i.issue_type == "empty_slot"]
+
+    return ExportValidationResult(
+        valid=len(errors) == 0,
+        entry_count=len(entries),
+        issues=issues,
+        warnings_count=len(warnings),
+        errors_count=len(errors),
+        duplicate_lineup_count=len(duplicates),
+        empty_slot_count=len(empty_slots),
+    )
+
+
 def _compute_player_swaps(
     original_entry: Dict[str, str],
     new_slot_values: Dict[str, str],
@@ -723,7 +880,7 @@ def _compute_entry_projection(
 @router.post("/entries/upload", response_model=List[EntryFileSummary])
 async def upload_entries(
     date: str,
-    draft_group_id: int,
+    draft_group_id: int | None = Query(default=None),
     file: UploadFile = File(...),
 ):
     """Upload DK entry CSV and persist per-contest state."""
@@ -736,19 +893,64 @@ async def upload_entries(
     for row in rows:
         entries_by_contest.setdefault(row.contest_id, []).append(row)
 
+    contest_dg_map: Dict[str, int] = {}
+    try:
+        contest_dg_map = build_contest_id_to_draft_group(date)
+    except Exception as exc:
+        logger.warning("Contest->draft_group map lookup failed for %s: %s", date, exc)
+
+    classic_entry = _is_dk_nba_classic_entry_header(header)
+    guessed_classic_dg = _guess_best_classic_draft_group_id(game_date=date) if classic_entry else None
+
+    mapped_values = [contest_dg_map.get(str(cid)) for cid in entries_by_contest.keys()]
+    mapped_unique = {dg for dg in mapped_values if dg is not None}
+    fallback_mapped_dg = next(iter(mapped_unique)) if len(mapped_unique) == 1 else None
+
+    upload_ts = datetime.utcnow().isoformat()
     summaries: List[EntryFileSummary] = []
     for contest_id, contest_rows in entries_by_contest.items():
         contest_name = contest_rows[0].contest_name
         entry_fee = contest_rows[0].entry_fee
-        now = datetime.utcnow().isoformat()
+        requested_dg: int | None = int(draft_group_id) if draft_group_id is not None else None
+        mapped_dg = contest_dg_map.get(str(contest_id))
+        if mapped_dg is None and requested_dg is None and fallback_mapped_dg is not None:
+            logger.warning(
+                "Entry upload contest %s not found in lobby; falling back to mapped dg=%s from other contests in file",
+                contest_id,
+                fallback_mapped_dg,
+            )
+            mapped_dg = int(fallback_mapped_dg)
+        if mapped_dg is None and guessed_classic_dg is not None:
+            # Post-lock DK lobby may omit contests. If entry format is NBA Classic, prefer classic DG from disk.
+            looks_requested_classic = False
+            if requested_dg is not None:
+                looks_requested_classic, _ = _draft_group_looks_like_dk_nba_classic(
+                    int(requested_dg), game_date=date
+                )
+            if requested_dg is None or not looks_requested_classic:
+                logger.warning(
+                    "Entry upload contest %s using guessed classic dg=%s (requested=%s)",
+                    contest_id,
+                    guessed_classic_dg,
+                    requested_dg,
+                )
+                mapped_dg = int(guessed_classic_dg)
+        resolved_dg: int | None = mapped_dg if mapped_dg is not None else requested_dg
+        if mapped_dg is not None and requested_dg is not None and int(mapped_dg) != int(requested_dg):
+            logger.warning(
+                "Entry upload slate mismatch for contest %s: requested=%s mapped=%s; using mapped",
+                contest_id,
+                requested_dg,
+                mapped_dg,
+            )
         entry_state = EntryFileState(
             game_date=date,
-            draft_group_id=draft_group_id,
+            draft_group_id=resolved_dg if resolved_dg is not None else -1,
             contest_id=contest_id,
             contest_name=contest_name,
             entry_fee=entry_fee,
-            created_at=now,
-            updated_at=now,
+            created_at=upload_ts,
+            updated_at=upload_ts,
             client_revision=1,
             header=header,
             entries=[
@@ -763,6 +965,46 @@ async def upload_entries(
                 for idx, r in enumerate(contest_rows)
             ],
         )
+        try:
+            # Contest mapping is authoritative (works even with empty roster slots).
+            if mapped_dg is not None:
+                entry_state.draft_group_id = int(mapped_dg)
+            elif resolved_dg is None and requested_dg is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Could not determine slate for contest {contest_id}. "
+                        "Pick a slate and retry, or ensure DK contests are available for this date."
+                    ),
+                )
+
+            sample_ids = _sample_entry_draftable_ids(entry_state)
+            candidates = _detect_draft_group_candidates(sample_ids, game_date=date)
+            if mapped_dg is None and candidates:
+                detected = candidates[0].draft_group_id
+                if requested_dg is None:
+                    entry_state.draft_group_id = int(detected)
+                elif int(detected) != int(entry_state.draft_group_id):
+                    logger.warning(
+                        "Entry file %s draft_group_id override: %s -> %s (match_count=%s)",
+                        contest_id,
+                        entry_state.draft_group_id,
+                        detected,
+                        candidates[0].match_count,
+                    )
+                    entry_state.draft_group_id = int(detected)
+            elif requested_dg is None and mapped_dg is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Could not auto-detect slate for contest {contest_id}. "
+                        "Pick a slate and retry, or ensure DK draftables are present for this date."
+                    ),
+                )
+        except Exception as exc:
+            if isinstance(exc, HTTPException):
+                raise
+            logger.warning("Entry file %s draft_group_id detection failed: %s", contest_id, exc)
         path = _entry_path(date, contest_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
@@ -771,9 +1013,10 @@ async def upload_entries(
             EntryFileSummary(
                 contest_id=contest_id,
                 contest_name=contest_name,
+                draft_group_id=int(entry_state.draft_group_id),
                 entry_count=len(contest_rows),
-                created_at=now,
-                updated_at=now,
+                created_at=upload_ts,
+                updated_at=upload_ts,
             )
         )
 
@@ -794,6 +1037,7 @@ async def list_entries(date: str):
                 EntryFileSummary(
                     contest_id=data.contest_id,
                     contest_name=data.contest_name,
+                    draft_group_id=int(data.draft_group_id),
                     entry_count=len(data.entries),
                     created_at=data.created_at,
                     updated_at=data.updated_at,
@@ -805,12 +1049,89 @@ async def list_entries(date: str):
     return summaries
 
 
+@router.post("/entries/repair-dg", response_model=List[EntryFileSummary])
+async def repair_entries_draft_group_ids(date: str):
+    """Repair stored entry file draft_group_id values using DK contest->dg mapping."""
+    root = _entries_dir(date)
+    if not root.exists():
+        return []
+
+    contest_dg_map: Dict[str, int] = {}
+    try:
+        contest_dg_map = build_contest_id_to_draft_group(date)
+    except Exception as exc:
+        logger.warning("Contest->draft_group map lookup failed for %s: %s", date, exc)
+
+    guessed_classic_dg = _guess_best_classic_draft_group_id(game_date=date)
+
+    items: List[tuple[Path, EntryFileState, str]] = []
+    for path in sorted(root.glob("*.json"), reverse=True):
+        try:
+            state = EntryFileState.model_validate_json(path.read_text())
+        except Exception as exc:
+            logger.warning("Failed to read entry file %s: %s", path, exc)
+            continue
+        batch_key = str(state.created_at)[:19]  # second granularity
+        items.append((path, state, batch_key))
+
+    batches: Dict[str, List[tuple[Path, EntryFileState]]] = {}
+    for path, state, batch_key in items:
+        batches.setdefault(batch_key, []).append((path, state))
+
+    now = datetime.utcnow().isoformat()
+    updated = 0
+    for batch_key, batch_items in batches.items():
+        known_dgs = {
+            contest_dg_map.get(str(state.contest_id))
+            for _, state in batch_items
+        }
+        known_dgs = {dg for dg in known_dgs if dg is not None}
+        batch_dg = next(iter(known_dgs)) if len(known_dgs) == 1 else None
+        if batch_dg is None and guessed_classic_dg is not None:
+            # If DK lobby no longer lists these contests, fall back to classic DG guess from disk.
+            # Only apply if the entry header looks like NBA Classic.
+            any_classic = any(_is_dk_nba_classic_entry_header(state.header) for _, state in batch_items)
+            if any_classic:
+                batch_dg = int(guessed_classic_dg)
+
+        for path, state in batch_items:
+            desired = contest_dg_map.get(str(state.contest_id)) or batch_dg
+            if desired is None:
+                continue
+            if int(state.draft_group_id) == int(desired):
+                continue
+            logger.warning(
+                "Repairing entry file %s: dg %s -> %s (batch=%s)",
+                state.contest_id,
+                state.draft_group_id,
+                desired,
+                batch_key,
+            )
+            state.draft_group_id = int(desired)
+            state.updated_at = now
+            state.client_revision = int(state.client_revision) + 1
+            path.write_text(state.model_dump_json(indent=2))
+            updated += 1
+
+    logger.info("Repaired %d entry files for %s", updated, date)
+    return await list_entries(date)
+
+
 @router.get("/entries/{contest_id}", response_model=EntryFileState)
 async def get_entry_file(contest_id: str, date: str):
     path = _entry_path(date, contest_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     return EntryFileState.model_validate_json(path.read_text())
+
+
+@router.delete("/entries/{contest_id}")
+async def delete_entry_file(contest_id: str, date: str):
+    path = _entry_path(date, contest_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
+    path.unlink()
+    return {"status": "deleted", "contest_id": contest_id}
 
 
 @router.post("/entries/{contest_id}/apply-build", response_model=EntryFileState)
@@ -828,6 +1149,19 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
         build = load_saved_build(date, request.build_id)
         if not build or "lineups" not in build:
             raise HTTPException(status_code=404, detail="Optimizer build not found")
+        build_draft_group_id = build.get("draft_group_id")
+        if (
+            build_draft_group_id is not None
+            and int(build_draft_group_id) != int(entry_state.draft_group_id)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Optimizer build draft_group_id "
+                    f"{build_draft_group_id} does not match entry draft_group_id "
+                    f"{entry_state.draft_group_id}"
+                ),
+            )
         lineups = [lu["player_ids"] for lu in build["lineups"]]
     elif request.build_source == "contest-sim":
         if not request.build_id:
@@ -837,6 +1171,19 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
             raise HTTPException(status_code=404, detail="Contest sim build not found")
         import json
         build = json.loads(build_path.read_text())
+        build_draft_group_id = build.get("draft_group_id")
+        if (
+            build_draft_group_id is not None
+            and int(build_draft_group_id) != int(entry_state.draft_group_id)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Contest sim build draft_group_id "
+                    f"{build_draft_group_id} does not match entry draft_group_id "
+                    f"{entry_state.draft_group_id}"
+                ),
+            )
         lineups = build.get("lineups", [])
     else:
         raise HTTPException(status_code=400, detail="Must provide lineups or build_source/build_id")
@@ -1212,12 +1559,41 @@ async def select_alternative(
     return entry_state
 
 
-@router.post("/entries/{contest_id}/export")
-async def export_entry_file(contest_id: str, date: str):
+@router.get("/entries/{contest_id}/validate", response_model=ExportValidationResult)
+async def validate_entry_file(contest_id: str, date: str):
+    """Validate entries before export - check for empty slots, invalid IDs, duplicates."""
     path = _entry_path(date, contest_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     entry_state = EntryFileState.model_validate_json(path.read_text())
+
+    return _validate_entries_for_export(entry_state.entries, entry_state.draft_group_id)
+
+
+@router.post("/entries/{contest_id}/export")
+async def export_entry_file(contest_id: str, date: str, force: bool = False):
+    """Export entries to CSV for DraftKings upload.
+
+    Args:
+        contest_id: Contest ID to export
+        date: Game date
+        force: If True, export even with validation errors (default False)
+    """
+    path = _entry_path(date, contest_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
+    entry_state = EntryFileState.model_validate_json(path.read_text())
+
+    # Validate before export
+    validation = _validate_entries_for_export(entry_state.entries, entry_state.draft_group_id)
+    if not validation.valid and not force:
+        error_details = "; ".join(f"{i.entry_id}: {i.message}" for i in validation.issues[:5])
+        if len(validation.issues) > 5:
+            error_details += f" (and {len(validation.issues) - 5} more)"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Validation failed with {validation.errors_count} errors: {error_details}. Use force=true to export anyway.",
+        )
 
     export_id = _generate_export_id()
     contest_root = _contest_root_for_export(
@@ -1232,7 +1608,10 @@ async def export_entry_file(contest_id: str, date: str):
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(entry_state.header)
+    # Use canonical header to ensure column count matches data rows
+    # (entry_state.header may have extra columns from DK's original export)
+    canonical_header = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
+    writer.writerow(canonical_header)
     for entry in entry_state.entries:
         row = [
             entry.get("entry_id", ""),
@@ -1317,20 +1696,28 @@ async def export_entry_file(contest_id: str, date: str):
         headers={
             "Content-Disposition": f"attachment; filename=entries_{date}_{contest_id}.csv",
             "X-Export-Id": export_id,
-            "Access-Control-Expose-Headers": "X-Export-Id",
+            "X-Validation-Warnings": str(validation.warnings_count),
+            "X-Validation-Duplicates": str(validation.duplicate_lineup_count),
+            "X-Entry-Count": str(len(entry_state.entries)),
+            "Access-Control-Expose-Headers": "X-Export-Id, X-Validation-Warnings, X-Validation-Duplicates, X-Entry-Count",
         },
     )
 
 
 @router.post("/entries/export")
-async def export_entries_batch(date: str, request: ExportEntriesRequest):
-    """Export multiple contests into a single CSV."""
+async def export_entries_batch(date: str, request: ExportEntriesRequest, force: bool = False):
+    """Export multiple contests into a single CSV.
+
+    Args:
+        date: Game date
+        request: Contest IDs to export
+        force: If True, export even with validation errors (default False)
+    """
     if not request.contest_ids:
         raise HTTPException(status_code=400, detail="No contest_ids provided")
-    output = io.StringIO()
-    writer = csv.writer(output)
-    header_written = False
-    total_entries = 0
+
+    # First pass: load all entries and validate
+    all_entries: List[Dict[str, str]] = []
     draft_group_ids: set[int] = set()
     sites: set[str] = set()
     for contest_id in request.contest_ids:
@@ -1340,23 +1727,39 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest):
         entry_state = EntryFileState.model_validate_json(path.read_text())
         draft_group_ids.add(int(entry_state.draft_group_id))
         sites.add(str(entry_state.site or "dk"))
-        if not header_written:
-            writer.writerow(entry_state.header)
-            header_written = True
-        for entry in entry_state.entries:
-            row = [
-                entry.get("entry_id", ""),
-                entry.get("contest_name", ""),
-                entry.get("contest_id", ""),
-                entry.get("entry_fee", ""),
-            ]
-            for slot in DK_NBA_SLOTS:
-                row.append(entry.get(slot, ""))
-            writer.writerow(row)
-            total_entries += 1
+        all_entries.extend(entry_state.entries)
+
+    # Validate all entries
+    draft_group_id: int | None = next(iter(draft_group_ids)) if len(draft_group_ids) == 1 else None
+    validation = _validate_entries_for_export(all_entries, draft_group_id or 0)
+    if not validation.valid and not force:
+        error_details = "; ".join(f"{i.entry_id}: {i.message}" for i in validation.issues[:5])
+        if len(validation.issues) > 5:
+            error_details += f" (and {len(validation.issues) - 5} more)"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Validation failed with {validation.errors_count} errors: {error_details}. Use force=true to export anyway.",
+        )
+
+    # Second pass: write CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    canonical_header = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
+    writer.writerow(canonical_header)
+    total_entries = 0
+    for entry in all_entries:
+        row = [
+            entry.get("entry_id", ""),
+            entry.get("contest_name", ""),
+            entry.get("contest_id", ""),
+            entry.get("entry_fee", ""),
+        ]
+        for slot in DK_NBA_SLOTS:
+            row.append(entry.get(slot, ""))
+        writer.writerow(row)
+        total_entries += 1
 
     export_id = _generate_export_id()
-    draft_group_id: int | None = next(iter(draft_group_ids)) if len(draft_group_ids) == 1 else None
     site = next(iter(sites)) if len(sites) == 1 else "dk"
     contest_root = _contest_root_for_export(site=site, game_date=date, draft_group_id=draft_group_id)
     exports_dir = contest_root / "exports"
@@ -1444,7 +1847,10 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest):
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
             "X-Export-Id": export_id,
-            "Access-Control-Expose-Headers": "X-Export-Id",
+            "X-Validation-Warnings": str(validation.warnings_count),
+            "X-Validation-Duplicates": str(validation.duplicate_lineup_count),
+            "X-Entry-Count": str(total_entries),
+            "Access-Control-Expose-Headers": "X-Export-Id, X-Validation-Warnings, X-Validation-Duplicates, X-Entry-Count",
         },
     )
 

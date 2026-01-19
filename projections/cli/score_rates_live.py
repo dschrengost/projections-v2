@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
+
+from projections.runtime_safety import configure_runtime_safety
+
+configure_runtime_safety()
 
 import pandas as pd
 import typer

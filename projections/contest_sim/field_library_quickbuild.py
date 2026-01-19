@@ -42,6 +42,7 @@ def build_quickbuild_field_library(
     weight_sum_target: int = 100000,
     weight_model_path: Optional[Path] = None,
     weight_model_bucket: str = "5k-20k",
+    use_ownership_features: bool = True,
     use_candidate_cache: bool = True,
     rebuild_candidates: bool = False,
     # Match optimizer page defaults: 22 workers, 1 thread per worker.
@@ -64,6 +65,10 @@ def build_quickbuild_field_library(
         use_user_overrides=False,
         ownership_mode="renormalize",
     )
+    player_pool_for_features = player_pool
+    if not use_ownership_features:
+        # Keep salary/team metadata but zero out ownership so field compression/weights don't depend on own_proj.
+        player_pool_for_features = [{**row, "own_proj": 0.0} for row in player_pool]
 
     qb_cfg = QuickBuildConfig(
         builds=int(qb_builds),
@@ -187,9 +192,11 @@ def build_quickbuild_field_library(
     # Optional calibrated weights (trained from bronze contest results).
     lineup_counts: Optional[Counter[tuple[str, ...]]] = None
     try:
+        if not use_ownership_features:
+            raise RuntimeError("use_ownership_features=False; skipping learned field weights")
         model_path = weight_model_path or default_field_weight_model_path(version="v1")
         if model_path.exists():
-            player_info = renormalize_ownership(build_player_info_map(player_pool))
+            player_info = renormalize_ownership(build_player_info_map(player_pool_for_features))
             total_own = sum(p.own_proj for p in player_info.values())
             if total_own > 1.0:
                 model = load_field_weight_model(model_path, version="v1")
@@ -223,6 +230,7 @@ def build_quickbuild_field_library(
         "qb_cfg": qb_cfg.to_dict(),
         "constraints": constraints,
         "qb_stats": qb_stats,
+        "use_ownership_features": bool(use_ownership_features),
         **candidate_cache_info,
     }
     if lineup_counts is not None and sum(lineup_counts.values()) > 0:
@@ -236,15 +244,15 @@ def build_quickbuild_field_library(
         return build_field_library_from_lineup_counts(
             lineup_counts,
             k=k,
-            player_pool=player_pool,
-            method="quickbuild_v1_calibrated",
+            player_pool=player_pool_for_features,
+            method="quickbuild_v1_calibrated" if use_ownership_features else "quickbuild_v1_calibrated_noown",
             params=params,
         )
 
     return build_field_library_from_candidates(
         candidates,
         k=k,
-        player_pool=player_pool,
-        method="quickbuild_v0",
+        player_pool=player_pool_for_features,
+        method="quickbuild_v0" if use_ownership_features else "quickbuild_v0_noown",
         params=params,
     )

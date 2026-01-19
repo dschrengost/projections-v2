@@ -3,6 +3,7 @@ import { apiUrl } from './client'
 export interface EntryFileSummary {
     contest_id: string
     contest_name: string
+    draft_group_id: number
     entry_count: number
     created_at: string
     updated_at: string
@@ -65,15 +66,48 @@ export interface LateSwapResult {
     }
 }
 
+export interface ValidationIssue {
+    entry_id: string
+    severity: 'error' | 'warning'
+    issue_type: string
+    message: string
+    slot?: string
+}
+
+export interface ValidationResult {
+    valid: boolean
+    entry_count: number
+    issues: ValidationIssue[]
+    warnings_count: number
+    errors_count: number
+    duplicate_lineup_count: number
+    empty_slot_count: number
+}
+
+export async function validateEntries(date: string, contestId: string): Promise<ValidationResult> {
+    const res = await fetch(
+        apiUrl(`/api/entry-manager/entries/${contestId}/validate?date=${date}`),
+    )
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Failed to validate entries: ${res.status}`)
+    }
+    return res.json()
+}
+
 export async function uploadEntries(
     date: string,
-    draftGroupId: number,
+    draftGroupId: number | null | undefined,
     file: File,
 ): Promise<EntryFileSummary[]> {
     const form = new FormData()
     form.append('file', file)
+    let url = apiUrl(`/api/entry-manager/entries/upload?date=${date}`)
+    if (draftGroupId !== null && draftGroupId !== undefined) {
+        url += `&draft_group_id=${draftGroupId}`
+    }
     const res = await fetch(
-        apiUrl(`/api/entry-manager/entries/upload?date=${date}&draft_group_id=${draftGroupId}`),
+        url,
         {
             method: 'POST',
             body: form,
@@ -95,6 +129,17 @@ export async function listEntryFiles(date: string): Promise<EntryFileSummary[]> 
     return res.json()
 }
 
+export async function repairEntryFileDraftGroups(date: string): Promise<EntryFileSummary[]> {
+    const res = await fetch(apiUrl(`/api/entry-manager/entries/repair-dg?date=${date}`), {
+        method: 'POST',
+    })
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Failed to repair entries: ${res.status}`)
+    }
+    return res.json()
+}
+
 export async function getEntryFile(date: string, contestId: string): Promise<EntryFileState> {
     const res = await fetch(
         apiUrl(`/api/entry-manager/entries/${contestId}?date=${date}`),
@@ -104,6 +149,17 @@ export async function getEntryFile(date: string, contestId: string): Promise<Ent
         throw new Error(body.detail || `Failed to load entry file: ${res.status}`)
     }
     return res.json()
+}
+
+export async function deleteEntryFile(date: string, contestId: string): Promise<void> {
+    const res = await fetch(
+        apiUrl(`/api/entry-manager/entries/${contestId}?date=${date}`),
+        { method: 'DELETE' },
+    )
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Failed to delete entry file: ${res.status}`)
+    }
 }
 
 export async function applyBuildToEntries(

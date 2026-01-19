@@ -22,6 +22,30 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _normalize_ownership_mode(mode: str | None) -> str:
+    m = str(mode or "full").strip().lower()
+    aliases = {
+        "on": "full",
+        "none": "off",
+        "no": "off",
+        "false": "off",
+        "true": "full",
+    }
+    m = aliases.get(m, m)
+    allowed = {"full", "off", "dupe_only", "field_only"}
+    if m not in allowed:
+        raise ValueError(f"Invalid ownership_mode: {mode!r} (allowed: {sorted(allowed)})")
+    return m
+
+
+def _normalize_rank_mode(mode: str | None) -> str:
+    m = str(mode or "current").strip().lower()
+    allowed = {"current", "tail_only", "tail_times_dupe"}
+    if m not in allowed:
+        raise ValueError(f"Invalid rank_mode: {mode!r} (allowed: {sorted(allowed)})")
+    return m
+
+
 def _sim_builds_dir() -> Path:
     """Get the contest sim builds directory under projections-data."""
     return paths.data_path() / "builds" / "contest_sim"
@@ -187,6 +211,14 @@ class ContestSimRequest(BaseModel):
     entry_fee: float = Field(default=3.0, description="Entry fee per lineup")
     weights: Optional[List[int]] = Field(default=None, description="Entry counts per lineup")
     entry_max: int = Field(default=150, description="Max entries per user (for dupe penalty)")
+    ownership_mode: str = Field(
+        default="full",
+        description="Ownership usage: full | off | dupe_only | field_only",
+    )
+    rank_mode: str = Field(
+        default="current",
+        description="Ranking mode for select_score: current | tail_only | tail_times_dupe",
+    )
 
 
 class LineupEVResultResponse(BaseModel):
@@ -334,6 +366,10 @@ class BuildFieldLibraryRequest(BaseModel):
     candidate_pool_size: int = 40000
     rebuild: bool = False
     rebuild_candidates: bool = False
+    ownership_mode: str = Field(
+        default="full",
+        description="Ownership usage: full | off | dupe_only | field_only",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -347,11 +383,23 @@ async def run_simulation(request: ContestSimRequest):
 
     User lineups compete against a modeled opponent field.
     
-    Dupe penalties are automatically applied if ownership data is available.
+    Dupe penalties and field generation can be toggled via `ownership_mode`.
     """
     try:
-        # Load ownership data for dupe penalty calculation
-        player_ownership = _load_player_ownership(request.game_date)
+        try:
+            ownership_mode = _normalize_ownership_mode(request.ownership_mode)
+            rank_mode = _normalize_rank_mode(request.rank_mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        if ownership_mode == "off":
+            rank_mode = "tail_only"
+
+        use_dupe_ownership = ownership_mode in {"full", "dupe_only"}
+        use_field_ownership = ownership_mode in {"full", "field_only"}
+
+        # Load ownership data for dupe penalty calculation (only when enabled)
+        player_ownership = _load_player_ownership(request.game_date) if use_dupe_ownership else {}
 
         field_lineups = None
         field_weights = None
@@ -365,14 +413,22 @@ async def run_simulation(request: ContestSimRequest):
                     status_code=400,
                     detail="draft_group_id is required when field_mode=generated_field",
                 )
+            # Cache separation: avoid overwriting ownership-aware field libraries with ownership-free builds.
+            version = request.field_library_version
+            if not use_field_ownership:
+                version = "v0" if version == "latest" else version
+                if not str(version).endswith("_noown"):
+                    version = f"{version}_noown"
+
             library, lib_path, built_now = load_or_build_field_library(
                 game_date=request.game_date,
                 draft_group_id=int(request.draft_group_id),
-                version=request.field_library_version,
+                version=version,
                 k=int(request.field_library_k),
                 candidate_pool_size=int(request.field_candidate_pool_size),
                 rebuild=bool(request.field_library_rebuild),
                 rebuild_candidates=bool(request.field_library_rebuild_candidates),
+                use_ownership_features=use_field_ownership,
             )
             field_lineups = library.lineups
             field_weights = library.weights
@@ -384,6 +440,9 @@ async def run_simulation(request: ContestSimRequest):
                 "field_library_method": library.meta.get("method"),
                 "field_library_selected_k": len(library.lineups),
                 "field_library_weights_sum": int(sum(library.weights)),
+                "ownership_mode": ownership_mode,
+                "rank_mode": rank_mode,
+                "field_library_use_ownership": bool(use_field_ownership),
             }
         
         result = run_contest_simulation(
@@ -396,11 +455,15 @@ async def run_simulation(request: ContestSimRequest):
             user_weights=request.weights,
             field_lineups=field_lineups,
             field_weights=field_weights,
-            player_ownership=player_ownership if player_ownership else None,
+            player_ownership=player_ownership if (use_dupe_ownership and player_ownership) else None,
             entry_max=request.entry_max,
+            ownership_mode=ownership_mode,
+            rank_mode=rank_mode,
         )
         if field_library_info:
             result.stats.debug.update(field_library_info)
+        else:
+            result.stats.debug.update({"ownership_mode": ownership_mode, "rank_mode": rank_mode})
 
         build_data = {
             "build_id": str(uuid4()),
@@ -624,14 +687,26 @@ async def list_field_libraries(date: str, draft_group_id: int):
 @router.post("/field-libraries/build", response_model=FieldLibrarySummaryResponse)
 async def build_field_library(request: BuildFieldLibraryRequest):
     """Build (or rebuild) a cached field library for a slate."""
+    try:
+        ownership_mode = _normalize_ownership_mode(request.ownership_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    use_field_ownership = ownership_mode in {"full", "field_only"}
+    version = request.version
+    if not use_field_ownership:
+        version = "v0" if version == "latest" else version
+        if not str(version).endswith("_noown"):
+            version = f"{version}_noown"
     library, path, _built_now = load_or_build_field_library(
         game_date=request.game_date,
         draft_group_id=int(request.draft_group_id),
-        version=request.version,
+        version=version,
         k=int(request.k),
         candidate_pool_size=int(request.candidate_pool_size),
         rebuild=bool(request.rebuild),
         rebuild_candidates=bool(request.rebuild_candidates),
+        use_ownership_features=use_field_ownership,
     )
     version = Path(path).stem.replace("field_library_", "")
     return FieldLibrarySummaryResponse(

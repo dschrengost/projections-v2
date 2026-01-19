@@ -55,6 +55,7 @@ export interface QuickBuildRequest {
     global_team_limit?: number
     lock_ids?: string[]
     ban_ids?: string[]
+    max_offoptimal_pct?: number | null
     include_games?: string[]
     exclude_games?: string[]
     ownership_penalty_enabled?: boolean

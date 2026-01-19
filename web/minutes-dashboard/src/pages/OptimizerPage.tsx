@@ -25,6 +25,8 @@ import {
     GameInfo,
 } from '../api/optimizer'
 import { formatSalary } from '../utils'
+import { useSlateDateAndSlate } from '../hooks/useSlateDate'
+import { formatSlateLabel } from '../utils/slateFormat'
 
 type SortKey = 'name' | 'team' | 'salary' | 'proj' | 'own_proj' | 'value'
 
@@ -35,13 +37,10 @@ type LineupGroup = {
     created_at: string
 }
 
-const todayISO = () => new Date().toISOString().slice(0, 10)
-
 export default function OptimizerPage() {
-    // Date and slate selection
-    const [selectedDate, setSelectedDate] = useState(todayISO())
+    // Date and slate selection (persisted in URL)
+    const [selectedDate, setSelectedDate, selectedSlate, setSelectedSlate] = useSlateDateAndSlate()
     const [slates, setSlates] = useState<Slate[]>([])
-    const [selectedSlate, setSelectedSlate] = useState<number | null>(null)
     const [slatesLoading, setSlatesLoading] = useState(false)
     const [slatesError, setSlatesError] = useState<string | null>(null)
 
@@ -74,10 +73,12 @@ export default function OptimizerPage() {
     const [builds, setBuilds] = useState(22)
     const [minUniq, setMinUniq] = useState(1)
     const [maxExposurePct, setMaxExposurePct] = useState(0)
+    const [nearDupJaccard, setNearDupJaccard] = useState(0)
     const [globalTeamLimit, setGlobalTeamLimit] = useState(4)
     const [minSalary, setMinSalary] = useState<number | null>(null)
     const [maxSalary, setMaxSalary] = useState<number | null>(50000)
     const [minProj, setMinProj] = useState<number | null>(null)
+    const [maxOffoptimalPct, setMaxOffoptimalPct] = useState(0)
     const [randomnessPct, setRandomnessPct] = useState(0)
     const [useUserOverrides, setUseUserOverrides] = useState(false)
     const [lateSwapEnabled, setLateSwapEnabled] = useState(false)
@@ -159,9 +160,12 @@ export default function OptimizerPage() {
             try {
                 const data = await getSlates(selectedDate)
                 setSlates(data)
-                // Auto-select first non-showdown slate
-                const mainSlate = data.find(s => s.slate_type !== 'showdown')
-                setSelectedSlate(mainSlate?.draft_group_id ?? data[0]?.draft_group_id ?? null)
+                // If URL has a slate and it exists in the data, keep it; otherwise auto-select
+                const urlSlateExists = selectedSlate && data.some(s => s.draft_group_id === selectedSlate)
+                if (!urlSlateExists) {
+                    const mainSlate = data.find(s => s.slate_type !== 'showdown')
+                    setSelectedSlate(mainSlate?.draft_group_id ?? data[0]?.draft_group_id ?? null)
+                }
             } catch (err) {
                 setSlatesError((err as Error).message)
                 setSlates([])
@@ -171,7 +175,7 @@ export default function OptimizerPage() {
             }
         }
         void loadSlates()
-    }, [selectedDate])
+    }, [selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
     const loadPool = useCallback(async () => {
         if (!selectedSlate) {
@@ -599,11 +603,13 @@ export default function OptimizerPage() {
                 per_build: Math.ceil(maxPool / builds) + 500,
                 min_uniq: minUniq,
                 max_exposure_pct: maxExposurePct > 0 ? maxExposurePct : null,
+                near_dup_jaccard: nearDupJaccard > 0 ? nearDupJaccard : undefined,
                 global_team_limit: globalTeamLimit,
                 min_salary: minSalary,
                 max_salary: maxSalary,
                 lock_ids: Array.from(lockedIds),
                 ban_ids: Array.from(bannedIds),
+                max_offoptimal_pct: maxOffoptimalPct > 0 ? maxOffoptimalPct / 100 : undefined,
                 exclude_games: Array.from(excludedGames),
                 enum_enable: maxPool >= 5000,
                 randomness_pct: randomnessPct > 0 && hasStddev ? randomnessPct : undefined,
@@ -912,7 +918,7 @@ export default function OptimizerPage() {
                             {slates.length === 0 && <option value="">No slates</option>}
                             {slates.map(s => (
                                 <option key={s.draft_group_id} value={s.draft_group_id}>
-                                    {s.slate_type} ({s.draft_group_id}) - {s.n_contests} contests
+                                    {formatSlateLabel(s)}
                                 </option>
                             ))}
                         </select>
@@ -980,6 +986,21 @@ export default function OptimizerPage() {
                         <small className="hint">0% disables exposure cap</small>
                     </div>
 
+                    <div className="randomness-control">
+                        <label>
+                            Near-Dup Jaccard: {nearDupJaccard.toFixed(2)}
+                            <input
+                                type="range"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={nearDupJaccard}
+                                onChange={e => setNearDupJaccard(Number(e.target.value))}
+                            />
+                        </label>
+                        <small className="hint">Higher = stricter. For 8-man DK, 0.75 ≈ 7/8 overlap, 0.60 ≈ 6/8; 0 disables.</small>
+                    </div>
+
                     <label>
                         Team Limit
                         <input
@@ -1029,6 +1050,21 @@ export default function OptimizerPage() {
                             step={5}
                         />
                     </label>
+
+                    <div className="randomness-control">
+                        <label>
+                            Max % Off Optimal: {maxOffoptimalPct}%
+                            <input
+                                type="range"
+                                min={0}
+                                max={50}
+                                step={0.5}
+                                value={maxOffoptimalPct}
+                                onChange={e => setMaxOffoptimalPct(Number(e.target.value))}
+                            />
+                        </label>
+                        <small className="hint">0% disables; tighter caps may return fewer lineups.</small>
+                    </div>
 
                     {/* Randomness Control */}
                     <div className={`randomness-control ${!hasStddev ? 'disabled' : ''}`}>

@@ -6,7 +6,7 @@ Pipeline orchestration, Prefect flows, and systemd services for `projections-v2`
 
 ### Main Flow
 
-The primary pipeline is `live_pipeline_flow` in `prefect_flows/live_pipeline.py`. It orchestrates:
+The primary pipeline is `nba_live_pipeline_flow` in `prefect_flows/live_nba_pipeline.py`. It orchestrates:
 
 1. **Data scraping** - Injuries, lineups, odds, salaries
 2. **Feature building** - Minutes features, rates features
@@ -20,17 +20,21 @@ Prefect deployments are defined in `prefect.yaml`:
 
 ```bash
 # Deploy all flows
-prefect deploy --all
+uv run prefect deploy --all
+
+# Prefect CLI does not currently persist all deployment fields from `prefect.yaml`
+# (notably `concurrency_options`). Re-apply overrides after deploy.
+uv run python tools/prefect_apply_deployment_overrides.py
 
 # View deployments
-prefect deployment ls
+uv run prefect deployment ls
 ```
 
 ### Flow Schedules
 
 | Flow | Schedule | Purpose |
 |------|----------|---------|
-| `live-pipeline` | Every 5 min (game days) | Main prediction pipeline |
+| `nba-live-pipeline` | Every 5 min (game days) | Main prediction pipeline |
 | `nightly-eval` | 3 AM daily | Model evaluation |
 
 ## Systemd Services

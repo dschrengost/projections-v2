@@ -98,6 +98,47 @@ def load_contests_df(contests_payload: Optional[Dict[str, object]] = None) -> pd
     return df
 
 
+def build_contest_id_to_draft_group(
+    game_date: str,
+    *,
+    contests_payload: Optional[Dict[str, object]] = None,
+) -> Dict[str, int]:
+    """Build mapping from DraftKings contest_id -> draft_group_id for a given date."""
+    try:
+        target_date = dt.date.fromisoformat(game_date)
+    except ValueError as exc:
+        raise ValueError(f"Invalid game_date format (expected YYYY-MM-DD): {game_date}") from exc
+
+    df = load_contests_df(contests_payload)
+    if df.empty:
+        return {}
+
+    if "id" not in df.columns:
+        raise RuntimeError("No 'id' field in contests; DraftKings payload changed?")
+
+    start_times_utc = _resolve_start_times(df)
+    start_times_local = start_times_utc.dt.tz_convert(_EASTERN)
+
+    df = df.assign(
+        start_time=start_times_local,
+        contest_id=df["id"].astype(str),
+        draft_group_id=pd.to_numeric(df["dg"], errors="coerce").astype("Int64"),
+    )
+
+    df = df[df["start_time"].notna() & df["draft_group_id"].notna()].copy()
+    df.loc[:, "game_date"] = df["start_time"].dt.date
+    df = df[df["game_date"] == target_date]
+    if df.empty:
+        return {}
+
+    mapping: Dict[str, int] = {}
+    for contest_id, dg in zip(df["contest_id"].tolist(), df["draft_group_id"].tolist(), strict=False):
+        if contest_id is None or pd.isna(dg):
+            continue
+        mapping[str(contest_id)] = int(dg)
+    return mapping
+
+
 def list_draft_groups_for_date(
     game_date: str,
     slate_type: SlateType = "all",
@@ -192,4 +233,3 @@ def list_draft_groups_for_date(
         by=["earliest_start", "draft_group_id"]
     )
     return result.reset_index(drop=True)
-

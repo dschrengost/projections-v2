@@ -70,6 +70,8 @@ export interface ContestSimRequest {
     field_size_override?: number
     entry_fee?: number
     weights?: number[]
+    ownership_mode?: 'full' | 'off' | 'dupe_only' | 'field_only'
+    rank_mode?: 'current' | 'tail_only' | 'tail_times_dupe'
 }
 
 export interface FieldLibrarySummary {
@@ -92,6 +94,7 @@ export interface BuildFieldLibraryRequest {
     candidate_pool_size?: number
     rebuild?: boolean
     rebuild_candidates?: boolean
+    ownership_mode?: 'full' | 'off' | 'dupe_only' | 'field_only'
 }
 
 export interface FieldSizeOption {

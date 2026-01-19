@@ -5,12 +5,18 @@ Outputs include minutes quantiles, play_prob, and now a canonical ``is_starter``
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 import json
 import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Optional, Set
 from functools import lru_cache
+
+from projections.runtime_safety import configure_runtime_safety
+
+configure_runtime_safety()
 
 import joblib
 import numpy as np
@@ -163,6 +169,30 @@ def _apply_scoring_overrides(
         if source in _DEFAULT_PARAMETER_SOURCES:
             cli_params[name] = value
     return cli_params
+
+
+def _coerce_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+    return None
+
+
+def _resolve_upside_adjustment(bundle_config: Path | None) -> bool | None:
+    if bundle_config is None:
+        return None
+    try:
+        payload = json.loads(bundle_config.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    return _coerce_bool(payload.get("enable_upside_adjustment"))
 
 
 def _season_from_date(day: date) -> int:
@@ -2200,12 +2230,18 @@ def main(
     enable_play_prob_mixing = resolved_params.get("enable_play_prob_mixing", False)
     disable_play_prob = resolved_params.get("disable_play_prob", False)
     play_prob_enabled = enable_play_prob_head and not disable_play_prob
+    enable_upside_adjustment = resolved_params.get("enable_upside_adjustment", enable_upside_adjustment)
     rotshare_quantiles_mode = resolved_params.get("rotshare_quantiles_mode", "point")
     rotshare_n_worlds = int(resolved_params.get("rotshare_n_worlds", 25_000))
     rotshare_concentration = float(resolved_params.get("rotshare_concentration", 60.0))
     rotshare_seed = int(resolved_params.get("rotshare_seed", 42))
     rotshare_min_active_players = int(resolved_params.get("rotshare_min_active_players", 5))
     rotshare_mc_center = str(resolved_params.get("rotshare_mc_center", "mean"))
+
+    if ctx.get_parameter_source("enable_upside_adjustment") in _DEFAULT_PARAMETER_SOURCES:
+        config_upside = _resolve_upside_adjustment(bundle_config)
+        if config_upside is not None:
+            enable_upside_adjustment = config_upside
 
     if date is None:
         raise typer.BadParameter("--date is required (set via CLI or config file).")

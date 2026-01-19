@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
+from projections.runtime_safety import configure_runtime_safety
+
+configure_runtime_safety()
+
 from datetime import date as date_cls
 from pathlib import Path
 
 import typer
 
+from projections.sim_v2.config import load_sim_v2_profile
 from scripts.sim_v2.generate_worlds_fpts_v2 import main as generate_worlds_main
 
 app = typer.Typer(add_completion=False)
@@ -43,6 +50,15 @@ def main(
 ) -> None:
     target_date = run_date or date_cls.today().isoformat()
     typer.echo(f"[sim_v2] live sim run date={target_date} profile={profile_name} worlds={num_worlds}")
+
+    try:
+        profile_cfg = load_sim_v2_profile(profile=profile_name, profiles_path=profiles_path)
+        typer.echo(
+            f"[sim_v2] profile_cfg.use_play_prob_masking={profile_cfg.use_play_prob_masking} "
+            f"(min_play_prob={profile_cfg.min_play_prob})"
+        )
+    except Exception as exc:
+        typer.echo(f"[sim_v2] warning: failed to resolve profile config ({exc})", err=True)
 
     worlds_output = worlds_root
     if data_root is not None:

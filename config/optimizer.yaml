@@ -55,6 +55,9 @@ constraints:
     max_salary: 60000
     global_team_limit: 4
 
+  # Optional: max % off optimal projection (fraction; null disables)
+  max_offoptimal_pct: null
+
 # Ownership penalty defaults (disabled by default in QuickBuild)
 ownership_penalty:
   enabled: false

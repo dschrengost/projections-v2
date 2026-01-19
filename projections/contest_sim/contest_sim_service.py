@@ -135,11 +135,9 @@ def load_worlds_matrix(
     world_files = sorted(worlds_dir.glob("world=*.parquet"))
 
     if world_files:
-        logger.info(f"Aggregating {len(world_files)} world files from {worlds_dir}")
-        # Load first file to get player index
+        logger.info("Aggregating %d world files from %s", len(world_files), worlds_dir)
+        # Load first file to resolve schema + FPTS column.
         first_df = pd.read_parquet(world_files[0])
-        player_ids = first_df["player_id"].astype(str).tolist()
-        player_index = {pid: idx for idx, pid in enumerate(player_ids)}
 
         # Determine FPTS column
         fpts_col = "dk_fpts_world"
@@ -151,19 +149,52 @@ def load_worlds_matrix(
             else:
                 raise ValueError(f"No FPTS column found in world files. Available: {list(first_df.columns)}")
 
-        # Aggregate all worlds
+        # Build a union of player_ids across all world files. Older runs often emit sparse
+        # per-world files (only players who played / received minutes), so using just the
+        # first world's player_ids silently drops players present in later worlds.
+        player_id_set: set[str] = set()
+        for world_file in world_files:
+            ids = pd.read_parquet(world_file, columns=["player_id"])["player_id"]
+            player_id_set.update(ids.astype(str).tolist())
+        if not player_id_set:
+            raise ValueError(f"No player_id values found while aggregating world files under {worlds_dir}")
+
+        # Deterministic ordering (prefer numeric sort when possible).
+        try:
+            player_ids = [str(pid) for pid in sorted((int(p) for p in player_id_set))]
+        except Exception:
+            player_ids = sorted(player_id_set)
+        player_index = {pid: idx for idx, pid in enumerate(player_ids)}
+
         n_worlds = len(world_files)
         n_players = len(player_ids)
         worlds_matrix = np.zeros((n_worlds, n_players), dtype=np.float64)
 
-        for idx, world_file in enumerate(world_files):
-            df = pd.read_parquet(world_file)
-            df = df.set_index("player_id")
-            for pid_idx, pid in enumerate(player_ids):
-                if str(pid) in df.index:
-                    worlds_matrix[idx, pid_idx] = float(df.loc[str(pid), fpts_col])
+        any_positive = False
+        for world_idx, world_file in enumerate(world_files):
+            df = pd.read_parquet(world_file, columns=["player_id", fpts_col])
+            if df.empty:
+                continue
+            df["player_id"] = df["player_id"].astype(str)
+            df[fpts_col] = pd.to_numeric(df[fpts_col], errors="coerce").fillna(0.0).astype(float)
+            if not any_positive and (df[fpts_col] > 0).any():
+                any_positive = True
 
-        logger.info(f"Aggregated {n_worlds} world files, shape={worlds_matrix.shape}")
+            cols = df["player_id"].map(player_index)
+            valid = cols.notna()
+            if not valid.any():
+                continue
+            col_idx = cols[valid].astype(int).to_numpy()
+            worlds_matrix[world_idx, col_idx] = df.loc[valid, fpts_col].to_numpy(dtype=np.float64, copy=False)
+
+        max_val = float(np.max(worlds_matrix)) if worlds_matrix.size else 0.0
+        if any_positive and max_val <= 0.0:
+            raise RuntimeError(
+                "Aggregated worlds matrix is all zeros despite positive per-world values. "
+                "This usually indicates a player_id dtype mismatch or an unexpected world file schema."
+            )
+
+        logger.info("Aggregated %d world files, shape=%s", n_worlds, worlds_matrix.shape)
         return worlds_matrix, player_index
 
     # Fall back to generating synthetic worlds from projections.parquet
@@ -180,21 +211,25 @@ def load_worlds_matrix(
     player_ids = proj_df["player_id"].astype(str).tolist()
     player_index = {pid: idx for idx, pid in enumerate(player_ids)}
 
-    # Get mean and std for each player
-    means = proj_df["dk_fpts_mean"].values.astype(np.float64)
-    means = np.nan_to_num(means, nan=0.0)
+    # Synthetic worlds are a last-resort fallback. Treat DNP/inactive as 0 via play_prob
+    # by sampling conditional-on-playing scores then zeroing out inactive worlds.
+    if "dk_fpts_mean" not in proj_df.columns:
+        raise FileNotFoundError(f"projections.parquet missing dk_fpts_mean at {proj_path}")
+
+    means_cond = proj_df["dk_fpts_mean"].values.astype(np.float64)
+    means_cond = np.nan_to_num(means_cond, nan=0.0)
     
     # Use dk_fpts_std if available, otherwise estimate from p90/p10 or use 20% of mean
     if "dk_fpts_std" in proj_df.columns:
         stds = proj_df["dk_fpts_std"].values.astype(np.float64)
-        stds = np.where(np.isnan(stds), means * 0.2, stds)
+        stds = np.where(np.isnan(stds), means_cond * 0.2, stds)
     elif "dk_fpts_p90" in proj_df.columns and "dk_fpts_p10" in proj_df.columns:
         p10 = np.nan_to_num(proj_df["dk_fpts_p10"].values, nan=0.0)
         p90 = np.nan_to_num(proj_df["dk_fpts_p90"].values, nan=0.0)
         # For normal dist, p90 - p10 ≈ 2.56 * std
-        stds = np.maximum((p90 - p10) / 2.56, means * 0.1).astype(np.float64)
+        stds = np.maximum((p90 - p10) / 2.56, means_cond * 0.1).astype(np.float64)
     else:
-        stds = (means * 0.2).astype(np.float64)
+        stds = (means_cond * 0.2).astype(np.float64)
     
     # Ensure minimum std to avoid degenerate distributions
     stds = np.maximum(stds, 1.0)
@@ -205,15 +240,22 @@ def load_worlds_matrix(
     
     # Sample from normal distribution for each player across all worlds
     # Shape: (n_synthetic_worlds, n_players)
-    worlds_matrix = rng.normal(
-        loc=means[np.newaxis, :],
+    if "play_prob" in proj_df.columns:
+        play_prob = pd.to_numeric(proj_df["play_prob"], errors="coerce").fillna(1.0).to_numpy(dtype=np.float64)
+        play_prob = np.clip(play_prob, 0.0, 1.0)
+    else:
+        play_prob = np.ones(n_players, dtype=np.float64)
+    active_mask = rng.random(size=(n_synthetic_worlds, n_players)) < play_prob[np.newaxis, :]
+    sampled = rng.normal(
+        loc=means_cond[np.newaxis, :],
         scale=stds[np.newaxis, :],
         size=(n_synthetic_worlds, n_players),
     )
     
-    # Clip to reasonable bounds (no negative FPTS, cap at ~3 std above mean)
-    worlds_matrix = np.maximum(worlds_matrix, 0.0)
-    worlds_matrix = np.minimum(worlds_matrix, means + 4 * stds)
+    # Clip to reasonable bounds (no negative FPTS, cap at ~4 std above mean_cond).
+    sampled = np.maximum(sampled, 0.0)
+    sampled = np.minimum(sampled, means_cond + 4 * stds)
+    worlds_matrix = np.where(active_mask, sampled, 0.0)
 
     # Validating worlds matrix data
     max_val = np.max(worlds_matrix)
@@ -309,6 +351,8 @@ def run_contest_simulation(
     data_root: Path | None = None,
     player_ownership: Optional[Dict[str, float]] = None,
     entry_max: int = 150,
+    ownership_mode: str = "full",
+    rank_mode: str = "current",
 ) -> ContestSimResult:
     """Run a contest simulation of user lineups against an opponent field.
 
@@ -341,6 +385,15 @@ def run_contest_simulation(
         If None, dupe penalties are not applied.
     entry_max : int
         Max entries per user (for dupe penalty binning)
+    ownership_mode : str
+        Ownership usage: full|dupe_only|field_only|off.
+        - full/dupe_only: allow ownership-based dupe penalties when player_ownership is provided
+        - field_only/off: dupe penalties disabled (treated as 1.0)
+    rank_mode : str
+        select_score formulation:
+          - current: tail_score - (1 - dupe_penalty) * mean  (existing behavior)
+          - tail_only: tail_score
+          - tail_times_dupe: tail_score * dupe_penalty
 
     Returns
     -------
@@ -463,7 +516,13 @@ def run_contest_simulation(
     # Note: the payout engine already tie-splits when a user lineup matches a
     # lineup present in the modeled field (field_equal_weight > 0). In that case
     # we disable the ownership-based dupe penalty to avoid double-counting.
-    if player_ownership:
+    ownership_mode_n = str(ownership_mode or "full").strip().lower()
+    rank_mode_n = str(rank_mode or "current").strip().lower()
+    if ownership_mode_n == "off":
+        rank_mode_n = "tail_only"
+
+    use_dupe_penalty = ownership_mode_n in {"full", "dupe_only"} and bool(player_ownership)
+    if use_dupe_penalty:
         logger.info("Computing dupe penalties with ownership data")
         dupe_penalties = compute_batch_dupe_penalties(
             lineups=user_lineups,
@@ -509,8 +568,15 @@ def run_contest_simulation(
         # the fractional reduction. The dupe_penalty is in [0,1] where 1=no penalty.
         # A dupe_penalty of 0.8 means we lose 20% due to duplication.
         # We scale the penalty by mean FPTS to make it comparable to tail_score units.
-        penalty_impact = (1.0 - dupe_penalty) * float(lineup_means[idx])
-        select_score_val = tail_score_val - penalty_impact
+        if rank_mode_n == "tail_only":
+            select_score_val = tail_score_val
+        elif rank_mode_n == "tail_times_dupe":
+            select_score_val = tail_score_val * float(dupe_penalty)
+        elif rank_mode_n == "current":
+            penalty_impact = (1.0 - dupe_penalty) * float(lineup_means[idx])
+            select_score_val = tail_score_val - penalty_impact
+        else:
+            raise ValueError(f"Invalid rank_mode: {rank_mode!r}")
 
         result = LineupEVResult(
             lineup_id=idx,
@@ -555,6 +621,62 @@ def run_contest_simulation(
             min(select_scores), float(np.median(select_scores)), max(select_scores),
         )
 
+    debug_payload: dict[str, object] = {
+        "user_total_entries": user_total_entries,
+        "field_total_entries": int(sum(scaled_field_weights)),
+        "total_entries": int(user_total_entries + sum(scaled_field_weights)),
+        "field_unique_k": int(len(field_lineups)),
+        "dupe_penalty_disabled_for_field_matches": int(dupe_penalty_disabled_for_matches),
+        "ownership_mode": ownership_mode_n,
+        "rank_mode": rank_mode_n,
+    }
+
+    # Optional DNP diagnostics for selection debugging (off by default).
+    # Enable with: PROJECTIONS_CONTEST_SIM_DEBUG_TOPK_ANY_ZERO=1
+    if os.environ.get("PROJECTIONS_CONTEST_SIM_DEBUG_TOPK_ANY_ZERO", "").strip().lower() in {"1", "true", "yes"}:
+        try:
+            top_k = min(int(entry_max), int(n_user_lineups))
+            if top_k > 0 and worlds_matrix.size > 0:
+                scores_arr = np.asarray(
+                    [r.select_score if r.select_score is not None else float("-inf") for r in results],
+                    dtype=np.float64,
+                )
+                if np.isfinite(scores_arr).any():
+                    order = np.argsort(-scores_arr)
+                    sort_key = "select_score"
+                else:
+                    ev_arr = np.asarray(evs, dtype=np.float64)
+                    order = np.argsort(-ev_arr)
+                    sort_key = "expected_value"
+
+                top_idx = order[:top_k]
+                zero_rates: list[float] = []
+                missing_player_count = 0
+                for i in top_idx:
+                    lineup = user_lineups[int(i)]
+                    raw_pids = [str(pid).strip() for pid in lineup if str(pid).strip()]
+                    cols = [player_index.get(pid) for pid in raw_pids]
+                    if any(c is None for c in cols):
+                        missing_player_count += 1
+                    cols_i = np.asarray([int(c) for c in cols if c is not None], dtype=np.int64)
+                    if cols_i.size == 0:
+                        continue
+                    sub = np.take(worlds_matrix, cols_i, axis=1)
+                    any_zero = np.any(sub == 0.0, axis=1)
+                    zero_rates.append(float(np.mean(any_zero)))
+
+                if zero_rates:
+                    debug_payload["top_k"] = int(top_k)
+                    debug_payload["top_k_sort_key"] = sort_key
+                    debug_payload["top_k_p_any_zero_player"] = {
+                        "mean": float(np.mean(zero_rates)),
+                        "p50": float(np.median(zero_rates)),
+                        "p90": float(np.percentile(zero_rates, 90)),
+                        "missing_player_lineups": int(missing_player_count),
+                    }
+        except Exception as exc:
+            logger.warning("Failed to compute DNP diagnostics: %s", exc)
+
     stats = SummaryStats(
         lineup_count=n_user_lineups,
         worlds_count=n_worlds,
@@ -564,13 +686,7 @@ def run_contest_simulation(
         best_ev_lineup_id=int(np.argmax(evs)) if evs else 0,
         best_win_rate_lineup_id=int(np.argmax(win_rates)) if win_rates else 0,
         best_top1pct_lineup_id=int(np.argmax(top1_rates)) if top1_rates else 0,
-        debug={
-            "user_total_entries": user_total_entries,
-            "field_total_entries": int(sum(scaled_field_weights)),
-            "total_entries": int(user_total_entries + sum(scaled_field_weights)),
-            "field_unique_k": int(len(field_lineups)),
-            "dupe_penalty_disabled_for_field_matches": int(dupe_penalty_disabled_for_matches),
-        },
+        debug=debug_payload,
     )
 
     return ContestSimResult(

@@ -10,24 +10,26 @@ from typing import Final
 _SPACE_RE: Final[re.Pattern[str]] = re.compile(r"\s+")
 _NON_ALNUM_RE: Final[re.Pattern[str]] = re.compile(r"[^a-z0-9]+")
 
+# Common name suffixes to strip for matching (generational, honorifics).
+_NAME_SUFFIXES: Final[frozenset[str]] = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
 
 # Aliases are keyed by a *compact* normalized string (no spaces/punctuation) and map to a
 # canonical normalized name with spaces (as returned by `normalize_player_name`).
+# Only needed for cases that can't be handled by suffix stripping or other rules.
 PLAYER_NAME_ALIASES: Final[dict[str, str]] = {
-    # Existing special cases.
+    # GG Jackson (MEM) is sometimes emitted as "G.G. Jackson" or full name.
+    "ggjackson": "gg jackson",
+    "gregoryjackson": "gg jackson",
+    # Alexandre Sarr -> Alex Sarr
     "alexandresarr": "alex sarr",
-    "jimmybutleriii": "jimmy butler",
-    # GG Jackson (MEM) is sometimes emitted as "G.G. Jackson II".
-    "ggjacksonii": "gg jackson",
-    # Some sources use the player's full given name.
-    "gregoryjacksonii": "gg jackson",
 }
 
 
 def normalize_player_name(value: object) -> str:
     """Normalize a player name for matching: fold accents, strip punctuation, lowercase.
 
-    Returns a space-separated normalized name, with optional alias rewrites applied.
+    Automatically strips common suffixes (Jr, Sr, II, III, IV, V) and applies alias rewrites.
+    Returns a space-separated normalized name.
     """
     if value is None:
         return ""
@@ -60,6 +62,13 @@ def normalize_player_name(value: object) -> str:
         collapsed.append(tok)
     if buf:
         collapsed.append(buf)
+
+    # Strip trailing suffixes (Jr, Sr, II, III, IV, V).
+    while collapsed and collapsed[-1] in _NAME_SUFFIXES:
+        collapsed.pop()
+
+    if not collapsed:
+        return ""
 
     canonical = " ".join(collapsed)
     compact = canonical.replace(" ", "")

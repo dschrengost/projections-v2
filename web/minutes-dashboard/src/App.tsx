@@ -111,7 +111,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 
 
 
-const todayISO = () => new Date().toISOString().slice(0, 10)
+import { useSlateDate } from './hooks/useSlateDate'
 
 const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics' | 'props' => {
   if (typeof window === 'undefined') {
@@ -132,7 +132,7 @@ const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'en
 
 function App() {
   const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics' | 'props'>(initialTab)
-  const [selectedDate, setSelectedDate] = useState(todayISO())
+  const [selectedDate, setSelectedDate] = useSlateDate()
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
   const [loading, setLoading] = useState(false)

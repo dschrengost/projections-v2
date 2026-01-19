@@ -29,9 +29,9 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 
-type TabType = 'lineups' | 'distribution' | 'dupes' | 'pairs' | 'leverage' | 'stacks' | 'ownership' | 'mylineups'
+import { useSlateDate } from '../hooks/useSlateDate'
 
-const todayISO = () => new Date().toISOString().slice(0, 10)
+type TabType = 'lineups' | 'distribution' | 'dupes' | 'pairs' | 'leverage' | 'stacks' | 'ownership' | 'mylineups'
 
 const formatOwn = (value: number | null | undefined): string => {
   if (value == null) return '-'
@@ -78,7 +78,7 @@ function OwnershipCard({
 export default function ContestPage() {
   // Date selection
   const [availableDates, setAvailableDates] = useState<string[]>([])
-  const [selectedDate, setSelectedDate] = useState(todayISO())
+  const [selectedDate, setSelectedDate] = useSlateDate()
   const [datesLoading, setDatesLoading] = useState(false)
 
   // Contest selection

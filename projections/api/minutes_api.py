@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 import json
 import os
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+from projections.runtime_safety import configure_runtime_safety
+
+configure_runtime_safety()
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -542,6 +548,47 @@ def create_app(
     sim_root = (sim_root or _env_path("MINUTES_SIM_ROOT", DEFAULT_SIM_ROOT)).resolve()
 
     app = FastAPI(title="Minutes API", version="0.1.0")
+
+    # Capture server startup info for /api/version endpoint
+    import subprocess
+    _server_started_at = datetime.utcnow().isoformat() + "Z"
+    try:
+        _git_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(Path(__file__).parent.parent.parent),
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()[:12]
+    except Exception:
+        _git_sha = "unknown"
+    try:
+        _git_branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(Path(__file__).parent.parent.parent),
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        _git_branch = "unknown"
+    try:
+        _git_dirty = bool(subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            cwd=str(Path(__file__).parent.parent.parent),
+            stderr=subprocess.DEVNULL,
+        ).decode().strip())
+    except Exception:
+        _git_dirty = False
+
+    @app.get("/api/version")
+    def get_version() -> JSONResponse:
+        """Return server version info for debugging code drift issues."""
+        return JSONResponse({
+            "git_sha": _git_sha,
+            "git_branch": _git_branch,
+            "git_dirty": _git_dirty,
+            "server_started_at": _server_started_at,
+            "python_version": __import__("sys").version,
+            "pid": os.getpid(),
+        })
+
     app.include_router(pipeline_status_router, prefix="/api")
     app.include_router(evaluation_router, prefix="/api")
     app.include_router(optimizer_router, prefix="/api/optimizer", tags=["optimizer"])

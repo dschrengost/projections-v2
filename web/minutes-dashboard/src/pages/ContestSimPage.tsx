@@ -25,16 +25,17 @@ import {
 } from '../api/optimizer'
 import LineupCard from '../components/LineupCard'
 import PlayerExposurePanel, { ExposureBounds } from '../components/PlayerExposurePanel'
+import { useSlateDateAndSlate } from '../hooks/useSlateDate'
+import { formatSlateLabel } from '../utils/slateFormat'
 
-const todayISO = () => new Date().toISOString().slice(0, 10)
+const ownershipStorageKey = 'contestSim.useOwnership'
 
 type SortKey = 'lineup_id' | 'mean' | 'p90' | 'p95' | 'expected_value' | 'roi' | 'win_rate' | 'top_1pct_rate' | 'top_10pct_rate' | 'cash_rate' | 'total_own' | 'ucv90' | 'tail_score' | 'select_score'
 
 export default function ContestSimPage() {
-    // Date and slate selection
-    const [selectedDate, setSelectedDate] = useState(todayISO())
+    // Date and slate selection (persisted in URL)
+    const [selectedDate, setSelectedDate, selectedSlate, setSelectedSlate] = useSlateDateAndSlate()
     const [slates, setSlates] = useState<Slate[]>([])
-    const [selectedSlate, setSelectedSlate] = useState<number | null>(null)
     const [slatesLoading, setSlatesLoading] = useState(false)
 
     // Saved builds
@@ -65,6 +66,13 @@ export default function ContestSimPage() {
     const [fieldLibraries, setFieldLibraries] = useState<FieldLibrarySummary[]>([])
     const [fieldLibrariesLoading, setFieldLibrariesLoading] = useState(false)
     const [fieldLibraryError, setFieldLibraryError] = useState<string | null>(null)
+    const [useOwnership, setUseOwnership] = useState(() => {
+        if (typeof window === 'undefined') {
+            return false
+        }
+        const stored = window.localStorage.getItem(ownershipStorageKey)
+        return stored ? stored === 'true' : false
+    })
 
     // Simulation state
     const [lineups, setLineups] = useState<string[][]>([])
@@ -87,6 +95,13 @@ export default function ContestSimPage() {
     const [minUniques, setMinUniques] = useState(3)
     const [exposureBounds, setExposureBounds] = useState<Map<string, ExposureBounds>>(new Map())
 
+    const ownershipMode = useOwnership ? 'full' : 'off'
+    const rankMode = useOwnership ? 'current' : 'tail_only'
+    const displayOwnershipMode = (() => {
+        const debugMode = simResult?.stats?.debug?.ownership_mode
+        return typeof debugMode === 'string' ? debugMode : ownershipMode
+    })()
+
     // Handler for changing exposure bounds
     const handleExposureBoundsChange = useCallback((playerId: string, bounds: ExposureBounds | null) => {
         setExposureBounds(prev => {
@@ -108,8 +123,22 @@ export default function ContestSimPage() {
             try {
                 const data = await getSlates(selectedDate)
                 setSlates(data)
-                const mainSlate = data.find(s => s.slate_type !== 'showdown')
-                setSelectedSlate(mainSlate?.draft_group_id ?? data[0]?.draft_group_id ?? null)
+                // If URL has a slate and it exists in the data, keep it; otherwise auto-select
+                const urlSlateExists = selectedSlate && data.some(s => s.draft_group_id === selectedSlate)
+                if (!urlSlateExists) {
+                    const mainSlates = data.filter(s => s.slate_type === 'main')
+                    const bestMain = [...mainSlates].sort((a, b) => {
+                        const aContests = a.n_contests ?? 0
+                        const bContests = b.n_contests ?? 0
+                        if (aContests !== bContests) return bContests - aContests
+                        const aGames = a.games?.length ?? 0
+                        const bGames = b.games?.length ?? 0
+                        if (aGames !== bGames) return bGames - aGames
+                        return b.draft_group_id - a.draft_group_id
+                    })[0]
+                    const fallback = data[0]
+                    setSelectedSlate(bestMain?.draft_group_id ?? fallback?.draft_group_id ?? null)
+                }
             } catch {
                 setSlates([])
                 setSelectedSlate(null)
@@ -118,7 +147,24 @@ export default function ContestSimPage() {
             }
         }
         void load()
-    }, [selectedDate])
+    }, [selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    const slateOptions = useMemo(() => {
+        const opts = [...slates]
+        if (
+            selectedSlate !== null
+            && selectedSlate !== undefined
+            && !opts.some(s => s.draft_group_id === selectedSlate)
+        ) {
+            opts.unshift({
+                game_date: selectedDate,
+                slate_type: 'selected',
+                draft_group_id: selectedSlate,
+                n_contests: 0,
+            })
+        }
+        return opts
+    }, [selectedDate, selectedSlate, slates])
 
     // Load saved builds when slate changes
     useEffect(() => {
@@ -220,6 +266,13 @@ export default function ContestSimPage() {
         }
         void load()
     }, [])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return
+        }
+        window.localStorage.setItem(ownershipStorageKey, String(useOwnership))
+    }, [useOwnership])
 
     // Load lineups when build selection changes
     useEffect(() => {
@@ -451,6 +504,8 @@ export default function ContestSimPage() {
                 field_candidate_pool_size: fieldMode === 'generated_field' ? fieldCandidatePoolSize : undefined,
                 field_library_rebuild: fieldMode === 'generated_field' ? fieldLibraryRebuild : undefined,
                 field_library_rebuild_candidates: fieldMode === 'generated_field' ? fieldLibraryRebuildCandidates : undefined,
+                ownership_mode: ownershipMode,
+                rank_mode: rankMode,
             })
             setSimResult(result)
             const builds = await getSavedSimBuilds(selectedDate)
@@ -473,6 +528,8 @@ export default function ContestSimPage() {
         fieldCandidatePoolSize,
         fieldLibraryRebuild,
         fieldLibraryRebuildCandidates,
+        ownershipMode,
+        rankMode,
     ])
 
     const handleBuildFieldLibrary = useCallback(async () => {
@@ -491,6 +548,7 @@ export default function ContestSimPage() {
                 candidate_pool_size: fieldCandidatePoolSize,
                 rebuild: fieldLibraryRebuild,
                 rebuild_candidates: fieldLibraryRebuildCandidates,
+                ownership_mode: ownershipMode,
             })
             const libs = await listFieldLibraries(selectedDate, selectedSlate)
             setFieldLibraries(libs)
@@ -507,6 +565,7 @@ export default function ContestSimPage() {
         fieldCandidatePoolSize,
         fieldLibraryRebuild,
         fieldLibraryRebuildCandidates,
+        ownershipMode,
     ])
 
     // Run simulation
@@ -668,10 +727,10 @@ export default function ContestSimPage() {
                             onChange={e => setSelectedSlate(Number(e.target.value) || null)}
                             disabled={slatesLoading}
                         >
-                            {slates.length === 0 && <option value="">No slates</option>}
-                            {slates.map(s => (
+                            {slateOptions.length === 0 && <option value="">No slates</option>}
+                            {slateOptions.map(s => (
                                 <option key={s.draft_group_id} value={s.draft_group_id}>
-                                    {s.slate_type} ({s.draft_group_id}) - {s.n_contests} contests
+                                    {formatSlateLabel(s)} (DG{s.draft_group_id})
                                 </option>
                             ))}
                         </select>
@@ -694,7 +753,7 @@ export default function ContestSimPage() {
                             {savedBuilds.length === 0 && <option value="">No builds</option>}
                             {savedBuilds.map(b => (
                                 <option key={b.job_id} value={b.job_id}>
-                                    {b.job_id.slice(0, 8)} ({b.lineups_count} lineups)
+                                    {b.job_id.slice(0, 8)} (DG{b.draft_group_id}, {b.lineups_count} lineups)
                                 </option>
                             ))}
                         </select>
@@ -840,6 +899,20 @@ export default function ContestSimPage() {
                         />
                     </label>
 
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input
+                            type="checkbox"
+                            checked={useOwnership}
+                            onChange={e => setUseOwnership(e.target.checked)}
+                        />
+                        Use ownership + dupe penalty
+                    </label>
+                    {!useOwnership && (
+                        <div className="muted" style={{ fontSize: '0.85rem' }}>
+                            Ownership is disabled for field weights and dupe penalties.
+                        </div>
+                    )}
+
                     <button
                         className="run-sim-btn"
                         onClick={handleRunSim}
@@ -867,6 +940,7 @@ export default function ContestSimPage() {
                             {savedSimBuilds.filter(b => b.kind === 'run').map(b => (
                                 <div key={b.build_id} className={`saved-build-card ${selectedSimBuildId === b.build_id ? 'selected' : ''}`}>
                                     <div className="saved-build-info">
+                                        <span className="saved-build-count">DG{b.draft_group_id}</span>
                                         <span className="saved-build-count">{b.lineups_count} lineups</span>
                                         <span className="saved-build-time">{new Date(b.created_at).toLocaleTimeString()}</span>
                                         {typeof b.stats?.avg_ev === 'number' && (
@@ -907,6 +981,7 @@ export default function ContestSimPage() {
                             {savedSimBuilds.filter(b => b.kind === 'lineups').map(b => (
                                 <div key={b.build_id} className={`saved-build-card ${selectedSimLineupId === b.build_id ? 'selected' : ''}`}>
                                     <div className="saved-build-info">
+                                        <span className="saved-build-count">DG{b.draft_group_id ?? '?'}</span>
                                         <span className="saved-build-count">{b.lineups_count} lineups</span>
                                         <span className="saved-build-time">{b.name ?? b.build_id.slice(0, 8)}</span>
                                     </div>
@@ -935,6 +1010,13 @@ export default function ContestSimPage() {
 
                     {simResult && (
                         <div className="lineup-cards-container">
+                            {displayOwnershipMode === 'off' && (
+                                <div style={{ marginBottom: '0.5rem' }}>
+                                    <span style={{ padding: '0.2rem 0.5rem', borderRadius: '999px', background: '#0f172a', border: '1px solid #334155', color: '#f8fafc', fontSize: '0.75rem' }}>
+                                        Ownership: OFF
+                                    </span>
+                                </div>
+                            )}
                             {/* Player Exposure Panel */}
                             <PlayerExposurePanel
                                 lineupResults={constrainedResults}

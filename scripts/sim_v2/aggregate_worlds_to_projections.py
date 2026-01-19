@@ -111,8 +111,45 @@ def _aggregate_for_date(
             df[stat_col] = pd.to_numeric(df[stat_col], errors="coerce")
     has_minutes = MINUTES_COLUMN in df.columns
 
+    n_worlds_total: int | None = None
+    if "world_id" in df.columns:
+        try:
+            n_worlds_total = int(pd.to_numeric(df["world_id"], errors="coerce").dropna().nunique())
+        except Exception:
+            n_worlds_total = None
+
+    def _unconditional_quantile_from_active(
+        *,
+        active_values: np.ndarray,
+        q: float,
+        p_missing: float,
+    ) -> float:
+        """Return quantile of mixture: mass p_missing at 0 + (1-p_missing) empirical(active_values)."""
+        if active_values.size == 0:
+            return 0.0
+        qf = float(q)
+        pm = float(np.clip(p_missing, 0.0, 1.0))
+        if pm >= 1.0:
+            return 0.0
+
+        # For x < 0: F(x) = (1-pm) * F_active(x).
+        # At x = 0: jump by pm (plus any active mass at 0).
+        lt0 = float(np.mean(active_values < 0.0))
+        le0 = float(np.mean(active_values <= 0.0))
+        F0_minus = (1.0 - pm) * lt0
+        F0 = pm + (1.0 - pm) * le0
+
+        if qf <= F0_minus:
+            q_active = qf / max(1e-12, (1.0 - pm))
+        elif qf <= F0:
+            return 0.0
+        else:
+            q_active = (qf - pm) / max(1e-12, (1.0 - pm))
+        q_active = float(np.clip(q_active, 0.0, 1.0))
+        return float(np.quantile(active_values, q_active))
+
     def _agg_func(group: pd.DataFrame) -> pd.Series:
-        fpts_series = group[fpts_col]
+        fpts_series = pd.to_numeric(group[fpts_col], errors="coerce").fillna(0.0)
         quantiles = fpts_series.quantile([0.05, 0.10, 0.25, 0.50, 0.75, 0.95])
         payload = {
             "dk_fpts_mean": float(fpts_series.mean()),
@@ -133,6 +170,33 @@ def _aggregate_for_date(
             payload["minutes_sim_mean"] = float(group[MINUTES_COLUMN].mean())
         if include_std:
             payload["dk_fpts_std"] = float(fpts_series.std(ddof=0))
+
+        # Unconditional (DNP=0) variants: when world files are sparse (missing rows for DNP),
+        # treat missing player-worlds as 0 and compute moments on the full N worlds.
+        if n_worlds_total is not None and n_worlds_total > 0:
+            present_n = int(fpts_series.shape[0])
+            missing_n = max(0, int(n_worlds_total) - present_n)
+            p_missing = missing_n / float(n_worlds_total)
+            sum_x = float(fpts_series.sum())
+            sum_x2 = float((fpts_series.to_numpy(dtype=float, copy=False) ** 2).sum())
+            mean_uncond = sum_x / float(n_worlds_total)
+            var_uncond = (sum_x2 / float(n_worlds_total)) - (mean_uncond ** 2)
+            payload["dk_fpts_mean_uncond"] = float(mean_uncond)
+            if include_std:
+                payload["dk_fpts_std_uncond"] = float(np.sqrt(max(0.0, var_uncond)))
+
+            active_vals = fpts_series.to_numpy(dtype=float, copy=False)
+            for q in (0.05, 0.10, 0.25, 0.50, 0.75, 0.95):
+                payload[f"dk_fpts_p{int(q*100):02d}_uncond"] = _unconditional_quantile_from_active(
+                    active_values=active_vals,
+                    q=q,
+                    p_missing=p_missing,
+                )
+
+            if has_minutes:
+                mins = pd.to_numeric(group[MINUTES_COLUMN], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+                sum_m = float(mins.sum())
+                payload["minutes_sim_mean_uncond"] = sum_m / float(n_worlds_total)
         return pd.Series(payload)
 
     grouped = df.groupby(key_cols, dropna=False).apply(_agg_func).reset_index()

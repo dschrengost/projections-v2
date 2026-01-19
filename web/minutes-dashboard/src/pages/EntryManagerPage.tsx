@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
     applyBuildToEntries,
+    deleteEntryFile,
     exportEntryFile,
     exportEntriesBatch,
     getEntryFile,
     listEntryFiles,
+    repairEntryFileDraftGroups,
     runLateSwap,
     selectLateSwapAlternative,
     uploadEntries,
@@ -14,8 +16,9 @@ import {
 } from '../api/entry_manager'
 import { getSavedBuilds, getSlates, loadSavedBuild, SavedBuild, Slate } from '../api/optimizer'
 import { getSavedSimBuilds, loadSavedSimBuild, SavedSimBuildSummary } from '../api/contest_sim'
+import { useSlateDateAndSlate } from '../hooks/useSlateDate'
+import { formatSlateLabel } from '../utils/slateFormat'
 
-const todayISO = () => new Date().toISOString().slice(0, 10)
 const DK_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL']
 const ENTRIES_PER_PAGE = 25
 
@@ -41,9 +44,8 @@ const extractPlayerName = (playerStr: string): string => {
 }
 
 export default function EntryManagerPage() {
-    const [selectedDate, setSelectedDate] = useState(todayISO())
+    const [selectedDate, setSelectedDate, selectedSlate, setSelectedSlate] = useSlateDateAndSlate()
     const [slates, setSlates] = useState<Slate[]>([])
-    const [selectedSlate, setSelectedSlate] = useState<number | null>(null)
     const [slatesLoading, setSlatesLoading] = useState(false)
 
     const [entryFiles, setEntryFiles] = useState<EntryFileSummary[]>([])
@@ -63,6 +65,7 @@ export default function EntryManagerPage() {
     const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null)
 
     const [uploading, setUploading] = useState(false)
+    const [repairing, setRepairing] = useState(false)
     const [applyLoading, setApplyLoading] = useState(false)
     const [lateSwapLoading, setLateSwapLoading] = useState(false)
 
@@ -83,8 +86,12 @@ export default function EntryManagerPage() {
             try {
                 const data = await getSlates(selectedDate)
                 setSlates(data)
-                const mainSlate = data.find(s => s.slate_type !== 'showdown')
-                setSelectedSlate(mainSlate?.draft_group_id ?? data[0]?.draft_group_id ?? null)
+                // If URL has a slate and it exists in the data, keep it; otherwise auto-select
+                const urlSlateExists = selectedSlate && data.some(s => s.draft_group_id === selectedSlate)
+                if (!urlSlateExists) {
+                    const mainSlate = data.find(s => s.slate_type !== 'showdown')
+                    setSelectedSlate(mainSlate?.draft_group_id ?? data[0]?.draft_group_id ?? null)
+                }
             } catch {
                 setSlates([])
                 setSelectedSlate(null)
@@ -93,7 +100,7 @@ export default function EntryManagerPage() {
             }
         }
         void loadSlates()
-    }, [selectedDate])
+    }, [selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         const loadEntries = async () => {
@@ -128,6 +135,9 @@ export default function EntryManagerPage() {
             try {
                 const data = await getEntryFile(selectedDate, selectedContestId)
                 setEntryFile(data)
+                if (data.draft_group_id && data.draft_group_id !== selectedSlate) {
+                    setSelectedSlate(data.draft_group_id)
+                }
             } catch (err) {
                 setEntryError((err as Error).message)
                 setEntryFile(null)
@@ -166,18 +176,38 @@ export default function EntryManagerPage() {
     }, [selectedDate, selectedSlate])
 
     useEffect(() => {
+        const targetDraftGroupId = entryFile?.draft_group_id ?? selectedSlate ?? null
         if (buildSource === 'optimizer') {
-            setSelectedBuildId(savedBuilds[0]?.job_id ?? null)
+            const match = targetDraftGroupId
+                ? savedBuilds.find(b => b.draft_group_id === targetDraftGroupId)
+                : savedBuilds[0]
+            setSelectedBuildId(match?.job_id ?? savedBuilds[0]?.job_id ?? null)
         } else {
-            setSelectedBuildId(savedSimBuilds[0]?.build_id ?? null)
+            const match = targetDraftGroupId
+                ? savedSimBuilds.find(b => b.draft_group_id === targetDraftGroupId)
+                : savedSimBuilds[0]
+            setSelectedBuildId(match?.build_id ?? savedSimBuilds[0]?.build_id ?? null)
         }
-    }, [buildSource, savedBuilds, savedSimBuilds])
+    }, [buildSource, entryFile?.draft_group_id, savedBuilds, savedSimBuilds, selectedSlate])
+
+    const slateOptions = useMemo(() => {
+        const opts = [...slates]
+        if (
+            selectedSlate !== null
+            && selectedSlate !== undefined
+            && !opts.some(s => s.draft_group_id === selectedSlate)
+        ) {
+            opts.unshift({
+                game_date: selectedDate,
+                slate_type: 'selected',
+                draft_group_id: selectedSlate,
+                n_contests: 0,
+            })
+        }
+        return opts
+    }, [selectedDate, selectedSlate, slates])
 
     const handleUpload = async (file: File) => {
-        if (!selectedSlate) {
-            setEntryError('Please select a slate before uploading')
-            return
-        }
         setUploading(true)
         setEntryError(null)
         try {
@@ -185,10 +215,52 @@ export default function EntryManagerPage() {
             setEntryFiles(summaries)
             setContestOrder(summaries.map(s => s.contest_id))
             setSelectedContestId(summaries[0]?.contest_id ?? null)
+            if (summaries.length > 0) {
+                setSelectedSlate(summaries[0].draft_group_id)
+            }
         } catch (err) {
             setEntryError((err as Error).message)
         } finally {
             setUploading(false)
+        }
+    }
+
+    const handleRepairDraftGroups = async () => {
+        setRepairing(true)
+        setEntryError(null)
+        try {
+            const summaries = await repairEntryFileDraftGroups(selectedDate)
+            setEntryFiles(summaries)
+            setContestOrder(summaries.map(s => s.contest_id))
+            if (selectedContestId && !summaries.some(s => s.contest_id === selectedContestId)) {
+                setSelectedContestId(summaries[0]?.contest_id ?? null)
+            }
+        } catch (err) {
+            setEntryError((err as Error).message)
+        } finally {
+            setRepairing(false)
+        }
+    }
+
+    const handleDeleteContest = async (contestId: string) => {
+        const confirmDelete = window.confirm('Delete this entry file? This cannot be undone.')
+        if (!confirmDelete) return
+        setEntryError(null)
+        try {
+            await deleteEntryFile(selectedDate, contestId)
+            const data = await listEntryFiles(selectedDate)
+            setEntryFiles(data)
+            setContestOrder(data.map(entry => entry.contest_id))
+            setSelectedContestIds(prev => {
+                const next = new Set(prev)
+                next.delete(contestId)
+                return next
+            })
+            if (selectedContestId === contestId) {
+                setSelectedContestId(data[0]?.contest_id ?? null)
+            }
+        } catch (err) {
+            setEntryError((err as Error).message)
         }
     }
 
@@ -204,17 +276,29 @@ export default function EntryManagerPage() {
         setEntryError(null)
         try {
             let lineups: string[][] = []
+            let buildDraftGroupId: number | null = null
             if (buildSource === 'optimizer') {
                 const build = await loadSavedBuild(selectedDate, selectedBuildId)
                 lineups = build.lineups?.map(lu => lu.player_ids) ?? []
+                buildDraftGroupId = build.draft_group_id ?? null
             } else {
                 const build = await loadSavedSimBuild(selectedDate, selectedBuildId)
                 lineups = build.lineups ?? []
+                buildDraftGroupId = build.draft_group_id ?? null
             }
             let offset = 0
             for (const contestId of targetIds) {
                 const entrySummary = entryFiles.find(entry => entry.contest_id === contestId)
                 const entryCount = entrySummary?.entry_count ?? 0
+                if (
+                    buildDraftGroupId !== null
+                    && entrySummary?.draft_group_id
+                    && entrySummary.draft_group_id !== buildDraftGroupId
+                ) {
+                    throw new Error(
+                        `Build slate DG${buildDraftGroupId} does not match contest slate DG${entrySummary.draft_group_id} (${entrySummary.contest_name})`,
+                    )
+                }
                 if (entryCount <= 0) continue
                 const slice = lineups.slice(offset, offset + entryCount)
                 if (slice.length < entryCount) {
@@ -403,10 +487,24 @@ export default function EntryManagerPage() {
         entryPageStart + ENTRIES_PER_PAGE,
     ) ?? []
 
+    const selectedBuildInfo = useMemo(() => {
+        if (!selectedBuildId) return null
+        if (buildSource === 'optimizer') {
+            return savedBuilds.find(b => b.job_id === selectedBuildId) ?? null
+        }
+        return savedSimBuilds.find(b => b.build_id === selectedBuildId) ?? null
+    }, [buildSource, savedBuilds, savedSimBuilds, selectedBuildId])
+
     const buildOptions = useMemo(() => {
         return buildSource === 'optimizer'
-            ? savedBuilds.map(b => ({ id: b.job_id, label: `${b.job_id.slice(0, 8)} (${b.lineups_count})` }))
-            : savedSimBuilds.map(b => ({ id: b.build_id, label: `${b.name ?? b.build_id.slice(0, 8)} (${b.lineups_count})` }))
+            ? savedBuilds.map(b => ({
+                id: b.job_id,
+                label: `${b.job_id.slice(0, 8)} (DG${b.draft_group_id}, ${b.lineups_count})`,
+            }))
+            : savedSimBuilds.map(b => ({
+                id: b.build_id,
+                label: `${b.name ?? b.build_id.slice(0, 8)} (DG${b.draft_group_id ?? '?'}, ${b.lineups_count})`,
+            }))
     }, [buildSource, savedBuilds, savedSimBuilds])
 
     const orderedEntries = useMemo(() => {
@@ -470,10 +568,10 @@ export default function EntryManagerPage() {
                             onChange={e => setSelectedSlate(Number(e.target.value) || null)}
                             disabled={slatesLoading}
                         >
-                            {slates.length === 0 && <option value="">No slates</option>}
-                            {slates.map(s => (
+                            <option value="">Auto (detect from upload)</option>
+                            {slateOptions.map(s => (
                                 <option key={s.draft_group_id} value={s.draft_group_id}>
-                                    {s.slate_type} ({s.draft_group_id})
+                                    {formatSlateLabel(s)} (DG{s.draft_group_id})
                                 </option>
                             ))}
                         </select>
@@ -559,6 +657,15 @@ export default function EntryManagerPage() {
                             }
                         }}
                     />
+                    <button
+                        className="build-btn"
+                        onClick={handleRepairDraftGroups}
+                        disabled={repairing || entryFiles.length === 0}
+                        style={{ marginTop: '0.5rem' }}
+                        title="Fix slate IDs for existing entry files (uses DK Contest ID mapping)"
+                    >
+                        {repairing ? 'Fixing...' : 'Fix Slate IDs'}
+                    </button>
                     {uploading && <div className="muted">Uploading...</div>}
 
                     <hr />
@@ -588,6 +695,11 @@ export default function EntryManagerPage() {
                             ))}
                         </select>
                     </label>
+                    {selectedBuildInfo && entryFile && (
+                        <div className="muted">
+                            Build slate DG{selectedBuildInfo.draft_group_id ?? '?'} | Contest slate DG{entryFile.draft_group_id}
+                        </div>
+                    )}
                     <button
                         className="build-btn"
                         onClick={handleApplyBuild}
@@ -667,11 +779,19 @@ export default function EntryManagerPage() {
                                         title="Select contest"
                                     />
                                     <span className="saved-build-count">{entry.entry_count} entries</span>
+                                    <span className="saved-build-time">DG{entry.draft_group_id}</span>
                                     <span className="saved-build-time">{entry.contest_name}</span>
                                 </div>
                                 <div className="saved-build-actions">
                                     <button className="load-btn" onClick={() => setSelectedContestId(entry.contest_id)}>
                                         Load
+                                    </button>
+                                    <button
+                                        className="delete-btn"
+                                        onClick={() => handleDeleteContest(entry.contest_id)}
+                                        title="Delete entry file"
+                                    >
+                                        Delete
                                     </button>
                                     <button
                                         className="delete-btn"

@@ -30,6 +30,7 @@ def load_or_build_field_library(
     candidate_pool_size: int = 40000,
     rebuild: bool = False,
     rebuild_candidates: bool = False,
+    use_ownership_features: bool = True,
     data_root: Optional[Path] = None,
 ) -> Tuple[FieldLibrary, Path, bool]:
     """Load a cached field library or build and persist a new one.
@@ -62,6 +63,7 @@ def load_or_build_field_library(
         k=k,
         candidate_pool_size=candidate_pool_size,
         rebuild_candidates=rebuild_candidates,
+        use_ownership_features=use_ownership_features,
     )
 
     # Ensure required metadata keys are present.

@@ -8,13 +8,7 @@ import {
     type PropsSummary,
     type BookLine,
 } from '../api/props'
-
-const todayLocalISO = () => {
-    const now = new Date()
-    const tzOffsetMs = now.getTimezoneOffset() * 60 * 1000
-    const local = new Date(now.getTime() - tzOffsetMs)
-    return local.toISOString().slice(0, 10)
-}
+import { useSlateDate } from '../hooks/useSlateDate'
 
 type SortKey = 'player_name' | 'team' | 'prop_type' | 'prediction' | 'best_over_line' | 'over_ev' | 'under_ev' | 'max_ev'
 
@@ -99,7 +93,7 @@ function BookLinesTable({ lines }: { lines: BookLine[] }) {
 }
 
 export function PropsPage() {
-    const [targetDate, setTargetDate] = useState(() => todayLocalISO())
+    const [targetDate, setTargetDate] = useSlateDate()
     const [lines, setLines] = useState<PropLine[]>([])
     const [summary, setSummary] = useState<PropsSummary | null>(null)
     const [loading, setLoading] = useState(false)

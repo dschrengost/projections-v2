@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchPipelineSummary, type PipelineJobSummary, type PipelineSummary } from '../api/pipeline'
-
-const todayLocalISO = () => {
-  const now = new Date()
-  const tzOffsetMs = now.getTimezoneOffset() * 60 * 1000
-  const local = new Date(now.getTime() - tzOffsetMs)
-  return local.toISOString().slice(0, 10)
-}
+import { useSlateDate } from '../hooks/useSlateDate'
 
 const formatDateTime = (value: string | null | undefined) => {
   if (!value) return 'N/A'
@@ -18,7 +12,7 @@ const formatDateTime = (value: string | null | undefined) => {
 }
 
 export function PipelinePage() {
-  const [targetDate, setTargetDate] = useState(() => todayLocalISO())
+  const [targetDate, setTargetDate] = useSlateDate()
   const [summary, setSummary] = useState<PipelineSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

@@ -9,10 +9,16 @@ Output: live/features_rates_v1/{date}/run={id}/features.parquet
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
+
+from projections.runtime_safety import configure_runtime_safety
+
+configure_runtime_safety()
 
 import numpy as np
 import pandas as pd
