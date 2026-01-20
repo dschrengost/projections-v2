@@ -645,7 +645,11 @@ def main(
     )
     if not enabled:
         typer.echo(
-            f"[rotation_minutes] rotation_set_minutes disabled (config={rotation_config}); keeping baseline.",
+            "[rotation_minutes] rotation_set_minutes disabled; using baseline minutes_v1 only",
+            err=True,
+        )
+        typer.echo(
+            f"[rotation_minutes] config={rotation_config} enabled=false; no SetTransformer overlay applied.",
             err=True,
         )
         _update_summary_json(summary_path, {"rotation_set_minutes": {"enabled": False}})

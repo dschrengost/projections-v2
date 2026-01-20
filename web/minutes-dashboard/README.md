@@ -1,3 +1,43 @@
+# Minutes Dashboard
+
+## Deployment Services
+
+### Production Dashboard (Port 8501)
+- **Service**: `minutes-dashboard.service`
+- **Port**: 8501
+- **Working Directory**: `/home/daniel/prod/projections-v2`
+- **Data Root**: `/home/daniel/projections-data`
+
+### Development Dashboard (Port 8502)
+This is a parallel instance for testing baseline-only LGBM minutes without the rotation SetTransformer overlay.
+
+- **Service**: `minutes-dashboard-dev.service`
+- **Port**: 8502
+- **Working Directory**: `/home/daniel/projects/projections-v2` (dev repo)
+- **Data Root**: `/home/daniel/projections-data`
+
+#### How to Start/Stop
+```bash
+# Install and start the dev service
+sudo cp infra/systemd/minutes-dashboard-dev.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now minutes-dashboard-dev
+
+# Check status
+systemctl status minutes-dashboard-dev
+journalctl -u minutes-dashboard-dev -n 100 --no-pager
+
+# Stop the dev service
+sudo systemctl stop minutes-dashboard-dev
+```
+
+#### Verifying Baseline-Only Minutes
+1. Check Prefect logs for: `[rotation_minutes] rotation_set_minutes disabled; using baseline minutes_v1 only`
+2. Access the dev dashboard at: `http://localhost:8502`
+3. Compare minute projections with the prod dashboard at: `http://localhost:8501`
+
+---
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
