@@ -1510,21 +1510,47 @@ def _build_minutes_live_logic(
 
     # ---------------------------------------------------------------------------
     # Recompute recency features (recent_start_pct_10) from historical starter flags
+    # NOTE: Use starter_flag_label as primary source; starter_flag may be corrupt (all 1s)
     # ---------------------------------------------------------------------------
     try:
         history_work = history_labels.copy()
         history_work["game_date"] = pd.to_datetime(history_work["game_date"]).dt.normalize()
         history_work = history_work[history_work["game_date"] < target_day].copy()
-        if not history_work.empty and "starter_flag" in history_work.columns:
+        
+        # Determine the correct starter flag column to use
+        # Priority: starter_flag_label (ground truth) > starter_flag (may be corrupt)
+        starter_col = None
+        if "starter_flag_label" in history_work.columns:
+            # Check if starter_flag_label has valid variance
+            sfl = pd.to_numeric(history_work["starter_flag_label"], errors="coerce").fillna(0)
+            if sfl.std() > 0.01:  # Has variance (not all same value)
+                starter_col = "starter_flag_label"
+        
+        if starter_col is None and "starter_flag" in history_work.columns:
+            sf = pd.to_numeric(history_work["starter_flag"], errors="coerce").fillna(0)
+            # Check if starter_flag is corrupt (all 1s or all 0s)
+            if sf.std() > 0.01:  # Has variance
+                starter_col = "starter_flag"
+            elif sf.mean() > 0.95:  # All 1s - corrupt!
+                typer.echo(
+                    f"[minutes-live] WARNING: starter_flag is corrupt (all 1s, mean={sf.mean():.3f}). "
+                    "recent_start_pct_10 will use starter_flag_label fallback or default to 0."
+                )
+                warnings.append("starter_flag corrupt (all 1s); falling back to starter_flag_label")
+                # Try starter_flag_label even if variance check failed
+                if "starter_flag_label" in history_work.columns:
+                    starter_col = "starter_flag_label"
+        
+        if not history_work.empty and starter_col is not None:
             history_work["player_id"] = pd.to_numeric(history_work["player_id"], errors="coerce").astype("Int64")
-            history_work["starter_flag"] = pd.to_numeric(history_work["starter_flag"], errors="coerce").fillna(0)
+            history_work["_starter_val"] = pd.to_numeric(history_work[starter_col], errors="coerce").fillna(0)
             history_work = history_work.dropna(subset=["player_id"])
             history_work.sort_values(["player_id", "game_date"], inplace=True)
 
             recency_features: list[dict[str, object]] = []
             for pid, group in history_work.groupby("player_id"):
                 last_10 = group.tail(10)
-                start_pct = float(last_10["starter_flag"].mean()) if len(last_10) > 0 else 0.0
+                start_pct = float(last_10["_starter_val"].mean()) if len(last_10) > 0 else 0.0
                 recency_features.append({
                     "player_id": pid,
                     "recent_start_pct_10_recomp": start_pct,
@@ -1543,6 +1569,18 @@ def _build_minutes_live_logic(
                         .clip(0.0, 1.0)
                     )
                     live_slice.drop(columns=["recent_start_pct_10_recomp"], inplace=True)
+                    
+                    # Diagnostic: log distribution of recent_start_pct_10
+                    rsp = live_slice["recent_start_pct_10"]
+                    nonzero_count = int((rsp > 0).sum())
+                    typer.echo(
+                        f"[minutes-live] recent_start_pct_10 recomputed from {starter_col}: "
+                        f"nonzero={nonzero_count}/{len(rsp)}, mean={rsp.mean():.3f}"
+                    )
+        else:
+            if starter_col is None:
+                warnings.append("No valid starter flag column found for recent_start_pct_10 recompute")
+                typer.echo("[minutes-live] WARNING: No valid starter flag column found; recent_start_pct_10 will be 0")
     except Exception as exc:  # pragma: no cover - defensive
         warnings.append(f"recency feature recompute failed: {exc}")
 
