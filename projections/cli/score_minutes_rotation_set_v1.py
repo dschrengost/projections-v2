@@ -38,6 +38,13 @@ from projections.rotation.live_features_v1 import (
 )
 from projections.rotation.set_model import predict_minutes as predict_rotation_minutes
 
+# ESPN OUT override - import from baseline scorer to ensure consistency
+from projections.cli.score_minutes_v1 import (
+    _load_espn_out_players,
+    _normalize_name_for_matching,
+)
+
+
 UTC = timezone.utc
 
 app = typer.Typer(help=__doc__)
@@ -892,7 +899,35 @@ def main(
         guard["is_out"] = 0
         guard["status"] = pd.NA
 
+    # 4b) ESPN OUT override: Load ESPN injuries and apply same override as baseline scorer.
+    # ESPN updates faster than NBA injury reports; this catches late scratches.
+    espn_out_count = 0
+    try:
+        espn_out_players = _load_espn_out_players(
+            day.date() if hasattr(day, "date") else day,
+            data_root=data_root,
+            run_as_of_ts=run_as_of_datetime,
+        )
+        if espn_out_players and "player_name" in guard.columns:
+            normalized_names = guard["player_name"].astype(str).map(_normalize_name_for_matching)
+            espn_mask = normalized_names.isin(espn_out_players)
+            espn_out_count = int(espn_mask.sum())
+            if espn_out_count > 0:
+                guard.loc[espn_mask, "is_out"] = 1
+                guard.loc[espn_mask, "status"] = "OUT"
+                espn_names = guard.loc[espn_mask, "player_name"].tolist()
+                typer.echo(
+                    f"[rotation_minutes] ESPN OUT override: {espn_out_count} players marked OUT: {espn_names[:10]}",
+                    err=True,
+                )
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(
+            f"[rotation_minutes] WARNING: ESPN OUT load failed ({exc}); using feature-time is_out",
+            err=True,
+        )
+
     # Default any missing rotation preds to baseline p50 (keeps totals sane).
+
     baseline_p50_col = (
         "minutes_p50_cond" if "minutes_p50_cond" in guard.columns else "minutes_p50"
     )

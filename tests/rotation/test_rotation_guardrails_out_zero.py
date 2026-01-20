@@ -57,3 +57,31 @@ def test_rotation_overlay_forces_out_rows_to_zero_and_avoids_tail_clamp() -> Non
     assert out_row == 0.0
     # With OUT forced to 0 pre-scale, tail clamp should not trigger.
     assert int(result.summary.get("tail_clamped_team_games", 0)) == 0
+
+
+def test_espn_out_name_normalization_matches_rotation_overlay() -> None:
+    """Verify ESPN OUT name normalization correctly matches player names.
+    
+    This tests the same normalization logic used in score_minutes_rotation_set_v1
+    to apply ESPN OUT overrides before guardrails.
+    """
+    from projections.cli.score_minutes_v1 import _normalize_name_for_matching
+
+    # ESPN uses ASCII, NBA uses Unicode
+    espn_out_players = {"kawhi leonard", "luka doncic", "bradley beal"}
+
+    df = pd.DataFrame([
+        {"player_id": 1, "player_name": "Kawhi Leonard"},    # Should match
+        {"player_id": 2, "player_name": "Luka Dončić"},      # Unicode - should match
+        {"player_id": 3, "player_name": "James Harden"},     # Should NOT match
+        {"player_id": 4, "player_name": "BRADLEY BEAL"},     # Case insensitive - should match
+    ])
+
+    normalized = df["player_name"].astype(str).map(_normalize_name_for_matching)
+    espn_mask = normalized.isin(espn_out_players)
+
+    assert espn_mask.sum() == 3
+    assert espn_mask.iloc[0] == True   # Kawhi
+    assert espn_mask.iloc[1] == True   # Luka (Unicode normalized)
+    assert espn_mask.iloc[2] == False  # Harden
+    assert espn_mask.iloc[3] == True   # Beal (case insensitive)
