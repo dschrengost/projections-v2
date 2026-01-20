@@ -315,7 +315,102 @@ def _derive_minutes_tails(
     return p10_new.astype(float), p90_new.astype(float)
 
 
+def _compute_delta_diagnostics(
+    df: pd.DataFrame,
+    *,
+    baseline_p50_col: str,
+    final_p50_col: str,
+    actual_minutes_col: str | None = None,
+) -> list[dict[str, Any]]:
+    """Compute per-team-game delta diagnostics comparing final vs baseline p50.
+
+    Metrics:
+      - mean_abs_delta_p50: mean(|final - baseline|) per team-game
+      - p95_abs_delta_p50: 95th percentile of |final - baseline|
+      - effective_blend_mass: same as mean_abs_delta_p50 (logged separately as
+        a "did the overlay move anything?" signal)
+      - directional_win_rate_ge4: For rows where |final - base| >= 4,
+        fraction where sign(final - base) == sign(actual - base).
+        Only computed if actual_minutes_col is present; otherwise null.
+
+    Returns a list of dicts, one per (game_id, team_id).
+    """
+    work = df.copy()
+    required = ["game_id", "team_id", baseline_p50_col, final_p50_col]
+    missing = [c for c in required if c not in work.columns]
+    if missing:
+        return []
+
+    baseline = pd.to_numeric(work[baseline_p50_col], errors="coerce").fillna(0.0)
+    final = pd.to_numeric(work[final_p50_col], errors="coerce").fillna(0.0)
+    work["_abs_delta"] = (final - baseline).abs()
+    work["_delta"] = final - baseline
+
+    # Check for realized minutes (historical/replay mode only)
+    has_actual = (
+        actual_minutes_col is not None
+        and actual_minutes_col in work.columns
+        and work[actual_minutes_col].notna().any()
+    )
+    if has_actual:
+        actual = pd.to_numeric(work[actual_minutes_col], errors="coerce").fillna(0.0)
+        work["_actual_delta"] = actual - baseline
+    else:
+        work["_actual_delta"] = np.nan
+
+    results: list[dict[str, Any]] = []
+    for (game_id, team_id), grp in work.groupby(["game_id", "team_id"], sort=False):
+        abs_delta = grp["_abs_delta"].to_numpy(dtype=float)
+        delta = grp["_delta"].to_numpy(dtype=float)
+
+        mean_abs = float(np.mean(abs_delta)) if len(abs_delta) else 0.0
+        p95_abs = float(np.percentile(abs_delta, 95)) if len(abs_delta) else 0.0
+
+        # Directional win rate for material changes (|delta| >= 4)
+        dir_win_rate: float | None = None
+        if has_actual:
+            actual_delta = grp["_actual_delta"].to_numpy(dtype=float)
+            mask_material = np.abs(delta) >= 4.0
+            if mask_material.sum() > 0:
+                # sign match: both positive or both negative or both zero
+                sign_match = np.sign(delta[mask_material]) == np.sign(
+                    actual_delta[mask_material]
+                )
+                dir_win_rate = float(np.mean(sign_match))
+
+        results.append(
+            {
+                "game_id": str(game_id),
+                "team_id": int(team_id),
+                "mean_abs_delta_p50": round(mean_abs, 3),
+                "p95_abs_delta_p50": round(p95_abs, 3),
+                "effective_blend_mass": round(mean_abs, 3),
+                "directional_win_rate_ge4": (
+                    round(dir_win_rate, 3) if dir_win_rate is not None else None
+                ),
+            }
+        )
+    return results
+
+
+def _log_delta_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
+    """Emit structured log lines for delta diagnostics per team-game."""
+    for rec in diagnostics:
+        dir_rate = rec.get("directional_win_rate_ge4")
+        dir_str = "null" if dir_rate is None else f"{dir_rate:.3f}"
+        typer.echo(
+            f"[rotation_minutes][delta_diag] "
+            f"game_id={rec['game_id']} team_id={rec['team_id']} "
+            f"mean_abs_delta_p50={rec['mean_abs_delta_p50']:.2f} "
+            f"p95_abs_delta_p50={rec['p95_abs_delta_p50']:.2f} "
+            f"effective_blend_mass={rec['effective_blend_mass']:.2f} "
+            f"directional_win_rate_ge4={dir_str}",
+            err=True,
+        )
+
+
 def _update_summary_json(summary_path: Path, updates: dict[str, Any]) -> None:
+
     if not summary_path.exists():
         summary = {}
     else:
@@ -833,7 +928,42 @@ def main(
 
     out_df.to_parquet(minutes_path, index=False)
 
+    # 5b) Compute delta diagnostics: compare final p50 to original baseline.
+    # This quantifies how much the rotation overlay actually moved minutes.
+    delta_diagnostics: list[dict[str, Any]] = []
+    try:
+        # Build a frame with both baseline and final p50 for comparison.
+        diag_df = base_df[["game_id", "team_id", "player_id"]].copy()
+        diag_df["_baseline_p50"] = pd.to_numeric(
+            base_df[baseline_p50_col], errors="coerce"
+        ).fillna(0.0)
+        diag_df["_final_p50"] = new_p50.to_numpy(dtype=float)
+        # For directional accuracy, check if realized minutes exist (replay/historical).
+        # In live mode, "minutes" (actual) won't be populated.
+        actual_col = "minutes" if "minutes" in base_df.columns else None
+        if actual_col and base_df[actual_col].notna().sum() > 0:
+            diag_df["_actual_minutes"] = pd.to_numeric(
+                base_df[actual_col], errors="coerce"
+            ).fillna(0.0)
+        else:
+            actual_col = None
+
+        delta_diagnostics = _compute_delta_diagnostics(
+            diag_df,
+            baseline_p50_col="_baseline_p50",
+            final_p50_col="_final_p50",
+            actual_minutes_col="_actual_minutes" if actual_col else None,
+        )
+        if delta_diagnostics:
+            _log_delta_diagnostics(delta_diagnostics)
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(
+            f"[rotation_minutes] WARNING: delta diagnostics failed ({exc}); continuing.",
+            err=True,
+        )
+
     # 6) Logging + summary.json augmentation.
+
     typer.echo(f"[rotation_minutes] guardrails: {guardrail.summary}", err=True)
     if "pathology_fallback" in guardrail.team_game_summary.columns:
         pathological = guardrail.team_game_summary.loc[
@@ -896,9 +1026,14 @@ def main(
                     if not guardrail.tail_minutes_top.empty
                     else []
                 ),
+                # Delta diagnostics: per-team-game metrics quantifying rotation overlay impact.
+                "delta_diagnostics": {
+                    "per_team_game": delta_diagnostics,
+                },
             }
         },
     )
+
     typer.echo(f"[rotation_minutes] wrote guarded minutes -> {minutes_path}", err=True)
 
 
