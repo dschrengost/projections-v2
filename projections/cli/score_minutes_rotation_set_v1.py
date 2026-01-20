@@ -320,6 +320,8 @@ def _compute_delta_diagnostics(
     *,
     baseline_p50_col: str,
     final_p50_col: str,
+    raw_rotation_p50_col: str | None = None,
+    blend_applied_map: dict[tuple[str, int], bool] | None = None,
     actual_minutes_col: str | None = None,
 ) -> list[dict[str, Any]]:
     """Compute per-team-game delta diagnostics comparing final vs baseline p50.
@@ -333,6 +335,12 @@ def _compute_delta_diagnostics(
         fraction where sign(final - base) == sign(actual - base).
         Only computed if actual_minutes_col is present; otherwise null.
 
+    Pre-blend (raw) metrics (if raw_rotation_p50_col provided):
+      - mean_abs_raw_delta_p50: mean(|raw_rot - baseline|) before blend/guardrails
+      - max_abs_raw_delta_p50: max(|raw_rot - baseline|)
+      - material_raw_delta_share: fraction of rows where |raw_rot - baseline| >= 10
+      - blend_applied: whether this team-game had the conservative blend applied
+
     Returns a list of dicts, one per (game_id, team_id).
     """
     work = df.copy()
@@ -345,6 +353,12 @@ def _compute_delta_diagnostics(
     final = pd.to_numeric(work[final_p50_col], errors="coerce").fillna(0.0)
     work["_abs_delta"] = (final - baseline).abs()
     work["_delta"] = final - baseline
+
+    # Pre-blend raw deltas (rotation p50 before guardrails/blend)
+    has_raw = raw_rotation_p50_col and raw_rotation_p50_col in work.columns
+    if has_raw:
+        raw_rot = pd.to_numeric(work[raw_rotation_p50_col], errors="coerce").fillna(0.0)
+        work["_abs_raw_delta"] = (raw_rot - baseline).abs()
 
     # Check for realized minutes (historical/replay mode only)
     has_actual = (
@@ -378,6 +392,21 @@ def _compute_delta_diagnostics(
                 )
                 dir_win_rate = float(np.mean(sign_match))
 
+        # Pre-blend raw delta metrics
+        raw_mean: float | None = None
+        raw_max: float | None = None
+        material_share: float | None = None
+        if has_raw:
+            abs_raw = grp["_abs_raw_delta"].to_numpy(dtype=float)
+            raw_mean = float(np.mean(abs_raw)) if len(abs_raw) else 0.0
+            raw_max = float(np.max(abs_raw)) if len(abs_raw) else 0.0
+            material_share = float((abs_raw >= 10.0).mean()) if len(abs_raw) else 0.0
+
+        # Blend applied flag
+        blend_applied: bool | None = None
+        if blend_applied_map is not None:
+            blend_applied = blend_applied_map.get((str(game_id), int(team_id)))
+
         results.append(
             {
                 "game_id": str(game_id),
@@ -388,9 +417,21 @@ def _compute_delta_diagnostics(
                 "directional_win_rate_ge4": (
                     round(dir_win_rate, 3) if dir_win_rate is not None else None
                 ),
+                # Pre-blend metrics
+                "mean_abs_raw_delta_p50": (
+                    round(raw_mean, 3) if raw_mean is not None else None
+                ),
+                "max_abs_raw_delta_p50": (
+                    round(raw_max, 3) if raw_max is not None else None
+                ),
+                "material_raw_delta_share_ge10": (
+                    round(material_share, 3) if material_share is not None else None
+                ),
+                "blend_applied": blend_applied,
             }
         )
     return results
+
 
 
 def _log_delta_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
@@ -398,15 +439,27 @@ def _log_delta_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
     for rec in diagnostics:
         dir_rate = rec.get("directional_win_rate_ge4")
         dir_str = "null" if dir_rate is None else f"{dir_rate:.3f}"
+        raw_mean = rec.get("mean_abs_raw_delta_p50")
+        raw_mean_str = "null" if raw_mean is None else f"{raw_mean:.2f}"
+        raw_max = rec.get("max_abs_raw_delta_p50")
+        raw_max_str = "null" if raw_max is None else f"{raw_max:.2f}"
+        mat_share = rec.get("material_raw_delta_share_ge10")
+        mat_share_str = "null" if mat_share is None else f"{mat_share:.3f}"
+        blend = rec.get("blend_applied")
+        blend_str = "null" if blend is None else str(blend).lower()
         typer.echo(
             f"[rotation_minutes][delta_diag] "
             f"game_id={rec['game_id']} team_id={rec['team_id']} "
             f"mean_abs_delta_p50={rec['mean_abs_delta_p50']:.2f} "
             f"p95_abs_delta_p50={rec['p95_abs_delta_p50']:.2f} "
-            f"effective_blend_mass={rec['effective_blend_mass']:.2f} "
+            f"mean_abs_raw_delta_p50={raw_mean_str} "
+            f"max_abs_raw_delta_p50={raw_max_str} "
+            f"material_raw_delta_share_ge10={mat_share_str} "
+            f"blend_applied={blend_str} "
             f"directional_win_rate_ge4={dir_str}",
             err=True,
         )
+
 
 
 def _update_summary_json(summary_path: Path, updates: dict[str, Any]) -> None:
@@ -930,6 +983,7 @@ def main(
 
     # 5b) Compute delta diagnostics: compare final p50 to original baseline.
     # This quantifies how much the rotation overlay actually moved minutes.
+    # Also tracks pre-blend raw deltas to distinguish blend masking from agreement.
     delta_diagnostics: list[dict[str, Any]] = []
     try:
         # Build a frame with both baseline and final p50 for comparison.
@@ -938,6 +992,11 @@ def main(
             base_df[baseline_p50_col], errors="coerce"
         ).fillna(0.0)
         diag_df["_final_p50"] = new_p50.to_numpy(dtype=float)
+        # Raw rotation p50 before guardrails/blend (from guard df)
+        if "rotation_minutes_p50" in guard.columns:
+            diag_df["_raw_rotation_p50"] = pd.to_numeric(
+                guard["rotation_minutes_p50"], errors="coerce"
+            ).fillna(0.0).to_numpy(dtype=float)
         # For directional accuracy, check if realized minutes exist (replay/historical).
         # In live mode, "minutes" (actual) won't be populated.
         actual_col = "minutes" if "minutes" in base_df.columns else None
@@ -948,10 +1007,24 @@ def main(
         else:
             actual_col = None
 
+        # Build blend_applied map from guardrails team_game_summary
+        blend_applied_map: dict[tuple[str, int], bool] | None = None
+        if (
+            hasattr(guardrail, "team_game_summary")
+            and "blend_applied" in guardrail.team_game_summary.columns
+        ):
+            tg = guardrail.team_game_summary
+            blend_applied_map = {
+                (str(row["game_id"]), int(row["team_id"])): bool(row["blend_applied"])
+                for _, row in tg.iterrows()
+            }
+
         delta_diagnostics = _compute_delta_diagnostics(
             diag_df,
             baseline_p50_col="_baseline_p50",
             final_p50_col="_final_p50",
+            raw_rotation_p50_col="_raw_rotation_p50" if "_raw_rotation_p50" in diag_df.columns else None,
+            blend_applied_map=blend_applied_map,
             actual_minutes_col="_actual_minutes" if actual_col else None,
         )
         if delta_diagnostics:
@@ -961,6 +1034,7 @@ def main(
             f"[rotation_minutes] WARNING: delta diagnostics failed ({exc}); continuing.",
             err=True,
         )
+
 
     # 6) Logging + summary.json augmentation.
 
