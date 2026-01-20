@@ -144,6 +144,27 @@ ReconcileMode = Literal["none", "p50", "p50_and_tails"]
 RotshareQuantilesMode = Literal["point", "mc"]
 RotshareQuantilesCenter = Literal["mean", "p50"]
 
+
+def _espn_override_allowed(df: pd.DataFrame) -> pd.Series:
+    """Allow ESPN OUT overrides only when NBA injury data is missing/unknown."""
+    if df.empty:
+        return pd.Series(dtype=bool)
+
+    if "injury_row_present" in df.columns:
+        injury_present = df["injury_row_present"].fillna(False).astype(bool)
+    else:
+        injury_present = pd.Series(False, index=df.index, dtype=bool)
+
+    if "status" in df.columns:
+        status_raw = df["status"]
+        status_norm = status_raw.astype(str).str.upper().str.strip()
+        status_unknown = status_raw.isna() | status_norm.isin({"", "UNK", "UNKNOWN"})
+    else:
+        status_unknown = pd.Series(True, index=df.index, dtype=bool)
+
+    # ESPN can override if NBA injury row is missing or NBA status is unknown.
+    return (~injury_present) | status_unknown
+
 app = typer.Typer(help=__doc__)
 
 
@@ -1106,7 +1127,9 @@ def _derive_is_out_flag(df: pd.DataFrame, *, espn_out_players: set[str] | None =
         is_out = is_out | role_out.astype(int)
     if espn_out_players and "player_name" in df.columns:
         normalized = df["player_name"].astype(str).map(_normalize_name_for_matching)
-        is_out = is_out | normalized.isin(espn_out_players).astype(int)
+        espn_mask = normalized.isin(espn_out_players)
+        allow_override = _espn_override_allowed(df)
+        is_out = is_out | (espn_mask & allow_override).astype(int)
     return is_out.astype(int)
 
 
@@ -1323,6 +1346,7 @@ def _score_rows(
         # Use unidecode normalization to match Unicode names (e.g., 'Luka Dončić') with ASCII ESPN names ('Luka Doncic')
         player_names_normalized = working["player_name"].apply(_normalize_name_for_matching)
         espn_mask = player_names_normalized.isin(espn_out_players)
+        espn_mask = espn_mask & _espn_override_allowed(working)
         if espn_mask.any():
             espn_outs = working.loc[espn_mask, "player_name"].tolist()
             typer.echo(f"[espn] marking {len(espn_outs)} players OUT: {espn_outs}", err=True)

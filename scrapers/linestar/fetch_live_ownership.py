@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import requests
 
 # Lazy import playwright to avoid import errors when not installed
 _playwright_available = None
@@ -56,6 +57,51 @@ SPORT_MAP = {"nba": 2}
 import os
 LS_EMAIL = os.getenv("LS_EMAIL", "dschrengost@gmail.com")
 LS_PASSWORD = os.getenv("LS_PASSWORD", "@Raven23!")
+
+
+def _load_storage_cookies() -> requests.cookies.RequestsCookieJar:
+    """Load cookies from Playwright storage_state.json into a Requests cookie jar."""
+    jar = requests.cookies.RequestsCookieJar()
+    if not STATE_PATH.exists():
+        return jar
+    try:
+        payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return jar
+
+    for cookie in payload.get("cookies", []):
+        name = cookie.get("name")
+        value = cookie.get("value")
+        if not name:
+            continue
+        jar.set(
+            name,
+            value or "",
+            domain=cookie.get("domain"),
+            path=cookie.get("path") or "/",
+        )
+    return jar
+
+
+def _request_json(params: dict) -> dict:
+    """Call LineStar API with stored cookies, avoiding Playwright."""
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.linestarapp.com/",
+        }
+    )
+    session.cookies.update(_load_storage_cookies())
+    resp = session.get(API, params=params, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+    try:
+        return resp.json()
+    except Exception:
+        return json.loads(resp.text)
 
 
 def refresh_session(
@@ -155,11 +201,6 @@ def discover_today_pid(
 
     Calls GetSalariesV5 without periodId to get the Periods list.
     """
-    if not _check_playwright():
-        raise ImportError("playwright is required: uv add playwright && playwright install chromium")
-
-    from playwright.sync_api import sync_playwright
-
     site_id = SITE_MAP.get(site.lower())
     sport_id = SPORT_MAP.get(sport.lower())
     if site_id is None or sport_id is None:
@@ -168,18 +209,7 @@ def discover_today_pid(
     if target_date is None:
         target_date = date.today()
 
-    with sync_playwright() as p:
-        rc = p.request.new_context(
-            storage_state=str(STATE_PATH) if STATE_PATH.exists() else None
-        )
-        r = rc.get(API, params={"site": site_id, "sport": sport_id})
-        if r.status != 200:
-            raise RuntimeError(f"HTTP {r.status}: {r.text()[:200]}")
-
-        try:
-            data = r.json()
-        except Exception:
-            data = json.loads(r.text())
+    data = _request_json({"site": site_id, "sport": sport_id})
 
     periods = data.get("Periods") or []
     if not periods:
@@ -201,28 +231,12 @@ def fetch_salaries_payload(
     sport: str = "nba",
 ) -> dict:
     """Fetch the raw GetSalariesV5 payload for a specific PID."""
-    if not _check_playwright():
-        raise ImportError("playwright is required: uv add playwright && playwright install chromium")
-
-    from playwright.sync_api import sync_playwright
-
     site_id = SITE_MAP.get(site.lower())
     sport_id = SPORT_MAP.get(sport.lower())
     if site_id is None or sport_id is None:
         raise ValueError(f"Unknown site={site} or sport={sport}")
 
-    with sync_playwright() as p:
-        rc = p.request.new_context(
-            storage_state=str(STATE_PATH) if STATE_PATH.exists() else None
-        )
-        r = rc.get(API, params={"periodId": pid, "site": site_id, "sport": sport_id})
-        if r.status != 200:
-            raise RuntimeError(f"HTTP {r.status}: {r.text()[:200]}")
-
-        try:
-            return r.json()
-        except Exception:
-            return json.loads(r.text())
+    return _request_json({"periodId": pid, "site": site_id, "sport": sport_id})
 
 
 def _raw_to_float(v) -> Optional[float]:

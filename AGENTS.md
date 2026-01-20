@@ -148,6 +148,32 @@ journalctl --user -u minutes-dashboard.service -f  # Tail logs
 - **run_id scoping**: Live outputs use `run=<timestamp>` directories. The "latest" pointer symlinks to the most recent run.
 - **DNP-CD handling**: Players with consecutive DNP-CD streaks get adjusted `play_prob`. Check `projections/builders/dnp_history.py`.
 
+## Runtime Stamps
+
+Every Prefect run and API startup logs a **runtime stamp** to help diagnose "which code is actually running" issues.
+
+**What's captured:**
+- Git commit SHA and dirty state
+- Python executable path, hostname, user
+- Config file paths and content hash (SHA-256)
+- Extracted run IDs from key config files
+
+**Where to find stamps:**
+- **Prefect UI**: First log lines of each `nba-live-pipeline` flow run
+- **API**: `GET /api/version` endpoint returns stamp info
+
+**Environment variables:**
+- `PROJECTIONS_ALLOW_DIRTY=1`: Allow running with dirty git tree (default: fail)
+- `PROJECTIONS_RUNTIME_STAMP_STRICT=0`: Disable all fail-fast checks (dev only)
+
+**Fail-fast behavior:**
+By default, production runs will fail early if:
+1. Git working tree is dirty (uncommitted changes)
+2. Required config files are missing (`minutes_current_run.json`, `rates_current_run.json`)
+
+> [!TIP]
+> To identify what code ran for a past Prefect run, find the `[runtime-stamp]` log line in the Prefect UI. The JSON includes `git_sha`, `config_hash`, and `run_ids`.
+
 ## Build & Test
 
 ```bash

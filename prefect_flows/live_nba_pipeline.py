@@ -46,6 +46,7 @@ from projections.cli import build_minutes_live as live_minutes_builder
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline import effective_inputs, health
+from projections.runtime_stamp import log_runtime_stamp, enforce_clean_tree
 
 
 import shutil
@@ -606,6 +607,21 @@ def nba_live_pipeline_flow(
     rotshare_mc_center: str = "mean",
 ) -> dict[str, str]:
     logger = get_run_logger()
+    
+    # Runtime stamp - log what code/config is running at flow start
+    enforce_clean_tree()  # Fail-fast if dirty tree in prod (set PROJECTIONS_ALLOW_DIRTY=1 to bypass)
+    log_runtime_stamp(
+        entrypoint="prefect:nba-live-pipeline",
+        config_paths={
+            "minutes_current_run": PROJECT_ROOT / "config/minutes_current_run.json",
+            "rates_current_run": PROJECT_ROOT / "config/rates_current_run.json",
+            "rotation_set_minutes_live": PROJECT_ROOT / "config/rotation_set_minutes_live.json",
+            "sim_v2_profiles": PROJECT_ROOT / "config/sim_v2_profiles.json",
+        },
+        project_root=PROJECT_ROOT,
+        logger=logger,
+    )
+    
     data_root = paths.get_data_root()
 
     if game_date is None:

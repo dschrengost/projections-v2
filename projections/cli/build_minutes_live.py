@@ -1106,6 +1106,31 @@ def _build_minutes_live_logic(
                          espn_mapped["player_id"] = espn_mapped["player_id"].astype("Int64")
                          espn_mapped["game_id"] = espn_mapped["game_id"].astype("Int64")
                          espn_mapped["as_of_ts"] = pd.to_datetime(espn_mapped["as_of_ts"], utc=True)
+
+                         # Prefer NBA.com injury rows when both sources report the same player/game.
+                         existing_keys = None
+                         if not injuries_df.empty and {"game_id", "player_id"}.issubset(injuries_df.columns):
+                             existing = injuries_df.copy()
+                             if "source" in existing.columns:
+                                 existing = existing[
+                                     existing["source"].astype(str).str.lower() != "espn"
+                                 ]
+                             existing = existing.dropna(subset=["game_id", "player_id"])
+                             if not existing.empty:
+                                 existing_keys = existing[["game_id", "player_id"]].drop_duplicates()
+                         if existing_keys is not None and not existing_keys.empty:
+                             before = len(espn_mapped)
+                             espn_mapped = espn_mapped.merge(
+                                 existing_keys.assign(_has_nba=1),
+                                 on=["game_id", "player_id"],
+                                 how="left",
+                             )
+                             espn_mapped = espn_mapped[espn_mapped["_has_nba"].isna()].drop(columns=["_has_nba"])
+                             dropped = before - len(espn_mapped)
+                             if dropped > 0:
+                                 typer.echo(
+                                     f"[minutes-live] Skipping {dropped} ESPN injuries already present in NBA.com reports."
+                                 )
                          
                          cols_to_keep = ["game_id", "player_id", "team_id", "status", "as_of_ts"]
                          subset = espn_mapped[cols_to_keep].copy()

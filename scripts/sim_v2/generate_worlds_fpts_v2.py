@@ -1320,15 +1320,41 @@ def _resolve_minutes_column(df: pd.DataFrame) -> str:
 
 
 def _ensure_status_bucket(df: pd.DataFrame) -> pd.DataFrame:
+    # Load any status overrides by player name
+    from projections.paths import get_project_root
+    
+    override_path = get_project_root() / "config" / "status_overrides.json"
+    status_overrides = {}
+    if override_path.exists():
+        try:
+            payload = json.loads(override_path.read_text(encoding="utf-8"))
+            status_overrides = payload.get("overrides", {})
+            if status_overrides:
+                typer.echo(f"[sim_v2] Loaded {len(status_overrides)} status overrides: {list(status_overrides.keys())}")
+        except (json.JSONDecodeError, Exception) as e:
+            typer.echo(f"[sim_v2] warning: failed to load status overrides: {e}", err=True)
+    
     if "status_bucket" in df.columns:
         df["status_bucket"] = df["status_bucket"].apply(status_bucket_from_raw)
-        return df
-    for col in ("status", "injury_status", "availability_status"):
-        if col in df.columns:
-            df["status_bucket"] = df[col].apply(status_bucket_from_raw)
-            return df
-    df["status_bucket"] = "healthy"
+    else:
+        for col in ("status", "injury_status", "availability_status"):
+            if col in df.columns:
+                df["status_bucket"] = df[col].apply(status_bucket_from_raw)
+                break
+        else:
+            df["status_bucket"] = "healthy"
+    
+    # Apply status overrides by player_name
+    if status_overrides and "player_name" in df.columns:
+        for player_name, override_status in status_overrides.items():
+            mask = df["player_name"].str.lower() == player_name.lower()
+            if mask.any():
+                original = df.loc[mask, "status_bucket"].iloc[0]
+                df.loc[mask, "status_bucket"] = status_bucket_from_raw(override_status)
+                typer.echo(f"[sim_v2] Status override: {player_name}: {original} -> {override_status}")
+    
     return df
+
 
 
 def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> pd.DataFrame:

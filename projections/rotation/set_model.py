@@ -20,42 +20,19 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+# Re-export utility functions for backward compatibility
+from projections.rotation.utils import (
+    GAME_ID_NORM_COL,
+    KEY_COLS,
+    OPPONENT_TEAM_ID_COL,
+    _coerce_int_series,
+    normalize_key_columns,
+    zfill_game_id_series,
+)
+
 MODEL_DIR_ENV = "ROTATION_SET_MODEL_DIR"
 MODEL_WEIGHTS_FILENAME = "model.pt"
 MODEL_CONFIG_FILENAME = "config.json"
-
-GAME_ID_NORM_COL = "game_id_norm"
-KEY_COLS = ("game_id", "team_id", "player_id")
-OPPONENT_TEAM_ID_COL = "opponent_team_id"
-
-
-def zfill_game_id_series(series: pd.Series) -> pd.Series:
-    """Normalize NBA game ids to a zero-filled 10-character string."""
-
-    coerced = pd.to_numeric(series, errors="coerce").astype("Int64")
-    return coerced.astype("string").str.zfill(10)
-
-
-def _coerce_int_series(series: pd.Series, *, name: str) -> pd.Series:
-    out = pd.to_numeric(series, errors="coerce").astype("Int64")
-    if out.isna().any():
-        raise ValueError(f"{name} contains missing/invalid values after coercion")
-    return out
-
-
-def normalize_key_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Return a copy with normalized key columns used for grouping."""
-
-    missing = [c for c in KEY_COLS if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing required key columns: {missing}")
-    out = df.copy()
-    out[GAME_ID_NORM_COL] = zfill_game_id_series(out["game_id"])
-    if out[GAME_ID_NORM_COL].isna().any():
-        raise ValueError("game_id contains missing/invalid values after normalization")
-    out["team_id"] = _coerce_int_series(out["team_id"], name="team_id")
-    out["player_id"] = _coerce_int_series(out["player_id"], name="player_id")
-    return out
 
 
 def masked_mean(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:

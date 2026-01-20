@@ -115,10 +115,13 @@ def _build_injuries_raw(
         # Use ingested_ts (actual scrape time) for as_of_ts instead of report_time.
         # report_time is aligned to :30 report slots which can be in the future,
         # causing the scoring pipeline to filter out all injury data.
+        # However, we also track report_ts to allow proper ordering when selecting
+        # the latest status per player (e.g., when a player goes from Q to Available).
         data.append(
             {
                 "report_date": report_day,
                 "as_of_ts": ingested_ts,  # Use scrape time, not aligned report slot
+                "report_ts": report_time,  # Actual report timestamp for ordering
                 "team_id": team_id,
                 "player_name": row.get("player_name"),
                 "player_id": player_id,
@@ -133,6 +136,7 @@ def _build_injuries_raw(
     columns = [
         "report_date",
         "as_of_ts",
+        "report_ts",
         "team_id",
         "player_name",
         "player_id",

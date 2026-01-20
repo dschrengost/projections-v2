@@ -11,7 +11,7 @@ from typing import Iterable
 
 import pandas as pd
 
-from projections.rotation.set_model import zfill_game_id_series
+from projections.rotation.utils import zfill_game_id_series
 
 ODDS_COLS: tuple[str, str] = ("spread_home", "total")
 

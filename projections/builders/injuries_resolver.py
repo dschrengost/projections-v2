@@ -261,6 +261,16 @@ class InjuriesResolver:
         df = df.copy()
         df["as_of_ts"] = pd.to_datetime(df["as_of_ts"], utc=True, errors="coerce")
         df["game_id"] = pd.to_numeric(df["game_id"], errors="coerce").astype("Int64")
+        
+        # Determine the ordering column: prefer report_ts, then derive from source URL
+        if "report_ts" in df.columns and df["report_ts"].notna().any():
+            df["_order_ts"] = pd.to_datetime(df["report_ts"], utc=True, errors="coerce")
+        elif "source" in df.columns and df["source"].notna().any():
+            # Derive report_ts from source URL for backwards compatibility
+            from projections.minutes_v1.snapshots import _parse_report_ts_from_source
+            df["_order_ts"] = df["source"].apply(_parse_report_ts_from_source)
+        else:
+            df["_order_ts"] = df["as_of_ts"]
 
         result_frames: list[pd.DataFrame] = []
         for game_id in df["game_id"].dropna().unique():
@@ -290,14 +300,14 @@ class InjuriesResolver:
                 # Log but continue - games_without will capture this
                 continue
 
-            # Keep latest snapshot per player for this game
-            valid_rows = valid_rows.sort_values("as_of_ts", ascending=False)
+            # Keep latest snapshot per player for this game, ordered by actual report time
+            valid_rows = valid_rows.sort_values("_order_ts", ascending=False, na_position="last")
             if "player_id" in valid_rows.columns:
                 valid_rows = valid_rows.drop_duplicates(
                     subset=["game_id", "player_id"], keep="first"
                 )
 
-            result_frames.append(valid_rows)
+            result_frames.append(valid_rows.drop(columns=["_order_ts"], errors="ignore"))
 
         if not result_frames:
             return pd.DataFrame()

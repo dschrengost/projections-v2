@@ -2,13 +2,50 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from projections.minutes_v1.constants import AvailabilityStatus
 from projections.utils import asof_left_join
+
+
+# Pattern to extract timestamp from NBA injury PDF URLs
+# Format: Injury-Report_2026-01-19_05_00PM.pdf
+_INJURY_REPORT_URL_PATTERN = re.compile(
+    r"Injury-Report_(\d{4}-\d{2}-\d{2})_(\d{2})_(\d{2})(AM|PM)\.pdf$"
+)
+
+
+def _parse_report_ts_from_source(source: str | None) -> pd.Timestamp | None:
+    """Extract report timestamp from NBA injury PDF URL.
+    
+    URL format: https://ak-static.cms.nba.com/referee/injury/Injury-Report_2026-01-19_05_00PM.pdf
+    Returns a timezone-aware (ET) timestamp, or None if parsing fails.
+    """
+    if not source or not isinstance(source, str):
+        return None
+    match = _INJURY_REPORT_URL_PATTERN.search(source)
+    if not match:
+        return None
+    date_str, hour_str, minute_str, ampm = match.groups()
+    hour = int(hour_str)
+    minute = int(minute_str)
+    if ampm == "PM" and hour != 12:
+        hour += 12
+    elif ampm == "AM" and hour == 12:
+        hour = 0
+    try:
+        et = ZoneInfo("America/New_York")
+        dt = datetime.strptime(date_str, "%Y-%m-%d").replace(
+            hour=hour, minute=minute, second=0, microsecond=0, tzinfo=et
+        )
+        return pd.Timestamp(dt).tz_convert("UTC")
+    except (ValueError, OverflowError):
+        return None
 
 
 def ensure_as_of_column(
@@ -135,8 +172,14 @@ def select_injury_snapshot(
     group_cols: Iterable[str] = ("game_id", "player_id"),
     tip_ts_col: str = "tip_ts",
     as_of_col: str = "as_of_ts",
+    report_ts_col: str = "report_ts",
 ) -> pd.DataFrame:
-    """Strict injury snapshot selection with placeholder rows for missing pre-tip data."""
+    """Strict injury snapshot selection with placeholder rows for missing pre-tip data.
+    
+    Uses report_ts (actual PDF report timestamp) for ordering when available,
+    falling back to as_of_ts. This ensures that when a player's status changes
+    (e.g., Questionable -> Available), the most recent report is selected.
+    """
 
     required = set(group_cols) | {tip_ts_col, as_of_col, "status", "restriction_flag", "ramp_flag"}
     missing = required - set(df.columns)
@@ -146,13 +189,30 @@ def select_injury_snapshot(
     working = df.copy()
     working[tip_ts_col] = pd.to_datetime(working[tip_ts_col], utc=True)
     working[as_of_col] = pd.to_datetime(working[as_of_col], utc=True, errors="coerce")
+    
+    # Use report_ts for ordering if available, else try to derive from source URL
+    has_report_ts = report_ts_col in working.columns and working[report_ts_col].notna().any()
+    if has_report_ts:
+        working[report_ts_col] = pd.to_datetime(working[report_ts_col], utc=True, errors="coerce")
+        order_col = report_ts_col
+    elif "source" in working.columns:
+        # Derive report_ts from source URL for backwards compatibility
+        # URL format: Injury-Report_2026-01-19_05_00PM.pdf
+        working["_derived_report_ts"] = working["source"].apply(_parse_report_ts_from_source)
+        if working["_derived_report_ts"].notna().any():
+            order_col = "_derived_report_ts"
+        else:
+            order_col = as_of_col
+    else:
+        order_col = as_of_col
 
     valid_mask = working[as_of_col].notna() & (working[as_of_col] <= working[tip_ts_col])
     valid = working.loc[valid_mask].copy()
 
     latest = pd.DataFrame(columns=working.columns)
     if not valid.empty:
-        latest_idx = valid.groupby(list(group_cols))[as_of_col].idxmax()
+        # Select the entry with the latest report_ts (or as_of_ts) per player/game
+        latest_idx = valid.groupby(list(group_cols))[order_col].idxmax()
         latest = valid.loc[latest_idx].copy()
         latest["selection_rule"] = "latest_leq_tip"
         latest["snapshot_missing"] = 0
@@ -204,3 +264,4 @@ def select_injury_snapshot(
         raise AssertionError("Detected injury snapshots with as_of_ts after tip_ts")
 
     return combined.drop(columns=[tip_ts_col])
+

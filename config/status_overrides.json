@@ -1,0 +1,6 @@
+{
+    "_comment": "Override player injury status for experiments. Set status to 'healthy' to remove probable/questionable tags.",
+    "overrides": {
+        "Payton Pritchard": "healthy"
+    }
+}
