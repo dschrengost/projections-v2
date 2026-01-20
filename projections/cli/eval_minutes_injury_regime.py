@@ -926,7 +926,7 @@ def main(
     start = pd.Timestamp(start_date).date()
     end = pd.Timestamp(end_date).date()
     if end < start:
-        raise typer.BadParameter("end_date must be on or after start_date", param_name="end_date")
+        raise typer.BadParameter("end_date must be on or after start_date", param_hint="end_date")
 
     data_root = data_root.expanduser().resolve()
     preds_root = preds_root.expanduser().resolve()

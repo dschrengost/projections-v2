@@ -81,25 +81,25 @@ def main(
 
     if not features:
         if not features_root.exists():
-            raise typer.BadParameter(f"--features-root {features_root} does not exist", param_name="features_root")
+            raise typer.BadParameter(f"--features-root {features_root} does not exist", param_hint="features_root")
         candidate_paths = sorted(features_root.glob("season=*/month=*/features.parquet"))
         candidate_paths = [path for path in candidate_paths if _partition_on_or_before(path, cutoff_ts)]
         if not candidate_paths:
             raise typer.BadParameter(
-                f"No features.parquet files found under {features_root}", param_name="features"
+                f"No features.parquet files found under {features_root}", param_hint="features"
             )
         feature_paths = candidate_paths
     else:
         feature_paths = features
     frames = load_feature_frames([path.expanduser() for path in feature_paths])
     if "game_date" not in frames.columns:
-        raise typer.BadParameter("Features are missing game_date column", param_name="features")
+        raise typer.BadParameter("Features are missing game_date column", param_hint="features")
     frames["game_date"] = pd.to_datetime(frames["game_date"]).dt.normalize()
     frames = frames.loc[frames["game_date"] <= cutoff_ts].copy()
     if frames.empty:
         raise typer.BadParameter(
             f"No features on/before {cutoff_ts.date()} after filtering; check inputs.",
-            param_name="features",
+            param_hint="features",
         )
     slot_priors = build_starter_slot_priors(frames, min_minutes=min_minutes)
     history = build_player_starter_history(frames)

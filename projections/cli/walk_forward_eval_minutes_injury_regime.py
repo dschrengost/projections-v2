@@ -319,7 +319,7 @@ def main(
     start = pd.Timestamp(start_date).date()
     train_start = pd.Timestamp(train_start_date).date() if train_start_date is not None else start
     if start < train_start:
-        raise typer.BadParameter("train_start_date must be on or before start_date", param_name="train_start_date")
+        raise typer.BadParameter("train_start_date must be on or before start_date", param_hint="train_start_date")
     typer.echo(f"[walk] loading features from {features_root}")
     features = _load_features_root(features_root)
     if end_date is None:
@@ -331,7 +331,7 @@ def main(
         end = pd.Timestamp(end_date).date()
 
     if end < start:
-        raise typer.BadParameter("end_date must be on or after start_date", param_name="end_date")
+        raise typer.BadParameter("end_date must be on or after start_date", param_hint="end_date")
 
     month_runs: list[MonthRun] = []
     for win_start, win_end in _iter_feature_month_windows(features, start=start, end=end):
