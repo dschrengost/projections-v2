@@ -901,30 +901,45 @@ def main(
 
     # 4b) ESPN OUT override: Load ESPN injuries and apply same override as baseline scorer.
     # ESPN updates faster than NBA injury reports; this catches late scratches.
+    # NOTE: For live scoring, we use current ESPN data (no timestamp filtering).
     espn_out_count = 0
+    espn_matched_count = 0
     try:
         espn_out_players = _load_espn_out_players(
             day.date() if hasattr(day, "date") else day,
             data_root=data_root,
-            run_as_of_ts=run_as_of_datetime,
+            run_as_of_ts=None,  # Use current ESPN data for live scoring
         )
+        espn_out_count = len(espn_out_players) if espn_out_players else 0
         if espn_out_players and "player_name" in guard.columns:
             normalized_names = guard["player_name"].astype(str).map(_normalize_name_for_matching)
             espn_mask = normalized_names.isin(espn_out_players)
-            espn_out_count = int(espn_mask.sum())
-            if espn_out_count > 0:
+            espn_matched_count = int(espn_mask.sum())
+            if espn_matched_count > 0:
                 guard.loc[espn_mask, "is_out"] = 1
                 guard.loc[espn_mask, "status"] = "OUT"
                 espn_names = guard.loc[espn_mask, "player_name"].tolist()
                 typer.echo(
-                    f"[rotation_minutes] ESPN OUT override: {espn_out_count} players marked OUT: {espn_names[:10]}",
+                    f"[rotation_minutes] ESPN OUT override: loaded={espn_out_count} matched={espn_matched_count} "
+                    f"marked OUT: {espn_names[:10]}",
                     err=True,
                 )
+            else:
+                typer.echo(
+                    f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} matched=0 (no overlap with slate)",
+                    err=True,
+                )
+        elif espn_out_count > 0:
+            typer.echo(
+                f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} but player_name column missing",
+                err=True,
+            )
     except Exception as exc:  # noqa: BLE001
         typer.echo(
             f"[rotation_minutes] WARNING: ESPN OUT load failed ({exc}); using feature-time is_out",
             err=True,
         )
+
 
     # Default any missing rotation preds to baseline p50 (keeps totals sane).
 
