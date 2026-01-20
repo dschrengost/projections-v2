@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/daniel/projects/projections-v2
+WorkingDirectory=/home/daniel/prod/projections-v2
 Environment="JAVA_HOME=/usr/lib/jvm/java-1.17.0-openjdk-amd64"
 Environment="PATH=/usr/lib/jvm/java-1.17.0-openjdk-amd64/bin:/home/daniel/.local/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PREFECT_API_URL=http://100.78.180.34:4200/api"

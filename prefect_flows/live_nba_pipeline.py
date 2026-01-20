@@ -46,7 +46,7 @@ from projections.cli import build_minutes_live as live_minutes_builder
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline import effective_inputs, health
-from projections.runtime_stamp import log_runtime_stamp, enforce_clean_tree
+from projections.runtime_stamp import log_runtime_stamp, enforce_clean_tree, enforce_prod_sanity
 
 
 import shutil
@@ -610,6 +610,7 @@ def nba_live_pipeline_flow(
     
     # Runtime stamp - log what code/config is running at flow start
     enforce_clean_tree()  # Fail-fast if dirty tree in prod (set PROJECTIONS_ALLOW_DIRTY=1 to bypass)
+    enforce_prod_sanity()  # Strict PROD checks - no bypass allowed in PROD
     log_runtime_stamp(
         entrypoint="prefect:nba-live-pipeline",
         config_paths={

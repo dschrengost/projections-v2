@@ -35,6 +35,9 @@ DEFAULT_CONFIG_PATHS: dict[str, str] = {
     "sim_v2_profiles": "config/sim_v2_profiles.json",
 }
 
+# PROD repository path - Prefect runs exclusively from here
+PROD_REPO_PATH = Path("/home/daniel/prod/projections-v2")
+
 
 @dataclass
 class RuntimeStamp:
@@ -307,6 +310,72 @@ def enforce_clean_tree(*, repo_root: Path | None = None) -> None:
             "  1. Commit your changes: git add -A && git commit -m 'wip'\n"
             "  2. Set PROJECTIONS_ALLOW_DIRTY=1 to bypass (dev only)\n"
             "  3. Set PROJECTIONS_RUNTIME_STAMP_STRICT=0 to disable all checks"
+        )
+
+
+def is_prod_execution(repo_root: Path | None = None) -> bool:
+    """Check if we're executing from the PROD repository.
+    
+    Returns True if the current execution context is the PROD checkout
+    at /home/daniel/prod/projections-v2.
+    """
+    if repo_root is None:
+        repo_root = _find_git_repo_root()
+    if repo_root is None:
+        # No git repo found - check CWD
+        try:
+            return Path.cwd().is_relative_to(PROD_REPO_PATH) or Path.cwd() == PROD_REPO_PATH
+        except (ValueError, OSError):
+            return False
+    try:
+        return repo_root == PROD_REPO_PATH or repo_root.is_relative_to(PROD_REPO_PATH)
+    except (ValueError, OSError):
+        return str(repo_root) == str(PROD_REPO_PATH)
+
+
+def enforce_prod_sanity(*, repo_root: Path | None = None) -> None:
+    """Enforce strict sanity checks for PROD execution.
+    
+    In PROD (detected via CWD matching PROD_REPO_PATH):
+    - .deploy_info must exist (proof of proper deployment)
+    - If git repo exists somehow, it must NOT be dirty
+    
+    PROD intentionally does NOT have a .git directory (excluded by rsync),
+    so we validate deployment via .deploy_info instead of git.
+    
+    DEV execution is not affected by this function.
+    
+    Raises:
+        RuntimeError: If any PROD invariant is violated.
+    """
+    # Check if we're in PROD by CWD (since PROD has no .git)
+    try:
+        cwd = Path.cwd()
+        in_prod = cwd == PROD_REPO_PATH or cwd.is_relative_to(PROD_REPO_PATH)
+    except (ValueError, OSError):
+        in_prod = False
+    
+    if not in_prod:
+        return  # DEV execution - no strict checks
+    
+    # PROD-specific checks (cannot be bypassed)
+    deploy_info = PROD_REPO_PATH / ".deploy_info"
+    if not deploy_info.exists():
+        raise RuntimeError(
+            "PROD execution requires .deploy_info file (proof of deployment).\n"
+            f"Expected at: {deploy_info}\n"
+            "Run scripts/deploy/deploy_live.sh from DEV to deploy properly."
+        )
+    
+    # If there's somehow a git repo in PROD, ensure it's not dirty
+    # (this shouldn't happen since rsync excludes .git, but safety check)
+    root = _find_git_repo_root()
+    if root is not None and _git_dirty(root):
+        raise RuntimeError(
+            "PROD tree is dirty - this should never happen.\n"
+            f"PROD repo: {root}\n"
+            "The PROD directory should only be updated via deploy_live.sh.\n"
+            "Re-run the deploy script from DEV to restore clean state."
         )
 
 

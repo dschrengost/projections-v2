@@ -37,6 +37,65 @@ Maintainable scaffolding for an NBA player minutes prediction project. The layou
    ```
 3. Activate the environment (uv will print the correct command, typically `source .venv/bin/activate`).
 
+## DEV vs PROD Execution Model
+
+This repository uses a two-checkout model to prevent accidental production changes:
+
+| Aspect | DEV | PROD |
+|--------|-----|------|
+| Path | `~/projects/projections-v2` | `~/prod/projections-v2` |
+| Purpose | Active development | Prefect execution |
+| Editable | Yes | **No** - deploy only |
+| Dirty tree | Allowed | **Fails immediately** |
+| Updated by | Developer | `deploy_live.sh` only |
+
+### Deploying Code to Production
+
+To deploy your changes to production:
+
+```bash
+# From DEV repo
+cd ~/projects/projections-v2
+
+# Optional: commit first (recommended)
+git add -A && git commit -m "your message"
+
+# Deploy to PROD
+./scripts/deploy/deploy_live.sh
+```
+
+The deploy script:
+1. Syncs DEV → PROD using rsync (excludes `.git`, caches, virtualenvs)
+2. Runs `uv sync --frozen` to ensure deps match
+3. Writes `.deploy_info` with deployment metadata
+4. Prints the runtime stamp from PROD
+
+### What NOT to Edit Directly
+
+> **⚠️ Never edit files directly in `/home/daniel/prod/projections-v2`**
+>
+> PROD is designed to be a clean, reproducible copy of DEV at a specific point in time.
+> Any direct edits will cause the PROD guardrails to fail, blocking all Prefect runs.
+
+If you accidentally edited PROD:
+```bash
+# Simply re-deploy from DEV
+./scripts/deploy/deploy_live.sh
+```
+
+### Prefect Execution
+
+All Prefect flows run exclusively from the PROD directory:
+- `prefect.yaml` sets `directory: /home/daniel/prod/projections-v2`
+- The systemd worker has `WorkingDirectory=/home/daniel/prod/projections-v2`
+
+The runtime stamp at the start of each run will show:
+```
+Repo Root:    /home/daniel/prod/projections-v2
+```
+
+This confirms code is running from PROD, not DEV.
+
 ## Running experiments
 
 1. Place your raw CSV (e.g., `nba_minutes.csv`) in `data/raw/`.
