@@ -67,7 +67,7 @@ def _resolve_run_id(day_dir: Path, run_id: str | None) -> str:
     latest = _read_latest_run_id(day_dir)
     if latest:
         return latest
-    raise typer.BadParameter(f"--run-id is required (no {LATEST_POINTER} under {day_dir})", param_name="run_id")
+    raise typer.BadParameter(f"--run-id is required (no {LATEST_POINTER} under {day_dir})", param_hint="run_id")
 
 
 def _write_latest_pointer(day_dir: Path, *, run_id: str, run_as_of_ts: pd.Timestamp) -> None:
@@ -127,7 +127,7 @@ def main(
     resolved_run_id = _resolve_run_id(minutes_day_dir, run_id)
     minutes_path = minutes_day_dir / f"run={resolved_run_id}" / FEATURE_FILENAME
     if not minutes_path.exists():
-        raise typer.BadParameter(f"Minutes features not found at {minutes_path}", param_name="minutes_features_root")
+        raise typer.BadParameter(f"Minutes features not found at {minutes_path}", param_hint="minutes_features_root")
 
     cfg = _load_json(Path(rotation_config))
     allow_priors_fallback = bool(cfg.get("allow_priors_fallback", False))
@@ -139,7 +139,7 @@ def main(
         resolved_model_dir = Path(str(cfg["model_dir"])).expanduser()
     if not resolved_model_dir or str(resolved_model_dir).strip() in {"", "."}:
         raise typer.BadParameter(
-            "--model-dir is required (or set ROTATION_SET_MODEL_DIR / config.model_dir)", param_name="model_dir"
+            "--model-dir is required (or set ROTATION_SET_MODEL_DIR / config.model_dir)", param_hint="model_dir"
         )
     spec = RotationSetMinutesV1FeatureSpec.load(resolved_model_dir)
 

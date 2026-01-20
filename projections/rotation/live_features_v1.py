@@ -537,6 +537,36 @@ def build_rotation_set_minutes_v1_features(
     if missing:
         raise RotationLiveFeaturesError(f"Missing required features after build (n={len(missing)}): {missing}")
 
+    # ---------------------------------------------------------------------------
+    # Sanity check: warn if starter features are degenerate (would cause flattening)
+    # This is a soft check - log warnings but do not fail production.
+    # ---------------------------------------------------------------------------
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    for team_id, grp in work.groupby("team_id", sort=False):
+        n_players = len(grp)
+        if n_players == 0:
+            continue
+        
+        # Check recent_start_pct_10: should NOT be all zeros for a team-game
+        if "recent_start_pct_10" in grp.columns:
+            rsp = pd.to_numeric(grp["recent_start_pct_10"], errors="coerce").fillna(0)
+            if n_players > 5 and (rsp == 0).sum() >= n_players * 0.9:
+                logger.warning(
+                    f"[rotation_features] team_id={team_id}: recent_start_pct_10 is ~100%% zeros "
+                    f"({int((rsp==0).sum())}/{n_players}). Model may flatten minutes distribution."
+                )
+        
+        # Check is_projected_starter: sum should be ~5 (one lineup)
+        if "is_projected_starter" in grp.columns:
+            proj_sum = grp["is_projected_starter"].sum()
+            if proj_sum == 0:
+                logger.warning(
+                    f"[rotation_features] team_id={team_id}: is_projected_starter sum=0. "
+                    "Model has no starter signal."
+                )
+    
     ordered = [*KEY_COLS, *keep_cols, *feature_columns]
     return RotationSetMinutesV1LiveFeaturesResult(
         features=work.loc[:, ordered].copy(),
