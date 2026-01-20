@@ -1,0 +1,31 @@
+[Unit]
+Description=DEV Minutes dashboard API + static assets (baseline-only, port 8502)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# DEV: Use the development repo, not prod
+WorkingDirectory=/home/daniel/projects/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+Environment=MINUTES_DAILY_ROOT=/home/daniel/projections-data/artifacts/minutes_v1/daily
+Environment=MINUTES_DASHBOARD_DIST=/home/daniel/projects/projections-v2/web/minutes-dashboard/dist
+User=daniel
+Group=daniel
+
+# HARDENING: Kill any rogue process on port 8502 before starting
+# This prevents "address already in use" errors from orphaned dev servers
+ExecStartPre=/bin/bash -c 'fuser -k 8502/tcp 2>/dev/null || true; sleep 1'
+
+# DEV port 8502 (prod uses 8501)
+ExecStart=/home/daniel/.local/bin/uv run uvicorn projections.api.minutes_api:create_app --host 0.0.0.0 --port 8502
+Restart=always
+RestartSec=5
+Nice=5
+
+# Prevent restart loops - fail permanently after 5 failures in 60 seconds
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target

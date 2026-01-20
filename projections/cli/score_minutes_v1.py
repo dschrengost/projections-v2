@@ -426,7 +426,7 @@ def _load_bundle(bundle_dir: Path) -> dict | MinuteShareArtifacts | RotationShar
     raise typer.BadParameter(
         f"Bundle missing model artifact at {bundle_dir} "
         "(checked lgbm_quantiles.joblib, rotation_share_model.joblib, minute_share_model.joblib)",
-        param_name="bundle_dir",
+        param_hint="bundle_dir",
     )
 
 
@@ -1825,7 +1825,7 @@ def score_minutes_range_to_parquet(
     if normalized_mode != "historical":
         raise ValueError("score_minutes_range_to_parquet currently supports historical mode only.")
     if run_id is not None:
-        raise typer.BadParameter("--run-id is only valid when --mode live.", param_name="run_id")
+        raise typer.BadParameter("--run-id is only valid when --mode live.", param_hint="run_id")
 
     promotion_ctx = _load_promotion_context(
         enabled=promotion_prior_enabled,
@@ -2337,7 +2337,7 @@ def main(
             except (json.JSONDecodeError, TypeError, ValueError):
                 run_summary = None
     elif run_id is not None:
-        raise typer.BadParameter("--run-id is only valid when --mode live.", param_name="run_id")
+        raise typer.BadParameter("--run-id is only valid when --mode live.", param_hint="run_id")
 
     run_as_of_datetime = run_as_of_ts_value.to_pydatetime() if run_as_of_ts_value is not None else None
     if normalized_mode == "live":

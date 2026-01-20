@@ -1,5 +1,5 @@
 {
-  "enabled": true,
+  "enabled": false,
   "model_dir": "artifacts/rotation_set_minutes_v1/rotation_set_minutes_v1_settransformer_20260115T153721Z",
   "blend_weight": 0.2,
   "injury_coverage_threshold": 0.5,
