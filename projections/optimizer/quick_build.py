@@ -538,6 +538,79 @@ class QuickBuildResult:
     config: QuickBuildConfig
 
 
+@dataclass
+class WorldSampleConfig:
+    """Configuration for world-sampling objective mode.
+
+    When enabled, each solve cycle samples a random world from the worlds_matrix
+    and uses that world's per-player FPTS as the objective coefficients, instead
+    of the mean projection.
+
+    Attributes:
+        enabled: Whether world sampling is active.
+        seed: RNG seed for reproducibility (None = random).
+        with_replacement: If True, same world can be sampled multiple times.
+        worlds_matrix: (n_worlds, n_players) FPTS matrix (numpy array).
+        player_index: Mapping from player_id (str) to column index in worlds_matrix.
+        mean_projections: Fallback projections for players not in worlds_matrix.
+    """
+
+    enabled: bool = False
+    seed: Optional[int] = None
+    with_replacement: bool = True
+    # These are set at runtime after loading worlds
+    worlds_matrix: Any = None  # np.ndarray, but avoid type import
+    player_index: Optional[dict] = None
+    mean_projections: Optional[dict] = None
+    _rng: Any = field(default=None, repr=False, compare=False)
+    _sampled_indices: List[int] = field(default_factory=list, repr=False, compare=False)
+    _warned_missing: bool = field(default=False, repr=False, compare=False)
+
+    def get_rng(self) -> Any:
+        """Get or create the RNG instance."""
+        if self._rng is None:
+            import numpy as np
+            self._rng = np.random.default_rng(self.seed)
+        return self._rng
+
+    def sample_world_index(self) -> int:
+        """Sample a world index and record it for diagnostics."""
+        if self.worlds_matrix is None:
+            raise ValueError("worlds_matrix not set")
+        n_worlds = self.worlds_matrix.shape[0]
+        rng = self.get_rng()
+        idx = int(rng.integers(0, n_worlds))
+        self._sampled_indices.append(idx)
+        return idx
+
+    def get_world_projections(self, world_idx: int, player_ids: List[str]) -> dict:
+        """Get projection dict for a specific world, with fallback for missing players.
+
+        Returns:
+            Dict mapping player_id -> projection value for that world.
+        """
+        if self.worlds_matrix is None or self.player_index is None:
+            raise ValueError("worlds_matrix or player_index not set")
+
+        projections = {}
+        for pid in player_ids:
+            col_idx = self.player_index.get(str(pid))
+            if col_idx is not None:
+                projections[pid] = float(self.worlds_matrix[world_idx, col_idx])
+            elif self.mean_projections and pid in self.mean_projections:
+                projections[pid] = float(self.mean_projections[pid])
+                if not self._warned_missing:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "WorldSample: player %s not in worlds_matrix, using mean projection",
+                        pid,
+                    )
+                    self._warned_missing = True
+            else:
+                projections[pid] = 0.0
+        return projections
+
+
 def _get_value(src: Any, key: str, default: Any = None) -> Any:
     if hasattr(src, key):
         return getattr(src, key)
@@ -1013,8 +1086,18 @@ def _worker_main(
     *,
     use_central_dedup: bool = False,
     no_solution_cycles: "mp.Value | None" = None,
+    world_sample: "WorldSampleConfig | None" = None,
 ) -> None:  # pragma: no cover - exercised via integration
     logger = logging.getLogger("optimizer.quick_build.worker")
+
+    # Log world sample mode if enabled
+    if world_sample and world_sample.enabled:
+        n_worlds = world_sample.worlds_matrix.shape[0] if world_sample.worlds_matrix is not None else 0
+        logger.info(
+            "[quick-build] worker seed=%s: world_sample mode enabled, n_worlds=%d, seed=%s",
+            seed, n_worlds, world_sample.seed,
+        )
+
     try:
         artifacts = build_cpsat_model(
             spec,
@@ -1084,12 +1167,48 @@ def _worker_main(
 
     total_emitted = 0
     empty_cycles = 0
+    solve_cycle = 0
     while not stop_event.is_set():
         remaining_target = None
         if cfg.per_build > 0:
             remaining_target = max(cfg.per_build - total_emitted, 0)
             if remaining_target == 0:
                 break
+
+        # World sampling: update objective coefficients per solve cycle
+        if world_sample and world_sample.enabled and world_sample.worlds_matrix is not None:
+            try:
+                world_idx = world_sample.sample_world_index()
+                world_projs = world_sample.get_world_projections(world_idx, artifacts.player_ids)
+
+                # Build new objective weights from sampled world projections
+                SCALE = 1000
+                new_obj_terms = []
+                for pid, var in zip(artifacts.player_ids, artifacts.player_vars):
+                    proj = world_projs.get(pid, 0.0)
+                    # Apply jitter for diversity within same world
+                    if cfg.jitter > 0:
+                        import hashlib
+                        import random as _random
+                        key = f"{pid}|{seed}|{solve_cycle}|ws_jitter"
+                        digest = hashlib.blake2b(key.encode("utf-8"), digest_size=8).digest()
+                        rnd = _random.Random(int.from_bytes(digest, "big"))
+                        proj += rnd.uniform(-1.0, 1.0) * cfg.jitter
+                    new_obj_terms.append(int(round(max(proj, 0.0) * SCALE)) * var)
+
+                # Clear old objective and set new one
+                model.ClearObjective()
+                model.Maximize(sum(new_obj_terms))
+
+                if solve_cycle == 0:
+                    logger.info(
+                        "[quick-build] worker seed=%s: first world sample idx=%d",
+                        seed, world_idx,
+                    )
+            except Exception as exc:
+                logger.warning("[quick-build] worker seed=%s: world sample failed: %s", seed, exc)
+
+        solve_cycle += 1
 
         cb = PoolingCallback(
             player_vars=player_vars,
@@ -1171,8 +1290,18 @@ def quick_build_pool(
     constraints: Any,
     qb_cfg: QuickBuildConfig,
     run_id: Optional[str] = None,
+    world_sample: Optional[WorldSampleConfig] = None,
 ) -> QuickBuildResult:
-    """Generate a deduped pool of lineup player-id tuples via QuickBuild workers."""
+    """Generate a deduped pool of lineup player-id tuples via QuickBuild workers.
+
+    Parameters:
+        slate: Player pool data for the slate.
+        site: DFS site (e.g., 'dk').
+        constraints: Optimization constraints.
+        qb_cfg: QuickBuild configuration.
+        run_id: Optional run identifier.
+        world_sample: Optional world sampling config for per-lineup world optimization.
+    """
 
     if not isinstance(qb_cfg, QuickBuildConfig):
         raise TypeError("qb_cfg must be a QuickBuildConfig instance")
@@ -1315,6 +1444,7 @@ def quick_build_pool(
                 "cross_bloom": None,  # handled in collector
                 "use_central_dedup": True,
                 "no_solution_cycles": no_solution_cycles,
+                "world_sample": world_sample,
             },
             daemon=True,
         )

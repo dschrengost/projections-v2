@@ -153,6 +153,9 @@ class QuickBuildRequest(BaseModel):
     use_user_overrides: bool = Field(default=False, description="Use user projection overrides ('My Proj')")
     ownership_mode: str = Field(default="renormalize", description="Ownership mode: raw or renormalize")
 
+    # World sampling mode
+    world_sample_enabled: bool = Field(default=False, description="Optimize against sampled worlds instead of mean projections")
+
 
 class JobStatus(BaseModel):
     """QuickBuild job status."""

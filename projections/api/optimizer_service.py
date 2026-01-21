@@ -30,6 +30,7 @@ from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
 from projections.optimizer.quick_build import (
     QuickBuildConfig,
     QuickBuildResult,
+    WorldSampleConfig,
     quick_build_pool,
 )
 from projections.optimizer.lineup_sim_stats import (
@@ -1262,12 +1263,38 @@ def run_quick_build(
         set_active_late_swap_bonus(late_swap_cfg)
 
         logger.info(
-            "Starting QuickBuild job %s: max_pool=%d, builds=%d, late_swap=%s",
+            "Starting QuickBuild job %s: max_pool=%d, builds=%d, late_swap=%s, world_sample=%s",
             job.job_id,
             qb_cfg.max_pool,
             qb_cfg.worker_count,
             late_swap_cfg.bonus_per_hour if late_swap_cfg else "off",
+            "on" if job.config.get("world_sample_enabled") else "off",
         )
+
+        # Build WorldSampleConfig if enabled
+        world_sample_cfg = None
+        if job.config.get("world_sample_enabled", False):
+            try:
+                from projections.contest_sim.contest_sim_service import load_worlds_matrix
+                worlds_matrix, player_index = load_worlds_matrix(job.game_date, get_data_root())
+                # Build mean projections fallback from player pool
+                mean_projections = {str(p.get("player_id")): float(p.get("proj", 0)) for p in player_pool}
+                world_sample_cfg = WorldSampleConfig(
+                    enabled=True,
+                    seed=None,  # Random seed for diversity
+                    with_replacement=True,
+                    worlds_matrix=worlds_matrix,
+                    player_index=player_index,
+                    mean_projections=mean_projections,
+                )
+                logger.info(
+                    "WorldSample configured: n_worlds=%d, n_players=%d",
+                    worlds_matrix.shape[0],
+                    worlds_matrix.shape[1],
+                )
+            except Exception as exc:
+                logger.warning("Failed to load worlds_matrix for world sampling: %s", exc)
+                world_sample_cfg = None
 
         try:
             result = quick_build_pool(
@@ -1276,6 +1303,7 @@ def run_quick_build(
                 constraints=constraints,
                 qb_cfg=qb_cfg,
                 run_id=job.job_id[:8],
+                world_sample=world_sample_cfg,
             )
         finally:
             # Clear global state after build

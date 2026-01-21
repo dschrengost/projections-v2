@@ -82,6 +82,7 @@ export default function OptimizerPage() {
     const [randomnessPct, setRandomnessPct] = useState(0)
     const [useUserOverrides, setUseUserOverrides] = useState(false)
     const [lateSwapEnabled, setLateSwapEnabled] = useState(false)
+    const [worldSampleEnabled, setWorldSampleEnabled] = useState(false)
 
     const overridesRef = useRef(overrides)
     const savedOverridesRef = useRef(savedOverrides)
@@ -615,6 +616,7 @@ export default function OptimizerPage() {
                 randomness_pct: randomnessPct > 0 && hasStddev ? randomnessPct : undefined,
                 use_user_overrides: useUserOverrides,
                 late_swap_enabled: lateSwapEnabled,
+                world_sample_enabled: worldSampleEnabled,
             }
             const job = await startBuild(request)
             setCurrentJob(job)
@@ -1125,6 +1127,26 @@ export default function OptimizerPage() {
                             {lateSwapEnabled
                                 ? 'Favors later games for swap optionality'
                                 : 'No late swap preference'}
+                        </small>
+                    </div>
+
+                    {/* World Sample Toggle */}
+                    <div className="override-toggle">
+                        <label className="toggle-switch">
+                            <input
+                                type="checkbox"
+                                checked={worldSampleEnabled}
+                                onChange={e => setWorldSampleEnabled(e.target.checked)}
+                            />
+                            <span className="toggle-slider"></span>
+                            <span className="toggle-label">
+                                {worldSampleEnabled ? 'World Sample Mode' : 'Mean Projections'}
+                            </span>
+                        </label>
+                        <small className="hint">
+                            {worldSampleEnabled
+                                ? 'Optimizes against random sampled worlds'
+                                : 'Uses mean projections for optimization'}
                         </small>
                     </div>
 

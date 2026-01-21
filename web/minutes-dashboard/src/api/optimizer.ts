@@ -66,6 +66,7 @@ export interface QuickBuildRequest {
     randomness_pct?: number | null
     use_user_overrides?: boolean
     ownership_mode?: string
+    world_sample_enabled?: boolean
 }
 
 export interface JobStatus {
