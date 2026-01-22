@@ -16,6 +16,7 @@ import typer
 
 from projections.fpts_v2.scoring import compute_dk_fpts
 from projections.paths import data_path, get_project_root
+from projections.sim_v2.bench_zero_mixture import apply_bench_zero_mixture
 from projections.sim_v2.config import DEFAULT_PROFILES_PATH, UsageSharesConfig, load_sim_v2_profile
 from projections.sim_v2.game_factor import apply_game_factor
 from projections.sim_v2.game_script import GameScriptConfig, classify_script, sample_minutes_with_scripts
@@ -2425,6 +2426,31 @@ def main(
                         )
                 # Defense-in-depth: ensure inactive players are hard-zero before reconciliation.
                 minutes_worlds = minutes_worlds * active_mask.astype(float)
+
+                # Optional bench/DNP mass-at-zero mixture: drop low-minute players to 0 with p_zero,
+                # then let reconciliation redistribute minutes among remaining active players.
+                bz_cfg = getattr(profile_cfg, "bench_zero_mixture", None)
+                if bz_cfg is not None and getattr(bz_cfg, "enabled", False) and group_map:
+                    stats = apply_bench_zero_mixture(
+                        minutes_worlds,
+                        active_mask,
+                        group_map=group_map,
+                        minutes_target=minutes_sim_base,
+                        play_prob=play_prob_arr,
+                        minutes_threshold=float(getattr(bz_cfg, "minutes_threshold", 8.0)),
+                        p_zero_base=float(getattr(bz_cfg, "p_zero_base", 0.25)),
+                        p_zero_slope=float(getattr(bz_cfg, "p_zero_slope", 0.0)),
+                        cap_minutes=MINUTES_CAP_SIM_V3,
+                        total_minutes=TEAM_MINUTES_TARGET,
+                        rng=rng,
+                    )
+                    minutes_worlds = minutes_worlds * active_mask.astype(float)
+                    if sim_audit and chunk_start == 0:
+                        typer.echo(
+                            f"[sim_v2][audit] bench_zero_mixture: dropped={stats.n_player_worlds_dropped} "
+                            f"restored={stats.n_player_worlds_restored_for_feasibility} "
+                            f"min_active_needed={stats.min_active_needed}"
+                        )
 
                 # After masking, reconcile active-only minutes to TEAM_MINUTES_TARGET per (team, world),
                 # then apply a single cap and renormalize remaining mass without flattening.

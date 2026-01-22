@@ -76,6 +76,16 @@ class GameFactorConfig:
 
 
 @dataclass
+class BenchZeroMixtureConfig:
+    """Config for a mass-at-zero mixture for low-minute players."""
+
+    enabled: bool = False
+    minutes_threshold: float = 8.0
+    p_zero_base: float = 0.25
+    p_zero_slope: float = 0.5
+
+
+@dataclass
 class UsageSharesConfig:
     """Config for stochastic usage share allocation within teams."""
 
@@ -146,6 +156,8 @@ class SimV2Profile:
     minutes_mean_recentering: MinutesMeanRecenteringConfig = field(default_factory=MinutesMeanRecenteringConfig)
     # Optional per-game latent factor (FPTS-level) to induce cross-team correlation.
     game_factor: GameFactorConfig = field(default_factory=GameFactorConfig)
+    # Optional mass-at-zero mixture for low-minute players (applied pre-reconcile).
+    bench_zero_mixture: BenchZeroMixtureConfig = field(default_factory=BenchZeroMixtureConfig)
     # Optional explicit minutes bundle path (overrides minutes_run_id resolution)
     minutes_bundle_path: Optional[str] = None
 
@@ -313,6 +325,14 @@ def load_sim_v2_profile(
         beta_basis=str(game_factor_cfg_raw.get("beta_basis", "minutes_share")),
     )
 
+    bench_zero_cfg_raw = config.get("bench_zero_mixture", {}) or {}
+    bench_zero_mixture = BenchZeroMixtureConfig(
+        enabled=bool(bench_zero_cfg_raw.get("enabled", False)),
+        minutes_threshold=float(bench_zero_cfg_raw.get("minutes_threshold", 8.0)),
+        p_zero_base=float(bench_zero_cfg_raw.get("p_zero_base", 0.25)),
+        p_zero_slope=float(bench_zero_cfg_raw.get("p_zero_slope", 0.5)),
+    )
+
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
     use_game_scripts = bool(game_script_cfg.get("enabled", False))
@@ -374,6 +394,7 @@ def load_sim_v2_profile(
         pre_sim_reconcile=pre_sim_reconcile,
         minutes_mean_recentering=minutes_mean_recentering,
         game_factor=game_factor,
+        bench_zero_mixture=bench_zero_mixture,
         minutes_bundle_path=minutes_bundle_path,
     )
 
