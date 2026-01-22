@@ -26,6 +26,7 @@ from projections.sim_v2.minutes_noise import (
 )
 from projections.sim_v2.minutes_stabilization import (
     apply_pre_sim_qp_reconcile,
+    reconcile_team_minutes_active_softmax,
     sample_minutes_noise_per_world,
 )
 from projections.sim_v2.noise import load_rates_noise_params
@@ -33,6 +34,8 @@ from projections.sim_v2.noise import load_rates_noise_params
 app = typer.Typer(add_completion=False)
 
 DEFAULT_MAX_ROTATION_SIZE = 10
+TEAM_MINUTES_TARGET = 240.0
+MINUTES_CAP_SIM_V3 = 41.0
 
 
 def _build_implied_team_points(
@@ -1669,6 +1672,7 @@ def main(
     ),
 ) -> None:
     profile_cfg = load_sim_v2_profile(profile=profile, profiles_path=profiles_path)
+    sim_audit = os.environ.get("PROJECTIONS_SIM_AUDIT", "0").strip() == "1"
 
     def _resolve(value, override, label):
         if override is not None and override != value:
@@ -2233,6 +2237,12 @@ def main(
                     f"min_minutes={mnc.min_minutes_for_noise} cap_abs={mnc.cap_abs}{extra}"
                 )
 
+            audit_team_sum_errs: list[np.ndarray] = []
+            audit_cap_bind_team_worlds = 0
+            audit_cap_infeasible_team_worlds = 0
+            audit_all_inactive_team_worlds = 0
+            audit_total_team_worlds = 0
+
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
                 rng = np.random.default_rng(date_seed + chunk_start)
@@ -2335,9 +2345,8 @@ def main(
                                         f"top8_share_delta={post_m['top8_share']-base_m['top8_share']:.3f})",
                                         err=True,
                                     )
-                    # Zero out inactive players' minutes
+                    # Zero out inactive players' minutes (reconciled after masking below).
                     minutes_worlds = minutes_worlds * active_mask.astype(float)
-                    # No further reconciliation needed - team-240 already enforced
                 elif use_game_scripts and game_script_config is not None:
                     minutes_worlds = sample_minutes_with_scripts(
                         minutes_p10=gs_minutes_p10,
@@ -2412,6 +2421,49 @@ def main(
                             rotation_prob=rot_prob_arr if "rotation_prob" in mu_df.columns else None,
                             protected_rotation_size=getattr(profile_cfg, "protected_rotation_size", None),
                         )
+                # Defense-in-depth: ensure inactive players are hard-zero before reconciliation.
+                minutes_worlds = minutes_worlds * active_mask.astype(float)
+
+                # After masking, reconcile active-only minutes to TEAM_MINUTES_TARGET per (team, world),
+                # then apply a single cap and renormalize remaining mass without flattening.
+                cap_bind_chunk = 0
+                cap_infeasible_chunk = 0
+                all_inactive_chunk = 0
+                for _, idxs in group_map.items():
+                    reconciled, stats = reconcile_team_minutes_active_softmax(
+                        minutes_worlds[:, idxs],
+                        active_mask[:, idxs],
+                        total_minutes=TEAM_MINUTES_TARGET,
+                        eps=1e-6,
+                        cap_minutes=MINUTES_CAP_SIM_V3,
+                        tol=1e-6,
+                    )
+                    minutes_worlds[:, idxs] = reconciled
+                    cap_bind_chunk += int(stats["n_cap_bind_rows"])
+                    cap_infeasible_chunk += int(stats["n_cap_infeasible_rows"])
+                    all_inactive_chunk += int(stats["n_all_inactive"])
+
+                audit_cap_bind_team_worlds += cap_bind_chunk
+                audit_cap_infeasible_team_worlds += cap_infeasible_chunk
+                audit_all_inactive_team_worlds += all_inactive_chunk
+                audit_total_team_worlds += int(len(group_map)) * int(chunk_size)
+
+                if sim_audit and group_map:
+                    err_chunks: list[np.ndarray] = []
+                    for _, idxs in group_map.items():
+                        err_chunks.append(np.abs(minutes_worlds[:, idxs].sum(axis=1) - TEAM_MINUTES_TARGET))
+                    err_vec = np.concatenate(err_chunks) if err_chunks else np.zeros(0, dtype=float)
+                    audit_team_sum_errs.append(err_vec)
+                    if chunk_start == 0:
+                        max_err = float(err_vec.max()) if err_vec.size else 0.0
+                        p99_err = float(np.quantile(err_vec, 0.99)) if err_vec.size else 0.0
+                        n_bad = int((err_vec > 1e-3).sum())
+                        typer.echo(
+                            f"[sim_v2][audit] minutes_team_sum_err: max={max_err:.6g} p99={p99_err:.6g} "
+                            f"n_bad_gt_1e-3={n_bad} cap_bind_team_worlds={cap_bind_chunk} "
+                            f"cap_infeasible_team_worlds={cap_infeasible_chunk} all_inactive_team_worlds={all_inactive_chunk}"
+                        )
+
                 minutes_world_samples.append(minutes_worlds)
 
                 stat_totals: dict[str, np.ndarray] = {}
@@ -2546,6 +2598,19 @@ def main(
                 for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov", "fga2", "fga3", "fta"):
                     if stat_name in stat_box:
                         stat_world_samples.setdefault(stat_name, []).append(stat_box[stat_name])
+
+            if sim_audit and audit_total_team_worlds > 0 and audit_team_sum_errs:
+                err_all = np.concatenate(audit_team_sum_errs)
+                max_err = float(err_all.max()) if err_all.size else 0.0
+                p99_err = float(np.quantile(err_all, 0.99)) if err_all.size else 0.0
+                n_bad = int((err_all > 1e-3).sum())
+                typer.echo(
+                    f"[sim_v2][audit] minutes_team_sum_err (all chunks): max={max_err:.6g} p99={p99_err:.6g} "
+                    f"n_bad_gt_1e-3={n_bad}/{audit_total_team_worlds} "
+                    f"cap_bind_team_worlds={audit_cap_bind_team_worlds}/{audit_total_team_worlds} "
+                    f"cap_infeasible_team_worlds={audit_cap_infeasible_team_worlds}/{audit_total_team_worlds} "
+                    f"all_inactive_team_worlds={audit_all_inactive_team_worlds}/{audit_total_team_worlds}"
+                )
 
             # Aggregate all worlds in-memory and compute CONDITIONAL quantiles
             # (only count worlds where player is active)
