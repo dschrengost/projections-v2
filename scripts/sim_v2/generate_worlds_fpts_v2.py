@@ -1676,6 +1676,7 @@ def main(
 ) -> None:
     profile_cfg = load_sim_v2_profile(profile=profile, profiles_path=profiles_path)
     sim_audit = os.environ.get("PROJECTIONS_SIM_AUDIT", "0").strip() == "1"
+    dev_asserts = os.environ.get("PROJECTIONS_SIM_DEV_ASSERTS", "0").strip() == "1"
 
     def _resolve(value, override, label):
         if override is not None and override != value:
@@ -2264,7 +2265,6 @@ def main(
                     # Only apply eligible_flag filtering when NOT preserving input rotation
                     # sim_v3 with preserve_input_rotation=True skips this: RotAlloc already handled rotation
                     active_mask = active_mask & np.broadcast_to(eligible_flag_arr[None, :], active_mask.shape)
-                active_mask_samples.append(active_mask)
 
 
                 # 2. Sample minutes based on game script OR structured minutes noise
@@ -2512,6 +2512,24 @@ def main(
                             f"max_abs_err_after={max_abs_after:.3f}"
                         )
 
+                # DEV-ONLY integrity asserts: after world generation (minutes sampling + masking + reconcile),
+                # enforce that minutes are non-negative and each (team, world) sums to ~240 before audits.
+                if dev_asserts and group_map:
+                    count_negative_minutes = int((minutes_worlds < 0.0).sum())
+                    if count_negative_minutes != 0:
+                        raise AssertionError(f"[sim_v2][dev_assert] negative minutes found: n={count_negative_minutes}")
+
+                    team_sums = np.stack(
+                        [minutes_worlds[:, idxs].sum(axis=1, dtype=float) for idxs in group_map.values()],
+                        axis=1,
+                    )  # (W, T)
+                    max_abs_team_sum_dev = float(np.max(np.abs(team_sums - TEAM_MINUTES_TARGET)))
+                    if max_abs_team_sum_dev >= 1e-4:
+                        raise AssertionError(
+                            f"[sim_v2][dev_assert] team-world minutes sum deviates from {TEAM_MINUTES_TARGET}: "
+                            f"max_abs_dev={max_abs_team_sum_dev:.6g}"
+                        )
+
                 audit_cap_bind_team_worlds += cap_bind_chunk
                 audit_cap_infeasible_team_worlds += cap_infeasible_chunk
                 audit_all_inactive_team_worlds += all_inactive_chunk
@@ -2533,6 +2551,10 @@ def main(
                             f"cap_infeasible_team_worlds={cap_infeasible_chunk} all_inactive_team_worlds={all_inactive_chunk}"
                         )
 
+                # IMPORTANT: Snapshot the final active mask AFTER any in-place mutations (e.g. bench_zero_mixture drops).
+                # Audits compute conditional moments like E[minutes | plays] and must use the same "plays" mask that
+                # produced the realized minutes/stats in this chunk.
+                active_mask_samples.append(active_mask.copy())
                 minutes_world_samples.append(minutes_worlds)
 
                 stat_totals: dict[str, np.ndarray] = {}
@@ -2812,17 +2834,80 @@ def main(
                 
                 # Compute UNCONDITIONAL statistics (include inactive worlds as 0).
                 # This is the required semantics for any decision metric: DNP => 0.
-                fpts_mean_uncond = all_fpts.mean(axis=0, dtype=float)
-                fpts_std_uncond = all_fpts.std(axis=0, ddof=0, dtype=float)
-                fpts_quantiles_uncond = np.percentile(
-                    all_fpts, [q * 100 for q in quantiles], axis=0
-                ).astype(float)
-                active_rate_sim = (active_counts / float(max(1, n_worlds_total))).astype(float)
+                use_play_prob_masking = getattr(profile_cfg, "use_play_prob_masking", True)
+                if (not use_play_prob_masking) and ("play_prob" in mu_df.columns):
+                    # When availability masking is disabled, worlds are generated conditional-on-playing.
+                    # Still emit unconditional moments by mixing with a point mass at 0 using play_prob.
+                    p_play = np.clip(play_prob_arr.astype(float), 0.0, 1.0)
+                    active_rate_sim = p_play
+
+                    fpts_mean_uncond = fpts_mean * p_play
+                    fpts_second_moment_cond = (fpts_std**2) + (fpts_mean**2)
+                    fpts_var_uncond = p_play * fpts_second_moment_cond - (fpts_mean_uncond**2)
+                    fpts_std_uncond = np.sqrt(np.maximum(fpts_var_uncond, 0.0))
+
+                    # Unconditional quantiles for a (1-p)*delta_0 + p*F_cond mixture.
+                    q_levels = np.asarray(quantiles, dtype=float)
+                    q0 = 1.0 - p_play  # mass at 0
+                    q_adj = np.where(p_play > 0, (q_levels[:, None] - q0[None, :]) / p_play[None, :], 0.0)
+                    q_adj = np.clip(q_adj, q_levels.min(), q_levels.max())
+                    # If the desired quantile falls into the point mass at 0, the mixture quantile is 0.
+                    in_zero = q_levels[:, None] <= q0[None, :]
+
+                    # Linear interpolation of conditional quantiles on the precomputed grid.
+                    grid = q_levels
+                    grid_q = fpts_quantiles  # (Q, P)
+                    idx_hi = np.searchsorted(grid, q_adj, side="left")
+                    idx_hi = np.clip(idx_hi, 0, len(grid) - 1)
+                    idx_lo = np.clip(idx_hi - 1, 0, len(grid) - 1)
+                    x0 = grid[idx_lo]
+                    x1 = grid[idx_hi]
+                    y0 = np.take_along_axis(grid_q, idx_lo, axis=0)
+                    y1 = np.take_along_axis(grid_q, idx_hi, axis=0)
+                    t = np.divide(q_adj - x0, x1 - x0, out=np.zeros_like(q_adj), where=(x1 - x0) > 0)
+                    fpts_quantiles_uncond = np.where(in_zero, 0.0, y0 + t * (y1 - y0)).astype(float)
+                else:
+                    fpts_mean_uncond = all_fpts.mean(axis=0, dtype=float)
+                    fpts_std_uncond = all_fpts.std(axis=0, ddof=0, dtype=float)
+                    fpts_quantiles_uncond = np.percentile(
+                        all_fpts, [q * 100 for q in quantiles], axis=0
+                    ).astype(float)
+                    active_rate_sim = (active_counts / float(max(1, n_worlds_total))).astype(float)
 
                 if all_minutes is not None:
-                    minutes_mean_uncond = all_minutes.mean(axis=0, dtype=float)
-                    minutes_std_uncond = all_minutes.std(axis=0, ddof=0, dtype=float)
-                    minutes_quantiles_uncond = np.percentile(all_minutes, [10, 50, 90], axis=0).astype(float)
+                    if (not use_play_prob_masking) and ("play_prob" in mu_df.columns):
+                        p_play = np.clip(play_prob_arr.astype(float), 0.0, 1.0)
+                        minutes_mean_uncond = minutes_mean * p_play
+                        minutes_second_moment_cond = (minutes_std**2) + (minutes_mean**2)
+                        minutes_var_uncond = p_play * minutes_second_moment_cond - (minutes_mean_uncond**2)
+                        minutes_std_uncond = np.sqrt(np.maximum(minutes_var_uncond, 0.0))
+
+                        # Mixture quantiles using the conditional 10/50/90 grid.
+                        levels = np.asarray([0.10, 0.50, 0.90], dtype=float)
+                        q_levels = levels
+                        q0 = 1.0 - p_play
+                        q_adj = np.where(p_play > 0, (q_levels[:, None] - q0[None, :]) / p_play[None, :], 0.0)
+                        q_adj = np.clip(q_adj, q_levels.min(), q_levels.max())
+                        in_zero = q_levels[:, None] <= q0[None, :]
+
+                        if minutes_quantiles is None:
+                            minutes_quantiles_uncond = np.zeros((3, n_players), dtype=float)
+                        else:
+                            grid = q_levels
+                            grid_q = minutes_quantiles  # (3, P)
+                            idx_hi = np.searchsorted(grid, q_adj, side="left")
+                            idx_hi = np.clip(idx_hi, 0, len(grid) - 1)
+                            idx_lo = np.clip(idx_hi - 1, 0, len(grid) - 1)
+                            x0 = grid[idx_lo]
+                            x1 = grid[idx_hi]
+                            y0 = np.take_along_axis(grid_q, idx_lo, axis=0)
+                            y1 = np.take_along_axis(grid_q, idx_hi, axis=0)
+                            t = np.divide(q_adj - x0, x1 - x0, out=np.zeros_like(q_adj), where=(x1 - x0) > 0)
+                            minutes_quantiles_uncond = np.where(in_zero, 0.0, y0 + t * (y1 - y0)).astype(float)
+                    else:
+                        minutes_mean_uncond = all_minutes.mean(axis=0, dtype=float)
+                        minutes_std_uncond = all_minutes.std(axis=0, ddof=0, dtype=float)
+                        minutes_quantiles_uncond = np.percentile(all_minutes, [10, 50, 90], axis=0).astype(float)
                 else:
                     minutes_mean_uncond = None
                     minutes_std_uncond = None

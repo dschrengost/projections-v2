@@ -9,7 +9,12 @@ from scripts.sim_v2.generate_worlds_fpts_v2 import main as generate_worlds_main
 
 
 def _write_minutes_projection(root: Path, game_date: str) -> None:
-    out_dir = root / "gold" / "projections_minutes_v1" / f"game_date={game_date}"
+    base_dir = root / "gold" / "projections_minutes_v1" / f"game_date={game_date}"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    # generate_worlds_fpts_v2 resolves minutes_v1 via latest_run.json when run_id is not provided.
+    run_id = "test"
+    (base_dir / "latest_run.json").write_text(json.dumps({"run_id": run_id}), encoding="utf-8")
+    out_dir = base_dir / f"run={run_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = [
         {
@@ -122,4 +127,3 @@ def test_stat_sampling_produces_nontrivial_upper_tail_for_low_mean_counts(tmp_pa
 
     # For mu~0.4 steals, Poisson p95 is 2 steals => 4 DK points from steals alone.
     assert float(df["dk_fpts_p95"].iloc[0]) >= 4.0
-

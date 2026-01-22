@@ -32,7 +32,12 @@ def _write_profiles(path: Path) -> None:
 
 
 def _write_minutes_projection(root: Path, game_date: str) -> None:
-    out_dir = root / "gold" / "projections_minutes_v1" / f"game_date={game_date}"
+    base_dir = root / "gold" / "projections_minutes_v1" / f"game_date={game_date}"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    # generate_worlds_fpts_v2 resolves minutes_v1 via latest_run.json when run_id is not provided.
+    run_id = "test"
+    (base_dir / "latest_run.json").write_text(json.dumps({"run_id": run_id}), encoding="utf-8")
+    out_dir = base_dir / f"run={run_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = [
         {
@@ -142,4 +147,3 @@ def test_sim_v2_outputs_availability_weighted_means_when_masking_disabled(tmp_pa
     # When use_play_prob_masking=False, uncond mean should be conditional * play_prob (analytic).
     assert np.isclose(uncond[0], cond[0] * p[0], rtol=1e-6, atol=1e-6)
     assert np.isclose(uncond[1], cond[1] * p[1], rtol=1e-6, atol=1e-6)
-

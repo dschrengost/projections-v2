@@ -45,7 +45,12 @@ def _write_profiles(path: Path) -> None:
 
 
 def _write_minutes_projection(root: Path, game_date: str) -> None:
-    out_dir = root / "gold" / "projections_minutes_v1" / f"game_date={game_date}"
+    base_dir = root / "gold" / "projections_minutes_v1" / f"game_date={game_date}"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    # generate_worlds_fpts_v2 resolves minutes_v1 via latest_run.json when run_id is not provided.
+    run_id = "test"
+    (base_dir / "latest_run.json").write_text(json.dumps({"run_id": run_id}), encoding="utf-8")
+    out_dir = base_dir / f"run={run_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     # One team with minutes that do NOT sum to 240 (200 total).
@@ -136,4 +141,3 @@ def test_structured_noise_sampling_projects_team_to_240(tmp_path: Path) -> None:
 
     team_sum = float(df[df["team_id"] == 10]["minutes_sim_mean"].sum())
     assert 239.0 <= team_sum <= 241.0, f"team minutes_sim_mean sum not ~240: {team_sum}"
-
