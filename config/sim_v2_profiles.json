@@ -146,16 +146,16 @@
         "tol": 0.05
       },
       "game_factor": {
-        "enabled": false,
-        "sigma": 8.0,
+        "enabled": true,
+        "sigma": 20.0,
         "mode": "additive",
         "beta_basis": "minutes_share"
       },
       "bench_zero_mixture": {
-        "enabled": false,
+        "enabled": true,
         "minutes_threshold": 8.0,
-        "p_zero_base": 0.25,
-        "p_zero_slope": 0.5
+        "p_zero_base": 0.75,
+        "p_zero_slope": 0.2
       },
       "team_sigma_scale": 1.0,
       "player_sigma_scale": 1.0,
