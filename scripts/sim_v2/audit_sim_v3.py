@@ -468,6 +468,197 @@ def _coverage_from_player_games(
     return pd.DataFrame(rows)
 
 
+def _minutes_bucket_stats(
+    *,
+    minutes_matrix: np.ndarray,  # (W, P)
+    minutes_p50: np.ndarray,  # (P,)
+) -> pd.DataFrame:
+    """
+    Aggregate minutes diagnostics by minutes_p50 bucket:
+      - E[minutes | plays] where plays := (minutes > 0)
+      - zero-mass rate := P(minutes == 0)
+    """
+    mins = np.asarray(minutes_matrix, dtype=float)
+    if mins.ndim != 2 or mins.size == 0:
+        return pd.DataFrame(
+            columns=[
+                "bucket",
+                "n_player_games",
+                "n_plays",
+                "minutes_sum",
+                "n_player_world_cells",
+                "play_rate",
+                "zero_mass_rate",
+                "minutes_mean_conditional",
+            ]
+        )
+
+    plays = mins > 0.0
+    play_counts = plays.sum(axis=0).astype(float)  # (P,)
+    minutes_sums = mins.sum(axis=0, dtype=float)  # (P,)
+
+    bucket = _bucket_minutes_target(np.asarray(minutes_p50, dtype=float))
+    rows: list[dict[str, Any]] = []
+    w = float(mins.shape[0])
+    for b in bucket.categories:
+        idx = np.where(bucket == b)[0]
+        if idx.size == 0:
+            continue
+        total_cells = w * float(idx.size)
+        total_plays = float(play_counts[idx].sum())
+        total_minutes = float(minutes_sums[idx].sum())
+        minutes_mean_cond = (total_minutes / total_plays) if total_plays > 0 else float("nan")
+        play_rate = (total_plays / total_cells) if total_cells > 0 else float("nan")
+        zero_mass_rate = 1.0 - play_rate if np.isfinite(play_rate) else float("nan")
+        rows.append(
+            {
+                "bucket": str(b),
+                "n_player_games": int(idx.size),
+                "n_plays": int(total_plays),
+                "minutes_sum": float(total_minutes),
+                "n_player_world_cells": int(total_cells),
+                "play_rate": float(play_rate),
+                "zero_mass_rate": float(zero_mass_rate),
+                "minutes_mean_conditional": float(minutes_mean_cond),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _tail_coverage_from_player_games_split(
+    *,
+    df: pd.DataFrame,
+    actual_col: str,
+    pred_prefix: str,
+    qs: list[float],
+    bucket_col: str,
+    split_col: str,
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for q in qs:
+        q_label = int(round(q * 100))
+        pred_col = f"{pred_prefix}_q{q_label:02d}"
+        if pred_col not in df.columns or actual_col not in df.columns or bucket_col not in df.columns or split_col not in df.columns:
+            continue
+
+        pred = pd.to_numeric(df[pred_col], errors="coerce")
+        actual = pd.to_numeric(df[actual_col], errors="coerce")
+        split = df[split_col]
+        bucket = df[bucket_col]
+        ok = pred.notna() & actual.notna() & split.notna() & bucket.notna()
+        if not ok.any():
+            continue
+
+        slim = pd.DataFrame(
+            {split_col: split[ok], bucket_col: bucket[ok], actual_col: actual[ok], pred_col: pred[ok]}
+        )
+        for (split_v, bucket_v), grp in slim.groupby([split_col, bucket_col], dropna=False):
+            if grp.empty:
+                continue
+            covered = (grp[actual_col] <= grp[pred_col]).astype(float)
+            rows.append(
+                {
+                    "value": pred_prefix,
+                    "quantile": q,
+                    "bucket": str(bucket_v) if bucket_v is not None and bucket_v == bucket_v else "NA",
+                    "split": str(split_v),
+                    "n": int(len(grp)),
+                    "coverage": float(covered.mean()),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _residual_corr_summary(
+    *,
+    df: pd.DataFrame,  # columns: game_id, team_id, residual
+) -> dict[str, float | int]:
+    """
+    Estimate average residual correlation using a global-variance proxy:
+      same-team:  E[r_i r_j] / Var(r) over pairs within the same (game_id, team_id)
+      cross-team: E[r_i r_j] / Var(r) over pairs across opposing teams within the same game_id
+    where residual := actual_fpts - sim_mean_fpts.
+    """
+    if df.empty:
+        return {
+            "same_team_resid_corr": float("nan"),
+            "same_team_pairs": 0,
+            "cross_team_resid_corr": float("nan"),
+            "cross_team_pairs": 0,
+            "resid_var": float("nan"),
+            "resid_rows": 0,
+        }
+
+    resid = pd.to_numeric(df["residual"], errors="coerce")
+    ok = resid.notna()
+    slim = df.loc[ok, ["game_id", "team_id"]].copy()
+    slim["residual"] = resid.loc[ok].astype(float)
+    if slim.empty:
+        return {
+            "same_team_resid_corr": float("nan"),
+            "same_team_pairs": 0,
+            "cross_team_resid_corr": float("nan"),
+            "cross_team_pairs": 0,
+            "resid_var": float("nan"),
+            "resid_rows": 0,
+        }
+
+    resid_var = float(slim["residual"].var(ddof=0))
+    if not np.isfinite(resid_var) or resid_var < 1e-12:
+        return {
+            "same_team_resid_corr": float("nan"),
+            "same_team_pairs": 0,
+            "cross_team_resid_corr": float("nan"),
+            "cross_team_pairs": 0,
+            "resid_var": float(resid_var),
+            "resid_rows": int(len(slim)),
+        }
+
+    slim = slim.copy()
+    slim["residual2"] = slim["residual"] * slim["residual"]
+    g = (
+        slim.groupby(["game_id", "team_id"], as_index=False)
+        .agg(sum_r=("residual", "sum"), sum_r2=("residual2", "sum"), n=("residual", "size"))
+        .reset_index(drop=True)
+    )
+
+    # Same-team: sum_{i<j} r_i r_j = (S^2 - sum r_i^2)/2
+    n = g["n"].to_numpy(dtype=float)
+    sum_r = g["sum_r"].to_numpy(dtype=float)
+    sum_r2 = g["sum_r2"].to_numpy(dtype=float)
+    valid_team = n >= 2
+    same_pairs = int((n[valid_team] * (n[valid_team] - 1.0) / 2.0).sum())
+    same_prod = float(((sum_r[valid_team] * sum_r[valid_team] - sum_r2[valid_team]) / 2.0).sum())
+    same_corr = (same_prod / float(same_pairs) / resid_var) if same_pairs > 0 else float("nan")
+
+    # Cross-team within game: sum_{i in A, j in B} r_i r_j = S_A * S_B
+    g2 = g.sort_values(["game_id", "team_id"]).copy()
+    game_counts = g2.groupby("game_id")["team_id"].transform("size")
+    g2 = g2.loc[game_counts == 2].copy()
+    if not g2.empty:
+        g2["row_in_game"] = g2.groupby("game_id").cumcount()
+        a = g2[g2["row_in_game"] == 0].set_index("game_id")
+        b = g2[g2["row_in_game"] == 1].set_index("game_id")
+        common = a.index.intersection(b.index)
+        a = a.loc[common]
+        b = b.loc[common]
+        cross_pairs = int((a["n"] * b["n"]).sum())
+        cross_prod = float((a["sum_r"] * b["sum_r"]).sum())
+    else:
+        cross_pairs = 0
+        cross_prod = 0.0
+    cross_corr = (cross_prod / float(cross_pairs) / resid_var) if cross_pairs > 0 else float("nan")
+
+    return {
+        "same_team_resid_corr": float(same_corr),
+        "same_team_pairs": int(same_pairs),
+        "cross_team_resid_corr": float(cross_corr),
+        "cross_team_pairs": int(cross_pairs),
+        "resid_var": float(resid_var),
+        "resid_rows": int(len(slim)),
+    }
+
+
 @app.command()
 def main(
     date_from: str = typer.Option(..., "--date-from", help="Start date (YYYY-MM-DD)"),
@@ -557,6 +748,7 @@ def main(
     corr_rows: list[dict[str, Any]] = []
     minutes_inv_summaries: list[MinutesInvariantSummary] = []
     player_game_cal_rows: list[dict[str, Any]] = []
+    minutes_bucket_rows: list[dict[str, Any]] = []
 
     for d in _date_range(d0, d1):
         date_str = d.isoformat()
@@ -584,6 +776,7 @@ def main(
         minutes_inv_summaries.append(inv)
 
         minutes_target_cond = _safe_float_series(proj_df, "minutes_mean", default=0.0)
+        minutes_p50 = _safe_float_series(proj_df, "minutes_p50", default=minutes_target_cond)
         minutes_sim_mean_cond = _safe_float_series(proj_df, "minutes_sim_mean", default=0.0)
         drift_minutes = minutes_sim_mean_cond - minutes_target_cond
 
@@ -658,7 +851,7 @@ def main(
         minutes_q = _empirical_quantiles(minutes, qs)
         fpts_q = _empirical_quantiles(worlds, qs)
 
-        bucket = _bucket_minutes_target(minutes_target_cond)
+        bucket = _bucket_minutes_target(minutes_p50)
         for i, row in proj_df.reset_index(drop=True).iterrows():
             payload: dict[str, Any] = {
                 "game_date": date_str,
@@ -666,6 +859,7 @@ def main(
                 "team_id": int(row.get("team_id")),
                 "player_id": str(row.get("player_id")),
                 "minutes_bucket": str(bucket[i]) if bucket[i] == bucket[i] else "NA",
+                "is_starter": int(float(row.get("is_starter", 0.0) or 0.0) > 0.5),
                 "minutes_actual": float(minutes_actual[i]) if np.isfinite(minutes_actual[i]) else np.nan,
                 "dk_fpts_actual": float(fpts_actual[i]) if np.isfinite(fpts_actual[i]) else np.nan,
             }
@@ -674,6 +868,12 @@ def main(
                 payload[f"minutes_q{q_label:02d}"] = float(minutes_q[qi, i])
                 payload[f"dk_fpts_q{q_label:02d}"] = float(fpts_q[qi, i])
             player_game_cal_rows.append(payload)
+
+        mb = _minutes_bucket_stats(minutes_matrix=minutes, minutes_p50=minutes_p50)
+        if not mb.empty:
+            mb = mb.copy()
+            mb.insert(0, "game_date", date_str)
+            minutes_bucket_rows.extend(mb.to_dict(orient="records"))
 
         # Correlations: residual pairs and game total proxy.
         centered = worlds - worlds.mean(axis=0, dtype=float, keepdims=True)
@@ -687,6 +887,15 @@ def main(
             x=centered, group_key=team_id, alt_key=game_id, mode="diff", n_pairs=2000, seed=seed
         )
         team_tot = _team_total_corr(worlds=worlds, game_id=game_id, team_id=team_id)
+
+        resid_df = pd.DataFrame(
+            {
+                "game_id": game_id.astype(int, copy=False),
+                "team_id": team_id.astype(int, copy=False),
+                "residual": fpts_actual - fpts_sim_mean_cond,
+            }
+        )
+        resid_corr = _residual_corr_summary(df=resid_df)
         corr_rows.append(
             {
                 "game_date": date_str,
@@ -699,6 +908,7 @@ def main(
                 "game_team_total_corr_mean": team_tot["mean"],
                 "game_team_total_corr_std": team_tot["std"],
                 "game_team_total_corr_games": team_tot["n_games"],
+                **resid_corr,
             }
         )
 
@@ -707,6 +917,7 @@ def main(
     drift_df = pd.DataFrame(drift_rows)
     corr_df = pd.DataFrame(corr_rows)
     cal_df = pd.DataFrame(player_game_cal_rows)
+    minutes_bucket_df = pd.DataFrame(minutes_bucket_rows)
     coverage_df = pd.concat(
         [
             _coverage_from_player_games(
@@ -728,6 +939,24 @@ def main(
         ],
         ignore_index=True,
     ) if not cal_df.empty else pd.DataFrame(columns=["value", "quantile", "bucket", "n", "coverage"])
+
+    fpts_tail_coverage_df = (
+        _tail_coverage_from_player_games_split(
+            df=cal_df,
+            actual_col="dk_fpts_actual",
+            pred_prefix="dk_fpts",
+            qs=[0.90, 0.95, 0.99],
+            bucket_col="minutes_bucket",
+            split_col="is_starter",
+        )
+        if not cal_df.empty
+        else pd.DataFrame(columns=["value", "quantile", "bucket", "split", "n", "coverage"])
+    )
+    if not fpts_tail_coverage_df.empty:
+        fpts_tail_coverage_df = fpts_tail_coverage_df.copy()
+        fpts_tail_coverage_df["split"] = fpts_tail_coverage_df["split"].map({"0": "bench", "1": "starter"}).fillna(
+            fpts_tail_coverage_df["split"]
+        )
 
     inv_max = max((s.max_abs_team_world_sum_err for s in minutes_inv_summaries), default=0.0)
     inv_neg = sum((s.count_negative_minutes for s in minutes_inv_summaries), 0)
@@ -761,11 +990,35 @@ def main(
             "top_20_worst_player_games": worst20,
         },
         "per_date": per_date_rows,
+        "minutes_bucket": (
+            (
+                lambda agg: agg.assign(
+                    play_rate=agg["n_plays"] / agg["n_player_world_cells"],
+                    zero_mass_rate=1.0 - (agg["n_plays"] / agg["n_player_world_cells"]),
+                    minutes_mean_conditional=agg["minutes_sum"] / agg["n_plays"],
+                )
+                .replace([np.inf, -np.inf], np.nan)
+                .to_dict(orient="records")
+            )(
+                minutes_bucket_df.drop(columns=["game_date"], errors="ignore")
+                .groupby("bucket", as_index=False)
+                .agg(
+                    n_player_games=("n_player_games", "sum"),
+                    n_player_world_cells=("n_player_world_cells", "sum"),
+                    n_plays=("n_plays", "sum"),
+                    minutes_sum=("minutes_sum", "sum"),
+                )
+            )
+            if not minutes_bucket_df.empty
+            else []
+        ),
+        "fpts_tail_coverage": fpts_tail_coverage_df.to_dict(orient="records") if not fpts_tail_coverage_df.empty else [],
         "notes": {
             "minutes_target": "minutes_mean vs minutes_sim_mean (conditional-on-active means)",
             "fpts_target": "dk_fpts_mean_target vs dk_fpts_mean (conditional-on-active means)",
-            "quantile_coverage": "P(actual <= sim_quantile) by minutes_mean bucket (unconditional)",
-            "correlation": "pairwise corr on centered FPTS worlds; pairs restricted within same game",
+            "quantile_coverage": "P(actual <= sim_quantile) by minutes_p50 bucket",
+            "minutes_bucket": "E[minutes | plays] and P(minutes == 0) by minutes_p50 bucket",
+            "correlation": "centered sim-world corr + residual corr (actual_fpts - sim_mean_fpts)",
         },
     }
 
@@ -773,6 +1026,10 @@ def main(
     per_date_df.to_csv(audit_dir / "per_date_summary.csv", index=False)
     corr_df.to_csv(audit_dir / "correlation_summary.csv", index=False)
     coverage_df.to_csv(audit_dir / "quantile_coverage.csv", index=False)
+    if not minutes_bucket_df.empty:
+        minutes_bucket_df.to_csv(audit_dir / "minutes_bucket_stats_per_date.csv", index=False)
+    if not fpts_tail_coverage_df.empty:
+        fpts_tail_coverage_df.to_csv(audit_dir / "fpts_tail_coverage_by_bucket_starter.csv", index=False)
     if not drift_df.empty:
         worst = drift_df.sort_values(["abs_minutes_drift_cond", "abs_fpts_drift_cond"], ascending=False).head(20)
         worst.to_csv(audit_dir / "mean_drift_top20.csv", index=False)
