@@ -469,6 +469,166 @@ def _project_team_240_fast(
     return out, stats
 
 
+def _project_to_simplex_nonnegative(v: np.ndarray, total: float) -> np.ndarray:
+    """Euclidean projection of v onto {x >= 0, sum(x) = total}."""
+    v = np.asarray(v, dtype=float)
+    n = int(v.size)
+    if n == 0:
+        return v
+    total = float(total)
+    if total <= 0.0:
+        return np.zeros_like(v)
+
+    # Standard simplex projection (Duchi et al. 2008).
+    u = np.sort(v)[::-1]
+    cssv = np.cumsum(u)
+    rho = np.nonzero(u * (np.arange(1, n + 1)) > (cssv - total))[0]
+    if rho.size == 0:
+        theta = (cssv[-1] - total) / float(n)
+    else:
+        k = int(rho[-1])
+        theta = (cssv[k] - total) / float(k + 1)
+    return np.maximum(v - theta, 0.0)
+
+
+def _project_to_capped_simplex(v: np.ndarray, total: float, cap: float) -> np.ndarray:
+    """Euclidean projection of v onto {0 <= x <= cap, sum(x) = total}."""
+    v = np.asarray(v, dtype=float)
+    n = int(v.size)
+    if n == 0:
+        return v
+    total = float(total)
+    cap = float(cap)
+    if total <= 0.0:
+        return np.zeros_like(v)
+    if cap <= 0.0:
+        raise ValueError(f"cap must be > 0; got {cap}")
+    if float(n) * cap <= total:
+        return np.full_like(v, cap)
+
+    # Find lambda such that sum(clip(v - lambda, 0, cap)) = total.
+    lo = float(np.min(v - cap))
+    hi = float(np.max(v))
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        s = float(np.clip(v - mid, 0.0, cap).sum())
+        if s > total:
+            lo = mid
+        else:
+            hi = mid
+    return np.clip(v - hi, 0.0, cap)
+
+
+def recenter_team_minutes_to_conditional_means(
+    minutes_world: np.ndarray,  # (W, N)
+    active_mask: np.ndarray,  # (W, N) bool
+    *,
+    target_minutes_conditional: np.ndarray,  # (N,) target E[min | active]
+    total_minutes: float = 240.0,
+    cap_minutes: float | None = None,
+    max_iters: int = 10,
+    step: float = 1.0,
+    tol: float = 1e-2,
+) -> tuple[np.ndarray, dict[str, float | int]]:
+    """
+    Post-reconcile mean-preservation correction for minutes.
+
+    Adjusts minutes *only* for active players in each world to better match the
+    per-player conditional mean targets (E[min | active]) while preserving:
+      - per-world team total = total_minutes (when any players are active)
+      - non-negativity
+      - optional hard cap (skipped per-row when infeasible)
+
+    This is a lightweight iterative method:
+      1) compute conditional mean error per player
+      2) add a per-player bias to active worlds
+      3) project each world back onto the (capped) simplex (L2-minimal per row)
+    """
+    m = np.asarray(minutes_world, dtype=float)
+    a = np.asarray(active_mask, dtype=bool)
+    if m.shape != a.shape:
+        raise ValueError(f"minutes_world and active_mask must have same shape; got {m.shape} vs {a.shape}")
+    if m.size == 0:
+        return m.copy(), {"enabled": 1, "n_iters": 0, "max_abs_err_before": 0.0, "max_abs_err_after": 0.0}
+
+    w, n = m.shape
+    total_minutes = float(total_minutes)
+    cap = float(cap_minutes) if cap_minutes is not None else None
+
+    active_counts = a.sum(axis=0).astype(float)
+    target = np.asarray(target_minutes_conditional, dtype=float).reshape(-1)
+    if target.size != n:
+        raise ValueError(f"target_minutes_conditional must have shape ({n},); got {target.shape}")
+
+    # Players never active in this chunk can't be matched; treat their target as 0.
+    target = target.copy()
+    target[active_counts <= 0.0] = 0.0
+
+    def _conditional_means(x: np.ndarray) -> np.ndarray:
+        sums = x.sum(axis=0, dtype=float)
+        return np.divide(sums, active_counts, out=np.zeros_like(sums), where=active_counts > 0.0)
+
+    enforce_idx = active_counts > 0.0
+    # Weight mean preservation to avoid over-penalizing deep-bench players with ~0 targets.
+    # This keeps them from either being forced to exactly 0 (star minutes blow up) or acting as
+    # totally free slack (they can soak unrealistic minutes when active).
+    weights = np.clip(target / 8.0, 0.2, 1.0)
+    weights = np.where(enforce_idx, weights, 0.0)
+
+    m = np.where(a, m, 0.0)
+    means0 = _conditional_means(m)
+    err0 = target - means0
+    max_abs0 = float(np.max(np.abs(err0[enforce_idx]))) if np.any(enforce_idx) else 0.0
+
+    bias = np.zeros(n, dtype=float)
+    n_iters_done = 0
+    max_abs_bias = 10.0
+    for it in range(int(max_iters)):
+        n_iters_done = it + 1
+        means = _conditional_means(m)
+        err = target - means
+        max_abs = float(np.max(np.abs(err[enforce_idx]))) if np.any(enforce_idx) else 0.0
+        if max_abs <= float(tol):
+            break
+        bias[enforce_idx] = np.clip(
+            bias[enforce_idx] + float(step) * (err[enforce_idx] * weights[enforce_idx]),
+            -max_abs_bias,
+            max_abs_bias,
+        )
+
+        out = np.zeros_like(m)
+        for r in range(w):
+            row_active = a[r]
+            if not row_active.any():
+                continue
+            v = m[r] + bias * row_active.astype(float)
+            v = np.where(row_active, v, 0.0)
+            idxs = np.where(row_active)[0]
+            v_act = v[idxs]
+            if cap is None:
+                proj = _project_to_simplex_nonnegative(v_act, total_minutes)
+            else:
+                # Ensure per-row cap is feasible by relaxing it up to the minimum required.
+                cap_eff = max(cap, total_minutes / float(idxs.size))
+                proj = _project_to_capped_simplex(v_act, total_minutes, cap_eff)
+            out[r, idxs] = proj
+        m = out
+
+    means1 = _conditional_means(m)
+    err1 = target - means1
+    max_abs1 = float(np.max(np.abs(err1[enforce_idx]))) if np.any(enforce_idx) else 0.0
+
+    return m, {
+        "enabled": 1,
+        "n_iters": int(n_iters_done),
+        "n_rows": int(w),
+        "n_players": int(n),
+        "n_enforced_players": int(enforce_idx.sum()),
+        "max_abs_err_before": max_abs0,
+        "max_abs_err_after": max_abs1,
+    }
+
+
 def apply_pre_sim_qp_reconcile(
     df: "pd.DataFrame",
     *,

@@ -56,6 +56,16 @@ class PreSimReconcileConfig:
 
 
 @dataclass
+class MinutesMeanRecenteringConfig:
+    """Config for post-reconcile minutes mean-preservation correction."""
+
+    enabled: bool = False
+    max_iters: int = 10
+    step: float = 1.0
+    tol: float = 1e-2
+
+
+@dataclass
 class UsageSharesConfig:
     """Config for stochastic usage share allocation within teams."""
 
@@ -122,6 +132,8 @@ class SimV2Profile:
     minutes_noise_config: MinutesNoiseConfig = field(default_factory=MinutesNoiseConfig)
     # Pre-sim QP reconciliation (runs once before simulation)
     pre_sim_reconcile: PreSimReconcileConfig = field(default_factory=PreSimReconcileConfig)
+    # Optional post-reconcile correction to preserve per-player conditional mean minutes.
+    minutes_mean_recentering: MinutesMeanRecenteringConfig = field(default_factory=MinutesMeanRecenteringConfig)
     # Optional explicit minutes bundle path (overrides minutes_run_id resolution)
     minutes_bundle_path: Optional[str] = None
 
@@ -272,6 +284,15 @@ def load_sim_v2_profile(
         minutes_weight_scale=float(pre_sim_reconcile_cfg_raw.get("minutes_weight_scale", 1.0)),
     )
 
+    # Post-reconcile mean preservation config
+    mmr_cfg_raw = config.get("minutes_mean_recentering", {}) or {}
+    minutes_mean_recentering = MinutesMeanRecenteringConfig(
+        enabled=bool(mmr_cfg_raw.get("enabled", False)),
+        max_iters=int(mmr_cfg_raw.get("max_iters", 10)),
+        step=float(mmr_cfg_raw.get("step", 1.0)),
+        tol=float(mmr_cfg_raw.get("tol", 1e-2)),
+    )
+
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
     use_game_scripts = bool(game_script_cfg.get("enabled", False))
@@ -331,6 +352,7 @@ def load_sim_v2_profile(
         preserve_input_rotation=preserve_input_rotation,
         minutes_noise_config=minutes_noise_config,
         pre_sim_reconcile=pre_sim_reconcile,
+        minutes_mean_recentering=minutes_mean_recentering,
         minutes_bundle_path=minutes_bundle_path,
     )
 

@@ -429,6 +429,45 @@ def _team_total_corr(
     }
 
 
+def _coverage_from_player_games(
+    *,
+    df: pd.DataFrame,
+    value_name: str,
+    actual_col: str,
+    pred_prefix: str,
+    qs: list[float],
+    bucket_col: str,
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for q in qs:
+        q_label = int(round(q * 100))
+        pred_col = f"{pred_prefix}_q{q_label:02d}"
+        if pred_col not in df.columns or actual_col not in df.columns:
+            continue
+        pred = pd.to_numeric(df[pred_col], errors="coerce")
+        actual = pd.to_numeric(df[actual_col], errors="coerce")
+        ok = pred.notna() & actual.notna()
+        if ok.any():
+            covered = (actual[ok] <= pred[ok]).astype(float)
+            rows.append(
+                {"value": value_name, "quantile": q, "bucket": "ALL", "n": int(ok.sum()), "coverage": float(covered.mean())}
+            )
+        for bucket, grp in df.loc[ok, [bucket_col, actual_col, pred_col]].groupby(bucket_col, dropna=False):
+            if grp.empty:
+                continue
+            covered_b = (grp[actual_col] <= grp[pred_col]).astype(float)
+            rows.append(
+                {
+                    "value": value_name,
+                    "quantile": q,
+                    "bucket": str(bucket) if bucket is not None and bucket == bucket else "NA",
+                    "n": int(len(grp)),
+                    "coverage": float(covered_b.mean()),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 @app.command()
 def main(
     date_from: str = typer.Option(..., "--date-from", help="Start date (YYYY-MM-DD)"),
@@ -515,9 +554,9 @@ def main(
     # Per-date audit accumulation.
     per_date_rows: list[dict[str, Any]] = []
     drift_rows: list[dict[str, Any]] = []
-    coverage_frames: list[pd.DataFrame] = []
     corr_rows: list[dict[str, Any]] = []
     minutes_inv_summaries: list[MinutesInvariantSummary] = []
+    player_game_cal_rows: list[dict[str, Any]] = []
 
     for d in _date_range(d0, d1):
         date_str = d.isoformat()
@@ -544,21 +583,13 @@ def main(
         inv = _minutes_invariant(proj_df=proj_df, minutes_matrix=minutes, eps=1e-3, cap=MINUTES_CAP_SIM_V3)
         minutes_inv_summaries.append(inv)
 
-        if "play_prob" in proj_df.columns:
-            play_prob = _safe_float_series(proj_df, "play_prob", default=1.0)
-        else:
-            play_prob = _safe_float_series(proj_df, "sim_p_active", default=1.0)
         minutes_target_cond = _safe_float_series(proj_df, "minutes_mean", default=0.0)
-        fpts_target_cond = _safe_float_series(proj_df, "dk_fpts_mean", default=0.0)
+        minutes_sim_mean_cond = _safe_float_series(proj_df, "minutes_sim_mean", default=0.0)
+        drift_minutes = minutes_sim_mean_cond - minutes_target_cond
 
-        minutes_mean_uncond = _empirical_means(minutes)
-        fpts_mean_uncond = _empirical_means(worlds)
-
-        minutes_target_uncond = minutes_target_cond * play_prob
-        fpts_target_uncond = fpts_target_cond * play_prob
-
-        drift_minutes = minutes_mean_uncond - minutes_target_uncond
-        drift_fpts = fpts_mean_uncond - fpts_target_uncond
+        fpts_target_cond = _safe_float_series(proj_df, "dk_fpts_mean_target", default=0.0)
+        fpts_sim_mean_cond = _safe_float_series(proj_df, "dk_fpts_mean", default=0.0)
+        drift_fpts = fpts_sim_mean_cond - fpts_target_cond
 
         per_date_rows.append(
             {
@@ -577,12 +608,12 @@ def main(
                     "game_id": int(row.get("game_id")),
                     "team_id": int(row.get("team_id")),
                     "player_id": str(row.get("player_id")),
-                    "minutes_target_uncond": float(minutes_target_uncond[i]),
-                    "minutes_sim_mean_uncond": float(minutes_mean_uncond[i]),
-                    "minutes_drift_uncond": float(drift_minutes[i]),
-                    "fpts_target_uncond": float(fpts_target_uncond[i]),
-                    "fpts_sim_mean_uncond": float(fpts_mean_uncond[i]),
-                    "fpts_drift_uncond": float(drift_fpts[i]),
+                    "minutes_target_cond": float(minutes_target_cond[i]),
+                    "minutes_sim_mean_cond": float(minutes_sim_mean_cond[i]),
+                    "minutes_drift_cond": float(drift_minutes[i]),
+                    "dk_fpts_target_cond": float(fpts_target_cond[i]),
+                    "dk_fpts_sim_mean_cond": float(fpts_sim_mean_cond[i]),
+                    "dk_fpts_drift_cond": float(drift_fpts[i]),
                 }
             )
 
@@ -628,12 +659,21 @@ def main(
         fpts_q = _empirical_quantiles(worlds, qs)
 
         bucket = _bucket_minutes_target(minutes_target_cond)
-        coverage_frames.append(
-            _coverage_table(actual=minutes_actual, q_preds=minutes_q, qs=qs, bucket=bucket, value_name="minutes")
-        )
-        coverage_frames.append(
-            _coverage_table(actual=fpts_actual, q_preds=fpts_q, qs=qs, bucket=bucket, value_name="dk_fpts")
-        )
+        for i, row in proj_df.reset_index(drop=True).iterrows():
+            payload: dict[str, Any] = {
+                "game_date": date_str,
+                "game_id": int(row.get("game_id")),
+                "team_id": int(row.get("team_id")),
+                "player_id": str(row.get("player_id")),
+                "minutes_bucket": str(bucket[i]) if bucket[i] == bucket[i] else "NA",
+                "minutes_actual": float(minutes_actual[i]) if np.isfinite(minutes_actual[i]) else np.nan,
+                "dk_fpts_actual": float(fpts_actual[i]) if np.isfinite(fpts_actual[i]) else np.nan,
+            }
+            for qi, q in enumerate(qs):
+                q_label = int(round(q * 100))
+                payload[f"minutes_q{q_label:02d}"] = float(minutes_q[qi, i])
+                payload[f"dk_fpts_q{q_label:02d}"] = float(fpts_q[qi, i])
+            player_game_cal_rows.append(payload)
 
         # Correlations: residual pairs and game total proxy.
         centered = worlds - worlds.mean(axis=0, dtype=float, keepdims=True)
@@ -666,9 +706,28 @@ def main(
     per_date_df = pd.DataFrame(per_date_rows)
     drift_df = pd.DataFrame(drift_rows)
     corr_df = pd.DataFrame(corr_rows)
-    coverage_df = pd.concat(coverage_frames, ignore_index=True) if coverage_frames else pd.DataFrame(
-        columns=["value", "quantile", "bucket", "n", "coverage"]
-    )
+    cal_df = pd.DataFrame(player_game_cal_rows)
+    coverage_df = pd.concat(
+        [
+            _coverage_from_player_games(
+                df=cal_df,
+                value_name="minutes",
+                actual_col="minutes_actual",
+                pred_prefix="minutes",
+                qs=[0.50, 0.75, 0.90, 0.95, 0.99],
+                bucket_col="minutes_bucket",
+            ),
+            _coverage_from_player_games(
+                df=cal_df,
+                value_name="dk_fpts",
+                actual_col="dk_fpts_actual",
+                pred_prefix="dk_fpts",
+                qs=[0.50, 0.75, 0.90, 0.95, 0.99],
+                bucket_col="minutes_bucket",
+            ),
+        ],
+        ignore_index=True,
+    ) if not cal_df.empty else pd.DataFrame(columns=["value", "quantile", "bucket", "n", "coverage"])
 
     inv_max = max((s.max_abs_team_world_sum_err for s in minutes_inv_summaries), default=0.0)
     inv_neg = sum((s.count_negative_minutes for s in minutes_inv_summaries), 0)
@@ -678,12 +737,12 @@ def main(
     median_abs_drift_minutes = 0.0
     median_abs_drift_fpts = 0.0
     if not drift_df.empty:
-        drift_df["abs_minutes_drift_uncond"] = drift_df["minutes_drift_uncond"].abs()
-        drift_df["abs_fpts_drift_uncond"] = drift_df["fpts_drift_uncond"].abs()
-        median_abs_drift_minutes = float(drift_df["abs_minutes_drift_uncond"].median())
-        median_abs_drift_fpts = float(drift_df["abs_fpts_drift_uncond"].median())
+        drift_df["abs_minutes_drift_cond"] = drift_df["minutes_drift_cond"].abs()
+        drift_df["abs_fpts_drift_cond"] = drift_df["dk_fpts_drift_cond"].abs()
+        median_abs_drift_minutes = float(drift_df["abs_minutes_drift_cond"].median())
+        median_abs_drift_fpts = float(drift_df["abs_fpts_drift_cond"].median())
         worst = drift_df.sort_values(
-            ["abs_minutes_drift_uncond", "abs_fpts_drift_uncond"], ascending=False
+            ["abs_minutes_drift_cond", "abs_fpts_drift_cond"], ascending=False
         ).head(20)
         worst20 = worst.to_dict(orient="records")
 
@@ -695,16 +754,16 @@ def main(
             "n_dates": int(inv_total_tw),
         },
         "mean_preservation": {
-            "target_minutes_uncond": "minutes_mean * play_prob",
-            "target_fpts_uncond": "dk_fpts_mean * play_prob",
-            "median_abs_drift_minutes_uncond": median_abs_drift_minutes,
-            "median_abs_drift_fpts_uncond": median_abs_drift_fpts,
+            "target_minutes_cond": "minutes_mean (input) vs minutes_sim_mean (sim)",
+            "target_fpts_cond": "dk_fpts_mean_target (input) vs dk_fpts_mean (sim)",
+            "median_abs_drift_minutes_cond": median_abs_drift_minutes,
+            "median_abs_drift_fpts_cond": median_abs_drift_fpts,
             "top_20_worst_player_games": worst20,
         },
         "per_date": per_date_rows,
         "notes": {
-            "minutes_target": "minutes_mean * play_prob (unconditional target)",
-            "fpts_target": "dk_fpts_mean * play_prob (unconditional target)",
+            "minutes_target": "minutes_mean vs minutes_sim_mean (conditional-on-active means)",
+            "fpts_target": "dk_fpts_mean_target vs dk_fpts_mean (conditional-on-active means)",
             "quantile_coverage": "P(actual <= sim_quantile) by minutes_mean bucket (unconditional)",
             "correlation": "pairwise corr on centered FPTS worlds; pairs restricted within same game",
         },
@@ -715,7 +774,7 @@ def main(
     corr_df.to_csv(audit_dir / "correlation_summary.csv", index=False)
     coverage_df.to_csv(audit_dir / "quantile_coverage.csv", index=False)
     if not drift_df.empty:
-        worst = drift_df.sort_values(["abs_minutes_drift_uncond", "abs_fpts_drift_uncond"], ascending=False).head(20)
+        worst = drift_df.sort_values(["abs_minutes_drift_cond", "abs_fpts_drift_cond"], ascending=False).head(20)
         worst.to_csv(audit_dir / "mean_drift_top20.csv", index=False)
 
     typer.echo(f"[audit_sim_v3] Wrote audit bundle: {audit_dir}")

@@ -26,6 +26,7 @@ from projections.sim_v2.minutes_noise import (
 )
 from projections.sim_v2.minutes_stabilization import (
     apply_pre_sim_qp_reconcile,
+    recenter_team_minutes_to_conditional_means,
     reconcile_team_minutes_active_softmax,
     sample_minutes_noise_per_world,
 )
@@ -2443,6 +2444,48 @@ def main(
                     cap_infeasible_chunk += int(stats["n_cap_infeasible_rows"])
                     all_inactive_chunk += int(stats["n_all_inactive"])
 
+                # Optional post-reconcile mean preservation (conditional on being active).
+                mmr_cfg = getattr(profile_cfg, "minutes_mean_recentering", None)
+                if mmr_cfg is not None and getattr(mmr_cfg, "enabled", False) and group_map:
+                    max_abs_before = 0.0
+                    max_abs_after = 0.0
+                    for _, idxs in group_map.items():
+                        targets = minutes_sim_base[np.asarray(idxs, dtype=int)]
+                        before = minutes_worlds[:, idxs]
+                        means_before = np.divide(
+                            before.sum(axis=0, dtype=float),
+                            active_mask[:, idxs].sum(axis=0).astype(float),
+                            out=np.zeros(len(idxs), dtype=float),
+                            where=active_mask[:, idxs].sum(axis=0) > 0,
+                        )
+                        max_abs_before = max(max_abs_before, float(np.max(np.abs(means_before - targets))))
+
+                        corrected, rec_stats = recenter_team_minutes_to_conditional_means(
+                            before,
+                            active_mask[:, idxs],
+                            target_minutes_conditional=targets,
+                            total_minutes=TEAM_MINUTES_TARGET,
+                            cap_minutes=MINUTES_CAP_SIM_V3,
+                            max_iters=int(getattr(mmr_cfg, "max_iters", 10)),
+                            step=float(getattr(mmr_cfg, "step", 1.0)),
+                            tol=float(getattr(mmr_cfg, "tol", 1e-2)),
+                        )
+                        minutes_worlds[:, idxs] = corrected
+
+                        means_after = np.divide(
+                            corrected.sum(axis=0, dtype=float),
+                            active_mask[:, idxs].sum(axis=0).astype(float),
+                            out=np.zeros(len(idxs), dtype=float),
+                            where=active_mask[:, idxs].sum(axis=0) > 0,
+                        )
+                        max_abs_after = max(max_abs_after, float(np.max(np.abs(means_after - targets))))
+
+                    if sim_audit and chunk_start == 0:
+                        typer.echo(
+                            f"[sim_v2][audit] minutes_mean_recentering: max_abs_err_before={max_abs_before:.3f} "
+                            f"max_abs_err_after={max_abs_after:.3f}"
+                        )
+
                 audit_cap_bind_team_worlds += cap_bind_chunk
                 audit_cap_infeasible_team_worlds += cap_infeasible_chunk
                 audit_all_inactive_team_worlds += all_inactive_chunk
@@ -2765,6 +2808,7 @@ def main(
                     }
 
                 # Build output projection DataFrame
+                dk_fpts_mean_target = pd.to_numeric(mu_df["dk_fpts_mean"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
                 proj_df = mu_df[["game_date", "game_id", "team_id", "player_id"]].copy()
                 # Expose play_prob used for world activation so downstream audits can validate
                 # unconditional mean targets (E[stat] = E[stat|plays] * play_prob).
@@ -2785,6 +2829,7 @@ def main(
                     proj_df["minutes_sim_p10_uncond"] = minutes_quantiles_uncond[0]
                     proj_df["minutes_sim_p50_uncond"] = minutes_quantiles_uncond[1]
                     proj_df["minutes_sim_p90_uncond"] = minutes_quantiles_uncond[2]
+                proj_df["dk_fpts_mean_target"] = dk_fpts_mean_target
                 proj_df["dk_fpts_mean"] = fpts_mean
                 proj_df["dk_fpts_std"] = fpts_std
                 proj_df["dk_fpts_p05"] = fpts_quantiles[0]
