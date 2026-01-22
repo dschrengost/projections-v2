@@ -2766,6 +2766,10 @@ def main(
 
                 # Build output projection DataFrame
                 proj_df = mu_df[["game_date", "game_id", "team_id", "player_id"]].copy()
+                # Expose play_prob used for world activation so downstream audits can validate
+                # unconditional mean targets (E[stat] = E[stat|plays] * play_prob).
+                if "play_prob" in mu_df.columns:
+                    proj_df["play_prob"] = play_prob_arr
                 proj_df["minutes_mean"] = minutes_sim_base
                 proj_df["minutes_sim_mean"] = minutes_mean
                 proj_df["minutes_sim_std"] = minutes_std
@@ -3053,6 +3057,21 @@ def main(
                         pd.DataFrame(worlds_matrix, columns=player_ids).to_parquet(worlds_path, index=False)
                     except Exception as exc:
                         typer.echo(f"[sim_v2] warning: failed to write worlds_matrix.parquet ({exc})", err=True)
+
+                # Optional: persist minutes worlds matrix for audits/invariant checks.
+                # Kept behind an env var to avoid expanding default artifact footprints.
+                if all_minutes is not None and os.environ.get("PROJECTIONS_SIM_WRITE_MINUTES_MATRIX", "0").strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                }:
+                    try:
+                        player_ids = mu_df["player_id"].astype(str).tolist()
+                        minutes_matrix = all_minutes.astype(np.float32, copy=True)
+                        minutes_path = out_dir / "minutes_matrix.parquet"
+                        pd.DataFrame(minutes_matrix, columns=player_ids).to_parquet(minutes_path, index=False)
+                    except Exception as exc:
+                        typer.echo(f"[sim_v2] warning: failed to write minutes_matrix.parquet ({exc})", err=True)
                 
                 typer.echo(
                     f"[sim_v2] {pd.Timestamp(game_date).date()} dk_fpts_world min/med/max="
