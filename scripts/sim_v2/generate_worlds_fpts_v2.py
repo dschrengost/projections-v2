@@ -16,7 +16,9 @@ import typer
 
 from projections.fpts_v2.scoring import compute_dk_fpts
 from projections.paths import data_path, get_project_root
+from projections.sim_v2.bench_zero_mixture import apply_bench_zero_mixture
 from projections.sim_v2.config import DEFAULT_PROFILES_PATH, UsageSharesConfig, load_sim_v2_profile
+from projections.sim_v2.game_factor import apply_game_factor
 from projections.sim_v2.game_script import GameScriptConfig, classify_script, sample_minutes_with_scripts
 from projections.sim_v2.minutes_noise import (
     build_sigma_per_player,
@@ -26,6 +28,7 @@ from projections.sim_v2.minutes_noise import (
 )
 from projections.sim_v2.minutes_stabilization import (
     apply_pre_sim_qp_reconcile,
+    recenter_team_minutes_to_conditional_means,
     reconcile_team_minutes_active_softmax,
     sample_minutes_noise_per_world,
 )
@@ -2424,6 +2427,30 @@ def main(
                 # Defense-in-depth: ensure inactive players are hard-zero before reconciliation.
                 minutes_worlds = minutes_worlds * active_mask.astype(float)
 
+                # Optional bench/DNP mass-at-zero mixture: drop low-minute players to 0 with p_zero,
+                # then let reconciliation redistribute minutes among remaining active players.
+                bz_cfg = getattr(profile_cfg, "bench_zero_mixture", None)
+                if bz_cfg is not None and getattr(bz_cfg, "enabled", False) and group_map:
+                    stats = apply_bench_zero_mixture(
+                        minutes_worlds,
+                        active_mask,
+                        group_map=group_map,
+                        minutes_target=minutes_sim_base,
+                        minutes_threshold=float(getattr(bz_cfg, "minutes_threshold", 8.0)),
+                        p_zero_base=float(getattr(bz_cfg, "p_zero_base", 0.25)),
+                        p_zero_slope=float(getattr(bz_cfg, "p_zero_slope", 0.0)),
+                        cap_minutes=MINUTES_CAP_SIM_V3,
+                        total_minutes=TEAM_MINUTES_TARGET,
+                        rng=rng,
+                    )
+                    minutes_worlds = minutes_worlds * active_mask.astype(float)
+                    if sim_audit and chunk_start == 0:
+                        typer.echo(
+                            f"[sim_v2][audit] bench_zero_mixture: dropped={stats.n_player_worlds_dropped} "
+                            f"restored={stats.n_player_worlds_restored_for_feasibility} "
+                            f"min_active_needed={stats.min_active_needed}"
+                        )
+
                 # After masking, reconcile active-only minutes to TEAM_MINUTES_TARGET per (team, world),
                 # then apply a single cap and renormalize remaining mass without flattening.
                 cap_bind_chunk = 0
@@ -2442,6 +2469,48 @@ def main(
                     cap_bind_chunk += int(stats["n_cap_bind_rows"])
                     cap_infeasible_chunk += int(stats["n_cap_infeasible_rows"])
                     all_inactive_chunk += int(stats["n_all_inactive"])
+
+                # Optional post-reconcile mean preservation (conditional on being active).
+                mmr_cfg = getattr(profile_cfg, "minutes_mean_recentering", None)
+                if mmr_cfg is not None and getattr(mmr_cfg, "enabled", False) and group_map:
+                    max_abs_before = 0.0
+                    max_abs_after = 0.0
+                    for _, idxs in group_map.items():
+                        targets = minutes_sim_base[np.asarray(idxs, dtype=int)]
+                        before = minutes_worlds[:, idxs]
+                        means_before = np.divide(
+                            before.sum(axis=0, dtype=float),
+                            active_mask[:, idxs].sum(axis=0).astype(float),
+                            out=np.zeros(len(idxs), dtype=float),
+                            where=active_mask[:, idxs].sum(axis=0) > 0,
+                        )
+                        max_abs_before = max(max_abs_before, float(np.max(np.abs(means_before - targets))))
+
+                        corrected, rec_stats = recenter_team_minutes_to_conditional_means(
+                            before,
+                            active_mask[:, idxs],
+                            target_minutes_conditional=targets,
+                            total_minutes=TEAM_MINUTES_TARGET,
+                            cap_minutes=MINUTES_CAP_SIM_V3,
+                            max_iters=int(getattr(mmr_cfg, "max_iters", 10)),
+                            step=float(getattr(mmr_cfg, "step", 1.0)),
+                            tol=float(getattr(mmr_cfg, "tol", 1e-2)),
+                        )
+                        minutes_worlds[:, idxs] = corrected
+
+                        means_after = np.divide(
+                            corrected.sum(axis=0, dtype=float),
+                            active_mask[:, idxs].sum(axis=0).astype(float),
+                            out=np.zeros(len(idxs), dtype=float),
+                            where=active_mask[:, idxs].sum(axis=0) > 0,
+                        )
+                        max_abs_after = max(max_abs_after, float(np.max(np.abs(means_after - targets))))
+
+                    if sim_audit and chunk_start == 0:
+                        typer.echo(
+                            f"[sim_v2][audit] minutes_mean_recentering: max_abs_err_before={max_abs_before:.3f} "
+                            f"max_abs_err_after={max_abs_after:.3f}"
+                        )
 
                 audit_cap_bind_team_worlds += cap_bind_chunk
                 audit_cap_infeasible_team_worlds += cap_infeasible_chunk
@@ -2593,6 +2662,32 @@ def main(
                         fpts_chunk = fpts_chunk + (stat_box["pts"] - pts_before)
                         # Preserve DNP=0 after post-processing.
                         fpts_chunk = np.where(active_mask, fpts_chunk, 0.0)
+
+                    # Optional game-level factor to induce cross-team correlation.
+                    gf_cfg = getattr(profile_cfg, "game_factor", None)
+                    if gf_cfg is not None and getattr(gf_cfg, "enabled", False):
+                        sigma = float(getattr(gf_cfg, "sigma", 0.0))
+                        if sigma > 0.0:
+                            mode = str(getattr(gf_cfg, "mode", "additive"))
+                            beta_basis = str(getattr(gf_cfg, "beta_basis", "minutes_share"))
+                            if beta_basis == "fpts_share":
+                                basis = (
+                                    pd.to_numeric(mu_df["dk_fpts_mean"], errors="coerce")
+                                    .fillna(0.0)
+                                    .to_numpy(dtype=float)
+                                )
+                            else:
+                                basis = minutes_sim_base.astype(float, copy=False)
+                            apply_game_factor(
+                                fpts_chunk,
+                                active_mask,
+                                game_ids=gs_game_ids,
+                                beta_basis=basis,
+                                sigma=sigma,
+                                mode=mode,  # type: ignore[arg-type]
+                                rng=rng,
+                            )
+                            fpts_chunk = np.where(active_mask, fpts_chunk, 0.0)
                 world_fpts_samples.append(fpts_chunk)
                 # Track individual stat worlds for aggregation
                 for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov", "fga2", "fga3", "fta"):
@@ -2765,7 +2860,12 @@ def main(
                     }
 
                 # Build output projection DataFrame
+                dk_fpts_mean_target = pd.to_numeric(mu_df["dk_fpts_mean"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
                 proj_df = mu_df[["game_date", "game_id", "team_id", "player_id"]].copy()
+                # Expose play_prob used for world activation so downstream audits can validate
+                # unconditional mean targets (E[stat] = E[stat|plays] * play_prob).
+                if "play_prob" in mu_df.columns:
+                    proj_df["play_prob"] = play_prob_arr
                 proj_df["minutes_mean"] = minutes_sim_base
                 proj_df["minutes_sim_mean"] = minutes_mean
                 proj_df["minutes_sim_std"] = minutes_std
@@ -2781,6 +2881,7 @@ def main(
                     proj_df["minutes_sim_p10_uncond"] = minutes_quantiles_uncond[0]
                     proj_df["minutes_sim_p50_uncond"] = minutes_quantiles_uncond[1]
                     proj_df["minutes_sim_p90_uncond"] = minutes_quantiles_uncond[2]
+                proj_df["dk_fpts_mean_target"] = dk_fpts_mean_target
                 proj_df["dk_fpts_mean"] = fpts_mean
                 proj_df["dk_fpts_std"] = fpts_std
                 proj_df["dk_fpts_p05"] = fpts_quantiles[0]
@@ -3053,6 +3154,21 @@ def main(
                         pd.DataFrame(worlds_matrix, columns=player_ids).to_parquet(worlds_path, index=False)
                     except Exception as exc:
                         typer.echo(f"[sim_v2] warning: failed to write worlds_matrix.parquet ({exc})", err=True)
+
+                # Optional: persist minutes worlds matrix for audits/invariant checks.
+                # Kept behind an env var to avoid expanding default artifact footprints.
+                if all_minutes is not None and os.environ.get("PROJECTIONS_SIM_WRITE_MINUTES_MATRIX", "0").strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                }:
+                    try:
+                        player_ids = mu_df["player_id"].astype(str).tolist()
+                        minutes_matrix = all_minutes.astype(np.float32, copy=True)
+                        minutes_path = out_dir / "minutes_matrix.parquet"
+                        pd.DataFrame(minutes_matrix, columns=player_ids).to_parquet(minutes_path, index=False)
+                    except Exception as exc:
+                        typer.echo(f"[sim_v2] warning: failed to write minutes_matrix.parquet ({exc})", err=True)
                 
                 typer.echo(
                     f"[sim_v2] {pd.Timestamp(game_date).date()} dk_fpts_world min/med/max="

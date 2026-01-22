@@ -56,6 +56,36 @@ class PreSimReconcileConfig:
 
 
 @dataclass
+class MinutesMeanRecenteringConfig:
+    """Config for post-reconcile minutes mean-preservation correction."""
+
+    enabled: bool = False
+    max_iters: int = 10
+    step: float = 1.0
+    tol: float = 1e-2
+
+
+@dataclass
+class GameFactorConfig:
+    """Config for a single per-game latent factor to induce cross-team correlation."""
+
+    enabled: bool = False
+    sigma: float = 0.0
+    mode: str = "additive"  # "additive" | "multiplicative"
+    beta_basis: str = "minutes_share"  # "minutes_share" | "fpts_share"
+
+
+@dataclass
+class BenchZeroMixtureConfig:
+    """Config for a mass-at-zero mixture for low-minute players."""
+
+    enabled: bool = False
+    minutes_threshold: float = 8.0
+    p_zero_base: float = 0.25
+    p_zero_slope: float = 0.5
+
+
+@dataclass
 class UsageSharesConfig:
     """Config for stochastic usage share allocation within teams."""
 
@@ -122,6 +152,12 @@ class SimV2Profile:
     minutes_noise_config: MinutesNoiseConfig = field(default_factory=MinutesNoiseConfig)
     # Pre-sim QP reconciliation (runs once before simulation)
     pre_sim_reconcile: PreSimReconcileConfig = field(default_factory=PreSimReconcileConfig)
+    # Optional post-reconcile correction to preserve per-player conditional mean minutes.
+    minutes_mean_recentering: MinutesMeanRecenteringConfig = field(default_factory=MinutesMeanRecenteringConfig)
+    # Optional per-game latent factor (FPTS-level) to induce cross-team correlation.
+    game_factor: GameFactorConfig = field(default_factory=GameFactorConfig)
+    # Optional mass-at-zero mixture for low-minute players (applied pre-reconcile).
+    bench_zero_mixture: BenchZeroMixtureConfig = field(default_factory=BenchZeroMixtureConfig)
     # Optional explicit minutes bundle path (overrides minutes_run_id resolution)
     minutes_bundle_path: Optional[str] = None
 
@@ -272,6 +308,31 @@ def load_sim_v2_profile(
         minutes_weight_scale=float(pre_sim_reconcile_cfg_raw.get("minutes_weight_scale", 1.0)),
     )
 
+    # Post-reconcile mean preservation config
+    mmr_cfg_raw = config.get("minutes_mean_recentering", {}) or {}
+    minutes_mean_recentering = MinutesMeanRecenteringConfig(
+        enabled=bool(mmr_cfg_raw.get("enabled", False)),
+        max_iters=int(mmr_cfg_raw.get("max_iters", 10)),
+        step=float(mmr_cfg_raw.get("step", 1.0)),
+        tol=float(mmr_cfg_raw.get("tol", 1e-2)),
+    )
+
+    game_factor_cfg_raw = config.get("game_factor", {}) or {}
+    game_factor = GameFactorConfig(
+        enabled=bool(game_factor_cfg_raw.get("enabled", False)),
+        sigma=float(game_factor_cfg_raw.get("sigma", 0.0)),
+        mode=str(game_factor_cfg_raw.get("mode", "additive")),
+        beta_basis=str(game_factor_cfg_raw.get("beta_basis", "minutes_share")),
+    )
+
+    bench_zero_cfg_raw = config.get("bench_zero_mixture", {}) or {}
+    bench_zero_mixture = BenchZeroMixtureConfig(
+        enabled=bool(bench_zero_cfg_raw.get("enabled", False)),
+        minutes_threshold=float(bench_zero_cfg_raw.get("minutes_threshold", 8.0)),
+        p_zero_base=float(bench_zero_cfg_raw.get("p_zero_base", 0.25)),
+        p_zero_slope=float(bench_zero_cfg_raw.get("p_zero_slope", 0.5)),
+    )
+
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
     use_game_scripts = bool(game_script_cfg.get("enabled", False))
@@ -331,6 +392,9 @@ def load_sim_v2_profile(
         preserve_input_rotation=preserve_input_rotation,
         minutes_noise_config=minutes_noise_config,
         pre_sim_reconcile=pre_sim_reconcile,
+        minutes_mean_recentering=minutes_mean_recentering,
+        game_factor=game_factor,
+        bench_zero_mixture=bench_zero_mixture,
         minutes_bundle_path=minutes_bundle_path,
     )
 

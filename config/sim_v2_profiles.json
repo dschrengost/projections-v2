@@ -139,6 +139,24 @@
         "tail_min_adjustable_minutes": 2.0,
         "min_minutes_for_noise_override": null
       },
+      "minutes_mean_recentering": {
+        "enabled": true,
+        "max_iters": 10,
+        "step": 0.8,
+        "tol": 0.05
+      },
+      "game_factor": {
+        "enabled": false,
+        "sigma": 8.0,
+        "mode": "additive",
+        "beta_basis": "minutes_share"
+      },
+      "bench_zero_mixture": {
+        "enabled": false,
+        "minutes_threshold": 8.0,
+        "p_zero_base": 0.25,
+        "p_zero_slope": 0.5
+      },
       "team_sigma_scale": 1.0,
       "player_sigma_scale": 1.0,
       "rates_sigma_scale": 1.0,
