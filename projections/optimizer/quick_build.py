@@ -88,18 +88,44 @@ def fnv1a_64(parts: Sequence[str]) -> int:
 
 
 def _max_overlap_from_jaccard(threshold: float, lineup_size: int) -> int:
-    """Return max allowed overlap count to keep Jaccard < threshold for equal-size lineups."""
+    """Return max allowed overlap count so that Jaccard < threshold.
+
+    For equal-size lineups A, B of size n with overlap k:
+        J(A,B) = k / (2n - k)
+
+    We want max k such that J < t, i.e., k < (2 * n * t) / (1 + t).
+
+    Args:
+        threshold: Jaccard threshold t. Values <= 0 or >= 1 disable the cap.
+        lineup_size: Number of players per lineup (n).
+
+    Returns:
+        k_max: Maximum overlap count such that J(k_max, n) < t.
+
+    Edge cases (all return n-1, i.e., disable overlap enforcement):
+        - t <= 0: disable (no near-dup filtering)
+        - t >= 1: disable (J < 1 allows any non-identical lineup)
+        - NaN/invalid: disable (conservative fallback)
+    """
+    n = int(lineup_size)
+    if n <= 0:
+        return 0
+
+    # Parse threshold safely
     try:
         t = float(threshold)
-    except Exception:
-        return max(0, lineup_size - 1)
-    if t <= 0:
-        return lineup_size
-    denom = 1.0 + t
-    if denom <= 0:
-        return max(0, lineup_size - 1)
-    raw = (2.0 * float(lineup_size) * t) / denom
-    return max(0, int(math.ceil(raw) - 1))
+    except (TypeError, ValueError):
+        return max(0, n - 1)
+
+    # NaN check and edge cases: disable overlap cap
+    if t != t or t <= 0.0 or t >= 1.0:
+        return max(0, n - 1)
+
+    # General case: k_max = floor(raw - eps) for strict J < t
+    raw = (2.0 * n * t) / (1.0 + t)
+    eps = 1e-9
+    k_max = int(math.floor(raw - eps))
+    return max(0, min(k_max, n - 1))
 
 
 class CrossWorkerBloom:
