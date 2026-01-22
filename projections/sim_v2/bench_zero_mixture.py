@@ -20,7 +20,6 @@ def apply_bench_zero_mixture(
     *,
     group_map: dict[Any, list[int]],
     minutes_target: np.ndarray,  # (P,)
-    play_prob: np.ndarray | None,  # (P,)
     minutes_threshold: float,
     p_zero_base: float,
     p_zero_slope: float,
@@ -71,10 +70,6 @@ def apply_bench_zero_mixture(
     x = np.clip((float(minutes_threshold) - target) / float(minutes_threshold), 0.0, 1.0)
     p_zero = np.clip(float(p_zero_base) + float(p_zero_slope) * x, 0.0, 0.95)
     p_zero = np.where(in_bucket, p_zero, 0.0)
-    if play_prob is not None:
-        pp = np.clip(np.asarray(play_prob, dtype=float), 0.0, 1.0)
-        if pp.shape[0] == minutes.shape[1]:
-            p_zero = p_zero * (1.0 - 0.5 * pp)
 
     drop = (rng.random(size=minutes.shape) < p_zero[None, :]) & active
 
@@ -124,4 +119,3 @@ def apply_bench_zero_mixture(
 
 
 __all__ = ["apply_bench_zero_mixture", "BenchZeroMixtureStats"]
-

@@ -2436,7 +2436,6 @@ def main(
                         active_mask,
                         group_map=group_map,
                         minutes_target=minutes_sim_base,
-                        play_prob=play_prob_arr,
                         minutes_threshold=float(getattr(bz_cfg, "minutes_threshold", 8.0)),
                         p_zero_base=float(getattr(bz_cfg, "p_zero_base", 0.25)),
                         p_zero_slope=float(getattr(bz_cfg, "p_zero_slope", 0.0)),

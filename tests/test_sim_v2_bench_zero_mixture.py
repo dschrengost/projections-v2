@@ -21,14 +21,12 @@ def test_bench_zero_mixture_preserves_feasibility_and_team_240_after_reconcile()
     active = np.ones((n_worlds, n_players), dtype=bool)
 
     group_map = {111: list(range(n_players))}
-    play_prob = np.zeros(n_players, dtype=float)
 
     stats = apply_bench_zero_mixture(
         minutes_worlds,
         active,
         group_map=group_map,
         minutes_target=minutes_target,
-        play_prob=play_prob,
         minutes_threshold=8.0,
         p_zero_base=0.95,
         p_zero_slope=0.0,
@@ -52,4 +50,3 @@ def test_bench_zero_mixture_preserves_feasibility_and_team_240_after_reconcile()
     np.testing.assert_allclose(reconciled.sum(axis=1), total, atol=1e-3)
     assert (reconciled >= 0.0).all()
     np.testing.assert_array_equal(reconciled[~active], 0.0)
-
