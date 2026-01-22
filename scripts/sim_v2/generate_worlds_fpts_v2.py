@@ -17,6 +17,7 @@ import typer
 from projections.fpts_v2.scoring import compute_dk_fpts
 from projections.paths import data_path, get_project_root
 from projections.sim_v2.config import DEFAULT_PROFILES_PATH, UsageSharesConfig, load_sim_v2_profile
+from projections.sim_v2.game_factor import apply_game_factor
 from projections.sim_v2.game_script import GameScriptConfig, classify_script, sample_minutes_with_scripts
 from projections.sim_v2.minutes_noise import (
     build_sigma_per_player,
@@ -2636,6 +2637,32 @@ def main(
                         fpts_chunk = fpts_chunk + (stat_box["pts"] - pts_before)
                         # Preserve DNP=0 after post-processing.
                         fpts_chunk = np.where(active_mask, fpts_chunk, 0.0)
+
+                    # Optional game-level factor to induce cross-team correlation.
+                    gf_cfg = getattr(profile_cfg, "game_factor", None)
+                    if gf_cfg is not None and getattr(gf_cfg, "enabled", False):
+                        sigma = float(getattr(gf_cfg, "sigma", 0.0))
+                        if sigma > 0.0:
+                            mode = str(getattr(gf_cfg, "mode", "additive"))
+                            beta_basis = str(getattr(gf_cfg, "beta_basis", "minutes_share"))
+                            if beta_basis == "fpts_share":
+                                basis = (
+                                    pd.to_numeric(mu_df["dk_fpts_mean"], errors="coerce")
+                                    .fillna(0.0)
+                                    .to_numpy(dtype=float)
+                                )
+                            else:
+                                basis = minutes_sim_base.astype(float, copy=False)
+                            apply_game_factor(
+                                fpts_chunk,
+                                active_mask,
+                                game_ids=gs_game_ids,
+                                beta_basis=basis,
+                                sigma=sigma,
+                                mode=mode,  # type: ignore[arg-type]
+                                rng=rng,
+                            )
+                            fpts_chunk = np.where(active_mask, fpts_chunk, 0.0)
                 world_fpts_samples.append(fpts_chunk)
                 # Track individual stat worlds for aggregation
                 for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov", "fga2", "fga3", "fta"):

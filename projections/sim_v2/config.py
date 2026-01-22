@@ -66,6 +66,16 @@ class MinutesMeanRecenteringConfig:
 
 
 @dataclass
+class GameFactorConfig:
+    """Config for a single per-game latent factor to induce cross-team correlation."""
+
+    enabled: bool = False
+    sigma: float = 0.0
+    mode: str = "additive"  # "additive" | "multiplicative"
+    beta_basis: str = "minutes_share"  # "minutes_share" | "fpts_share"
+
+
+@dataclass
 class UsageSharesConfig:
     """Config for stochastic usage share allocation within teams."""
 
@@ -134,6 +144,8 @@ class SimV2Profile:
     pre_sim_reconcile: PreSimReconcileConfig = field(default_factory=PreSimReconcileConfig)
     # Optional post-reconcile correction to preserve per-player conditional mean minutes.
     minutes_mean_recentering: MinutesMeanRecenteringConfig = field(default_factory=MinutesMeanRecenteringConfig)
+    # Optional per-game latent factor (FPTS-level) to induce cross-team correlation.
+    game_factor: GameFactorConfig = field(default_factory=GameFactorConfig)
     # Optional explicit minutes bundle path (overrides minutes_run_id resolution)
     minutes_bundle_path: Optional[str] = None
 
@@ -293,6 +305,14 @@ def load_sim_v2_profile(
         tol=float(mmr_cfg_raw.get("tol", 1e-2)),
     )
 
+    game_factor_cfg_raw = config.get("game_factor", {}) or {}
+    game_factor = GameFactorConfig(
+        enabled=bool(game_factor_cfg_raw.get("enabled", False)),
+        sigma=float(game_factor_cfg_raw.get("sigma", 0.0)),
+        mode=str(game_factor_cfg_raw.get("mode", "additive")),
+        beta_basis=str(game_factor_cfg_raw.get("beta_basis", "minutes_share")),
+    )
+
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
     use_game_scripts = bool(game_script_cfg.get("enabled", False))
@@ -353,6 +373,7 @@ def load_sim_v2_profile(
         minutes_noise_config=minutes_noise_config,
         pre_sim_reconcile=pre_sim_reconcile,
         minutes_mean_recentering=minutes_mean_recentering,
+        game_factor=game_factor,
         minutes_bundle_path=minutes_bundle_path,
     )
 

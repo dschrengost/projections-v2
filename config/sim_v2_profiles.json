@@ -145,6 +145,12 @@
         "step": 0.8,
         "tol": 0.05
       },
+      "game_factor": {
+        "enabled": false,
+        "sigma": 8.0,
+        "mode": "additive",
+        "beta_basis": "minutes_share"
+      },
       "team_sigma_scale": 1.0,
       "player_sigma_scale": 1.0,
       "rates_sigma_scale": 1.0,
