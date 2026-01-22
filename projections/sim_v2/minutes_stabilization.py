@@ -187,6 +187,147 @@ def sample_minutes_noise_per_world(
     return m_final, stats
 
 
+def reconcile_team_minutes_active_softmax(
+    m0: np.ndarray,  # (W, N)
+    active_mask: np.ndarray,  # (W, N) bool
+    *,
+    total_minutes: float = 240.0,
+    eps: float = 1e-6,
+    cap_minutes: float | None = None,
+    tol: float = 1e-6,
+    cap_tol: float = 1e-9,
+    max_cap_iters: int = 20,
+) -> tuple[np.ndarray, dict[str, float | int]]:
+    """
+    Reconcile minutes to `total_minutes` per row using active-only softmax.
+
+    - Inactive players are forced to exactly 0.0 and excluded from the softmax denominator.
+    - Active players get a non-negative allocation that sums to `total_minutes` (within `tol`).
+    - Optional `cap_minutes` applies a hard cap with iterative proportional redistribution
+      (weights proportional to pre-cap minutes, i.e. exp(logits)).
+    """
+    m0 = np.asarray(m0, dtype=float)
+    active_mask = np.asarray(active_mask, dtype=bool)
+    if m0.shape != active_mask.shape:
+        raise ValueError(f"m0 and active_mask must have same shape; got {m0.shape} vs {active_mask.shape}")
+
+    n_rows = int(m0.shape[0])
+    if n_rows == 0:
+        return m0.copy(), {
+            "n_rows": 0,
+            "n_all_inactive": 0,
+            "n_cap_bind_rows": 0,
+            "n_cap_infeasible_rows": 0,
+        }
+
+    all_inactive = ~active_mask.any(axis=1)
+    n_all_inactive = int(all_inactive.sum())
+
+    # Active-only softmax in log-space: minutes ∝ exp(log(max(m0, eps))) = max(m0, eps).
+    logits = np.log(np.maximum(m0, float(eps)))
+    logits = np.where(active_mask, logits, -np.inf)
+
+    out = np.zeros_like(m0, dtype=float)
+    if (~all_inactive).any():
+        logits_valid = logits[~all_inactive]
+        max_logits = np.max(logits_valid, axis=1, keepdims=True)
+        exps = np.exp(logits_valid - max_logits)
+        denom = exps.sum(axis=1, keepdims=True)
+        probs = np.divide(exps, denom, out=np.zeros_like(exps), where=denom > 0.0)
+        out_valid = float(total_minutes) * probs
+        out[~all_inactive] = out_valid
+
+    # Defense-in-depth: keep inactive exactly 0.
+    out = np.where(active_mask, out, 0.0)
+
+    if cap_minutes is None:
+        return out, {
+            "n_rows": n_rows,
+            "n_all_inactive": n_all_inactive,
+            "n_cap_bind_rows": 0,
+            "n_cap_infeasible_rows": 0,
+        }
+
+    cap = float(cap_minutes)
+    if cap <= 0.0:
+        raise ValueError(f"cap_minutes must be > 0; got {cap_minutes}")
+
+    # Cap is infeasible if active_count * cap < total_minutes.
+    active_counts = active_mask.sum(axis=1).astype(int)
+    cap_infeasible = (active_counts.astype(float) * cap) < (float(total_minutes) - float(tol))
+    n_cap_infeasible = int(cap_infeasible.sum())
+
+    # Only apply cap where feasible; keep softmax allocation otherwise.
+    pre_cap = out.copy()
+    capped = np.where(active_mask, np.minimum(out, cap), 0.0)
+    capped[cap_infeasible] = pre_cap[cap_infeasible]
+
+    n_cap_bind_rows = int(((active_mask & (pre_cap > (cap + cap_tol))).any(axis=1) & (~cap_infeasible)).sum())
+
+    # Iterative proportional redistribution of remaining mass for feasible rows only.
+    for _ in range(int(max_cap_iters)):
+        feasible_idx = np.flatnonzero(~cap_infeasible)
+        if feasible_idx.size == 0:
+            break
+
+        remaining = float(total_minutes) - capped[feasible_idx].sum(axis=1)
+        if np.all(remaining <= tol):
+            break
+
+        eligible = active_mask[feasible_idx] & (capped[feasible_idx] < (cap - cap_tol))
+        eligible_sum = eligible.sum(axis=1)
+        can_add = (remaining > tol) & (eligible_sum > 0)
+        if not can_add.any():
+            break
+
+        weights = np.where(eligible, pre_cap[feasible_idx], 0.0)
+        weight_sum = weights.sum(axis=1)
+
+        # Only allocate on rows that still need minutes and have eligible weight.
+        rows = np.flatnonzero(can_add & (weight_sum > 0.0))
+        for r in rows:
+            row_idx = int(feasible_idx[r])
+            add = weights[r] * (remaining[r] / weight_sum[r])
+            capped_row = np.minimum(capped[row_idx] + add, cap)
+            capped[row_idx] = capped_row
+
+    # Final renormalization for feasible rows (keep caps and inactive zeros).
+    feasible_rows = ~cap_infeasible
+    if feasible_rows.any():
+        row_sum = capped[feasible_rows].sum(axis=1)
+        residual = float(total_minutes) - row_sum
+        needs_fix = np.abs(residual) > tol
+        if needs_fix.any():
+            for r in np.flatnonzero(needs_fix):
+                full_row_idx = np.flatnonzero(feasible_rows)[r]
+                row_active = active_mask[full_row_idx]
+                row = capped[full_row_idx]
+                if residual[r] > 0:
+                    eligible = row_active & (row < (cap - cap_tol))
+                    if eligible.any():
+                        weights = np.where(eligible, pre_cap[full_row_idx], 0.0)
+                        wsum = float(weights.sum())
+                        if wsum > 0.0:
+                            add = weights * (residual[r] / wsum)
+                            row = np.minimum(row + add, cap)
+                else:
+                    eligible = row_active & (row > 0.0)
+                    if eligible.any():
+                        weights = np.where(eligible, pre_cap[full_row_idx], 0.0)
+                        wsum = float(weights.sum())
+                        if wsum > 0.0:
+                            sub = weights * ((-residual[r]) / wsum)
+                            row = np.maximum(row - sub, 0.0)
+                capped[full_row_idx] = np.where(row_active, row, 0.0)
+
+    return capped, {
+        "n_rows": n_rows,
+        "n_all_inactive": n_all_inactive,
+        "n_cap_bind_rows": n_cap_bind_rows,
+        "n_cap_infeasible_rows": n_cap_infeasible,
+    }
+
+
 def _project_team_240_fast(
     m_noisy: np.ndarray,  # (W, P)
     team_indices: np.ndarray,  # (P,)
@@ -419,5 +560,6 @@ __all__ = [
     "MinutesNoiseStats",
     "_position_aware_target_cv",
     "apply_pre_sim_qp_reconcile",
+    "reconcile_team_minutes_active_softmax",
     "sample_minutes_noise_per_world",
 ]
