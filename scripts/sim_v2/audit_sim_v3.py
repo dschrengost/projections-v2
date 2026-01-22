@@ -183,6 +183,58 @@ def _load_minutes_actuals_from_labels(*, data_root: Path, date_from: date_cls, d
     return pd.concat(out_frames, ignore_index=True)
 
 
+def _fetch_fpts_actuals_from_nba_com(*, game_ids: list[int], timeout: float = 10.0) -> pd.DataFrame:
+    if not game_ids:
+        return pd.DataFrame(columns=["game_date", "game_id", "player_id", "dk_fpts_actual"])
+
+    from scrapers.nba_boxscore import NbaComBoxScoreScraper
+    from projections.fpts_v2.scoring import compute_dk_fpts
+
+    scraper = NbaComBoxScoreScraper(timeout=timeout, request_delay=0.0)
+    rows: list[dict[str, Any]] = []
+    for gid in sorted(set(int(x) for x in game_ids)):
+        game = scraper.fetch_box_score(str(gid))
+        if game is None:
+            continue
+        game_date = game.game_time_local.date() if game.game_time_local else None
+        for team in (game.home, game.away):
+            if team is None:
+                continue
+            for p in team.players:
+                stats = p.statistics or {}
+                rows.append(
+                    {
+                        "game_date": game_date,
+                        "game_id": int(game.game_id),
+                        "team_id": int(team.team_id),
+                        "player_id": int(p.person_id),
+                        "pts": float(stats.get("points") or 0.0),
+                        "reb": float(stats.get("reboundsTotal") or 0.0),
+                        "oreb": float(stats.get("reboundsOffensive") or 0.0),
+                        "dreb": float(stats.get("reboundsDefensive") or 0.0),
+                        "ast": float(stats.get("assists") or 0.0),
+                        "stl": float(stats.get("steals") or 0.0),
+                        "blk": float(stats.get("blocks") or 0.0),
+                        "tov": float(stats.get("turnovers") or 0.0),
+                        "fgm": float(stats.get("fieldGoalsMade") or 0.0),
+                        "fga": float(stats.get("fieldGoalsAttempted") or 0.0),
+                        "fg3m": float(stats.get("threePointersMade") or 0.0),
+                        "fg3a": float(stats.get("threePointersAttempted") or 0.0),
+                        "ftm": float(stats.get("freeThrowsMade") or 0.0),
+                        "fta": float(stats.get("freeThrowsAttempted") or 0.0),
+                        "pf": float(stats.get("foulsPersonal") or 0.0),
+                        "plus_minus": float(stats.get("plusMinusPoints") or 0.0),
+                    }
+                )
+    if not rows:
+        return pd.DataFrame(columns=["game_date", "game_id", "player_id", "dk_fpts_actual"])
+
+    df = pd.DataFrame(rows)
+    df["dk_fpts_actual"] = compute_dk_fpts(df)
+    df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce").dt.date
+    return df[["game_date", "game_id", "player_id", "dk_fpts_actual"]].copy()
+
+
 @dataclass(frozen=True)
 class MinutesInvariantSummary:
     max_abs_team_world_sum_err: float
@@ -388,6 +440,11 @@ def main(
     profiles_path: Path | None = typer.Option(None, "--profiles-path", help="Override sim profiles JSON path"),
     seed: int = typer.Option(0, "--seed", help="RNG seed for sim reproducibility"),
     sim_run_id: str | None = typer.Option(None, "--sim-run-id", help="Explicit sim run_id to write under artifacts/"),
+    fetch_fpts_actuals: bool = typer.Option(
+        True,
+        "--fetch-fpts-actuals/--no-fetch-fpts-actuals",
+        help="If local boxscore FPTS actuals are unavailable, fetch from NBA.com liveData endpoints.",
+    ),
 ) -> None:
     d0 = _parse_date(date_from)
     d1 = _parse_date(date_to)
@@ -451,6 +508,9 @@ def main(
     minutes_actuals_df = _load_minutes_actuals_from_labels(data_root=root, date_from=d0, date_to=d1)
     meta["minutes_actuals_rows"] = int(len(minutes_actuals_df))
     meta["fpts_actuals_rows"] = int(len(fpts_actuals_df))
+    meta["fpts_actuals_source"] = "raw_boxscores_json" if len(fpts_actuals_df) else "none"
+
+    fetched_fpts_cache: dict[int, pd.DataFrame] = {}
 
     # Per-date audit accumulation.
     per_date_rows: list[dict[str, Any]] = []
@@ -537,6 +597,24 @@ def main(
             ["game_id", "player_id", "dk_fpts_actual"]
         ].copy()
         fpts_slice["player_id"] = fpts_slice["player_id"].astype(str)
+        if fpts_slice.empty and fetch_fpts_actuals:
+            # Fetch once per date, keyed by game_id.
+            game_ids_for_date = sorted({int(x) for x in proj_df["game_id"].astype(int).tolist()})
+            missing_gids = [gid for gid in game_ids_for_date if gid not in fetched_fpts_cache]
+            if missing_gids:
+                typer.echo(f"[audit_sim_v3] fetching NBA.com boxscores for {date_str} (n_games={len(missing_gids)})")
+                fetched = _fetch_fpts_actuals_from_nba_com(game_ids=missing_gids)
+                for gid in missing_gids:
+                    fetched_fpts_cache[gid] = fetched[fetched["game_id"] == gid].copy()
+                meta["fpts_actuals_source"] = "nba_com_fetch"
+            fetched_for_date = pd.concat(
+                [fetched_fpts_cache[gid] for gid in game_ids_for_date if gid in fetched_fpts_cache],
+                ignore_index=True,
+            )
+            fpts_slice = fetched_for_date[fetched_for_date["game_date"] == d][
+                ["game_id", "player_id", "dk_fpts_actual"]
+            ].copy()
+            fpts_slice["player_id"] = fpts_slice["player_id"].astype(str)
 
         proj_join = proj_df[["game_id", "player_id"]].copy()
         proj_join["player_id"] = proj_join["player_id"].astype(str)
