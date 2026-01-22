@@ -491,6 +491,175 @@ def _project_to_simplex_nonnegative(v: np.ndarray, total: float) -> np.ndarray:
     return np.maximum(v - theta, 0.0)
 
 
+def _project_to_simplex_nonnegative_batch(
+    v: np.ndarray,
+    active_mask: np.ndarray,
+    total: float,
+) -> np.ndarray:
+    """
+    Vectorized simplex projection for batch of rows with varying active sets.
+
+    Projects each row of v onto {x >= 0, sum(x) = total} considering only active positions.
+    Inactive positions are set to 0.
+
+    Args:
+        v: (W, N) array of values to project
+        active_mask: (W, N) bool array indicating active positions per row
+        total: target sum for each row
+
+    Returns:
+        (W, N) array with projected values (inactive positions = 0)
+    """
+    v = np.asarray(v, dtype=float)
+    active_mask = np.asarray(active_mask, dtype=bool)
+    w, n = v.shape
+    total = float(total)
+
+    if w == 0 or n == 0:
+        return v.copy()
+    if total <= 0.0:
+        return np.zeros_like(v)
+
+    # Set inactive positions to -inf for sorting (they'll end up last)
+    v_masked = np.where(active_mask, v, -np.inf)
+
+    # Sort descending along axis=1
+    u = np.sort(v_masked, axis=1)[:, ::-1]
+
+    # Count active per row
+    active_counts = active_mask.sum(axis=1)  # (W,)
+
+    # Cumsum of sorted values
+    cssv = np.cumsum(u, axis=1)  # (W, N)
+
+    # Build index array: 1, 2, 3, ... N
+    idx = np.arange(1, n + 1, dtype=float)  # (N,)
+
+    # Condition: u[k] * (k+1) > cssv[k] - total
+    # We need to find the largest k where this holds for each row
+    condition = u * idx[None, :] > (cssv - total)
+
+    # Mask out positions beyond the active count for each row
+    position_mask = idx[None, :] <= active_counts[:, None]
+    condition = condition & position_mask
+
+    # Find rho (largest valid index) per row
+    # Use argmax on reversed condition to find last True
+    has_valid = condition.any(axis=1)
+
+    # For rows with valid indices, find the last True position
+    # Trick: multiply condition by position index, take max
+    rho_indices = (condition * idx[None, :]).max(axis=1).astype(int) - 1  # 0-indexed
+
+    # Compute theta for each row
+    # theta = (cssv[rho] - total) / (rho + 1)
+    theta = np.zeros(w, dtype=float)
+
+    # For rows with valid rho
+    valid_rows = has_valid & (rho_indices >= 0)
+    if valid_rows.any():
+        theta[valid_rows] = (
+            cssv[valid_rows, rho_indices[valid_rows]] - total
+        ) / (rho_indices[valid_rows] + 1)
+
+    # For rows without valid rho (all values too small), use fallback
+    fallback_rows = ~valid_rows & (active_counts > 0)
+    if fallback_rows.any():
+        # Get the sum of active values for these rows
+        active_sums = np.where(active_mask, v, 0.0).sum(axis=1)
+        theta[fallback_rows] = (active_sums[fallback_rows] - total) / active_counts[fallback_rows]
+
+    # Project: max(v - theta, 0), but only for active positions
+    result = np.maximum(v - theta[:, None], 0.0)
+    result = np.where(active_mask, result, 0.0)
+
+    return result
+
+
+def _project_to_capped_simplex_batch(
+    v: np.ndarray,
+    active_mask: np.ndarray,
+    total: float,
+    cap: float,
+) -> np.ndarray:
+    """
+    Vectorized capped simplex projection for batch of rows.
+
+    Projects each row of v onto {0 <= x <= cap, sum(x) = total} considering only active positions.
+
+    Args:
+        v: (W, N) array of values to project
+        active_mask: (W, N) bool array indicating active positions per row
+        total: target sum for each row
+        cap: maximum value per element
+
+    Returns:
+        (W, N) array with projected values (inactive positions = 0)
+    """
+    v = np.asarray(v, dtype=float)
+    active_mask = np.asarray(active_mask, dtype=bool)
+    w, n = v.shape
+    total = float(total)
+    cap = float(cap)
+
+    if w == 0 or n == 0:
+        return v.copy()
+    if total <= 0.0:
+        return np.zeros_like(v)
+    if cap <= 0.0:
+        raise ValueError(f"cap must be > 0; got {cap}")
+
+    active_counts = active_mask.sum(axis=1).astype(float)  # (W,)
+
+    # Check feasibility: if active_count * cap < total, cap is infeasible
+    # For infeasible rows, just return capped values (won't sum to total)
+    cap_feasible = (active_counts * cap) >= total
+
+    result = np.zeros_like(v)
+
+    # Binary search for lambda such that sum(clip(v - lambda, 0, cap)) = total
+    # Vectorized: do binary search in parallel for all rows
+
+    # Initialize bounds
+    has_active = active_counts > 0.0
+    min_v = np.min(np.where(active_mask, v, np.inf), axis=1)
+    max_v = np.max(np.where(active_mask, v, -np.inf), axis=1)
+    lo = np.where(has_active, min_v - cap, 0.0)  # (W,)
+    hi = np.where(has_active, max_v, 0.0)  # (W,)
+
+    # 30 iterations of binary search (plenty for float64 precision)
+    for _ in range(30):
+        mid = 0.5 * (lo + hi)
+        # Compute sum of clipped values for each row
+        clipped = np.clip(v - mid[:, None], 0.0, cap)
+        clipped = np.where(active_mask, clipped, 0.0)
+        s = clipped.sum(axis=1)
+        # Update bounds
+        lo = np.where(s > total, mid, lo)
+        hi = np.where(s <= total, mid, hi)
+
+    # Final projection
+    result = np.clip(v - hi[:, None], 0.0, cap)
+    result = np.where(active_mask, result, 0.0)
+
+    # For infeasible rows, relax cap to make it feasible
+    infeasible = ~cap_feasible & (active_counts > 0)
+    if infeasible.any():
+        # Minimum cap needed: total / active_count
+        min_cap = total / np.maximum(active_counts, 1.0)
+        # Re-project these rows with relaxed cap
+        for r in np.flatnonzero(infeasible):
+            row_active = active_mask[r]
+            if not row_active.any():
+                continue
+            cap_eff = float(min_cap[r])
+            # Use scalar version for these edge cases
+            idxs = np.where(row_active)[0]
+            result[r, idxs] = _project_to_capped_simplex(v[r, idxs], total, cap_eff)
+
+    return result
+
+
 def _project_to_capped_simplex(v: np.ndarray, total: float, cap: float) -> np.ndarray:
     """Euclidean projection of v onto {0 <= x <= cap, sum(x) = total}."""
     v = np.asarray(v, dtype=float)
@@ -543,6 +712,8 @@ def recenter_team_minutes_to_conditional_means(
       1) compute conditional mean error per player
       2) add a per-player bias to active worlds
       3) project each world back onto the (capped) simplex (L2-minimal per row)
+
+    Note: Uses vectorized batch projections for performance.
     """
     m = np.asarray(minutes_world, dtype=float)
     a = np.asarray(active_mask, dtype=bool)
@@ -596,23 +767,14 @@ def recenter_team_minutes_to_conditional_means(
             max_abs_bias,
         )
 
-        out = np.zeros_like(m)
-        for r in range(w):
-            row_active = a[r]
-            if not row_active.any():
-                continue
-            v = m[r] + bias * row_active.astype(float)
-            v = np.where(row_active, v, 0.0)
-            idxs = np.where(row_active)[0]
-            v_act = v[idxs]
-            if cap is None:
-                proj = _project_to_simplex_nonnegative(v_act, total_minutes)
-            else:
-                # Ensure per-row cap is feasible by relaxing it up to the minimum required.
-                cap_eff = max(cap, total_minutes / float(idxs.size))
-                proj = _project_to_capped_simplex(v_act, total_minutes, cap_eff)
-            out[r, idxs] = proj
-        m = out
+        # Vectorized projection: apply bias and project all rows at once
+        v = m + bias[None, :] * a.astype(float)
+        v = np.where(a, v, 0.0)
+
+        if cap is None:
+            m = _project_to_simplex_nonnegative_batch(v, a, total_minutes)
+        else:
+            m = _project_to_capped_simplex_batch(v, a, total_minutes, cap)
 
     means1 = _conditional_means(m)
     err1 = target - means1
