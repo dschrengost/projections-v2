@@ -2850,13 +2850,14 @@ def main(
                     q_levels = np.asarray(quantiles, dtype=float)
                     q0 = 1.0 - p_play  # mass at 0
                     q_adj = np.where(p_play > 0, (q_levels[:, None] - q0[None, :]) / p_play[None, :], 0.0)
-                    q_adj = np.clip(q_adj, q_levels.min(), q_levels.max())
+                    q_adj = np.minimum(q_adj, q_levels.max())
                     # If the desired quantile falls into the point mass at 0, the mixture quantile is 0.
                     in_zero = q_levels[:, None] <= q0[None, :]
 
                     # Linear interpolation of conditional quantiles on the precomputed grid.
-                    grid = q_levels
-                    grid_q = fpts_quantiles  # (Q, P)
+                    # Include an explicit zero point to allow interpolation below the minimum conditional quantile.
+                    grid = np.concatenate(([0.0], q_levels))
+                    grid_q = np.vstack([np.zeros((1, n_players), dtype=float), fpts_quantiles])  # (Q+1, P)
                     idx_hi = np.searchsorted(grid, q_adj, side="left")
                     idx_hi = np.clip(idx_hi, 0, len(grid) - 1)
                     idx_lo = np.clip(idx_hi - 1, 0, len(grid) - 1)
@@ -2887,14 +2888,15 @@ def main(
                         q_levels = levels
                         q0 = 1.0 - p_play
                         q_adj = np.where(p_play > 0, (q_levels[:, None] - q0[None, :]) / p_play[None, :], 0.0)
-                        q_adj = np.clip(q_adj, q_levels.min(), q_levels.max())
+                        q_adj = np.minimum(q_adj, q_levels.max())
                         in_zero = q_levels[:, None] <= q0[None, :]
 
                         if minutes_quantiles is None:
                             minutes_quantiles_uncond = np.zeros((3, n_players), dtype=float)
                         else:
-                            grid = q_levels
-                            grid_q = minutes_quantiles  # (3, P)
+                            # Include an explicit zero point to allow interpolation below the minimum conditional quantile.
+                            grid = np.concatenate(([0.0], q_levels))
+                            grid_q = np.vstack([np.zeros((1, n_players), dtype=float), minutes_quantiles])  # (4, P)
                             idx_hi = np.searchsorted(grid, q_adj, side="left")
                             idx_hi = np.clip(idx_hi, 0, len(grid) - 1)
                             idx_lo = np.clip(idx_hi - 1, 0, len(grid) - 1)
