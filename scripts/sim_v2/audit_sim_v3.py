@@ -163,6 +163,26 @@ def _load_actuals_from_raw_boxscores(
     return pd.concat(out_frames, ignore_index=True)
 
 
+def _load_minutes_actuals_from_labels(*, data_root: Path, date_from: date_cls, date_to: date_cls) -> pd.DataFrame:
+    seasons = sorted({_season_from_date(d) for d in _date_range(date_from, date_to)})
+    out_frames: list[pd.DataFrame] = []
+    for season in seasons:
+        path = data_root / "labels" / f"season={season}" / "boxscore_labels.parquet"
+        if not path.exists():
+            continue
+        df = pd.read_parquet(path, columns=["game_date", "game_id", "player_id", "minutes"])
+        df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce").dt.date
+        mask = (df["game_date"] >= date_from) & (df["game_date"] <= date_to)
+        df = df.loc[mask, ["game_date", "game_id", "player_id", "minutes"]].copy()
+        df = df.rename(columns={"minutes": "minutes_actual"})
+        df["player_id"] = df["player_id"].astype(int)
+        df["game_id"] = df["game_id"].astype(int)
+        out_frames.append(df)
+    if not out_frames:
+        return pd.DataFrame(columns=["game_date", "game_id", "player_id", "minutes_actual"])
+    return pd.concat(out_frames, ignore_index=True)
+
+
 @dataclass(frozen=True)
 class MinutesInvariantSummary:
     max_abs_team_world_sum_err: float
@@ -427,7 +447,10 @@ def main(
     )
 
     typer.echo("[audit_sim_v3] Loading actuals (raw boxscores) ...")
-    actuals_df = _load_actuals_from_raw_boxscores(data_root=root, date_from=d0, date_to=d1)
+    fpts_actuals_df = _load_actuals_from_raw_boxscores(data_root=root, date_from=d0, date_to=d1)
+    minutes_actuals_df = _load_minutes_actuals_from_labels(data_root=root, date_from=d0, date_to=d1)
+    meta["minutes_actuals_rows"] = int(len(minutes_actuals_df))
+    meta["fpts_actuals_rows"] = int(len(fpts_actuals_df))
 
     # Per-date audit accumulation.
     per_date_rows: list[dict[str, Any]] = []
@@ -505,13 +528,19 @@ def main(
 
         # Quantile coverage vs actuals (minutes + fpts)
         join_keys = ["game_id", "player_id"]
-        actuals_slice = actuals_df[actuals_df["game_date"] == d][
-            ["game_id", "player_id", "minutes_actual", "dk_fpts_actual"]
+        minutes_slice = minutes_actuals_df[minutes_actuals_df["game_date"] == d][
+            ["game_id", "player_id", "minutes_actual"]
         ].copy()
-        actuals_slice["player_id"] = actuals_slice["player_id"].astype(str)
+        minutes_slice["player_id"] = minutes_slice["player_id"].astype(str)
+
+        fpts_slice = fpts_actuals_df[fpts_actuals_df["game_date"] == d][
+            ["game_id", "player_id", "dk_fpts_actual"]
+        ].copy()
+        fpts_slice["player_id"] = fpts_slice["player_id"].astype(str)
+
         proj_join = proj_df[["game_id", "player_id"]].copy()
         proj_join["player_id"] = proj_join["player_id"].astype(str)
-        joined = proj_join.merge(actuals_slice, on=join_keys, how="left")
+        joined = proj_join.merge(minutes_slice, on=join_keys, how="left").merge(fpts_slice, on=join_keys, how="left")
 
         minutes_actual = pd.to_numeric(joined["minutes_actual"], errors="coerce").to_numpy(dtype=float)
         fpts_actual = pd.to_numeric(joined["dk_fpts_actual"], errors="coerce").to_numpy(dtype=float)
@@ -559,7 +588,9 @@ def main(
     per_date_df = pd.DataFrame(per_date_rows)
     drift_df = pd.DataFrame(drift_rows)
     corr_df = pd.DataFrame(corr_rows)
-    coverage_df = pd.concat(coverage_frames, ignore_index=True) if coverage_frames else pd.DataFrame()
+    coverage_df = pd.concat(coverage_frames, ignore_index=True) if coverage_frames else pd.DataFrame(
+        columns=["value", "quantile", "bucket", "n", "coverage"]
+    )
 
     inv_max = max((s.max_abs_team_world_sum_err for s in minutes_inv_summaries), default=0.0)
     inv_neg = sum((s.count_negative_minutes for s in minutes_inv_summaries), 0)
@@ -604,8 +635,7 @@ def main(
     (audit_dir / "sim_audit.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     per_date_df.to_csv(audit_dir / "per_date_summary.csv", index=False)
     corr_df.to_csv(audit_dir / "correlation_summary.csv", index=False)
-    if not coverage_df.empty:
-        coverage_df.to_csv(audit_dir / "quantile_coverage.csv", index=False)
+    coverage_df.to_csv(audit_dir / "quantile_coverage.csv", index=False)
     if not drift_df.empty:
         worst = drift_df.sort_values(["abs_minutes_drift_uncond", "abs_fpts_drift_uncond"], ascending=False).head(20)
         worst.to_csv(audit_dir / "mean_drift_top20.csv", index=False)
