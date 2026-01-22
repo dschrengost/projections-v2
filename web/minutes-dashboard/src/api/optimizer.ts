@@ -135,7 +135,16 @@ export async function startBuild(request: QuickBuildRequest): Promise<JobStatus>
     })
     if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail || `Failed to start build: ${res.status}`)
+        // Handle FastAPI validation errors which come as an array
+        let errorMsg = `Failed to start build: ${res.status}`
+        if (Array.isArray(body.detail)) {
+            errorMsg = body.detail.map((e: { msg?: string; loc?: string[] }) =>
+                `${e.loc?.slice(-1)[0] || 'field'}: ${e.msg || 'validation error'}`
+            ).join('; ')
+        } else if (typeof body.detail === 'string') {
+            errorMsg = body.detail
+        }
+        throw new Error(errorMsg)
     }
     return res.json()
 }

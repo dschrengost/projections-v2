@@ -968,7 +968,7 @@ export default function OptimizerPage() {
                             type="number"
                             value={minUniq}
                             onChange={e => setMinUniq(Number(e.target.value))}
-                            min={1}
+                            min={0}
                             max={8}
                         />
                     </label>

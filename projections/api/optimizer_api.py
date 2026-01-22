@@ -108,7 +108,7 @@ class QuickBuildRequest(BaseModel):
     max_pool: int = Field(default=10000, ge=100, le=200000, description="Max lineups in pool")
     builds: int = Field(default=22, ge=1, le=24, description="Number of parallel workers")
     per_build: int = Field(default=3000, ge=100, le=50000, description="Target lineups per worker")
-    min_uniq: int = Field(default=1, ge=1, le=8, description="Min unique players between lineups")
+    min_uniq: int = Field(default=1, ge=0, le=8, description="Min unique players between lineups (0 = no constraint)")
     max_exposure_pct: Optional[float] = Field(
         default=None,
         ge=0.0,
