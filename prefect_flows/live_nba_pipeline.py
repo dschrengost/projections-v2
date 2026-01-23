@@ -502,13 +502,20 @@ def rmh_shadow_minutes_task(
         # RMH bundles are trained on a superset of minutes features + rotation priors.
         # If we run inference on minutes features alone, missing priors columns get
         # imputed to 0.0 (standardized to large negatives) and can blow up minutes.
-        required = set(bundle.feature_spec.continuous + bundle.feature_spec.categorical)
+        required_cont = set(bundle.feature_spec.continuous)
+        required_cat = set(bundle.feature_spec.categorical)
+        required = required_cont | required_cat
+
+        missing_cont_before = sorted(required_cont.difference(features.columns))
         missing_before = sorted(required.difference(features.columns))
+        missing_frac_before = len(missing_cont_before) / max(len(required_cont), 1)
         if missing_before:
             logger.info(
                 "[rmh-shadow] feature_coverage before_priors "
-                f"missing={len(missing_before)}/{len(required)} "
-                f"sample={missing_before[:8]}"
+                f"missing_feature_count={len(missing_cont_before)} "
+                f"total_required_continuous={len(required_cont)} "
+                f"missing_frac={missing_frac_before:.3f} "
+                f"missing_sample={missing_cont_before[:10]}"
             )
 
         # Join rotation priors if the bundle expects any *_prior_* columns.
@@ -591,16 +598,19 @@ def rmh_shadow_minutes_task(
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[rmh-shadow] failed to join rotation priors: {exc}")
 
+        missing_cont_after = sorted(required_cont.difference(features.columns))
         missing_after = sorted(required.difference(features.columns))
+        missing_frac = len(missing_cont_after) / max(len(required_cont), 1)
         if missing_after:
             logger.info(
                 "[rmh-shadow] feature_coverage after_priors "
-                f"missing={len(missing_after)}/{len(required)} "
-                f"sample={missing_after[:8]}"
+                f"missing_feature_count={len(missing_cont_after)} "
+                f"total_required_continuous={len(required_cont)} "
+                f"missing_frac={missing_frac:.3f} "
+                f"missing_sample={missing_cont_after[:10]}"
             )
 
         max_missing_frac = float(os.environ.get("RMH_MAX_MISSING_FEATURE_FRAC", "0.25"))
-        missing_frac = len(missing_after) / max(len(required), 1)
         if missing_frac > max_missing_frac:
             logger.warning(
                 "[rmh-shadow] skipped: insufficient feature coverage after priors join "
