@@ -449,6 +449,7 @@ def rmh_shadow_minutes_task(
         from projections.models.rotation_minutes_hurdle_v1 import load_bundle, predict_frame
 
         bundle = load_bundle(artifact_dir)
+        logger.info(f"[rmh-shadow] RMH shadow loaded delta_out={bundle.model.delta_out}")
         features = pd.read_parquet(features_path)
         preds = predict_frame(features, bundle=bundle)
 

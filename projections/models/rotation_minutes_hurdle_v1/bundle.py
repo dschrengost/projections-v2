@@ -16,7 +16,9 @@ from .model import RotationMinutesHurdleMLP
 
 
 def _json_dump(path: Path, payload: Any) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _json_load(path: Path) -> Any:
@@ -75,7 +77,10 @@ def save_bundle(
             # Needed to reconstruct the module at inference time.
             "n_continuous": len(feature_spec.continuous),
             "cat_cols": feature_spec.categorical,
-            "cat_cardinalities": [len(preprocessor.categorical[col]) + 1 for col in feature_spec.categorical],
+            "cat_cardinalities": [
+                len(preprocessor.categorical[col]) + 1
+                for col in feature_spec.categorical
+            ],
             "emb_dim": int(config.get("emb_dim", 16)),
             "hidden_dims": list(config.get("hidden_dims", [])),
             "dropout": float(config.get("dropout", 0.0)),
@@ -83,7 +88,10 @@ def save_bundle(
     }
 
     _json_dump(run_dir / "config.json", config)
-    _json_dump(run_dir / "schema.json", {"schema_hash": schema_hash, "feature_spec": feature_spec.to_metadata()})
+    _json_dump(
+        run_dir / "schema.json",
+        {"schema_hash": schema_hash, "feature_spec": feature_spec.to_metadata()},
+    )
     _json_dump(run_dir / "preprocessor.json", preprocessor.to_json_dict())
     _json_dump(run_dir / "metrics.json", metrics)
     _json_dump(run_dir / "meta.json", meta)
@@ -104,6 +112,23 @@ def load_bundle(run_dir: Path, *, map_location: str | None = None) -> RMHBundle:
     )
     preprocessor = MinutesPreprocessorState.from_json_dict(preprocessor_payload)
 
+    checkpoint = torch.load(run_dir / "model.pt", map_location=map_location or "cpu")
+    state_dict = checkpoint.get("state_dict")
+    if state_dict is None:
+        raise KeyError(
+            f"RMH bundle missing state_dict in checkpoint: {run_dir / 'model.pt'}"
+        )
+    if "delta_head.weight" not in state_dict:
+        raise KeyError(
+            "RMH bundle state_dict missing delta_head.weight; cannot infer delta_out."
+        )
+    delta_weight = state_dict["delta_head.weight"]
+    if not hasattr(delta_weight, "shape"):
+        raise TypeError(
+            "RMH bundle delta_head.weight is not a tensor; cannot infer delta_out."
+        )
+    delta_out = int(delta_weight.shape[0])
+
     model_cfg = meta["model"]
     model = RotationMinutesHurdleMLP(
         n_continuous=int(model_cfg["n_continuous"]),
@@ -111,9 +136,9 @@ def load_bundle(run_dir: Path, *, map_location: str | None = None) -> RMHBundle:
         emb_dim=int(model_cfg["emb_dim"]),
         hidden_dims=[int(x) for x in model_cfg.get("hidden_dims", [])],
         dropout=float(model_cfg["dropout"]),
+        delta_out=delta_out,
     )
-    checkpoint = torch.load(run_dir / "model.pt", map_location=map_location or "cpu")
-    model.load_state_dict(checkpoint["state_dict"])
+    model.load_state_dict(state_dict)
     model.eval()
 
     return RMHBundle(
@@ -132,4 +157,3 @@ __all__ = [
     "load_bundle",
     "save_bundle",
 ]
-
