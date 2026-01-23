@@ -40,6 +40,7 @@ class RotationMinutesHurdleMLP(nn.Module):
         emb_dim: int,
         hidden_dims: Sequence[int],
         dropout: float,
+        delta_out: int = 6,
     ) -> None:
         super().__init__()
         self.embeddings = nn.ModuleList(
@@ -47,7 +48,9 @@ class RotationMinutesHurdleMLP(nn.Module):
         )
         input_dim = int(n_continuous) + int(emb_dim) * len(self.embeddings)
         if input_dim <= 0:
-            raise ValueError("RotationMinutesHurdleMLP requires at least one feature column.")
+            raise ValueError(
+                "RotationMinutesHurdleMLP requires at least one feature column."
+            )
 
         layers: list[nn.Module] = []
         prev = input_dim
@@ -59,13 +62,20 @@ class RotationMinutesHurdleMLP(nn.Module):
             prev = int(hidden)
         self.trunk = nn.Identity() if not layers else nn.Sequential(*layers)
 
+        delta_out = int(delta_out)
+        if delta_out not in {2, 6}:
+            raise ValueError(
+                f"delta_out must be 2 (v1.0) or 6 (v1.1), got {delta_out}."
+            )
+        self.delta_out = delta_out
+
         # Head A: play probability (logit)
         self.play_head = nn.Linear(prev, 1)
 
         # Head B: conditional minutes distribution (q50 + 6 cumulative softplus deltas)
         # v1.1: Predict q50 + deltas for {d25, d10, d05, d75, d90, d95}
         self.q50_head = nn.Linear(prev, 1)
-        self.delta_head = nn.Linear(prev, 6)  # d25, d10, d05, d75, d90, d95
+        self.delta_head = nn.Linear(prev, self.delta_out)
 
     def forward(self, x_cont: torch.Tensor, x_cat: torch.Tensor) -> RMHOutputs:
         pieces: list[torch.Tensor] = []
@@ -85,23 +95,38 @@ class RotationMinutesHurdleMLP(nn.Module):
         q50 = self.q50_head(hidden).squeeze(1)
         deltas = self.delta_head(hidden)
 
-        # Non-crossing parameterization via cumulative softplus deltas from q50.
-        # Below q50: q25 = q50 - sp(d25), q10 = q25 - sp(d10), q05 = q10 - sp(d05)
-        # Above q50: q75 = q50 + sp(d75), q90 = q75 + sp(d90), q95 = q90 + sp(d95)
-        d25 = F.softplus(deltas[:, 0])
-        d10 = F.softplus(deltas[:, 1])
-        d05 = F.softplus(deltas[:, 2])
-        d75 = F.softplus(deltas[:, 3])
-        d90 = F.softplus(deltas[:, 4])
-        d95 = F.softplus(deltas[:, 5])
+        if self.delta_out == 2:
+            # v1.0: only q10/q90 deltas; linearly fill q05/q25/q75/q95 for v1.1 outputs.
+            d10 = F.softplus(deltas[:, 0])
+            d90 = F.softplus(deltas[:, 1])
 
-        q25 = q50 - d25
-        q10 = q25 - d10
-        q05 = q10 - d05
+            q10 = q50 - d10
+            q90 = q50 + d90
 
-        q75 = q50 + d75
-        q90 = q75 + d90
-        q95 = q90 + d95
+            slope_lo = (q50 - q10) / 0.40
+            slope_hi = (q90 - q50) / 0.40
+            q05 = q10 - slope_lo * 0.05
+            q25 = q10 + slope_lo * 0.15
+            q75 = q50 + slope_hi * 0.25
+            q95 = q90 + slope_hi * 0.05
+        else:
+            # v1.1: Non-crossing parameterization via cumulative softplus deltas from q50.
+            # Below q50: q25 = q50 - sp(d25), q10 = q25 - sp(d10), q05 = q10 - sp(d05)
+            # Above q50: q75 = q50 + sp(d75), q90 = q75 + sp(d90), q95 = q90 + sp(d95)
+            d25 = F.softplus(deltas[:, 0])
+            d10 = F.softplus(deltas[:, 1])
+            d05 = F.softplus(deltas[:, 2])
+            d75 = F.softplus(deltas[:, 3])
+            d90 = F.softplus(deltas[:, 4])
+            d95 = F.softplus(deltas[:, 5])
+
+            q25 = q50 - d25
+            q10 = q25 - d10
+            q05 = q10 - d05
+
+            q75 = q50 + d75
+            q90 = q75 + d90
+            q95 = q90 + d95
 
         return RMHOutputs(
             logits_play=logits_play,
