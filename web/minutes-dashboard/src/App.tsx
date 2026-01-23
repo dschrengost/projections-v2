@@ -770,6 +770,11 @@ function App() {
                         key={key}
                         onClick={() => toggleSort(key)}
                         className="sortable"
+                        title={
+                          key === 'p_in_rotation' && modelId === 'rmh_v1_1'
+                            ? `RMH: In rotation probability (minutes >= T=${selectedModel?.meta?.play_threshold ?? 5})`
+                            : undefined
+                        }
                       >
                         {SORT_LABELS[key]}
                         {sortKey === key && (
