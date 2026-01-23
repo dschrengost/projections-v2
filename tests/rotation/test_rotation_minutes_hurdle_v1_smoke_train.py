@@ -9,6 +9,7 @@ from projections.models.rotation_minutes_hurdle_v1.train import train_rmh
 
 
 def test_rmh_train_smoke_writes_artifact_bundle(tmp_path: Path):
+    """Smoke test for v1.1 training: writes artifact bundle with new quantile config."""
     dataset_dir = tmp_path / "dataset"
     dataset_dir.mkdir(parents=True, exist_ok=True)
 
@@ -35,7 +36,7 @@ def test_rmh_train_smoke_writes_artifact_bundle(tmp_path: Path):
             "team_id": features["team_id"],
             "player_id": features["player_id"],
             "game_date": features["game_date"],
-            # First half plays, second half DNP (matches OUT status)
+            # First half plays (28 min >= threshold=5), second half DNP (0 min < threshold=5)
             "minutes": [28.0] * (n // 2) + [0.0] * (n - n // 2),
         }
     )
@@ -43,6 +44,7 @@ def test_rmh_train_smoke_writes_artifact_bundle(tmp_path: Path):
     features.to_parquet(dataset_dir / "features.parquet", index=False)
     labels.to_parquet(dataset_dir / "labels.parquet", index=False)
 
+    # v1.1: Uses new defaults (play_threshold=5, 7 quantiles)
     cfg = RMHConfig(
         train_dataset_dir=dataset_dir,
         artifact_dir=tmp_path / "artifacts",
@@ -56,6 +58,7 @@ def test_rmh_train_smoke_writes_artifact_bundle(tmp_path: Path):
         seed=123,
         half_life_play_days=30.0,
         half_life_minutes_days=30.0,
+        # v1.1 defaults: play_threshold=5.0, quantiles=[0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
     )
 
     run_dir = train_rmh(cfg)

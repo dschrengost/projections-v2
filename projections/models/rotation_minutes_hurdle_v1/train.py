@@ -19,8 +19,8 @@ from projections.models.minutes_nn import fit_preprocessor, transform_frame
 from .bundle import save_bundle
 from .config import RMHConfig, load_config
 from .data import add_has_injury_row, build_y_play, compute_recency_weights, dataset_summary, load_labeled_frame
-from .mixture import mixture_quantile_q10_q50_q90
-from .model import RotationMinutesHurdleMLP, conditional_minutes_pinball_loss_q10_q50_q90, weighted_bce_with_logits
+from .mixture import mixture_quantile
+from .model import RotationMinutesHurdleMLP, conditional_minutes_pinball_loss, weighted_bce_with_logits
 
 
 app = typer.Typer(add_completion=False, help="Train RMH_v1 (rotation minutes hurdle model).")
@@ -94,13 +94,18 @@ def _predict(
     device: str,
     batch_size: int = 8192,
 ) -> dict[str, np.ndarray]:
+    """Run inference and return all 7 conditional quantiles plus p_play."""
     model.eval()
     model.to(device)
     n = x_cont.shape[0]
     p_play = np.empty(n, dtype=np.float64)
+    q05 = np.empty(n, dtype=np.float64)
     q10 = np.empty(n, dtype=np.float64)
+    q25 = np.empty(n, dtype=np.float64)
     q50 = np.empty(n, dtype=np.float64)
+    q75 = np.empty(n, dtype=np.float64)
     q90 = np.empty(n, dtype=np.float64)
+    q95 = np.empty(n, dtype=np.float64)
 
     for start in range(0, n, batch_size):
         end = min(n, start + batch_size)
@@ -108,11 +113,24 @@ def _predict(
         xb_cat = torch.from_numpy(x_cat[start:end]).to(device)
         out = model(xb_cont, xb_cat)
         p_play[start:end] = torch.sigmoid(out.logits_play).detach().cpu().numpy()
+        q05[start:end] = out.q05_cond.detach().cpu().numpy()
         q10[start:end] = out.q10_cond.detach().cpu().numpy()
+        q25[start:end] = out.q25_cond.detach().cpu().numpy()
         q50[start:end] = out.q50_cond.detach().cpu().numpy()
+        q75[start:end] = out.q75_cond.detach().cpu().numpy()
         q90[start:end] = out.q90_cond.detach().cpu().numpy()
+        q95[start:end] = out.q95_cond.detach().cpu().numpy()
 
-    return {"p_play": p_play, "q10_cond": q10, "q50_cond": q50, "q90_cond": q90}
+    return {
+        "p_play": p_play,
+        "q05_cond": q05,
+        "q10_cond": q10,
+        "q25_cond": q25,
+        "q50_cond": q50,
+        "q75_cond": q75,
+        "q90_cond": q90,
+        "q95_cond": q95,
+    }
 
 
 def train_rmh(cfg: RMHConfig) -> Path:
@@ -188,14 +206,26 @@ def train_rmh(cfg: RMHConfig) -> Path:
 
             out = model(xb_cont, xb_cat)
             loss_play = weighted_bce_with_logits(out.logits_play, yb_play, wb_play)
-            loss_minutes = conditional_minutes_pinball_loss_q10_q50_q90(
-                q10=out.q10_cond,
-                q50=out.q50_cond,
-                q90=out.q90_cond,
+
+            # v1.1: Build quantile preds dict and weights dict from config
+            quantile_preds = {
+                0.05: out.q05_cond,
+                0.10: out.q10_cond,
+                0.25: out.q25_cond,
+                0.50: out.q50_cond,
+                0.75: out.q75_cond,
+                0.90: out.q90_cond,
+                0.95: out.q95_cond,
+            }
+            quantile_weights_dict = {
+                tau: w for tau, w in zip(cfg.quantiles, cfg.quantile_weights)
+            }
+            loss_minutes = conditional_minutes_pinball_loss(
+                quantile_preds=quantile_preds,
                 y_minutes=yb_minutes,
                 y_play=yb_play,
                 sample_weight=wb_minutes,
-                quantile_weights=cfg.quantile_weights,
+                quantile_weights=quantile_weights_dict,
             )
             loss = cfg.play_loss_weight * loss_play + cfg.minutes_loss_weight * loss_minutes
 
@@ -237,26 +267,45 @@ def train_rmh(cfg: RMHConfig) -> Path:
         pass
     ece, ece_bins = _ece_table(y_play_int, p_play, bins=10)
 
-    # Conditional minutes coverage on played-only slice
+    # Conditional minutes coverage on played-only slice (v1.1: all 7 quantiles)
     played = y_play_int == 1
-    cov10 = float(np.mean(y_minutes[played] <= preds["q10_cond"][played])) if played.any() else float("nan")
-    cov50 = float(np.mean(y_minutes[played] <= preds["q50_cond"][played])) if played.any() else float("nan")
-    cov90 = float(np.mean(y_minutes[played] <= preds["q90_cond"][played])) if played.any() else float("nan")
+    cov_dict = {}
+    for tau_str, key in [
+        ("q05", "q05_cond"),
+        ("q10", "q10_cond"),
+        ("q25", "q25_cond"),
+        ("q50", "q50_cond"),
+        ("q75", "q75_cond"),
+        ("q90", "q90_cond"),
+        ("q95", "q95_cond"),
+    ]:
+        if played.any():
+            cov_dict[f"p(y<={tau_str})"] = float(np.mean(y_minutes[played] <= preds[key][played]))
+        else:
+            cov_dict[f"p(y<={tau_str})"] = float("nan")
 
-    # Mixture quantile example (ensures we are not clamping adjusted taus to 0.10).
+    # Mixture quantile example (v1.1: uses all 7 quantiles, ensures no clamping).
     example = {
         "p_play": 0.11,
         "tau": 0.90,
         "tau_pos": (0.90 - (1.0 - 0.11)) / 0.11,
-        "q10_cond": 15.0,
+        "q05_cond": 8.0,
+        "q10_cond": 12.0,
+        "q25_cond": 18.0,
         "q50_cond": 25.0,
+        "q75_cond": 30.0,
         "q90_cond": 35.0,
+        "q95_cond": 38.0,
     }
-    ex_q90 = mixture_quantile_q10_q50_q90(
+    ex_q90 = mixture_quantile(
         p_play=np.array([example["p_play"]]),
+        q05_cond=np.array([example["q05_cond"]]),
         q10_cond=np.array([example["q10_cond"]]),
+        q25_cond=np.array([example["q25_cond"]]),
         q50_cond=np.array([example["q50_cond"]]),
+        q75_cond=np.array([example["q75_cond"]]),
         q90_cond=np.array([example["q90_cond"]]),
+        q95_cond=np.array([example["q95_cond"]]),
         tau=example["tau"],
         play_threshold=cfg.play_threshold,
     )[0]
@@ -272,7 +321,7 @@ def train_rmh(cfg: RMHConfig) -> Path:
             "play_pr_auc": play_pr_auc,
             "play_ece": float(ece),
             "play_ece_bins": ece_bins,
-            "minutes_cov_played": {"p(y<=q10)": cov10, "p(y<=q50)": cov50, "p(y<=q90)": cov90},
+            "minutes_cov_played": cov_dict,  # v1.1: all 7 quantiles
             "history": history,
             "train_seconds": train_seconds,
         },

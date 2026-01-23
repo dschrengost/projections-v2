@@ -26,11 +26,17 @@ class RMHConfig(BaseModel):
     limit_rows: int | None = Field(None, description="Optional row limit (dev/smoke only).")
 
     # --- Targets ---
-    play_threshold: float = Field(1.0, description="T: y_play = 1[minutes >= T].")
+    play_threshold: float = Field(5.0, description="T: y_play = 1[minutes >= T]. v1.1 default is 5 (rotation threshold).")
 
-    # --- Quantiles (fixed to q10/q50/q90 for v1) ---
-    quantiles: list[float] = Field(default_factory=lambda: [0.10, 0.50, 0.90])
-    quantile_weights: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0])
+    # --- Quantiles (v1.1 expands to 7 quantiles) ---
+    quantiles: list[float] = Field(
+        default_factory=lambda: [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95],
+        description="Conditional quantiles for minutes head. Must be sorted ascending and include 0.50.",
+    )
+    quantile_weights: list[float] = Field(
+        default_factory=lambda: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        description="Weights for pinball loss per quantile. Optional tail upweighting (e.g., 1.2× on q05/q95).",
+    )
 
     # --- Recency weighting ---
     half_life_play_days: float = Field(30.0, description="Half-life in days for play head weights.")
@@ -54,16 +60,18 @@ class RMHConfig(BaseModel):
     @field_validator("quantiles")
     @classmethod
     def _validate_quantiles(cls, v: list[float]) -> list[float]:
-        if [round(x, 2) for x in v] != [0.10, 0.50, 0.90]:
-            raise ValueError("RMH_v1 only supports quantiles [0.10, 0.50, 0.90].")
         if sorted(v) != list(v):
             raise ValueError("quantiles must be sorted ascending.")
+        if any(q <= 0.0 or q >= 1.0 for q in v):
+            raise ValueError("quantiles must all be in (0, 1).")
+        if 0.50 not in [round(x, 2) for x in v]:
+            raise ValueError("quantiles must include 0.50 (median) for non-crossing parameterization.")
         return v
 
     @field_validator("quantile_weights")
     @classmethod
     def _validate_quantile_weights(cls, v: list[float], info) -> list[float]:
-        quantiles = info.data.get("quantiles") or [0.10, 0.50, 0.90]
+        quantiles = info.data.get("quantiles") or [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
         if len(v) != len(quantiles):
             raise ValueError("quantile_weights length must match quantiles length.")
         if any(w <= 0 for w in v):
