@@ -498,6 +498,126 @@ def rmh_shadow_minutes_task(
             f"[rmh-shadow] RMH shadow loaded delta_out={bundle.model.delta_out}"
         )
         features = pd.read_parquet(features_path)
+
+        # RMH bundles are trained on a superset of minutes features + rotation priors.
+        # If we run inference on minutes features alone, missing priors columns get
+        # imputed to 0.0 (standardized to large negatives) and can blow up minutes.
+        required_cont = set(bundle.feature_spec.continuous)
+        required_cat = set(bundle.feature_spec.categorical)
+        required = required_cont | required_cat
+
+        missing_cont_before = sorted(required_cont.difference(features.columns))
+        missing_before = sorted(required.difference(features.columns))
+        missing_frac_before = len(missing_cont_before) / max(len(required_cont), 1)
+        if missing_before:
+            logger.info(
+                "[rmh-shadow] feature_coverage before_priors "
+                f"missing_feature_count={len(missing_cont_before)} "
+                f"total_required_continuous={len(required_cont)} "
+                f"missing_frac={missing_frac_before:.3f} "
+                f"missing_sample={missing_cont_before[:10]}"
+            )
+
+        # Join rotation priors if the bundle expects any *_prior_* columns.
+        # (Rotation set live features uses the same priors source and fallback logic.)
+        if any("_prior_" in col for col in missing_before):
+            try:
+                from projections.rotation.live_features_v1 import (
+                    load_rotation_priors_for_live_inference,
+                )
+                from projections.rotation.rotation_set_minutes_features_v1 import (
+                    apply_odds_missing_flags,
+                    fill_numeric_missing_with_zero,
+                    join_rotation_priors,
+                )
+
+                # Mirror the season boundary used across the repo (Aug–Jul season).
+                day = pd.Timestamp(game_date).normalize()
+                season = int(day.year) if int(day.month) >= 8 else int(day.year) - 1
+
+                allow_priors_fallback = True
+                try:
+                    cfg = json.loads(
+                        (
+                            PROJECT_ROOT / "config/rotation_set_minutes_live.json"
+                        ).read_text(encoding="utf-8")
+                    )
+                    allow_priors_fallback = bool(cfg.get("allow_priors_fallback", True))
+                except Exception:
+                    # Safe default: allow fallback, but never fail RMH shadow on config read.
+                    allow_priors_fallback = True
+
+                priors = load_rotation_priors_for_live_inference(
+                    data_root=data_root,
+                    season=season,
+                    game_date=game_date,
+                    game_ids=features["game_id"].astype(str).unique().tolist()
+                    if "game_id" in features.columns
+                    else [],
+                    team_ids=(
+                        pd.to_numeric(features["team_id"], errors="coerce")
+                        .dropna()
+                        .astype(int)
+                        .unique()
+                        .tolist()
+                        if "team_id" in features.columns
+                        else []
+                    ),
+                    player_ids=(
+                        pd.to_numeric(features["player_id"], errors="coerce")
+                        .dropna()
+                        .astype(int)
+                        .unique()
+                        .tolist()
+                        if "player_id" in features.columns
+                        else []
+                    ),
+                    allow_priors_fallback=allow_priors_fallback,
+                )
+                if priors.warning_message:
+                    logger.warning(
+                        f"[rmh-shadow] priors warning: {priors.warning_message}"
+                    )
+                logger.info(
+                    "[rmh-shadow] priors loaded "
+                    f"used_latest_fallback={priors.used_latest_fallback} "
+                    f"teams_found={priors.teams_found} teams_missing={priors.teams_missing} "
+                    f"players_found={priors.players_found} players_missing={priors.players_missing}"
+                )
+
+                work = features.copy()
+                if {"spread_home", "total"}.issubset(work.columns):
+                    work = apply_odds_missing_flags(work)
+                work = fill_numeric_missing_with_zero(work)
+                work = join_rotation_priors(
+                    work,
+                    team_priors=priors.team_priors,
+                    player_priors=priors.player_priors,
+                )
+                features = work
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[rmh-shadow] failed to join rotation priors: {exc}")
+
+        missing_cont_after = sorted(required_cont.difference(features.columns))
+        missing_after = sorted(required.difference(features.columns))
+        missing_frac = len(missing_cont_after) / max(len(required_cont), 1)
+        if missing_after:
+            logger.info(
+                "[rmh-shadow] feature_coverage after_priors "
+                f"missing_feature_count={len(missing_cont_after)} "
+                f"total_required_continuous={len(required_cont)} "
+                f"missing_frac={missing_frac:.3f} "
+                f"missing_sample={missing_cont_after[:10]}"
+            )
+
+        max_missing_frac = float(os.environ.get("RMH_MAX_MISSING_FEATURE_FRAC", "0.25"))
+        if missing_frac > max_missing_frac:
+            logger.warning(
+                "[rmh-shadow] skipped: insufficient feature coverage after priors join "
+                f"missing_frac={missing_frac:.3f} > RMH_MAX_MISSING_FEATURE_FRAC={max_missing_frac:.3f}"
+            )
+            return None
+
         preds = predict_frame(features, bundle=bundle)
 
         key_cols = [
