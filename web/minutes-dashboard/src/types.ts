@@ -15,11 +15,20 @@ export type PlayerRow = {
     is_projected_starter?: boolean
     is_confirmed_starter?: boolean
     play_prob?: number
+    p_in_rotation?: number
     minutes_p10?: number
     minutes_p50?: number
     minutes_p90?: number
     minutes_p10_cond?: number
     minutes_p90_cond?: number
+    minutes_mean_uncond?: number
+    minutes_q05_uncond?: number
+    minutes_q10_uncond?: number
+    minutes_q25_uncond?: number
+    minutes_q50_uncond?: number
+    minutes_q75_uncond?: number
+    minutes_q90_uncond?: number
+    minutes_q95_uncond?: number
     proj_fpts?: number
     fpts_per_min_pred?: number
     scoring_system?: string

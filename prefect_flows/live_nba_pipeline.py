@@ -9,6 +9,8 @@ Each stage is an explicit Prefect task and the flow enforces:
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 import faulthandler
 import os
 import json
@@ -46,6 +48,7 @@ from projections.cli import build_minutes_live as live_minutes_builder
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline import effective_inputs, health
+from projections.pipeline import minutes_models
 from projections.runtime_stamp import log_runtime_stamp, enforce_clean_tree, enforce_prod_sanity
 
 
@@ -411,6 +414,93 @@ def publish_minutes_gold_task(
     return out_day
 
 
+@task(name="rmh-shadow-minutes", retries=0)
+def rmh_shadow_minutes_task(
+    *,
+    game_date: str,
+    run_id: str,
+    run_as_of_ts: str,
+    features_path: Path,
+    data_root: Path,
+) -> Path | None:
+    """Run RMH_v1.1 inference as a non-blocking shadow branch.
+
+    Safety:
+    - Gated by RMH_SHADOW_ENABLED=1 (default off)
+    - Never raises: errors are logged with "[rmh-shadow]" and the pipeline continues.
+    """
+    logger = get_run_logger()
+    if os.environ.get("RMH_SHADOW_ENABLED") != "1":
+        return None
+
+    artifact_dir_raw = os.environ.get("RMH_ARTIFACT_DIR")
+    if not artifact_dir_raw:
+        logger.warning("[rmh-shadow] RMH_ARTIFACT_DIR is not set; skipping RMH shadow inference")
+        return None
+
+    model_label = os.environ.get("RMH_MODEL_LABEL") or "RMH v1.1"
+    artifact_dir = Path(artifact_dir_raw).expanduser().resolve()
+
+    try:
+        if not artifact_dir.exists():
+            raise FileNotFoundError(f"RMH_ARTIFACT_DIR does not exist: {artifact_dir}")
+
+        # Import lazily to avoid torch import cost when RMH shadow is disabled.
+        from projections.models.rotation_minutes_hurdle_v1 import load_bundle, predict_frame
+
+        bundle = load_bundle(artifact_dir)
+        features = pd.read_parquet(features_path)
+        preds = predict_frame(features, bundle=bundle)
+
+        key_cols = [c for c in ("game_id", "player_id", "team_id") if c in preds.columns]
+        if not key_cols:
+            raise RuntimeError("RMH features frame missing required id columns (game_id/player_id/team_id).")
+
+        out = preds.loc[:, key_cols].copy()
+        out["snapshot_ts"] = str(run_as_of_ts)
+
+        # RMH semantics: play_threshold=5.0 means "in rotation" (not "played").
+        out["p_in_rotation"] = pd.to_numeric(preds["p_play"], errors="coerce").astype(float)
+
+        # Unconditional moments/quantiles (v1.1)
+        out["minutes_mean_uncond"] = pd.to_numeric(preds["minutes_mean_uncond"], errors="coerce").astype(float)
+        for q in ("05", "10", "25", "50", "75", "90", "95"):
+            col = f"minutes_q{q}_uncond"
+            if col in preds.columns:
+                out[col] = pd.to_numeric(preds[col], errors="coerce").astype(float)
+
+        # Dashboard compatibility: map RMH unconditional quantiles to minutes_pXX fields.
+        if "minutes_q10_uncond" in out.columns:
+            out["minutes_p10"] = out["minutes_q10_uncond"]
+        if "minutes_q50_uncond" in out.columns:
+            out["minutes_p50"] = out["minutes_q50_uncond"]
+        if "minutes_q90_uncond" in out.columns:
+            out["minutes_p90"] = out["minutes_q90_uncond"]
+
+        play_threshold = float(bundle.config.get("play_threshold", 5.0))
+        model_meta = {
+            "play_threshold": play_threshold,
+            "quantiles": bundle.config.get("quantiles", [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]),
+            "rmh_artifact_dir": str(artifact_dir),
+            "rmh_schema_hash": bundle.schema_hash,
+        }
+        out_path = minutes_models.write_minutes_model_outputs(
+            data_root=data_root,
+            game_date=game_date,
+            run_id=run_id,
+            model_id=minutes_models.MODEL_ID_RMH_V1_1,
+            model_label=model_label,
+            df=out,
+            run_as_of_ts=run_as_of_ts,
+            model_meta=model_meta,
+        )
+        logger.info(f"[rmh-shadow] wrote {len(out)} rows to {out_path}")
+        return out_path
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(f"[rmh-shadow] failed: {exc}")
+        return None
+
+
 @task(name="build-rates-features", retries=1, retry_delay_seconds=60)
 def build_rates_features_task(*, game_date: str, run_id: str, data_root: Path) -> Path:
     args = [
@@ -688,6 +778,17 @@ def nba_live_pipeline_flow(
         )
         control_plane.copy_manifest_to_dir(manifest_path, feat_minutes.parent)
 
+        # Stage 2.5: RMH shadow minutes (optional, non-blocking)
+        rmh_minutes_path = rmh_shadow_minutes_task(
+            game_date=game_date,
+            run_id=run_id,
+            run_as_of_ts=as_of_ts,
+            features_path=feat_minutes,
+            data_root=data_root,
+        )
+        if rmh_minutes_path is not None:
+            control_plane.copy_manifest_to_dir(manifest_path, rmh_minutes_path.parent)
+
         # Stage 3: score minutes
         minutes_path = score_minutes_task(
             game_date=game_date,
@@ -805,6 +906,18 @@ def nba_live_pipeline_flow(
                 manifest_path=manifest_path,
                 extra={"entrypoint": "prefect", "stage": "unified_projections"},
             )
+            if rmh_minutes_path is not None:
+                try:
+                    control_plane.promote_run_pointer(
+                        dataset_dir=minutes_models.model_day_dir(
+                            data_root=data_root, model_id=minutes_models.MODEL_ID_RMH_V1_1, game_date=game_date
+                        ),
+                        run_id=run_id,
+                        manifest_path=manifest_path,
+                        extra={"entrypoint": "prefect", "stage": "minutes_shadow", "model_id": "rmh_v1_1"},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[rmh-shadow] failed to promote pointer (continuing): {exc}")
         else:
             logger.info("[shadow] promote_pointers=False; skipping latest_run.json updates")
 

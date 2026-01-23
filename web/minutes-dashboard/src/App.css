@@ -53,6 +53,12 @@
   cursor: not-allowed;
 }
 
+.model-caption {
+  font-size: 0.75rem;
+  line-height: 1.1;
+  margin-top: 0.25rem;
+}
+
 .status-bar {
   font-size: 0.95rem;
   color: #94a3b8;

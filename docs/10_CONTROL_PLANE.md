@@ -82,6 +82,17 @@ Timers trigger pipeline runs on schedule:
 - **API docs**: http://localhost:8000/docs
 - **Dashboard**: http://localhost:3000
 
+## RMH Shadow Mode (Minutes)
+
+The live pipeline can optionally run the Rotation Minutes Hurdle model (RMH v1.1) in **shadow mode** alongside production minutes scoring.
+
+- Enable: `RMH_SHADOW_ENABLED=1`
+- Configure bundle: `RMH_ARTIFACT_DIR=/full/path/to/artifacts/rotation_minutes_hurdle_v1/<run_id>`
+- Optional label: `RMH_MODEL_LABEL="RMH v1.1"`
+- Output (dev namespace): `$PROJECTIONS_DATA_ROOT/artifacts/minutes_models/daily/model_id=rmh_v1_1/<game_date>/run=<run_id>/minutes.parquet`
+
+Shadow failures are non-blocking and will log with `[rmh-shadow]`.
+
 ## See Also
 
 - [00_REPO_MAP.md](./00_REPO_MAP.md) - Repository structure
