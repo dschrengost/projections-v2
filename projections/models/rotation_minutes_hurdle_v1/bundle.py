@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from dataclasses import dataclass
 from hashlib import sha256
@@ -13,6 +14,8 @@ from projections.models.minutes_features import MinutesFeatureSpec
 from projections.models.minutes_nn import MinutesPreprocessorState
 
 from .model import RotationMinutesHurdleMLP
+
+logger = logging.getLogger(__name__)
 
 
 def _json_dump(path: Path, payload: Any) -> None:
@@ -116,18 +119,21 @@ def load_bundle(run_dir: Path, *, map_location: str | None = None) -> RMHBundle:
     state_dict = checkpoint.get("state_dict")
     if state_dict is None:
         raise KeyError(
-            f"RMH bundle missing state_dict in checkpoint: {run_dir / 'model.pt'}"
+            f"missing state_dict in RMH bundle checkpoint: {run_dir / 'model.pt'}"
         )
     if "delta_head.weight" not in state_dict:
-        raise KeyError(
-            "RMH bundle state_dict missing delta_head.weight; cannot infer delta_out."
-        )
+        raise KeyError("missing delta_head.weight in RMH bundle state_dict")
     delta_weight = state_dict["delta_head.weight"]
     if not hasattr(delta_weight, "shape"):
         raise TypeError(
             "RMH bundle delta_head.weight is not a tensor; cannot infer delta_out."
         )
     delta_out = int(delta_weight.shape[0])
+    if delta_out == 2:
+        logger.info(
+            "[rmh] legacy delta_out=2 checkpoint detected; "
+            "mapping to v1.1 quantiles via linear interpolation between q10/q50/q90."
+        )
 
     model_cfg = meta["model"]
     model = RotationMinutesHurdleMLP(

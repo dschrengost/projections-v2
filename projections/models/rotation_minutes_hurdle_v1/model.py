@@ -96,7 +96,7 @@ class RotationMinutesHurdleMLP(nn.Module):
         deltas = self.delta_head(hidden)
 
         if self.delta_out == 2:
-            # v1.0: only q10/q90 deltas; interpolate to fill v1.1 output surface.
+            # v1.0: only q10/q90 deltas; linearly fill q05/q25/q75/q95 for v1.1 outputs.
             d10 = F.softplus(deltas[:, 0])
             d90 = F.softplus(deltas[:, 1])
 

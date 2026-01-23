@@ -49,7 +49,11 @@ from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline import effective_inputs, health
 from projections.pipeline import minutes_models
-from projections.runtime_stamp import log_runtime_stamp, enforce_clean_tree, enforce_prod_sanity
+from projections.runtime_stamp import (
+    log_runtime_stamp,
+    enforce_clean_tree,
+    enforce_prod_sanity,
+)
 
 
 import shutil
@@ -62,7 +66,7 @@ _DEFAULT_UV_PATH = Path("/home/daniel/.local/bin/uv")
 
 def _uv_bin() -> str:
     """Resolve path to uv binary.
-    
+
     Resolution order:
     1. UV_BIN environment variable (explicit override)
     2. Absolute path at /home/daniel/.local/bin/uv (works under systemd)
@@ -74,19 +78,17 @@ def _uv_bin() -> str:
     if env_uv:
         if Path(env_uv).exists():
             return env_uv
-        raise FileNotFoundError(
-            f"UV_BIN={env_uv} specified but file does not exist"
-        )
-    
+        raise FileNotFoundError(f"UV_BIN={env_uv} specified but file does not exist")
+
     # 2. Check default absolute path
     if _DEFAULT_UV_PATH.exists():
         return str(_DEFAULT_UV_PATH)
-    
+
     # 3. Fall back to shutil.which
     which_uv = shutil.which("uv")
     if which_uv:
         return which_uv
-    
+
     # 4. Not found - raise with instructions
     raise FileNotFoundError(
         "Could not find 'uv' executable. Either:\n"
@@ -166,7 +168,9 @@ def scrape_task(*, game_date: str, data_root: Path) -> None:
     ]
     if schedule_path.exists():
         args.extend(["--schedule", str(schedule_path)])
-    _run_python_module("projections.cli.live_pipeline", args, data_root=data_root, timeout_s=900)
+    _run_python_module(
+        "projections.cli.live_pipeline", args, data_root=data_root, timeout_s=900
+    )
 
 
 @task(name="dk-salaries", retries=2, retry_delay_seconds=120)
@@ -202,7 +206,9 @@ def scrape_props_task(*, game_date: str, data_root: Path) -> None:
 
 
 @task(name="build-minutes-features", retries=1, retry_delay_seconds=60)
-def build_minutes_features_task(*, game_date: str, run_id: str, run_as_of_ts: str, data_root: Path) -> Path:
+def build_minutes_features_task(
+    *, game_date: str, run_id: str, run_as_of_ts: str, data_root: Path
+) -> Path:
     logger = get_run_logger()
     target_day = pd.Timestamp(game_date).normalize()
     run_ts = pd.Timestamp(run_as_of_ts)
@@ -259,7 +265,9 @@ def build_minutes_features_task(*, game_date: str, run_id: str, run_as_of_ts: st
         .tolist()
     )
     if not live_game_ids:
-        raise RuntimeError("No live game_ids available after building roster-based labels.")
+        raise RuntimeError(
+            "No live game_ids available after building roster-based labels."
+        )
 
     schedule_default = data_root / "silver" / "schedule" / f"season={season}"
     schedule_df = live_minutes_builder._load_table(schedule_default, None)
@@ -285,7 +293,9 @@ def build_minutes_features_task(*, game_date: str, run_id: str, run_as_of_ts: st
     features["game_date"] = pd.to_datetime(features["game_date"]).dt.normalize()
     live_slice = features.loc[features["game_date"] == target_day].copy()
     live_slice = live_slice[
-        pd.to_numeric(live_slice["game_id"], errors="coerce").astype("Int64").isin(live_game_ids)
+        pd.to_numeric(live_slice["game_id"], errors="coerce")
+        .astype("Int64")
+        .isin(live_game_ids)
     ].copy()
     if {"feature_as_of_ts", *KEY_COLUMNS}.issubset(live_slice.columns):
         live_slice = deduplicate_latest(
@@ -302,8 +312,12 @@ def build_minutes_features_task(*, game_date: str, run_id: str, run_as_of_ts: st
     health.require_file(out_path, label="minutes features.parquet")
     df = pd.read_parquet(out_path)
     health.require_row_count(df, min_rows=20, max_rows=5000, label="minutes features")
-    health.require_columns(df, required=["player_id", "game_id", "team_id"], label="minutes features")
-    health.require_non_null(df, cols=["player_id", "game_id", "team_id"], label="minutes features")
+    health.require_columns(
+        df, required=["player_id", "game_id", "team_id"], label="minutes features"
+    )
+    health.require_non_null(
+        df, cols=["player_id", "game_id", "team_id"], label="minutes features"
+    )
     health.require_game_date(df, game_date=game_date, label="minutes features")
     health.require_freshness(
         df,
@@ -358,23 +372,44 @@ def score_minutes_task(
     if rotshare_seed is not None:
         args.extend(["--rotshare-seed", str(int(rotshare_seed))])
     if rotshare_min_active_players is not None:
-        args.extend(["--rotshare-min-active-players", str(int(rotshare_min_active_players))])
+        args.extend(
+            ["--rotshare-min-active-players", str(int(rotshare_min_active_players))]
+        )
     if rotshare_mc_center:
         args.extend(["--rotshare-mc-center", rotshare_mc_center])
     # Use rotation_set_v1 scorer which runs baseline + rotation overlay if enabled
-    _run_python_module("projections.cli.score_minutes_rotation_set_v1", args, data_root=data_root, timeout_s=1200)
-    out_path = data_root / "artifacts" / "minutes_v1" / "daily" / game_date / f"run={run_id}" / "minutes.parquet"
+    _run_python_module(
+        "projections.cli.score_minutes_rotation_set_v1",
+        args,
+        data_root=data_root,
+        timeout_s=1200,
+    )
+    out_path = (
+        data_root
+        / "artifacts"
+        / "minutes_v1"
+        / "daily"
+        / game_date
+        / f"run={run_id}"
+        / "minutes.parquet"
+    )
     health.require_file(out_path, label="minutes.parquet")
     df = pd.read_parquet(out_path)
     health.require_row_count(df, min_rows=20, max_rows=800, label="minutes")
-    health.require_columns(df, required=["player_id", "game_id", "team_id"], label="minutes")
-    health.require_non_null(df, cols=["player_id", "game_id", "team_id"], label="minutes")
+    health.require_columns(
+        df, required=["player_id", "game_id", "team_id"], label="minutes"
+    )
+    health.require_non_null(
+        df, cols=["player_id", "game_id", "team_id"], label="minutes"
+    )
     health.require_game_date(df, game_date=game_date, label="minutes")
     return out_path
 
 
 @task(name="effective-minutes", retries=0)
-def effective_minutes_task(*, game_date: str, run_id: str, minutes_path: Path, data_root: Path) -> Path:
+def effective_minutes_task(
+    *, game_date: str, run_id: str, minutes_path: Path, data_root: Path
+) -> Path:
     run_dir = minutes_path.parent
     result = effective_inputs.write_effective_minutes_layer(
         game_date=pd.Timestamp(game_date).date(),
@@ -383,7 +418,9 @@ def effective_minutes_task(*, game_date: str, run_id: str, minutes_path: Path, d
         data_root=data_root,
         source="gameview",
     )
-    health.require_file(result.effective_minutes_path, label="effective_minutes.parquet")
+    health.require_file(
+        result.effective_minutes_path, label="effective_minutes.parquet"
+    )
     eff = pd.read_parquet(result.effective_minutes_path)
     health.require_row_count(eff, min_rows=20, max_rows=800, label="effective minutes")
     health.require_game_date(eff, game_date=game_date, label="effective minutes")
@@ -410,7 +447,9 @@ def publish_minutes_gold_task(
     df = pd.read_parquet(effective_minutes_path)
     df.to_parquet(out_minutes, index=False)
     df.to_parquet(out_effective, index=False)
-    out_summary.write_text(effective_summary_path.read_text(encoding="utf-8"), encoding="utf-8")
+    out_summary.write_text(
+        effective_summary_path.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     return out_day
 
 
@@ -431,11 +470,14 @@ def rmh_shadow_minutes_task(
     """
     logger = get_run_logger()
     if os.environ.get("RMH_SHADOW_ENABLED") != "1":
+        logger.info("[rmh-shadow] skipped: RMH_SHADOW_ENABLED != 1")
         return None
 
     artifact_dir_raw = os.environ.get("RMH_ARTIFACT_DIR")
     if not artifact_dir_raw:
-        logger.warning("[rmh-shadow] RMH_ARTIFACT_DIR is not set; skipping RMH shadow inference")
+        logger.warning(
+            "[rmh-shadow] skipped: RMH_ARTIFACT_DIR is not set; skipping RMH shadow inference"
+        )
         return None
 
     model_label = os.environ.get("RMH_MODEL_LABEL") or "RMH v1.1"
@@ -446,25 +488,38 @@ def rmh_shadow_minutes_task(
             raise FileNotFoundError(f"RMH_ARTIFACT_DIR does not exist: {artifact_dir}")
 
         # Import lazily to avoid torch import cost when RMH shadow is disabled.
-        from projections.models.rotation_minutes_hurdle_v1 import load_bundle, predict_frame
+        from projections.models.rotation_minutes_hurdle_v1 import (
+            load_bundle,
+            predict_frame,
+        )
 
         bundle = load_bundle(artifact_dir)
-        logger.info(f"[rmh-shadow] RMH shadow loaded delta_out={bundle.model.delta_out}")
+        logger.info(
+            f"[rmh-shadow] RMH shadow loaded delta_out={bundle.model.delta_out}"
+        )
         features = pd.read_parquet(features_path)
         preds = predict_frame(features, bundle=bundle)
 
-        key_cols = [c for c in ("game_id", "player_id", "team_id") if c in preds.columns]
+        key_cols = [
+            c for c in ("game_id", "player_id", "team_id") if c in preds.columns
+        ]
         if not key_cols:
-            raise RuntimeError("RMH features frame missing required id columns (game_id/player_id/team_id).")
+            raise RuntimeError(
+                "RMH features frame missing required id columns (game_id/player_id/team_id)."
+            )
 
         out = preds.loc[:, key_cols].copy()
         out["snapshot_ts"] = str(run_as_of_ts)
 
         # RMH semantics: play_threshold=5.0 means "in rotation" (not "played").
-        out["p_in_rotation"] = pd.to_numeric(preds["p_play"], errors="coerce").astype(float)
+        out["p_in_rotation"] = pd.to_numeric(preds["p_play"], errors="coerce").astype(
+            float
+        )
 
         # Unconditional moments/quantiles (v1.1)
-        out["minutes_mean_uncond"] = pd.to_numeric(preds["minutes_mean_uncond"], errors="coerce").astype(float)
+        out["minutes_mean_uncond"] = pd.to_numeric(
+            preds["minutes_mean_uncond"], errors="coerce"
+        ).astype(float)
         for q in ("05", "10", "25", "50", "75", "90", "95"):
             col = f"minutes_q{q}_uncond"
             if col in preds.columns:
@@ -481,7 +536,9 @@ def rmh_shadow_minutes_task(
         play_threshold = float(bundle.config.get("play_threshold", 5.0))
         model_meta = {
             "play_threshold": play_threshold,
-            "quantiles": bundle.config.get("quantiles", [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]),
+            "quantiles": bundle.config.get(
+                "quantiles", [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
+            ),
             "rmh_artifact_dir": str(artifact_dir),
             "rmh_schema_hash": bundle.schema_hash,
         }
@@ -513,13 +570,29 @@ def build_rates_features_task(*, game_date: str, run_id: str, data_root: Path) -
         str(data_root),
         "--no-strict",
     ]
-    _run_python_module("projections.cli.build_rates_features_live", args, data_root=data_root, timeout_s=1200)
-    out_path = data_root / "live" / "features_rates_v1" / game_date / f"run={run_id}" / "features.parquet"
+    _run_python_module(
+        "projections.cli.build_rates_features_live",
+        args,
+        data_root=data_root,
+        timeout_s=1200,
+    )
+    out_path = (
+        data_root
+        / "live"
+        / "features_rates_v1"
+        / game_date
+        / f"run={run_id}"
+        / "features.parquet"
+    )
     health.require_file(out_path, label="rates features.parquet")
     df = pd.read_parquet(out_path)
     health.require_row_count(df, min_rows=20, max_rows=5000, label="rates features")
-    health.require_columns(df, required=["player_id", "game_id", "team_id"], label="rates features")
-    health.require_non_null(df, cols=["player_id", "game_id", "team_id"], label="rates features")
+    health.require_columns(
+        df, required=["player_id", "game_id", "team_id"], label="rates features"
+    )
+    health.require_non_null(
+        df, cols=["player_id", "game_id", "team_id"], label="rates features"
+    )
     health.require_game_date(df, game_date=game_date, label="rates features")
     return out_path
 
@@ -537,19 +610,32 @@ def score_rates_task(*, game_date: str, run_id: str, data_root: Path) -> Path:
         str(data_root / "gold" / "rates_v1_live"),
         "--no-strict",
     ]
-    _run_python_module("projections.cli.score_rates_live", args, data_root=data_root, timeout_s=1200)
-    out_path = data_root / "gold" / "rates_v1_live" / game_date / f"run={run_id}" / "rates.parquet"
+    _run_python_module(
+        "projections.cli.score_rates_live", args, data_root=data_root, timeout_s=1200
+    )
+    out_path = (
+        data_root
+        / "gold"
+        / "rates_v1_live"
+        / game_date
+        / f"run={run_id}"
+        / "rates.parquet"
+    )
     health.require_file(out_path, label="rates.parquet")
     df = pd.read_parquet(out_path)
     health.require_row_count(df, min_rows=20, max_rows=800, label="rates")
-    health.require_columns(df, required=["player_id", "game_id", "team_id"], label="rates")
+    health.require_columns(
+        df, required=["player_id", "game_id", "team_id"], label="rates"
+    )
     health.require_non_null(df, cols=["player_id", "game_id", "team_id"], label="rates")
     health.require_game_date(df, game_date=game_date, label="rates")
     return out_path
 
 
 @task(name="effective-rates", retries=0)
-def effective_rates_task(*, game_date: str, run_id: str, rates_path: Path, data_root: Path) -> Path:
+def effective_rates_task(
+    *, game_date: str, run_id: str, rates_path: Path, data_root: Path
+) -> Path:
     run_dir = rates_path.parent
     eff_path = effective_inputs.write_effective_rates_layer(
         game_date=pd.Timestamp(game_date).date(),
@@ -593,9 +679,20 @@ def run_sim_task(
         "--rates-run-id",
         run_id,
     ]
-    _run_python_module("scripts.sim_v2.run_sim_live", args, data_root=data_root, timeout_s=2400)
-    out_dir = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2" / f"game_date={game_date}" / f"run={run_id}"
-    health.require_file(out_dir / "projections.parquet", label="sim projections.parquet")
+    _run_python_module(
+        "scripts.sim_v2.run_sim_live", args, data_root=data_root, timeout_s=2400
+    )
+    out_dir = (
+        data_root
+        / "artifacts"
+        / "sim_v2"
+        / "worlds_fpts_v2"
+        / f"game_date={game_date}"
+        / f"run={run_id}"
+    )
+    health.require_file(
+        out_dir / "projections.parquet", label="sim projections.parquet"
+    )
     sim_df = pd.read_parquet(out_dir / "projections.parquet")
     health.require_row_count(sim_df, min_rows=20, max_rows=800, label="sim projections")
     health.require_columns(sim_df, required=["player_id"], label="sim projections")
@@ -617,7 +714,12 @@ def score_ownership_task(*, game_date: str, run_id: str, data_root: Path) -> Non
         "--data-root",
         str(data_root),
     ]
-    _run_python_module("projections.cli.score_ownership_linestar", args, data_root=data_root, timeout_s=1200)
+    _run_python_module(
+        "projections.cli.score_ownership_linestar",
+        args,
+        data_root=data_root,
+        timeout_s=1200,
+    )
 
 
 @task(name="select-main-draft-group")
@@ -672,11 +774,20 @@ def finalize_projections_task(
         "--data-root",
         str(data_root),
     ]
-    _run_python_module("projections.cli.finalize_projections", args, data_root=data_root, timeout_s=1200)
+    _run_python_module(
+        "projections.cli.finalize_projections",
+        args,
+        data_root=data_root,
+        timeout_s=1200,
+    )
     out_dir = data_root / "artifacts" / "projections" / game_date / f"run={run_id}"
-    health.require_file(out_dir / "projections.parquet", label="unified projections.parquet")
+    health.require_file(
+        out_dir / "projections.parquet", label="unified projections.parquet"
+    )
     df = pd.read_parquet(out_dir / "projections.parquet")
-    health.require_row_count(df, min_rows=20, max_rows=1200, label="unified projections")
+    health.require_row_count(
+        df, min_rows=20, max_rows=1200, label="unified projections"
+    )
     health.require_columns(df, required=["player_id"], label="unified projections")
     return out_dir
 
@@ -698,7 +809,7 @@ def nba_live_pipeline_flow(
     rotshare_mc_center: str = "mean",
 ) -> dict[str, str]:
     logger = get_run_logger()
-    
+
     # Runtime stamp - log what code/config is running at flow start
     enforce_clean_tree()  # Fail-fast if dirty tree in prod (set PROJECTIONS_ALLOW_DIRTY=1 to bypass)
     enforce_prod_sanity()  # Strict PROD checks - no bypass allowed in PROD
@@ -707,13 +818,14 @@ def nba_live_pipeline_flow(
         config_paths={
             "minutes_current_run": PROJECT_ROOT / "config/minutes_current_run.json",
             "rates_current_run": PROJECT_ROOT / "config/rates_current_run.json",
-            "rotation_set_minutes_live": PROJECT_ROOT / "config/rotation_set_minutes_live.json",
+            "rotation_set_minutes_live": PROJECT_ROOT
+            / "config/rotation_set_minutes_live.json",
             "sim_v2_profiles": PROJECT_ROOT / "config/sim_v2_profiles.json",
         },
         project_root=PROJECT_ROOT,
         logger=logger,
     )
-    
+
     data_root = paths.get_data_root()
 
     if game_date is None:
@@ -775,7 +887,10 @@ def nba_live_pipeline_flow(
 
         # Stage 2: build minutes features
         feat_minutes = build_minutes_features_task(
-            game_date=game_date, run_id=run_id, run_as_of_ts=as_of_ts, data_root=data_root
+            game_date=game_date,
+            run_id=run_id,
+            run_as_of_ts=as_of_ts,
+            data_root=data_root,
         )
         control_plane.copy_manifest_to_dir(manifest_path, feat_minutes.parent)
 
@@ -808,7 +923,10 @@ def nba_live_pipeline_flow(
 
         # Stage 3.5: effective minutes inputs (overrides from GameView only)
         eff_minutes_path = effective_minutes_task(
-            game_date=game_date, run_id=run_id, minutes_path=minutes_path, data_root=data_root
+            game_date=game_date,
+            run_id=run_id,
+            minutes_path=minutes_path,
+            data_root=data_root,
         )
 
         # Publish minutes to gold run dir (no flat file writes).
@@ -816,21 +934,34 @@ def nba_live_pipeline_flow(
             game_date=game_date,
             run_id=run_id,
             effective_minutes_path=eff_minutes_path,
-            effective_summary_path=(minutes_path.parent / effective_inputs.EFFECTIVE_INPUTS_SUMMARY),
+            effective_summary_path=(
+                minutes_path.parent / effective_inputs.EFFECTIVE_INPUTS_SUMMARY
+            ),
             data_root=data_root,
         )
-        control_plane.copy_manifest_to_dir(manifest_path, minutes_gold_day / f"run={run_id}")
+        control_plane.copy_manifest_to_dir(
+            manifest_path, minutes_gold_day / f"run={run_id}"
+        )
 
         # Stage 4: build rates features
-        feat_rates = build_rates_features_task(game_date=game_date, run_id=run_id, data_root=data_root)
+        feat_rates = build_rates_features_task(
+            game_date=game_date, run_id=run_id, data_root=data_root
+        )
         control_plane.copy_manifest_to_dir(manifest_path, feat_rates.parent)
 
         # Stage 5: score rates
-        rates_path = score_rates_task(game_date=game_date, run_id=run_id, data_root=data_root)
+        rates_path = score_rates_task(
+            game_date=game_date, run_id=run_id, data_root=data_root
+        )
         control_plane.copy_manifest_to_dir(manifest_path, rates_path.parent)
 
         # Stage 5.5: effective rates inputs (overrides from GameView only)
-        _ = effective_rates_task(game_date=game_date, run_id=run_id, rates_path=rates_path, data_root=data_root)
+        _ = effective_rates_task(
+            game_date=game_date,
+            run_id=run_id,
+            rates_path=rates_path,
+            data_root=data_root,
+        )
 
         # Stage 6: sim worlds (sim_v3 only)
         sim_dir = run_sim_task(
@@ -845,15 +976,24 @@ def nba_live_pipeline_flow(
 
         # Stage 7: ownership
         score_ownership_task(game_date=game_date, run_id=run_id, data_root=data_root)
-        ownership_run_dir = data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}"
+        ownership_run_dir = (
+            data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}"
+        )
         if ownership_run_dir.exists():
             control_plane.copy_manifest_to_dir(manifest_path, ownership_run_dir)
 
         # Stage 8: finalize + publish unified projections
-        draft_group_id = select_main_draft_group_task(game_date=game_date, data_root=data_root)
-        control_plane.atomic_update_json(manifest_path, {"slate": {"draft_group_id": draft_group_id}})
+        draft_group_id = select_main_draft_group_task(
+            game_date=game_date, data_root=data_root
+        )
+        control_plane.atomic_update_json(
+            manifest_path, {"slate": {"draft_group_id": draft_group_id}}
+        )
         projections_dir = finalize_projections_task(
-            game_date=game_date, run_id=run_id, draft_group_id=draft_group_id, data_root=data_root
+            game_date=game_date,
+            run_id=run_id,
+            draft_group_id=draft_group_id,
+            data_root=data_root,
         )
         control_plane.copy_manifest_to_dir(manifest_path, projections_dir)
 
@@ -866,13 +1006,20 @@ def nba_live_pipeline_flow(
                 extra={"entrypoint": "prefect", "stage": "features_minutes_v1"},
             )
             control_plane.promote_run_pointer(
-                dataset_dir=(data_root / "artifacts" / "minutes_v1" / "daily" / game_date),
+                dataset_dir=(
+                    data_root / "artifacts" / "minutes_v1" / "daily" / game_date
+                ),
                 run_id=run_id,
                 manifest_path=manifest_path,
                 extra={"entrypoint": "prefect", "stage": "minutes_v1_daily"},
             )
             control_plane.promote_run_pointer(
-                dataset_dir=(data_root / "gold" / "projections_minutes_v1" / f"game_date={game_date}"),
+                dataset_dir=(
+                    data_root
+                    / "gold"
+                    / "projections_minutes_v1"
+                    / f"game_date={game_date}"
+                ),
                 run_id=run_id,
                 manifest_path=manifest_path,
                 extra={"entrypoint": "prefect", "stage": "projections_minutes_v1"},
@@ -890,13 +1037,21 @@ def nba_live_pipeline_flow(
                 extra={"entrypoint": "prefect", "stage": "rates_v1_live"},
             )
             control_plane.promote_run_pointer(
-                dataset_dir=(data_root / "silver" / "ownership_predictions" / game_date),
+                dataset_dir=(
+                    data_root / "silver" / "ownership_predictions" / game_date
+                ),
                 run_id=run_id,
                 manifest_path=manifest_path,
                 extra={"entrypoint": "prefect", "stage": "ownership_predictions"},
             )
             control_plane.promote_run_pointer(
-                dataset_dir=(data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2" / f"game_date={game_date}"),
+                dataset_dir=(
+                    data_root
+                    / "artifacts"
+                    / "sim_v2"
+                    / "worlds_fpts_v2"
+                    / f"game_date={game_date}"
+                ),
                 run_id=run_id,
                 manifest_path=manifest_path,
                 extra={"entrypoint": "prefect", "stage": "sim_v2_worlds_fpts_v2"},
@@ -911,16 +1066,26 @@ def nba_live_pipeline_flow(
                 try:
                     control_plane.promote_run_pointer(
                         dataset_dir=minutes_models.model_day_dir(
-                            data_root=data_root, model_id=minutes_models.MODEL_ID_RMH_V1_1, game_date=game_date
+                            data_root=data_root,
+                            model_id=minutes_models.MODEL_ID_RMH_V1_1,
+                            game_date=game_date,
                         ),
                         run_id=run_id,
                         manifest_path=manifest_path,
-                        extra={"entrypoint": "prefect", "stage": "minutes_shadow", "model_id": "rmh_v1_1"},
+                        extra={
+                            "entrypoint": "prefect",
+                            "stage": "minutes_shadow",
+                            "model_id": "rmh_v1_1",
+                        },
                     )
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning(f"[rmh-shadow] failed to promote pointer (continuing): {exc}")
+                    logger.warning(
+                        f"[rmh-shadow] failed to promote pointer (continuing): {exc}"
+                    )
         else:
-            logger.info("[shadow] promote_pointers=False; skipping latest_run.json updates")
+            logger.info(
+                "[shadow] promote_pointers=False; skipping latest_run.json updates"
+            )
 
         logger.info(f"[outputs] projections_dir={projections_dir}")
         return {
