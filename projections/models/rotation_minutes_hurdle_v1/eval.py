@@ -253,7 +253,7 @@ def _coverage_by_minutes_bucket(
         }
 
         for q_name, col in quantile_cols:
-            q_vals = sub.loc[bucket_mask.nonzero()[0], col].astype(float).to_numpy()
+            q_vals = sub.iloc[bucket_mask.nonzero()[0]][col].astype(float).to_numpy()
             row[f"cov_{q_name}"] = float(np.mean(y_bucket <= q_vals))
 
         rows.append(row)
