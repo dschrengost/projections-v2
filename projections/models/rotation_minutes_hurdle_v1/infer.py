@@ -13,7 +13,7 @@ from projections.models.minutes_nn import transform_frame
 
 from .bundle import RMHBundle, load_bundle
 from .data import add_has_injury_row
-from .mixture import mixture_quantiles_q10_q50_q90
+from .mixture import mixture_quantiles
 
 
 app = typer.Typer(add_completion=False, help="Run RMH_v1 inference from a saved artifact bundle.")
@@ -37,7 +37,10 @@ def predict_frame(
     bundle: RMHBundle,
     batch_size: int = 8192,
 ) -> pd.DataFrame:
-    """Attach RMH_v1 predictions to a frame containing model features."""
+    """Attach RMH_v1/v1.1 predictions to a frame containing model features.
+
+    v1.1: Outputs all 7 conditional quantiles and corresponding unconditional quantiles.
+    """
 
     work = add_has_injury_row(df)
     work = _ensure_feature_columns(work, bundle)
@@ -50,9 +53,13 @@ def predict_frame(
 
     n = len(work)
     p_play = np.empty(n, dtype=np.float64)
+    q05_cond = np.empty(n, dtype=np.float64)
     q10_cond = np.empty(n, dtype=np.float64)
+    q25_cond = np.empty(n, dtype=np.float64)
     q50_cond = np.empty(n, dtype=np.float64)
+    q75_cond = np.empty(n, dtype=np.float64)
     q90_cond = np.empty(n, dtype=np.float64)
+    q95_cond = np.empty(n, dtype=np.float64)
 
     for start in range(0, n, batch_size):
         end = min(n, start + batch_size)
@@ -60,31 +67,54 @@ def predict_frame(
         xb_cat = torch.from_numpy(x_cat[start:end]).to(device)
         out = model(xb_cont, xb_cat)
         p_play[start:end] = torch.sigmoid(out.logits_play).detach().cpu().numpy()
+        q05_cond[start:end] = out.q05_cond.detach().cpu().numpy()
         q10_cond[start:end] = out.q10_cond.detach().cpu().numpy()
+        q25_cond[start:end] = out.q25_cond.detach().cpu().numpy()
         q50_cond[start:end] = out.q50_cond.detach().cpu().numpy()
+        q75_cond[start:end] = out.q75_cond.detach().cpu().numpy()
         q90_cond[start:end] = out.q90_cond.detach().cpu().numpy()
+        q95_cond[start:end] = out.q95_cond.detach().cpu().numpy()
 
-    play_threshold = float(bundle.config.get("play_threshold", 1.0))
-    taus = [float(x) for x in bundle.config.get("quantiles", [0.10, 0.50, 0.90])]
+    play_threshold = float(bundle.config.get("play_threshold", 5.0))
+    taus = [float(x) for x in bundle.config.get("quantiles", [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95])]
 
-    q_uncond = mixture_quantiles_q10_q50_q90(
+    # v1.1: Compute unconditional quantiles using all 7 conditional quantiles
+    q_uncond = mixture_quantiles(
         p_play=p_play,
+        q05_cond=q05_cond,
         q10_cond=q10_cond,
+        q25_cond=q25_cond,
         q50_cond=q50_cond,
+        q75_cond=q75_cond,
         q90_cond=q90_cond,
+        q95_cond=q95_cond,
         taus=taus,
         play_threshold=play_threshold,
     )
 
     out_df = work.copy()
     out_df["p_play"] = p_play
+
+    # Conditional quantiles (v1.1: all 7)
+    out_df["minutes_q05_cond"] = q05_cond
     out_df["minutes_q10_cond"] = q10_cond
+    out_df["minutes_q25_cond"] = q25_cond
     out_df["minutes_q50_cond"] = q50_cond
+    out_df["minutes_q75_cond"] = q75_cond
     out_df["minutes_q90_cond"] = q90_cond
+    out_df["minutes_q95_cond"] = q95_cond
+
+    # Unconditional outputs
     out_df["minutes_mean_uncond"] = p_play * q50_cond
-    out_df["minutes_q10_uncond"] = q_uncond.get(0.10, q_uncond[taus[0]])
-    out_df["minutes_q50_uncond"] = q_uncond.get(0.50, q_uncond[taus[1]])
-    out_df["minutes_q90_uncond"] = q_uncond.get(0.90, q_uncond[taus[2]])
+
+    # Unconditional quantiles (v1.1: all 7)
+    out_df["minutes_q05_uncond"] = q_uncond.get(0.05, np.zeros(n))
+    out_df["minutes_q10_uncond"] = q_uncond.get(0.10, np.zeros(n))
+    out_df["minutes_q25_uncond"] = q_uncond.get(0.25, np.zeros(n))
+    out_df["minutes_q50_uncond"] = q_uncond.get(0.50, np.zeros(n))
+    out_df["minutes_q75_uncond"] = q_uncond.get(0.75, np.zeros(n))
+    out_df["minutes_q90_uncond"] = q_uncond.get(0.90, np.zeros(n))
+    out_df["minutes_q95_uncond"] = q_uncond.get(0.95, np.zeros(n))
 
     return out_df
 
