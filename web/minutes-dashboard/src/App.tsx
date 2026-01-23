@@ -75,6 +75,7 @@ type SortKey =
   | 'minutes_p50'
   | 'minutes_p90'
   | 'play_prob'
+  | 'p_in_rotation'
   | 'proj_fpts'
   | 'fpts_per_min_pred'
   | 'starter_status'
@@ -98,6 +99,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   minutes_p50: 'P50',
   minutes_p90: 'P90',
   play_prob: 'Play Prob',
+  p_in_rotation: 'In Rotation',
   proj_fpts: 'FPTS',
   fpts_per_min_pred: 'FPTS/min',
   starter_status: 'Starter',
@@ -107,6 +109,14 @@ const SORT_LABELS: Record<SortKey, string> = {
   sim_dk_fpts_mean: 'Sim Mean',
   sim_dk_fpts_p95: 'Sim p95',
   sim_minutes_sim_mean: 'Sim MIN',
+}
+
+type ModelOption = {
+  model_id: string
+  label: string
+  meta?: {
+    play_threshold?: number
+  }
 }
 
 
@@ -148,6 +158,11 @@ function App() {
   const [blessedRunId, setBlessedRunId] = useState<string | null>(null)
   const pinnedRunRef = useRef<string | null>(null)
 
+  const [modelId, setModelId] = useState<string>('prod')
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([
+    { model_id: 'prod', label: 'Production' },
+  ])
+
   const [showSim, setShowSim] = useState(true)
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
 
@@ -171,14 +186,17 @@ function App() {
   }, [activeTab])
 
   const fetchData = useCallback(
-    async (date: string, currentRunId: string | null) => {
+    async (date: string, currentRunId: string | null, currentModelId: string) => {
       setLoading(true)
       setError(null)
       setStatusMessage(null)
       try {
         const runParam = currentRunId ? `&run_id=${encodeURIComponent(currentRunId)}` : ''
+        const modelParam = currentModelId && currentModelId !== 'prod'
+          ? `&model_id=${encodeURIComponent(currentModelId)}`
+          : ''
         const minutesRes = await fetch(
-          apiUrl(`/api/minutes?date=${date}${runParam}`),
+          apiUrl(`/api/minutes?date=${date}${runParam}${modelParam}`),
         )
         if (minutesRes.status === 404) {
           let detail = 'No artifact for selected date.'
@@ -200,7 +218,7 @@ function App() {
         }
 
         const summaryRes = await fetch(
-          apiUrl(`/api/minutes/meta?date=${date}${runParam}`),
+          apiUrl(`/api/minutes/meta?date=${date}${runParam}${modelParam}`),
         )
         if (summaryRes.status === 404) {
           setSummary(null)
@@ -220,6 +238,34 @@ function App() {
     },
     [setRows],
   )
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const loadModels = async () => {
+      try {
+        const res = await fetch(apiUrl(`/api/minutes/models?date=${selectedDate}`), {
+          signal: controller.signal,
+        })
+        if (!res.ok) {
+          setModelOptions([{ model_id: 'prod', label: 'Production' }])
+          setModelId('prod')
+          return
+        }
+        const models: ModelOption[] = await res.json()
+        const safeModels =
+          Array.isArray(models) && models.length
+            ? models
+            : [{ model_id: 'prod', label: 'Production' }]
+        setModelOptions(safeModels)
+        setModelId((prev) => (safeModels.some((m) => m.model_id === prev) ? prev : 'prod'))
+      } catch {
+        setModelOptions([{ model_id: 'prod', label: 'Production' }])
+        setModelId('prod')
+      }
+    }
+    void loadModels()
+    return () => controller.abort()
+  }, [selectedDate])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -274,8 +320,16 @@ function App() {
   }, [selectedDate])
 
   useEffect(() => {
-    void fetchData(selectedDate, runId)
-  }, [selectedDate, runId, fetchData])
+    void fetchData(selectedDate, runId, modelId)
+  }, [selectedDate, runId, modelId, fetchData])
+
+  useEffect(() => {
+    setSortKey((prev) => {
+      if (modelId === 'rmh_v1_1' && prev === 'play_prob') return 'p_in_rotation'
+      if (modelId !== 'rmh_v1_1' && prev === 'p_in_rotation') return 'play_prob'
+      return prev
+    })
+  }, [modelId])
 
   const matchups = useMemo(() => {
     const games = new Map<string, { home: string; away: string; id: string }>()
@@ -365,6 +419,12 @@ function App() {
       setSortDir(key === 'player_id' || key === 'team_id' ? 'asc' : 'desc')
     }
   }
+
+  const probSortKey: SortKey = modelId === 'rmh_v1_1' ? 'p_in_rotation' : 'play_prob'
+  const selectedModel = useMemo(
+    () => modelOptions.find((m) => m.model_id === modelId),
+    [modelOptions, modelId],
+  )
 
 
 
@@ -566,7 +626,30 @@ function App() {
               {!latestRunId && !runOptions.length && <option value="">No runs</option>}
             </select>
           </label>
-          <button onClick={() => fetchData(selectedDate, runId)} disabled={loading}>
+          {modelOptions.length > 1 && (
+            <label>
+              Model
+              <select
+                value={modelId}
+                onChange={(event) => setModelId(event.target.value || 'prod')}
+              >
+                {modelOptions.map((option) => (
+                  <option key={option.model_id} value={option.model_id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {modelId === 'rmh_v1_1' && selectedModel?.meta?.play_threshold != null && (
+                <div
+                  className="muted model-caption"
+                  title="RMH v1.1: play_threshold (minutes) defines 'in rotation' for p_in_rotation"
+                >
+                  T={selectedModel.meta.play_threshold}
+                </div>
+              )}
+            </label>
+          )}
+          <button onClick={() => fetchData(selectedDate, runId, modelId)} disabled={loading}>
             Refresh
           </button>
           <button
@@ -681,12 +764,17 @@ function App() {
                     )}
                   </th>
                   <th>Opponent</th>
-                  {(['minutes_p10', 'minutes_p50', 'minutes_p90', 'play_prob'] as SortKey[]).map(
+                  {(['minutes_p10', 'minutes_p50', 'minutes_p90', probSortKey] as SortKey[]).map(
                     (key) => (
                       <th
                         key={key}
                         onClick={() => toggleSort(key)}
                         className="sortable"
+                        title={
+                          key === 'p_in_rotation' && modelId === 'rmh_v1_1'
+                            ? `RMH: In rotation probability (minutes >= T=${selectedModel?.meta?.play_threshold ?? 5})`
+                            : undefined
+                        }
                       >
                         {SORT_LABELS[key]}
                         {sortKey === key && (
@@ -765,7 +853,11 @@ function App() {
                       <td>{formatMinutes(row.minutes_p10)}</td>
                       <td>{formatMinutes(row.minutes_p50)}</td>
                       <td>{formatMinutes(row.minutes_p90)}</td>
-                      <td>{formatPercent(row.play_prob)}</td>
+                      <td>
+                        {formatPercent(
+                          (row as any)[probSortKey] as number | undefined,
+                        )}
+                      </td>
                       {/* Ownership Columns */}
                       <td>{formatSalary(row.salary)}</td>
                       {/* My Own% input */}

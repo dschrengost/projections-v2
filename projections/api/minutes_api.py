@@ -32,9 +32,11 @@ from projections.api.diagnostics_api import router as diagnostics_router
 from projections.api.ops_api import router as ops_router
 from projections.api.props_api import router as props_router
 from projections.pipeline import control_plane
+from projections.pipeline import minutes_models as minutes_models_store
 from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
 
 DEFAULT_DAILY_ROOT = paths.data_path("artifacts", "minutes_v1", "daily")
+DEFAULT_MINUTES_MODELS_ROOT = paths.data_path("artifacts", "minutes_models", "daily")
 DEFAULT_DASHBOARD_DIST = Path("web/minutes-dashboard/dist")
 DEFAULT_FPTS_ROOT = paths.data_path("gold", "projections_fpts_v1")
 DEFAULT_SIM_ROOT = paths.data_path("artifacts", "sim_v2", "worlds_fpts_v2")
@@ -65,12 +67,23 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "is_confirmed_starter",
     "pos_bucket",
     "play_prob",
+    # Shadow models may expose different semantics (e.g., RMH uses "in rotation").
+    "p_in_rotation",
     "minutes_p10",
     "minutes_p50",
     "minutes_p90",
     "minutes_p10_cond",
     "minutes_p50_cond",
     "minutes_p90_cond",
+    # Optional shadow-model diagnostics (unconditional outputs).
+    "minutes_mean_uncond",
+    "minutes_q05_uncond",
+    "minutes_q10_uncond",
+    "minutes_q25_uncond",
+    "minutes_q50_uncond",
+    "minutes_q75_uncond",
+    "minutes_q90_uncond",
+    "minutes_q95_uncond",
     "fpts_per_min_pred",
     "proj_fpts",
     "scoring_system",
@@ -536,6 +549,7 @@ def _build_counts(df: pd.DataFrame) -> dict[str, int]:
 def create_app(
     *,
     daily_root: Path | None = None,
+    minutes_models_root: Path | None = None,
     dashboard_dist: Path | None = None,
     fpts_root: Path | None = None,
     sim_root: Path | None = None,
@@ -543,6 +557,9 @@ def create_app(
     """Construct the FastAPI app."""
 
     minutes_root = (daily_root or _env_path("MINUTES_DAILY_ROOT", DEFAULT_DAILY_ROOT)).resolve()
+    minutes_models_root = (
+        minutes_models_root or _env_path("MINUTES_MODELS_DAILY_ROOT", DEFAULT_MINUTES_MODELS_ROOT)
+    ).resolve()
     dist_dir = (dashboard_dist or _env_path("MINUTES_DASHBOARD_DIST", DEFAULT_DASHBOARD_DIST)).resolve()
     fpts_root = (fpts_root or _env_path("MINUTES_FPTS_ROOT", DEFAULT_FPTS_ROOT)).resolve()
     sim_root = (sim_root or _env_path("MINUTES_SIM_ROOT", DEFAULT_SIM_ROOT)).resolve()
@@ -581,9 +598,62 @@ def create_app(
     app.include_router(ops_router)
     app.include_router(props_router, prefix="/api")
 
-    @app.get("/api/minutes")
-    def get_minutes(date: str | None = None, run_id: str | None = None) -> JSONResponse:
+    @app.get("/api/minutes/models")
+    def list_minutes_models(date: str | None = None) -> JSONResponse:
+        """List selectable minutes models for the dashboard.
+
+        Returns a list of {model_id, label, meta?}. Production is always present.
+        Shadow models are only returned when corresponding artifacts exist.
+        """
         slate_day = _parse_date(date)
+
+        models: list[dict[str, Any]] = [
+            {"model_id": minutes_models_store.MODEL_ID_PROD, "label": "Production"}
+        ]
+
+        rmh_day_dir = (
+            minutes_models_root
+            / f"model_id={minutes_models_store.MODEL_ID_RMH_V1_1}"
+            / slate_day.isoformat()
+        )
+        if rmh_day_dir.exists() and any(p.is_dir() and p.name.startswith("run=") for p in rmh_day_dir.iterdir()):
+            rmh_label = os.environ.get("RMH_MODEL_LABEL") or "RMH v1.1"
+            play_threshold: float | None = None
+            try:
+                pointer_path = rmh_day_dir / LATEST_POINTER
+                run_id = _load_pointer_run_id(pointer_path) if pointer_path.exists() else None
+                if run_id:
+                    summary = _load_summary(rmh_day_dir / f"run={run_id}") or {}
+                else:
+                    run_dirs = sorted(
+                        [p for p in rmh_day_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
+                        reverse=True,
+                    )
+                    summary = _load_summary(run_dirs[0]) if run_dirs else {}
+                if isinstance(summary, dict):
+                    rmh_label = summary.get("model_label") or rmh_label
+                    model_meta = summary.get("model_meta") if isinstance(summary.get("model_meta"), dict) else {}
+                    raw_threshold = model_meta.get("play_threshold")
+                    play_threshold = float(raw_threshold) if raw_threshold is not None else None
+            except Exception:
+                pass
+
+            payload: dict[str, Any] = {"model_id": minutes_models_store.MODEL_ID_RMH_V1_1, "label": rmh_label}
+            if play_threshold is not None:
+                payload["meta"] = {"play_threshold": play_threshold}
+            models.append(payload)
+
+        return JSONResponse(models)
+
+    @app.get("/api/minutes")
+    def get_minutes(date: str | None = None, run_id: str | None = None, model_id: str | None = None) -> JSONResponse:
+        slate_day = _parse_date(date)
+        resolved_model_id = minutes_models_store.normalize_model_id(model_id)
+        if resolved_model_id not in {
+            minutes_models_store.MODEL_ID_PROD,
+            minutes_models_store.MODEL_ID_RMH_V1_1,
+        }:
+            raise HTTPException(status_code=400, detail=f"Unknown model_id: {model_id}")
 
         # Source of truth: unified projections artifact (minutes + sim + ownership).
         # `run_id` is interpreted as projections_run_id when loading unified projections.
@@ -622,6 +692,69 @@ def create_app(
                     latest_run_id = None
 
         unified_df, resolved_run_id, updated_at = _load_unified_projections(slate_day, run_id, data_root)
+
+        if resolved_model_id != minutes_models_store.MODEL_ID_PROD:
+            # Shadow model view: overlay shadow minutes onto the unified projections frame.
+            target_run_id = run_id or resolved_run_id
+            if not target_run_id:
+                raise HTTPException(status_code=404, detail="No artifact for selected date.")
+
+            shadow_day_dir = (
+                minutes_models_root / f"model_id={resolved_model_id}" / slate_day.isoformat()
+            )
+            shadow_run_dir = _resolve_run_dir(shadow_day_dir, target_run_id)
+            shadow_df = _load_minutes(shadow_run_dir)
+
+            if unified_df is None or unified_df.empty:
+                players = _serialize_players(shadow_df)
+                return JSONResponse(
+                    {
+                        "date": slate_day.isoformat(),
+                        "count": len(players),
+                        "players": players,
+                        "run_id": target_run_id,
+                        "model_id": resolved_model_id,
+                    }
+                )
+
+            base = unified_df.copy()
+            shadow = shadow_df.copy()
+            join_keys = [k for k in ("game_id", "team_id", "player_id") if k in base.columns and k in shadow.columns]
+            if not join_keys:
+                raise HTTPException(status_code=500, detail="Unable to join shadow minutes onto projections frame.")
+
+            for key in join_keys:
+                base[key] = pd.to_numeric(base[key], errors="coerce").astype("Int64")
+                shadow[key] = pd.to_numeric(shadow[key], errors="coerce").astype("Int64")
+            shadow = shadow.dropna(subset=join_keys).drop_duplicates(subset=join_keys, keep="last")
+
+            merged = base.merge(shadow, on=join_keys, how="left", suffixes=("", "__shadow"))
+            for col in ("minutes_p10", "minutes_p50", "minutes_p90", "play_prob"):
+                shadow_col = f"{col}__shadow"
+                if shadow_col in merged.columns:
+                    merged[col] = merged[shadow_col].where(pd.notna(merged[shadow_col]), merged.get(col))
+                    merged = merged.drop(columns=[shadow_col])
+            if "p_in_rotation" in merged.columns:
+                if "play_prob" in merged.columns:
+                    merged["play_prob"] = merged["p_in_rotation"].combine_first(merged["play_prob"])
+                else:
+                    merged["play_prob"] = merged["p_in_rotation"]
+            # Drop any remaining conflicted shadow columns we don't explicitly override.
+            merged = merged.drop(columns=[c for c in merged.columns if c.endswith("__shadow")], errors="ignore")
+
+            players = _serialize_players(merged)
+            payload = {
+                "date": slate_day.isoformat(),
+                "count": len(players),
+                "players": players,
+                "run_id": resolved_run_id or target_run_id,
+                "last_updated": updated_at,
+                "latest_run_id": latest_run_id,
+                "blessed_run_id": blessed_run_id,
+                "pinned_run_id": pinned_run_id,
+                "model_id": resolved_model_id,
+            }
+            return JSONResponse(payload)
 
         if unified_df is not None and not unified_df.empty:
             # Rename sim columns to match expected dashboard format
@@ -762,8 +895,16 @@ def create_app(
         return JSONResponse(payload)
 
     @app.get("/api/minutes/meta")
-    def get_minutes_meta(date: str | None = None, run_id: str | None = None) -> JSONResponse:
+    def get_minutes_meta(
+        date: str | None = None, run_id: str | None = None, model_id: str | None = None
+    ) -> JSONResponse:
         slate_day = _parse_date(date)
+        resolved_model_id = minutes_models_store.normalize_model_id(model_id)
+        if resolved_model_id not in {
+            minutes_models_store.MODEL_ID_PROD,
+            minutes_models_store.MODEL_ID_RMH_V1_1,
+        }:
+            raise HTTPException(status_code=400, detail=f"Unknown model_id: {model_id}")
 
         # Prefer unified projections metadata when available (minutes + sim + ownership source of truth).
         data_root = paths.data_path()
@@ -832,6 +973,20 @@ def create_app(
                 "latest_run_id": latest_run_id,
                 "sim_available": bool(summary.get("sim_run_id")),
             }
+            if resolved_model_id != minutes_models_store.MODEL_ID_PROD:
+                try:
+                    shadow_day_dir = (
+                        minutes_models_root / f"model_id={resolved_model_id}" / slate_day.isoformat()
+                    )
+                    shadow_run_dir = _resolve_run_dir(shadow_day_dir, resolved_projections_run_id)
+                    shadow_summary = _load_summary(shadow_run_dir) or {}
+                    payload["minutes_model"] = {
+                        "model_id": resolved_model_id,
+                        "label": shadow_summary.get("model_label"),
+                        "meta": shadow_summary.get("model_meta"),
+                    }
+                except Exception:
+                    payload["minutes_model"] = {"model_id": resolved_model_id}
             return JSONResponse(payload)
 
         # Fall back to legacy minutes meta when unified projections are unavailable.
