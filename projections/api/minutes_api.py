@@ -735,7 +735,10 @@ def create_app(
                     merged[col] = merged[shadow_col].where(pd.notna(merged[shadow_col]), merged.get(col))
                     merged = merged.drop(columns=[shadow_col])
             if "p_in_rotation" in merged.columns:
-                merged["play_prob"] = merged["p_in_rotation"]
+                if "play_prob" in merged.columns:
+                    merged["play_prob"] = merged["p_in_rotation"].combine_first(merged["play_prob"])
+                else:
+                    merged["play_prob"] = merged["p_in_rotation"]
             # Drop any remaining conflicted shadow columns we don't explicitly override.
             merged = merged.drop(columns=[c for c in merged.columns if c.endswith("__shadow")], errors="ignore")
 

@@ -35,7 +35,20 @@ def test_minutes_model_id_routing_overlays_shadow_minutes(tmp_path, monkeypatch)
                 "minutes_p50": 20.0,
                 "minutes_p90": 30.0,
                 "play_prob": 0.8,
-            }
+            },
+            {
+                "game_date": day,
+                "game_id": 1001,
+                "team_id": 10,
+                "player_id": 2,
+                "player_name": "Missing RMH",
+                "team_tricode": "AAA",
+                "opponent_team_tricode": "BBB",
+                "minutes_p10": 8.0,
+                "minutes_p50": 18.0,
+                "minutes_p90": 28.0,
+                "play_prob": 0.9,
+            },
         ]
     )
     _write_parquet(base_run_dir / "projections.parquet", base_df)
@@ -98,17 +111,25 @@ def test_minutes_model_id_routing_overlays_shadow_minutes(tmp_path, monkeypatch)
 
     prod = client.get("/api/minutes", params={"date": day, "run_id": run_id})
     assert prod.status_code == 200
-    prod_row = prod.json()["players"][0]
-    assert prod_row["minutes_p50"] == 20.0
-    assert prod_row["play_prob"] == 0.8
+    prod_players = prod.json()["players"]
+    prod_by_player = {str(p.get("player_id")): p for p in prod_players}
+    assert prod_by_player["1"]["minutes_p50"] == 20.0
+    assert prod_by_player["1"]["play_prob"] == 0.8
+    assert prod_by_player["2"]["minutes_p50"] == 18.0
+    assert prod_by_player["2"]["play_prob"] == 0.9
 
     rmh = client.get("/api/minutes", params={"date": day, "run_id": run_id, "model_id": "rmh_v1_1"})
     assert rmh.status_code == 200
-    rmh_row = rmh.json()["players"][0]
-    assert rmh_row["minutes_p50"] == 33.0
-    assert rmh_row["p_in_rotation"] == 0.25
-    assert rmh_row["play_prob"] == 0.25
+    rmh_players = rmh.json()["players"]
+    rmh_by_player = {str(p.get("player_id")): p for p in rmh_players}
+    assert rmh_by_player["1"]["minutes_p50"] == 33.0
+    assert rmh_by_player["1"]["p_in_rotation"] == 0.25
+    assert rmh_by_player["1"]["play_prob"] == 0.25
+
+    # Missing RMH match should not clobber base play_prob.
+    assert rmh_by_player["2"]["minutes_p50"] == 18.0
+    assert rmh_by_player["2"]["play_prob"] == 0.9
+    assert rmh_by_player["2"].get("p_in_rotation") is None
 
     unknown = client.get("/api/minutes", params={"date": day, "run_id": run_id, "model_id": "nope"})
     assert unknown.status_code == 400
-
