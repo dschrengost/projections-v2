@@ -1,0 +1,33 @@
+train_dataset_dir: /home/daniel/projections-data/training/datasets/rotation_train_v1_boxscore_20260112
+val_dataset_dir: /home/daniel/projections-data/training/datasets/rotation_train_v1_boxscore_20260112_szn2025
+
+# Artifacts will be written to: {artifact_dir}/{run_id}/
+artifact_dir: artifacts/rotation_minutes_hurdle_v1
+run_id: null
+limit_rows: null  # dev/smoke only
+
+# RMH_v1 hurdle definition
+play_threshold: 1.0
+
+# Conditional minutes head (fixed to q10/q50/q90 in v1)
+quantiles: [0.10, 0.50, 0.90]
+quantile_weights: [1.0, 1.0, 1.0]
+
+# Recency weighting (exp(-Δt/half_life))
+half_life_play_days: 30.0
+half_life_minutes_days: 60.0
+
+# Model / optimizer
+emb_dim: 16
+hidden_dims: [256, 256]
+dropout: 0.10
+lr: 0.001
+weight_decay: 0.00001
+batch_size: 2048
+epochs: 25
+seed: 42
+device: auto
+
+# Loss balancing
+play_loss_weight: 1.0
+minutes_loss_weight: 1.0
