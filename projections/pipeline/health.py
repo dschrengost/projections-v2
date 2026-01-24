@@ -132,7 +132,7 @@ def require_minutes_sanity(
     df: pd.DataFrame,
     *,
     label: str,
-    minutes_col_candidates: Iterable[str] = ("minutes_final", "minutes_p50_cond", "minutes_p50", "minutes_pred_p50"),
+    minutes_col_candidates: Iterable[str] = ("effective_minutes", "minutes_final", "minutes_p50_cond", "minutes_p50", "minutes_pred_p50"),
     team_target: float = 240.0,
     team_tolerance: float = 15.0,
     max_active_players: int = 20,

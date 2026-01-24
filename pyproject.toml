@@ -8,9 +8,12 @@ authors = [
   { name = "Daniel Schrengost" }
 ]
 dependencies = [
-  "numpy>=1.26",
-  "pandas>=2.2",
-  "scikit-learn>=1.5",
+  # Native numeric stack is a common source of hard crashes (SIGSEGV/abort) under load.
+  # Keep upper bounds to avoid silently rolling PROD onto bleeding-edge wheels.
+  "numpy>=1.26,<2.0",
+  "pandas>=2.2,<2.3",
+  "scipy>=1.11,<1.16",
+  "scikit-learn>=1.5,<1.7",
   "xgboost>=2.0",
   "torch>=2.2",
   "pyyaml>=6.0",
@@ -22,7 +25,7 @@ dependencies = [
   "pandera>=0.26.1",
   "cvxpy>=1.7.3",
   "ortools>=9.11",
-  "pyarrow>=10.0.1",
+  "pyarrow>=10.0.1,<22.0",
   "tabula>=1.0.5",
   "httpx>=0.28.1",
   "tabula-py>=2.10.0",
