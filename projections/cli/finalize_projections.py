@@ -59,12 +59,19 @@ MINUTES_COLUMNS = [
     "play_prob",
     "pos_bucket",
     # Minutes projections
+    "minutes_final",
     "minutes_p10",
     "minutes_p50",
     "minutes_p90",
     "minutes_p10_cond",
     "minutes_p50_cond",
     "minutes_p90_cond",
+    # Manual adjustment + contract tags (effective minutes layer)
+    "minutes_delta",
+    "minutes_delta_applied",
+    "ops_override_applied",
+    "minutes_contract_version",
+    "minutes_contract_hash",
     # Game context
     "spread_home",
     "total",

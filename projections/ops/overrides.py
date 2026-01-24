@@ -9,6 +9,12 @@ from typing import Any, Iterable
 import pandas as pd
 
 from projections import paths
+from projections.minutes.reconcile import (
+    IN_ROTATION_THRESHOLD_MIN,
+    MINUTES_CONTRACT_VERSION,
+    minutes_contract_hash,
+    reconcile_team_minutes,
+)
 
 OPS_OVERRIDES_VERSION = 1
 
@@ -475,6 +481,7 @@ def _reconcile_minutes_after_overrides(
     *,
     locked_mask: pd.Series,
     target_team_minutes: float = 240.0,
+    log_diagnostics: bool = False,
 ) -> pd.DataFrame:
     """Reconcile team minutes back to 240 without changing locked players."""
     if df.empty or not {"game_id", "team_id", "minutes_p50"} <= set(df.columns):
@@ -504,6 +511,7 @@ def _reconcile_minutes_after_overrides(
     for col in quant_cols:
         work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0.0).astype(float)
 
+    diags: list[tuple[Any, Any, Any]] = []
     for (_, _), group_idx in work.groupby(["game_id", "team_id"], sort=False).groups.items():
         idx = pd.Index(group_idx)
         g = work.loc[idx]
@@ -511,22 +519,31 @@ def _reconcile_minutes_after_overrides(
 
         # Only adjust non-OUT players; keep OUT at 0.
         g_out = status_lower.loc[idx].eq("out")
-        adjustable = (~g_locked) & (~g_out) & (g["minutes_p50"] > 0)
-        if not adjustable.any():
-            continue
+        if g_out.any():
+            work.loc[idx[g_out], "minutes_p50"] = 0.0
+            for col in quant_cols:
+                work.loc[idx[g_out], col] = 0.0
 
-        total = float(g["minutes_p50"].sum())
-        delta = float(target_team_minutes - total)
-        if abs(delta) < 1e-6:
-            continue
-
-        base = g.loc[adjustable, "minutes_p50"]
-        new_vals = _distribute_delta_with_caps(base, delta, lower=0.0, upper=48.0)
-        p50_delta = new_vals - base
-        work.loc[new_vals.index, "minutes_p50"] = new_vals
-
+        minutes_before = work.loc[idx, "minutes_p50"].astype(float)
+        reconciled, diag = reconcile_team_minutes(
+            g,
+            float(target_team_minutes),
+            minutes_col="minutes_p50",
+            cap_col=None,
+            weight_col=None,
+            state_col=None,
+            locked_mask=(g_locked | g_out),
+            in_rotation_threshold_min=float(IN_ROTATION_THRESHOLD_MIN),
+            default_cap=48.0,
+            max_passes=5,
+            eps=1e-6,
+        )
+        work.loc[idx, "minutes_p50"] = reconciled
+        p50_delta = reconciled - minutes_before
         for col in quant_cols:
-            work.loc[new_vals.index, col] = (work.loc[new_vals.index, col] + p50_delta).clip(lower=0.0, upper=48.0)
+            work.loc[idx, col] = (work.loc[idx, col].astype(float) + p50_delta).clip(lower=0.0, upper=48.0)
+        if log_diagnostics:
+            diags.append((g.iloc[0].get("game_id"), g.iloc[0].get("team_id"), diag))
 
     if {"minutes_p10", "minutes_p50"} <= set(work.columns):
         work["minutes_p10"] = work["minutes_p10"].clip(upper=work["minutes_p50"])
@@ -539,6 +556,27 @@ def _reconcile_minutes_after_overrides(
     if "minutes_p50_cond" in work.columns:
         work["minutes_p50_cond"] = work["minutes_p50_cond"].clip(lower=0.0, upper=48.0)
 
+    if log_diagnostics and diags:
+        for gid, tid, d in diags:
+            print(
+                "[minutes-reconcile] game_id=%s team_id=%s pre=%.2f post=%.2f residual=%.4f "
+                "passes=%d cap_infeasible=%s locked_infeasible=%s out=%d cameo=%d rotation=%d cap_hits=%d"
+                % (
+                    gid,
+                    tid,
+                    float(d.pre_sum),
+                    float(d.post_sum),
+                    float(d.residual),
+                    int(d.passes),
+                    bool(d.cap_infeasible),
+                    bool(d.locked_infeasible),
+                    int(d.n_out_or_dnp),
+                    int(d.n_cameo),
+                    int(d.n_rotation),
+                    int(d.n_cap_hits),
+                )
+            )
+
     return work
 
 
@@ -548,25 +586,100 @@ def apply_overrides_to_minutes_df(
     game_date: date,
     data_root: Path | None = None,
     reconcile_team_minutes: bool = True,
+    log_diagnostics: bool = False,
+    force_reconcile: bool = False,
 ) -> pd.DataFrame:
     """Apply authoritative ops overrides to a minutes projections frame.
 
     Note: if minutes overrides change team totals, we reconcile minutes_p50 back to 240
     (within each game/team) so downstream sims/validation remain stable.
     """
-    overrides = load_overrides_map(game_date, data_root=data_root)
-    if minutes_df.empty or not overrides:
+    if minutes_df.empty:
         return minutes_df
+
+    overrides = load_overrides_map(game_date, data_root=data_root)
+
+    work = minutes_df.copy()
+    # Preserve raw model outputs for debugging (ops overrides should only affect the effective layer).
+    # If the caller passes an already-effective frame (with *_model columns), reset the
+    # mutable columns back to their model values to keep this operation idempotent.
+    for col in (
+        "status",
+        "play_prob",
+        "is_confirmed_starter",
+        "is_projected_starter",
+        "minutes_p10",
+        "minutes_p50",
+        "minutes_p90",
+        "minutes_p10_cond",
+        "minutes_p50_cond",
+        "minutes_p90_cond",
+    ):
+        model_col = f"{col}_model"
+        if model_col in work.columns:
+            work[col] = work[model_col]
+        elif col in work.columns:
+            work[model_col] = work[col]
+
+    # Drop previously-materialized effective-layer fields so we can rebuild them deterministically.
+    work = work.drop(
+        columns=[
+            "minutes_delta",
+            "minutes_delta_applied",
+            "ops_override_applied",
+            "minutes_final",
+            "minutes_contract_version",
+            "minutes_contract_hash",
+            "_minutes_p10_overridden",
+            "_minutes_p90_overridden",
+        ],
+        errors="ignore",
+    )
+
+    if not overrides:
+        # Still attach stable "effective layer" columns so downstream consumers can
+        # prefer a single source of truth, even when no overrides exist.
+        work["ops_override_applied"] = False
+        work["minutes_delta_applied"] = False
+        if "minutes_delta" not in work.columns:
+            work["minutes_delta"] = pd.NA
+        if force_reconcile and reconcile_team_minutes and {"game_id", "team_id", "minutes_p50"} <= set(work.columns):
+            work = _reconcile_minutes_after_overrides(
+                work,
+                locked_mask=pd.Series(False, index=work.index),
+                target_team_minutes=240.0,
+                log_diagnostics=log_diagnostics,
+            )
+        if "minutes_final" not in work.columns:
+            base_col = "minutes_p50_cond" if "minutes_p50_cond" in work.columns else "minutes_p50"
+            work["minutes_final"] = pd.to_numeric(work.get(base_col), errors="coerce").fillna(0.0).astype(float)
+        work["minutes_contract_version"] = int(MINUTES_CONTRACT_VERSION)
+        work["minutes_contract_hash"] = minutes_contract_hash()
+        return work
 
     ops_df = _overrides_as_frame(overrides, include_fields=MINUTES_FIELDS)
     if ops_df.empty:
-        return minutes_df
+        work["ops_override_applied"] = False
+        work["minutes_delta_applied"] = False
+        if force_reconcile and reconcile_team_minutes and {"game_id", "team_id", "minutes_p50"} <= set(work.columns):
+            work = _reconcile_minutes_after_overrides(
+                work,
+                locked_mask=pd.Series(False, index=work.index),
+                target_team_minutes=240.0,
+                log_diagnostics=log_diagnostics,
+            )
+        if "minutes_final" not in work.columns:
+            base_col = "minutes_p50_cond" if "minutes_p50_cond" in work.columns else "minutes_p50"
+            work["minutes_final"] = pd.to_numeric(work.get(base_col), errors="coerce").fillna(0.0).astype(float)
+        work["minutes_contract_version"] = int(MINUTES_CONTRACT_VERSION)
+        work["minutes_contract_hash"] = minutes_contract_hash()
+        return work
 
-    work = minutes_df.copy()
     work["_ops_key"] = _ops_key_for_df(work)
     merged = work.merge(ops_df, on="_ops_key", how="left", suffixes=("", "_ops"))
 
     locked_mask = pd.Series(False, index=merged.index)
+    ops_applied = pd.Series(False, index=merged.index)
 
     # Track which quantiles were explicitly overridden (for downstream sim to preserve)
     for qcol in ("minutes_p10", "minutes_p90"):
@@ -574,6 +687,7 @@ def apply_overrides_to_minutes_df(
         flag_col = f"_{qcol}_overridden"
         if override_col in merged.columns:
             merged[flag_col] = merged[override_col].notna()
+            ops_applied = ops_applied | merged[override_col].notna()
         else:
             merged[flag_col] = False
 
@@ -589,6 +703,7 @@ def apply_overrides_to_minutes_df(
             merged[col] = merged[override_col]
         if col == "minutes_p50":
             locked_mask = locked_mask | merged[override_col].notna()
+        ops_applied = ops_applied | merged[override_col].notna()
 
     # Apply minutes_delta as additive adjustment (takes precedence over raw quantile overrides)
     # Note: minutes_delta only exists in ops_df (never in original minutes_df), so after merge
@@ -607,6 +722,12 @@ def apply_overrides_to_minutes_df(
             locked_mask = locked_mask | has_delta
             merged.loc[has_delta, "_minutes_p10_overridden"] = True
             merged.loc[has_delta, "_minutes_p90_overridden"] = True
+            ops_applied = ops_applied | has_delta
+            merged["minutes_delta_applied"] = has_delta
+        else:
+            merged["minutes_delta_applied"] = False
+    else:
+        merged["minutes_delta_applied"] = False
 
     # If operator marks player OUT, force play_prob=0 and minutes=0 (keep row for downstream).
     status_raw = merged.get("status")
@@ -619,11 +740,25 @@ def apply_overrides_to_minutes_df(
                 if mcol in merged.columns:
                     merged.loc[is_out, mcol] = 0.0
             locked_mask = locked_mask | is_out
+            ops_applied = ops_applied | is_out
 
+    merged["ops_override_applied"] = ops_applied
     merged = merged.drop(columns=[c for c in merged.columns if c.endswith("_ops")] + ["_ops_key"], errors="ignore")
 
     if reconcile_team_minutes and {"game_id", "team_id", "minutes_p50"} <= set(merged.columns):
-        merged = _reconcile_minutes_after_overrides(merged, locked_mask=locked_mask, target_team_minutes=240.0)
+        merged = _reconcile_minutes_after_overrides(
+            merged,
+            locked_mask=locked_mask,
+            target_team_minutes=240.0,
+            log_diagnostics=log_diagnostics,
+        )
+
+    # Single source of truth column for consumers.
+    if "minutes_final" not in merged.columns:
+        base_col = "minutes_p50_cond" if "minutes_p50_cond" in merged.columns else "minutes_p50"
+        merged["minutes_final"] = pd.to_numeric(merged.get(base_col), errors="coerce").fillna(0.0).astype(float)
+    merged["minutes_contract_version"] = int(MINUTES_CONTRACT_VERSION)
+    merged["minutes_contract_hash"] = minutes_contract_hash()
 
     return merged
 

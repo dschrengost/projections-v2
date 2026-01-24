@@ -150,7 +150,10 @@ def _attach_rates_mean_fpts(
                 return col
         return None
 
-    minutes_col = _first_present(minutes_df, ["minutes_p50_cond", "minutes_p50", "minutes_mean", "minutes", "minutes_pred"])
+    minutes_col = _first_present(
+        minutes_df,
+        ["minutes_final", "minutes_p50_cond", "minutes_p50", "minutes_mean", "minutes", "minutes_pred"],
+    )
     if minutes_col is None:
         return minutes_df
 
@@ -841,6 +844,8 @@ def build_player_pool(
                 "minutes_sim_p50_uncond",
                 "sim_minutes_sim_p50",
                 "minutes_sim_p50",
+                "minutes_final",
+                "minutes_p50_cond",
                 "minutes_p50",
                 "minutes",
                 "minutes_pred",
