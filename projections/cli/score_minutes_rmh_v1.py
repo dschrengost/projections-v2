@@ -106,6 +106,7 @@ def main(
         join_rotation_priors,
     )
     from projections.minutes.reconcile import reconcile_team_minutes
+    from projections.models.rotation_minutes_hurdle_v1.live_features import prepare_live_features_for_rmh
 
     # 1) Load RMH bundle
     bundle = load_bundle(bundle_dir)
@@ -207,23 +208,21 @@ def main(
             team_priors=priors.team_priors,
             player_priors=priors.player_priors,
         )
-        features = work
+        features = prepare_live_features_for_rmh(work)
 
     # 5) Check feature coverage after priors join
     missing_cont_after = sorted(required_cont.difference(features.columns))
-    missing_frac = len(missing_cont_after) / max(len(required_cont), 1)
-    if missing_cont_after:
+    missing_cat_after = sorted(required_cat.difference(features.columns))
+    if missing_cont_after or missing_cat_after:
         typer.echo(
             f"[rmh-scorer] feature_coverage after_priors "
-            f"missing={len(missing_cont_after)}/{len(required_cont)} "
-            f"frac={missing_frac:.3f} sample={missing_cont_after[:5]}",
+            f"missing_cont={len(missing_cont_after)}/{len(required_cont)} "
+            f"missing_cat={len(missing_cat_after)}/{len(required_cat)} "
+            f"cont_sample={missing_cont_after[:5]} cat_sample={missing_cat_after[:5]}",
             err=True,
         )
-
-    max_missing_frac = 0.25
-    if missing_frac > max_missing_frac:
         raise RuntimeError(
-            f"Insufficient feature coverage: {missing_frac:.3f} > {max_missing_frac:.3f}"
+            "Insufficient feature coverage for RMH inference; refusing to zero-fill missing inputs."
         )
 
     # 6) Run RMH inference
@@ -233,9 +232,36 @@ def main(
     # 7) Build output DataFrame with required columns
     key_cols = ["game_id", "player_id", "team_id"]
     out = features.loc[:, [c for c in key_cols if c in features.columns]].copy()
+    out["game_date"] = day.date()
 
     # Copy through useful metadata columns if present
-    for col in ["player_name", "team_abbr", "opp_team_abbr", "status"]:
+    passthrough_cols = [
+        # Identity / roster context
+        "player_name",
+        "status",
+        "pos_bucket",
+        "starter_flag",
+        "is_projected_starter",
+        "is_confirmed_starter",
+        # Game context
+        "tip_ts",
+        "team_name",
+        "team_tricode",
+        "opponent_team_id",
+        "opponent_team_name",
+        "opponent_team_tricode",
+        # Vegas / game script signals
+        "spread_home",
+        "total",
+        "odds_as_of_ts",
+        "blowout_index",
+        "blowout_risk_score",
+        "close_game_score",
+        # Legacy cols (some downstream tooling still uses these)
+        "team_abbr",
+        "opp_team_abbr",
+    ]
+    for col in passthrough_cols:
         if col in features.columns:
             out[col] = features[col]
 

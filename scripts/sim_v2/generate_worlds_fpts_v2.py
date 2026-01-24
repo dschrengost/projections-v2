@@ -1134,6 +1134,11 @@ def _load_minutes_projection(
     for path, rid, label in candidates:
         if path.exists():
             df = pd.read_parquet(path)
+            if "game_date" not in df.columns:
+                if "date" in df.columns:
+                    df["game_date"] = pd.to_datetime(df["date"], errors="coerce")
+                else:
+                    df["game_date"] = pd.to_datetime(date_token)
             return df, rid, path, label
     raise FileNotFoundError(
         f"No minutes_v1 projection found for {date_token} (source={minutes_source}, run_id={run_id!r})."
