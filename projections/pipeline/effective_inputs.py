@@ -51,7 +51,13 @@ def build_effective_minutes(
 
     overrides_map = load_overrides_map(game_date, data_root=data_root)
     before = minutes_df.copy()
-    after = apply_overrides_to_minutes_df(before, game_date=game_date, data_root=data_root)
+    after = apply_overrides_to_minutes_df(
+        before,
+        game_date=game_date,
+        data_root=data_root,
+        log_diagnostics=True,
+        force_reconcile=True,
+    )
 
     key_cols = [c for c in ("game_id", "player_id", "player_name", "team_id", "team_tricode") if c in before.columns]
     tracked_cols = [
