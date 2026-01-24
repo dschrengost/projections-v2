@@ -353,3 +353,48 @@ class TestEnsureSchemaColumns:
         assert result["starter_flag"].iloc[2] == 1  # from is_starter
         assert result["starter_flag"].iloc[3] == 0  # none
         assert bool(result["starter_flag_missing"].iloc[0]) is False
+
+    def test_fills_lineup_semantics_from_starters_and_out(self, builder: SharedFeaturesBuilder) -> None:
+        """Fill lineup_role/status/roster_status when missing.
+
+        Training expects:
+        - lineup_role in {bench, confirmed_starter, projected_starter, out}
+        - lineup_status: Expected only for projected_starter, otherwise Confirmed
+        - lineup_roster_status: Inactive only for out, otherwise Active
+        """
+        df = pd.DataFrame(
+            {
+                "game_id": [22500100] * 4,
+                "team_id": [1610612751] * 4,
+                "player_id": [101, 102, 103, 104],
+                "active_flag": [True, True, True, False],
+                "is_out": [0, 0, 0, 0],
+                "is_confirmed_starter": [True, False, False, False],
+                "is_projected_starter": [False, True, False, False],
+                # Leave lineup_* missing on purpose.
+                "lineup_role": [pd.NA, pd.NA, pd.NA, pd.NA],
+                "lineup_status": [pd.NA, pd.NA, pd.NA, pd.NA],
+                "lineup_roster_status": [pd.NA, pd.NA, pd.NA, pd.NA],
+            }
+        )
+
+        result = builder._ensure_schema_columns(df)
+
+        by_pid = result.set_index("player_id")
+
+        assert str(by_pid.loc[101, "lineup_role"]) == "confirmed_starter"
+        assert str(by_pid.loc[101, "lineup_status"]) == "Confirmed"
+        assert str(by_pid.loc[101, "lineup_roster_status"]) == "Active"
+
+        assert str(by_pid.loc[102, "lineup_role"]) == "projected_starter"
+        assert str(by_pid.loc[102, "lineup_status"]) == "Expected"
+        assert str(by_pid.loc[102, "lineup_roster_status"]) == "Active"
+
+        assert str(by_pid.loc[103, "lineup_role"]) == "bench"
+        assert str(by_pid.loc[103, "lineup_status"]) == "Confirmed"
+        assert str(by_pid.loc[103, "lineup_roster_status"]) == "Active"
+
+        # inactive roster -> out role
+        assert str(by_pid.loc[104, "lineup_role"]) == "out"
+        assert str(by_pid.loc[104, "lineup_status"]) == "Confirmed"
+        assert str(by_pid.loc[104, "lineup_roster_status"]) == "Inactive"
