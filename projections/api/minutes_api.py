@@ -67,6 +67,13 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "is_confirmed_starter",
     "pos_bucket",
     "play_prob",
+    # Effective minutes layer diagnostics
+    "ops_override_applied",
+    "minutes_delta",
+    "minutes_delta_applied",
+    "minutes_final",
+    "minutes_contract_version",
+    "minutes_contract_hash",
     # Shadow models may expose different semantics (e.g., RMH uses "in rotation").
     "p_in_rotation",
     "minutes_p10",

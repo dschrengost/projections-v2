@@ -234,7 +234,12 @@ def get_game_ops(
     rates_game = rates_df.loc[rates_df["game_id"] == gid].copy()
 
     # Apply authoritative overrides (effective inputs).
-    minutes_effective = apply_overrides_to_minutes_df(minutes_game, game_date=slate_day, data_root=data_root)
+    minutes_effective = apply_overrides_to_minutes_df(
+        minutes_game,
+        game_date=slate_day,
+        data_root=data_root,
+        force_reconcile=True,
+    )
     rates_effective = apply_overrides_to_rates_df(rates_game, game_date=slate_day, data_root=data_root)
 
     overrides_map = load_overrides_map(slate_day, data_root=data_root)
@@ -298,12 +303,18 @@ def get_game_ops(
                     "play_prob",
                     "is_confirmed_starter",
                     "is_projected_starter",
+                    "minutes_final",
                     "minutes_p10",
                     "minutes_p50",
                     "minutes_p90",
                     "minutes_p10_cond",
                     "minutes_p50_cond",
                     "minutes_p90_cond",
+                    "minutes_delta",
+                    "minutes_delta_applied",
+                    "ops_override_applied",
+                    "minutes_contract_version",
+                    "minutes_contract_hash",
                     "rotation_prob",
                     "p_rot",
                     "mu_cond",
@@ -314,12 +325,18 @@ def get_game_ops(
                     "play_prob",
                     "is_confirmed_starter",
                     "is_projected_starter",
+                    "minutes_final",
                     "minutes_p10",
                     "minutes_p50",
                     "minutes_p90",
                     "minutes_p10_cond",
                     "minutes_p50_cond",
                     "minutes_p90_cond",
+                    "minutes_delta",
+                    "minutes_delta_applied",
+                    "ops_override_applied",
+                    "minutes_contract_version",
+                    "minutes_contract_hash",
                 )),
                 "rates_baseline": _pick(base_rates, rates_keys),
                 "rates_effective": _pick(eff_rates, rates_keys),
