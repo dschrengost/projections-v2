@@ -1,0 +1,325 @@
+"""Score minutes using RMH v1 (Rotation Minutes Hurdle) model.
+
+This CLI:
+1. Loads the RMH bundle from config/rmh_current_run.json
+2. Loads base minutes features and joins rotation priors (critical for training/inference parity)
+3. Runs RMH inference via predict_frame()
+4. Applies 240-minute team reconciliation with configurable threshold
+5. Outputs to standard minutes_v1/daily path for downstream consumption
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from datetime import timezone
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import typer
+
+UTC = timezone.utc
+
+DEFAULT_DATA_ROOT = Path(os.environ.get("PROJECTIONS_DATA_ROOT", "data"))
+DEFAULT_CONFIG_PATH = Path("config/rmh_current_run.json")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+app = typer.Typer(add_completion=False)
+
+
+def _normalize_day(date_str: str) -> pd.Timestamp:
+    return pd.Timestamp(date_str).normalize()
+
+
+def _season_for_day(day: pd.Timestamp) -> int:
+    """Return the season year (Aug–Jul boundary)."""
+    return int(day.year) if int(day.month) >= 8 else int(day.year) - 1
+
+
+def _load_rmh_config(config_path: Path) -> dict[str, Any]:
+    """Load RMH configuration from JSON file."""
+    if not config_path.exists():
+        raise FileNotFoundError(f"RMH config not found: {config_path}")
+    return json.loads(config_path.read_text(encoding="utf-8"))
+
+
+@app.command()
+def main(
+    *,
+    date: str = typer.Option(..., "--date", help="Slate date (YYYY-MM-DD)."),
+    run_id: str = typer.Option(..., "--run-id", help="Run id for run-scoped outputs."),
+    data_root: Path = typer.Option(
+        DEFAULT_DATA_ROOT, "--data-root", help="PROJECTIONS_DATA_ROOT override."
+    ),
+    config_path: Path = typer.Option(
+        DEFAULT_CONFIG_PATH, "--config", help="Path to RMH config JSON."
+    ),
+    minutes_features_root: Path | None = typer.Option(
+        None,
+        "--minutes-features-root",
+        help="Override root for live minutes features.",
+    ),
+) -> None:
+    """Score minutes using RMH v1 model with 240-minute team reconciliation."""
+    day = _normalize_day(date)
+    season = _season_for_day(day)
+    data_root = Path(data_root).expanduser().resolve()
+
+    # Resolve config path relative to project root if not absolute
+    if not config_path.is_absolute():
+        config_path = PROJECT_ROOT / config_path
+
+    config = _load_rmh_config(config_path)
+    if not config.get("enabled", False):
+        typer.echo("[rmh-scorer] RMH disabled in config; exiting.", err=True)
+        raise typer.Exit(code=0)
+
+    bundle_dir_raw = config.get("bundle_dir")
+    if not bundle_dir_raw:
+        raise ValueError("bundle_dir not specified in RMH config")
+
+    # Resolve bundle dir relative to project root if not absolute
+    bundle_dir = Path(bundle_dir_raw)
+    if not bundle_dir.is_absolute():
+        bundle_dir = PROJECT_ROOT / bundle_dir
+    bundle_dir = bundle_dir.expanduser().resolve()
+
+    if not bundle_dir.exists():
+        raise FileNotFoundError(f"RMH bundle not found: {bundle_dir}")
+
+    reconcile_mode = config.get("reconcile_team_minutes", "p50")
+    in_rotation_threshold_min = float(config.get("in_rotation_threshold_min", 5.0))
+
+    typer.echo(
+        f"[rmh-scorer] date={day.date()} run_id={run_id} bundle={bundle_dir.name} "
+        f"reconcile={reconcile_mode} threshold={in_rotation_threshold_min}",
+        err=True,
+    )
+
+    # Import RMH modules lazily to avoid torch import cost when not needed
+    from projections.models.rotation_minutes_hurdle_v1 import load_bundle, predict_frame
+    from projections.rotation.live_features_v1 import load_rotation_priors_for_live_inference
+    from projections.rotation.rotation_set_minutes_features_v1 import (
+        apply_odds_missing_flags,
+        fill_numeric_missing_with_zero,
+        join_rotation_priors,
+    )
+    from projections.minutes.reconcile import reconcile_team_minutes
+
+    # 1) Load RMH bundle
+    bundle = load_bundle(bundle_dir)
+    typer.echo(
+        f"[rmh-scorer] loaded bundle delta_out={bundle.model.delta_out} "
+        f"n_continuous={len(bundle.feature_spec.continuous)} "
+        f"n_categorical={len(bundle.feature_spec.categorical)}",
+        err=True,
+    )
+
+    # 2) Load minutes features
+    if minutes_features_root is None:
+        minutes_features_root = data_root / "live" / "features_minutes_v1"
+    features_path = (
+        Path(minutes_features_root) / day.strftime("%Y-%m-%d") / f"run={run_id}" / "features.parquet"
+    )
+    if not features_path.exists():
+        raise FileNotFoundError(f"Minutes features not found: {features_path}")
+
+    features = pd.read_parquet(features_path)
+    typer.echo(f"[rmh-scorer] loaded {len(features)} rows from {features_path}", err=True)
+
+    # 3) Check feature coverage before priors join
+    required_cont = set(bundle.feature_spec.continuous)
+    required_cat = set(bundle.feature_spec.categorical)
+    required = required_cont | required_cat
+
+    missing_cont_before = sorted(required_cont.difference(features.columns))
+    missing_frac_before = len(missing_cont_before) / max(len(required_cont), 1)
+    if missing_cont_before:
+        typer.echo(
+            f"[rmh-scorer] feature_coverage before_priors "
+            f"missing={len(missing_cont_before)}/{len(required_cont)} "
+            f"frac={missing_frac_before:.3f} sample={missing_cont_before[:5]}",
+            err=True,
+        )
+
+    # 4) Join rotation priors (CRITICAL for training/inference parity)
+    if any("_prior_" in col for col in required.difference(features.columns)):
+        typer.echo("[rmh-scorer] joining rotation priors...", err=True)
+
+        # Load priors config
+        allow_priors_fallback = True
+        try:
+            rot_cfg_path = PROJECT_ROOT / "config" / "rotation_set_minutes_live.json"
+            if rot_cfg_path.exists():
+                rot_cfg = json.loads(rot_cfg_path.read_text(encoding="utf-8"))
+                allow_priors_fallback = bool(rot_cfg.get("allow_priors_fallback", True))
+        except Exception:
+            pass
+
+        game_ids = (
+            features["game_id"].astype(str).unique().tolist()
+            if "game_id" in features.columns
+            else []
+        )
+        team_ids = (
+            pd.to_numeric(features["team_id"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .unique()
+            .tolist()
+            if "team_id" in features.columns
+            else []
+        )
+        player_ids = (
+            pd.to_numeric(features["player_id"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .unique()
+            .tolist()
+            if "player_id" in features.columns
+            else []
+        )
+
+        priors = load_rotation_priors_for_live_inference(
+            data_root=data_root,
+            season=season,
+            game_date=day.strftime("%Y-%m-%d"),
+            game_ids=game_ids,
+            team_ids=team_ids,
+            player_ids=player_ids,
+            allow_priors_fallback=allow_priors_fallback,
+        )
+        if priors.warning_message:
+            typer.echo(f"[rmh-scorer] priors warning: {priors.warning_message}", err=True)
+        typer.echo(
+            f"[rmh-scorer] priors loaded: teams_found={priors.teams_found} "
+            f"players_found={priors.players_found} fallback={priors.used_latest_fallback}",
+            err=True,
+        )
+
+        work = features.copy()
+        if {"spread_home", "total"}.issubset(work.columns):
+            work = apply_odds_missing_flags(work)
+        work = fill_numeric_missing_with_zero(work)
+        work = join_rotation_priors(
+            work,
+            team_priors=priors.team_priors,
+            player_priors=priors.player_priors,
+        )
+        features = work
+
+    # 5) Check feature coverage after priors join
+    missing_cont_after = sorted(required_cont.difference(features.columns))
+    missing_frac = len(missing_cont_after) / max(len(required_cont), 1)
+    if missing_cont_after:
+        typer.echo(
+            f"[rmh-scorer] feature_coverage after_priors "
+            f"missing={len(missing_cont_after)}/{len(required_cont)} "
+            f"frac={missing_frac:.3f} sample={missing_cont_after[:5]}",
+            err=True,
+        )
+
+    max_missing_frac = 0.25
+    if missing_frac > max_missing_frac:
+        raise RuntimeError(
+            f"Insufficient feature coverage: {missing_frac:.3f} > {max_missing_frac:.3f}"
+        )
+
+    # 6) Run RMH inference
+    typer.echo("[rmh-scorer] running RMH inference...", err=True)
+    preds = predict_frame(features, bundle=bundle)
+
+    # 7) Build output DataFrame with required columns
+    key_cols = ["game_id", "player_id", "team_id"]
+    out = features.loc[:, [c for c in key_cols if c in features.columns]].copy()
+
+    # Copy through useful metadata columns if present
+    for col in ["player_name", "team_abbr", "opp_team_abbr", "status"]:
+        if col in features.columns:
+            out[col] = features[col]
+
+    # Map RMH outputs to standard schema
+    out["play_prob"] = pd.to_numeric(preds["p_play"], errors="coerce").fillna(0.0)
+
+    # Unconditional quantiles (these are the "real" predictions)
+    for q in ("10", "50", "90"):
+        col_src = f"minutes_q{q}_uncond"
+        col_dst = f"minutes_p{q}"
+        if col_src in preds.columns:
+            out[col_dst] = pd.to_numeric(preds[col_src], errors="coerce").fillna(0.0)
+        else:
+            # Fallback for v1.0 bundles
+            out[col_dst] = 0.0
+
+    # Conditional quantiles (for downstream that wants them)
+    for q in ("10", "50", "90"):
+        col_src = f"minutes_q{q}_cond"
+        col_dst = f"minutes_p{q}_cond"
+        if col_src in preds.columns:
+            out[col_dst] = pd.to_numeric(preds[col_src], errors="coerce").fillna(0.0)
+        elif f"minutes_p{q}" in out.columns:
+            # Derive from unconditional if conditional not available
+            out[col_dst] = out[f"minutes_p{q}"]
+
+    # 8) Apply 240-minute team reconciliation
+    if reconcile_mode != "none":
+        typer.echo(
+            f"[rmh-scorer] applying 240-min reconciliation (threshold={in_rotation_threshold_min})...",
+            err=True,
+        )
+
+        reconciled_list = []
+        for (game_id, team_id), team_df in out.groupby(["game_id", "team_id"]):
+            reconciled_minutes, diag = reconcile_team_minutes(
+                team_df,
+                target_minutes=240.0,
+                minutes_col="minutes_p50",
+                in_rotation_threshold_min=in_rotation_threshold_min,
+            )
+            team_result = team_df.copy()
+            team_result["effective_minutes"] = reconciled_minutes.values
+            reconciled_list.append(team_result)
+
+        out = pd.concat(reconciled_list, ignore_index=True)
+        typer.echo(
+            f"[rmh-scorer] reconciled {len(out)} players across "
+            f"{out['team_id'].nunique()} teams",
+            err=True,
+        )
+    else:
+        # No reconciliation - use p50 as effective
+        out["effective_minutes"] = out["minutes_p50"]
+
+    # 9) Write output
+    out_dir = data_root / "artifacts" / "minutes_v1" / "daily" / day.strftime("%Y-%m-%d") / f"run={run_id}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "minutes.parquet"
+    out.to_parquet(out_path, index=False)
+
+    # Write summary
+    summary = {
+        "date": day.strftime("%Y-%m-%d"),
+        "run_id": run_id,
+        "generated_at": pd.Timestamp.now(tz=UTC).isoformat(),
+        "model": "rmh_v1",
+        "bundle_dir": str(bundle_dir),
+        "schema_hash": bundle.schema_hash,
+        "reconcile_mode": reconcile_mode,
+        "in_rotation_threshold_min": in_rotation_threshold_min,
+        "counts": {
+            "rows": int(len(out)),
+            "games": int(out["game_id"].nunique()) if "game_id" in out.columns else 0,
+            "teams": int(out["team_id"].nunique()) if "team_id" in out.columns else 0,
+        },
+    }
+    (out_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    typer.echo(f"[rmh-scorer] wrote {len(out)} rows to {out_path}", err=True)
+
+
+if __name__ == "__main__":
+    app()
