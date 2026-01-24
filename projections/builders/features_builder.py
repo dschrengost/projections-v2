@@ -216,9 +216,25 @@ class SharedFeaturesBuilder:
             roster, "as_of_ts", tip_lookup, "roster"
         )
 
-        # Build features using MinutesFeatureBuilder
+        # Build features using MinutesFeatureBuilder.
+        #
+        # IMPORTANT: labels includes both historical rows (for history-based features like
+        # starter/rest) and live stubs. We must provide schedule rows for *all* label game_ids
+        # so MinutesFeatureBuilder can attach tip_ts and compute shift/rolling features.
+        schedule_for_builder = schedule
+        if "game_id" in labels.columns and "game_id" in schedule.columns:
+            label_game_ids = (
+                pd.to_numeric(labels["game_id"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+                .tolist()
+            )
+            if label_game_ids:
+                schedule_for_builder = schedule.loc[schedule["game_id"].isin(label_game_ids)].copy()
+
         builder = MinutesFeatureBuilder(
-            schedule=schedule[schedule["game_id"].isin(game_ids)],
+            schedule=schedule_for_builder,
             injuries_snapshot=injuries_result.injuries,
             odds_snapshot=filtered_odds,
             roster_nightly=filtered_roster,
@@ -228,6 +244,15 @@ class SharedFeaturesBuilder:
         )
 
         features = builder.build(labels)
+        # From this point onward we only need the target slate rows; history rows were used
+        # to compute PIT-safe history features (trend/role/rest).
+        if "game_date" in features.columns:
+            game_dates = pd.to_datetime(features["game_date"], errors="coerce").dt.normalize()
+            target_day = pd.Timestamp(cfg.target_day).normalize()
+            features = features.loc[game_dates == target_day].copy()
+        if "game_id" in features.columns and game_ids:
+            gid = pd.to_numeric(features["game_id"], errors="coerce").astype("Int64")
+            features = features.loc[gid.isin(set(game_ids))].copy()
 
         # Recompute trend features (roll_mean_5, min_last1, etc.) using historical labels.
         # This is critical for live builds where raw features may be missing player-level history.
@@ -259,6 +284,7 @@ class SharedFeaturesBuilder:
         features = self._attach_dnp_history_features(
             features,
             labels_source=labels,
+            schedule=schedule,
             warnings=warnings,
         )
 
@@ -734,6 +760,181 @@ class SharedFeaturesBuilder:
         else:
             df["starter_flag"] = pd.to_numeric(df["starter_flag"], errors="coerce").fillna(0).astype(int)
 
+        # ------------------------------------------------------------------
+        # Starter fallback: ensure each team has 5 pre-tip starters when possible.
+        #
+        # Live lineup sources can be incomplete (late posting, team-specific feed gaps).
+        # When a team has <5 starters flagged, derive a best-effort starter set using
+        # history-driven signals (starter_prev_game_asof, recent_start_pct_10) and
+        # minutes priors (roll_mean_10) while excluding OUT players.
+        # ------------------------------------------------------------------
+        if {"game_id", "team_id", "player_id"}.issubset(df.columns):
+            if "is_projected_starter" not in df.columns:
+                df["is_projected_starter"] = False
+            if "is_confirmed_starter" not in df.columns:
+                df["is_confirmed_starter"] = False
+            if "lineup_role" not in df.columns:
+                df["lineup_role"] = pd.NA
+
+            # Avoid pandas FutureWarning about silent downcasting on fillna for object dtype.
+            df["is_projected_starter"] = (
+                df["is_projected_starter"].astype("boolean", copy=False).fillna(False).astype(bool)
+            )
+            df["is_confirmed_starter"] = (
+                df["is_confirmed_starter"].astype("boolean", copy=False).fillna(False).astype(bool)
+            )
+
+            is_out = pd.to_numeric(df.get("is_out", 0), errors="coerce").fillna(0).astype(int)
+            not_out = is_out == 0
+            # Never treat OUT players as starters.
+            df["starter_flag"] = (
+                (pd.to_numeric(df["starter_flag"], errors="coerce").fillna(0).astype(int) > 0) & not_out
+            ).astype(int)
+
+            def _numeric_series(name: str, default: float) -> pd.Series:
+                if name not in df.columns:
+                    return pd.Series(default, index=df.index, dtype="float64")
+                return pd.to_numeric(df[name], errors="coerce").fillna(default).astype("float64")
+
+            prev_start = _numeric_series("starter_prev_game_asof", 0.0)
+            recent_pct = _numeric_series("recent_start_pct_10", 0.0)
+            roll_mean_10 = _numeric_series("roll_mean_10", 0.0)
+            player_id_num = pd.to_numeric(df["player_id"], errors="coerce").fillna(0).astype(int)
+
+            needs_fill = 0
+            for (game_id, team_id), group in df.groupby(["game_id", "team_id"], sort=False):
+                idx = group.index
+                # Unit tests and some edge pipelines may pass partial team frames.
+                # Only attempt 5-starter enforcement when the team slice has enough players.
+                if len(idx) < 5:
+                    continue
+                cur = (
+                    group["is_confirmed_starter"].fillna(False).astype(bool)
+                    | group["is_projected_starter"].fillna(False).astype(bool)
+                    | (pd.to_numeric(group["starter_flag"], errors="coerce").fillna(0).astype(int) > 0)
+                ) & not_out.loc[idx].astype(bool)
+                n = int(cur.sum())
+                if n == 5:
+                    continue
+                needs_fill += 1
+
+                # Build a deterministic ranking for eligible players.
+                rank_frame = pd.DataFrame(
+                    {
+                        "cur": cur.astype(int),
+                        "not_out": not_out.loc[idx].astype(int),
+                        "prev_start": prev_start.loc[idx].astype(float),
+                        "recent_pct": recent_pct.loc[idx].astype(float),
+                        "roll_mean_10": roll_mean_10.loc[idx].astype(float),
+                        "player_id": player_id_num.loc[idx].astype(int),
+                    },
+                    index=idx,
+                )
+
+                eligible = rank_frame["not_out"] == 1
+                if int(eligible.sum()) < 5:
+                    continue
+
+                if n >= 5:
+                    # Too many starters: keep the top 5 by ranking, prioritizing confirmed starters.
+                    confirmed = group["is_confirmed_starter"].fillna(False).astype(bool) & not_out.loc[idx].astype(bool)
+                    keep = pd.Series(False, index=idx)
+                    if int(confirmed.sum()) >= 5:
+                        order = rank_frame.loc[confirmed].sort_values(
+                            ["prev_start", "recent_pct", "roll_mean_10", "player_id"],
+                            ascending=[False, False, False, True],
+                        )
+                        keep.loc[order.head(5).index] = True
+                    else:
+                        keep.loc[confirmed.index] = confirmed.astype(bool)
+                        remaining = 5 - int(confirmed.sum())
+                        pool = rank_frame.loc[eligible & ~confirmed].sort_values(
+                            ["prev_start", "recent_pct", "roll_mean_10", "player_id"],
+                            ascending=[False, False, False, True],
+                        )
+                        keep.loc[pool.head(remaining).index] = True
+
+                    df.loc[idx, "starter_flag"] = keep.astype(int)
+                    df.loc[idx, "is_projected_starter"] = keep.astype(bool)
+                else:
+                    # Not enough starters: fill up to 5 using ranking among eligible non-starters.
+                    need = 5 - n
+                    pool = rank_frame.loc[eligible & (rank_frame["cur"] == 0)].sort_values(
+                        ["prev_start", "recent_pct", "roll_mean_10", "player_id"],
+                        ascending=[False, False, False, True],
+                    )
+                    add_idx = pool.head(need).index
+                    if len(add_idx) == 0:
+                        continue
+                    df.loc[add_idx, "is_projected_starter"] = True
+                    df.loc[add_idx, "starter_flag"] = 1
+                    if "lineup_role" in df.columns:
+                        role_series = df.loc[add_idx, "lineup_role"].astype("string").fillna("")
+                        empty = role_series.eq("") | role_series.str.lower().isin({"none", "nan"})
+                        df.loc[add_idx[empty.to_numpy()], "lineup_role"] = "projected_starter"
+
+            if needs_fill:
+                logger.info(f"[starters] filled starters for {needs_fill} team(s) with incomplete lineup signals.")
+
+        # ------------------------------------------------------------------
+        # Lineup semantics: fill categorical lineup fields expected by RMH
+        # training and downstream consumers.
+        #
+        # Training distribution (rotation_train_v1_boxscore_20260112):
+        # - lineup_role: bench / confirmed_starter / projected_starter / out
+        # - lineup_status: Confirmed for all non-projected, Expected for projected
+        # - lineup_roster_status: Active for non-out, Inactive for out
+        #
+        # Live feeds are often sparse (starters only), so we derive a complete
+        # per-player set using starter flags + OUT/active_flag.
+        # ------------------------------------------------------------------
+        if {"game_id", "team_id", "player_id"}.issubset(df.columns):
+            if "lineup_role" not in df.columns:
+                df["lineup_role"] = pd.NA
+            if "lineup_status" not in df.columns:
+                df["lineup_status"] = pd.NA
+            if "lineup_roster_status" not in df.columns:
+                df["lineup_roster_status"] = pd.NA
+
+            # Determine which rows need role filling.
+            role_series = df["lineup_role"].astype("string").fillna("").str.strip()
+            role_missing = role_series.eq("") | role_series.str.lower().isin({"none", "nan"})
+
+            # Use active_flag when available (captures roster inactive cases not on injury report).
+            if "active_flag" in df.columns:
+                active_flag = df["active_flag"].fillna(False).astype(bool)
+            else:
+                active_flag = pd.Series(True, index=df.index, dtype=bool)
+
+            is_out = pd.to_numeric(df.get("is_out", 0), errors="coerce").fillna(0).astype(int)
+            out_like = (is_out == 1) | (~active_flag)
+
+            confirmed = df.get("is_confirmed_starter", False)
+            confirmed = confirmed.fillna(False).astype(bool) if isinstance(confirmed, pd.Series) else pd.Series(False, index=df.index, dtype=bool)
+            projected = df.get("is_projected_starter", False)
+            projected = projected.fillna(False).astype(bool) if isinstance(projected, pd.Series) else pd.Series(False, index=df.index, dtype=bool)
+            starter_flag = pd.to_numeric(df.get("starter_flag", 0), errors="coerce").fillna(0).astype(int) > 0
+
+            derived_role = pd.Series("bench", index=df.index, dtype="string[pyarrow]")
+            derived_role.loc[out_like] = "out"
+            derived_role.loc[~out_like & confirmed] = "confirmed_starter"
+            derived_role.loc[~out_like & ~confirmed & (projected | starter_flag)] = "projected_starter"
+            df.loc[role_missing, "lineup_role"] = derived_role.loc[role_missing]
+
+            # lineup_roster_status: Active vs Inactive (derived from role/out_like).
+            roster_status_series = df["lineup_roster_status"].astype("string").fillna("").str.strip()
+            roster_missing = roster_status_series.eq("") | roster_status_series.str.lower().isin({"none", "nan"})
+            derived_roster_status = pd.Series("Active", index=df.index, dtype="string[pyarrow]")
+            derived_roster_status.loc[df["lineup_role"].astype("string").str.lower() == "out"] = "Inactive"
+            df.loc[roster_missing, "lineup_roster_status"] = derived_roster_status.loc[roster_missing]
+
+            # lineup_status: Expected only for projected starters, otherwise Confirmed.
+            status_series = df["lineup_status"].astype("string").fillna("").str.strip()
+            status_missing = status_series.eq("") | status_series.str.lower().isin({"none", "nan"})
+            derived_status = pd.Series("Confirmed", index=df.index, dtype="string[pyarrow]")
+            derived_status.loc[df["lineup_role"].astype("string").str.lower() == "projected_starter"] = "Expected"
+            df.loc[status_missing, "lineup_status"] = derived_status.loc[status_missing]
+
         for col in _TEAM_CONTEXT_COLUMNS:
             if col not in df.columns:
                 df[col] = np.nan
@@ -1205,6 +1406,7 @@ class SharedFeaturesBuilder:
         df: pd.DataFrame,
         *,
         labels_source: pd.DataFrame,
+        schedule: pd.DataFrame,
         warnings: list[str],
     ) -> pd.DataFrame:
         """Attach DNP history features (consecutive_active_dnp, etc.) from historical labels.
@@ -1243,10 +1445,144 @@ class SharedFeaturesBuilder:
                         df[col] = 0 if "streak" in col or "consecutive" in col or "games_since" in col else 0.0
                 return df
 
+            # ------------------------------------------------------------------
+            # Training parity for DNP history requires OUT games to be present in
+            # the historical frame. Boxscore labels can omit OUT players entirely,
+            # so we build a per-team schedule spine and fill minutes=0 when absent.
+            #
+            # Steps:
+            # 1) enumerate all prior team games for each (player_id, team_id) in current_df
+            # 2) merge boxscore minutes (default 0 if missing)
+            # 3) derive `is_out` from injuries snapshot as-of tip_ts per game
+            # ------------------------------------------------------------------
+            if not {"player_id", "team_id"}.issubset(current_df.columns):
+                warnings.append("[dnp_history] current_df missing player_id/team_id; using defaults.")
+                for col in DNP_HISTORY_FEATURE_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = 0 if "streak" in col or "consecutive" in col or "games_since" in col else 0.0
+                return df
+
+            pairs = current_df.loc[:, ["player_id", "team_id"]].copy()
+            pairs["player_id"] = pd.to_numeric(pairs["player_id"], errors="coerce").astype("Int64")
+            pairs["team_id"] = pd.to_numeric(pairs["team_id"], errors="coerce").astype("Int64")
+            pairs = pairs.dropna(subset=["player_id", "team_id"]).drop_duplicates()
+            if pairs.empty:
+                return df
+
+            sched_required = {"game_id", "game_date", "tip_ts", "home_team_id", "away_team_id"}
+            if not sched_required.issubset(schedule.columns):
+                warnings.append(
+                    f"[dnp_history] schedule missing columns {sorted(sched_required - set(schedule.columns))}; using defaults."
+                )
+                for col in DNP_HISTORY_FEATURE_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = 0 if "streak" in col or "consecutive" in col or "games_since" in col else 0.0
+                return df
+
+            sched = schedule.copy()
+            sched["game_date"] = pd.to_datetime(sched["game_date"], errors="coerce").dt.normalize()
+            sched["tip_ts"] = pd.to_datetime(sched["tip_ts"], utc=True, errors="coerce")
+
+            home = sched.loc[:, ["game_id", "game_date", "tip_ts", "home_team_id"]].rename(
+                columns={"home_team_id": "team_id"}
+            )
+            away = sched.loc[:, ["game_id", "game_date", "tip_ts", "away_team_id"]].rename(
+                columns={"away_team_id": "team_id"}
+            )
+            team_games = pd.concat([home, away], ignore_index=True)
+            team_games["team_id"] = pd.to_numeric(team_games["team_id"], errors="coerce").astype("Int64")
+            team_games["game_id"] = pd.to_numeric(team_games["game_id"], errors="coerce").astype("Int64")
+            team_games = team_games.dropna(subset=["team_id", "game_id", "game_date"])
+            team_games = team_games.loc[team_games["game_date"] < target_day].copy()
+            team_games = team_games.loc[team_games["team_id"].isin(pairs["team_id"].unique())].copy()
+            if team_games.empty:
+                return df
+
+            history_spine = pairs.merge(team_games, on="team_id", how="inner")
+            if history_spine.empty:
+                return df
+
+            # Avoid counting games before the player is first observed with this team in labels history.
+            hist_labels = historical.copy()
+            hist_labels["player_id"] = pd.to_numeric(hist_labels["player_id"], errors="coerce").astype("Int64")
+            hist_labels["team_id"] = pd.to_numeric(hist_labels["team_id"], errors="coerce").astype("Int64")
+            first_seen = (
+                hist_labels.dropna(subset=["player_id", "team_id"])
+                .groupby(["player_id", "team_id"], as_index=False)["game_date"]
+                .min()
+                .rename(columns={"game_date": "first_seen_game_date"})
+            )
+            history_spine = history_spine.merge(first_seen, on=["player_id", "team_id"], how="left")
+            history_spine = history_spine.dropna(subset=["first_seen_game_date"]).copy()
+            history_spine = history_spine.loc[history_spine["game_date"] >= history_spine["first_seen_game_date"]].copy()
+            history_spine = history_spine.drop(columns=["first_seen_game_date"], errors="ignore")
+            if history_spine.empty:
+                return df
+
+            # Merge realized minutes from labels; missing => minutes=0.
+            minutes = hist_labels.loc[:, ["game_id", "player_id", "team_id", "minutes"]].copy()
+            minutes["game_id"] = pd.to_numeric(minutes["game_id"], errors="coerce").astype("Int64")
+            minutes = minutes.dropna(subset=["game_id", "player_id", "team_id"])
+            minutes["minutes"] = pd.to_numeric(minutes["minutes"], errors="coerce").fillna(0.0).astype(float)
+            minutes = minutes.drop_duplicates(subset=["game_id", "player_id", "team_id"], keep="last")
+            history_spine = history_spine.merge(minutes, on=["game_id", "player_id", "team_id"], how="left")
+            history_spine["minutes"] = pd.to_numeric(history_spine["minutes"], errors="coerce").fillna(0.0).astype(float)
+
+            injuries_root = self.config.data_root / "silver" / "injuries_snapshot" / f"season={self.config.season}"
+            injuries_files = sorted(injuries_root.glob("**/*.parquet")) if injuries_root.exists() else []
+            if injuries_files:
+                injuries_frames: list[pd.DataFrame] = []
+                for path in injuries_files:
+                    try:
+                        injuries_frames.append(
+                            pd.read_parquet(
+                                path,
+                                columns=[
+                                    "game_id",
+                                    "player_id",
+                                    "status",
+                                    "as_of_ts",
+                                    "restriction_flag",
+                                    "ramp_flag",
+                                    "games_since_return",
+                                    "days_since_return",
+                                ],
+                            )
+                        )
+                    except Exception:  # noqa: BLE001
+                        injuries_frames.append(pd.read_parquet(path))
+                injuries_snapshot = (
+                    pd.concat(injuries_frames, ignore_index=True) if injuries_frames else pd.DataFrame()
+                )
+            else:
+                injuries_snapshot = pd.DataFrame()
+
+            if not injuries_snapshot.empty:
+                from projections.features import availability as availability_features
+
+                # Normalize join keys so the schedule spine can match the injury snapshot.
+                for col in ("game_id", "player_id"):
+                    if col in injuries_snapshot.columns:
+                        injuries_snapshot[col] = pd.to_numeric(injuries_snapshot[col], errors="coerce").astype("Int64")
+                injuries_snapshot = injuries_snapshot.dropna(subset=["game_id", "player_id"])
+
+                for col in ("game_id", "player_id"):
+                    if col in history_spine.columns:
+                        history_spine[col] = pd.to_numeric(history_spine[col], errors="coerce").astype("Int64")
+                history_spine = history_spine.dropna(subset=["game_id", "player_id"])
+
+                prepared = availability_features.prepare_injuries_snapshot(injuries_snapshot)
+                history_spine = availability_features.attach_availability_features(
+                    history_spine, prepared_injuries=prepared, injuries_snapshot=injuries_snapshot
+                )
+            else:
+                # No injuries history available; fall back to conservative "active" interpretation.
+                history_spine["is_out"] = 0
+
             # Call the live inference function
             result = compute_dnp_history_features_for_live(
                 current_game_df=current_df,
-                historical_df=historical,
+                historical_df=history_spine,
                 game_date_col="game_date",
                 player_id_col="player_id",
                 team_id_col="team_id",

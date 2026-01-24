@@ -51,6 +51,8 @@ profile*.json
 scratch/
 tmp/
 local/
+reports/sim_audit/
+reports/parity_audit/
 
 # -------------------------
 # Data files (ignored by default)
