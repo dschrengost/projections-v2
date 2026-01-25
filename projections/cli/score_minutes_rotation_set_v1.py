@@ -74,6 +74,8 @@ class RotationLiveConfig:
     injury_coverage_threshold: float
     dnp_tail_minutes_threshold: float
     allow_priors_fallback: bool
+    enable_blend_to_baseline: bool  # Default False (PR3: disable suppression)
+    fallback_mode: str  # "fail_closed" or "degrade_loudly"
 
     @classmethod
     def load(cls, path: Path) -> "RotationLiveConfig":
@@ -91,6 +93,12 @@ class RotationLiveConfig:
         injury_threshold = float(payload.get("injury_coverage_threshold", 0.5))
         dnp_tail_threshold = float(payload.get("dnp_tail_minutes_threshold", 8.0))
         allow_priors_fallback = bool(payload.get("allow_priors_fallback", False))
+        # PR3: blend-to-baseline is now disabled by default
+        enable_blend = bool(payload.get("enable_blend_to_baseline", False))
+        # PR3: explicit fallback mode (default: degrade_loudly for safer rollout)
+        fallback_mode = str(payload.get("fallback_mode", "degrade_loudly"))
+        if fallback_mode not in ("fail_closed", "degrade_loudly"):
+            fallback_mode = "degrade_loudly"
         return cls(
             enabled=enabled,
             model_dir=str(model_dir) if model_dir else None,
@@ -98,6 +106,8 @@ class RotationLiveConfig:
             injury_coverage_threshold=injury_threshold,
             dnp_tail_minutes_threshold=dnp_tail_threshold,
             allow_priors_fallback=allow_priors_fallback,
+            enable_blend_to_baseline=enable_blend,
+            fallback_mode=fallback_mode,
         )
 
 
@@ -680,10 +690,13 @@ def main(
         else float(config.dnp_tail_minutes_threshold)
     )
     allow_priors_fallback = bool(config.allow_priors_fallback)
+    # PR3: blend-to-baseline is now disabled by default (let transformer signal through)
+    enable_blend = bool(config.enable_blend_to_baseline)
+    fallback_mode = str(config.fallback_mode)
 
     typer.echo(
         f"[rotation_minutes] rotation_set_minutes enabled model_dir={resolved_model_dir} blend_weight={w} "
-        f"injury_thr={inj_thr} dnp_tail_thr={dnp_thr}",
+        f"injury_thr={inj_thr} dnp_tail_thr={dnp_thr} enable_blend={enable_blend} fallback_mode={fallback_mode}",
         err=True,
     )
 
@@ -1007,8 +1020,25 @@ def main(
         injury_coverage_threshold=inj_thr,
         dnp_tail_minutes_threshold=dnp_thr,
         cap_max_minutes=cap_max_minutes,
+        enable_blend_to_baseline=enable_blend,  # PR3: disabled by default
     )
     new_p50 = guardrail.minutes_p50
+
+    # PR3: Handle degradation according to fallback_mode
+    if guardrail.degraded:
+        degraded_msg = (
+            f"[rotation_minutes] DEGRADED: {len(guardrail.degraded_reasons)} fallback(s) triggered: "
+            f"{guardrail.degraded_reasons}"
+        )
+        if fallback_mode == "fail_closed":
+            # In fail_closed mode, raise an error instead of continuing with degraded output
+            raise RuntimeError(
+                f"Guardrail triggered in fail_closed mode. {degraded_msg}\n"
+                "To continue with degraded output, set fallback_mode='degrade_loudly' in config."
+            )
+        else:
+            # degrade_loudly: log warning but continue
+            typer.echo(degraded_msg, err=True)
 
     # 4b) Post-guardrail DNP override: for players with strong DNP-CD signals,
     # override their minutes to 0 regardless of baseline. This allows us to use
@@ -1190,23 +1220,23 @@ def main(
     )
 
     # Inject provenance stamp for artifact traceability
+    # PR3: Use guardrail's degradation tracking for accurate fallback reporting
     provenance = build_provenance(
         alloc_mode="rotation_set",
         model_dir=resolved_model_dir,
         run_id=run_id,
         game_date=day.strftime("%Y-%m-%d"),
-        degraded=bool(guardrail.summary.get("n_blended_team_games", 0) > 0),
-        degraded_reason=(
-            f"blended {guardrail.summary.get('n_blended_team_games', 0)} team-games"
-            if guardrail.summary.get("n_blended_team_games", 0) > 0
-            else ""
-        ),
+        degraded=guardrail.degraded,
+        degraded_reason="; ".join(guardrail.degraded_reasons) if guardrail.degraded_reasons else "",
         extras={
             "blend_weight": w,
             "injury_coverage_threshold": inj_thr,
             "dnp_tail_minutes_threshold": dnp_thr,
+            "enable_blend_to_baseline": enable_blend,
+            "fallback_mode": fallback_mode,
             "espn_out_count": espn_out_count,
             "espn_matched_count": espn_matched_count,
+            "degraded_reasons": guardrail.degraded_reasons,
         },
     )
     inject_provenance_into_summary(summary_path, provenance)

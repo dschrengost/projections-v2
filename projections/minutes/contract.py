@@ -65,6 +65,11 @@ MinutesAllocMode = Literal[
     "unknown",
 ]
 
+FallbackMode = Literal[
+    "fail_closed",  # Fail fast on missing inputs or pathology (prefer for production correctness)
+    "degrade_loudly",  # Degrade gracefully but loudly (set degraded=True, emit warnings)
+]
+
 
 # ---------------------------------------------------------------------------
 # Provenance stamp dataclass
@@ -270,6 +275,7 @@ __all__ = [
     "MINUTES_CONTRACT_VERSION",
     "minutes_contract_hash",
     "MinutesAllocMode",
+    "FallbackMode",
     "MinutesProvenance",
     "build_provenance",
     "load_provenance_from_summary",

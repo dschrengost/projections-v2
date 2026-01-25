@@ -15,10 +15,28 @@ KEY_COLS: tuple[str, str, str] = ("game_id", "team_id", "player_id")
 
 @dataclass(frozen=True)
 class RotationGuardrailResult:
+    """Result of applying rotation minutes guardrails.
+
+    Attributes:
+        minutes_p50: Final guarded minutes p50 predictions
+        summary: Aggregate stats about guardrail triggers
+        team_game_summary: Per team-game diagnostic info
+        tail_minutes_top: Top team-games by tail minutes (DNP)
+        degraded: True if any fallback was triggered (blend, pathology, etc.)
+        degraded_reasons: List of reasons why degradation occurred
+    """
+
     minutes_p50: pd.Series
     summary: dict[str, Any]
     team_game_summary: pd.DataFrame
     tail_minutes_top: pd.DataFrame
+    degraded: bool = False
+    degraded_reasons: list[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        # Ensure degraded_reasons is always a list
+        if self.degraded_reasons is None:
+            object.__setattr__(self, "degraded_reasons", [])
 
 
 def _coerce_bool_series(series: pd.Series) -> pd.Series:
@@ -62,12 +80,14 @@ def apply_rotation_minutes_guardrails(
     pathology_top5_sum_threshold: float = 210.0,
     pathology_min_top5_sum_threshold: float = 125.0,
     team_target_minutes: float = 240.0,
+    enable_blend_to_baseline: bool = False,
 ) -> RotationGuardrailResult:
     """Apply guardrails and return guarded p50 minutes.
 
     Rules:
       1) Row fallback: minutes_features_row_missing==1 -> use baseline p50 for that row.
-      2) Team blend: if lineup_fields_present==False AND injury_coverage_rate < threshold:
+      2) Team blend (DISABLED by default): if enable_blend_to_baseline=True AND
+         lineup_fields_present==False AND injury_coverage_rate < threshold:
          minutes = w*rotation + (1-w)*baseline for the whole team-game.
       3) Tail clamp: if a team-game allocates > threshold minutes to DNP-proxy rows
          (play_prob==0 equivalent, e.g. status OUT), fall back to baseline for that team-game.
@@ -75,7 +95,14 @@ def apply_rotation_minutes_guardrails(
          within the team-game back to `team_target_minutes` while preserving fallback rows.
       5) Pathology fallback: for obviously impossible allocations (e.g. OT-level minutes or
          extreme concentration), fall back to baseline for the entire team-game.
+
+    Args:
+        enable_blend_to_baseline: If False (default), blend-to-baseline is disabled.
+            This was previously the default behavior but is now opt-in to let the
+            transformer model signal through without suppression.
     """
+    # Track degradation reasons
+    degraded_reasons: list[str] = []
 
     if blend_weight < 0.0 or blend_weight > 1.0:
         raise ValueError("blend_weight must be in [0, 1]")
@@ -118,17 +145,24 @@ def apply_rotation_minutes_guardrails(
     lineup_present_aligned = lineup_present_team.reindex(team_index, fill_value=False).to_numpy(dtype=bool)
     injury_cov_aligned = injury_coverage_rate.reindex(team_index).fillna(0.0).to_numpy(dtype=float)
 
-    blend_team_mask = (~lineup_present_aligned) & (injury_cov_aligned < float(injury_coverage_threshold))
+    # Compute blend eligibility mask (for diagnostics), but only apply if enabled
+    blend_team_mask_eligible = (~lineup_present_aligned) & (injury_cov_aligned < float(injury_coverage_threshold))
 
     guarded = rot.copy()
+    # Only apply blend if explicitly enabled (disabled by default to let transformer signal through)
+    blend_team_mask = blend_team_mask_eligible if enable_blend_to_baseline else np.zeros_like(blend_team_mask_eligible, dtype=bool)
     if blend_team_mask.any():
         w = float(blend_weight)
         guarded = guarded.where(~blend_team_mask, w * rot + (1.0 - w) * base)
+        n_blended = int(blend_team_mask.sum())
+        degraded_reasons.append(f"blend_to_baseline:{n_blended}_rows")
 
     row_missing = pd.to_numeric(work.get(minutes_features_row_missing_col, 0), errors="coerce").fillna(0).astype(int)
     row_fallback_mask = row_missing.to_numpy(dtype=int) == 1
     if row_fallback_mask.any():
         guarded = guarded.where(~row_fallback_mask, base)
+        n_row_fallback = int(row_fallback_mask.sum())
+        degraded_reasons.append(f"row_fallback:{n_row_fallback}_rows")
 
     # Enforce per-team 240-minute totals by scaling the non-fallback rows.
     df_team = pd.DataFrame(
@@ -171,6 +205,8 @@ def apply_rotation_minutes_guardrails(
     clamp_aligned = team_index.isin(clamp_index)
     if clamp_aligned.any():
         guarded = guarded.where(~clamp_aligned, base)
+        n_clamped_teams = int(tail_pre_team["tail_clamped"].sum())
+        degraded_reasons.append(f"tail_clamp:{n_clamped_teams}_team_games")
 
     tail_post = pd.DataFrame(
         {
@@ -270,6 +306,10 @@ def apply_rotation_minutes_guardrails(
         fallback_index = pd.MultiIndex.from_frame(metrics_team.loc[metrics_team["pathology_fallback"], group_cols])
         fallback_aligned = pd.MultiIndex.from_frame(work.loc[:, group_cols]).isin(fallback_index)
         guarded = guarded.where(~fallback_aligned, base)
+        n_pathology_teams = int(fallback_team.sum())
+        # Collect distinct pathology reasons
+        pathology_reasons_set = set(metrics_team.loc[metrics_team["pathology_fallback"], "pathology_reason"].tolist())
+        degraded_reasons.append(f"pathology_fallback:{n_pathology_teams}_team_games({','.join(pathology_reasons_set)})")
     else:
         metrics_team["pathology_fallback"] = False
         metrics_team["pathology_reason"] = ""
@@ -421,9 +461,19 @@ def apply_rotation_minutes_guardrails(
         summary["cap_pre_rate"] = float(pre_cap_rate)
         summary["cap_post_max_minutes"] = float(guarded.max()) if len(work) else 0.0
 
+    # Add degradation tracking to summary
+    summary["degraded"] = len(degraded_reasons) > 0
+    summary["degraded_reasons"] = degraded_reasons
+    # Also track if blend was eligible but not applied (for diagnostics)
+    if not enable_blend_to_baseline and blend_team_mask_eligible.any():
+        n_would_blend = int(blend_team_mask_eligible.sum())
+        summary["blend_eligible_but_disabled"] = n_would_blend
+
     return RotationGuardrailResult(
         minutes_p50=guarded,
         summary=summary,
         team_game_summary=team_game,
         tail_minutes_top=tail_team,
+        degraded=len(degraded_reasons) > 0,
+        degraded_reasons=degraded_reasons,
     )

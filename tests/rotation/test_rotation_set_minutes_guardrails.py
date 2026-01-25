@@ -69,6 +69,7 @@ def test_guardrail_team_blend_triggers_on_missing_lineups_and_low_injury_coverag
         pathology_n_gt_40_threshold=999,
         pathology_top5_sum_threshold=1e9,
         team_target_minutes=240.0,
+        enable_blend_to_baseline=True,  # PR3: must explicitly enable blend
     )
     out = result.minutes_p50
 
@@ -251,3 +252,190 @@ def test_guardrail_flatness_fallback_triggers_when_max_and_top5_both_low() -> No
     assert float(out.sum()) == pytest.approx(240.0, abs=1e-6)
     assert out.to_numpy(dtype=float) == pytest.approx(df["baseline_p50"].to_numpy(dtype=float), abs=1e-6)
     assert bool(result.team_game_summary.loc[0, "pathology_fallback"]) is True
+
+
+# PR3: Tests for blend-to-baseline disabled by default and degradation tracking
+
+
+def test_guardrail_blend_disabled_by_default() -> None:
+    """PR3: Blend-to-baseline is disabled by default; rotation signal passes through."""
+    df = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 10],
+            "player_id": [201, 202],
+            "rotation_p50": [30.0, 210.0],
+            "baseline_p50": [40.0, 200.0],
+            "minutes_features_row_missing": [0, 0],
+            # Lineup fields missing and low injury coverage -> would trigger blend if enabled
+            "lineup_timestamp": [pd.NaT, pd.NaT],
+            "lineup_status": [pd.NA, pd.NA],
+            "lineup_roster_status": [pd.NA, pd.NA],
+            "injury_snapshot_missing": [1, 1],
+        }
+    )
+
+    # Default: enable_blend_to_baseline=False
+    result = apply_rotation_minutes_guardrails(
+        df,
+        rotation_p50_col="rotation_p50",
+        baseline_p50_col="baseline_p50",
+        blend_weight=0.2,
+        injury_coverage_threshold=0.5,
+        pathology_max_minutes_threshold=1e9,
+        pathology_n_gt_40_threshold=999,
+        pathology_top5_sum_threshold=1e9,
+        team_target_minutes=240.0,
+        enable_blend_to_baseline=False,  # Explicitly disabled (default)
+    )
+    out = result.minutes_p50
+
+    # Without blending, rotation p50 is used directly (scaled to 240)
+    # 30 + 210 = 240 so no scaling needed
+    assert float(out.iloc[0]) == 30.0
+    assert float(out.iloc[1]) == 210.0
+    # No degradation when blend is disabled
+    assert result.degraded is False
+    assert len(result.degraded_reasons) == 0
+    # But the summary should track that blend was eligible but disabled
+    assert result.summary.get("blend_eligible_but_disabled") == 2
+
+
+def test_guardrail_blend_enabled_triggers_degradation() -> None:
+    """PR3: When blend is enabled and triggers, degradation is tracked."""
+    df = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 10],
+            "player_id": [201, 202],
+            "rotation_p50": [30.0, 210.0],
+            "baseline_p50": [40.0, 200.0],
+            "minutes_features_row_missing": [0, 0],
+            # Lineup fields missing and low injury coverage
+            "lineup_timestamp": [pd.NaT, pd.NaT],
+            "lineup_status": [pd.NA, pd.NA],
+            "lineup_roster_status": [pd.NA, pd.NA],
+            "injury_snapshot_missing": [1, 1],
+        }
+    )
+
+    result = apply_rotation_minutes_guardrails(
+        df,
+        rotation_p50_col="rotation_p50",
+        baseline_p50_col="baseline_p50",
+        blend_weight=0.2,
+        injury_coverage_threshold=0.5,
+        pathology_max_minutes_threshold=1e9,
+        pathology_n_gt_40_threshold=999,
+        pathology_top5_sum_threshold=1e9,
+        team_target_minutes=240.0,
+        enable_blend_to_baseline=True,  # Opt-in to blend
+    )
+    out = result.minutes_p50
+
+    # Blend applied: 0.2*rot + 0.8*base
+    assert float(out.iloc[0]) == 38.0
+    assert float(out.iloc[1]) == 202.0
+    # Degradation is tracked
+    assert result.degraded is True
+    assert any("blend_to_baseline" in r for r in result.degraded_reasons)
+
+
+def test_guardrail_row_fallback_triggers_degradation() -> None:
+    """PR3: Row-level fallback triggers degradation tracking."""
+    df = pd.DataFrame(
+        {
+            "game_id": [1, 1, 1],
+            "team_id": [10, 10, 10],
+            "player_id": [101, 102, 103],
+            "rotation_p50": [80.0, 80.0, 80.0],
+            "baseline_p50": [80.0, 80.0, 80.0],
+            "minutes_features_row_missing": [1, 0, 0],  # First row missing
+            "lineup_timestamp": [pd.Timestamp("2026-01-01T00:00:00Z"), pd.NaT, pd.NaT],
+            "lineup_status": [pd.NA, pd.NA, pd.NA],
+            "lineup_roster_status": [pd.NA, pd.NA, pd.NA],
+            "injury_snapshot_missing": [0, 0, 0],
+        }
+    )
+
+    result = apply_rotation_minutes_guardrails(
+        df,
+        rotation_p50_col="rotation_p50",
+        baseline_p50_col="baseline_p50",
+        pathology_max_minutes_threshold=1e9,
+        pathology_n_gt_40_threshold=999,
+        pathology_top5_sum_threshold=1e9,
+        team_target_minutes=240.0,
+    )
+
+    assert result.degraded is True
+    assert any("row_fallback" in r for r in result.degraded_reasons)
+
+
+def test_guardrail_pathology_fallback_triggers_degradation() -> None:
+    """PR3: Pathology fallback triggers degradation tracking with reason."""
+    df = pd.DataFrame(
+        {
+            "game_id": [1] * 6,
+            "team_id": [10] * 6,
+            "player_id": [1, 2, 3, 4, 5, 6],
+            # OT-level max minutes triggers pathology fallback
+            "rotation_p50": [65.0, 50.0, 45.0, 40.0, 20.0, 20.0],
+            "baseline_p50": [40.0, 38.0, 36.0, 34.0, 46.0, 46.0],
+            "minutes_features_row_missing": [0] * 6,
+            "lineup_timestamp": [pd.Timestamp("2026-01-01T00:00:00Z")] * 6,
+            "lineup_status": [pd.NA] * 6,
+            "lineup_roster_status": [pd.NA] * 6,
+            "injury_snapshot_missing": [0] * 6,
+            "status": ["Ava"] * 6,
+        }
+    )
+
+    result = apply_rotation_minutes_guardrails(
+        df,
+        rotation_p50_col="rotation_p50",
+        baseline_p50_col="baseline_p50",
+        cap_max_minutes=44.0,
+        team_target_minutes=240.0,
+    )
+
+    assert result.degraded is True
+    assert any("pathology_fallback" in r for r in result.degraded_reasons)
+    # Should include the specific pathology reason
+    assert any("max_minutes" in r for r in result.degraded_reasons)
+
+
+def test_guardrail_degraded_reason_nonempty_when_fallback_occurs() -> None:
+    """PR3: Missing play_prob is never silently treated as 1.0, degraded_reason is set."""
+    df = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 10],
+            "player_id": [201, 202],
+            "rotation_p50": [120.0, 120.0],
+            "baseline_p50": [120.0, 120.0],
+            "minutes_features_row_missing": [1, 0],  # One row fallback
+            "lineup_timestamp": [pd.NaT, pd.NaT],
+            "lineup_status": [pd.NA, pd.NA],
+            "lineup_roster_status": [pd.NA, pd.NA],
+            "injury_snapshot_missing": [0, 0],
+            # No play_prob column - should not silently treat as 1.0
+        }
+    )
+
+    result = apply_rotation_minutes_guardrails(
+        df,
+        rotation_p50_col="rotation_p50",
+        baseline_p50_col="baseline_p50",
+        team_target_minutes=240.0,
+        pathology_max_minutes_threshold=1e9,
+        pathology_n_gt_40_threshold=999,
+        pathology_top5_sum_threshold=1e9,
+    )
+
+    # Degradation is tracked for row_fallback
+    assert result.degraded is True
+    assert len(result.degraded_reasons) > 0
+    # Summary has degraded info
+    assert result.summary.get("degraded") is True
+    assert result.summary.get("degraded_reasons") == result.degraded_reasons
