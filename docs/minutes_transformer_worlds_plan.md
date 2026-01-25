@@ -233,8 +233,75 @@ If parity/invariants fail in production:
 
 ## Gotchas to address explicitly (do not hand-wave)
 
-- Do not “fill missing continuous features with 0 and proceed” in production scoring.
+- Do not "fill missing continuous features with 0 and proceed" in production scoring.
 - Define `in_rotation` semantics once and enforce it across minutes, sim, UI, and optimizer.
 - Ensure `game_date` exists in all published artifacts (prevents `KeyError: game_date` class regressions).
-- Keep reconciliation as a boundary constraint (240), but emit diagnostics showing whether it’s a no-op vs masking a failure.
+- Keep reconciliation as a boundary constraint (240), but emit diagnostics showing whether it's a no-op vs masking a failure.
+
+---
+
+## Implementation Progress
+
+### Completed PRs
+
+| PR | Commit | Description | Status |
+|----|--------|-------------|--------|
+| [#32](https://github.com/dschrengost/projections-v2/pull/32) | `ccf11dbf` | PR1: Add provenance stamps and contract definitions | ✅ Merged |
+| [#33](https://github.com/dschrengost/projections-v2/pull/33) | `467799d4` | PR2: Add parity gate + diagnostics artifact (detect-only) | ✅ Merged |
+| [#34](https://github.com/dschrengost/projections-v2/pull/34) | `a3671d7e` | PR3: Remove suppression/blending except as last resort | ✅ Merged |
+| [#35](https://github.com/dschrengost/projections-v2/pull/35) | `83b8bf41` | PR4: Make rotation_set primary scorer | ✅ Merged |
+| [#36](https://github.com/dschrengost/projections-v2/pull/36) | `87cdf06d` | PR5 Tasks 0-1: Config + aux outputs | ✅ Merged |
+| [#37](https://github.com/dschrengost/projections-v2/pull/37) | `9f1ec8ca` | PR5 Tasks 2-3: Model-space backend + quantiles contract | ✅ Merged |
+
+### PR5 Task Breakdown (Minutes Worlds)
+
+Spec: `docs/minutes/minutes_worlds_pr5_spec.md`
+
+| Task | Description | Status | Files |
+|------|-------------|--------|-------|
+| **Task 0** | Config + constants | ✅ Complete | `projections/sim_v2/config.py` |
+| **Task 1** | Expose transformer aux outputs (opt-in) | ✅ Complete | `projections/rotation/set_model.py` |
+| **Task 2** | Add new sim backend (no double-noise) | ✅ Complete | `projections/sim_v2/minutes_worlds_model_space_v1.py`, `scripts/sim_v2/generate_worlds_fpts_v2.py` |
+| **Task 3** | Minutes quantiles contract in sim outputs | ✅ Complete | `scripts/sim_v2/generate_worlds_fpts_v2.py` |
+| **Task 4** | play_prob missingness hard degradation | 🔲 Pending | |
+| **Task 5** | Gate semantics retrain or explicit mapping | 🔲 Pending | |
+| **Task 6** | Bench-zero mixture empirical evaluation | 🔲 Pending | |
+| **Task 7** | Calibration gating + fallback | 🔲 Pending | |
+| **Task 8** | UI + API alignment | 🔲 Pending | |
+
+### Key Artifacts Created
+
+**New Module: `projections/sim_v2/minutes_worlds_model_space_v1.py`**
+- `MinutesWorldsConfig`: Configuration for gate temperature, bench-zero mixture
+- `MinutesWorldsResult`: Output dataclass with minutes_worlds, active_mask, diagnostics
+- `sample_minutes_worlds_model_space_v1()`: Pure function for model-space sampling
+- `compute_minutes_quantiles()`: Helper for unconditional/conditional quantiles
+- `_enforce_team_240_simple()`: Team minutes constraint enforcement
+
+**Config Additions: `projections/sim_v2/config.py`**
+- `MinutesWorldsConfig` dataclass with fields:
+  - `mode`: "legacy" or "model_space_v1"
+  - `fail_on_missing_play_prob`: hard degradation policy
+  - `gate_temperature`: calibration scaling
+  - `calibration_policy`: "none", "temperature_scaling", "odds_gated"
+  - `min_odds_coverage`: threshold for odds-dependent calibration
+
+**Aux Outputs: `projections/rotation/set_model.py`**
+- `RotationSetAuxOutputs` dataclass
+- `predict(..., return_aux=True)` returns gate_logit, gate_prob, share_logit columns
+
+**Contract Columns (sim outputs)**
+- `minutes_p10/p50/p90`: unconditional quantiles (DNP => 0, decision-relevant)
+- `minutes_p10_cond/p50_cond/p90_cond`: conditional quantiles (given plays)
+
+### Tests Added
+
+- `tests/sim_v2/test_minutes_worlds_model_space_v1.py` (13 tests)
+  - Determinism tests
+  - Team-240 constraint tests
+  - play_prob validation tests
+  - Bench-zero mixture tests
+  - Gate temperature tests
+  - Quantiles contract tests
+- `tests/rotation/test_set_model.py` (10 tests for aux outputs)
 
