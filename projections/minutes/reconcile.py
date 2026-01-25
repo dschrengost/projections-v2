@@ -10,31 +10,20 @@ projection layer that:
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from typing import Literal, cast
 
 import numpy as np
 import pandas as pd
 
-IN_ROTATION_THRESHOLD_MIN = 5.0
-
-# Bump when changing semantics of the effective minutes artifact.
-MINUTES_CONTRACT_VERSION = 1
+# Import canonical contract definitions
+from projections.minutes.contract import (
+    IN_ROTATION_THRESHOLD_MIN,
+    MINUTES_CONTRACT_VERSION,
+    minutes_contract_hash,
+)
 
 MinutesState = Literal["out", "dnp", "cameo", "rotation", "unknown"]
-
-
-def minutes_contract_hash(*, version: int = MINUTES_CONTRACT_VERSION) -> str:
-    """Stable hash for the minutes contract version.
-
-    Keep this deliberately simple: the version is the primary bump mechanism.
-    """
-
-    payload = {"minutes_contract_version": int(version)}
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
-    return digest
 
 
 @dataclass(frozen=True, slots=True)

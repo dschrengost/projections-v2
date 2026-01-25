@@ -28,6 +28,7 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.minutes import build_provenance, inject_provenance_into_summary
 from projections.minutes_v1.reconcile import load_reconcile_config
 from projections.rotation.guardrails import apply_rotation_minutes_guardrails
 from projections.rotation.live_features_v1 import (
@@ -1157,6 +1158,28 @@ def main(
             }
         },
     )
+
+    # Inject provenance stamp for artifact traceability
+    provenance = build_provenance(
+        alloc_mode="rotation_set",
+        model_dir=resolved_model_dir,
+        run_id=run_id,
+        game_date=day.strftime("%Y-%m-%d"),
+        degraded=bool(guardrail.summary.get("n_blended_team_games", 0) > 0),
+        degraded_reason=(
+            f"blended {guardrail.summary.get('n_blended_team_games', 0)} team-games"
+            if guardrail.summary.get("n_blended_team_games", 0) > 0
+            else ""
+        ),
+        extras={
+            "blend_weight": w,
+            "injury_coverage_threshold": inj_thr,
+            "dnp_tail_minutes_threshold": dnp_thr,
+            "espn_out_count": espn_out_count,
+            "espn_matched_count": espn_matched_count,
+        },
+    )
+    inject_provenance_into_summary(summary_path, provenance)
 
     typer.echo(f"[rotation_minutes] wrote guarded minutes -> {minutes_path}", err=True)
 

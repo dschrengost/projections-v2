@@ -19,6 +19,8 @@ from typing import Any
 import pandas as pd
 import typer
 
+from projections.minutes import build_provenance, inject_provenance_into_summary
+
 UTC = timezone.utc
 
 DEFAULT_DATA_ROOT = Path(os.environ.get("PROJECTIONS_DATA_ROOT", "data"))
@@ -448,10 +450,28 @@ def main(
             "teams": int(out["team_id"].nunique()) if "team_id" in out.columns else 0,
         },
     }
-    (out_dir / "summary.json").write_text(
+    summary_path = out_dir / "summary.json"
+    summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+
+    # Inject provenance stamp for artifact traceability
+    provenance = build_provenance(
+        alloc_mode="rmh",
+        model_dir=bundle_dir,
+        run_id=run_id,
+        game_date=day.strftime("%Y-%m-%d"),
+        degraded=False,
+        degraded_reason="",
+        extras={
+            "reconcile_mode": reconcile_mode,
+            "in_rotation_threshold_min": in_rotation_threshold_min,
+            "max_rotation_players": max_rotation_players,
+            "schema_hash": bundle.schema_hash,
+        },
+    )
+    inject_provenance_into_summary(summary_path, provenance)
 
     typer.echo(f"[rmh-scorer] wrote {len(out)} rows to {out_path}", err=True)
 
