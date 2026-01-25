@@ -1079,6 +1079,19 @@ class TeamGameSet:
     opp_idx: np.ndarray
 
 
+@dataclass
+class RotationSetAuxOutputs:
+    """Auxiliary outputs from RotationSetMinutesPredictor when return_aux=True.
+
+    Attributes:
+        player_df: DataFrame with per-player aux columns (gate_logit, gate_prob, share_logit)
+        router_df: Optional DataFrame with per-(game_id, team_id) router outputs
+    """
+
+    player_df: pd.DataFrame
+    router_df: pd.DataFrame | None = None
+
+
 def _build_team_id_mapping(vocab: list[int] | None) -> dict[int, int]:
     if not vocab:
         return {}
@@ -1120,7 +1133,25 @@ class RotationSetMinutesPredictor:
         model.load_state_dict(state)
         return cls(config=config, model=model, device=device)
 
-    def predict(self, df_features: pd.DataFrame, *, batch_size: int = 64) -> pd.DataFrame:
+    def predict(
+        self,
+        df_features: pd.DataFrame,
+        *,
+        batch_size: int = 64,
+        return_aux: bool = False,
+    ) -> pd.DataFrame | RotationSetAuxOutputs:
+        """Predict per-player minutes from a flat feature dataframe.
+
+        Args:
+            df_features: Input features with player-level rows.
+            batch_size: Number of (game, team) groups per batch.
+            return_aux: If True, return RotationSetAuxOutputs with aux columns
+                (gate_logit, gate_prob, share_logit) and router outputs.
+
+        Returns:
+            If return_aux=False: DataFrame with pred_minutes column.
+            If return_aux=True: RotationSetAuxOutputs with player_df and router_df.
+        """
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
         df = normalize_key_columns(df_features)
@@ -1163,6 +1194,15 @@ class RotationSetMinutesPredictor:
 
         preds = np.zeros(len(df), dtype="float32")
         num_features = len(self.config.feature_columns)
+
+        # Aux output arrays (only allocated if return_aux=True)
+        gate_logit_all: np.ndarray | None = None
+        share_logit_all: np.ndarray | None = None
+        router_records: list[dict] | None = None
+        if return_aux:
+            gate_logit_all = np.full(len(df), np.nan, dtype="float32")
+            share_logit_all = np.full(len(df), np.nan, dtype="float32")
+            router_records = []
 
         alloc_flag_all: np.ndarray | None = None
         is_out_all: np.ndarray | None = None
@@ -1244,25 +1284,71 @@ class RotationSetMinutesPredictor:
                                 starters_out_proxy = 0.0
                             router_features[i, 2] = float(np.clip(starters_out_proxy / 5.0, 0.0, 1.0))
 
-                minutes = (
-                    self.model(
-                        x,
-                        team_idx,
-                        opp_idx,
-                        mask,
-                        alloc_mask=alloc_mask,
-                        prior_weights=prior_w if prior_weight_all is not None else None,
-                        router_features=router_features,
+                if return_aux:
+                    # Call forward_with_aux to get auxiliary outputs
+                    minutes_t, gate_logits_t, share_logits_t, router_pi_soft_t, router_pi_used_t = (
+                        self.model.forward_with_aux(
+                            x,
+                            team_idx,
+                            opp_idx,
+                            mask,
+                            alloc_mask=alloc_mask,
+                            prior_weights=prior_w if prior_weight_all is not None else None,
+                            router_features=router_features,
+                        )
                     )
-                    .cpu()
-                    .numpy()
-                )
-                for i, group in enumerate(batch):
-                    n = group.x.shape[0]
-                    preds[group.row_indices] = minutes[i, :n]
+                    minutes = minutes_t.cpu().numpy()
+                    gate_logits = gate_logits_t.cpu().numpy() if gate_logits_t is not None else None
+                    share_logits = share_logits_t.cpu().numpy()
+                    router_pi_soft = router_pi_soft_t.cpu().numpy() if router_pi_soft_t is not None else None
+
+                    for i, group in enumerate(batch):
+                        n = group.x.shape[0]
+                        preds[group.row_indices] = minutes[i, :n]
+                        share_logit_all[group.row_indices] = share_logits[i, :n]
+                        if gate_logits is not None:
+                            gate_logit_all[group.row_indices] = gate_logits[i, :n]
+                        # Record router outputs per group
+                        if router_pi_soft is not None and router_records is not None:
+                            router_records.append({
+                                "game_id_norm": group.game_id,
+                                "team_id": group.team_id,
+                                **{f"router_pi_{k}": float(router_pi_soft[i, k]) for k in range(router_pi_soft.shape[1])},
+                            })
+                else:
+                    minutes = (
+                        self.model(
+                            x,
+                            team_idx,
+                            opp_idx,
+                            mask,
+                            alloc_mask=alloc_mask,
+                            prior_weights=prior_w if prior_weight_all is not None else None,
+                            router_features=router_features,
+                        )
+                        .cpu()
+                        .numpy()
+                    )
+                    for i, group in enumerate(batch):
+                        n = group.x.shape[0]
+                        preds[group.row_indices] = minutes[i, :n]
 
         out = df_features.copy()
         out["pred_minutes"] = preds
+
+        if return_aux:
+            # Add aux columns to output DataFrame
+            out["gate_logit"] = gate_logit_all
+            out["gate_prob"] = 1.0 / (1.0 + np.exp(-gate_logit_all))  # sigmoid
+            out["share_logit"] = share_logit_all
+
+            # Build router DataFrame if we have router outputs
+            router_df = None
+            if router_records:
+                router_df = pd.DataFrame(router_records)
+
+            return RotationSetAuxOutputs(player_df=out, router_df=router_df)
+
         return out
 
 

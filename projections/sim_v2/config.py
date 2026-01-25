@@ -86,6 +86,22 @@ class BenchZeroMixtureConfig:
 
 
 @dataclass
+class MinutesWorldsConfig:
+    """Config for model-space minutes worlds sampling (PR5 backend)."""
+
+    # Backend mode: "legacy" (existing noise backends), "model_space_v1" (new transformer-based)
+    mode: str = "legacy"
+    # If True, fail hard when play_prob is missing; if False, degrade to legacy
+    fail_on_missing_play_prob: bool = True
+    # Calibration policy: "none", "temperature_scaling", "odds_gated"
+    calibration_policy: str = "none"
+    # Temperature scaling factor for gate logits (only if calibration_policy="temperature_scaling")
+    gate_temperature: float = 1.0
+    # Minimum odds coverage ratio to use odds-dependent calibration
+    min_odds_coverage: float = 0.8
+
+
+@dataclass
 class UsageSharesConfig:
     """Config for stochastic usage share allocation within teams."""
 
@@ -160,6 +176,8 @@ class SimV2Profile:
     bench_zero_mixture: BenchZeroMixtureConfig = field(default_factory=BenchZeroMixtureConfig)
     # Optional explicit minutes bundle path (overrides minutes_run_id resolution)
     minutes_bundle_path: Optional[str] = None
+    # Model-space minutes worlds config (PR5 backend)
+    minutes_worlds: MinutesWorldsConfig = field(default_factory=MinutesWorldsConfig)
 
 
 def _read_json(path: Path) -> dict:
@@ -333,6 +351,16 @@ def load_sim_v2_profile(
         p_zero_slope=float(bench_zero_cfg_raw.get("p_zero_slope", 0.5)),
     )
 
+    # Minutes worlds config (PR5 model-space backend)
+    minutes_worlds_cfg_raw = config.get("minutes_worlds", {}) or {}
+    minutes_worlds = MinutesWorldsConfig(
+        mode=str(minutes_worlds_cfg_raw.get("mode", "legacy")),
+        fail_on_missing_play_prob=bool(minutes_worlds_cfg_raw.get("fail_on_missing_play_prob", True)),
+        calibration_policy=str(minutes_worlds_cfg_raw.get("calibration_policy", "none")),
+        gate_temperature=float(minutes_worlds_cfg_raw.get("gate_temperature", 1.0)),
+        min_odds_coverage=float(minutes_worlds_cfg_raw.get("min_odds_coverage", 0.8)),
+    )
+
     # Game script config
     game_script_cfg = config.get("game_script", {}) or {}
     use_game_scripts = bool(game_script_cfg.get("enabled", False))
@@ -396,6 +424,7 @@ def load_sim_v2_profile(
         game_factor=game_factor,
         bench_zero_mixture=bench_zero_mixture,
         minutes_bundle_path=minutes_bundle_path,
+        minutes_worlds=minutes_worlds,
     )
 
 
@@ -403,6 +432,7 @@ __all__ = [
     "SimV2Profile",
     "UsageSharesConfig",
     "MinutesNoiseConfig",
+    "MinutesWorldsConfig",
     "PreSimReconcileConfig",
     "load_sim_v2_profile",
     "DEFAULT_PROFILES_PATH",
