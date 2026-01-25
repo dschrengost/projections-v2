@@ -239,7 +239,66 @@ DFS utility metrics:
 - Game scripts module: `projections/sim_v2/game_script.py`
 - Odds attach: `projections/features/game_env.py`
 
-## 8) Open Questions (to resolve explicitly)
+## 8) PR Sequence (small, safe steps)
+
+This is the execution plan the team should follow. The goal is to land changes in **small PRs** with tight blast radius and a clear rollback story.
+
+### PR1 — Provenance + contract stamps + “what ran” CLI (no behavior change)
+Deliverables:
+- Define the minutes eligibility contract in one place:
+  - `PLAY_THRESHOLD_MINUTES = 1.0` (plays at all)
+  - `ROTATION_THRESHOLD_MINUTES = 5.0` (in rotation)
+- Ensure `minutes_contract_version` + `minutes_contract_hash` are present in minutes artifacts (and appear in UI payloads).
+- Add hard provenance stamps to produced artifacts (summary + optionally parquet columns): `minutes_alloc_mode`, `minutes_model_dir`, `minutes_run_id`, `git_sha`, `contract_version/hash`, `degraded_reason`.
+- Add a CLI/diagnostic that prints these stamps from produced artifacts so we can answer “what ran?” instantly for any run directory.
+
+### PR2 — Parity gate + diagnostics artifact (detect-only)
+Deliverables:
+- Add a rotation-set parity audit (training ↔ inference): missing required columns, dtype mismatches, join missingness, value-range checks.
+- Write a per-run diagnostics artifact next to minutes outputs (e.g., parity report JSON + a short summary block written into `summary.json`).
+- Wire the pipeline to emit the diagnostics, but do not change scoring decisions yet (detect-only).
+- Add unit tests: missing required feature triggers parity failure.
+
+### PR3 — Remove suppression/blending except as last resort (loud + controlled)
+Deliverables:
+- Disable blend-to-baseline by default; keep a kill switch to re-enable if needed.
+- Enforce “no silent fallback”: if any fallback occurs, set `minutes_degraded=true` and a non-empty `degraded_reason` (and surface it in UI/API).
+- Make fail-closed vs degrade-loudly an explicit mode (prefer fail-closed for production correctness).
+- Add unit tests: fallback implies `degraded_reason` non-empty; missing `play_prob` is never silently treated as 1.0.
+
+### PR4 — Allocator-of-record switch (transformer produces canonical minutes)
+Deliverables:
+- Switch production minutes scoring to transformer-only (rotation-set allocator is canonical; RMH is shadow-only).
+- Add a transformer-primary scoring mode that:
+  - does not run baseline minutes_v1 scoring
+  - enforces OUT hard-zeros
+  - enforces team sums == 240 (tight tolerance)
+  - emits gating fields (`play_prob` and `rotation_prob`) using the shared thresholds/constants
+- Add a controlled rollback switch to restore the legacy path.
+
+### PR5 — World generator MVP + worlds-derived minutes quantiles + UI wiring
+Deliverables:
+- Implement a minutes world generator with an explicit generative story:
+  1) draw game script (margin)
+  2) play gate per player (Bernoulli on play logits/prob)
+  3) rotation gate conditional on play (Bernoulli on rotation logits/prob)
+  4) allocate baseline minutes shares among rotation players
+  5) add garbage-time pool as a function of |margin| and redistribute from top players → deep bench
+  6) normalize to exactly 240 per team per world
+- Publish minutes quantiles from worlds as the authoritative quantiles (`p10/p50/p90` shown/used).
+- Update dashboard logic to stop using a heuristic “rotation threshold” and instead rely on the shared contract thresholds (or display the contract value).
+- Add tests: per-world team sums == 240; OUT players have 0 minutes in all worlds; world-derived quantiles are present in unified outputs.
+
+### PR6 — Recency/decay (stability under injury/small-sample regimes)
+Deliverables:
+- Add recency/decay using training-time weights and/or inference priors, with explicit stability knobs:
+  - half-life (days) documented and justified
+  - min effective sample size / smoothing so 1 game can’t dominate
+  - defined behavior for rookies / no recent games / DNP streaks / new team
+  - explicit team-change reset behavior (trade deadline)
+- Add tests that cover small-sample and injury-return regimes to prevent whipsaw.
+
+## 9) Open Questions (to resolve explicitly)
 
 - What should be the “contract” for starters when no confirmed lineup exists?
   - (A) Predict a probabilistic starter flag, or
@@ -252,7 +311,7 @@ DFS utility metrics:
   - (A) fail-fast in production, or
   - (B) degrade gracefully but loudly (artifact diagnostics + alerting)?
 
-## 9) Appendix: Suggested Debug Commands
+## 10) Appendix: Suggested Debug Commands
 
 These are “do not lose the plot” commands for incident response:
 
@@ -265,3 +324,8 @@ These are “do not lose the plot” commands for incident response:
 
 - Vegas environment calibration helper:
   - `uv run python -m scripts.sim_v2.calibrate_vegas_env --help`
+
+
+***NOTES***
+
+1) Since the sim samples minutes, we no longer need a separate model to predict minutes quantiles; instead, publish minutes quantiles as world-derived diagnostics alongside minutes_world_mean, and store the transformer’s gate/share parameters as the canonical minutes ‘model space’ inputs to the sim
