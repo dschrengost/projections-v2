@@ -3,6 +3,9 @@
 This document is the living plan to get minutes predictions back to “production-grade” after the recent model promotion.
 The intent is to keep us aligned on **what we’re fixing**, **why it broke**, and **how we’ll ship a durable solution**.
 
+> **Companion doc (more concrete / contract-driven):**
+> - `docs/minutes_transformer_worlds_plan.md`
+
 ## 0) TL;DR
 
 - Make the **rotation-set transformer** the canonical minutes allocator (p50 + rotation realism) instead of relying on caps/reconciliation to shape outputs.
@@ -15,8 +18,17 @@ The intent is to keep us aligned on **what we’re fixing**, **why it broke**, a
 
 - **Minutes predictions are too flat**: most “active” players get non-trivial minutes; top-end looks suppressed.
 - **No projected starters**: output looks like “rotation + deep bench” rather than a plausible starting 5 + rotation.
+
+***looks like we do see projected starters as of now***
+
 - **Team names show as IDs** in the dashboard (team identity join/regression).
+
+***looks like we do see team names as of now***
+
 - **No Vegas lines** visible (odds attach/regression).
+
+***looks like we do see vegas lines as of now***
+
 - **Too many DNP-CD candidates get meaningful minutes**; injuries/availability may be broken.
 - Prefect flow sometimes fails in sim with `KeyError: 'game_date'` (artifact schema regression).
 
@@ -198,6 +210,9 @@ DFS utility metrics:
 ### Milestone 1 — Stop the bleeding (1–2 days)
 - Prove which model is producing production minutes.
 - Restore missing team/odds fields end-to-end.
+
+***i think RMH is running currently with some allocator***
+
 - Ensure injuries feed is current and `play_prob` isn’t silently defaulting to 1.0.
 - Remove any guardrail logic that forces broad blending/fallback in normal conditions.
 
@@ -229,6 +244,9 @@ DFS utility metrics:
 - What should be the “contract” for starters when no confirmed lineup exists?
   - (A) Predict a probabilistic starter flag, or
   - (B) Derive starter priors from historical + coach tendencies + roster/injury context.
+
+***it should be B***
+
 - Should the transformer emit `play_prob` itself (multi-task), or do we keep `play_prob` separate and treat it as an upstream dependency?
 - What is the acceptable fallback behavior when injuries/odds feeds are missing?
   - (A) fail-fast in production, or
@@ -247,4 +265,3 @@ These are “do not lose the plot” commands for incident response:
 
 - Vegas environment calibration helper:
   - `uv run python -m scripts.sim_v2.calibrate_vegas_env --help`
-
