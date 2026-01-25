@@ -439,6 +439,7 @@ class TeamGameExample:
     vacated_minutes_prior_20_total: float
     team_out_count: int
     starters_out_proxy: int
+    sample_w: float
     y: np.ndarray
 
 
@@ -467,6 +468,7 @@ def _collate_team_games(
     torch.Tensor,
     torch.Tensor,
     torch.Tensor,
+    torch.Tensor,
 ]:
     max_n = max(ex.x.shape[0] for ex in batch)
     num_features = batch[0].x.shape[1]
@@ -477,6 +479,7 @@ def _collate_team_games(
     prior_w = torch.zeros((len(batch), max_n), dtype=torch.float32)
     vacated_minutes = torch.zeros((len(batch),), dtype=torch.float32)
     router_features = torch.zeros((len(batch), 3), dtype=torch.float32)
+    sample_w = torch.ones((len(batch),), dtype=torch.float32)
     y = torch.zeros((len(batch), max_n), dtype=torch.float32)
     mask = torch.zeros((len(batch), max_n), dtype=torch.bool)
     for i, ex in enumerate(batch):
@@ -490,9 +493,10 @@ def _collate_team_games(
         router_features[i, 0] = float(np.clip(float(ex.vacated_minutes_prior_20_total) / 60.0, 0.0, 1.0))
         router_features[i, 1] = float(np.clip(float(ex.team_out_count) / 10.0, 0.0, 1.0))
         router_features[i, 2] = float(np.clip(float(ex.starters_out_proxy) / 5.0, 0.0, 1.0))
+        sample_w[i] = float(ex.sample_w)
         y[i, :n] = torch.from_numpy(ex.y)
         mask[i, :n] = True
-    return x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features, y, mask
+    return (x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features, sample_w, y, mask)
 
 
 def _build_team_game_examples(
@@ -561,7 +565,7 @@ def _build_team_game_examples(
                 vacated_minutes_prior_20_total=vacated_minutes,
                 team_out_count=team_out_count,
                 starters_out_proxy=starters_out_proxy,
-                y=y,
+                sample_w=1.0,                y=y,
             )
         )
     return examples
@@ -643,7 +647,7 @@ def _evaluate(
     router_max_pi_used_gt_08_inj = 0.0
     router_rows_used_inj = 0.0
     with torch.no_grad():
-        for x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features_batch, y, mask in loader:
+        for x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features_batch, sample_w, y, mask in loader:
             x = x.to(device)
             team_idx = team_idx.to(device)
             opp_idx = opp_idx.to(device)
@@ -725,7 +729,7 @@ def _evaluate(
                             y_rot,
                             reduction="none",
                         )
-                    weights = rot_mask_f * w_inj
+                    weights = rot_mask_f * w_inj * w.view(-1, 1)
                     rot_loss_sum += float((per_el * weights).sum().item())
                     rot_loss_denom += float(weights.sum().item())
 
@@ -745,7 +749,7 @@ def _evaluate(
                 if lambda_fp > 0:
                     excess = torch.relu(pred - float(fp_minutes_threshold)) ** 2
                     fp = excess * (1.0 - y_rot_hard)
-                    weights = rot_mask_f * w_inj
+                    weights = rot_mask_f * w_inj * w.view(-1, 1)
                     fp_loss_sum += float((fp * weights).sum().item())
                     fp_loss_denom += float(weights.sum().item())
 
@@ -855,7 +859,7 @@ def _post_train_diagnostics(model: torch.nn.Module, loader: DataLoader, *, devic
     dnp_preds: list[float] = []
 
     with torch.no_grad():
-        for x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features_batch, y, mask in loader:
+        for x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features_batch, sample_w, y, mask in loader:
             x = x.to(device)
             team_idx = team_idx.to(device)
             opp_idx = opp_idx.to(device)
@@ -863,6 +867,8 @@ def _post_train_diagnostics(model: torch.nn.Module, loader: DataLoader, *, devic
             prior_w = prior_w.to(device)
             vacated_minutes = vacated_minutes.to(device)
             router_features_batch = router_features_batch.to(device)
+            sample_w = sample_w.to(device)
+            w = sample_w.to(dtype=torch.float32).clamp(min=0.0)
             y = y.to(device)
             mask = mask.to(device)
 
@@ -1318,6 +1324,8 @@ def main() -> None:
             prior_w = prior_w.to(device)
             vacated_minutes = vacated_minutes.to(device)
             router_features_batch = router_features_batch.to(device)
+            sample_w = sample_w.to(device)
+            w = sample_w.to(dtype=torch.float32).clamp(min=0.0)
             y = y.to(device)
             mask = mask.to(device)
 
@@ -1360,7 +1368,10 @@ def main() -> None:
                 router_pi_soft = None
                 router_pi_used = None
 
-            loss_min = _masked_mae(pred, y, mask)
+            w_denom = w.sum().clamp(min=1e-6)
+            abs_err = (pred - y).abs() * mask.to(dtype=pred.dtype)
+            per_team = abs_err.sum(dim=1) / mask.sum(dim=1).clamp(min=1).to(dtype=abs_err.dtype)
+            loss_min = (per_team * w).sum() / w_denom
             loss_rot = pred.new_tensor(0.0)
             loss_fp = pred.new_tensor(0.0)
             loss_router = pred.new_tensor(0.0)
@@ -1378,7 +1389,7 @@ def main() -> None:
                 else:
                     y_rot = y_rot_hard
 
-                weights = rot_mask_f * w_inj
+                weights = rot_mask_f * w_inj * w.view(-1, 1)
                 if lambda_rot > 0:
                     if rot_loss_type == "focal":
                         per_el = _focal_bce_with_logits(
