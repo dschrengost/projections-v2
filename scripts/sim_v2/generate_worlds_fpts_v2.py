@@ -32,6 +32,10 @@ from projections.sim_v2.minutes_stabilization import (
     recenter_team_minutes_to_conditional_means,
     sample_minutes_noise_per_world,
 )
+from projections.sim_v2.minutes_worlds_model_space_v1 import (
+    MinutesWorldsConfig as ModelSpaceMinutesWorldsConfig,
+    sample_minutes_worlds_model_space_v1,
+)
 from projections.sim_v2.noise import load_rates_noise_params
 
 app = typer.Typer(add_completion=False)
@@ -2258,6 +2262,36 @@ def main(
                     f"min_minutes={mnc.min_minutes_for_noise} cap_abs={mnc.cap_abs}{extra}"
                 )
 
+            # PR5 backend: model-space minutes worlds sampling
+            # Check if minutes_worlds config is set to model_space_v1 mode
+            minutes_worlds_cfg = getattr(profile_cfg, "minutes_worlds", None)
+            use_model_space_minutes = (
+                minutes_worlds_cfg is not None
+                and getattr(minutes_worlds_cfg, "mode", "legacy") == "model_space_v1"
+            )
+            if use_model_space_minutes:
+                # Validate play_prob is not missing (per spec, PR5 backend must not silently fill with 1.0)
+                if "play_prob" not in mu_df.columns or mu_df["play_prob"].isna().all():
+                    if getattr(minutes_worlds_cfg, "fail_on_missing_play_prob", True):
+                        raise ValueError(
+                            "[sim_v2] model_space_v1 backend requires valid play_prob column; "
+                            "set fail_on_missing_play_prob=False to degrade to legacy backend"
+                        )
+                    else:
+                        typer.echo(
+                            "[sim_v2] warning: play_prob missing, degrading from model_space_v1 to legacy backend",
+                            err=True,
+                        )
+                        use_model_space_minutes = False
+                else:
+                    typer.echo(
+                        f"[sim_v2] model_space_v1 minutes worlds enabled: "
+                        f"gate_temperature={getattr(minutes_worlds_cfg, 'gate_temperature', 1.0)}"
+                    )
+                # Ensure mutual exclusion with other backends
+                if use_model_space_minutes:
+                    use_structured_minutes_noise = False
+
             audit_team_sum_errs: list[np.ndarray] = []
             audit_cap_bind_team_worlds = 0
             audit_cap_infeasible_team_worlds = 0
@@ -2284,8 +2318,60 @@ def main(
                     active_mask = active_mask & np.broadcast_to(eligible_flag_arr[None, :], active_mask.shape)
 
 
-                # 2. Sample minutes based on game script OR structured minutes noise
-                if use_structured_minutes_noise:
+                # 2. Sample minutes based on backend: model_space_v1 > structured_noise > game_scripts > fallback
+                if use_model_space_minutes:
+                    # PR5 backend: model-space minutes worlds using transformer aux outputs
+                    # Extract gate/share logits if available in mu_df
+                    gate_logit_arr = (
+                        pd.to_numeric(mu_df["gate_logit"], errors="coerce").to_numpy(dtype=float)
+                        if "gate_logit" in mu_df.columns
+                        else None
+                    )
+                    gate_prob_arr = (
+                        pd.to_numeric(mu_df["gate_prob"], errors="coerce").to_numpy(dtype=float)
+                        if "gate_prob" in mu_df.columns
+                        else None
+                    )
+                    share_logit_arr = (
+                        pd.to_numeric(mu_df["share_logit"], errors="coerce").to_numpy(dtype=float)
+                        if "share_logit" in mu_df.columns
+                        else np.zeros(len(mu_df), dtype=float)  # Fallback: no share variation
+                    )
+
+                    # Build model-space config from profile
+                    model_space_cfg = ModelSpaceMinutesWorldsConfig(
+                        gate_temperature=getattr(minutes_worlds_cfg, "gate_temperature", 1.0),
+                        use_bench_zero_mixture=True,  # Default on per spec
+                        bench_zero_minutes_threshold=8.0,
+                        bench_zero_p_base=0.25,
+                        bench_zero_p_slope=0.5,
+                    )
+
+                    # Call the PR5 backend (handles active_mask internally)
+                    pr5_result = sample_minutes_worlds_model_space_v1(
+                        minutes_mean=gs_minutes_p50,
+                        gate_logit=gate_logit_arr,
+                        gate_prob=gate_prob_arr,
+                        share_logit=share_logit_arr,
+                        play_prob=play_prob_arr,
+                        team_indices=team_indices,
+                        n_worlds=chunk_size,
+                        rng=rng,
+                        config=model_space_cfg,
+                    )
+                    minutes_worlds = pr5_result.minutes_worlds
+                    active_mask = pr5_result.active_mask
+
+                    # Log diagnostics on first chunk
+                    if chunk_start == 0:
+                        diag = pr5_result.diagnostics
+                        typer.echo(
+                            f"[sim_v2] model_space_v1 stats: "
+                            f"active_rate={diag['active_rate']:.3f} "
+                            f"rotation_rate={diag['rotation_rate']:.3f} "
+                            f"zero_minutes_rate={diag['zero_minutes_rate']:.3f}"
+                        )
+                elif use_structured_minutes_noise:
                     # New path: structured minutes noise with cheap team-240 projection.
                     # When preserve_input_rotation=True, we skip the heavy per-world QP
                     # and instead use fast bounded noise + team-240 projection.
@@ -2984,6 +3070,10 @@ def main(
                     proj_df["minutes_sim_p10"] = minutes_quantiles[0]
                     proj_df["minutes_sim_p50"] = minutes_quantiles[1]
                     proj_df["minutes_sim_p90"] = minutes_quantiles[2]
+                    # PR5 contract: conditional minutes quantiles (given plays)
+                    proj_df["minutes_p10_cond"] = minutes_quantiles[0]
+                    proj_df["minutes_p50_cond"] = minutes_quantiles[1]
+                    proj_df["minutes_p90_cond"] = minutes_quantiles[2]
                 # Unconditional minutes summaries (DNP => 0)
                 if minutes_mean_uncond is not None and minutes_std_uncond is not None:
                     proj_df["minutes_sim_mean_uncond"] = minutes_mean_uncond
@@ -2992,6 +3082,11 @@ def main(
                     proj_df["minutes_sim_p10_uncond"] = minutes_quantiles_uncond[0]
                     proj_df["minutes_sim_p50_uncond"] = minutes_quantiles_uncond[1]
                     proj_df["minutes_sim_p90_uncond"] = minutes_quantiles_uncond[2]
+                    # PR5 contract: unconditional minutes quantiles (includes DNP zeros)
+                    # These are the primary display columns per spec (decision-relevant)
+                    proj_df["minutes_p10"] = minutes_quantiles_uncond[0]
+                    proj_df["minutes_p50"] = minutes_quantiles_uncond[1]
+                    proj_df["minutes_p90"] = minutes_quantiles_uncond[2]
                 proj_df["dk_fpts_mean_target"] = dk_fpts_mean_target
                 proj_df["dk_fpts_mean"] = fpts_mean
                 proj_df["dk_fpts_std"] = fpts_std
