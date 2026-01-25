@@ -19,6 +19,7 @@ export type PlayerRow = {
     minutes_p10?: number
     minutes_p50?: number
     minutes_p90?: number
+    minutes_final?: number
     minutes_p10_cond?: number
     minutes_p90_cond?: number
     minutes_mean_uncond?: number

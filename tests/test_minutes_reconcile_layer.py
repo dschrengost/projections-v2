@@ -164,3 +164,47 @@ def test_minutes_api_prefers_effective_minutes(tmp_path: Path) -> None:
 
     df = minutes_api._load_minutes(run_dir)
     assert float(pd.to_numeric(df["minutes_p50"], errors="coerce").iloc[0]) == 20.0
+
+
+def test_apply_overrides_minutes_final_prefers_effective_minutes(tmp_path: Path) -> None:
+    slate_day = date(2026, 1, 18)
+
+    base = pd.DataFrame(
+        [
+            {
+                "game_id": 1,
+                "team_id": 10,
+                "player_id": 100,
+                "status": "available",
+                "minutes_p50": 12.0,
+                "minutes_p50_cond": 12.0,
+                "effective_minutes": 200.0,
+            },
+            {
+                "game_id": 1,
+                "team_id": 10,
+                "player_id": 101,
+                "status": "available",
+                "minutes_p50": 12.0,
+                "minutes_p50_cond": 12.0,
+                "effective_minutes": 40.0,
+            },
+        ]
+    )
+
+    out = apply_overrides_to_minutes_df(
+        base,
+        game_date=slate_day,
+        data_root=tmp_path,
+        force_reconcile=True,
+    )
+
+    assert {"minutes_final", "minutes_contract_version", "minutes_contract_hash"}.issubset(out.columns)
+    out["minutes_final"] = pd.to_numeric(out["minutes_final"], errors="coerce").fillna(0.0)
+    out["effective_minutes"] = pd.to_numeric(out["effective_minutes"], errors="coerce").fillna(0.0)
+    assert float(out["minutes_final"].sum()) == pytest.approx(240.0, abs=1e-6)
+    pd.testing.assert_series_equal(out["minutes_final"], out["effective_minutes"], check_names=False)
+    # Ensure we don't force-reconcile the raw model quantiles when effective minutes exist.
+    assert float(pd.to_numeric(out["minutes_p50"], errors="coerce").fillna(0.0).sum()) == pytest.approx(
+        24.0, abs=1e-6
+    )

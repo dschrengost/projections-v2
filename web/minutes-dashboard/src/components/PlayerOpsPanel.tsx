@@ -117,7 +117,7 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
         })
         // Sort by minutes within each team
         Object.values(groups).forEach(arr => {
-            arr.sort((a, b) => (b.minutes_p50 || 0) - (a.minutes_p50 || 0))
+            arr.sort((a, b) => (b.minutes_final ?? b.minutes_p50 ?? 0) - (a.minutes_final ?? a.minutes_p50 ?? 0))
         })
         return groups
     }, [players, teams])
@@ -145,7 +145,7 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
                         const d = deltas[String(p.player_id)] || 0
                         return sum + d
                     }, 0)
-                    const teamTotal = teamPlayers.reduce((sum, p) => sum + (p.minutes_p50 || 0), 0) + teamDelta
+                    const teamTotal = teamPlayers.reduce((sum, p) => sum + (p.minutes_final ?? p.minutes_p50 ?? 0), 0) + teamDelta
 
                     return (
                         <div key={team} className="ops-team-group">
@@ -160,7 +160,7 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
                                     {teamPlayers.map(p => {
                                         const pid = String(p.player_id)
                                         const delta = deltas[pid]
-                                        const baseMin = p.minutes_p50 || 0
+                                        const baseMin = p.minutes_final ?? p.minutes_p50 ?? 0
                                         const finalMin = baseMin + (delta || 0)
                                         const isStarter = p.is_confirmed_starter || p.is_projected_starter
 

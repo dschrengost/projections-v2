@@ -74,6 +74,7 @@ type SortKey =
   | 'minutes_p10'
   | 'minutes_p50'
   | 'minutes_p90'
+  | 'minutes_final'
   | 'play_prob'
   | 'p_in_rotation'
   | 'proj_fpts'
@@ -98,6 +99,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   minutes_p10: 'P10',
   minutes_p50: 'P50',
   minutes_p90: 'P90',
+  minutes_final: 'MIN',
   play_prob: 'Play Prob',
   p_in_rotation: 'In Rotation',
   proj_fpts: 'FPTS',
@@ -148,7 +150,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
-  const [sortKey, setSortKey] = useState<SortKey>('minutes_p50')
+  const [sortKey, setSortKey] = useState<SortKey>('minutes_final')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
@@ -402,7 +404,11 @@ function App() {
     filteredRows.forEach((row) => {
       const team =
         String(row.team_tricode ?? row.team_name ?? row.team_id ?? 'NA')
-      const minutes = typeof row.minutes_p50 === 'number' ? row.minutes_p50 : 0
+      const minutes = typeof row.minutes_final === 'number'
+        ? row.minutes_final
+        : typeof row.minutes_p50 === 'number'
+          ? row.minutes_p50
+          : 0
       totals.set(team, (totals.get(team) ?? 0) + minutes)
     })
     return Array.from(totals.entries()).map(([team, minutes]) => ({
@@ -757,19 +763,19 @@ function App() {
                       <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
                     )}
                   </th>
-                  <th onClick={() => toggleSort('team_id')} className="sortable">
-                    Team
-                    {sortKey === 'team_id' && (
-                      <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
-                    )}
-                  </th>
-                  <th>Opponent</th>
-                  {(['minutes_p10', 'minutes_p50', 'minutes_p90', probSortKey] as SortKey[]).map(
-                    (key) => (
-                      <th
-                        key={key}
-                        onClick={() => toggleSort(key)}
-                        className="sortable"
+	                  <th onClick={() => toggleSort('team_id')} className="sortable">
+	                    Team
+	                    {sortKey === 'team_id' && (
+	                      <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
+	                    )}
+	                  </th>
+	                  <th>Opponent</th>
+	                  {(['minutes_p10', 'minutes_final', 'minutes_p90', probSortKey] as SortKey[]).map(
+	                    (key) => (
+	                      <th
+	                        key={key}
+	                        onClick={() => toggleSort(key)}
+	                        className="sortable"
                         title={
                           key === 'p_in_rotation' && modelId === 'rmh_v1_1'
                             ? `RMH: In rotation probability (minutes >= T=${selectedModel?.meta?.play_threshold ?? 5})`
@@ -780,9 +786,9 @@ function App() {
                         {sortKey === key && (
                           <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
                         )}
-                      </th>
-                    ),
-                  )}
+	                      </th>
+	                    ),
+	                  )}
                   {/* Ownership Columns - add My Own% before Own% */}
                   <th>Salary</th>
                   <th className="override-col">My Own%</th>
@@ -848,15 +854,15 @@ function App() {
                         </div>
                         <div className="muted">{formatTime(row.tip_ts, row.game_date)}</div>
                       </td>
-                      <td>{teamLabel}</td>
-                      <td>{opponentLabel}</td>
-                      <td>{formatMinutes(row.minutes_p10)}</td>
-                      <td>{formatMinutes(row.minutes_p50)}</td>
-                      <td>{formatMinutes(row.minutes_p90)}</td>
-                      <td>
-                        {formatPercent(
-                          (row as any)[probSortKey] as number | undefined,
-                        )}
+	                      <td>{teamLabel}</td>
+	                      <td>{opponentLabel}</td>
+	                      <td>{formatMinutes(row.minutes_p10)}</td>
+	                      <td>{formatMinutes(row.minutes_final ?? row.minutes_p50)}</td>
+	                      <td>{formatMinutes(row.minutes_p90)}</td>
+	                      <td>
+	                        {formatPercent(
+	                          (row as any)[probSortKey] as number | undefined,
+	                        )}
                       </td>
                       {/* Ownership Columns */}
                       <td>{formatSalary(row.salary)}</td>
