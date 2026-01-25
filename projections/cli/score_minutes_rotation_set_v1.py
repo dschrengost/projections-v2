@@ -28,7 +28,13 @@ import pandas as pd
 import typer
 
 from projections import paths
-from projections.minutes import build_provenance, inject_provenance_into_summary
+from projections.minutes import (
+    build_provenance,
+    compute_parity_report,
+    inject_parity_into_summary,
+    inject_provenance_into_summary,
+    write_parity_report,
+)
 from projections.minutes_v1.reconcile import load_reconcile_config
 from projections.rotation.guardrails import apply_rotation_minutes_guardrails
 from projections.rotation.live_features_v1 import (
@@ -714,6 +720,10 @@ def main(
     out_day_dir = Path(rotation_features_root) / day.strftime("%Y-%m-%d")
     out_run_dir = out_day_dir / f"run={run_id}"
     rot_features_path = out_run_dir / "features.parquet"
+
+    # Load feature spec (needed for parity check regardless of feature source)
+    spec = RotationSetMinutesV1FeatureSpec.load(Path(resolved_model_dir))
+
     if rot_features_path.exists():
         typer.echo(
             f"[rotation_minutes] using prebuilt rotation features at {rot_features_path}",
@@ -737,7 +747,6 @@ def main(
             return
     else:
         try:
-            spec = RotationSetMinutesV1FeatureSpec.load(Path(resolved_model_dir))
             game_ids = (
                 pd.to_numeric(minutes_feat["game_id"], errors="coerce")
                 .dropna()
@@ -823,6 +832,27 @@ def main(
                 sort_keys=True,
             ),
             encoding="utf-8",
+        )
+
+    # 3b) Compute parity report (detect-only, does not block scoring)
+    parity_report = compute_parity_report(
+        rot_features,
+        model_dir=Path(resolved_model_dir),
+        game_date=day.strftime("%Y-%m-%d"),
+        run_id=run_id,
+        expected_features=spec.feature_columns,
+    )
+    typer.echo(f"[rotation_minutes] {parity_report.summary_line()}", err=True)
+
+    # Write parity report artifact
+    parity_report_path = write_parity_report(parity_report, minutes_out_dir)
+    typer.echo(f"[rotation_minutes] wrote parity report -> {parity_report_path}", err=True)
+
+    if parity_report.n_warnings > 0:
+        typer.echo(
+            f"[rotation_minutes] parity warnings ({parity_report.n_warnings}): "
+            f"{[w.column for w in parity_report.warnings[:5]]}",
+            err=True,
         )
 
     # 4) Predict rotation minutes (p50) and align to baseline output rows.
@@ -1180,6 +1210,9 @@ def main(
         },
     )
     inject_provenance_into_summary(summary_path, provenance)
+
+    # Inject parity report summary
+    inject_parity_into_summary(summary_path, parity_report)
 
     typer.echo(f"[rotation_minutes] wrote guarded minutes -> {minutes_path}", err=True)
 
