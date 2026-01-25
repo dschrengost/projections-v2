@@ -27,6 +27,106 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 app = typer.Typer(add_completion=False)
 
+def _coerce_bool(series: pd.Series) -> pd.Series:
+    if series.dtype == bool:
+        return series
+    if pd.api.types.is_bool_dtype(series):
+        return series.astype("boolean").fillna(False).astype(bool)
+    return series.fillna(False).astype(bool)
+
+
+def _reconcile_team_minutes_with_rotation_cap(
+    df_team: pd.DataFrame,
+    *,
+    target_minutes: float,
+    minutes_col: str,
+    in_rotation_threshold_min: float,
+    max_rotation_players: int | None,
+) -> pd.Series:
+    """Reconcile team minutes while enforcing a hard cap on rotation size.
+
+    RMH can produce non-trivial minutes for many \"active\" players, which then gets
+    flattened by scaling to 240. This helper optionally caps the number of players
+    eligible to receive non-zero effective minutes (per game/team) by selecting the
+    top-N by the model minutes column, always keeping starters.
+    """
+
+    from projections.minutes.reconcile import reconcile_team_minutes
+
+    if df_team.empty:
+        return pd.Series([], index=df_team.index, dtype=float)
+
+    if max_rotation_players is None:
+        reconciled_minutes, _ = reconcile_team_minutes(
+            df_team,
+            target_minutes=float(target_minutes),
+            minutes_col=minutes_col,
+            in_rotation_threshold_min=float(in_rotation_threshold_min),
+        )
+        return reconciled_minutes
+
+    max_n = int(max_rotation_players)
+    if max_n < 1:
+        raise ValueError("max_rotation_players must be >= 1")
+
+    eff = pd.Series(0.0, index=df_team.index, dtype=float)
+
+    # Avoid allocating minutes to OUT rows.
+    can_play = pd.Series(True, index=df_team.index, dtype=bool)
+    if "status" in df_team.columns:
+        status = df_team["status"].astype("string").str.upper()
+        can_play &= ~status.eq("OUT").fillna(False)
+    if "play_prob" in df_team.columns:
+        play_prob = pd.to_numeric(df_team["play_prob"], errors="coerce").fillna(0.0)
+        can_play &= play_prob > 0.0
+
+    starter_flag = pd.Series(False, index=df_team.index, dtype=bool)
+    if "starter_flag" in df_team.columns:
+        starter_flag = pd.to_numeric(df_team["starter_flag"], errors="coerce").fillna(0).astype(int) > 0
+    if "is_confirmed_starter" in df_team.columns:
+        starter_flag = starter_flag | _coerce_bool(df_team["is_confirmed_starter"])
+    if "is_projected_starter" in df_team.columns:
+        starter_flag = starter_flag | _coerce_bool(df_team["is_projected_starter"])
+    always_keep = can_play & starter_flag
+
+    minutes = pd.to_numeric(df_team[minutes_col], errors="coerce").fillna(0.0)
+    pool_mask = can_play & ~always_keep & (minutes > 0.0)
+
+    keep = always_keep.copy()
+    slots = max_n - int(keep.sum())
+    if slots > 0 and pool_mask.any():
+        pool = df_team.loc[pool_mask].copy()
+        pool_minutes = pd.to_numeric(pool[minutes_col], errors="coerce").fillna(0.0)
+        if "player_id" in pool.columns:
+            pool_player_id = pd.to_numeric(pool["player_id"], errors="coerce").fillna(0).astype(int)
+        else:
+            pool_player_id = pd.Series(range(len(pool)), index=pool.index, dtype=int)
+
+        order = (
+            pd.DataFrame(
+                {
+                    "_minutes": pool_minutes,
+                    "_player_id": pool_player_id,
+                }
+            )
+            .sort_values(["_minutes", "_player_id"], ascending=[False, True])
+            .head(slots)
+        )
+        keep.loc[order.index] = True
+
+    kept = df_team.loc[keep].copy()
+    if kept.empty:
+        return eff
+
+    reconciled_kept, _ = reconcile_team_minutes(
+        kept,
+        target_minutes=float(target_minutes),
+        minutes_col=minutes_col,
+        in_rotation_threshold_min=float(in_rotation_threshold_min),
+    )
+    eff.loc[reconciled_kept.index] = reconciled_kept
+    return eff
+
 
 def _normalize_day(date_str: str) -> pd.Timestamp:
     return pd.Timestamp(date_str).normalize()
@@ -90,10 +190,13 @@ def main(
 
     reconcile_mode = config.get("reconcile_team_minutes", "p50")
     in_rotation_threshold_min = float(config.get("in_rotation_threshold_min", 5.0))
+    max_rotation_players_raw = config.get("max_rotation_players")
+    max_rotation_players = int(max_rotation_players_raw) if max_rotation_players_raw is not None else None
 
     typer.echo(
         f"[rmh-scorer] date={day.date()} run_id={run_id} bundle={bundle_dir.name} "
-        f"reconcile={reconcile_mode} threshold={in_rotation_threshold_min}",
+        f"reconcile={reconcile_mode} threshold={in_rotation_threshold_min} "
+        f"max_rotation_players={max_rotation_players}",
         err=True,
     )
 
@@ -105,7 +208,6 @@ def main(
         fill_numeric_missing_with_zero,
         join_rotation_priors,
     )
-    from projections.minutes.reconcile import reconcile_team_minutes
     from projections.models.rotation_minutes_hurdle_v1.live_features import prepare_live_features_for_rmh
 
     # 1) Load RMH bundle
@@ -297,14 +399,15 @@ def main(
 
         reconciled_list = []
         for (game_id, team_id), team_df in out.groupby(["game_id", "team_id"]):
-            reconciled_minutes, diag = reconcile_team_minutes(
+            eff = _reconcile_team_minutes_with_rotation_cap(
                 team_df,
                 target_minutes=240.0,
                 minutes_col="minutes_p50",
                 in_rotation_threshold_min=in_rotation_threshold_min,
+                max_rotation_players=max_rotation_players,
             )
             team_result = team_df.copy()
-            team_result["effective_minutes"] = reconciled_minutes.values
+            team_result["effective_minutes"] = eff.reindex(team_result.index).fillna(0.0).to_numpy(dtype=float)
             reconciled_list.append(team_result)
 
         out = pd.concat(reconciled_list, ignore_index=True)
@@ -313,6 +416,11 @@ def main(
             f"{out['team_id'].nunique()} teams",
             err=True,
         )
+        if max_rotation_players is not None:
+            typer.echo(
+                f"[rmh-scorer] rotation cap applied: max_rotation_players={max_rotation_players}",
+                err=True,
+            )
     else:
         # No reconciliation - use p50 as effective
         out["effective_minutes"] = out["minutes_p50"]
@@ -333,6 +441,7 @@ def main(
         "schema_hash": bundle.schema_hash,
         "reconcile_mode": reconcile_mode,
         "in_rotation_threshold_min": in_rotation_threshold_min,
+        "max_rotation_players": max_rotation_players,
         "counts": {
             "rows": int(len(out)),
             "games": int(out["game_id"].nunique()) if "game_id" in out.columns else 0,
