@@ -45,7 +45,7 @@ const computeTeamSummary = (players: PlayerRow[]) => {
     const gtd = players.filter(p => ['gtd', 'questionable', 'doubtful'].includes(p.status?.toLowerCase() || ''))
 
     const totalFpts = active.reduce((sum, p) => sum + (p.sim_dk_fpts_mean || 0), 0)
-    const totalMinutes = active.reduce((sum, p) => sum + (p.minutes_p50 || 0), 0)
+    const totalMinutes = active.reduce((sum, p) => sum + (p.minutes_final ?? p.minutes_p50 ?? 0), 0)
     const avgFptsPerMin = totalMinutes > 0 ? totalFpts / totalMinutes : 0
 
     return {
@@ -86,7 +86,9 @@ export const GameView: React.FC<GameViewProps> = ({ rows, gameId }) => {
         const injured: PlayerRow[] = []
 
         // Sort by minutes descending first
-        const sorted = [...players].sort((a, b) => (b.minutes_p50 || 0) - (a.minutes_p50 || 0))
+        const sorted = [...players].sort(
+            (a, b) => (b.minutes_final ?? b.minutes_p50 ?? 0) - (a.minutes_final ?? a.minutes_p50 ?? 0),
+        )
 
         sorted.forEach((p) => {
             const status = p.status?.toLowerCase() || ''
@@ -94,7 +96,7 @@ export const GameView: React.FC<GameViewProps> = ({ rows, gameId }) => {
                 injured.push(p)
             } else if (p.is_confirmed_starter || p.is_projected_starter) {
                 starters.push(p)
-            } else if ((p.minutes_p50 || 0) >= ROTATION_MINUTES_THRESHOLD) {
+            } else if ((p.minutes_final ?? p.minutes_p50 ?? 0) >= ROTATION_MINUTES_THRESHOLD) {
                 rotation.push(p)
             } else {
                 bench.push(p)
@@ -323,7 +325,7 @@ type MinutesChartProps = {
 
 const MinutesDistributionChart: React.FC<MinutesChartProps> = ({ player }) => {
     const p10 = player.minutes_p10 || 0
-    const p50 = player.minutes_p50 || 0
+    const p50 = player.minutes_final ?? player.minutes_p50 ?? 0
     const p90 = player.minutes_p90 || 0
     const simP50 = player.sim_minutes_sim_p50 ?? player.sim_minutes_sim_mean ?? p50
 
@@ -449,7 +451,7 @@ const ExpandablePlayerList: React.FC<{
                                     </div>
                                 </td>
                                 <td className="salary-cell">{formatSalary(p.salary)}</td>
-                                <td>{formatMinutes(p.minutes_p50)}</td>
+                                <td>{formatMinutes(p.minutes_final ?? p.minutes_p50)}</td>
                                 <td className="font-bold">{formatFpts(p.sim_dk_fpts_mean)}</td>
                                 <td className="ownership-cell">
                                     {p.is_locked && <span className="lock-icon" title="Predictions locked">🔒</span>}
@@ -475,7 +477,7 @@ const ExpandablePlayerList: React.FC<{
                                                 <StatItem
                                                     label="Sim Min p50"
                                                     value={p.sim_minutes_sim_p50 ?? p.sim_minutes_sim_mean}
-                                                    compare={p.minutes_p50}
+                                                    compare={p.minutes_final ?? p.minutes_p50}
                                                     format="minutes"
                                                 />
                                                 <StatItem label="p10" value={p.sim_dk_fpts_p10} />
