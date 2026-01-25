@@ -1,9 +1,8 @@
-"""Score minutes using baseline minutes_v1 with a guarded rotation_set_minutes_v1 overlay.
+"""Score minutes using rotation_set_minutes_v1 (overlay or primary mode).
 
-This is intended as a production-safe switch:
-- Always computes baseline minutes_v1 first.
-- If rotation_set_minutes is enabled, builds live features + predicts rotation minutes.
-- Applies guardrails + tail mapping, then overwrites minutes_v1 outputs for downstream consumers.
+Modes:
+- overlay (legacy): compute baseline minutes_v1 first, then apply a guarded rotation_set overlay.
+- primary: skip baseline, produce canonical minutes directly from the transformer.
 """
 
 from __future__ import annotations
@@ -29,6 +28,8 @@ import typer
 
 from projections import paths
 from projections.minutes import (
+    PLAY_THRESHOLD_MINUTES,
+    ROTATION_THRESHOLD_MINUTES,
     build_provenance,
     compute_parity_report,
     inject_parity_into_summary,
@@ -49,6 +50,7 @@ from projections.rotation.set_model import predict_minutes as predict_rotation_m
 from projections.cli.score_minutes_v1 import (
     _load_espn_out_players,
     _normalize_name_for_matching,
+    _select_minutes_columns,
 )
 
 
@@ -64,6 +66,44 @@ DEFAULT_ROTATION_FEATURES_ROOT = paths.data_path(
 DEFAULT_MINUTES_ARTIFACT_ROOT = paths.data_path("artifacts", "minutes_v1", "daily")
 DEFAULT_ROTATION_CONFIG = Path("config/rotation_set_minutes_live.json")
 DEFAULT_RECONCILE_CONFIG = Path("config/minutes_l2_reconcile.yaml")
+PRIMARY_PASSTHROUGH_COLS: tuple[str, ...] = (
+    "player_name",
+    "status",
+    "pos_bucket",
+    "starter_flag",
+    "is_projected_starter",
+    "is_confirmed_starter",
+    "tip_ts",
+    "team_name",
+    "team_tricode",
+    "opponent_team_id",
+    "opponent_team_name",
+    "opponent_team_tricode",
+    "spread_home",
+    "total",
+    "odds_as_of_ts",
+    "blowout_index",
+    "blowout_risk_score",
+    "close_game_score",
+    "team_abbr",
+    "opp_team_abbr",
+    "home_team_id",
+    "away_team_id",
+    "home_flag",
+    "lineup_role",
+    "lineup_status",
+    "lineup_roster_status",
+    "lineup_timestamp",
+    "restriction_flag",
+    "ramp_flag",
+    "games_since_return",
+    "days_since_return",
+    "injury_as_of_ts",
+    "prior_play_prob",
+    "is_out",
+    "is_q",
+    "is_prob",
+)
 
 
 @dataclass(frozen=True)
@@ -76,6 +116,7 @@ class RotationLiveConfig:
     allow_priors_fallback: bool
     enable_blend_to_baseline: bool  # Default False (PR3: disable suppression)
     fallback_mode: str  # "fail_closed" or "degrade_loudly"
+    mode: str  # "overlay" or "primary"
 
     @classmethod
     def load(cls, path: Path) -> "RotationLiveConfig":
@@ -99,6 +140,7 @@ class RotationLiveConfig:
         fallback_mode = str(payload.get("fallback_mode", "degrade_loudly"))
         if fallback_mode not in ("fail_closed", "degrade_loudly"):
             fallback_mode = "degrade_loudly"
+        mode = _normalize_rotation_mode(str(payload.get("mode", "overlay")))
         return cls(
             enabled=enabled,
             model_dir=str(model_dir) if model_dir else None,
@@ -108,6 +150,7 @@ class RotationLiveConfig:
             allow_priors_fallback=allow_priors_fallback,
             enable_blend_to_baseline=enable_blend,
             fallback_mode=fallback_mode,
+            mode=mode,
         )
 
 
@@ -120,6 +163,187 @@ def _normalize_day(value: str) -> pd.Timestamp:
 
 def _season_for_day(day: pd.Timestamp) -> int:
     return int(day.year) if int(day.month) >= 8 else int(day.year) - 1
+
+
+def _normalize_rotation_mode(value: str | None) -> str:
+    if not value:
+        return "overlay"
+    raw = str(value).strip().lower()
+    if raw in {"primary", "transformer", "transformer_only", "transformer-only", "canonical"}:
+        return "primary"
+    if raw in {"overlay", "legacy", "baseline"}:
+        return "overlay"
+    return "overlay"
+
+
+def _build_primary_minutes_frame(
+    minutes_feat: pd.DataFrame,
+    *,
+    day: pd.Timestamp,
+) -> pd.DataFrame:
+    key_cols = [c for c in ("game_id", "player_id", "team_id") if c in minutes_feat.columns]
+    out = minutes_feat.loc[:, key_cols].copy()
+    out["game_date"] = day.date()
+    for col in PRIMARY_PASSTHROUGH_COLS:
+        if col in minutes_feat.columns:
+            out[col] = minutes_feat[col]
+    return out
+
+
+def _derive_out_mask(df: pd.DataFrame) -> pd.Series:
+    out_mask = pd.Series(False, index=df.index, dtype=bool)
+    if "is_out" in df.columns:
+        out_flag = pd.to_numeric(df["is_out"], errors="coerce").fillna(0).astype(int)
+        out_mask = out_mask | (out_flag.to_numpy(dtype=int) == 1)
+    if "status" in df.columns:
+        status = df["status"].astype("string").str.upper()
+        out_mask = out_mask | status.eq("OUT").fillna(False).to_numpy(dtype=bool)
+    return out_mask
+
+
+def _scale_minutes_to_team_target(
+    df: pd.DataFrame,
+    minutes: pd.Series,
+    *,
+    team_target: float = 240.0,
+    group_cols: tuple[str, str] = ("game_id", "team_id"),
+) -> tuple[pd.Series, dict[str, float | int]]:
+    if minutes.empty:
+        return minutes, {"teams": 0, "zero_sum_teams": 0, "max_abs_delta": 0.0}
+    team_sum = minutes.groupby([df[c] for c in group_cols], sort=False).transform("sum")
+    scale = (float(team_target) / team_sum.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    scaled = minutes.to_numpy(dtype=float) * scale.to_numpy(dtype=float)
+    scaled = np.clip(scaled, 0.0, None)
+    scaled_series = pd.Series(scaled, index=minutes.index, dtype=float)
+    grouped_before = minutes.groupby([df[c] for c in group_cols], sort=False).sum()
+    grouped_after = scaled_series.groupby([df[c] for c in group_cols], sort=False).sum()
+    max_abs_delta = float((grouped_after - float(team_target)).abs().max()) if not grouped_after.empty else 0.0
+    zero_sum = int((grouped_before <= 0.0).sum()) if not grouped_before.empty else 0
+    return scaled_series, {
+        "teams": int(grouped_before.shape[0]) if not grouped_before.empty else 0,
+        "zero_sum_teams": zero_sum,
+        "max_abs_delta": max_abs_delta,
+    }
+
+
+def _derive_gate_probs(
+    minutes: pd.Series,
+    *,
+    out_mask: pd.Series | None = None,
+) -> tuple[pd.Series, pd.Series]:
+    mins = pd.to_numeric(minutes, errors="coerce").fillna(0.0).astype(float)
+    play_prob = (mins >= float(PLAY_THRESHOLD_MINUTES)).astype(float)
+    rotation_prob = (mins >= float(ROTATION_THRESHOLD_MINUTES)).astype(float)
+    if out_mask is not None:
+        mask = out_mask.to_numpy(dtype=bool)
+        play_prob = play_prob.where(~mask, 0.0)
+        rotation_prob = rotation_prob.where(~mask, 0.0)
+    return play_prob, rotation_prob
+
+
+def _run_baseline_minutes(
+    *,
+    day: pd.Timestamp,
+    run_id: str,
+    reconcile_team_minutes: str,
+    minutes_output: str,
+    bundle_dir: Path | None,
+    rotshare_quantiles_mode: str | None,
+    rotshare_n_worlds: int | None,
+    rotshare_concentration: float | None,
+    rotshare_seed: int | None,
+    rotshare_min_active_players: int | None,
+    rotshare_mc_center: str | None,
+    data_root: Path,
+) -> None:
+    typer.echo(
+        f"[rotation_minutes] baseline minutes_v1 date={day.date()} run_id={run_id}",
+        err=True,
+    )
+    baseline_args = [
+        "--date",
+        day.strftime("%Y-%m-%d"),
+        "--mode",
+        "live",
+        "--run-id",
+        run_id,
+        "--reconcile-team-minutes",
+        str(reconcile_team_minutes),
+        "--minutes-output",
+        str(minutes_output),
+    ]
+    if bundle_dir is not None:
+        baseline_args.extend(["--bundle-dir", str(bundle_dir)])
+    if rotshare_quantiles_mode:
+        baseline_args.extend(["--rotshare-quantiles-mode", str(rotshare_quantiles_mode)])
+    if rotshare_n_worlds is not None:
+        baseline_args.extend(["--rotshare-n-worlds", str(int(rotshare_n_worlds))])
+    if rotshare_concentration is not None:
+        baseline_args.extend(["--rotshare-concentration", str(float(rotshare_concentration))])
+    if rotshare_seed is not None:
+        baseline_args.extend(["--rotshare-seed", str(int(rotshare_seed))])
+    if rotshare_min_active_players is not None:
+        baseline_args.extend(
+            ["--rotshare-min-active-players", str(int(rotshare_min_active_players))]
+        )
+    if rotshare_mc_center:
+        baseline_args.extend(["--rotshare-mc-center", str(rotshare_mc_center)])
+
+    _run_python_module(
+        "projections.cli.score_minutes_v1",
+        baseline_args,
+        data_root=data_root,
+        timeout_s=1200,
+    )
+
+
+def _fallback_primary_to_baseline(
+    *,
+    reason: str,
+    day: pd.Timestamp,
+    run_id: str,
+    reconcile_team_minutes: str,
+    minutes_output: str,
+    bundle_dir: Path | None,
+    rotshare_quantiles_mode: str | None,
+    rotshare_n_worlds: int | None,
+    rotshare_concentration: float | None,
+    rotshare_seed: int | None,
+    rotshare_min_active_players: int | None,
+    rotshare_mc_center: str | None,
+    data_root: Path,
+    summary_path: Path,
+    mode: str,
+) -> None:
+    typer.echo(
+        f"[rotation_minutes] WARNING: primary mode fallback to baseline ({reason})",
+        err=True,
+    )
+    _run_baseline_minutes(
+        day=day,
+        run_id=run_id,
+        reconcile_team_minutes=reconcile_team_minutes,
+        minutes_output=minutes_output,
+        bundle_dir=bundle_dir,
+        rotshare_quantiles_mode=rotshare_quantiles_mode,
+        rotshare_n_worlds=rotshare_n_worlds,
+        rotshare_concentration=rotshare_concentration,
+        rotshare_seed=rotshare_seed,
+        rotshare_min_active_players=rotshare_min_active_players,
+        rotshare_mc_center=rotshare_mc_center,
+        data_root=data_root,
+    )
+    _update_summary_json(
+        summary_path,
+        {
+            "rotation_set_minutes": {
+                "enabled": False,
+                "mode": mode,
+                "error": reason,
+                "fallback_to_baseline": True,
+            }
+        },
+    )
 
 
 def _load_rotation_historical_features_for_dnp(
@@ -546,6 +770,11 @@ def main(
     rotshare_mc_center: str | None = typer.Option(
         None, "--rotshare-mc-center", help="Baseline rotshare mc center."
     ),
+    scoring_mode: str | None = typer.Option(
+        None,
+        "--scoring-mode",
+        help="Scoring mode: overlay (legacy) or primary (transformer-only).",
+    ),
     data_root: Path = typer.Option(
         DEFAULT_DATA_ROOT, "--data-root", help="PROJECTIONS_DATA_ROOT override."
     ),
@@ -600,57 +829,12 @@ def main(
     minutes_path = minutes_out_dir / "minutes.parquet"
     summary_path = minutes_out_dir / "summary.json"
 
-    # 1) Always run baseline first (safe fallback), unless explicitly skipped.
-    if not skip_baseline:
-        typer.echo(
-            f"[rotation_minutes] baseline minutes_v1 date={day.date()} run_id={run_id}",
-            err=True,
-        )
-        baseline_args = [
-            "--date",
-            day.strftime("%Y-%m-%d"),
-            "--mode",
-            "live",
-            "--run-id",
-            run_id,
-            "--reconcile-team-minutes",
-            str(reconcile_team_minutes),
-            "--minutes-output",
-            str(minutes_output),
-        ]
-        if bundle_dir is not None:
-            baseline_args.extend(["--bundle-dir", str(bundle_dir)])
-        if rotshare_quantiles_mode:
-            baseline_args.extend(
-                ["--rotshare-quantiles-mode", str(rotshare_quantiles_mode)]
-            )
-        if rotshare_n_worlds is not None:
-            baseline_args.extend(["--rotshare-n-worlds", str(int(rotshare_n_worlds))])
-        if rotshare_concentration is not None:
-            baseline_args.extend(
-                ["--rotshare-concentration", str(float(rotshare_concentration))]
-            )
-        if rotshare_seed is not None:
-            baseline_args.extend(["--rotshare-seed", str(int(rotshare_seed))])
-        if rotshare_min_active_players is not None:
-            baseline_args.extend(
-                ["--rotshare-min-active-players", str(int(rotshare_min_active_players))]
-            )
-        if rotshare_mc_center:
-            baseline_args.extend(["--rotshare-mc-center", str(rotshare_mc_center)])
-
-        _run_python_module(
-            "projections.cli.score_minutes_v1",
-            baseline_args,
-            data_root=data_root,
-            timeout_s=1200,
-        )
-
-    if not minutes_path.exists():
-        raise RuntimeError(f"Baseline minutes.parquet missing at {minutes_path}")
-
     config = RotationLiveConfig.load(rotation_config)
     enabled = bool(config.enabled)
+    resolved_mode = _normalize_rotation_mode(
+        scoring_mode or os.environ.get("ROTATION_SET_SCORING_MODE") or config.mode
+    )
+    primary_mode = resolved_mode == "primary"
     resolved_model_dir = (
         model_dir
         or (
@@ -660,21 +844,103 @@ def main(
         )
         or (Path(config.model_dir) if config.model_dir else None)
     )
+    if not primary_mode:
+        # 1) Always run baseline first (safe fallback), unless explicitly skipped.
+        if not skip_baseline:
+            _run_baseline_minutes(
+                day=day,
+                run_id=run_id,
+                reconcile_team_minutes=reconcile_team_minutes,
+                minutes_output=minutes_output,
+                bundle_dir=bundle_dir,
+                rotshare_quantiles_mode=rotshare_quantiles_mode,
+                rotshare_n_worlds=rotshare_n_worlds,
+                rotshare_concentration=rotshare_concentration,
+                rotshare_seed=rotshare_seed,
+                rotshare_min_active_players=rotshare_min_active_players,
+                rotshare_mc_center=rotshare_mc_center,
+                data_root=data_root,
+            )
+
+        if not minutes_path.exists():
+            raise RuntimeError(f"Baseline minutes.parquet missing at {minutes_path}")
+
+        base_df = pd.read_parquet(minutes_path)
+        if base_df.empty:
+            typer.echo("[rotation_minutes] baseline output empty; nothing to do.", err=True)
+            return
+    else:
+        minutes_out_dir.mkdir(parents=True, exist_ok=True)
+        base_df = pd.DataFrame()
+
     if not enabled:
+        if primary_mode:
+            reason = f"rotation_set_minutes disabled (config={rotation_config})"
+            if config.fallback_mode == "degrade_loudly":
+                _fallback_primary_to_baseline(
+                    reason=reason,
+                    day=day,
+                    run_id=run_id,
+                    reconcile_team_minutes=reconcile_team_minutes,
+                    minutes_output=minutes_output,
+                    bundle_dir=bundle_dir,
+                    rotshare_quantiles_mode=rotshare_quantiles_mode,
+                    rotshare_n_worlds=rotshare_n_worlds,
+                    rotshare_concentration=rotshare_concentration,
+                    rotshare_seed=rotshare_seed,
+                    rotshare_min_active_players=rotshare_min_active_players,
+                    rotshare_mc_center=rotshare_mc_center,
+                    data_root=data_root,
+                    summary_path=summary_path,
+                    mode=resolved_mode,
+                )
+                return
+            raise RuntimeError(f"Primary mode requires rotation_set enabled. {reason}")
         typer.echo(
             f"[rotation_minutes] rotation_set_minutes disabled (config={rotation_config}); keeping baseline.",
             err=True,
         )
-        _update_summary_json(summary_path, {"rotation_set_minutes": {"enabled": False}})
+        _update_summary_json(
+            summary_path,
+            {"rotation_set_minutes": {"enabled": False, "mode": resolved_mode}},
+        )
         return
     if resolved_model_dir is None:
+        if primary_mode:
+            reason = "rotation enabled but model_dir missing"
+            if config.fallback_mode == "degrade_loudly":
+                _fallback_primary_to_baseline(
+                    reason=reason,
+                    day=day,
+                    run_id=run_id,
+                    reconcile_team_minutes=reconcile_team_minutes,
+                    minutes_output=minutes_output,
+                    bundle_dir=bundle_dir,
+                    rotshare_quantiles_mode=rotshare_quantiles_mode,
+                    rotshare_n_worlds=rotshare_n_worlds,
+                    rotshare_concentration=rotshare_concentration,
+                    rotshare_seed=rotshare_seed,
+                    rotshare_min_active_players=rotshare_min_active_players,
+                    rotshare_mc_center=rotshare_mc_center,
+                    data_root=data_root,
+                    summary_path=summary_path,
+                    mode=resolved_mode,
+                )
+                return
+            raise RuntimeError(f"Primary mode requires model_dir. {reason}")
         typer.echo(
             "[rotation_minutes] WARNING: rotation enabled but model_dir missing; keeping baseline.",
             err=True,
         )
         _update_summary_json(
             summary_path,
-            {"rotation_set_minutes": {"enabled": True, "error": "model_dir_missing"}},
+            {
+                "rotation_set_minutes": {
+                    "enabled": True,
+                    "mode": resolved_mode,
+                    "error": "model_dir_missing",
+                }
+            },
         )
         return
 
@@ -695,16 +961,10 @@ def main(
     fallback_mode = str(config.fallback_mode)
 
     typer.echo(
-        f"[rotation_minutes] rotation_set_minutes enabled model_dir={resolved_model_dir} blend_weight={w} "
+        f"[rotation_minutes] rotation_set_minutes enabled mode={resolved_mode} model_dir={resolved_model_dir} blend_weight={w} "
         f"injury_thr={inj_thr} dnp_tail_thr={dnp_thr} enable_blend={enable_blend} fallback_mode={fallback_mode}",
         err=True,
     )
-
-    # 2) Load baseline minutes output and required live inputs.
-    base_df = pd.read_parquet(minutes_path)
-    if base_df.empty:
-        typer.echo("[rotation_minutes] baseline output empty; nothing to do.", err=True)
-        return
 
     minutes_features_path = (
         Path(minutes_features_root)
@@ -713,6 +973,28 @@ def main(
         / "features.parquet"
     )
     if not minutes_features_path.exists():
+        if primary_mode:
+            reason = f"minutes features missing at {minutes_features_path}"
+            if config.fallback_mode == "degrade_loudly":
+                _fallback_primary_to_baseline(
+                    reason=reason,
+                    day=day,
+                    run_id=run_id,
+                    reconcile_team_minutes=reconcile_team_minutes,
+                    minutes_output=minutes_output,
+                    bundle_dir=bundle_dir,
+                    rotshare_quantiles_mode=rotshare_quantiles_mode,
+                    rotshare_n_worlds=rotshare_n_worlds,
+                    rotshare_concentration=rotshare_concentration,
+                    rotshare_seed=rotshare_seed,
+                    rotshare_min_active_players=rotshare_min_active_players,
+                    rotshare_mc_center=rotshare_mc_center,
+                    data_root=data_root,
+                    summary_path=summary_path,
+                    mode=resolved_mode,
+                )
+                return
+            raise RuntimeError(f"Primary mode requires minutes features. {reason}")
         typer.echo(
             f"[rotation_minutes] WARNING: minutes features missing at {minutes_features_path}; keeping baseline.",
             err=True,
@@ -722,6 +1004,7 @@ def main(
             {
                 "rotation_set_minutes": {
                     "enabled": True,
+                    "mode": resolved_mode,
                     "error": "minutes_features_missing",
                 }
             },
@@ -744,6 +1027,28 @@ def main(
         )
         rot_features = pd.read_parquet(rot_features_path)
         if rot_features.empty:
+            if primary_mode:
+                reason = "rotation_features_empty"
+                if config.fallback_mode == "degrade_loudly":
+                    _fallback_primary_to_baseline(
+                        reason=reason,
+                        day=day,
+                        run_id=run_id,
+                        reconcile_team_minutes=reconcile_team_minutes,
+                        minutes_output=minutes_output,
+                        bundle_dir=bundle_dir,
+                        rotshare_quantiles_mode=rotshare_quantiles_mode,
+                        rotshare_n_worlds=rotshare_n_worlds,
+                        rotshare_concentration=rotshare_concentration,
+                        rotshare_seed=rotshare_seed,
+                        rotshare_min_active_players=rotshare_min_active_players,
+                        rotshare_mc_center=rotshare_mc_center,
+                        data_root=data_root,
+                        summary_path=summary_path,
+                        mode=resolved_mode,
+                    )
+                    return
+                raise RuntimeError(f"Primary mode requires rotation features. {reason}")
             typer.echo(
                 "[rotation_minutes] WARNING: rotation features empty; keeping baseline.",
                 err=True,
@@ -753,6 +1058,7 @@ def main(
                 {
                     "rotation_set_minutes": {
                         "enabled": True,
+                        "mode": resolved_mode,
                         "error": "rotation_features_empty",
                     }
                 },
@@ -813,6 +1119,28 @@ def main(
                 historical_features=historical_features,
             )
         except RotationLiveFeaturesError as exc:
+            if primary_mode:
+                reason = f"feature_build_failed:{exc}"
+                if config.fallback_mode == "degrade_loudly":
+                    _fallback_primary_to_baseline(
+                        reason=reason,
+                        day=day,
+                        run_id=run_id,
+                        reconcile_team_minutes=reconcile_team_minutes,
+                        minutes_output=minutes_output,
+                        bundle_dir=bundle_dir,
+                        rotshare_quantiles_mode=rotshare_quantiles_mode,
+                        rotshare_n_worlds=rotshare_n_worlds,
+                        rotshare_concentration=rotshare_concentration,
+                        rotshare_seed=rotshare_seed,
+                        rotshare_min_active_players=rotshare_min_active_players,
+                        rotshare_mc_center=rotshare_mc_center,
+                        data_root=data_root,
+                        summary_path=summary_path,
+                        mode=resolved_mode,
+                    )
+                    return
+                raise RuntimeError(f"Primary mode feature build failed: {exc}") from exc
             typer.echo(
                 f"[rotation_minutes] WARNING: feature build failed ({exc}); keeping baseline.",
                 err=True,
@@ -822,6 +1150,7 @@ def main(
                 {
                     "rotation_set_minutes": {
                         "enabled": True,
+                        "mode": resolved_mode,
                         "error": f"feature_build_failed:{exc}",
                     }
                 },
@@ -877,6 +1206,28 @@ def main(
             batch_size=int(batch_size),
         )
     except Exception as exc:  # noqa: BLE001
+        if primary_mode:
+            reason = f"predict_failed:{exc}"
+            if config.fallback_mode == "degrade_loudly":
+                _fallback_primary_to_baseline(
+                    reason=reason,
+                    day=day,
+                    run_id=run_id,
+                    reconcile_team_minutes=reconcile_team_minutes,
+                    minutes_output=minutes_output,
+                    bundle_dir=bundle_dir,
+                    rotshare_quantiles_mode=rotshare_quantiles_mode,
+                    rotshare_n_worlds=rotshare_n_worlds,
+                    rotshare_concentration=rotshare_concentration,
+                    rotshare_seed=rotshare_seed,
+                    rotshare_min_active_players=rotshare_min_active_players,
+                    rotshare_mc_center=rotshare_mc_center,
+                    data_root=data_root,
+                    summary_path=summary_path,
+                    mode=resolved_mode,
+                )
+                return
+            raise RuntimeError(f"Primary mode predict failed: {exc}") from exc
         typer.echo(
             f"[rotation_minutes] WARNING: rotation model predict failed ({exc}); keeping baseline.",
             err=True,
@@ -886,6 +1237,7 @@ def main(
             {
                 "rotation_set_minutes": {
                     "enabled": True,
+                    "mode": resolved_mode,
                     "error": f"predict_failed:{exc}",
                 }
             },
@@ -900,6 +1252,148 @@ def main(
         .fillna(0.0)
         .astype(float)
     )
+
+    if primary_mode:
+        out_df = _build_primary_minutes_frame(minutes_feat, day=day)
+        out_df = out_df.merge(rot_pred, on=["game_id", "team_id", "player_id"], how="left")
+        out_df["minutes_p50"] = pd.to_numeric(
+            out_df["rotation_minutes_p50"], errors="coerce"
+        ).fillna(0.0)
+
+        # ESPN OUT override: apply before hard-zero enforcement.
+        espn_out_count = 0
+        espn_matched_count = 0
+        try:
+            espn_out_players = _load_espn_out_players(
+                day.date() if hasattr(day, "date") else day,
+                data_root=data_root,
+                run_as_of_ts=None,
+            )
+            espn_out_count = len(espn_out_players) if espn_out_players else 0
+            if espn_out_players and "player_name" in out_df.columns:
+                normalized_names = out_df["player_name"].astype(str).map(_normalize_name_for_matching)
+                espn_mask = normalized_names.isin(espn_out_players)
+                espn_matched_count = int(espn_mask.sum())
+                if espn_matched_count > 0:
+                    out_df.loc[espn_mask, "is_out"] = 1
+                    out_df.loc[espn_mask, "status"] = "OUT"
+                    typer.echo(
+                        f"[rotation_minutes] ESPN OUT override: loaded={espn_out_count} matched={espn_matched_count}",
+                        err=True,
+                    )
+                else:
+                    typer.echo(
+                        f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} matched=0 (no overlap with slate)",
+                        err=True,
+                    )
+            elif espn_out_count > 0:
+                typer.echo(
+                    f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} but player_name column missing",
+                    err=True,
+                )
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(
+                f"[rotation_minutes] WARNING: ESPN OUT load failed ({exc}); using feature-time is_out",
+                err=True,
+            )
+
+        out_mask = _derive_out_mask(out_df)
+        out_df.loc[out_mask, "minutes_p50"] = 0.0
+
+        dnp_cols_needed = ["consecutive_active_dnp", "active_but_dnp_rate_last10"]
+        dnp_cols_present = [c for c in dnp_cols_needed if c in rot_features.columns]
+        if len(dnp_cols_present) == len(dnp_cols_needed):
+            dnp_check = out_df.merge(
+                rot_features[["game_id", "team_id", "player_id"] + dnp_cols_needed],
+                on=["game_id", "team_id", "player_id"],
+                how="left",
+            )
+            consec_dnp = pd.to_numeric(
+                dnp_check["consecutive_active_dnp"], errors="coerce"
+            ).fillna(0)
+            dnp_rate = pd.to_numeric(
+                dnp_check["active_but_dnp_rate_last10"], errors="coerce"
+            ).fillna(0)
+            dnp_override_mask = (consec_dnp >= 3) & (dnp_rate >= 0.8)
+            n_overridden = int(dnp_override_mask.sum())
+            if n_overridden > 0:
+                out_df.loc[dnp_override_mask, "minutes_p50"] = 0.0
+                typer.echo(
+                    f"[rotation_minutes] DNP override: zeroed {n_overridden} players with "
+                    f"consecutive_active_dnp>=3 AND dnp_rate>=0.8",
+                    err=True,
+                )
+
+        scaled_minutes, scale_summary = _scale_minutes_to_team_target(
+            out_df, out_df["minutes_p50"], team_target=240.0
+        )
+        out_df["minutes_p50"] = scaled_minutes
+
+        out_mask = _derive_out_mask(out_df)
+        play_prob, rotation_prob = _derive_gate_probs(out_df["minutes_p50"], out_mask=out_mask)
+        out_df["play_prob"] = play_prob
+        out_df["rotation_prob"] = rotation_prob
+        out_df["minutes_alloc_mode"] = "rotation_set"
+        out_df["model_run_id"] = str(Path(resolved_model_dir).name)
+        out_df = out_df.drop(columns=["rotation_minutes_p50"], errors="ignore")
+
+        out_df["minutes_p10"] = out_df["minutes_p50"]
+        out_df["minutes_p90"] = out_df["minutes_p50"]
+        out_df["minutes_p10_cond"] = out_df["minutes_p50"]
+        out_df["minutes_p50_cond"] = out_df["minutes_p50"]
+        out_df["minutes_p90_cond"] = out_df["minutes_p50"]
+        out_df["minutes_p10_uncond"] = out_df["minutes_p50"]
+        out_df["minutes_p50_uncond"] = out_df["minutes_p50"]
+        out_df["minutes_p90_uncond"] = out_df["minutes_p50"]
+
+        out_df = _select_minutes_columns(out_df, minutes_output)
+        out_df.to_parquet(minutes_path, index=False)
+
+        _update_summary_json(
+            summary_path,
+            {
+                "date": day.strftime("%Y-%m-%d"),
+                "run_id": run_id,
+                "generated_at": pd.Timestamp.now(tz=UTC).isoformat(),
+                "rotation_set_minutes": {
+                    "enabled": True,
+                    "mode": resolved_mode,
+                    "model_dir": str(Path(resolved_model_dir).expanduser()),
+                    "team_scale": scale_summary,
+                    "espn_out_count": espn_out_count,
+                    "espn_matched_count": espn_matched_count,
+                },
+                "counts": {
+                    "rows": int(len(out_df)),
+                    "games": int(out_df["game_id"].nunique()) if "game_id" in out_df.columns else 0,
+                    "teams": int(out_df["team_id"].nunique()) if "team_id" in out_df.columns else 0,
+                },
+            },
+        )
+
+        provenance = build_provenance(
+            alloc_mode="rotation_set",
+            model_dir=resolved_model_dir,
+            run_id=run_id,
+            game_date=day.strftime("%Y-%m-%d"),
+            degraded=scale_summary.get("zero_sum_teams", 0) > 0,
+            degraded_reason=(
+                f"zero_sum_teams:{scale_summary.get('zero_sum_teams', 0)}"
+                if scale_summary.get("zero_sum_teams", 0) > 0
+                else ""
+            ),
+            extras={
+                "mode": resolved_mode,
+                "team_scale": scale_summary,
+                "espn_out_count": espn_out_count,
+                "espn_matched_count": espn_matched_count,
+            },
+        )
+        inject_provenance_into_summary(summary_path, provenance)
+        inject_parity_into_summary(summary_path, parity_report)
+
+        typer.echo(f"[rotation_minutes] wrote primary minutes -> {minutes_path}", err=True)
+        return
 
     # Guardrail inputs from minutes features (lineup fields) + rotation features (missing flags).
     guard = base_df.merge(rot_pred, on=["game_id", "team_id", "player_id"], how="left")
@@ -1201,6 +1695,7 @@ def main(
         {
             "rotation_set_minutes": {
                 "enabled": True,
+                "mode": resolved_mode,
                 "model_dir": str(Path(resolved_model_dir).expanduser()),
                 "blend_weight": w,
                 "injury_coverage_threshold": inj_thr,
@@ -1234,6 +1729,7 @@ def main(
             "dnp_tail_minutes_threshold": dnp_thr,
             "enable_blend_to_baseline": enable_blend,
             "fallback_mode": fallback_mode,
+            "mode": resolved_mode,
             "espn_out_count": espn_out_count,
             "espn_matched_count": espn_matched_count,
             "degraded_reasons": guardrail.degraded_reasons,
