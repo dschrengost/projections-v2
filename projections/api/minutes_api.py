@@ -22,6 +22,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from projections import paths
+from projections.minutes import (
+    MINUTES_CONTRACT_VERSION,
+    PLAY_THRESHOLD_MINUTES,
+    ROTATION_THRESHOLD_MINUTES,
+    load_provenance_from_summary,
+    minutes_contract_hash,
+)
 from projections.api.pipeline_status_api import router as pipeline_status_router
 from projections.api.evaluation_api import router as evaluation_router
 from projections.api.optimizer_api import router as optimizer_router
@@ -593,6 +600,27 @@ def create_app(
             "config_hash": _stamp.config_hash[:16],
             "run_ids": _stamp.run_ids,
             "hostname": _stamp.hostname,
+            # Minutes contract info
+            "minutes_contract": {
+                "version": MINUTES_CONTRACT_VERSION,
+                "hash": minutes_contract_hash()[:16],
+                "play_threshold_minutes": PLAY_THRESHOLD_MINUTES,
+                "rotation_threshold_minutes": ROTATION_THRESHOLD_MINUTES,
+            },
+        })
+
+    @app.get("/api/minutes/contract")
+    def get_minutes_contract() -> JSONResponse:
+        """Return minutes contract definitions.
+
+        This endpoint exposes the canonical threshold values used by
+        all minutes scoring models and the dashboard.
+        """
+        return JSONResponse({
+            "version": MINUTES_CONTRACT_VERSION,
+            "hash": minutes_contract_hash(),
+            "play_threshold_minutes": PLAY_THRESHOLD_MINUTES,
+            "rotation_threshold_minutes": ROTATION_THRESHOLD_MINUTES,
         })
 
     app.include_router(pipeline_status_router, prefix="/api")
