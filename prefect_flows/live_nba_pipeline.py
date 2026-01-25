@@ -371,6 +371,17 @@ def score_minutes_task(
 
     # Check if RMH is enabled
     rmh_enabled, rmh_config = _is_rmh_enabled()
+    allow_rmh_primary = str(os.environ.get("PROJECTIONS_ALLOW_RMH_PRIMARY", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if rmh_enabled and not allow_rmh_primary:
+        logger.warning(
+            "[score-minutes] RMH enabled but primary RMH is disabled; "
+            "continuing with rotation_set scorer (set PROJECTIONS_ALLOW_RMH_PRIMARY=1 to allow)"
+        )
+        rmh_enabled = False
 
     if rmh_enabled:
         logger.info(
