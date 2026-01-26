@@ -6,5 +6,12 @@
   "injury_coverage_threshold": 0.5,
   "dnp_tail_minutes_threshold": 8.0,
   "allow_priors_fallback": true,
-  "fallback_mode": "fail_closed"
+  "fallback_mode": "fail_closed",
+
+  "sparsify_enable": true,
+  "sparsify_use_col": "gate_prob",
+  "sparsify_topk": 8,
+  "sparsify_tau": 0.55,
+  "sparsify_kmax": 10,
+  "sparsify_min_keep": 8
 }
