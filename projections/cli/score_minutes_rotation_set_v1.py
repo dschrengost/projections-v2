@@ -199,6 +199,54 @@ def _normalize_rotation_mode(value: str | None) -> str:
     return "overlay"
 
 
+@dataclass
+class BaselineMinutesResult:
+    """Result of extracting baseline minutes from features."""
+
+    values: np.ndarray
+    source_col: str
+    gt0_count: int
+    min_val: float
+    median_val: float
+    max_val: float
+
+
+def _extract_baseline_minutes(
+    minutes_feat: pd.DataFrame,
+    candidate_cols: tuple[str, ...] = ("minutes_p50_model", "minutes_final", "minutes_p50"),
+) -> BaselineMinutesResult:
+    """Extract baseline minutes from the first valid candidate column.
+
+    Priority order: minutes_p50_model > minutes_final > minutes_p50.
+    Uses the first column that has any non-zero values.
+    """
+    for candidate_col in candidate_cols:
+        if candidate_col in minutes_feat.columns:
+            candidate_vals = pd.to_numeric(
+                minutes_feat[candidate_col], errors="coerce"
+            ).fillna(0.0)
+            if candidate_vals.gt(0).any():
+                vals = candidate_vals.astype(float).to_numpy()
+                return BaselineMinutesResult(
+                    values=vals,
+                    source_col=candidate_col,
+                    gt0_count=int((vals > 0).sum()),
+                    min_val=float(vals.min()),
+                    median_val=float(np.median(vals)),
+                    max_val=float(vals.max()),
+                )
+    # No valid column found
+    n_rows = len(minutes_feat)
+    return BaselineMinutesResult(
+        values=np.zeros(n_rows, dtype=float),
+        source_col="none",
+        gt0_count=0,
+        min_val=0.0,
+        median_val=0.0,
+        max_val=0.0,
+    )
+
+
 def _build_primary_minutes_frame(
     minutes_feat: pd.DataFrame,
     *,
@@ -1301,20 +1349,30 @@ def main(
 
         # Extract baseline minutes from the pre-rotation minutes model for pathology fallback.
         # This ensures guardrails can fall back to a real baseline, not the rotation output.
-        if "minutes_p50" in minutes_feat.columns:
-            out_df["baseline_minutes_p50"] = (
-                pd.to_numeric(minutes_feat["minutes_p50"], errors="coerce")
-                .fillna(0.0)
-                .astype(float)
-                .to_numpy()
+        # Priority: minutes_p50_model > minutes_final > minutes_p50 (if present pre-rotation)
+        baseline_result = _extract_baseline_minutes(minutes_feat)
+        baseline_source_col = baseline_result.source_col
+        baseline_gt0_count = baseline_result.gt0_count
+        baseline_min_val = baseline_result.min_val
+        baseline_median_val = baseline_result.median_val
+        baseline_max_val = baseline_result.max_val
+
+        if baseline_source_col == "none":
+            available_cols = [c for c in minutes_feat.columns if "minutes" in c.lower()]
+            typer.echo(
+                f"[rotation_minutes] WARNING: no baseline minutes column found with >0 values; "
+                f"baseline_minutes_p50 set to 0.0 (pathology fallback may not be effective). "
+                f"Available minutes columns: {available_cols}",
+                err=True,
             )
         else:
             typer.echo(
-                "[rotation_minutes] WARNING: minutes_p50 not in minutes_feat; "
-                "baseline_minutes_p50 set to 0.0 (pathology fallback may not be effective)",
+                f"[rotation_minutes] baseline_minutes_p50: source={baseline_source_col} "
+                f"gt0={baseline_gt0_count} min={baseline_min_val:.2f} "
+                f"median={baseline_median_val:.2f} max={baseline_max_val:.2f}",
                 err=True,
             )
-            out_df["baseline_minutes_p50"] = 0.0
+        out_df["baseline_minutes_p50"] = baseline_result.values
 
         out_df = out_df.merge(rot_pred, on=["game_id", "team_id", "player_id"], how="left")
         out_df["minutes_p50"] = pd.to_numeric(
@@ -1454,6 +1512,13 @@ def main(
                     "espn_out_count": espn_out_count,
                     "espn_matched_count": espn_matched_count,
                     "guardrails": guardrail_stats,
+                    "baseline_stats": {
+                        "source_col": baseline_source_col,
+                        "gt0_count": baseline_gt0_count,
+                        "min": baseline_min_val,
+                        "median": baseline_median_val,
+                        "max": baseline_max_val,
+                    },
                 },
                 "counts": {
                     "rows": int(len(out_df)),
