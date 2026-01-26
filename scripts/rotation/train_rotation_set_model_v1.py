@@ -546,6 +546,7 @@ def _build_team_game_examples(
         prior_w = prior_w_all[idx_arr]
         out_mask = ~alloc_mask
         vacated_minutes = float(np.sum(prior20_all[idx_arr][out_mask].astype("float64")))
+        sw = 1.0 + float(sample_w_injury_scale) * float(np.clip(vacated_minutes / 60.0, 0.0, 1.0))
         team_out_count = int(np.sum(out_mask.astype(np.int64)))
         prior20_group = prior20_all[idx_arr].astype("float64", copy=False)
         k = int(min(5, prior20_group.shape[0]))
@@ -1228,6 +1229,7 @@ def main() -> None:
         feature_std=std.astype(float).tolist(),
         use_prior_head=use_prior_head,
         prior_weight_col=prior_weight_col,
+            sample_w_injury_scale=float(args.sample_w_injury_scale),
         prior_weight_floor=prior_weight_floor,
         use_team_embeddings=True,
         team_id_vocab=team_id_vocab,
@@ -1299,6 +1301,8 @@ def main() -> None:
         raise ValueError("--fp-minutes-threshold must be >= 0")
     if inj_weight_scale < 0:
         raise ValueError("--inj-weight-scale must be >= 0")
+    if float(args.sample_w_injury_scale) < 0:
+        raise ValueError("--sample-w-injury-scale must be >= 0")
     if lambda_rot < 0 or lambda_fp < 0:
         raise ValueError("--lambda-rot/--lambda-fp must be >= 0")
     if float(args.share_temperature) <= 0:
