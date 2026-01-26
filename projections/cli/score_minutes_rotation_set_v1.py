@@ -1347,6 +1347,22 @@ def main(
     if primary_mode:
         out_df = _build_primary_minutes_frame(minutes_feat, day=day)
 
+        # Prepare explicit real baseline column for guardrails if available.
+        # We prefer 'minutes_p50_model' (raw transformer output) over derived baseline.
+        guardrail_baseline_col = "minutes_p50"
+        if "minutes_p50_model" in minutes_feat.columns:
+            out_df["minutes_p50_model"] = (
+                pd.to_numeric(minutes_feat["minutes_p50_model"], errors="coerce")
+                .fillna(0.0)
+                .astype(float)
+            )
+            guardrail_baseline_col = "minutes_p50_model"
+        else:
+            typer.echo(
+                "[rotation_minutes] WARNING: minutes_p50_model missing from features; falling back to minutes_p50 for guardrails",
+                err=True,
+            )
+
         # Extract baseline minutes from the pre-rotation minutes model for pathology fallback.
         # This ensures guardrails can fall back to a real baseline, not the rotation output.
         # Priority: minutes_p50_model > minutes_final > minutes_p50 (if present pre-rotation)
@@ -1454,7 +1470,7 @@ def main(
         guardrail_result = apply_rotation_minutes_guardrails(
             out_df,
             rotation_p50_col="minutes_p50",
-            baseline_p50_col="baseline_minutes_p50",  # Real baseline for pathology fallback
+            baseline_p50_col=guardrail_baseline_col,
             minutes_features_row_missing_col="minutes_features_row_missing",
             injury_snapshot_missing_col="injury_snapshot_missing",
             out_flag_col="is_out",

@@ -545,6 +545,47 @@ class TestPathologyFallbackWithRealBaseline:
             f"Sparsify should not run on pathology teams; bench player should have ~10, got {bench_player_minutes}"
         )
 
+    def test_pathology_fallback_uses_minutes_p50_model_when_explicitly_passed(self) -> None:
+        """Verify we can explicitly pass 'minutes_p50_model' as baseline and it gets used."""
+        # Pathological rotation
+        smeared_minutes = [28.0, 27.0, 26.0, 25.0, 24.0, 23.0, 22.0, 21.0, 20.0, 24.0]
+        # Baseline (legacy) is empty/zeros
+        baseline_zeros = [0.0] * 10
+        # Model minutes (e.g. from upstream transformer) is good
+        model_minutes = [36.0, 34.0, 32.0, 31.0, 30.0, 22.0, 18.0, 15.0, 12.0, 10.0]
+
+        df = pd.DataFrame({
+            "game_id": ["0022401234"] * 10,
+            "team_id": [1610612744] * 10,
+            "player_id": list(range(1, 11)),
+            "rotation_minutes_p50": smeared_minutes,
+            "baseline_minutes_p50": baseline_zeros,
+            "minutes_p50_model": model_minutes,
+            "gate_prob": [0.95 - i * 0.05 for i in range(10)],
+            "minutes_features_row_missing": [0] * 10,
+            "injury_snapshot_missing": [0.0] * 10,
+            "is_out": [0] * 10,
+            "status": [None] * 10,
+        })
+
+        # Call with baseline_p50_col="minutes_p50_model"
+        result = apply_rotation_minutes_guardrails(
+            df,
+            rotation_p50_col="rotation_minutes_p50",
+            baseline_p50_col="minutes_p50_model",  # Explicitly using model output
+            pathology_min_max_minutes_threshold=30.0,
+            pathology_min_top5_sum_threshold=135.0,
+        )
+
+        # Pathology should trigger
+        assert result.summary["pathology"]["fallback_team_games"] >= 1
+
+        # Should use minutes_p50_model values (star ~36), NOT baseline_minutes_p50 (0)
+        star_player_minutes = result.minutes_p50.iloc[0]
+        assert star_player_minutes > 30.0, (
+            f"Expected fallback to use minutes_p50_model (~36), got {star_player_minutes}"
+        )
+
 
 class TestGuardrailsAlwaysRunAndReturnStats:
     """Test that guardrails always run and return stats, even when sparsify is disabled."""
