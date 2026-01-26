@@ -44,7 +44,10 @@ from projections.rotation.live_features_v1 import (
     build_rotation_set_minutes_v1_features,
     load_rotation_priors_for_live_inference,
 )
-from projections.rotation.set_model import predict_minutes as predict_rotation_minutes
+from projections.rotation.set_model import (
+    predict_minutes as predict_rotation_minutes,
+    RotationSetAuxOutputs,
+)
 
 # ESPN OUT override - import from baseline scorer to ensure consistency
 from projections.cli.score_minutes_v1 import (
@@ -1216,12 +1219,18 @@ def main(
 
     # 4) Predict rotation minutes (p50) and align to baseline output rows.
     try:
-        rot_scored = predict_rotation_minutes(
+        rot_result = predict_rotation_minutes(
             rot_features,
             model_dir=Path(resolved_model_dir),
             device=str(device),
             batch_size=int(batch_size),
+            return_aux=True,
         )
+        # Handle both DataFrame and RotationSetAuxOutputs return types
+        if isinstance(rot_result, RotationSetAuxOutputs):
+            rot_scored = rot_result.player_df
+        else:
+            rot_scored = rot_result
     except Exception as exc:  # noqa: BLE001
         if primary_mode:
             reason = f"predict_failed:{exc}"
@@ -1261,9 +1270,13 @@ def main(
         )
         return
 
+    # Log gate_prob presence for diagnostics
+    gate_prob_present = "gate_prob" in rot_scored.columns
+    typer.echo(f"[rotation_minutes] gate_prob present: {gate_prob_present}", err=True)
+
     # Build rot_pred with minutes and optionally gate_prob for sparsify guardrail
     rot_pred_cols = ["game_id", "team_id", "player_id", "pred_minutes"]
-    if "gate_prob" in rot_scored.columns:
+    if gate_prob_present:
         rot_pred_cols.append("gate_prob")
     rot_pred = rot_scored.loc[:, rot_pred_cols].rename(
         columns={"pred_minutes": "rotation_minutes_p50"}
@@ -1273,7 +1286,7 @@ def main(
         .fillna(0.0)
         .astype(float)
     )
-    if "gate_prob" in rot_pred.columns:
+    if gate_prob_present:
         rot_pred["gate_prob"] = (
             pd.to_numeric(rot_pred["gate_prob"], errors="coerce")
             .fillna(0.0)
