@@ -100,6 +100,50 @@ def _print_top_minutes(df_team: pd.DataFrame, *, title: str, k: int = 12) -> Non
     )
 
 
+def _print_alloc_eligibility_diagnostics(df_team: pd.DataFrame, *, title: str = "alloc_mask") -> None:
+    """Print alloc_mask eligibility diagnostics for a team-game.
+    
+    Shows how many players would be eligible under the new stricter alloc_mask logic,
+    and the distribution of minutes for eligible vs. ineligible players.
+    """
+    try:
+        from projections.rotation.alloc_mask import build_alloc_mask_from_features
+    except ImportError:
+        print(f"[{title}] WARNING: Could not import alloc_mask module, skipping diagnostics")
+        return
+    
+    n_players = len(df_team)
+    
+    # Compute eligibility
+    is_out = pd.to_numeric(df_team.get("is_out"), errors="coerce").fillna(0).astype(int)
+    n_not_out = int((is_out == 0).sum())
+    
+    # Build alloc_mask using the helper
+    alloc_mask = build_alloc_mask_from_features(
+        df_team,
+        min_eligible=9,
+        prior_play_prob_threshold=0.20,
+        baseline_minutes_threshold=4.0,
+    )
+    n_alloc_eligible = int(alloc_mask.sum())
+    
+    # Compute minutes distribution
+    mins = pd.to_numeric(df_team.get("minutes_p50_cond"), errors="coerce").fillna(0.0)
+    pct_lt_2 = float((mins < 2.0).mean() * 100) if len(mins) > 0 else 0.0
+    pct_eq_0 = float((mins == 0.0).mean() * 100) if len(mins) > 0 else 0.0
+    
+    # Minutes for eligible vs. ineligible
+    eligible_mins = mins[alloc_mask].to_numpy() if alloc_mask.sum() > 0 else np.array([])
+    ineligible_mins = mins[~alloc_mask].to_numpy() if (~alloc_mask).sum() > 0 else np.array([])
+    
+    print(f"\n[{title}] n_players={n_players} n_not_out={n_not_out} n_alloc_eligible={n_alloc_eligible}")
+    print(f"[{title}] pct_lt_2_minutes={pct_lt_2:.1f}% pct_eq_0_minutes={pct_eq_0:.1f}%")
+    if len(eligible_mins) > 0:
+        print(f"[{title}] eligible_mins: mean={float(eligible_mins.mean()):.1f} min={float(eligible_mins.min()):.1f} max={float(eligible_mins.max()):.1f}")
+    if len(ineligible_mins) > 0:
+        print(f"[{title}] ineligible_mins: mean={float(ineligible_mins.mean()):.1f} min={float(ineligible_mins.min()):.1f} max={float(ineligible_mins.max()):.1f}")
+
+
 def _run_baseline_minutes(
     *,
     game_date: str,
@@ -259,6 +303,7 @@ def main() -> None:
     print(f"\n[overlay] selected team-game: game_id={game_id} team_id={team_id} team={team} opp={opp}")
     overlay_team = minutes[(minutes["game_id"].astype(int) == game_id) & (minutes["team_id"].astype(int) == team_id)].copy()
     _print_top_minutes(overlay_team, title="overlay")
+    _print_alloc_eligibility_diagnostics(overlay_team, title="alloc_mask")
 
     # Optional: recompute baseline for side-by-side comparison.
     if args.compute_baseline:

@@ -29,6 +29,7 @@ from projections.rotation.utils import (
     normalize_key_columns,
     zfill_game_id_series,
 )
+from projections.rotation.alloc_mask import build_alloc_mask_from_features
 
 MODEL_DIR_ENV = "ROTATION_SET_MODEL_DIR"
 MODEL_WEIGHTS_FILENAME = "model.pt"
@@ -1204,11 +1205,23 @@ class RotationSetMinutesPredictor:
             share_logit_all = np.full(len(df), np.nan, dtype="float32")
             router_records = []
 
-        alloc_flag_all: np.ndarray | None = None
+        # Columns used for alloc_mask construction
+        alloc_feature_cols = [
+            "is_out", "prior_play_prob", "is_confirmed_starter",
+            "is_projected_starter", "status",
+        ]
+        # Check for baseline minutes column (try common names)
+        baseline_col: str | None = None
+        for cand in ("minutes_p50", "baseline_p50", "minutes_from_stints_prior_20"):
+            if cand in df.columns:
+                baseline_col = cand
+                break
+        if baseline_col:
+            alloc_feature_cols.append(baseline_col)
+
         is_out_all: np.ndarray | None = None
         if "is_out" in df.columns:
             is_out_all = pd.to_numeric(df["is_out"], errors="coerce").fillna(0).astype(int).to_numpy(dtype=int)
-            alloc_flag_all = is_out_all == 0
 
         router_feat_dim = int(getattr(self.config, "router_feature_dim", 0))
         prior20_all: np.ndarray | None = None
@@ -1249,14 +1262,21 @@ class RotationSetMinutesPredictor:
                     n = group.x.shape[0]
                     x[i, :n] = torch.from_numpy(group.x).to(self.device)
                     mask[i, :n] = True
-                    if alloc_flag_all is not None:
-                        alloc = alloc_flag_all[group.row_indices]
-                        if not bool(np.any(alloc)):
-                            alloc_mask[i, :n] = True
-                        else:
-                            alloc_mask[i, :n] = torch.as_tensor(alloc.astype(bool), device=self.device)
-                    else:
+                    # Build stricter alloc_mask from features instead of just is_out
+                    group_df = df.iloc[group.row_indices]
+                    alloc_arr = build_alloc_mask_from_features(
+                        group_df,
+                        min_eligible=9,
+                        max_eligible=None,  # No cap for now
+                        prior_play_prob_threshold=0.20,
+                        baseline_minutes_threshold=4.0,
+                        baseline_minutes_col=baseline_col,
+                    )
+                    if not bool(np.any(alloc_arr)):
+                        # Fallback: if no one is eligible, set all not-out players
                         alloc_mask[i, :n] = True
+                    else:
+                        alloc_mask[i, :n] = torch.as_tensor(alloc_arr, device=self.device)
                     if prior_weight_all is not None:
                         prior_w[i, :n] = torch.as_tensor(prior_weight_all[group.row_indices], device=self.device)
                     team_idx[i, :n] = torch.from_numpy(group.team_idx).to(self.device)
