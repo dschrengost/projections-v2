@@ -12,6 +12,6 @@
   "sparsify_use_col": "minutes_p50",
   "sparsify_topk": 9,
   "sparsify_tau": 8.0,
-  "sparsify_kmax": 10,
-  "sparsify_min_keep": 6
+  "sparsify_kmax": 9,
+  "sparsify_min_keep": 9
 }
