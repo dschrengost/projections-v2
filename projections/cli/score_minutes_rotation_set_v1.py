@@ -126,6 +126,7 @@ class RotationLiveConfig:
     sparsify_tau: float
     sparsify_kmax: int
     sparsify_min_keep: int
+    sparsify_use_col: str
 
     @classmethod
     def load(cls, path: Path) -> "RotationLiveConfig":
@@ -156,6 +157,7 @@ class RotationLiveConfig:
         sparsify_tau = float(payload.get("sparsify_tau", 0.55))
         sparsify_kmax = int(payload.get("sparsify_kmax", 11))
         sparsify_min_keep = int(payload.get("sparsify_min_keep", 8))
+        sparsify_use_col = str(payload.get("sparsify_use_col", "gate_prob"))
         return cls(
             enabled=enabled,
             model_dir=str(model_dir) if model_dir else None,
@@ -171,6 +173,7 @@ class RotationLiveConfig:
             sparsify_tau=sparsify_tau,
             sparsify_kmax=sparsify_kmax,
             sparsify_min_keep=sparsify_min_keep,
+            sparsify_use_col=sparsify_use_col,
         )
 
 
@@ -1368,6 +1371,40 @@ def main(
             out_df, out_df["minutes_p50"], team_target=240.0
         )
         out_df["minutes_p50"] = scaled_minutes
+
+        # Apply rotation minutes guardrails (including sparsify) to primary_mode output
+        # Use pre-guardrail minutes as baseline for fallback/pathology comparisons
+        if config.sparsify_enable:
+            guardrail_result = apply_rotation_minutes_guardrails(
+                out_df,
+                rotation_p50_col="minutes_p50",
+                baseline_p50_col="minutes_p50",  # Use same for primary mode (no separate baseline)
+                minutes_features_row_missing_col="minutes_features_row_missing",
+                injury_snapshot_missing_col="injury_snapshot_missing",
+                out_flag_col="is_out",
+                status_col="status",
+                blend_weight=0.0,  # No blend in primary mode
+                injury_coverage_threshold=inj_thr,
+                dnp_tail_minutes_threshold=dnp_thr,
+                cap_max_minutes=None,  # Already scaled to 240
+                enable_blend_to_baseline=False,  # No blend in primary mode
+                sparsify_enable=config.sparsify_enable,
+                sparsify_topk=config.sparsify_topk,
+                sparsify_tau=config.sparsify_tau,
+                sparsify_kmax=config.sparsify_kmax,
+                sparsify_min_keep=config.sparsify_min_keep,
+                sparsify_use_col=config.sparsify_use_col,
+            )
+            out_df["minutes_p50"] = guardrail_result.minutes_p50
+            sparsify_stats = guardrail_result.summary.get("sparsify", {})
+            typer.echo(
+                f"[rotation_minutes] applied guardrails: sparsify_enabled={config.sparsify_enable} "
+                f"use_col={config.sparsify_use_col} topk={config.sparsify_topk} tau={config.sparsify_tau} "
+                f"kmax={config.sparsify_kmax} min_keep={config.sparsify_min_keep} "
+                f"n_teams_sparsified={sparsify_stats.get('n_teams_sparsified', 0)} "
+                f"n_players_zeroed={sparsify_stats.get('n_players_zeroed', 0)}",
+                err=True,
+            )
 
         out_mask = _derive_out_mask(out_df)
         play_prob, rotation_prob = _derive_gate_probs(out_df["minutes_p50"], out_mask=out_mask)
