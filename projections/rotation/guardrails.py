@@ -149,8 +149,11 @@ def apply_rotation_minutes_guardrails(
 
     lineup_present_row = _row_lineup_present(work)
 
-    injury_missing = pd.to_numeric(work.get(injury_snapshot_missing_col, 1), errors="coerce")
-    injury_missing = injury_missing.fillna(1).astype(float).clip(lower=0.0, upper=1.0)
+    if injury_snapshot_missing_col in work.columns:
+        injury_missing = pd.to_numeric(work[injury_snapshot_missing_col], errors="coerce")
+    else:
+        injury_missing = pd.Series(1.0, index=work.index)
+    injury_missing = injury_missing.fillna(1.0).astype(float).clip(lower=0.0, upper=1.0)
 
     group_cols = ["game_id", "team_id"]
     lineup_present_team = lineup_present_row.groupby([work[c] for c in group_cols], sort=False).any()
