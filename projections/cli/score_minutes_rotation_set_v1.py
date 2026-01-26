@@ -117,6 +117,12 @@ class RotationLiveConfig:
     enable_blend_to_baseline: bool  # Default False (PR3: disable suppression)
     fallback_mode: str  # "fail_closed" or "degrade_loudly"
     mode: str  # "overlay" or "primary"
+    # Sparsify parameters (opt-in, default disabled)
+    sparsify_enable: bool
+    sparsify_topk: int
+    sparsify_tau: float
+    sparsify_kmax: int
+    sparsify_min_keep: int
 
     @classmethod
     def load(cls, path: Path) -> "RotationLiveConfig":
@@ -141,6 +147,12 @@ class RotationLiveConfig:
         if fallback_mode not in ("fail_closed", "degrade_loudly"):
             fallback_mode = "degrade_loudly"
         mode = _normalize_rotation_mode(str(payload.get("mode", "overlay")))
+        # Sparsify parameters (safe defaults: disabled)
+        sparsify_enable = bool(payload.get("sparsify_enable", False))
+        sparsify_topk = int(payload.get("sparsify_topk", 9))
+        sparsify_tau = float(payload.get("sparsify_tau", 0.55))
+        sparsify_kmax = int(payload.get("sparsify_kmax", 11))
+        sparsify_min_keep = int(payload.get("sparsify_min_keep", 8))
         return cls(
             enabled=enabled,
             model_dir=str(model_dir) if model_dir else None,
@@ -151,6 +163,11 @@ class RotationLiveConfig:
             enable_blend_to_baseline=enable_blend,
             fallback_mode=fallback_mode,
             mode=mode,
+            sparsify_enable=sparsify_enable,
+            sparsify_topk=sparsify_topk,
+            sparsify_tau=sparsify_tau,
+            sparsify_kmax=sparsify_kmax,
+            sparsify_min_keep=sparsify_min_keep,
         )
 
 
@@ -1244,14 +1261,24 @@ def main(
         )
         return
 
-    rot_pred = rot_scored.loc[
-        :, ["game_id", "team_id", "player_id", "pred_minutes"]
-    ].rename(columns={"pred_minutes": "rotation_minutes_p50"})
+    # Build rot_pred with minutes and optionally gate_prob for sparsify guardrail
+    rot_pred_cols = ["game_id", "team_id", "player_id", "pred_minutes"]
+    if "gate_prob" in rot_scored.columns:
+        rot_pred_cols.append("gate_prob")
+    rot_pred = rot_scored.loc[:, rot_pred_cols].rename(
+        columns={"pred_minutes": "rotation_minutes_p50"}
+    )
     rot_pred["rotation_minutes_p50"] = (
         pd.to_numeric(rot_pred["rotation_minutes_p50"], errors="coerce")
         .fillna(0.0)
         .astype(float)
     )
+    if "gate_prob" in rot_pred.columns:
+        rot_pred["gate_prob"] = (
+            pd.to_numeric(rot_pred["gate_prob"], errors="coerce")
+            .fillna(0.0)
+            .astype(float)
+        )
 
     if primary_mode:
         out_df = _build_primary_minutes_frame(minutes_feat, day=day)
@@ -1515,6 +1542,12 @@ def main(
         dnp_tail_minutes_threshold=dnp_thr,
         cap_max_minutes=cap_max_minutes,
         enable_blend_to_baseline=enable_blend,  # PR3: disabled by default
+        # Sparsify parameters from config (opt-in, default disabled)
+        sparsify_enable=config.sparsify_enable,
+        sparsify_topk=config.sparsify_topk,
+        sparsify_tau=config.sparsify_tau,
+        sparsify_kmax=config.sparsify_kmax,
+        sparsify_min_keep=config.sparsify_min_keep,
     )
     new_p50 = guardrail.minutes_p50
 
