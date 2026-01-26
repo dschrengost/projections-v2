@@ -386,6 +386,166 @@ class TestSparsifyByMinutes:
         assert sparsify["kept_score_max"] >= 30.0, "Max kept score should be high"
 
 
+class TestPathologyFallbackWithRealBaseline:
+    """Tests for pathology fallback using separate baseline minutes."""
+
+    def test_pathology_fallback_uses_baseline_not_rotation(self) -> None:
+        """When rotation minutes trigger pathology, fallback should use baseline, not rotation.
+
+        This test verifies the fix for the bug where primary mode used minutes_p50 for both
+        rotation_p50_col and baseline_p50_col, making pathology fallback a no-op.
+        """
+        # Create a smeared/pathological rotation distribution:
+        # - Low max_minutes (e.g., 28) triggers min_max_minutes pathology
+        # - Low top5_sum triggers min_top5_sum pathology
+        # flat_trigger = min_max_trigger AND min_top5_trigger, so we need both.
+        smeared_minutes = [28.0, 27.0, 26.0, 25.0, 24.0, 23.0, 22.0, 21.0, 20.0, 24.0]
+        # Sum = 240, max=28 < 30, top5_sum = 28+27+26+25+24 = 130
+
+        # Create sane baseline minutes with realistic distribution:
+        # - Star player at 36 mins
+        # - Top 5 sum well above threshold (~165)
+        baseline_minutes = [36.0, 34.0, 32.0, 31.0, 30.0, 22.0, 18.0, 15.0, 12.0, 10.0]
+        # Sum = 240, max=36, top5_sum=163
+
+        df = pd.DataFrame({
+            "game_id": ["0022401234"] * 10,
+            "team_id": [1610612744] * 10,
+            "player_id": list(range(1, 11)),
+            "rotation_minutes_p50": smeared_minutes,
+            "baseline_minutes_p50": baseline_minutes,
+            "gate_prob": [0.95 - i * 0.05 for i in range(10)],
+            "minutes_features_row_missing": [0] * 10,
+            "injury_snapshot_missing": [0.0] * 10,
+            "is_out": [0] * 10,
+            "status": [None] * 10,
+        })
+
+        result = apply_rotation_minutes_guardrails(
+            df,
+            rotation_p50_col="rotation_minutes_p50",
+            baseline_p50_col="baseline_minutes_p50",
+            # Use thresholds that trigger flat_trigger (min_max_trigger AND min_top5_trigger)
+            pathology_min_max_minutes_threshold=30.0,  # max=28 < 30 triggers
+            pathology_min_top5_sum_threshold=135.0,  # top5_sum=130 < 135 triggers
+        )
+
+        # Pathology should have triggered for this team-game
+        assert result.summary["pathology"]["fallback_team_games"] >= 1, (
+            "Expected pathology fallback to trigger for smeared rotation"
+        )
+
+        # The result should be the BASELINE minutes, not the smeared rotation
+        # Star player should have ~36 mins (baseline), not ~28 (rotation)
+        star_player_minutes = result.minutes_p50.iloc[0]
+        assert star_player_minutes > 32.0, (
+            f"Expected star player to have baseline (~36) not rotation (~28), got {star_player_minutes}"
+        )
+
+        # The lowest player should have baseline minutes too
+        bench_player_minutes = result.minutes_p50.iloc[9]
+        assert abs(bench_player_minutes - 10.0) < 0.5, (
+            f"Expected bench player to have baseline (~10), got {bench_player_minutes}"
+        )
+
+        # Team total should still be 240
+        total = result.minutes_p50.sum()
+        assert abs(total - 240.0) < 0.01, f"Expected team total 240, got {total}"
+
+    def test_no_pathology_when_baseline_equals_rotation(self) -> None:
+        """Verify the old bug: if baseline==rotation, pathology fallback is a no-op.
+
+        This documents the bug that the fix addresses. When baseline_p50_col points
+        to the same data as rotation_p50_col, pathology fallback replaces rotation
+        with itself - achieving nothing.
+        """
+        # Create pathological rotation minutes
+        smeared_minutes = [28.0, 27.0, 26.0, 25.0, 24.0, 23.0, 22.0, 21.0, 20.0, 24.0]
+        # Sum = 240, max=28, top5_sum=130
+
+        df = pd.DataFrame({
+            "game_id": ["0022401234"] * 10,
+            "team_id": [1610612744] * 10,
+            "player_id": list(range(1, 11)),
+            "rotation_minutes_p50": smeared_minutes,
+            "baseline_minutes_p50": smeared_minutes.copy(),  # Same as rotation - the bug!
+            "gate_prob": [0.95 - i * 0.05 for i in range(10)],
+            "minutes_features_row_missing": [0] * 10,
+            "injury_snapshot_missing": [0.0] * 10,
+            "is_out": [0] * 10,
+            "status": [None] * 10,
+        })
+
+        result = apply_rotation_minutes_guardrails(
+            df,
+            rotation_p50_col="rotation_minutes_p50",
+            baseline_p50_col="baseline_minutes_p50",
+            # Same thresholds as the fix test - triggers flat_trigger
+            pathology_min_max_minutes_threshold=30.0,  # max=28 < 30 triggers
+            pathology_min_top5_sum_threshold=135.0,  # top5_sum=130 < 135 triggers
+        )
+
+        # Pathology triggers (same as above test)
+        assert result.summary["pathology"]["fallback_team_games"] >= 1
+
+        # But since baseline == rotation, the "fallback" is a no-op
+        # Star player still has smeared minutes (~28), not realistic (~36)
+        star_player_minutes = result.minutes_p50.iloc[0]
+        assert star_player_minutes < 32.0, (
+            f"With baseline==rotation, star player stays smeared (~28), got {star_player_minutes}"
+        )
+
+    def test_sparsify_disabled_on_pathology_team(self) -> None:
+        """Sparsify should NOT run on teams that fell back to baseline via pathology.
+
+        When a team triggers pathology fallback, the entire team-game reverts to baseline.
+        Sparsify should skip these teams since they're no longer using rotation output.
+        """
+        # Create pathological rotation distribution
+        smeared_minutes = [28.0, 27.0, 26.0, 25.0, 24.0, 23.0, 22.0, 21.0, 20.0, 24.0]
+        # Sum = 240, max=28, top5_sum=130
+        # Sane baseline with clear rotation hierarchy
+        baseline_minutes = [36.0, 34.0, 32.0, 31.0, 30.0, 22.0, 18.0, 15.0, 12.0, 10.0]
+        # Sum = 240, max=36, top5_sum=163
+
+        df = pd.DataFrame({
+            "game_id": ["0022401234"] * 10,
+            "team_id": [1610612744] * 10,
+            "player_id": list(range(1, 11)),
+            "rotation_minutes_p50": smeared_minutes,
+            "baseline_minutes_p50": baseline_minutes,
+            "gate_prob": [0.95, 0.90, 0.85, 0.80, 0.75, 0.40, 0.35, 0.30, 0.25, 0.20],
+            "minutes_features_row_missing": [0] * 10,
+            "injury_snapshot_missing": [0.0] * 10,
+            "is_out": [0] * 10,
+            "status": [None] * 10,
+        })
+
+        result = apply_rotation_minutes_guardrails(
+            df,
+            rotation_p50_col="rotation_minutes_p50",
+            baseline_p50_col="baseline_minutes_p50",
+            # Thresholds that trigger flat_trigger for smeared distribution
+            pathology_min_max_minutes_threshold=30.0,  # max=28 < 30 triggers
+            pathology_min_top5_sum_threshold=135.0,  # top5_sum=130 < 135 triggers
+            sparsify_enable=True,
+            sparsify_topk=5,
+            sparsify_tau=0.50,  # Would zero players 6-10 if sparsify ran
+            sparsify_kmax=8,
+            sparsify_min_keep=5,
+        )
+
+        # Pathology should trigger
+        assert result.summary["pathology"]["fallback_team_games"] >= 1
+
+        # Since pathology fallback happened, sparsify should NOT have zeroed the bench players
+        # The bench player (idx 9) should still have baseline minutes (~10), not 0
+        bench_player_minutes = result.minutes_p50.iloc[9]
+        assert bench_player_minutes > 5.0, (
+            f"Sparsify should not run on pathology teams; bench player should have ~10, got {bench_player_minutes}"
+        )
+
+
 class TestGuardrailsAlwaysRunAndReturnStats:
     """Test that guardrails always run and return stats, even when sparsify is disabled."""
 

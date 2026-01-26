@@ -1298,6 +1298,24 @@ def main(
 
     if primary_mode:
         out_df = _build_primary_minutes_frame(minutes_feat, day=day)
+
+        # Extract baseline minutes from the pre-rotation minutes model for pathology fallback.
+        # This ensures guardrails can fall back to a real baseline, not the rotation output.
+        if "minutes_p50" in minutes_feat.columns:
+            out_df["baseline_minutes_p50"] = (
+                pd.to_numeric(minutes_feat["minutes_p50"], errors="coerce")
+                .fillna(0.0)
+                .astype(float)
+                .to_numpy()
+            )
+        else:
+            typer.echo(
+                "[rotation_minutes] WARNING: minutes_p50 not in minutes_feat; "
+                "baseline_minutes_p50 set to 0.0 (pathology fallback may not be effective)",
+                err=True,
+            )
+            out_df["baseline_minutes_p50"] = 0.0
+
         out_df = out_df.merge(rot_pred, on=["game_id", "team_id", "player_id"], how="left")
         out_df["minutes_p50"] = pd.to_numeric(
             out_df["rotation_minutes_p50"], errors="coerce"
@@ -1374,11 +1392,11 @@ def main(
 
         # Apply rotation minutes guardrails (including sparsify) UNCONDITIONALLY in primary mode.
         # This ensures guardrails always run and stats are always visible in logs + summary.json.
-        # Use pre-guardrail minutes as baseline for fallback/pathology comparisons.
+        # Use baseline_minutes_p50 (from pre-rotation minutes model) for pathology fallback.
         guardrail_result = apply_rotation_minutes_guardrails(
             out_df,
             rotation_p50_col="minutes_p50",
-            baseline_p50_col="minutes_p50",  # Use same for primary mode (no separate baseline)
+            baseline_p50_col="baseline_minutes_p50",  # Real baseline for pathology fallback
             minutes_features_row_missing_col="minutes_features_row_missing",
             injury_snapshot_missing_col="injury_snapshot_missing",
             out_flag_col="is_out",
