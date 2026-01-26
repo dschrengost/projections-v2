@@ -46,6 +46,13 @@ from projections.rotation.set_model import (  # noqa: E402
     build_model,
     zfill_game_id_series,
 )
+from projections.rotation.training_losses import (  # noqa: E402
+    build_in_rotation_labels,
+    compute_anti_smear_penalty,
+    compute_k_hat,
+    compute_k_regularizer,
+    compute_minutes_out_loss,
+)
 
 
 TEAM_TOTAL_MINUTES = 240.0
@@ -627,6 +634,7 @@ def _evaluate(
     fp_loss_denom = 0.0
     tail_sum = 0.0
     rot_size8_sum = 0.0
+    rotation_size_hat_sum = 0.0
     n_teams = 0.0
     # Gate calibration bins: [0,0.2), [0.2,0.4), ..., [0.8,1.0]
     gate_bins = torch.tensor([0.0, 0.2, 0.4, 0.6, 0.8, 1.0], device=device)
@@ -717,6 +725,11 @@ def _evaluate(
             tail_sum += float((240.0 - top9_sum).sum().item())
             rot_size8_sum += float((pred_team >= 8.0).sum(dim=1).to(dtype=torch.float32).sum().item())
             n_teams += float(pred_team.shape[0])
+
+            # Compute k_hat (expected rotation size) from gate probabilities
+            if use_gate_head and gate_logits is not None:
+                k_hat = compute_k_hat(gate_logits, final_mask)
+                rotation_size_hat_sum += float(k_hat.sum().item())
 
             if (lambda_rot > 0 or lambda_fp > 0) and use_gate_head:
                 w_inj = 1.0 + float(inj_weight_scale) * torch.clamp(vacated_minutes / 60.0, min=0.0, max=1.0)
@@ -832,6 +845,7 @@ def _evaluate(
         "mae_w": float(mae_team_w),
         "tail_mean_team240_top9": float(tail_sum / max(n_teams, 1.0)),
         "rotation_size8_mean": float(rot_size8_sum / max(n_teams, 1.0)),
+        "rotation_size_hat_mean": float(rotation_size_hat_sum / max(n_teams, 1.0)),
     }
     if use_gate_head and (lambda_rot > 0):
         out["rot_loss"] = float(rot_loss_sum / max(rot_loss_denom, 1.0))
@@ -1118,6 +1132,50 @@ def main() -> None:
         help="If > 0, add weak regularization to prevent tail collapse: 0.01 * relu(floor - tail)^2.",
     )
 
+    # Gate supervision / anti-smear arguments
+    parser.add_argument(
+        "--rotation-minutes-threshold",
+        type=float,
+        default=6.0,
+        help="Minutes threshold for in_rotation label (used for gate supervision).",
+    )
+    parser.add_argument(
+        "--gate-bce-weight",
+        type=float,
+        default=1.0,
+        help="Weight for gate BCE loss (gate_logits vs in_rotation label).",
+    )
+    parser.add_argument(
+        "--minutes-out-weight",
+        type=float,
+        default=0.25,
+        help="Penalty weight for predicted minutes on non-rotation players.",
+    )
+    parser.add_argument(
+        "--k-target",
+        type=float,
+        default=9.5,
+        help="Expected rotation size per team-game (for K regularizer).",
+    )
+    parser.add_argument(
+        "--k-reg-weight",
+        type=float,
+        default=0.05,
+        help="Weight for team expected-K regularizer loss.",
+    )
+    parser.add_argument(
+        "--anti-smear-weight",
+        type=float,
+        default=0.05,
+        help="Weight for anti-smear penalty (minutes above floor on low-gate players).",
+    )
+    parser.add_argument(
+        "--anti-smear-floor",
+        type=float,
+        default=4.0,
+        help="Minutes floor for anti-smear penalty: relu(pred - floor) * (1 - gate_prob).",
+    )
+
     args = parser.parse_args()
 
     _set_seed(int(args.seed))
@@ -1344,6 +1402,15 @@ def main() -> None:
     focal_gamma = float(args.focal_gamma)
     focal_alpha = float(args.focal_alpha)
 
+    # Gate supervision / anti-smear params
+    rotation_minutes_threshold = float(args.rotation_minutes_threshold)
+    gate_bce_weight = float(args.gate_bce_weight)
+    minutes_out_weight = float(args.minutes_out_weight)
+    k_target = float(args.k_target)
+    k_reg_weight = float(args.k_reg_weight)
+    anti_smear_weight = float(args.anti_smear_weight)
+    anti_smear_floor = float(args.anti_smear_floor)
+
     if moe_experts < 1:
         raise ValueError("--moe-experts must be >= 1")
     if moe_experts > 1 and not use_gate_head:
@@ -1374,6 +1441,29 @@ def main() -> None:
     if float(args.share_temperature) <= 0:
         raise ValueError("--share-temperature must be > 0")
 
+    # Validation for gate supervision / anti-smear params
+    if rotation_minutes_threshold < 0:
+        raise ValueError("--rotation-minutes-threshold must be >= 0")
+    if gate_bce_weight < 0:
+        raise ValueError("--gate-bce-weight must be >= 0")
+    if minutes_out_weight < 0:
+        raise ValueError("--minutes-out-weight must be >= 0")
+    if k_target < 0:
+        raise ValueError("--k-target must be >= 0")
+    if k_reg_weight < 0:
+        raise ValueError("--k-reg-weight must be >= 0")
+    if anti_smear_weight < 0:
+        raise ValueError("--anti-smear-weight must be >= 0")
+    if anti_smear_floor < 0:
+        raise ValueError("--anti-smear-floor must be >= 0")
+    # Gate supervision requires use_gate_head
+    gate_losses_active = gate_bce_weight > 0 or k_reg_weight > 0 or anti_smear_weight > 0 or minutes_out_weight > 0
+    if gate_losses_active and not use_gate_head:
+        raise ValueError(
+            "--use-gate-head is required when any of --gate-bce-weight, --k-reg-weight, "
+            "--anti-smear-weight, or --minutes-out-weight is non-zero"
+        )
+
     best_metric_name = str(args.best_metric)
     best_val = float("inf")
     best_state: dict[str, Any] | None = None
@@ -1386,6 +1476,10 @@ def main() -> None:
         running_loss_rot = 0.0
         running_loss_fp = 0.0
         running_loss_router = 0.0
+        running_loss_gate_bce = 0.0
+        running_loss_minutes_out = 0.0
+        running_loss_k_reg = 0.0
+        running_loss_anti_smear = 0.0
         running_mae_w_sum = 0.0
         running_mae_w_denom = 0.0
         batches = 0
@@ -1517,12 +1611,54 @@ def main() -> None:
                 tail_penalty = torch.relu(tail_floor_minutes - tail) ** 2
                 loss_tail_floor = 0.01 * tail_penalty.mean()
 
+            # Gate supervision losses (requires use_gate_head)
+            loss_gate_bce = pred.new_tensor(0.0)
+            loss_minutes_out = pred.new_tensor(0.0)
+            loss_k_reg = pred.new_tensor(0.0)
+            loss_anti_smear = pred.new_tensor(0.0)
+            if use_gate_head and gate_logits is not None:
+                final_mask_gate = alloc_mask & mask
+                # Build in_rotation labels using the dedicated threshold
+                in_rotation = build_in_rotation_labels(y, rotation_minutes_threshold, final_mask_gate)
+
+                # Gate BCE loss: supervise gate_logits to predict in_rotation membership
+                if gate_bce_weight > 0:
+                    # Compute pos_weight to handle class imbalance
+                    n_pos = in_rotation.sum().clamp(min=1.0)
+                    n_neg = (final_mask_gate.to(dtype=in_rotation.dtype) - in_rotation).sum().clamp(min=1.0)
+                    pos_weight = (n_neg / n_pos).clamp(min=0.5, max=2.0)
+                    bce_per_el = torch.nn.functional.binary_cross_entropy_with_logits(
+                        gate_logits,
+                        in_rotation,
+                        pos_weight=pos_weight.expand_as(gate_logits),
+                        reduction="none",
+                    )
+                    mask_f = final_mask_gate.to(dtype=bce_per_el.dtype)
+                    denom = mask_f.sum().clamp(min=1.0)
+                    loss_gate_bce = (bce_per_el * mask_f).sum() / denom
+
+                # Minutes out penalty: encourage non-rotation players toward zero minutes
+                if minutes_out_weight > 0:
+                    loss_minutes_out = compute_minutes_out_loss(pred, in_rotation, final_mask_gate)
+
+                # Team expected-K regularizer
+                if k_reg_weight > 0:
+                    loss_k_reg = compute_k_regularizer(gate_logits, final_mask_gate, k_target)
+
+                # Anti-smear penalty
+                if anti_smear_weight > 0:
+                    loss_anti_smear = compute_anti_smear_penalty(pred, gate_logits, final_mask_gate, anti_smear_floor)
+
             loss = (
                 loss_min
                 + float(lambda_rot) * loss_rot
                 + float(lambda_fp) * loss_fp
                 + loss_router
                 + loss_tail_floor
+                + float(gate_bce_weight) * loss_gate_bce
+                + float(minutes_out_weight) * loss_minutes_out
+                + float(k_reg_weight) * loss_k_reg
+                + float(anti_smear_weight) * loss_anti_smear
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -1533,6 +1669,10 @@ def main() -> None:
             running_loss_rot += float(loss_rot.item())
             running_loss_fp += float(loss_fp.item())
             running_loss_router += float(loss_router.item())
+            running_loss_gate_bce += float(loss_gate_bce.item())
+            running_loss_minutes_out += float(loss_minutes_out.item())
+            running_loss_k_reg += float(loss_k_reg.item())
+            running_loss_anti_smear += float(loss_anti_smear.item())
             batches += 1
 
         train_eval = _evaluate(
@@ -1575,6 +1715,10 @@ def main() -> None:
             "train_loss_rot": running_loss_rot / max(batches, 1),
             "train_loss_fp": running_loss_fp / max(batches, 1),
             "train_loss_router": running_loss_router / max(batches, 1),
+            "train_loss_gate_bce": running_loss_gate_bce / max(batches, 1),
+            "train_loss_minutes_out": running_loss_minutes_out / max(batches, 1),
+            "train_loss_k_reg": running_loss_k_reg / max(batches, 1),
+            "train_loss_anti_smear": running_loss_anti_smear / max(batches, 1),
             # New explicit metric names (preferred).
             "train_mae_player": float(train_eval["mae_player"]),
             "train_mae_team_w": float(train_mae_team_w),
@@ -1589,6 +1733,7 @@ def main() -> None:
             "val_team_mae": float(val_eval["mae_team"]),
             "val_tail_mean_team240_top9": float(val_eval["tail_mean_team240_top9"]),
             "val_rotation_size8_mean": float(val_eval["rotation_size8_mean"]),
+            "val_rotation_size_hat_mean": float(val_eval["rotation_size_hat_mean"]),
         }
         if "rot_loss" in val_eval:
             row["val_rot_loss"] = float(val_eval["rot_loss"])
@@ -1628,10 +1773,13 @@ def main() -> None:
         history.append(row)
         msg = (
             f"[epoch {epoch:03d}] loss={row['train_loss']:.4f} (min={row['train_loss_min']:.4f} "
-            f"rot={row['train_loss_rot']:.4f} fp={row['train_loss_fp']:.4f} router={row['train_loss_router']:.4f}) "
+            f"rot={row['train_loss_rot']:.4f} fp={row['train_loss_fp']:.4f} router={row['train_loss_router']:.4f} "
+            f"gate_bce={row['train_loss_gate_bce']:.4f} min_out={row['train_loss_minutes_out']:.4f} "
+            f"k_reg={row['train_loss_k_reg']:.4f} smear={row['train_loss_anti_smear']:.4f}) "
             f"train_mae_player={row['train_mae_player']:.4f} train_mae_team_w={row['train_mae_team_w']:.4f} "
             f"val_mae_player={row['val_mae_player']:.4f} val_mae_team={row['val_mae_team']:.4f} val_mae_team_w={row['val_mae_team_w']:.4f} "
-            f"val_tail={row['val_tail_mean_team240_top9']:.2f} val_rot8={row['val_rotation_size8_mean']:.2f}"
+            f"val_tail={row['val_tail_mean_team240_top9']:.2f} val_rot8={row['val_rotation_size8_mean']:.2f} "
+            f"val_k_hat={row['val_rotation_size_hat_mean']:.2f}"
         )
         if "val_rot_loss" in row:
             msg += f" val_rot_loss={row['val_rot_loss']:.4f}"
