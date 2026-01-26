@@ -720,7 +720,9 @@ def _evaluate(
 
             if (lambda_rot > 0 or lambda_fp > 0) and use_gate_head:
                 w_inj = 1.0 + float(inj_weight_scale) * torch.clamp(vacated_minutes / 60.0, min=0.0, max=1.0)
-                w_inj = w_inj.view(-1, 1)
+                # Cap effective weight to prevent double-amplification of injury regimes.
+                w_eff = torch.clamp(w * w_inj.view(-1), max=2.0)
+                w_eff = w_eff.view(-1, 1)
 
                 y_rot_hard = (y >= float(rot_target_threshold)).to(dtype=pred.dtype)
                 if rot_target_mode == "soft":
@@ -729,6 +731,7 @@ def _evaluate(
                     y_rot = y_rot_hard
 
                 rot_mask_f = final_mask.to(dtype=pred.dtype)
+                weights = rot_mask_f * w_eff
                 if lambda_rot > 0:
                     if rot_loss_type == "focal":
                         per_el = _focal_bce_with_logits(
@@ -743,7 +746,6 @@ def _evaluate(
                             y_rot,
                             reduction="none",
                         )
-                    weights = rot_mask_f * w_inj * w.view(-1, 1)
                     rot_loss_sum += float((per_el * weights).sum().item())
                     rot_loss_denom += float(weights.sum().item())
 
@@ -763,7 +765,6 @@ def _evaluate(
                 if lambda_fp > 0:
                     excess = torch.relu(pred - float(fp_minutes_threshold)) ** 2
                     fp = excess * (1.0 - y_rot_hard)
-                    weights = rot_mask_f * w_inj * w.view(-1, 1)
                     fp_loss_sum += float((fp * weights).sum().item())
                     fp_loss_denom += float(weights.sum().item())
 
@@ -1110,6 +1111,12 @@ def main() -> None:
             "mae_team_w (sample_w-weighted per-team, default)."
         ),
     )
+    parser.add_argument(
+        "--tail-floor-minutes",
+        type=float,
+        default=0.0,
+        help="If > 0, add weak regularization to prevent tail collapse: 0.01 * relu(floor - tail)^2.",
+    )
 
     args = parser.parse_args()
 
@@ -1448,7 +1455,9 @@ def main() -> None:
                 final_mask = alloc_mask & mask
                 rot_mask_f = final_mask.to(dtype=pred.dtype)
                 w_inj = 1.0 + float(inj_weight_scale) * torch.clamp(vacated_minutes / 60.0, min=0.0, max=1.0)
-                w_inj = w_inj.view(-1, 1)
+                # Cap effective weight to prevent double-amplification of injury regimes.
+                w_eff = torch.clamp(w * w_inj.view(-1), max=2.0)
+                w_eff = w_eff.view(-1, 1)
 
                 y_rot_hard = (y >= float(rot_target_threshold)).to(dtype=pred.dtype)
                 if rot_target_mode == "soft":
@@ -1456,7 +1465,7 @@ def main() -> None:
                 else:
                     y_rot = y_rot_hard
 
-                weights = rot_mask_f * w_inj * w.view(-1, 1)
+                weights = rot_mask_f * w_eff
                 if lambda_rot > 0:
                     if rot_loss_type == "focal":
                         per_el = _focal_bce_with_logits(
@@ -1497,11 +1506,23 @@ def main() -> None:
 
                 loss_router = float(lambda_router_load_balance) * loss_router_lb + float(lambda_router_entropy) * loss_router_entropy
 
+            # Tail floor regularizer (optional, behind --tail-floor-minutes flag).
+            loss_tail_floor = pred.new_tensor(0.0)
+            tail_floor_minutes = float(args.tail_floor_minutes)
+            if tail_floor_minutes > 0.0:
+                final_mask_tail = alloc_mask & mask
+                pred_team = pred * final_mask_tail.to(dtype=pred.dtype)
+                top9_sum = torch.topk(pred_team, k=min(9, pred_team.shape[1]), dim=1).values.sum(dim=1)
+                tail = 240.0 - top9_sum
+                tail_penalty = torch.relu(tail_floor_minutes - tail) ** 2
+                loss_tail_floor = 0.01 * tail_penalty.mean()
+
             loss = (
                 loss_min
                 + float(lambda_rot) * loss_rot
                 + float(lambda_fp) * loss_fp
                 + loss_router
+                + loss_tail_floor
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
