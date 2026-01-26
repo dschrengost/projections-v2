@@ -21,6 +21,8 @@ from projections.features.dnp_history import (
     derive_roster_active_pre_tip,
 )
 from projections.rotation.rotation_set_minutes_features_v1 import (
+    ROTATION_SET_DERIVED_FEATURES,
+    add_rotation_set_derived_features,
     apply_odds_missing_flags,
     fill_numeric_missing_with_zero,
     join_rotation_priors,
@@ -519,6 +521,11 @@ def build_rotation_set_minutes_v1_features(
             work["consecutive_active_dnp"] = 0
             work["active_but_dnp_rate_last10"] = config.alpha / (config.alpha + config.beta)
             work["inactive_streak_len"] = 0
+
+    # Compute derived features (team counts, vacancy features, etc.) if needed by the model.
+    derived_needed = [c for c in ROTATION_SET_DERIVED_FEATURES if c in feature_columns and c not in work.columns]
+    if derived_needed:
+        work = add_rotation_set_derived_features(work, feature_columns=feature_columns)
 
     # Validate feature list + keep opponent_team_id for embeddings.
     # Also keep minutes_features_row_missing for guardrail logic even if not a model feature.
