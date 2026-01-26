@@ -175,7 +175,11 @@ def apply_rotation_minutes_guardrails(
         n_blended = int(blend_team_mask.sum())
         degraded_reasons.append(f"blend_to_baseline:{n_blended}_rows")
 
-    row_missing = pd.to_numeric(work.get(minutes_features_row_missing_col, 0), errors="coerce").fillna(0).astype(int)
+    if minutes_features_row_missing_col in work.columns:
+        row_missing = pd.to_numeric(work[minutes_features_row_missing_col], errors="coerce")
+    else:
+        row_missing = pd.Series(0, index=work.index)
+    row_missing = row_missing.fillna(0).astype(int)
     row_fallback_mask = row_missing.to_numpy(dtype=int) == 1
     if row_fallback_mask.any():
         guarded = guarded.where(~row_fallback_mask, base)
