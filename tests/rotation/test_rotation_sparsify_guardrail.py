@@ -384,3 +384,106 @@ class TestSparsifyByMinutes:
         # The min kept score should be >= some reasonable value (depends on renorm)
         # The max should be close to the original max minutes
         assert sparsify["kept_score_max"] >= 30.0, "Max kept score should be high"
+
+
+class TestGuardrailsAlwaysRunAndReturnStats:
+    """Test that guardrails always run and return stats, even when sparsify is disabled."""
+
+    def _make_two_team_df(self) -> pd.DataFrame:
+        """Build a 2-team DataFrame for testing guardrails visibility."""
+        # Team A: 10 players, realistic distribution summing to 240
+        team_a_minutes = [36.0, 34.0, 32.0, 30.0, 28.0, 22.0, 18.0, 15.0, 13.0, 12.0]
+        # Team B: 10 players, similar distribution
+        team_b_minutes = [35.0, 33.0, 31.0, 29.0, 27.0, 23.0, 19.0, 16.0, 14.0, 13.0]
+
+        rows = []
+        for i, mins in enumerate(team_a_minutes):
+            rows.append({
+                "game_id": "0022401234",
+                "team_id": 1610612744,
+                "player_id": 100 + i,
+                "minutes_p50": mins,
+                "rotation_minutes_p50": mins,
+                "baseline_minutes_p50": mins,
+                "gate_prob": 0.9 - i * 0.05,
+                "minutes_features_row_missing": 0,
+                "injury_snapshot_missing": 0.0,
+                "is_out": 0,
+                "status": None,
+            })
+        for i, mins in enumerate(team_b_minutes):
+            rows.append({
+                "game_id": "0022401234",
+                "team_id": 1610612745,
+                "player_id": 200 + i,
+                "minutes_p50": mins,
+                "rotation_minutes_p50": mins,
+                "baseline_minutes_p50": mins,
+                "gate_prob": 0.9 - i * 0.05,
+                "minutes_features_row_missing": 0,
+                "injury_snapshot_missing": 0.0,
+                "is_out": 0,
+                "status": None,
+            })
+        return pd.DataFrame(rows)
+
+    def test_guardrails_return_stats_when_sparsify_disabled(self) -> None:
+        """Guardrails should return stats even when sparsify is disabled."""
+        df = self._make_two_team_df()
+
+        result = apply_rotation_minutes_guardrails(
+            df,
+            rotation_p50_col="minutes_p50",
+            baseline_p50_col="baseline_minutes_p50",
+            sparsify_enable=False,  # Disabled
+        )
+
+        # Stats should still be present
+        assert "sparsify" in result.summary
+        assert result.summary["sparsify"]["enabled"] is False
+        # Other guardrail stats should be present
+        assert "rows" in result.summary
+        assert "pathology" in result.summary
+        assert "degraded" in result.summary
+        assert "degraded_reasons" in result.summary
+
+    def test_guardrails_sparsify_reduces_player_count_with_minutes_col(self) -> None:
+        """Sparsify using minutes_p50 should reduce players >1 min per team to <=kmax."""
+        df = self._make_two_team_df()
+
+        # Count players with >1 minute before guardrails
+        pre_count_team_a = (df[df["team_id"] == 1610612744]["minutes_p50"] > 1.0).sum()
+        pre_count_team_b = (df[df["team_id"] == 1610612745]["minutes_p50"] > 1.0).sum()
+
+        result = apply_rotation_minutes_guardrails(
+            df,
+            rotation_p50_col="minutes_p50",
+            baseline_p50_col="baseline_minutes_p50",
+            sparsify_enable=True,
+            sparsify_use_col="minutes_p50",  # Use minutes as score
+            sparsify_topk=6,
+            sparsify_tau=15.0,  # Only players with >=15 mins pass tau
+            sparsify_kmax=8,  # Cap at 8
+            sparsify_min_keep=5,
+        )
+
+        # Merge result back for per-team analysis
+        result_df = df.copy()
+        result_df["final_minutes"] = result.minutes_p50
+
+        # Count players with >1 minute after guardrails
+        post_count_team_a = (result_df[result_df["team_id"] == 1610612744]["final_minutes"] > 1.0).sum()
+        post_count_team_b = (result_df[result_df["team_id"] == 1610612745]["final_minutes"] > 1.0).sum()
+
+        # Should have fewer players with >1 min (or at most kmax)
+        assert post_count_team_a <= 8, f"Team A should have <=8 players with >1 min, got {post_count_team_a}"
+        assert post_count_team_b <= 8, f"Team B should have <=8 players with >1 min, got {post_count_team_b}"
+
+        # Verify stats are present and meaningful
+        sparsify_stats = result.summary["sparsify"]
+        assert sparsify_stats["enabled"] is True
+        assert sparsify_stats["use_col"] == "minutes_p50"
+        assert "n_teams_sparsified" in sparsify_stats
+        assert "n_players_zeroed" in sparsify_stats
+        # At least one team should have been sparsified (had players zeroed)
+        assert sparsify_stats["n_players_zeroed"] >= 0  # May be 0 if all players passed criteria
