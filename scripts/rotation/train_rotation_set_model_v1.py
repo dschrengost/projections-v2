@@ -1036,12 +1036,19 @@ def main() -> None:
         default="load_balance",
         help="Router regularizer type (applied when --moe-experts > 1).",
     )
-    parser.add_argument("--entmax-alpha", type=float, default=1.5, help="Alpha for entmax (alloc-activation=entmax).")
     parser.add_argument(
+        "--entmax-alpha",
+        type=float,
+        default=1.5,
+        help="Alpha for entmax activation (1.0=softmax, 1.5=entmax15, 2.0=sparsemax). Lower => softer allocation.",
+    )
+    parser.add_argument(
+        "--alloc-temp",
         "--share-temperature",
         type=float,
         default=1.0,
-        help="Temperature for share logits before simplex activation (lower => sharper).",
+        dest="share_temperature",
+        help="Temperature for allocation logits before simplex activation. Higher => softer/more spread allocation.",
     )
     parser.add_argument("--lambda-rot", type=float, default=0.6, help="Membership (rotation) loss weight.")
     parser.add_argument("--lambda-fp", type=float, default=0.05, help="False-positive minutes penalty weight.")

@@ -433,3 +433,189 @@ def test_return_aux_without_moe_router_df_is_none(tmp_path: Path) -> None:
     result = predictor.predict(df, return_aux=True)
 
     assert result.router_df is None
+
+
+# -----------------------------------------------------------------------------
+# Tests for allocation temperature / share_temperature (softening the simplex)
+# -----------------------------------------------------------------------------
+
+
+def test_share_temperature_1_matches_baseline() -> None:
+    """share_temperature=1.0 should produce identical output to the baseline."""
+    torch.manual_seed(42)
+    gate_logits = torch.randn(2, 5, dtype=torch.float32)
+    share_logits = torch.randn(2, 5, dtype=torch.float32)
+    mask = torch.ones(2, 5, dtype=torch.bool)
+
+    minutes_t1 = minutes_from_gate_and_share_logits(
+        gate_logits,
+        share_logits,
+        mask,
+        total_minutes=240.0,
+        alloc_activation="entmax",
+        entmax_alpha=1.5,
+        share_temperature=1.0,
+    )
+    # Call again with same temperature to verify determinism
+    minutes_t1_again = minutes_from_gate_and_share_logits(
+        gate_logits,
+        share_logits,
+        mask,
+        total_minutes=240.0,
+        alloc_activation="entmax",
+        entmax_alpha=1.5,
+        share_temperature=1.0,
+    )
+
+    torch.testing.assert_close(minutes_t1, minutes_t1_again, rtol=0.0, atol=1e-9)
+    torch.testing.assert_close(minutes_t1.sum(dim=1), torch.tensor([240.0, 240.0]), rtol=0.0, atol=1e-4)
+
+
+def test_higher_share_temperature_produces_less_peaked_allocation() -> None:
+    """Higher temperature should produce more spread-out (less peaked) allocations."""
+    torch.manual_seed(42)
+    gate_logits = torch.tensor([[5.0, 3.0, 1.0, -1.0, -3.0]], dtype=torch.float32)
+    share_logits = torch.tensor([[5.0, 3.0, 1.0, -1.0, -3.0]], dtype=torch.float32)
+    mask = torch.ones(1, 5, dtype=torch.bool)
+
+    minutes_t1 = minutes_from_gate_and_share_logits(
+        gate_logits,
+        share_logits,
+        mask,
+        total_minutes=240.0,
+        alloc_activation="entmax",
+        entmax_alpha=1.5,
+        share_temperature=1.0,
+    )
+    minutes_t2 = minutes_from_gate_and_share_logits(
+        gate_logits,
+        share_logits,
+        mask,
+        total_minutes=240.0,
+        alloc_activation="entmax",
+        entmax_alpha=1.5,
+        share_temperature=2.0,
+    )
+
+    # Both should sum to 240
+    torch.testing.assert_close(minutes_t1.sum(dim=1), torch.tensor([240.0]), rtol=0.0, atol=1e-4)
+    torch.testing.assert_close(minutes_t2.sum(dim=1), torch.tensor([240.0]), rtol=0.0, atol=1e-4)
+
+    # Higher temperature should reduce the max allocation
+    max_t1 = minutes_t1.max(dim=1).values.item()
+    max_t2 = minutes_t2.max(dim=1).values.item()
+    assert max_t2 < max_t1, f"Expected max_t2 ({max_t2}) < max_t1 ({max_t1})"
+
+    # Higher temperature should increase the min non-zero allocation
+    # (fewer zeros, more spread)
+    nonzero_t1 = minutes_t1[minutes_t1 > 1.0]
+    nonzero_t2 = minutes_t2[minutes_t2 > 1.0]
+    # With temperature 2, we expect more players to get meaningful minutes
+    assert len(nonzero_t2) >= len(nonzero_t1), "Higher temp should spread minutes to more players"
+
+
+def test_lower_entmax_alpha_produces_softer_allocation() -> None:
+    """Lower entmax_alpha (closer to 1.0) should produce softer allocations."""
+    torch.manual_seed(42)
+    gate_logits = torch.tensor([[10.0, 5.0, 0.0, -5.0]], dtype=torch.float32)
+    share_logits = torch.tensor([[10.0, 5.0, 0.0, -5.0]], dtype=torch.float32)
+    mask = torch.ones(1, 4, dtype=torch.bool)
+
+    # entmax_alpha=2.0 is effectively sparsemax (sparsest)
+    minutes_alpha2 = minutes_from_gate_and_share_logits(
+        gate_logits,
+        share_logits,
+        mask,
+        total_minutes=240.0,
+        alloc_activation="entmax",
+        entmax_alpha=2.0,
+        share_temperature=1.0,
+    )
+    # entmax_alpha=1.5 is standard entmax
+    minutes_alpha15 = minutes_from_gate_and_share_logits(
+        gate_logits,
+        share_logits,
+        mask,
+        total_minutes=240.0,
+        alloc_activation="entmax",
+        entmax_alpha=1.5,
+        share_temperature=1.0,
+    )
+    # entmax_alpha closer to 1.0 approaches softmax (softest)
+    minutes_alpha12 = minutes_from_gate_and_share_logits(
+        gate_logits,
+        share_logits,
+        mask,
+        total_minutes=240.0,
+        alloc_activation="entmax",
+        entmax_alpha=1.2,
+        share_temperature=1.0,
+    )
+
+    # All should sum to 240
+    for m in [minutes_alpha2, minutes_alpha15, minutes_alpha12]:
+        torch.testing.assert_close(m.sum(dim=1), torch.tensor([240.0]), rtol=0.0, atol=1e-4)
+
+    # Lower alpha => fewer exact zeros
+    zeros_alpha2 = (minutes_alpha2 < 0.1).sum().item()
+    zeros_alpha15 = (minutes_alpha15 < 0.1).sum().item()
+    zeros_alpha12 = (minutes_alpha12 < 0.1).sum().item()
+    assert zeros_alpha12 <= zeros_alpha15 <= zeros_alpha2, (
+        f"Expected zeros to decrease with lower alpha: {zeros_alpha12} <= {zeros_alpha15} <= {zeros_alpha2}"
+    )
+
+
+def test_minutes_from_logits_temperature_softens_allocation() -> None:
+    """Test temperature effect on minutes_from_logits (non-gate-head path)."""
+    torch.manual_seed(42)
+    logits = torch.tensor([[5.0, 3.0, 1.0, -1.0, -3.0]], dtype=torch.float32)
+    mask = torch.ones(1, 5, dtype=torch.bool)
+
+    minutes_t1 = minutes_from_logits(
+        logits,
+        mask,
+        total_minutes=240.0,
+        alloc_activation="entmax",
+        entmax_alpha=1.5,
+        temperature=1.0,
+    )
+    minutes_t3 = minutes_from_logits(
+        logits,
+        mask,
+        total_minutes=240.0,
+        alloc_activation="entmax",
+        entmax_alpha=1.5,
+        temperature=3.0,
+    )
+
+    # Both should sum to 240
+    torch.testing.assert_close(minutes_t1.sum(dim=1), torch.tensor([240.0]), rtol=0.0, atol=1e-4)
+    torch.testing.assert_close(minutes_t3.sum(dim=1), torch.tensor([240.0]), rtol=0.0, atol=1e-4)
+
+    # Higher temperature should reduce the max allocation
+    max_t1 = minutes_t1.max(dim=1).values.item()
+    max_t3 = minutes_t3.max(dim=1).values.item()
+    assert max_t3 < max_t1, f"Expected max_t3 ({max_t3}) < max_t1 ({max_t1})"
+
+
+def test_share_temperature_validation() -> None:
+    """share_temperature <= 0 should raise ValueError."""
+    gate_logits = torch.tensor([[1.0, 2.0]], dtype=torch.float32)
+    share_logits = torch.tensor([[1.0, 2.0]], dtype=torch.float32)
+    mask = torch.ones(1, 2, dtype=torch.bool)
+
+    with pytest.raises(ValueError, match="share_temperature must be > 0"):
+        minutes_from_gate_and_share_logits(
+            gate_logits,
+            share_logits,
+            mask,
+            share_temperature=0.0,
+        )
+
+    with pytest.raises(ValueError, match="share_temperature must be > 0"):
+        minutes_from_gate_and_share_logits(
+            gate_logits,
+            share_logits,
+            mask,
+            share_temperature=-1.0,
+        )
