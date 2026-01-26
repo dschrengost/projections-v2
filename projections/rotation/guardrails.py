@@ -336,17 +336,19 @@ def apply_rotation_minutes_guardrails(
         metrics_team["pathology_fallback"] = False
         metrics_team["pathology_reason"] = ""
 
-    # Sparsify: zero out players with low gate probability, renormalize to team target.
+    # Sparsify: zero out players with low score (minutes or gate_prob), renormalize to team target.
     # This is applied AFTER row fallback, OUT handling, tail clamp, and pathology fallback.
-    sparsify_stats: dict[str, int | float] = {"enabled": sparsify_enable}
+    # The sparsify_use_col is a numeric "score" column - higher values are kept.
+    # Typical use: "rotation_minutes_p50" for minutes-based sparsify, "gate_prob" for prob-based.
+    sparsify_stats: dict[str, Any] = {"enabled": sparsify_enable}
     if sparsify_enable:
-        # Check if gate_prob column exists
+        # Check if score column exists
         if sparsify_use_col not in work.columns:
             sparsify_stats["skipped"] = True
             sparsify_stats["skip_reason"] = "column_missing"
         else:
             sparsify_stats["skipped"] = False
-            gate_prob_arr = pd.to_numeric(work[sparsify_use_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            score_arr = pd.to_numeric(work[sparsify_use_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
 
             # Build fixed mask: rows that must not be modified
             # Include: row_fallback_mask, clamp_aligned (tail-clamped teams), out_mask
@@ -360,6 +362,8 @@ def apply_rotation_minutes_guardrails(
             guarded_arr = guarded.to_numpy(dtype=np.float64)
             n_teams_sparsified = 0
             n_players_zeroed = 0
+            # Track min/max score of kept players for diagnostics
+            kept_scores: list[float] = []
 
             # Process each team-game
             for (game_id, team_id), idx in work.groupby(group_cols, sort=False).groups.items():
@@ -370,27 +374,27 @@ def apply_rotation_minutes_guardrails(
                 if not eligible_team.any():
                     continue
 
-                # Get gate probs for eligible players
+                # Get scores for eligible players
                 eligible_idx = idx_arr[eligible_team]
-                gp_eligible = gate_prob_arr[eligible_idx]
+                score_eligible = score_arr[eligible_idx]
 
-                # Sort eligible players by gate_prob descending
-                sort_order = np.argsort(-gp_eligible)
+                # Sort eligible players by score descending
+                sort_order = np.argsort(-score_eligible)
                 sorted_idx = eligible_idx[sort_order]
-                sorted_gp = gp_eligible[sort_order]
+                sorted_score = score_eligible[sort_order]
 
                 # Build keep set:
                 # 1. Start with top sparsify_topk
                 keep_mask = np.zeros(len(sorted_idx), dtype=bool)
                 keep_mask[:min(sparsify_topk, len(keep_mask))] = True
 
-                # 2. Union with rows where gate_prob >= tau
-                above_tau = sorted_gp >= sparsify_tau
+                # 2. Union with rows where score >= tau
+                above_tau = sorted_score >= sparsify_tau
                 keep_mask = keep_mask | above_tau
 
-                # 3. If keep size > kmax, trim lowest gate_prob
+                # 3. If keep size > kmax, trim lowest score (keep only top kmax)
                 if keep_mask.sum() > sparsify_kmax:
-                    # Keep only the top kmax by gate_prob (already sorted)
+                    # Keep only the top kmax by score (already sorted)
                     keep_count = 0
                     for i in range(len(keep_mask)):
                         if keep_mask[i]:
@@ -399,7 +403,7 @@ def apply_rotation_minutes_guardrails(
                             else:
                                 keep_mask[i] = False
 
-                # 4. If keep size < min_keep, add next highest gate_prob
+                # 4. If keep size < min_keep, add next highest score
                 if keep_mask.sum() < sparsify_min_keep:
                     needed = sparsify_min_keep - keep_mask.sum()
                     for i in range(len(keep_mask)):
@@ -414,6 +418,10 @@ def apply_rotation_minutes_guardrails(
                     guarded_arr[zero_idx] = 0.0
                     n_players_zeroed += len(zero_idx)
                     n_teams_sparsified += 1
+
+                # Track kept scores for diagnostics
+                if keep_mask.any():
+                    kept_scores.extend(sorted_score[keep_mask].tolist())
 
                 # Renormalize kept eligible rows to target = team_target_minutes - sum(fixed rows)
                 fixed_idx = idx_arr[fixed_team]
@@ -439,6 +447,13 @@ def apply_rotation_minutes_guardrails(
             sparsify_stats["tau"] = sparsify_tau
             sparsify_stats["kmax"] = sparsify_kmax
             sparsify_stats["min_keep"] = sparsify_min_keep
+            sparsify_stats["use_col"] = sparsify_use_col
+            # Add diagnostics for kept player scores
+            if kept_scores:
+                sparsify_stats["kept_score_min"] = float(np.min(kept_scores))
+                sparsify_stats["kept_score_max"] = float(np.max(kept_scores))
+                n_teams = max(1, n_teams_sparsified) if n_teams_sparsified > 0 else len(work.groupby(group_cols, sort=False).groups)
+                sparsify_stats["n_kept_mean"] = round(len(kept_scores) / max(1, n_teams), 2)
 
     if cap_max_minutes is not None:
         cap_val = float(cap_max_minutes)

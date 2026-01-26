@@ -1598,6 +1598,7 @@ def main(
         sparsify_tau=config.sparsify_tau,
         sparsify_kmax=config.sparsify_kmax,
         sparsify_min_keep=config.sparsify_min_keep,
+        sparsify_use_col=config.sparsify_use_col,
     )
     new_p50 = guardrail.minutes_p50
 
