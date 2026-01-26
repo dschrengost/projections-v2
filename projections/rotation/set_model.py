@@ -1378,14 +1378,19 @@ def predict_minutes(
     model_dir: str | Path | None = None,
     device: str = "cpu",
     batch_size: int = 64,
-) -> pd.DataFrame:
+    return_aux: bool = False,
+) -> pd.DataFrame | RotationSetAuxOutputs:
     """Predict per-player minutes from a flat feature dataframe.
 
     The dataframe is internally grouped by (game_id, team_id) and padded/masked per batch.
+
+    Args:
+        return_aux: If True, return RotationSetAuxOutputs with gate_prob and other aux columns.
     """
 
     resolved_dir = model_dir or os.environ.get(MODEL_DIR_ENV)
     if not resolved_dir:
         raise ValueError(f"model_dir must be provided or {MODEL_DIR_ENV} must be set")
     predictor = RotationSetMinutesPredictor.load(Path(resolved_dir), device=device)
-    return predictor.predict(df_features, batch_size=batch_size)
+    return predictor.predict(df_features, batch_size=batch_size, return_aux=return_aux)
+
