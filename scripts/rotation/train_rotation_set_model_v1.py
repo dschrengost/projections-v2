@@ -1229,7 +1229,7 @@ def main() -> None:
         feature_std=std.astype(float).tolist(),
         use_prior_head=use_prior_head,
         prior_weight_col=prior_weight_col,
-            sample_w_injury_scale=float(args.sample_w_injury_scale),
+        sample_w_injury_scale=float(args.sample_w_injury_scale),
         prior_weight_floor=prior_weight_floor,
         use_team_embeddings=True,
         team_id_vocab=team_id_vocab,
