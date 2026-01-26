@@ -1372,39 +1372,35 @@ def main(
         )
         out_df["minutes_p50"] = scaled_minutes
 
-        # Apply rotation minutes guardrails (including sparsify) to primary_mode output
-        # Use pre-guardrail minutes as baseline for fallback/pathology comparisons
-        if config.sparsify_enable:
-            guardrail_result = apply_rotation_minutes_guardrails(
-                out_df,
-                rotation_p50_col="minutes_p50",
-                baseline_p50_col="minutes_p50",  # Use same for primary mode (no separate baseline)
-                minutes_features_row_missing_col="minutes_features_row_missing",
-                injury_snapshot_missing_col="injury_snapshot_missing",
-                out_flag_col="is_out",
-                status_col="status",
-                blend_weight=0.0,  # No blend in primary mode
-                injury_coverage_threshold=inj_thr,
-                dnp_tail_minutes_threshold=dnp_thr,
-                cap_max_minutes=None,  # Already scaled to 240
-                enable_blend_to_baseline=False,  # No blend in primary mode
-                sparsify_enable=config.sparsify_enable,
-                sparsify_topk=config.sparsify_topk,
-                sparsify_tau=config.sparsify_tau,
-                sparsify_kmax=config.sparsify_kmax,
-                sparsify_min_keep=config.sparsify_min_keep,
-                sparsify_use_col=config.sparsify_use_col,
-            )
-            out_df["minutes_p50"] = guardrail_result.minutes_p50
-            sparsify_stats = guardrail_result.summary.get("sparsify", {})
-            typer.echo(
-                f"[rotation_minutes] applied guardrails: sparsify_enabled={config.sparsify_enable} "
-                f"use_col={config.sparsify_use_col} topk={config.sparsify_topk} tau={config.sparsify_tau} "
-                f"kmax={config.sparsify_kmax} min_keep={config.sparsify_min_keep} "
-                f"n_teams_sparsified={sparsify_stats.get('n_teams_sparsified', 0)} "
-                f"n_players_zeroed={sparsify_stats.get('n_players_zeroed', 0)}",
-                err=True,
-            )
+        # Apply rotation minutes guardrails (including sparsify) UNCONDITIONALLY in primary mode.
+        # This ensures guardrails always run and stats are always visible in logs + summary.json.
+        # Use pre-guardrail minutes as baseline for fallback/pathology comparisons.
+        guardrail_result = apply_rotation_minutes_guardrails(
+            out_df,
+            rotation_p50_col="minutes_p50",
+            baseline_p50_col="minutes_p50",  # Use same for primary mode (no separate baseline)
+            minutes_features_row_missing_col="minutes_features_row_missing",
+            injury_snapshot_missing_col="injury_snapshot_missing",
+            out_flag_col="is_out",
+            status_col="status",
+            blend_weight=0.0,  # No blend in primary mode
+            injury_coverage_threshold=inj_thr,
+            dnp_tail_minutes_threshold=dnp_thr,
+            cap_max_minutes=None,  # Already scaled to 240
+            enable_blend_to_baseline=False,  # No blend in primary mode
+            sparsify_enable=config.sparsify_enable,
+            sparsify_topk=config.sparsify_topk,
+            sparsify_tau=config.sparsify_tau,
+            sparsify_kmax=config.sparsify_kmax,
+            sparsify_min_keep=config.sparsify_min_keep,
+            sparsify_use_col=config.sparsify_use_col,
+        )
+        out_df["minutes_p50"] = guardrail_result.minutes_p50
+        guardrail_stats = guardrail_result.summary
+        typer.echo(
+            f"[rotation_minutes] guardrails: {json.dumps(guardrail_stats, default=str)}",
+            err=True,
+        )
 
         out_mask = _derive_out_mask(out_df)
         play_prob, rotation_prob = _derive_gate_probs(out_df["minutes_p50"], out_mask=out_mask)
@@ -1439,6 +1435,7 @@ def main(
                     "team_scale": scale_summary,
                     "espn_out_count": espn_out_count,
                     "espn_matched_count": espn_matched_count,
+                    "guardrails": guardrail_stats,
                 },
                 "counts": {
                     "rows": int(len(out_df)),
@@ -1448,22 +1445,28 @@ def main(
             },
         )
 
+        # Track degradation from guardrails as well as scale issues
+        guardrail_degraded = guardrail_result.degraded
+        degraded = scale_summary.get("zero_sum_teams", 0) > 0 or guardrail_degraded
+        degraded_reasons = []
+        if scale_summary.get("zero_sum_teams", 0) > 0:
+            degraded_reasons.append(f"zero_sum_teams:{scale_summary.get('zero_sum_teams', 0)}")
+        if guardrail_degraded:
+            degraded_reasons.extend(guardrail_result.degraded_reasons)
+
         provenance = build_provenance(
             alloc_mode="rotation_set",
             model_dir=resolved_model_dir,
             run_id=run_id,
             game_date=day.strftime("%Y-%m-%d"),
-            degraded=scale_summary.get("zero_sum_teams", 0) > 0,
-            degraded_reason=(
-                f"zero_sum_teams:{scale_summary.get('zero_sum_teams', 0)}"
-                if scale_summary.get("zero_sum_teams", 0) > 0
-                else ""
-            ),
+            degraded=degraded,
+            degraded_reason="; ".join(degraded_reasons) if degraded_reasons else "",
             extras={
                 "mode": resolved_mode,
                 "team_scale": scale_summary,
                 "espn_out_count": espn_out_count,
                 "espn_matched_count": espn_matched_count,
+                "guardrails": guardrail_stats,
             },
         )
         inject_provenance_into_summary(summary_path, provenance)
