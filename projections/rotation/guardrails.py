@@ -81,6 +81,13 @@ def apply_rotation_minutes_guardrails(
     pathology_min_top5_sum_threshold: float = 125.0,
     team_target_minutes: float = 240.0,
     enable_blend_to_baseline: bool = False,
+    # Sparsify parameters (opt-in, default disabled)
+    sparsify_enable: bool = False,
+    sparsify_topk: int = 9,
+    sparsify_tau: float = 0.55,
+    sparsify_kmax: int = 11,
+    sparsify_min_keep: int = 8,
+    sparsify_use_col: str = "gate_prob",
 ) -> RotationGuardrailResult:
     """Apply guardrails and return guarded p50 minutes.
 
@@ -91,15 +98,23 @@ def apply_rotation_minutes_guardrails(
          minutes = w*rotation + (1-w)*baseline for the whole team-game.
       3) Tail clamp: if a team-game allocates > threshold minutes to DNP-proxy rows
          (play_prob==0 equivalent, e.g. status OUT), fall back to baseline for that team-game.
-      4) Optional cap: when cap_max_minutes is set, cap per-player p50 and redistribute
-         within the team-game back to `team_target_minutes` while preserving fallback rows.
-      5) Pathology fallback: for obviously impossible allocations (e.g. OT-level minutes or
+      4) Pathology fallback: for obviously impossible allocations (e.g. OT-level minutes or
          extreme concentration), fall back to baseline for the entire team-game.
+      5) Sparsify (DISABLED by default): Zero out minutes for players unlikely to play,
+         keeping top-K by gate probability plus anyone above τ threshold.
+      6) Optional cap: when cap_max_minutes is set, cap per-player p50 and redistribute
+         within the team-game back to `team_target_minutes` while preserving fallback rows.
 
     Args:
         enable_blend_to_baseline: If False (default), blend-to-baseline is disabled.
             This was previously the default behavior but is now opt-in to let the
             transformer model signal through without suppression.
+        sparsify_enable: If True, apply gate-based sparsification after pathology fallback.
+        sparsify_topk: Keep at least top-K players by gate probability.
+        sparsify_tau: Keep anyone with gate_prob >= tau.
+        sparsify_kmax: Maximum number of players to keep per team-game.
+        sparsify_min_keep: Minimum number of players to keep per team-game.
+        sparsify_use_col: Column name containing gate probabilities.
     """
     # Track degradation reasons
     degraded_reasons: list[str] = []
@@ -314,6 +329,110 @@ def apply_rotation_minutes_guardrails(
         metrics_team["pathology_fallback"] = False
         metrics_team["pathology_reason"] = ""
 
+    # Sparsify: zero out players with low gate probability, renormalize to team target.
+    # This is applied AFTER row fallback, OUT handling, tail clamp, and pathology fallback.
+    sparsify_stats: dict[str, int | float] = {"enabled": sparsify_enable}
+    if sparsify_enable:
+        # Check if gate_prob column exists
+        if sparsify_use_col not in work.columns:
+            sparsify_stats["skipped"] = True
+            sparsify_stats["skip_reason"] = "column_missing"
+        else:
+            sparsify_stats["skipped"] = False
+            gate_prob_arr = pd.to_numeric(work[sparsify_use_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+
+            # Build fixed mask: rows that must not be modified
+            # Include: row_fallback_mask, clamp_aligned (tail-clamped teams), out_mask
+            fixed_mask_sparsify = row_fallback_mask | clamp_aligned | out_mask.to_numpy(dtype=bool)
+            # Also exclude pathology-fallback team-games
+            if "pathology_fallback" in metrics_team.columns and bool(metrics_team["pathology_fallback"].any()):
+                pathology_fallbacks = metrics_team.loc[metrics_team["pathology_fallback"], group_cols]
+                pathology_index = pd.MultiIndex.from_frame(pathology_fallbacks)
+                fixed_mask_sparsify = fixed_mask_sparsify | team_index.isin(pathology_index)
+
+            guarded_arr = guarded.to_numpy(dtype=np.float64)
+            n_teams_sparsified = 0
+            n_players_zeroed = 0
+
+            # Process each team-game
+            for (game_id, team_id), idx in work.groupby(group_cols, sort=False).groups.items():
+                idx_arr = np.asarray(list(idx), dtype=int)
+                fixed_team = fixed_mask_sparsify[idx_arr]
+                eligible_team = ~fixed_team
+
+                if not eligible_team.any():
+                    continue
+
+                # Get gate probs for eligible players
+                eligible_idx = idx_arr[eligible_team]
+                gp_eligible = gate_prob_arr[eligible_idx]
+
+                # Sort eligible players by gate_prob descending
+                sort_order = np.argsort(-gp_eligible)
+                sorted_idx = eligible_idx[sort_order]
+                sorted_gp = gp_eligible[sort_order]
+
+                # Build keep set:
+                # 1. Start with top sparsify_topk
+                keep_mask = np.zeros(len(sorted_idx), dtype=bool)
+                keep_mask[:min(sparsify_topk, len(keep_mask))] = True
+
+                # 2. Union with rows where gate_prob >= tau
+                above_tau = sorted_gp >= sparsify_tau
+                keep_mask = keep_mask | above_tau
+
+                # 3. If keep size > kmax, trim lowest gate_prob
+                if keep_mask.sum() > sparsify_kmax:
+                    # Keep only the top kmax by gate_prob (already sorted)
+                    keep_count = 0
+                    for i in range(len(keep_mask)):
+                        if keep_mask[i]:
+                            if keep_count < sparsify_kmax:
+                                keep_count += 1
+                            else:
+                                keep_mask[i] = False
+
+                # 4. If keep size < min_keep, add next highest gate_prob
+                if keep_mask.sum() < sparsify_min_keep:
+                    needed = sparsify_min_keep - keep_mask.sum()
+                    for i in range(len(keep_mask)):
+                        if not keep_mask[i] and needed > 0:
+                            keep_mask[i] = True
+                            needed -= 1
+
+                # Zero out non-kept eligible players
+                zero_mask = ~keep_mask
+                zero_idx = sorted_idx[zero_mask]
+                if len(zero_idx) > 0:
+                    guarded_arr[zero_idx] = 0.0
+                    n_players_zeroed += len(zero_idx)
+                    n_teams_sparsified += 1
+
+                # Renormalize kept eligible rows to target = team_target_minutes - sum(fixed rows)
+                fixed_idx = idx_arr[fixed_team]
+                fixed_sum = float(np.sum(guarded_arr[fixed_idx]))
+                target = float(team_target_minutes) - fixed_sum
+
+                if target <= 0.0:
+                    # Zero all non-fixed rows
+                    guarded_arr[eligible_idx] = 0.0
+                else:
+                    kept_idx = sorted_idx[keep_mask]
+                    kept_minutes = guarded_arr[kept_idx]
+                    kept_sum = float(np.sum(kept_minutes))
+                    if kept_sum > 0.0:
+                        # Proportional scaling
+                        scale = target / kept_sum
+                        guarded_arr[kept_idx] = kept_minutes * scale
+
+            guarded = pd.Series(guarded_arr, index=work.index, dtype=float)
+            sparsify_stats["n_teams_sparsified"] = n_teams_sparsified
+            sparsify_stats["n_players_zeroed"] = n_players_zeroed
+            sparsify_stats["topk"] = sparsify_topk
+            sparsify_stats["tau"] = sparsify_tau
+            sparsify_stats["kmax"] = sparsify_kmax
+            sparsify_stats["min_keep"] = sparsify_min_keep
+
     if cap_max_minutes is not None:
         cap_val = float(cap_max_minutes)
 
@@ -460,6 +579,9 @@ def apply_rotation_minutes_guardrails(
         summary["cap_pre_max_minutes"] = float(pre_cap_max)
         summary["cap_pre_rate"] = float(pre_cap_rate)
         summary["cap_post_max_minutes"] = float(guarded.max()) if len(work) else 0.0
+
+    # Add sparsify stats to summary
+    summary["sparsify"] = sparsify_stats
 
     # Add degradation tracking to summary
     summary["degraded"] = len(degraded_reasons) > 0
