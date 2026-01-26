@@ -509,6 +509,7 @@ def _build_team_game_examples(
     feature_mean: np.ndarray,
     feature_std: np.ndarray,
     prior_weight_col: str | None = None,
+    sample_w_injury_scale: float = 0.0,
 ) -> list[TeamGameExample]:
     feats = _numeric_frame(df, feature_cols).to_numpy(dtype="float32", copy=False)
     feats = (feats - feature_mean) / feature_std
@@ -566,7 +567,8 @@ def _build_team_game_examples(
                 vacated_minutes_prior_20_total=vacated_minutes,
                 team_out_count=team_out_count,
                 starters_out_proxy=starters_out_proxy,
-                sample_w=1.0,                y=y,
+                sample_w=sw,
+                y=y,
             )
         )
     return examples
@@ -616,6 +618,8 @@ def _evaluate(
     model.eval()
     total_abs = 0.0
     total_count = 0.0
+    mae_w_sum = 0.0
+    mae_w_denom = 0.0
     team_maes: list[float] = []
     rot_loss_sum = 0.0
     rot_loss_denom = 0.0
@@ -656,6 +660,12 @@ def _evaluate(
             prior_w = prior_w.to(device)
             vacated_minutes = vacated_minutes.to(device)
             router_features_batch = router_features_batch.to(device)
+            sample_w = sample_w.to(device) if sample_w is not None else None
+            if sample_w is None:
+                w = torch.ones((x.shape[0],), device=device)
+            else:
+                assert sample_w.ndim == 1 and sample_w.shape[0] == x.shape[0]
+                w = sample_w.to(dtype=torch.float32).clamp(min=0.0)
             y = y.to(device)
             mask = mask.to(device)
             if use_gate_head:
@@ -695,6 +705,9 @@ def _evaluate(
             total_count += float(mask.sum().item())
             per_team = abs_err.sum(dim=1) / mask.sum(dim=1).clamp(min=1).to(dtype=abs_err.dtype)
             team_maes.extend(per_team.cpu().numpy().tolist())
+            # Weighted MAE accumulation.
+            mae_w_sum += float((per_team * w).sum().item())
+            mae_w_denom += float(w.sum().item())
 
             # Team-level diagnostics (computed on alloc_mask, which excludes OUT players).
             final_mask = alloc_mask & mask
@@ -804,11 +817,18 @@ def _evaluate(
                         router_rows_used_inj += float(pi_inj.shape[0])
                         router_max_pi_used_gt_08_inj += float((pi_inj.max(axis=1) > 0.8).sum())
 
-    mae = total_abs / max(total_count, 1.0)
-    team_mae = float(np.mean(team_maes)) if team_maes else float("nan")
+    mae_player = total_abs / max(total_count, 1.0)
+    mae_team = float(np.mean(team_maes)) if team_maes else float("nan")
+    mae_team_w = mae_w_sum / max(mae_w_denom, 1e-6)
     out: dict[str, Any] = {
-        "mae": float(mae),
-        "team_mae": float(team_mae),
+        # New explicit names (preferred).
+        "mae_player": float(mae_player),
+        "mae_team": float(mae_team),
+        "mae_team_w": float(mae_team_w),
+        # Legacy keys (backward compat).
+        "mae": float(mae_player),
+        "team_mae": float(mae_team),
+        "mae_w": float(mae_team_w),
         "tail_mean_team240_top9": float(tail_sum / max(n_teams, 1.0)),
         "rotation_size8_mean": float(rot_size8_sum / max(n_teams, 1.0)),
     }
@@ -1072,6 +1092,25 @@ def main() -> None:
         default=DEFAULT_MAX_TEAM_MINUTES_GAP,
         help="Max allowed |team_total_minutes_from_stints - (label_sum or minutes_from_stints_sum)| to keep a team-game.",
     )
+    parser.add_argument(
+        "--sample-w-injury-scale",
+        type=float,
+        default=0.0,
+        help="Team-game weight: sample_w = 1 + scale * clip(vacated_prior20/60, 0, 1).",
+    )
+    parser.add_argument(
+        "--best-metric",
+        type=str,
+        choices=["mae_player", "mae_team", "mae_team_w"],
+        default="mae_team_w",
+        help=(
+            "Metric for best-checkpoint selection: "
+            "mae_player (per-player weighted), "
+            "mae_team (unweighted per-team), "
+            "mae_team_w (sample_w-weighted per-team, default)."
+        ),
+    )
+
     args = parser.parse_args()
 
     _set_seed(int(args.seed))
@@ -1194,6 +1233,7 @@ def main() -> None:
         feature_mean=mean,
         feature_std=std,
         prior_weight_col=prior_weight_col if use_prior_head else None,
+        sample_w_injury_scale=float(args.sample_w_injury_scale),
     )
     val_examples = _build_team_game_examples(
         val_df,
@@ -1204,7 +1244,27 @@ def main() -> None:
         feature_mean=mean,
         feature_std=std,
         prior_weight_col=prior_weight_col if use_prior_head else None,
+        sample_w_injury_scale=float(args.sample_w_injury_scale),
     )
+
+    # DEBUG: validation sample weights + injury magnitude
+    if len(val_examples) > 0:
+        _sw = np.array([ex.sample_w for ex in val_examples], dtype=float)
+        _vac = np.array([ex.vacated_minutes_prior_20_total for ex in val_examples], dtype=float)
+        print(
+            "[rotation_set_minutes] val sample_w:",
+            f"mean={_sw.mean():.3f}",
+            f"p50={np.percentile(_sw,50):.3f}",
+            f"p90={np.percentile(_sw,90):.3f}",
+            f"max={_sw.max():.3f}",
+        )
+        print(
+            "[rotation_set_minutes] val vacated20:",
+            f"mean={_vac.mean():.2f}",
+            f"p50={np.percentile(_vac,50):.2f}",
+            f"p90={np.percentile(_vac,90):.2f}",
+            f"max={_vac.max():.2f}",
+        )
 
     train_loader = DataLoader(
         TeamGameDataset(train_examples),
@@ -1229,7 +1289,6 @@ def main() -> None:
         feature_std=std.astype(float).tolist(),
         use_prior_head=use_prior_head,
         prior_weight_col=prior_weight_col,
-        sample_w_injury_scale=float(args.sample_w_injury_scale),
         prior_weight_floor=prior_weight_floor,
         use_team_embeddings=True,
         team_id_vocab=team_id_vocab,
@@ -1308,6 +1367,7 @@ def main() -> None:
     if float(args.share_temperature) <= 0:
         raise ValueError("--share-temperature must be > 0")
 
+    best_metric_name = str(args.best_metric)
     best_val = float("inf")
     best_state: dict[str, Any] | None = None
     history: list[dict[str, Any]] = []
@@ -1319,8 +1379,10 @@ def main() -> None:
         running_loss_rot = 0.0
         running_loss_fp = 0.0
         running_loss_router = 0.0
+        running_mae_w_sum = 0.0
+        running_mae_w_denom = 0.0
         batches = 0
-        for x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features_batch, y, mask in train_loader:
+        for x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features_batch, sample_w, y, mask in train_loader:
             x = x.to(device)
             team_idx = team_idx.to(device)
             opp_idx = opp_idx.to(device)
@@ -1371,11 +1433,12 @@ def main() -> None:
                 gate_logits = None
                 router_pi_soft = None
                 router_pi_used = None
-
-            w_denom = w.sum().clamp(min=1e-6)
+            loss_min = _masked_mae(pred, y, mask)
+            # Weighted MAE metric (not used in optimization, logged only).
             abs_err = (pred - y).abs() * mask.to(dtype=pred.dtype)
             per_team = abs_err.sum(dim=1) / mask.sum(dim=1).clamp(min=1).to(dtype=abs_err.dtype)
-            loss_min = (per_team * w).sum() / w_denom
+            running_mae_w_sum += float((per_team * w).sum().item())
+            running_mae_w_denom += float(w.sum().item())
             loss_rot = pred.new_tensor(0.0)
             loss_fp = pred.new_tensor(0.0)
             loss_router = pred.new_tensor(0.0)
@@ -1483,6 +1546,7 @@ def main() -> None:
             focal_gamma=focal_gamma,
             focal_alpha=focal_alpha,
         )
+        train_mae_team_w = running_mae_w_sum / max(running_mae_w_denom, 1e-6)
         row = {
             "epoch": epoch,
             "train_loss": running_loss / max(batches, 1),
@@ -1490,9 +1554,18 @@ def main() -> None:
             "train_loss_rot": running_loss_rot / max(batches, 1),
             "train_loss_fp": running_loss_fp / max(batches, 1),
             "train_loss_router": running_loss_router / max(batches, 1),
-            "train_mae": float(train_eval["mae"]),
-            "val_mae": float(val_eval["mae"]),
-            "val_team_mae": float(val_eval["team_mae"]),
+            # New explicit metric names (preferred).
+            "train_mae_player": float(train_eval["mae_player"]),
+            "train_mae_team_w": float(train_mae_team_w),
+            "val_mae_player": float(val_eval["mae_player"]),
+            "val_mae_team": float(val_eval["mae_team"]),
+            "val_mae_team_w": float(val_eval["mae_team_w"]),
+            # Legacy keys (backward compat).
+            "train_mae": float(train_eval["mae_player"]),
+            "train_mae_w": float(train_mae_team_w),
+            "val_mae": float(val_eval["mae_player"]),
+            "val_mae_w": float(val_eval["mae_team_w"]),
+            "val_team_mae": float(val_eval["mae_team"]),
             "val_tail_mean_team240_top9": float(val_eval["tail_mean_team240_top9"]),
             "val_rotation_size8_mean": float(val_eval["rotation_size8_mean"]),
         }
@@ -1535,7 +1608,8 @@ def main() -> None:
         msg = (
             f"[epoch {epoch:03d}] loss={row['train_loss']:.4f} (min={row['train_loss_min']:.4f} "
             f"rot={row['train_loss_rot']:.4f} fp={row['train_loss_fp']:.4f} router={row['train_loss_router']:.4f}) "
-            f"train_mae={row['train_mae']:.4f} val_mae={row['val_mae']:.4f} "
+            f"train_mae_player={row['train_mae_player']:.4f} train_mae_team_w={row['train_mae_team_w']:.4f} "
+            f"val_mae_player={row['val_mae_player']:.4f} val_mae_team={row['val_mae_team']:.4f} val_mae_team_w={row['val_mae_team_w']:.4f} "
             f"val_tail={row['val_tail_mean_team240_top9']:.2f} val_rot8={row['val_rotation_size8_mean']:.2f}"
         )
         if "val_rot_loss" in row:
@@ -1572,8 +1646,11 @@ def main() -> None:
             frac_str = ", ".join(f"{float(v):.3f}" for v in row["val_router_assign_frac"][:8])
             print(f"  val_router_assign_frac=[{frac_str}]")
 
-        if row["val_mae"] < best_val:
-            best_val = row["val_mae"]
+        # Best-model selection based on --best-metric.
+        val_metric_key = f"val_{best_metric_name}"
+        current_val = row[val_metric_key]
+        if current_val < best_val:
+            best_val = current_val
             best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
 
     if best_state is None:
@@ -1609,7 +1686,18 @@ def main() -> None:
         json.dumps({"columns": feature_cols}, indent=2, sort_keys=True), encoding="utf-8"
     )
 
-    final_metrics = {"best_val_mae": float(best_val), "best_val_team_mae": float(val_best["team_mae"]), "final_epoch": int(args.epochs)}
+    final_metrics = {
+        "best_metric_name": best_metric_name,
+        "best_metric_value": float(best_val),
+        # Explicit best values for each metric type.
+        "best_val_mae_player": float(val_best["mae_player"]),
+        "best_val_mae_team": float(val_best["mae_team"]),
+        "best_val_mae_team_w": float(val_best["mae_team_w"]),
+        # Legacy keys (backward compat).
+        "best_val_mae": float(val_best["mae_player"]),
+        "best_val_team_mae": float(val_best["mae_team"]),
+        "final_epoch": int(args.epochs),
+    }
     final_metrics.update({f"last_{k}": v for k, v in history[-1].items() if k != "epoch"})
 
     manifest: dict[str, Any] = {
@@ -1635,7 +1723,10 @@ def main() -> None:
 
     print("\n[rotation_set_minutes] Done")
     print(f"  run_id: {run_id}")
-    print(f"  best_val_mae: {best_val:.4f}")
+    print(f"  best_metric: {best_metric_name}={best_val:.4f}")
+    print(f"  val_mae_player: {val_best['mae_player']:.4f}")
+    print(f"  val_mae_team: {val_best['mae_team']:.4f}")
+    print(f"  val_mae_team_w: {val_best['mae_team_w']:.4f}")
     print(f"  val_dust_rate: {diagnostics_val['dust_rate']:.4f}")
     print(f"  val_top8_share_mean: {diagnostics_val['top8_share_mean']:.4f}")
     print(f"  val_dnp_pred_median: {diagnostics_val['dnp_pred_median']}")
