@@ -15,15 +15,14 @@ import pandas as pd
 import typer
 
 from projections.fpts_v2.scoring import compute_dk_fpts
-from projections.minutes.reconcile import reconcile_team_minutes_matrix
 from projections.paths import data_path, get_project_root
 from projections.sim_v2.bench_zero_mixture import apply_bench_zero_mixture
 from projections.sim_v2.config import DEFAULT_PROFILES_PATH, UsageSharesConfig, load_sim_v2_profile
 from projections.sim_v2.game_factor import apply_game_factor
 from projections.sim_v2.game_script import GameScriptConfig, classify_script, sample_minutes_with_scripts
+from projections.sim_v2.minutes_allocator import allocate_team_minutes_matrix
 from projections.sim_v2.minutes_noise import (
     build_sigma_per_player,
-    enforce_team_240_minutes,
     load_minutes_noise_params,
     status_bucket_from_raw,
 )
@@ -1736,7 +1735,6 @@ def main(
     team_factor_sigma_eff = team_factor_sigma if team_factor_sigma is not None else profile_cfg.team_factor_sigma
     worlds_per_chunk = max(1, (profile_cfg.worlds_batch_size or profile_cfg.worlds_per_chunk))
     n_worlds_eff = int(n_worlds) if n_worlds is not None else int(profile_cfg.worlds_n or 2000)
-    enforce_team_240 = profile_cfg.enforce_team_240
     use_efficiency_scoring_eff = (
         profile_cfg.use_efficiency_scoring if use_efficiency_scoring is None else use_efficiency_scoring
     )
@@ -2159,6 +2157,36 @@ def main(
                 group_map.setdefault((int(key[0]), int(key[1])), []).append(idx)
             group_map = {k: np.array(v, dtype=int) for k, v in group_map.items()}
 
+            # Minutes allocator priority signal (deterministic; no retrain).
+            # Higher values => more protected from adjustment when projecting team totals to 240.
+            priority_base_col = None
+            for candidate in ("baseline_minutes_p50", "minutes_p50_cond", "minutes_p50", "minutes_mean"):
+                if candidate in mu_df.columns:
+                    priority_base_col = candidate
+                    break
+            if priority_base_col is None:
+                priority_base = gs_minutes_p50.astype(float, copy=True)
+                priority_base_col = "minutes_mean"
+            else:
+                priority_base = (
+                    pd.to_numeric(mu_df[priority_base_col], errors="coerce")
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                )
+            starter_like = np.zeros(len(mu_df), dtype=float)
+            for col in ("is_confirmed_starter", "is_projected_starter", "starter_flag", "is_starter"):
+                if col in mu_df.columns:
+                    starter_like = np.maximum(
+                        starter_like,
+                        pd.to_numeric(mu_df[col], errors="coerce").fillna(0.0).to_numpy(dtype=float),
+                    )
+            starter_like = starter_like > 0.5
+            starter_bump = 2.0  # small deterministic bump
+            minutes_alloc_priority = np.clip(priority_base, 0.0, None) + starter_bump * starter_like.astype(float)
+            mu_df["_minutes_alloc_priority"] = minutes_alloc_priority
+            minutes_alloc_metrics["minutes_alloc_priority_base_col"] = priority_base_col
+            minutes_alloc_metrics["minutes_alloc_priority_starter_bump"] = float(starter_bump)
+
             # Vegas implied team points for optional anchoring.
             schedule_df = _load_schedule_for_date(root, pd.Timestamp(game_date))
             implied_team_points = _build_implied_team_points(minutes_df, schedule_df)
@@ -2297,6 +2325,16 @@ def main(
             audit_cap_infeasible_team_worlds = 0
             audit_all_inactive_team_worlds = 0
             audit_total_team_worlds = 0
+
+            # Run-level minutes allocation diagnostics (aggregate; no per-world spam).
+            ma_team_worlds = 0
+            ma_sum_n_active = 0.0
+            ma_sum_n_nonzero = 0.0
+            ma_sum_active_players = 0.0
+            ma_sum_active_lt1 = 0.0
+            ma_sum_off_240 = 0
+            ma_top1: list[np.ndarray] = []
+            ma_top5: list[np.ndarray] = []
 
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
@@ -2470,27 +2508,7 @@ def main(
                     )
                     # 3. Zero out inactive players' minutes (before reconciliation)
                     minutes_worlds = minutes_worlds * active_mask.astype(float)
-
-                    # 4. Reconcile to 240 per team per world, considering only active players
-                    # When preserve_input_rotation is True, disable rotation cap (RotAlloc already handled it)
-                    max_rotation_size_for_enforce = None if getattr(profile_cfg, 'preserve_input_rotation', False) else max_rotation_size_eff
-                    if enforce_team_240 and n_teams > 0 and not getattr(profile_cfg, 'preserve_input_rotation', False):
-                        # Skip enforce_team_240 when preserve_input_rotation is True
-                        # (we already did pre-sim QP reconciliation)
-                        minutes_worlds = enforce_team_240_minutes(
-                            minutes_world=minutes_worlds,
-                            team_indices=team_indices,
-                            rotation_mask=rotation_mask,
-                            bench_mask=bench_mask,
-                            baseline_minutes=gs_minutes_p50,
-                            clamp_scale=(0.7, 1.3),
-                            active_mask=active_mask,
-                            starter_mask=gs_is_starter > 0,
-                            max_rotation_size=max_rotation_size_for_enforce,
-                            play_prob=play_prob_arr,
-                            rotation_prob=rot_prob_arr if "rotation_prob" in mu_df.columns else None,
-                            protected_rotation_size=getattr(profile_cfg, "protected_rotation_size", None),
-                        )
+                    # NOTE: team-240 is enforced later via the minutes allocator (after masking/bench-zero).
                 else:
                     # Fallback: sample minutes from per-player distribution.
                     z90 = 1.2815515655446004
@@ -2506,27 +2524,7 @@ def main(
 
                     # 3. Zero out inactive players' minutes (before reconciliation)
                     minutes_worlds = minutes_worlds * active_mask.astype(float)
-
-                    # 4. Reconcile to 240 per team per world, considering only active players
-                    # When preserve_input_rotation is True, disable rotation cap (RotAlloc already handled it)
-                    max_rotation_size_for_enforce = None if getattr(profile_cfg, 'preserve_input_rotation', False) else max_rotation_size_eff
-                    if enforce_team_240 and n_teams > 0 and not getattr(profile_cfg, 'preserve_input_rotation', False):
-                        # Skip enforce_team_240 when preserve_input_rotation is True
-                        # (we already did pre-sim QP reconciliation)
-                        minutes_worlds = enforce_team_240_minutes(
-                            minutes_world=minutes_worlds,
-                            team_indices=team_indices,
-                            rotation_mask=rotation_mask,
-                            bench_mask=bench_mask,
-                            baseline_minutes=gs_minutes_p50,
-                            clamp_scale=(0.7, 1.3),
-                            active_mask=active_mask,
-                            starter_mask=gs_is_starter > 0,
-                            max_rotation_size=max_rotation_size_for_enforce,
-                            play_prob=play_prob_arr,
-                            rotation_prob=rot_prob_arr if "rotation_prob" in mu_df.columns else None,
-                            protected_rotation_size=getattr(profile_cfg, "protected_rotation_size", None),
-                        )
+                    # NOTE: team-240 is enforced later via the minutes allocator (after masking/bench-zero).
                 # Defense-in-depth: ensure inactive players are hard-zero before reconciliation.
                 minutes_worlds = minutes_worlds * active_mask.astype(float)
 
@@ -2554,8 +2552,8 @@ def main(
                             f"min_active_needed={stats.min_active_needed}"
                         )
 
-                # After masking, reconcile active-only minutes to TEAM_MINUTES_TARGET per (team, world),
-                # then apply a single cap and renormalize remaining mass without flattening.
+                # After masking, project active-only minutes to TEAM_MINUTES_TARGET per (team, world)
+                # with bounds while protecting high-priority players from being squeezed.
                 cap_bind_chunk = 0
                 cap_infeasible_chunk = 0
                 all_inactive_chunk = 0
@@ -2565,20 +2563,41 @@ def main(
                     # Production minutes inputs always have >=20 rows (pipeline health checks).
                     if len(idxs) < MIN_TEAM_SIZE_FOR_TEAM_MINUTES_RECONCILE:
                         continue
-                    reconciled, stats = reconcile_team_minutes_matrix(
+                    priority_team = minutes_alloc_priority[np.asarray(idxs, dtype=int)]
+                    allocated, stats = allocate_team_minutes_matrix(
                         minutes_worlds[:, idxs],
                         active_mask[:, idxs],
-                        target_minutes=TEAM_MINUTES_TARGET,
-                        cap_minutes=MINUTES_CAP_SIM_V3,
-                        weights=None,
-                        tiers=None,
-                        max_passes=5,
+                        priority=priority_team,
+                        cap=MINUTES_CAP_SIM_V3,
+                        target_total=TEAM_MINUTES_TARGET,
+                        k=3.0,
                         eps=1e-6,
                     )
-                    minutes_worlds[:, idxs] = reconciled
+                    minutes_worlds[:, idxs] = allocated
                     cap_bind_chunk += int(stats["n_cap_bind_rows"])
                     cap_infeasible_chunk += int(stats["n_cap_infeasible_rows"])
                     all_inactive_chunk += int(stats["n_all_inactive"])
+
+                    # Allocation diagnostics (team-world level).
+                    active_team = active_mask[:, idxs]
+                    n_active = active_team.sum(axis=1).astype(float)
+                    n_nonzero = (allocated > 1e-9).sum(axis=1).astype(float)
+                    ma_team_worlds += int(len(n_active))
+                    ma_sum_n_active += float(n_active.sum())
+                    ma_sum_n_nonzero += float(n_nonzero.sum())
+
+                    ma_sum_active_players += float(n_active.sum())
+                    ma_sum_active_lt1 += float(((allocated < 1.0) & active_team).sum())
+
+                    team_sum = allocated.sum(axis=1)
+                    ma_sum_off_240 += int((np.abs(team_sum - TEAM_MINUTES_TARGET) > 1e-3).sum())
+
+                    ma_top1.append(allocated.max(axis=1))
+                    if allocated.shape[1] >= 5:
+                        top5 = np.partition(allocated, allocated.shape[1] - 5, axis=1)[:, -5:].sum(axis=1)
+                    else:
+                        top5 = team_sum
+                    ma_top5.append(top5)
 
                 # Optional post-reconcile mean preservation (conditional on being active).
                 mmr_cfg = getattr(profile_cfg, "minutes_mean_recentering", None)
@@ -2838,6 +2857,39 @@ def main(
                     f"cap_infeasible_team_worlds={audit_cap_infeasible_team_worlds}/{audit_total_team_worlds} "
                     f"all_inactive_team_worlds={audit_all_inactive_team_worlds}/{audit_total_team_worlds}"
                 )
+
+            # Emit a single compact minutes allocator diagnostic line for this date/profile.
+            minutes_alloc_summary: dict[str, object] = {}
+            if ma_team_worlds > 0:
+                top1_all = np.concatenate(ma_top1) if ma_top1 else np.zeros(0, dtype=float)
+                top5_all = np.concatenate(ma_top5) if ma_top5 else np.zeros(0, dtype=float)
+
+                def _dist(arr: np.ndarray) -> dict[str, float]:
+                    if arr.size == 0:
+                        return {"mean": 0.0, "p10": 0.0, "p50": 0.0, "p90": 0.0, "max": 0.0}
+                    return {
+                        "mean": float(np.mean(arr)),
+                        "p10": float(np.percentile(arr, 10)),
+                        "p50": float(np.percentile(arr, 50)),
+                        "p90": float(np.percentile(arr, 90)),
+                        "max": float(np.max(arr)),
+                    }
+
+                pct_active_lt1 = (
+                    (ma_sum_active_lt1 / ma_sum_active_players) * 100.0
+                    if ma_sum_active_players > 0
+                    else 0.0
+                )
+                minutes_alloc_summary = {
+                    "team_worlds": int(ma_team_worlds),
+                    "n_active_mean": float(ma_sum_n_active / ma_team_worlds),
+                    "n_nonzero_mean": float(ma_sum_n_nonzero / ma_team_worlds),
+                    "top1_minutes": _dist(top1_all),
+                    "top5_minutes_sum": _dist(top5_all),
+                    "n_team_worlds_sum_off_gt_1e-3": int(ma_sum_off_240),
+                    "pct_active_lt1_min": float(pct_active_lt1),
+                }
+                typer.echo(f"[minutes-alloc] {json.dumps(minutes_alloc_summary, separators=(',', ':'))}", err=True)
 
             # Aggregate all worlds in-memory and compute CONDITIONAL quantiles
             # (only count worlds where player is active)
@@ -3166,6 +3218,8 @@ def main(
                         "preserve_input_rotation": getattr(profile_cfg, 'preserve_input_rotation', False),
                     }
                     metrics_payload.update(minutes_alloc_metrics)
+                    if minutes_alloc_summary:
+                        metrics_payload["minutes_allocator"] = minutes_alloc_summary
                     if "worlds_integrity_payload" in locals():
                         metrics_payload["worlds_integrity"] = worlds_integrity_payload
                     (out_dir / "metrics.json").write_text(
