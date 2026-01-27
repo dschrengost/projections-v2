@@ -341,6 +341,18 @@ def _is_rmh_enabled() -> tuple[bool, dict]:
         return False, {}
 
 
+def _is_rotation_set_enabled() -> bool:
+    """Check if rotation_set scoring is enabled via config/rotation_set_minutes_live.json."""
+    rotset_config_path = PROJECT_ROOT / "config" / "rotation_set_minutes_live.json"
+    if not rotset_config_path.exists():
+        return False
+    try:
+        config = json.loads(rotset_config_path.read_text(encoding="utf-8"))
+        return bool(config.get("enabled", False))
+    except Exception:
+        return False
+
+
 @task(name="score-minutes", retries=1, retry_delay_seconds=120)
 def score_minutes_task(
     *,
@@ -356,16 +368,15 @@ def score_minutes_task(
     rotshare_min_active_players: int | None = None,
     rotshare_mc_center: str | None = None,
 ) -> Path:
-    """Score minutes using RMH v1 (if enabled) or rotation set overlay.
+    """Score minutes using RMH v1, rotation_set overlay, or legacy scorer.
 
-    If config/rmh_current_run.json has enabled=true:
-    - Uses score_minutes_rmh_v1 for RMH-based minutes prediction
-    - Applies 240-minute team reconciliation with configurable threshold
-
-    Otherwise falls back to score_minutes_rotation_set_v1 which:
-    1. Runs baseline minutes_v1 scoring
-    2. If rotation_set_minutes_live.json is enabled, builds rotation features + predicts
-    3. Applies guardrails and blends rotation predictions with baseline
+    Scorer selection:
+    1. If config/rmh_current_run.json has enabled=true AND PROJECTIONS_ALLOW_RMH_PRIMARY=1:
+       - Uses score_minutes_rmh_v1 for RMH-based minutes prediction
+    2. Else if config/rotation_set_minutes_live.json has enabled=true:
+       - Uses score_minutes_rotation_set_v1 which builds rotation features + predicts
+    3. Otherwise (legacy mode):
+       - Uses score_minutes_v1 (baseline minutes_v1 only, no rotation overlay)
     """
     logger = get_run_logger()
 
@@ -378,16 +389,19 @@ def score_minutes_task(
     }
     if rmh_enabled and not allow_rmh_primary:
         logger.warning(
-            "[score-minutes] RMH enabled but primary RMH is disabled; "
-            "continuing with rotation_set scorer (set PROJECTIONS_ALLOW_RMH_PRIMARY=1 to allow)"
+            "[score-minutes] RMH config enabled=true but PROJECTIONS_ALLOW_RMH_PRIMARY not set; "
+            "checking rotation_set config next"
         )
         rmh_enabled = False
 
+    # Check if rotation_set is enabled
+    rotation_set_enabled = _is_rotation_set_enabled()
+
     if rmh_enabled:
         logger.info(
-            f"[score-minutes] using RMH v1 scorer "
-            f"bundle={rmh_config.get('bundle_dir', 'N/A')} "
-            f"threshold={rmh_config.get('in_rotation_threshold_min', 5.0)}"
+            f"[score-minutes] SELECTED: RMH v1 scorer "
+            f"(bundle={rmh_config.get('bundle_dir', 'N/A')}, "
+            f"threshold={rmh_config.get('in_rotation_threshold_min', 5.0)})"
         )
         args = [
             "--date",
@@ -403,8 +417,8 @@ def score_minutes_task(
             data_root=data_root,
             timeout_s=1200,
         )
-    else:
-        logger.info("[score-minutes] using rotation_set_v1 scorer (RMH disabled)")
+    elif rotation_set_enabled:
+        logger.info("[score-minutes] SELECTED: rotation_set_v1 scorer (rotation_set enabled=true)")
         args = [
             "--date",
             game_date,
@@ -433,6 +447,42 @@ def score_minutes_task(
             args.extend(["--rotshare-mc-center", rotshare_mc_center])
         _run_python_module(
             "projections.cli.score_minutes_rotation_set_v1",
+            args,
+            data_root=data_root,
+            timeout_s=1200,
+        )
+    else:
+        logger.info("[score-minutes] SELECTED: legacy scorer (rotation_set enabled=false)")
+        args = [
+            "--date",
+            game_date,
+            "--run-id",
+            run_id,
+            "--mode",
+            "live",
+            "--reconcile-team-minutes",
+            reconcile_mode,
+            "--minutes-output",
+            "conditional",
+        ]
+        if minutes_bundle_dir:
+            args.extend(["--bundle-dir", minutes_bundle_dir])
+        if rotshare_quantiles_mode:
+            args.extend(["--rotshare-quantiles-mode", rotshare_quantiles_mode])
+        if rotshare_n_worlds is not None:
+            args.extend(["--rotshare-n-worlds", str(int(rotshare_n_worlds))])
+        if rotshare_concentration is not None:
+            args.extend(["--rotshare-concentration", str(float(rotshare_concentration))])
+        if rotshare_seed is not None:
+            args.extend(["--rotshare-seed", str(int(rotshare_seed))])
+        if rotshare_min_active_players is not None:
+            args.extend(
+                ["--rotshare-min-active-players", str(int(rotshare_min_active_players))]
+            )
+        if rotshare_mc_center:
+            args.extend(["--rotshare-mc-center", rotshare_mc_center])
+        _run_python_module(
+            "projections.cli.score_minutes_v1",
             args,
             data_root=data_root,
             timeout_s=1200,
