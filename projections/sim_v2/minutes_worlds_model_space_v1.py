@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from projections.minutes import PLAY_THRESHOLD_MINUTES, ROTATION_THRESHOLD_MINUTES
+from projections.sim_v2.minutes_allocator import allocate_team_minutes_matrix
 
 
 @dataclass(frozen=True)
@@ -174,34 +175,36 @@ def _enforce_team_240_simple(
     team_indices: np.ndarray,
     in_rotation_mask: np.ndarray,
 ) -> np.ndarray:
-    """Enforce 240 minutes per team per world via proportional scaling.
+    """Enforce 240 minutes per team per world via weighted bounded projection.
 
-    Simple implementation that scales rotation players proportionally to hit 240.
+    Uses `minutes_mean`-like priorities implicitly (demand itself) to avoid smearing
+    top-minute players when scaling up/down to team total.
     """
-    n_worlds, n_players = minutes_worlds.shape
+    n_worlds, _n_players = minutes_worlds.shape
     n_teams = int(team_indices.max()) + 1 if team_indices.size else 0
 
     out = minutes_worlds.copy()
-    team_one_hot = np.eye(n_teams, dtype=float)[team_indices]  # (P, T)
+    for t in range(n_teams):
+        idxs = np.flatnonzero(team_indices == t)
+        if idxs.size == 0:
+            continue
+        demand = out[:, idxs]
+        active = in_rotation_mask[:, idxs]
+        # Priority: higher demand minutes => more protected.
+        priority = np.maximum(demand.mean(axis=0), 0.0)
+        allocated, _stats = allocate_team_minutes_matrix(
+            demand,
+            active,
+            priority=priority,
+            cap=48.0,
+            target_total=240.0,
+            k=3.0,
+            eps=1e-6,
+        )
+        out[:, idxs] = allocated
 
-    # Sum of minutes per team per world
-    team_sums = out @ team_one_hot  # (W, T)
-
-    # Scale factor per team per world
-    scale = np.ones_like(team_sums)
-    nonzero = team_sums > 1e-6
-    scale[nonzero] = 240.0 / team_sums[nonzero]
-
-    # Clamp scale to avoid extreme values
-    scale = np.clip(scale, 0.5, 2.0)
-
-    # Apply scale per player based on their team
-    scale_per_player = scale[:, team_indices]  # (W, P)
-    out = out * scale_per_player
-
-    # Ensure non-rotation players stay at 0
+    # Ensure non-rotation players stay at 0 exactly.
     out = np.where(in_rotation_mask, out, 0.0)
-
     return out
 
 
