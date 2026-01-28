@@ -5,5 +5,11 @@
   "minutes_alloc_mode": "legacy",
   "rotalloc_bundle_dir": "artifacts/experiments/lgbm_rotalloc_final_v1",
   "reconcile_team_minutes": "p50",
-  "enable_upside_adjustment": false
+  "enable_upside_adjustment": false,
+  "play_prob_calibration": {
+    "enabled": true,
+    "target": "bench",
+    "temp": 2.8,
+    "bias": -0.9
+  }
 }

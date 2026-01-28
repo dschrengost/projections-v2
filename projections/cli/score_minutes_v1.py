@@ -216,6 +216,19 @@ def _resolve_upside_adjustment(bundle_config: Path | None) -> bool | None:
     return _coerce_bool(payload.get("enable_upside_adjustment"))
 
 
+
+
+def _resolve_play_prob_calibration(bundle_config: Path | None) -> dict | None:
+    if bundle_config is None:
+        return None
+    try:
+        payload = json.loads(bundle_config.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    cfg = payload.get("play_prob_calibration")
+    return cfg if isinstance(cfg, dict) else None
+
+
 def _season_from_date(day: date) -> int:
     """Season is keyed by start year (Aug–Jul)."""
 
@@ -236,6 +249,49 @@ def _attach_unconditional_minutes(df: pd.DataFrame) -> pd.DataFrame:
         if base in df.columns:
             df[f"{base}_uncond"] = df[base]
     return df
+
+
+
+
+def _apply_play_prob_calibration(
+    play_prob: np.ndarray,
+    df: pd.DataFrame,
+    config: dict | None,
+) -> np.ndarray:
+    if not config:
+        return play_prob
+    if not _coerce_bool(config.get("enabled", True)):
+        return play_prob
+
+    target = str(config.get("target", "all")).strip().lower()
+    temp = float(config.get("temp", 1.0))
+    bias = float(config.get("bias", 0.0))
+    if temp <= 0.0:
+        typer.echo("[play_prob_cal] invalid temp; skipping calibration", err=True)
+        return play_prob
+
+    if target == "bench":
+        if "starter_flag" in df.columns:
+            starter_flag = pd.to_numeric(df["starter_flag"], errors="coerce").fillna(0).astype(int)
+        elif {"is_confirmed_starter", "is_projected_starter"}.issubset(df.columns):
+            starter_flag = (
+                pd.to_numeric(df["is_confirmed_starter"], errors="coerce").fillna(0).astype(int)
+                | pd.to_numeric(df["is_projected_starter"], errors="coerce").fillna(0).astype(int)
+            )
+        elif "is_starter" in df.columns:
+            starter_flag = pd.to_numeric(df["is_starter"], errors="coerce").fillna(0).astype(int)
+        else:
+            starter_flag = pd.Series(0, index=df.index, dtype=int)
+        mask = starter_flag.to_numpy(dtype=bool) == 0
+    else:
+        mask = np.ones(len(play_prob), dtype=bool)
+
+    probs = np.clip(play_prob, 1e-6, 1.0 - 1e-6)
+    logits = np.log(probs / (1.0 - probs))
+    calibrated = 1.0 / (1.0 + np.exp(-(logits / temp + bias)))
+    out = play_prob.copy()
+    out[mask] = calibrated[mask]
+    return np.clip(out, 0.0, 1.0)
 
 
 def _make_reconcile_debugger(
@@ -1234,6 +1290,7 @@ def _score_rows(
     *,
     enable_play_prob_head: bool = True,
     enable_play_prob_mixing: bool = False,
+    play_prob_calibration: dict | None = None,
     promotion_ctx: PromotionPriorContext | None = None,
     promotion_debug: bool = False,
     espn_out_players: set[str] | None = None,
@@ -1329,6 +1386,7 @@ def _score_rows(
         play_prob = predict_play_probability(play_prob_artifacts, feature_matrix)
     else:
         play_prob = np.ones(len(working), dtype=float)
+    play_prob = _apply_play_prob_calibration(play_prob, working, play_prob_calibration)
     working["play_prob"] = play_prob
 
     # Force play_prob to 0.0 for known OUT players (if they were allowed through filtering).
@@ -1431,6 +1489,7 @@ def _score_rows_dual(
     blend_band_min: float,
     enable_play_prob_head: bool = True,
     enable_play_prob_mixing: bool = False,
+    play_prob_calibration: dict | None = None,
     promotion_ctx: PromotionPriorContext | None = None,
     promotion_debug: bool = False,
     espn_out_players: set[str] | None = None,
@@ -1452,6 +1511,7 @@ def _score_rows_dual(
         early_bundle,
         enable_play_prob_head=enable_play_prob_head,
         enable_play_prob_mixing=enable_play_prob_mixing,
+        play_prob_calibration=play_prob_calibration,
         promotion_ctx=promotion_ctx,
         promotion_debug=promotion_debug,
         espn_out_players=espn_out_players,
@@ -1461,6 +1521,7 @@ def _score_rows_dual(
         late_bundle,
         enable_play_prob_head=enable_play_prob_head,
         enable_play_prob_mixing=enable_play_prob_mixing,
+        play_prob_calibration=play_prob_calibration,
         promotion_ctx=promotion_ctx,
         promotion_debug=promotion_debug,
         espn_out_players=espn_out_players,
@@ -1870,6 +1931,7 @@ def score_minutes_range_to_parquet(
     if limit_rows is not None:
         prepared = prepared.head(limit_rows).copy()
     play_prob_enabled = enable_play_prob_head and not disable_play_prob
+    play_prob_calibration = _resolve_play_prob_calibration(bundle_config)
     if model["mode"] == "dual":
         scored = _score_rows_dual(
             prepared,
@@ -1879,6 +1941,7 @@ def score_minutes_range_to_parquet(
             blend_band_min=model["blend_band_min"],
             enable_play_prob_head=play_prob_enabled,
             enable_play_prob_mixing=enable_play_prob_mixing,
+            play_prob_calibration=play_prob_calibration,
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
         )
@@ -1889,6 +1952,7 @@ def score_minutes_range_to_parquet(
             model["bundle"],
             enable_play_prob_head=play_prob_enabled,
             enable_play_prob_mixing=enable_play_prob_mixing,
+            play_prob_calibration=play_prob_calibration,
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
             sharpen_exponent=sharpen_exponent,
@@ -2266,6 +2330,7 @@ def main(
         config_upside = _resolve_upside_adjustment(bundle_config)
         if config_upside is not None:
             enable_upside_adjustment = config_upside
+    play_prob_calibration = _resolve_play_prob_calibration(bundle_config)
 
     if date is None:
         raise typer.BadParameter("--date is required (set via CLI or config file).")
@@ -2377,6 +2442,7 @@ def main(
             blend_band_min=model["blend_band_min"],
             enable_play_prob_head=play_prob_enabled,
             enable_play_prob_mixing=enable_play_prob_mixing,
+            play_prob_calibration=play_prob_calibration,
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
             espn_out_players=espn_out_players,
@@ -2388,6 +2454,7 @@ def main(
             model["bundle"],
             enable_play_prob_head=play_prob_enabled,
             enable_play_prob_mixing=enable_play_prob_mixing,
+            play_prob_calibration=play_prob_calibration,
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
             espn_out_players=espn_out_players,
