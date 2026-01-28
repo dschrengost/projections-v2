@@ -38,6 +38,7 @@ from projections.minutes_v1.datasets import (
     write_ids_csv,
 )
 from projections.minutes_v1.validation import sample_anti_leak_check
+from projections.features.dnp_history import DNP_HISTORY_FEATURE_COLUMNS, compute_dnp_history_features
 from projections.validation.data_quality import validate_feature_ranges
 from projections.registry.manifest import (
     load_manifest,
@@ -349,6 +350,17 @@ def _load_feature_frame_with_schema(
         feature_df,
         [target_col, "game_date", "feature_as_of_ts", *KEY_COLUMNS],
     )
+
+    missing_dnp = [col for col in DNP_HISTORY_FEATURE_COLUMNS if col not in feature_df.columns]
+    if missing_dnp:
+        try:
+            typer.echo(f"[features] computing DNP history features (missing: {', '.join(missing_dnp)})")
+            feature_df = compute_dnp_history_features(feature_df, validate_pit=False)
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(f"[features] warning: failed to compute DNP history features: {exc}", err=True)
+            for col in DNP_HISTORY_FEATURE_COLUMNS:
+                if col not in feature_df.columns:
+                    feature_df[col] = 0.0
 
     # Anti-leak validation: ensure no feature timestamps exceed tip time
     if "tip_ts" in feature_df.columns:
@@ -1548,7 +1560,8 @@ def main(
         cal_df = _filter_out_players(cal_window.slice(feature_df))
         val_df = _filter_out_players(val_window.slice(feature_df))
     for frame in (train_df, cal_df, val_df):
-        frame["plays_target"] = (frame[target_col] > 0).astype(int)
+        target_values = pd.to_numeric(frame[target_col], errors="coerce").fillna(0.0)
+        frame["plays_target"] = (target_values > 0).astype(int)
 
     typer.echo(
         f"Training LightGBM quantiles on {len(train_df):,} rows "

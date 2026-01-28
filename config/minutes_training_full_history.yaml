@@ -1,8 +1,8 @@
 minutes_training:
-  run_id: lgbm_full_v1_play_head_20251209
-  data_root: data
+  run_id: minutes_v1_safe_starter_20260127_dnp_playprob
+  data_root: /home/daniel/projections-data
   artifact_root: artifacts/minutes_lgbm
-  features: data/gold/features_minutes_v1/all_features.parquet
+  features: /home/daniel/projections-data/gold/features_minutes_v1
   train_start: 2022-10-01T00:00:00+00:00
   train_end: 2025-02-28T23:59:59+00:00
   cal_start: 2025-03-01T00:00:00+00:00

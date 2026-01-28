@@ -15,6 +15,7 @@ from projections.archetypes import (
 )
 from projections.features import availability as availability_features
 from projections.features import depth as depth_features
+from projections.features.dnp_history import DNP_HISTORY_FEATURE_COLUMNS, compute_dnp_history_features
 from projections.features import game_env as game_env_features
 from projections.features import return_ramp as return_ramp_features
 from projections.features import role as role_features
@@ -39,6 +40,7 @@ class MinutesFeatureBuilder:
     def build(self, labels: pd.DataFrame) -> pd.DataFrame:
         base = self._attach_schedule(labels)
         base = self._attach_injuries(base)
+        base = self._attach_dnp_history_features(base)
         base = self._attach_odds(base)
         base = self._attach_depth(base)
         base = self._player_history_features(base)
@@ -130,6 +132,26 @@ class MinutesFeatureBuilder:
         merged = return_ramp_features.attach_return_ramp_features(merged)
         validate_injury_as_of(merged)
         return merged
+
+    def _attach_dnp_history_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return df
+        required = {"game_date", "player_id", "team_id"}
+        missing = required - set(df.columns)
+        if missing:
+            warnings.warn(f"Skipping DNP history features; missing columns: {sorted(missing)}")
+            for col in DNP_HISTORY_FEATURE_COLUMNS:
+                if col not in df.columns:
+                    df[col] = 0.0
+            return df
+        try:
+            return compute_dnp_history_features(df)
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"Failed to compute DNP history features: {exc}")
+            for col in DNP_HISTORY_FEATURE_COLUMNS:
+                if col not in df.columns:
+                    df[col] = 0.0
+            return df
 
     def _attach_odds(self, df: pd.DataFrame) -> pd.DataFrame:
         return game_env_features.attach_game_environment_features(df, self.odds_snapshot)
