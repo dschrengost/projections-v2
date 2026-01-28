@@ -86,6 +86,7 @@ type SortKey =
   | 'sim_dk_fpts_mean'
   | 'sim_dk_fpts_p95'
   | 'sim_minutes_sim_mean'
+  | 'sim_minutes_sim_mean_uncond'
 
 type RunOption = {
   run_id: string
@@ -111,6 +112,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   sim_dk_fpts_mean: 'Sim Mean',
   sim_dk_fpts_p95: 'Sim p95',
   sim_minutes_sim_mean: 'Sim MIN',
+  sim_minutes_sim_mean_uncond: 'Sim MIN (Uncond)',
 }
 
 type ModelOption = {
@@ -171,6 +173,13 @@ function App() {
   // Player override state: player_id -> { minutes?: number, fpts?: number, own?: number }
   type PlayerOverride = { minutes?: number | null; fpts?: number | null; own?: number | null }
   const [overrides, setOverrides] = useState<Map<string, PlayerOverride>>(new Map())
+
+  const resolveSimMinutesValue = (row: PlayerRow, key: SortKey) => {
+    if (key === 'sim_minutes_sim_mean_uncond') {
+      return row.sim_minutes_sim_mean_uncond ?? row.sim_minutes_sim_mean
+    }
+    return row[key as keyof PlayerRow] as number | undefined
+  }
 
   const updateOverride = (playerId: string, field: keyof PlayerOverride, value: number | null) => {
     setOverrides(prev => {
@@ -382,8 +391,8 @@ function App() {
     }
 
     const sorted = filtered.sort((a, b) => {
-      const left = a[sortKey]
-      const right = b[sortKey]
+      const left = resolveSimMinutesValue(a, sortKey)
+      const right = resolveSimMinutesValue(b, sortKey)
       if (typeof left === 'number' && typeof right === 'number') {
         return sortDir === 'asc' ? left - right : right - left
       }
@@ -440,7 +449,7 @@ function App() {
   ]
 
   const simStatColumns: Array<{ key: SortKey; label: string }> = [
-    { key: 'sim_minutes_sim_mean', label: 'Sim MIN' },
+    { key: 'sim_minutes_sim_mean_uncond', label: 'Sim MIN (Uncond)' },
   ]
 
   const nav = (
@@ -932,7 +941,7 @@ function App() {
                           {simStatColumns.map(({ key }) => (
                             <td key={key}>
                               {key.startsWith('sim_minutes_sim_')
-                                ? formatMinutesSim(row[key as keyof PlayerRow] as number | undefined)
+                                ? formatMinutesSim(resolveSimMinutesValue(row, key))
                                 : formatStat(row[key as keyof PlayerRow] as number | undefined)}
                             </td>
                           ))}

@@ -55,7 +55,7 @@ SUMMARY_FILENAME = "summary.json"
 FPTS_FILENAME = "fpts.parquet"
 SIM_PROJECTIONS_FILENAME = "sim_v2_projections.parquet"
 
-# Only expose conditional minutes fields to the UI.
+# Expose sim minutes (unconditional + conditional) for the UI.
 PLAYER_COLUMNS: tuple[str, ...] = (
     "game_date",
     "tip_ts",
@@ -129,6 +129,11 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "sim_minutes_sim_p50",
     "sim_minutes_sim_p90",
     "sim_minutes_sim_std",
+    "sim_minutes_sim_mean_uncond",
+    "sim_minutes_sim_p10_uncond",
+    "sim_minutes_sim_p50_uncond",
+    "sim_minutes_sim_p90_uncond",
+    "sim_minutes_sim_std_uncond",
     # Ownership/DFS columns
     "salary",
     "pred_own_pct",
@@ -546,7 +551,7 @@ def _serialize_players(df: pd.DataFrame) -> list[dict[str, Any]]:
     trimmed = trimmed.replace([float("inf"), float("-inf")], pd.NA)
     trimmed = trimmed.astype(object).where(pd.notna(trimmed), None)
     trimmed = trimmed.replace({pd.NA: None, float("inf"): None, float("-inf"): None})
-    # Prefer the conditional minutes; drop any unconditional columns to keep the UI focused.
+    # Keep both conditional and unconditional columns for UI usage.
     return list(jsonable_encoder(trimmed.to_dict(orient="records")))
 
 

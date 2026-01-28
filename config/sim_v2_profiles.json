@@ -51,7 +51,7 @@
       "worlds_per_chunk": 2000,
       "seed": 12345,
       "min_play_prob": 0.0,
-      "use_play_prob_masking": true,
+      "use_play_prob_masking": false,
       "team_factor_sigma": 0.08,
       "team_factor_gamma": 1.0,
       "enforce_team_240": true,

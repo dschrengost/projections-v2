@@ -327,7 +327,11 @@ const MinutesDistributionChart: React.FC<MinutesChartProps> = ({ player }) => {
     const p10 = player.minutes_p10 || 0
     const p50 = player.minutes_final ?? player.minutes_p50 ?? 0
     const p90 = player.minutes_p90 || 0
-    const simP50 = player.sim_minutes_sim_p50 ?? player.sim_minutes_sim_mean ?? p50
+    const simP50 = player.sim_minutes_sim_p50_uncond
+        ?? player.sim_minutes_sim_p50
+        ?? player.sim_minutes_sim_mean_uncond
+        ?? player.sim_minutes_sim_mean
+        ?? p50
 
     const maxMinutes = 48
     const scale = (val: number) => (val / maxMinutes) * 100
@@ -476,7 +480,10 @@ const ExpandablePlayerList: React.FC<{
                                             <div className="stats-row secondary">
                                                 <StatItem
                                                     label="Sim Min p50"
-                                                    value={p.sim_minutes_sim_p50 ?? p.sim_minutes_sim_mean}
+                                                    value={p.sim_minutes_sim_p50_uncond
+                                                        ?? p.sim_minutes_sim_p50
+                                                        ?? p.sim_minutes_sim_mean_uncond
+                                                        ?? p.sim_minutes_sim_mean}
                                                     compare={p.minutes_final ?? p.minutes_p50}
                                                     format="minutes"
                                                 />
