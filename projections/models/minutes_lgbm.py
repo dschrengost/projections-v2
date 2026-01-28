@@ -79,6 +79,40 @@ TWO_SIDED_LOW_UNDER_WEIGHT = 3.0
 TWO_SIDED_LOW_OVER_WEIGHT = 1.0
 TWO_SIDED_HIGH_OVER_WEIGHT = 3.0
 TWO_SIDED_HIGH_UNDER_WEIGHT = 1.0
+
+# Dedicated play_prob feature list (avoid minutes-correlated features).
+PLAY_PROB_FEATURE_CANDIDATES: tuple[str, ...] = (
+    "prior_play_prob",
+    "is_out",
+    "is_q",
+    "is_prob",
+    "injury_snapshot_missing",
+    "restriction_flag",
+    "ramp_flag",
+    "games_since_return",
+    "days_since_return",
+    "is_projected_starter",
+    "is_confirmed_starter",
+    "starter_flag",
+    "starter_prev_game_asof",
+    "recent_start_pct_10",
+    "depth_same_pos_active",
+    "same_archetype_overlap",
+    "roster_active_pre_tip",
+    "games_since_last_roster_active",
+    "never_roster_active_before",
+    "consecutive_active_dnp",
+    "active_but_dnp_rate_last10",
+    "inactive_streak_len",
+)
+
+
+def _infer_play_prob_feature_columns(feature_df: pd.DataFrame) -> list[str]:
+    cols = [c for c in PLAY_PROB_FEATURE_CANDIDATES if c in feature_df.columns]
+    cols = [c for c in cols if pd.api.types.is_numeric_dtype(feature_df[c])]
+    if not cols:
+        raise ValueError("No usable play_prob features found in feature frame.")
+    return cols
 PLAYABLE_MIN_P50_DEFAULT = 10.0
 PLAYABLE_P10_ACCEPTANCE = (0.08, 0.12)
 PLAYABLE_P90_ACCEPTANCE = (0.87, 0.94)
@@ -608,6 +642,10 @@ def predict_play_probability(
     *,
     calibrated: bool = True,
 ) -> np.ndarray:
+    if artifacts.feature_names:
+        X = X.reindex(columns=artifacts.feature_names)
+        for col in X.columns:
+            X[col] = pd.to_numeric(X[col], errors="coerce")
     X_imp = artifacts.imputer.transform(X)
     if artifacts.feature_names:
         X_imp = pd.DataFrame(X_imp, columns=artifacts.feature_names, index=X.index)
@@ -1504,6 +1542,7 @@ def main(
         month=month,
         target_col=target_col,
     )
+    play_prob_feature_columns = _infer_play_prob_feature_columns(feature_df)
 
     # NOTE: starter_flag must be inference-available.
     # Never derive it from box score minutes (e.g. top-5 minute getters), or we will leak label
@@ -1577,7 +1616,7 @@ def main(
     if not enable_play_prob_head:
         typer.echo("Play probability head disabled; emitting conditional minutes only.", err=True)
     else:
-        X_train_play_prob = train_df[feature_columns]
+        X_train_play_prob = train_df[play_prob_feature_columns]
         y_train_play_prob = train_df["plays_target"]
         if y_train_play_prob.nunique() >= 2:
             play_prob_artifacts = _train_play_probability_model(
@@ -1629,7 +1668,7 @@ def main(
     if play_prob_artifacts is not None:
         y_cal_play = cal_df["plays_target"]
         if y_cal_play.nunique() >= 2:
-            _fit_play_probability_calibrator(play_prob_artifacts, cal_df[feature_columns], y_cal_play)
+            _fit_play_probability_calibrator(play_prob_artifacts, cal_df[play_prob_feature_columns], y_cal_play)
         else:
             typer.echo("Play probability calibration skipped (single class).", err=True)
 
@@ -1709,7 +1748,7 @@ def main(
     val_eval["p10_cond"] = val_eval["minutes_p10"]
     val_eval["p90_cond"] = val_eval["minutes_p90"]
     if play_prob_artifacts is not None:
-        val_play_prob = predict_play_probability(play_prob_artifacts, val_df[feature_columns])
+        val_play_prob = predict_play_probability(play_prob_artifacts, val_df[play_prob_feature_columns])
     else:
         val_play_prob = np.ones(len(val_df), dtype=float)
     val_eval["play_prob"] = val_play_prob
@@ -1996,6 +2035,7 @@ def main(
             "target_col": target_col,
             "windows": windows_meta,
             "fold_id": fold_id,
+            "play_prob_feature_columns": play_prob_feature_columns,
         },
     )
     write_json(
