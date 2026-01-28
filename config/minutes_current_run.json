@@ -9,7 +9,7 @@
   "play_prob_calibration": {
     "enabled": true,
     "target": "bench",
-    "temp": 2.8,
-    "bias": -0.9
+    "temp": 2.3,
+    "bias": -0.3
   }
 }
