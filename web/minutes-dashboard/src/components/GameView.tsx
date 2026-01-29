@@ -44,8 +44,9 @@ const computeTeamSummary = (players: PlayerRow[]) => {
     const injured = players.filter(p => p.status?.toLowerCase() === 'out')
     const gtd = players.filter(p => ['gtd', 'questionable', 'doubtful'].includes(p.status?.toLowerCase() || ''))
 
-    const totalFpts = active.reduce((sum, p) => sum + (p.sim_dk_fpts_mean || 0), 0)
-    const totalMinutes = active.reduce((sum, p) => sum + (p.minutes_final ?? p.minutes_p50 ?? 0), 0)
+    // Prefer canonical unconditional sim summaries (DNP=0) so team totals match downstream sim/optimizer.
+    const totalFpts = active.reduce((sum, p) => sum + (p.fpts_sim_uncond_mean ?? 0), 0)
+    const totalMinutes = active.reduce((sum, p) => sum + (p.minutes_sim_uncond_mean ?? p.minutes_final ?? p.minutes_p50 ?? 0), 0)
     const avgFptsPerMin = totalMinutes > 0 ? totalFpts / totalMinutes : 0
 
     return {
@@ -327,7 +328,8 @@ const MinutesDistributionChart: React.FC<MinutesChartProps> = ({ player }) => {
     const p10 = player.minutes_p10 || 0
     const p50 = player.minutes_final ?? player.minutes_p50 ?? 0
     const p90 = player.minutes_p90 || 0
-    const simP50 = player.sim_minutes_sim_p50_uncond
+    const simP50 = player.minutes_sim_uncond_p50
+        ?? player.sim_minutes_sim_p50_uncond
         ?? player.sim_minutes_sim_p50
         ?? player.sim_minutes_sim_mean_uncond
         ?? player.sim_minutes_sim_mean
@@ -455,15 +457,15 @@ const ExpandablePlayerList: React.FC<{
                                     </div>
                                 </td>
                                 <td className="salary-cell">{formatSalary(p.salary)}</td>
-                                <td>{formatMinutes(p.minutes_final ?? p.minutes_p50)}</td>
-                                <td className="font-bold">{formatFpts(p.sim_dk_fpts_mean)}</td>
+                                <td>{formatMinutes(p.minutes_sim_uncond_mean ?? p.minutes_final ?? p.minutes_p50)}</td>
+                                <td className="font-bold">{formatFpts(p.fpts_sim_uncond_mean)}</td>
                                 <td className="ownership-cell">
                                     {p.is_locked && <span className="lock-icon" title="Predictions locked">🔒</span>}
                                     {formatOwnership(p.pred_own_pct)}
                                 </td>
                                 <td className="value-cell">{formatValue(p.value)}</td>
-                                <td className="text-upside">{formatFpts(p.sim_dk_fpts_p95)}</td>
-                                <td className="text-downside">{formatFpts(p.sim_dk_fpts_p05)}</td>
+                                <td className="text-upside">{formatFpts(p.fpts_sim_uncond_p95 ?? p.sim_dk_fpts_p95)}</td>
+                                <td className="text-downside">{formatFpts(p.fpts_sim_uncond_p05 ?? p.sim_dk_fpts_p05)}</td>
                             </tr>
                             {isExpanded && (
                                 <tr className="expanded-details">
@@ -480,11 +482,13 @@ const ExpandablePlayerList: React.FC<{
                                             <div className="stats-row secondary">
                                                 <StatItem
                                                     label="Sim Min p50"
-                                                    value={p.sim_minutes_sim_p50_uncond
+                                                    value={p.minutes_sim_uncond_p50
+                                                        ?? p.sim_minutes_sim_p50_uncond
                                                         ?? p.sim_minutes_sim_p50
+                                                        ?? p.minutes_sim_uncond_mean
                                                         ?? p.sim_minutes_sim_mean_uncond
                                                         ?? p.sim_minutes_sim_mean}
-                                                    compare={p.minutes_final ?? p.minutes_p50}
+                                                    compare={p.minutes_sim_uncond_mean ?? p.minutes_final ?? p.minutes_p50}
                                                     format="minutes"
                                                 />
                                                 <StatItem label="p10" value={p.sim_dk_fpts_p10} />

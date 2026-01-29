@@ -15,6 +15,9 @@ export type PlayerRow = {
     is_projected_starter?: boolean
     is_confirmed_starter?: boolean
     play_prob?: number
+    // Canonical play probability fields (explicit conditioning)
+    p_play_raw?: number
+    p_play_eff?: number
     p_in_rotation?: number
     minutes_p10?: number
     minutes_p50?: number
@@ -42,6 +45,19 @@ export type PlayerRow = {
     sim_dk_fpts_p75?: number
     sim_dk_fpts_p90?: number
     sim_dk_fpts_p95?: number
+    // Canonical sim FPTS summaries (prefer *_uncond_* for decision metrics)
+    fpts_sim_cond_mean?: number
+    fpts_sim_cond_std?: number
+    fpts_sim_cond_p05?: number
+    fpts_sim_cond_p50?: number
+    fpts_sim_cond_p90?: number
+    fpts_sim_cond_p95?: number
+    fpts_sim_uncond_mean?: number
+    fpts_sim_uncond_std?: number
+    fpts_sim_uncond_p05?: number
+    fpts_sim_uncond_p50?: number
+    fpts_sim_uncond_p90?: number
+    fpts_sim_uncond_p95?: number
     sim_pts_mean?: number
     sim_reb_mean?: number
     sim_ast_mean?: number
@@ -58,6 +74,14 @@ export type PlayerRow = {
     sim_minutes_sim_p50_uncond?: number
     sim_minutes_sim_p90_uncond?: number
     sim_minutes_sim_std_uncond?: number
+    // Canonical sim minutes summaries (prefer *_uncond_* for decision metrics)
+    minutes_sim_p_active?: number
+    minutes_sim_cond_mean?: number
+    minutes_sim_cond_std?: number
+    minutes_sim_cond_p50?: number
+    minutes_sim_uncond_mean?: number
+    minutes_sim_uncond_std?: number
+    minutes_sim_uncond_p50?: number
     // Vegas lines (game-level, same for all players in game)
     total?: number
     spread_home?: number
