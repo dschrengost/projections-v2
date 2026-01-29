@@ -37,6 +37,15 @@ All flags below are loaded into `projections/sim_v2/config.py:SimV2Profile` via 
   - Effect: optional transform `p_eff = f(p_raw)`; sim samples actives using `p_eff` (raw play_prob unchanged)
   - Used in prod: `sim_v3` sets `enabled=false` (wired, off by default)
 
+- `play_prob_policy.*` (NEW, preferred)
+  - Location: profile root → `play_prob_policy`; loaded in `projections/sim_v2/config.py:PlayProbPolicyConfig`
+  - Defaults: `enabled=false`, `rotation_lock_floor=0.995`, `rotation_lock_min_cond_p50=18`, `rotation_lock_topk=8`, `probable_floor=0.90`
+  - Effect: policy layer that:
+    - forces OUT/INACTIVE/SUSPENDED to `play_prob_eff=0`
+    - floors rotation locks who are not on the injury report to ~1.0 (but not exactly 1.0)
+    - floors PROBABLE to at least 0.90
+  - Used in prod: `sim_v3` sets `enabled=true` (and currently uses `rotation_lock_min_cond_p50=8.0`; see `docs/notes/play_prob_policy.md`)
+
 ### Team/World Feasibility (NEW)
 
 - `minutes_feasibility.*`
