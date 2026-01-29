@@ -173,6 +173,7 @@ class ContestSimRequest(BaseModel):
     """Request to run a contest simulation."""
 
     game_date: str = Field(..., description="Game date in YYYY-MM-DD format")
+    run_id: Optional[str] = Field(default=None, description="Optional projections run_id (defaults to blessed/pinned/latest)")
     draft_group_id: Optional[int] = Field(default=None, description="Draft group ID")
     lineups: List[List[str]] = Field(..., description="List of lineups (each a list of player_ids)")
     field_mode: str = Field(
@@ -448,6 +449,7 @@ async def run_simulation(request: ContestSimRequest):
         result = run_contest_simulation(
             user_lineups=request.lineups,
             game_date=request.game_date,
+            run_id=request.run_id,
             archetype=request.archetype,
             field_size_bucket=request.field_size_bucket,
             field_size_override=request.field_size_override,
