@@ -188,10 +188,20 @@ export async function applyBuildToEntries(
     return res.json()
 }
 
-export async function exportEntryFile(date: string, contestId: string): Promise<Blob> {
+export async function exportEntryFile(
+    date: string,
+    contestId: string,
+    entryIds?: string[],
+): Promise<Blob> {
     const res = await fetch(
         apiUrl(`/api/entry-manager/entries/${contestId}/export?date=${date}`),
-        { method: 'POST' },
+        entryIds && entryIds.length > 0
+            ? {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entry_ids: entryIds }),
+            }
+            : { method: 'POST' },
     )
     if (!res.ok) {
         const body = await res.json().catch(() => ({}))

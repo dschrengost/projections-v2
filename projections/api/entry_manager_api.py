@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -694,6 +694,10 @@ class LateSwapResult(BaseModel):
 
 class ExportEntriesRequest(BaseModel):
     contest_ids: List[str]
+
+
+class ExportEntrySelectionRequest(BaseModel):
+    entry_ids: List[str]
 
 
 class SelectAlternativeRequest(BaseModel):
@@ -1571,7 +1575,12 @@ async def validate_entry_file(contest_id: str, date: str):
 
 
 @router.post("/entries/{contest_id}/export")
-async def export_entry_file(contest_id: str, date: str, force: bool = False):
+async def export_entry_file(
+    contest_id: str,
+    date: str,
+    force: bool = False,
+    request: ExportEntrySelectionRequest | None = Body(default=None),
+):
     """Export entries to CSV for DraftKings upload.
 
     Args:
@@ -1583,9 +1592,23 @@ async def export_entry_file(contest_id: str, date: str, force: bool = False):
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     entry_state = EntryFileState.model_validate_json(path.read_text())
+    entries = entry_state.entries
+
+    selected_ids: set[str] | None = None
+    if request and request.entry_ids:
+        selected_ids = {str(entry_id) for entry_id in request.entry_ids}
+        filtered_entries: list[dict[str, str]] = []
+        for idx, entry in enumerate(entries):
+            entry_id = str(entry.get("entry_id", ""))
+            entry_key = str(entry.get("entry_key") or entry_id or f"row-{idx + 1}")
+            if entry_id in selected_ids or entry_key in selected_ids:
+                filtered_entries.append(entry)
+        entries = filtered_entries
+        if len(entries) == 0:
+            raise HTTPException(status_code=400, detail="No selected entries found for export")
 
     # Validate before export
-    validation = _validate_entries_for_export(entry_state.entries, entry_state.draft_group_id)
+    validation = _validate_entries_for_export(entries, entry_state.draft_group_id)
     if not validation.valid and not force:
         error_details = "; ".join(f"{i.entry_id}: {i.message}" for i in validation.issues[:5])
         if len(validation.issues) > 5:
@@ -1612,7 +1635,7 @@ async def export_entry_file(contest_id: str, date: str, force: bool = False):
     # (entry_state.header may have extra columns from DK's original export)
     canonical_header = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
     writer.writerow(canonical_header)
-    for entry in entry_state.entries:
+    for entry in entries:
         row = [
             entry.get("entry_id", ""),
             entry.get("contest_name", ""),
@@ -1637,7 +1660,7 @@ async def export_entry_file(contest_id: str, date: str, force: bool = False):
         "draft_group_id": int(entry_state.draft_group_id),
         "contest_ids": [str(contest_id)],
         "export_csv_path": str(export_csv_path.resolve()),
-        "lineup_count": int(len(entry_state.entries)),
+        "lineup_count": int(len(entries)),
         "git_sha": _safe_git_sha(),
         # Evaluation config defaults (passed explicitly by runner).
         "train_frac": 0.7,
@@ -1698,7 +1721,7 @@ async def export_entry_file(contest_id: str, date: str, force: bool = False):
             "X-Export-Id": export_id,
             "X-Validation-Warnings": str(validation.warnings_count),
             "X-Validation-Duplicates": str(validation.duplicate_lineup_count),
-            "X-Entry-Count": str(len(entry_state.entries)),
+            "X-Entry-Count": str(len(entries)),
             "Access-Control-Expose-Headers": "X-Export-Id, X-Validation-Warnings, X-Validation-Duplicates, X-Entry-Count",
         },
     )
