@@ -147,6 +147,46 @@ def _norm_cdf(x: np.ndarray) -> np.ndarray:
     return np.where(x >= 0.0, prob, 1.0 - prob)
 
 
+def _assert_inactive_zero_minutes(
+    *,
+    stage: str,
+    minutes_worlds: np.ndarray,
+    active_mask: np.ndarray,
+    game_date: str,
+    player_ids: np.ndarray,
+    team_ids: np.ndarray,
+    game_ids: np.ndarray,
+    policy_reason: np.ndarray | None,
+    world_offset: int,
+) -> None:
+    """Debug assertion: inactive players must have exactly 0 minutes."""
+    if minutes_worlds.size == 0:
+        return
+    bad = (~active_mask) & (minutes_worlds > 0.0)
+    if not bad.any():
+        return
+
+    idxs = np.argwhere(bad)
+    reason_arr = policy_reason if policy_reason is not None else None
+    for w_idx, p_idx in idxs:
+        pid = player_ids[p_idx] if player_ids.size else str(p_idx)
+        tid = team_ids[p_idx] if team_ids.size else "unknown"
+        gid = game_ids[p_idx] if game_ids.size else "unknown"
+        reason = reason_arr[p_idx] if reason_arr is not None and reason_arr.size == player_ids.size else "n/a"
+        typer.echo(
+            "[sim_v2][inactive_minutes_violation] "
+            f"stage={stage} date={game_date} game_id={gid} team_id={tid} "
+            f"world={world_offset + int(w_idx)} player_id={pid} "
+            f"minutes={float(minutes_worlds[w_idx, p_idx]):.6f} "
+            f"active={bool(active_mask[w_idx, p_idx])} policy_reason={reason}",
+            err=True,
+        )
+
+    raise AssertionError(
+        f"[sim_v2][dev_assert] inactive minutes > 0 detected at stage={stage}: n={len(idxs)}"
+    )
+
+
 def _adjust_mean_for_clip(mu: np.ndarray, sigma: float, max_iter: int = 6) -> np.ndarray:
     """
     Solve for m so that E[max(N(m, sigma), 0)] == mu (mu >= 0).
@@ -2174,6 +2214,7 @@ def main(
             play_prob_raw = np.clip(play_prob_arr.astype(float), 0.0, 1.0)
             play_prob_eff = play_prob_raw
             rotation_lock_mask = None
+            policy_reason_arr: np.ndarray | None = None
             play_prob_policy_cfg = getattr(profile_cfg, "play_prob_policy", None)
             if play_prob_policy_cfg is not None and getattr(play_prob_policy_cfg, "enabled", False) and group_map:
                 policy_df, policy_diag = apply_play_prob_policy_with_diagnostics(
@@ -2186,6 +2227,7 @@ def main(
                 play_prob_eff = pd.to_numeric(policy_df["play_prob_eff"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
                 play_prob_eff = np.clip(play_prob_eff, 0.0, 1.0)
                 rotation_lock_mask = policy_df["rotation_lock"].astype(bool).to_numpy()
+                policy_reason_arr = policy_df["play_prob_policy_reason"].astype(str).to_numpy(dtype=object)
 
                 minutes_alloc_metrics["play_prob_policy_enabled"] = True
                 minutes_alloc_metrics["play_prob_policy"] = {
@@ -2729,6 +2771,18 @@ def main(
                     # NOTE: team-240 is enforced later via the minutes allocator (after masking/bench-zero).
                 # Defense-in-depth: ensure inactive players are hard-zero before reconciliation.
                 minutes_worlds = minutes_worlds * active_mask.astype(float)
+                if dev_asserts:
+                    _assert_inactive_zero_minutes(
+                        stage="pre_reconcile",
+                        minutes_worlds=minutes_worlds,
+                        active_mask=active_mask,
+                        game_date=str(pd.Timestamp(game_date).date()),
+                        player_ids=mu_df["player_id"].astype(str).to_numpy(),
+                        team_ids=gs_team_ids,
+                        game_ids=gs_game_ids,
+                        policy_reason=policy_reason_arr,
+                        world_offset=chunk_start,
+                    )
 
                 # Optional bench/DNP mass-at-zero mixture: drop low-minute players to 0 with p_zero,
                 # then let reconciliation redistribute minutes among remaining active players.
@@ -2758,6 +2812,18 @@ def main(
                             f"[sim_v2][audit] bench_zero_mixture: dropped={stats.n_player_worlds_dropped} "
                             f"restored={stats.n_player_worlds_restored_for_feasibility} "
                             f"min_active_needed={stats.min_active_needed}"
+                        )
+                    if dev_asserts:
+                        _assert_inactive_zero_minutes(
+                            stage="post_bench_zero",
+                            minutes_worlds=minutes_worlds,
+                            active_mask=active_mask,
+                            game_date=str(pd.Timestamp(game_date).date()),
+                            player_ids=mu_df["player_id"].astype(str).to_numpy(),
+                            team_ids=gs_team_ids,
+                            game_ids=gs_game_ids,
+                            policy_reason=policy_reason_arr,
+                            world_offset=chunk_start,
                         )
 
                 # After masking, project active-only minutes to TEAM_MINUTES_TARGET per (team, world)
@@ -2851,6 +2917,18 @@ def main(
                             f"[sim_v2][audit] minutes_mean_recentering: max_abs_err_before={max_abs_before:.3f} "
                             f"max_abs_err_after={max_abs_after:.3f}"
                         )
+                if dev_asserts:
+                    _assert_inactive_zero_minutes(
+                        stage="post_reconcile",
+                        minutes_worlds=minutes_worlds,
+                        active_mask=active_mask,
+                        game_date=str(pd.Timestamp(game_date).date()),
+                        player_ids=mu_df["player_id"].astype(str).to_numpy(),
+                        team_ids=gs_team_ids,
+                        game_ids=gs_game_ids,
+                        policy_reason=policy_reason_arr,
+                        world_offset=chunk_start,
+                    )
 
                 # DEV-ONLY integrity asserts: after world generation (minutes sampling + masking + reconcile),
                 # enforce that minutes are non-negative and each (team, world) sums to ~240 before audits.
