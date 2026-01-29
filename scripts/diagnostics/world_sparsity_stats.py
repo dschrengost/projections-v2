@@ -34,6 +34,7 @@ from projections.sim_v2.minutes_physics import (
     compute_max_increase_by_depth,
     compute_rotation_lock_mask,
 )
+from projections.sim_v2.play_prob_policy import apply_play_prob_policy_with_diagnostics
 
 app = typer.Typer(add_completion=False)
 
@@ -134,7 +135,7 @@ def _simulate_team_stats(
     profile: SimV2Profile,
     hard_cap: float,
     physics: bool,
-) -> dict[str, object]:
+) -> tuple[dict[str, object], pd.DataFrame | None]:
     min_col = _resolve_minutes_column(team_df)
 
     baseline_minutes = pd.to_numeric(team_df[min_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
@@ -164,7 +165,16 @@ def _simulate_team_stats(
     # Availability policy (p_eff)
     play_prob_eff = play_prob_raw
     rotation_lock_mask = None
-    if physics and getattr(profile.minutes_availability_policy, "enabled", False):
+    policy_reason = np.array(["raw"] * len(team_df), dtype=object)
+    if physics and getattr(profile.play_prob_policy, "enabled", False):
+        policy_input = team_df.copy()
+        policy_input["status_bucket"] = status_bucket
+        policy_df, _policy_diag = apply_play_prob_policy_with_diagnostics(policy_input, profile.play_prob_policy)
+        play_prob_eff = pd.to_numeric(policy_df["play_prob_eff"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        play_prob_eff = np.clip(play_prob_eff, 0.0, 1.0)
+        rotation_lock_mask = policy_df["rotation_lock"].astype(bool).to_numpy()
+        policy_reason = policy_df["play_prob_policy_reason"].astype(str).to_numpy(dtype=object)
+    elif physics and getattr(profile.minutes_availability_policy, "enabled", False):
         rotation_lock_mask, play_prob_eff, _policy_diag = apply_minutes_availability_policy(
             play_prob_raw=play_prob_raw,
             baseline_minutes=baseline_minutes,
@@ -231,6 +241,9 @@ def _simulate_team_stats(
         "sum_demand_active": _dist_float(sum_demand_active),
         "frac_any_cap48": float(cap48_hits.mean()),
         "frac_any_hard_cap": float(cap_hits.mean()),
+        "n_team_worlds": int(n_worlds),
+        "n_cap_hits": int(cap_hits.sum()),
+        "n_cap48_hits": int(cap48_hits.sum()),
         "frac_sparse_n_active_lt8": float(frac_sparse),
         "frac_allocator_infeasible": float(frac_alloc_infeasible),
     }
@@ -244,13 +257,40 @@ def _simulate_team_stats(
             else 0.0
         )
         out["frac_worlds_promoted"] = float(gate_diag.n_promoted_team_worlds) / float(n_worlds)
+        out["n_infeasible_pre_resample"] = int(gate_diag.n_infeasible_pre_resample)
+        out["n_resampled_team_worlds"] = int(gate_diag.n_resampled_team_worlds)
+        out["n_promoted_team_worlds"] = int(gate_diag.n_promoted_team_worlds)
+        out["promoted_players_total"] = int(gate_diag.promoted_players_total)
     else:
         out["frac_worlds_infeasible_pre_resample"] = None
         out["frac_worlds_resampled"] = None
         out["avg_resample_attempts"] = None
         out["frac_worlds_promoted"] = None
+        out["n_infeasible_pre_resample"] = 0
+        out["n_resampled_team_worlds"] = 0
+        out["n_promoted_team_worlds"] = 0
+        out["promoted_players_total"] = 0
 
-    return out
+    # Per-player diagnostics for policy audits.
+    rotation_lock = rotation_lock_mask if rotation_lock_mask is not None else np.zeros(len(team_df), dtype=bool)
+    player_diag = pd.DataFrame(
+        {
+            "player_id": pd.to_numeric(team_df.get("player_id"), errors="coerce"),
+            "player_name": team_df.get("player_name"),
+            "status_bucket": status_bucket.astype(str),
+            "baseline_minutes": baseline_minutes.astype(float),
+            "rotation_lock": rotation_lock.astype(bool),
+            "play_prob_raw": play_prob_raw.astype(float),
+            "play_prob_eff": play_prob_eff.astype(float),
+            "sim_p_active": active.mean(axis=0).astype(float),
+            "policy_reason": policy_reason.astype(str),
+        }
+    )
+    for extra in ("game_id", "team_id"):
+        if extra in team_df.columns:
+            player_diag[extra] = pd.to_numeric(team_df[extra], errors="coerce")
+
+    return out, player_diag
 
 
 @app.command()
@@ -271,6 +311,8 @@ def main(
         1e-3, "--max-frac-alloc-infeasible", help="Max allowed allocator infeasible rate per team"
     ),
     out: Path | None = typer.Option(None, "--out", help="Optional path to write a CSV report"),
+    player_out: Path | None = typer.Option(None, "--player-out", help="Optional path to write per-player audit CSV"),
+    offenders_n: int = typer.Option(20, "--offenders-n", help="How many offender rows to print"),
 ) -> None:
     date_norm = pd.Timestamp(date).date().isoformat()
     root = Path(data_root) if data_root is not None else data_path()
@@ -285,6 +327,7 @@ def main(
             minutes_feasibility=replace(profile_cfg.minutes_feasibility, enabled=False),
             minutes_absorption_caps=replace(profile_cfg.minutes_absorption_caps, enabled=False),
             minutes_availability_policy=replace(profile_cfg.minutes_availability_policy, enabled=False),
+            play_prob_policy=replace(profile_cfg.play_prob_policy, enabled=False),
         )
 
     df = _load_minutes_projection(root, date_norm, run_id=run_id)
@@ -320,11 +363,12 @@ def main(
     child_seeds = ss.spawn(len(grouped))
 
     rows: list[dict[str, object]] = []
+    rows_player: list[pd.DataFrame] = []
     failures: list[str] = []
 
     for (key, team_df), child in zip(grouped, child_seeds):
         rng = np.random.default_rng(child)
-        stats = _simulate_team_stats(
+        stats, player_diag = _simulate_team_stats(
             team_df=team_df,
             n_worlds=int(n_worlds),
             rng=rng,
@@ -343,6 +387,11 @@ def main(
             **stats,
         }
         rows.append(row)
+        if player_diag is not None and not player_diag.empty:
+            player_diag = player_diag.copy()
+            player_diag["game_id"] = int(game_id) if game_id is not None else player_diag.get("game_id")
+            player_diag["team_id"] = int(team_id)
+            rows_player.append(player_diag)
 
         if assert_mode:
             frac_sparse = float(row["frac_sparse_n_active_lt8"])
@@ -354,6 +403,7 @@ def main(
                 )
 
     out_df = pd.DataFrame(rows)
+    player_df = pd.concat(rows_player, ignore_index=True) if rows_player else pd.DataFrame()
     # Expand nested dict columns for readability when writing CSV.
     for col in ("n_active", "sum_demand_active"):
         if col in out_df.columns:
@@ -392,10 +442,78 @@ def main(
     pd.set_option("display.max_columns", 200)
     print(out_df[view_cols].to_string(index=False))
 
+    # Aggregate summary (team-world weighted), plus play_prob policy audit.
+    try:
+        total_team_worlds = int(out_df["n_team_worlds"].fillna(0).sum()) if "n_team_worlds" in out_df.columns else 0
+        infeasible = int(out_df["n_infeasible_pre_resample"].fillna(0).sum()) if "n_infeasible_pre_resample" in out_df.columns else 0
+        promoted_worlds = int(out_df["n_promoted_team_worlds"].fillna(0).sum()) if "n_promoted_team_worlds" in out_df.columns else 0
+        cap_hits = int(out_df["n_cap_hits"].fillna(0).sum()) if "n_cap_hits" in out_df.columns else 0
+        promoted_players = int(out_df["promoted_players_total"].fillna(0).sum()) if "promoted_players_total" in out_df.columns else 0
+
+        if total_team_worlds > 0:
+            print(
+                "\nAGGREGATE (team-world weighted): "
+                f"frac_infeasible_pre_resample={infeasible/total_team_worlds:.4f} "
+                f"frac_promoted={promoted_worlds/total_team_worlds:.4f} "
+                f"cap_hit_rate={cap_hits/total_team_worlds:.4f} "
+                f"promoted_players_total={promoted_players}"
+            )
+    except Exception:
+        pass
+
+    if not player_df.empty:
+        # Bucket summaries.
+        not_out_or_q = ~player_df["status_bucket"].astype(str).str.lower().isin(["out", "questionable"])
+        rot = player_df["rotation_lock"].astype(bool) & not_out_or_q
+        fringe = (~player_df["rotation_lock"].astype(bool)) & not_out_or_q
+
+        def _dist(series: pd.Series) -> dict[str, float]:
+            vals = pd.to_numeric(series, errors="coerce").dropna().to_numpy(dtype=float)
+            if vals.size == 0:
+                return {"mean": 0.0, "p10": 0.0, "p50": 0.0, "p90": 0.0}
+            return {
+                "mean": float(vals.mean()),
+                "p10": float(np.percentile(vals, 10)),
+                "p50": float(np.percentile(vals, 50)),
+                "p90": float(np.percentile(vals, 90)),
+            }
+
+        print("\nPLAY_PROB POLICY AUDIT:")
+        print("  reasons:", player_df["policy_reason"].astype(str).value_counts().to_dict())
+        print("  rotation_lock sim_p_active:", _dist(player_df.loc[rot, "sim_p_active"]))
+        print("  fringe sim_p_active:", _dist(player_df.loc[fringe, "sim_p_active"]))
+        print("  rotation_lock p_raw:", _dist(player_df.loc[rot, "play_prob_raw"]))
+        print("  rotation_lock p_eff:", _dist(player_df.loc[rot, "play_prob_eff"]))
+        print("  fringe p_raw:", _dist(player_df.loc[fringe, "play_prob_raw"]))
+        print("  fringe p_eff:", _dist(player_df.loc[fringe, "play_prob_eff"]))
+
+        player_df["delta_eff_raw"] = player_df["play_prob_eff"] - player_df["play_prob_raw"]
+        player_df["delta_sim_eff"] = (player_df["sim_p_active"] - player_df["play_prob_eff"]).abs()
+
+        top_bumps = player_df.sort_values("delta_eff_raw", ascending=False).head(int(offenders_n))
+        top_dev = player_df.sort_values("delta_sim_eff", ascending=False).head(int(offenders_n))
+        print("\nTOP p_eff - p_raw:")
+        print(
+            top_bumps[
+                ["game_id", "team_id", "player_name", "player_id", "status_bucket", "baseline_minutes", "rotation_lock", "play_prob_raw", "play_prob_eff", "delta_eff_raw", "policy_reason"]
+            ].to_string(index=False)
+        )
+        print("\nTOP |sim_p_active - p_eff|:")
+        print(
+            top_dev[
+                ["game_id", "team_id", "player_name", "player_id", "status_bucket", "baseline_minutes", "rotation_lock", "play_prob_eff", "sim_p_active", "delta_sim_eff", "policy_reason"]
+            ].to_string(index=False)
+        )
+
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out_df.to_csv(out, index=False)
         print(f"\nWrote: {out}")
+
+    if player_out is not None and not player_df.empty:
+        player_out.parent.mkdir(parents=True, exist_ok=True)
+        player_df.to_csv(player_out, index=False)
+        print(f"\nWrote: {player_out}")
 
     if failures:
         print("\nFAILED thresholds:")
