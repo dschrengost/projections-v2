@@ -188,6 +188,15 @@
           "questionable"
         ]
       },
+      "play_prob_policy": {
+        "enabled": true,
+        "rotation_lock_floor": 0.995,
+        "rotation_lock_min_cond_p50": 8.0,
+        "rotation_lock_topk": 8,
+        "probable_floor": 0.9,
+        "require_fresh_injury_snapshot": false,
+        "freshness_minutes": 90
+      },
       "team_sigma_scale": 1.0,
       "player_sigma_scale": 1.0,
       "rates_sigma_scale": 1.0,

@@ -141,6 +141,30 @@ class MinutesAvailabilityPolicyConfig:
 
 
 @dataclass
+class PlayProbPolicyConfig:
+    """Config for play_prob "policy layer" used by sim availability sampling.
+
+    This is intended to stabilize minutes feasibility by treating rotation-lock
+    players (who are not on the injury report) as ~certain to be active, while
+    still pricing DNP risk for fringe and injured players.
+    """
+
+    enabled: bool = False
+
+    # Rotation-lock heuristic.
+    rotation_lock_min_cond_p50: float = 18.0
+    rotation_lock_topk: int = 8
+
+    # Floors (never set to exactly 1.0 to preserve RNG sensitivity / avoid degeneracy).
+    rotation_lock_floor: float = 0.995
+    probable_floor: float = 0.90
+
+    # Optional injury snapshot freshness gating (best-effort; disabled by default).
+    require_fresh_injury_snapshot: bool = False
+    freshness_minutes: float = 90.0
+
+
+@dataclass
 class MinutesWorldsConfig:
     """Config for model-space minutes worlds sampling (PR5 backend)."""
 
@@ -236,6 +260,8 @@ class SimV2Profile:
     minutes_absorption_caps: MinutesAbsorptionCapsConfig = field(default_factory=MinutesAbsorptionCapsConfig)
     # Optional play_prob transform policy used by availability sampling.
     minutes_availability_policy: MinutesAvailabilityPolicyConfig = field(default_factory=MinutesAvailabilityPolicyConfig)
+    # Preferred play_prob policy layer (sim_v3 default); supersedes minutes_availability_policy when enabled.
+    play_prob_policy: PlayProbPolicyConfig = field(default_factory=PlayProbPolicyConfig)
     # Optional explicit minutes bundle path (overrides minutes_run_id resolution)
     minutes_bundle_path: Optional[str] = None
     # Model-space minutes worlds config (PR5 backend)
@@ -455,6 +481,17 @@ def load_sim_v2_profile(
         exclude_status_buckets=exclude_status_tuple,
     )
 
+    play_prob_policy_raw = config.get("play_prob_policy", {}) or {}
+    play_prob_policy = PlayProbPolicyConfig(
+        enabled=bool(play_prob_policy_raw.get("enabled", False)),
+        rotation_lock_min_cond_p50=float(play_prob_policy_raw.get("rotation_lock_min_cond_p50", 18.0)),
+        rotation_lock_topk=int(play_prob_policy_raw.get("rotation_lock_topk", 8)),
+        rotation_lock_floor=float(play_prob_policy_raw.get("rotation_lock_floor", 0.995)),
+        probable_floor=float(play_prob_policy_raw.get("probable_floor", 0.90)),
+        require_fresh_injury_snapshot=bool(play_prob_policy_raw.get("require_fresh_injury_snapshot", False)),
+        freshness_minutes=float(play_prob_policy_raw.get("freshness_minutes", 90.0)),
+    )
+
     # Minutes worlds config (PR5 model-space backend)
     minutes_worlds_cfg_raw = config.get("minutes_worlds", {}) or {}
     minutes_worlds = MinutesWorldsConfig(
@@ -530,6 +567,7 @@ def load_sim_v2_profile(
         minutes_feasibility=minutes_feasibility,
         minutes_absorption_caps=minutes_absorption_caps,
         minutes_availability_policy=minutes_availability_policy,
+        play_prob_policy=play_prob_policy,
         minutes_bundle_path=minutes_bundle_path,
         minutes_worlds=minutes_worlds,
     )
@@ -543,6 +581,7 @@ __all__ = [
     "MinutesFeasibilityConfig",
     "MinutesAbsorptionCapsConfig",
     "MinutesAvailabilityPolicyConfig",
+    "PlayProbPolicyConfig",
     "PreSimReconcileConfig",
     "load_sim_v2_profile",
     "DEFAULT_PROFILES_PATH",
