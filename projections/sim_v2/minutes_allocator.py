@@ -146,11 +146,14 @@ def allocate_team_minutes_matrix(
     *,
     priority: np.ndarray,  # (N,)
     cap: float | np.ndarray = 48.0,
+    max_increase: np.ndarray | None = None,  # (N,) optional additional cap above anchor
+    baseline: np.ndarray | None = None,  # (N,) optional anchor minutes (max(demand, baseline))
     target_total: float = 240.0,
     k: float = 3.0,
     eps: float = 1e-6,
     max_iters: int = 60,
-) -> tuple[np.ndarray, dict[str, float | int]]:
+    return_infeasible_mask: bool = False,
+) -> tuple[np.ndarray, dict[str, float | int | np.ndarray]]:
     """Vectorized allocator for a single team across many worlds.
 
     This matches allocate_team_minutes semantics, but solves one λ per world row.
@@ -182,7 +185,25 @@ def allocate_team_minutes_matrix(
 
     # Apply play/inactive semantics: inactive players are fixed at 0 with cap=0.
     demand = np.clip(d0, 0.0, None) * active.astype(float)
-    cap_eff = cap_vec[None, :] * active.astype(float)
+
+    if max_increase is None:
+        cap_eff = cap_vec[None, :] * active.astype(float)
+    else:
+        inc = np.asarray(max_increase, dtype=float)
+        if inc.shape != (n_players,):
+            raise ValueError(f"max_increase must have shape (N,), got {inc.shape}")
+        inc = np.clip(inc, 0.0, None)
+
+        if baseline is None:
+            anchor = demand
+        else:
+            base = np.asarray(baseline, dtype=float)
+            if base.shape != (n_players,):
+                raise ValueError(f"baseline must have shape (N,), got {base.shape}")
+            anchor = np.maximum(demand, base[None, :])
+
+        cap_dyn = anchor + inc[None, :]
+        cap_eff = np.minimum(cap_vec[None, :], cap_dyn) * active.astype(float)
 
     all_inactive = ~active.any(axis=1)
     n_all_inactive = int(all_inactive.sum())
@@ -263,8 +284,8 @@ def allocate_team_minutes_matrix(
         "n_cap_infeasible_rows": int(n_cap_infeasible),
         "n_cap_bind_rows": int(n_cap_bind_rows),
         "max_abs_residual": float(max_abs_residual),
+        **({"cap_infeasible_mask": cap_infeasible} if return_infeasible_mask else {}),
     }
 
 
 __all__ = ["allocate_team_minutes", "allocate_team_minutes_matrix"]
-

@@ -26,6 +26,7 @@ def apply_bench_zero_mixture(
     cap_minutes: float,
     total_minutes: float = 240.0,
     rng: np.random.Generator | None = None,
+    min_active_needed_override: int | None = None,
 ) -> BenchZeroMixtureStats:
     """
     Two-part minutes model for low-minute players:
@@ -57,6 +58,8 @@ def apply_bench_zero_mixture(
         )
 
     min_active_needed = int(np.ceil(float(total_minutes) / float(cap_minutes)))
+    if min_active_needed_override is not None:
+        min_active_needed = max(min_active_needed, int(min_active_needed_override))
 
     in_bucket = target < float(minutes_threshold)
     if not np.any(in_bucket):
