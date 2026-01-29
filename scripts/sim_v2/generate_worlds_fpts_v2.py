@@ -26,6 +26,12 @@ from projections.sim_v2.minutes_noise import (
     load_minutes_noise_params,
     status_bucket_from_raw,
 )
+from projections.sim_v2.minutes_physics import (
+    apply_minutes_availability_policy,
+    apply_team_feasibility_gate,
+    compute_max_increase_by_depth,
+    compute_rotation_lock_mask,
+)
 from projections.sim_v2.minutes_stabilization import (
     apply_pre_sim_qp_reconcile,
     recenter_team_minutes_to_conditional_means,
@@ -1468,6 +1474,7 @@ def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> p
         "minutes_p50_cond",
         "minutes_p50",
         "play_prob",
+        "status_bucket",
         "is_starter",
         "rotation_prob",
         "eligible_flag",
@@ -2157,6 +2164,99 @@ def main(
                 group_map.setdefault((int(key[0]), int(key[1])), []).append(idx)
             group_map = {k: np.array(v, dtype=int) for k, v in group_map.items()}
 
+            # ------------------------------------------------------------------
+            # Minutes physics knobs (availability policy, feasibility gate, caps)
+            # ------------------------------------------------------------------
+            hard_cap_minutes = float(MINUTES_CAP_SIM_V3)
+
+            # Optional play_prob transform (sim uses p_eff for active sampling).
+            play_prob_raw = np.clip(play_prob_arr.astype(float), 0.0, 1.0)
+            play_prob_eff = play_prob_raw
+            rotation_lock_mask = None
+            availability_policy_cfg = getattr(profile_cfg, "minutes_availability_policy", None)
+            if availability_policy_cfg is not None and getattr(availability_policy_cfg, "enabled", False) and group_map:
+                status_bucket_arr = (
+                    mu_df["status_bucket"].astype(str).to_numpy()
+                    if "status_bucket" in mu_df.columns
+                    else None
+                )
+                rotation_lock_mask, play_prob_eff, policy_diag = apply_minutes_availability_policy(
+                    play_prob_raw=play_prob_raw,
+                    baseline_minutes=minutes_sim_base,
+                    is_starter=(gs_is_starter > 0) if gs_is_starter is not None else None,
+                    status_bucket=status_bucket_arr,
+                    group_map=group_map,
+                    cfg=availability_policy_cfg,
+                )
+                minutes_alloc_metrics["minutes_availability_policy_enabled"] = True
+                minutes_alloc_metrics["minutes_availability_policy"] = {
+                    "n_rotation_locks": int(policy_diag.n_rotation_locks),
+                    "n_floored": int(policy_diag.n_floored),
+                    "max_floor_delta": float(policy_diag.max_floor_delta),
+                    "p_floor": float(getattr(availability_policy_cfg, "play_prob_floor", 0.0)),
+                }
+                if sim_audit:
+                    typer.echo(
+                        "[sim-physics] availability_policy enabled: "
+                        f"locks={policy_diag.n_rotation_locks} floored={policy_diag.n_floored} "
+                        f"max_delta={policy_diag.max_floor_delta:.3f}"
+                    )
+            else:
+                minutes_alloc_metrics["minutes_availability_policy_enabled"] = False
+
+            # Increase-only absorption caps: compute per-player max increase minutes (delta_i_max).
+            absorption_cfg = getattr(profile_cfg, "minutes_absorption_caps", None)
+            max_increase_arr: np.ndarray | None = None
+            cap_upper_arr = np.full(len(mu_df), hard_cap_minutes, dtype=float)
+            if absorption_cfg is not None and getattr(absorption_cfg, "enabled", False) and group_map:
+                max_increase_arr = compute_max_increase_by_depth(
+                    baseline_minutes=minutes_sim_base,
+                    is_starter=(gs_is_starter > 0) if gs_is_starter is not None else None,
+                    group_map=group_map,
+                    cfg=absorption_cfg,
+                )
+                cap_upper_arr = np.minimum(
+                    hard_cap_minutes,
+                    np.clip(minutes_sim_base, 0.0, None) + np.clip(max_increase_arr, 0.0, None),
+                )
+                minutes_alloc_metrics["minutes_absorption_caps_enabled"] = True
+                minutes_alloc_metrics["minutes_absorption_caps"] = {
+                    "core_rank_max": int(getattr(absorption_cfg, "core_rank_max", 0)),
+                    "rotation_rank_max": int(getattr(absorption_cfg, "rotation_rank_max", 0)),
+                    "bench_rank_max": int(getattr(absorption_cfg, "bench_rank_max", 0)),
+                    "fringe_rank_max": int(getattr(absorption_cfg, "fringe_rank_max", 0)),
+                    "core_delta_max": float(getattr(absorption_cfg, "core_delta_max", 0.0)),
+                    "rotation_delta_max": float(getattr(absorption_cfg, "rotation_delta_max", 0.0)),
+                    "bench_delta_max": float(getattr(absorption_cfg, "bench_delta_max", 0.0)),
+                    "fringe_delta_max": float(getattr(absorption_cfg, "fringe_delta_max", 0.0)),
+                    "deep_delta_max": float(getattr(absorption_cfg, "deep_delta_max", 0.0)),
+                }
+                if sim_audit:
+                    typer.echo(
+                        "[sim-physics] absorption_caps enabled: "
+                        f"delta_p50={float(np.percentile(max_increase_arr, 50)):.1f} "
+                        f"delta_p90={float(np.percentile(max_increase_arr, 90)):.1f}"
+                    )
+            else:
+                minutes_alloc_metrics["minutes_absorption_caps_enabled"] = False
+
+            # Rotation lock mask for feasibility (even if availability policy is disabled).
+            feasibility_cfg = getattr(profile_cfg, "minutes_feasibility", None)
+            if (
+                rotation_lock_mask is None
+                and feasibility_cfg is not None
+                and getattr(feasibility_cfg, "enabled", False)
+                and getattr(feasibility_cfg, "min_rotation_locks_active", None) is not None
+                and group_map
+            ):
+                rotation_lock_mask = compute_rotation_lock_mask(
+                    baseline_minutes=minutes_sim_base,
+                    is_starter=(gs_is_starter > 0) if gs_is_starter is not None else None,
+                    group_map=group_map,
+                    top_k=8,
+                    minutes_threshold=20.0,
+                )
+
             # Minutes allocator priority signal (deterministic; no retrain).
             # Higher values => more protected from adjustment when projecting team totals to 240.
             priority_base_col = None
@@ -2336,6 +2436,14 @@ def main(
             ma_top1: list[np.ndarray] = []
             ma_top5: list[np.ndarray] = []
 
+            # Minutes physics diagnostics (team-world level, aggregated).
+            phys_team_worlds = 0
+            phys_infeasible_pre = 0
+            phys_resampled_team_worlds = 0
+            phys_resample_attempts_total = 0
+            phys_promoted_team_worlds = 0
+            phys_promoted_players_total = 0
+
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
                 rng = np.random.default_rng(date_seed + chunk_start)
@@ -2346,14 +2454,70 @@ def main(
                 use_play_prob_masking = getattr(profile_cfg, "use_play_prob_masking", True)
                 if use_play_prob_masking:
                     u_active = rng.random(size=(chunk_size, len(play_prob_arr)))
-                    active_mask = u_active < play_prob_arr[None, :]
+                    active_mask = u_active < play_prob_eff[None, :]
                 else:
                     # All players with play_prob > 0 are active; OUT players (play_prob=0) stay inactive
-                    active_mask = np.broadcast_to(play_prob_arr > 0, (chunk_size, len(play_prob_arr)))
-                if eligible_flag_arr is not None and not getattr(profile_cfg, 'preserve_input_rotation', False):
-                    # Only apply eligible_flag filtering when NOT preserving input rotation
-                    # sim_v3 with preserve_input_rotation=True skips this: RotAlloc already handled rotation
+                    active_mask = np.broadcast_to(play_prob_eff > 0, (chunk_size, len(play_prob_eff)))
+                if eligible_flag_arr is not None and not getattr(profile_cfg, "preserve_input_rotation", False):
+                    # Only apply eligible_flag filtering when NOT preserving input rotation.
+                    # With preserve_input_rotation=True, the input frame is assumed to already reflect the
+                    # desired rotation/eligibility set.
                     active_mask = active_mask & np.broadcast_to(eligible_flag_arr[None, :], active_mask.shape)
+
+                # 1b. Team/world feasibility gate: resample availability draws until constraints are feasible.
+                if (
+                    use_play_prob_masking
+                    and feasibility_cfg is not None
+                    and getattr(feasibility_cfg, "enabled", False)
+                    and group_map
+                ):
+                    eligible_mask_for_gate = (
+                        eligible_flag_arr
+                        if (eligible_flag_arr is not None and not getattr(profile_cfg, "preserve_input_rotation", False))
+                        else None
+                    )
+                    active_mask, gate_diag = apply_team_feasibility_gate(
+                        active_mask,
+                        play_prob=play_prob_eff,
+                        baseline_minutes=minutes_sim_base,
+                        cap_upper=cap_upper_arr,
+                        group_map=group_map,
+                        cfg=feasibility_cfg,
+                        rng=rng,
+                        eligible_mask=eligible_mask_for_gate,
+                        rotation_lock_mask=rotation_lock_mask,
+                        target_total=TEAM_MINUTES_TARGET,
+                        eps=1e-6,
+                    )
+                    phys_team_worlds += int(gate_diag.n_team_worlds)
+                    phys_infeasible_pre += int(gate_diag.n_infeasible_pre_resample)
+                    phys_resampled_team_worlds += int(gate_diag.n_resampled_team_worlds)
+                    phys_resample_attempts_total += int(gate_diag.resample_attempts_total)
+                    phys_promoted_team_worlds += int(gate_diag.n_promoted_team_worlds)
+                    phys_promoted_players_total += int(gate_diag.promoted_players_total)
+                    if sim_audit and chunk_start == 0:
+                        frac_infeasible = (
+                            float(gate_diag.n_infeasible_pre_resample) / float(gate_diag.n_team_worlds)
+                            if gate_diag.n_team_worlds
+                            else 0.0
+                        )
+                        frac_resampled = (
+                            float(gate_diag.n_resampled_team_worlds) / float(gate_diag.n_team_worlds)
+                            if gate_diag.n_team_worlds
+                            else 0.0
+                        )
+                        avg_attempts = (
+                            float(gate_diag.resample_attempts_total) / float(gate_diag.n_resampled_team_worlds)
+                            if gate_diag.n_resampled_team_worlds
+                            else 0.0
+                        )
+                        typer.echo(
+                            "[sim-physics][resample] feasibility_gate: "
+                            f"team_worlds={gate_diag.n_team_worlds} "
+                            f"frac_infeasible_pre={frac_infeasible:.4f} "
+                            f"frac_resampled={frac_resampled:.4f} avg_attempts={avg_attempts:.2f} "
+                            f"promoted_worlds={gate_diag.n_promoted_team_worlds} promoted_players={gate_diag.promoted_players_total}"
+                        )
 
 
                 # 2. Sample minutes based on backend: model_space_v1 > structured_noise > game_scripts > fallback
@@ -2391,7 +2555,7 @@ def main(
                         gate_logit=gate_logit_arr,
                         gate_prob=gate_prob_arr,
                         share_logit=share_logit_arr,
-                        play_prob=play_prob_arr,
+                        play_prob=play_prob_eff,
                         team_indices=team_indices,
                         n_worlds=chunk_size,
                         rng=rng,
@@ -2532,6 +2696,11 @@ def main(
                 # then let reconciliation redistribute minutes among remaining active players.
                 bz_cfg = getattr(profile_cfg, "bench_zero_mixture", None)
                 if bz_cfg is not None and getattr(bz_cfg, "enabled", False) and group_map:
+                    min_active_override = (
+                        int(getattr(feasibility_cfg, "min_active_players", 0))
+                        if (feasibility_cfg is not None and getattr(feasibility_cfg, "enabled", False))
+                        else None
+                    )
                     stats = apply_bench_zero_mixture(
                         minutes_worlds,
                         active_mask,
@@ -2540,9 +2709,10 @@ def main(
                         minutes_threshold=float(getattr(bz_cfg, "minutes_threshold", 8.0)),
                         p_zero_base=float(getattr(bz_cfg, "p_zero_base", 0.25)),
                         p_zero_slope=float(getattr(bz_cfg, "p_zero_slope", 0.0)),
-                        cap_minutes=MINUTES_CAP_SIM_V3,
+                        cap_minutes=hard_cap_minutes,
                         total_minutes=TEAM_MINUTES_TARGET,
                         rng=rng,
+                        min_active_needed_override=min_active_override,
                     )
                     minutes_worlds = minutes_worlds * active_mask.astype(float)
                     if sim_audit and chunk_start == 0:
@@ -2563,23 +2733,26 @@ def main(
                     # Production minutes inputs always have >=20 rows (pipeline health checks).
                     if len(idxs) < MIN_TEAM_SIZE_FOR_TEAM_MINUTES_RECONCILE:
                         continue
-                    priority_team = minutes_alloc_priority[np.asarray(idxs, dtype=int)]
+                    idxs_arr = np.asarray(idxs, dtype=int)
+                    priority_team = minutes_alloc_priority[idxs_arr]
                     allocated, stats = allocate_team_minutes_matrix(
-                        minutes_worlds[:, idxs],
-                        active_mask[:, idxs],
+                        minutes_worlds[:, idxs_arr],
+                        active_mask[:, idxs_arr],
                         priority=priority_team,
-                        cap=MINUTES_CAP_SIM_V3,
+                        cap=hard_cap_minutes,
+                        max_increase=(max_increase_arr[idxs_arr] if max_increase_arr is not None else None),
+                        baseline=(minutes_sim_base[idxs_arr] if max_increase_arr is not None else None),
                         target_total=TEAM_MINUTES_TARGET,
                         k=3.0,
                         eps=1e-6,
                     )
-                    minutes_worlds[:, idxs] = allocated
+                    minutes_worlds[:, idxs_arr] = allocated
                     cap_bind_chunk += int(stats["n_cap_bind_rows"])
                     cap_infeasible_chunk += int(stats["n_cap_infeasible_rows"])
                     all_inactive_chunk += int(stats["n_all_inactive"])
 
                     # Allocation diagnostics (team-world level).
-                    active_team = active_mask[:, idxs]
+                    active_team = active_mask[:, idxs_arr]
                     n_active = active_team.sum(axis=1).astype(float)
                     n_nonzero = (allocated > 1e-9).sum(axis=1).astype(float)
                     ma_team_worlds += int(len(n_active))
@@ -2731,7 +2904,7 @@ def main(
                             if key not in team_to_idx:
                                 team_to_idx[key] = len(team_to_idx)
                             team_indices_arr[player_idxs] = team_to_idx[key]
-                        
+                    
                         # Apply learned FGA allocation
                         stat_totals = _apply_learned_fga_shares_allocation(
                             stat_totals=stat_totals,
@@ -2743,7 +2916,7 @@ def main(
                             bundle=usage_shares_bundle,
                             rng=rng,
                         )
-                        
+                    
                         # Apply rate_weighted for non-FGA targets (FTA, TOV)
                         non_fga_targets = [t for t in usage_shares_cfg.targets if t != "fga"]
                         if non_fga_targets:
@@ -2857,6 +3030,37 @@ def main(
                     f"cap_infeasible_team_worlds={audit_cap_infeasible_team_worlds}/{audit_total_team_worlds} "
                     f"all_inactive_team_worlds={audit_all_inactive_team_worlds}/{audit_total_team_worlds}"
                 )
+
+            if audit_total_team_worlds > 0 and audit_cap_infeasible_team_worlds > 0:
+                typer.echo(
+                    f"[alloc-infeasible] cap_infeasible_team_worlds={audit_cap_infeasible_team_worlds}/{audit_total_team_worlds}",
+                    err=True,
+                )
+
+            # Minutes physics diagnostics (availability gate / resampling).
+            minutes_physics_summary: dict[str, object] = {}
+            if feasibility_cfg is not None and getattr(feasibility_cfg, "enabled", False) and phys_team_worlds > 0:
+                frac_infeasible_pre = float(phys_infeasible_pre) / float(phys_team_worlds)
+                frac_resampled = float(phys_resampled_team_worlds) / float(phys_team_worlds)
+                avg_attempts = (
+                    float(phys_resample_attempts_total) / float(phys_resampled_team_worlds)
+                    if phys_resampled_team_worlds > 0
+                    else 0.0
+                )
+                frac_promoted = float(phys_promoted_team_worlds) / float(phys_team_worlds)
+                minutes_physics_summary = {
+                    "team_worlds": int(phys_team_worlds),
+                    "min_active_players": int(getattr(feasibility_cfg, "min_active_players", 0)),
+                    "min_sum_demand": float(getattr(feasibility_cfg, "min_sum_demand", 0.0)),
+                    "max_resample_attempts": int(getattr(feasibility_cfg, "max_resample_attempts", 0)),
+                    "frac_infeasible_pre_resample": float(frac_infeasible_pre),
+                    "frac_resampled": float(frac_resampled),
+                    "avg_resample_attempts": float(avg_attempts),
+                    "frac_promoted": float(frac_promoted),
+                    "promoted_players_total": int(phys_promoted_players_total),
+                }
+                minutes_alloc_metrics["minutes_physics"] = minutes_physics_summary
+                typer.echo(f"[sim-physics] {json.dumps(minutes_physics_summary, separators=(',', ':'))}", err=True)
 
             # Emit a single compact minutes allocator diagnostic line for this date/profile.
             minutes_alloc_summary: dict[str, object] = {}

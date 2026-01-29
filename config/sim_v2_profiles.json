@@ -160,6 +160,34 @@
         "p_zero_base": 0.85,
         "p_zero_slope": 0.35
       },
+      "minutes_feasibility": {
+        "enabled": true,
+        "min_active_players": 8,
+        "min_sum_demand": 210.0,
+        "max_resample_attempts": 10
+      },
+      "minutes_absorption_caps": {
+        "enabled": true,
+        "core_rank_max": 5,
+        "rotation_rank_max": 8,
+        "bench_rank_max": 10,
+        "fringe_rank_max": 12,
+        "core_delta_max": 16.0,
+        "rotation_delta_max": 12.0,
+        "bench_delta_max": 8.0,
+        "fringe_delta_max": 4.0,
+        "deep_delta_max": 2.0
+      },
+      "minutes_availability_policy": {
+        "enabled": false,
+        "rotation_lock_top_k": 8,
+        "rotation_lock_minutes_threshold": 20.0,
+        "play_prob_floor": 0.99,
+        "exclude_status_buckets": [
+          "out",
+          "questionable"
+        ]
+      },
       "team_sigma_scale": 1.0,
       "player_sigma_scale": 1.0,
       "rates_sigma_scale": 1.0,

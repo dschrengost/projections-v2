@@ -86,6 +86,61 @@ class BenchZeroMixtureConfig:
 
 
 @dataclass
+class MinutesFeasibilityConfig:
+    """Config for per-team/per-world availability feasibility gating + resampling."""
+
+    enabled: bool = False
+    # Minimum active players per team per world (after any eligibility filtering).
+    min_active_players: int = 8
+    # Minimum baseline minutes among active players, computed pre-reconcile.
+    min_sum_demand: float = 210.0
+    # Max retries when resampling a team's availability draws.
+    max_resample_attempts: int = 10
+    # Optional: minimum "rotation lock" actives per team/world (None = disabled).
+    min_rotation_locks_active: int | None = None
+
+
+@dataclass
+class MinutesAbsorptionCapsConfig:
+    """Config for increase-only absorption caps during team-240 reconciliation."""
+
+    enabled: bool = False
+
+    # Depth-rank bucket cutoffs (rank is within team by baseline minutes, 1=highest).
+    core_rank_max: int = 5
+    rotation_rank_max: int = 8
+    bench_rank_max: int = 10
+    fringe_rank_max: int = 12
+
+    # Max additional minutes above the anchor minutes for each bucket.
+    # "anchor minutes" is max(sampled_minutes, baseline_minutes) so noise-driven minutes
+    # are not artificially clipped.
+    core_delta_max: float = 16.0
+    rotation_delta_max: float = 12.0
+    bench_delta_max: float = 8.0
+    fringe_delta_max: float = 4.0
+    deep_delta_max: float = 2.0
+
+
+@dataclass
+class MinutesAvailabilityPolicyConfig:
+    """Config for transforming play_prob before active sampling."""
+
+    enabled: bool = False
+
+    # Rotation lock heuristic: lock players who are starters, in top-K by baseline minutes,
+    # or exceed a minutes threshold.
+    rotation_lock_top_k: int = 8
+    rotation_lock_minutes_threshold: float = 20.0
+
+    # Floor play_prob for non-OUT/non-DOUBTFUL rotation locks.
+    play_prob_floor: float = 0.99
+
+    # Status buckets that should never be floored even if they are a rotation lock.
+    exclude_status_buckets: tuple[str, ...] = ("out", "questionable")
+
+
+@dataclass
 class MinutesWorldsConfig:
     """Config for model-space minutes worlds sampling (PR5 backend)."""
 
@@ -162,7 +217,8 @@ class SimV2Profile:
     vacancy_mode: str = "game"  # "none" | "game"
     # Whether to sample active mask from play_prob (True = Bernoulli sampling, False = all active)
     use_play_prob_masking: bool = True
-    # When True, sim does not apply eligible_flag filtering or rotation pruning - RotAlloc already handled it
+    # When True, sim does not apply eligible_flag filtering or rotation pruning; the input
+    # minutes frame is assumed to already reflect the desired rotation/eligibility set.
     preserve_input_rotation: bool = False
     # New structured minutes noise config (per-world noise + cheap team-240 projection)
     minutes_noise_config: MinutesNoiseConfig = field(default_factory=MinutesNoiseConfig)
@@ -174,6 +230,12 @@ class SimV2Profile:
     game_factor: GameFactorConfig = field(default_factory=GameFactorConfig)
     # Optional mass-at-zero mixture for low-minute players (applied pre-reconcile).
     bench_zero_mixture: BenchZeroMixtureConfig = field(default_factory=BenchZeroMixtureConfig)
+    # Minutes feasibility gating + resampling after availability sampling.
+    minutes_feasibility: MinutesFeasibilityConfig = field(default_factory=MinutesFeasibilityConfig)
+    # Increase-only absorption caps for team-240 reconciliation.
+    minutes_absorption_caps: MinutesAbsorptionCapsConfig = field(default_factory=MinutesAbsorptionCapsConfig)
+    # Optional play_prob transform policy used by availability sampling.
+    minutes_availability_policy: MinutesAvailabilityPolicyConfig = field(default_factory=MinutesAvailabilityPolicyConfig)
     # Optional explicit minutes bundle path (overrides minutes_run_id resolution)
     minutes_bundle_path: Optional[str] = None
     # Model-space minutes worlds config (PR5 backend)
@@ -287,7 +349,7 @@ def load_sim_v2_profile(
     use_play_prob_masking = bool(config.get("use_play_prob_masking", True))
 
     # Preserve input rotation: when True, sim skips eligible_flag filtering and rotation pruning
-    # (RotAlloc already handled rotation selection upstream)
+    # (the input is assumed to already reflect the desired rotation/eligibility set).
     preserve_input_rotation = bool(config.get("preserve_input_rotation", False))
 
     # Minutes bundle path (explicit override for bundle location)
@@ -349,6 +411,48 @@ def load_sim_v2_profile(
         minutes_threshold=float(bench_zero_cfg_raw.get("minutes_threshold", 8.0)),
         p_zero_base=float(bench_zero_cfg_raw.get("p_zero_base", 0.25)),
         p_zero_slope=float(bench_zero_cfg_raw.get("p_zero_slope", 0.5)),
+    )
+
+    feasibility_cfg_raw = config.get("minutes_feasibility", {}) or {}
+    min_rotation_locks_active_raw = feasibility_cfg_raw.get("min_rotation_locks_active")
+    minutes_feasibility = MinutesFeasibilityConfig(
+        enabled=bool(feasibility_cfg_raw.get("enabled", False)),
+        min_active_players=int(feasibility_cfg_raw.get("min_active_players", 8)),
+        min_sum_demand=float(feasibility_cfg_raw.get("min_sum_demand", 210.0)),
+        max_resample_attempts=int(feasibility_cfg_raw.get("max_resample_attempts", 10)),
+        min_rotation_locks_active=(
+            int(min_rotation_locks_active_raw)
+            if min_rotation_locks_active_raw is not None
+            else None
+        ),
+    )
+
+    absorption_cfg_raw = config.get("minutes_absorption_caps", {}) or {}
+    minutes_absorption_caps = MinutesAbsorptionCapsConfig(
+        enabled=bool(absorption_cfg_raw.get("enabled", False)),
+        core_rank_max=int(absorption_cfg_raw.get("core_rank_max", 5)),
+        rotation_rank_max=int(absorption_cfg_raw.get("rotation_rank_max", 8)),
+        bench_rank_max=int(absorption_cfg_raw.get("bench_rank_max", 10)),
+        fringe_rank_max=int(absorption_cfg_raw.get("fringe_rank_max", 12)),
+        core_delta_max=float(absorption_cfg_raw.get("core_delta_max", 16.0)),
+        rotation_delta_max=float(absorption_cfg_raw.get("rotation_delta_max", 12.0)),
+        bench_delta_max=float(absorption_cfg_raw.get("bench_delta_max", 8.0)),
+        fringe_delta_max=float(absorption_cfg_raw.get("fringe_delta_max", 4.0)),
+        deep_delta_max=float(absorption_cfg_raw.get("deep_delta_max", 2.0)),
+    )
+
+    availability_cfg_raw = config.get("minutes_availability_policy", {}) or {}
+    exclude_status = availability_cfg_raw.get("exclude_status_buckets")
+    if exclude_status is None:
+        exclude_status_tuple: tuple[str, ...] = ("out", "questionable")
+    else:
+        exclude_status_tuple = tuple(str(x) for x in exclude_status)
+    minutes_availability_policy = MinutesAvailabilityPolicyConfig(
+        enabled=bool(availability_cfg_raw.get("enabled", False)),
+        rotation_lock_top_k=int(availability_cfg_raw.get("rotation_lock_top_k", 8)),
+        rotation_lock_minutes_threshold=float(availability_cfg_raw.get("rotation_lock_minutes_threshold", 20.0)),
+        play_prob_floor=float(availability_cfg_raw.get("play_prob_floor", 0.99)),
+        exclude_status_buckets=exclude_status_tuple,
     )
 
     # Minutes worlds config (PR5 model-space backend)
@@ -423,6 +527,9 @@ def load_sim_v2_profile(
         minutes_mean_recentering=minutes_mean_recentering,
         game_factor=game_factor,
         bench_zero_mixture=bench_zero_mixture,
+        minutes_feasibility=minutes_feasibility,
+        minutes_absorption_caps=minutes_absorption_caps,
+        minutes_availability_policy=minutes_availability_policy,
         minutes_bundle_path=minutes_bundle_path,
         minutes_worlds=minutes_worlds,
     )
@@ -433,6 +540,9 @@ __all__ = [
     "UsageSharesConfig",
     "MinutesNoiseConfig",
     "MinutesWorldsConfig",
+    "MinutesFeasibilityConfig",
+    "MinutesAbsorptionCapsConfig",
+    "MinutesAvailabilityPolicyConfig",
     "PreSimReconcileConfig",
     "load_sim_v2_profile",
     "DEFAULT_PROFILES_PATH",
