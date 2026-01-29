@@ -390,14 +390,34 @@ def apply_overrides(
     df = player_df.copy()
     
     # Identify source columns
-    fpts_col = _find_col(df, ["sim_dk_fpts_mean", "dk_fpts_mean", "proj_fpts", "fpts_mean", "proj"])
+    # Prefer canonical unconditional (DNP=0) sim means when available so overrides match
+    # optimizer/contest-sim decision metrics.
+    fpts_col = _find_col(
+        df,
+        [
+            "fpts_sim_uncond_mean",
+            "dk_fpts_mean_uncond",
+            "fpts_sim_cond_mean",
+            "dk_fpts_mean",
+            "sim_dk_fpts_mean",  # legacy API naming
+            "proj_fpts",
+            "fpts_mean",
+            "proj",
+        ],
+    )
     minutes_col = _find_col(
         df,
         [
-            "sim_minutes_sim_mean",
+            "minutes_sim_uncond_mean",
+            "minutes_sim_mean_uncond",
+            "minutes_sim_cond_mean",
             "minutes_sim_mean",
-            "sim_minutes_sim_p50",
+            "minutes_sim_uncond_p50",
+            "minutes_sim_p50_uncond",
+            "minutes_sim_cond_p50",
             "minutes_sim_p50",
+            "sim_minutes_sim_mean",  # legacy API naming
+            "sim_minutes_sim_p50",   # legacy API naming
             "minutes_p50",
             "minutes",
             "minutes_pred",

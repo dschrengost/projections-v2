@@ -37,6 +37,7 @@ from projections.optimizer.lineup_sim_stats import (
     compute_lineup_distribution_stats,
     load_world_fpts_matrix,
 )
+from projections.projections_bundle import add_canonical_projection_fields, resolve_unified_projections_run
 from projections.optimizer.objective import (
     set_active_late_swap_bonus,
     LateSwapBonusConfig,
@@ -277,53 +278,27 @@ def load_projections_for_date(
         player_id, player_name, team_tricode, sim_dk_fpts_mean, pred_own_pct, etc.
     """
     root = data_root or get_data_root()
-    df = None
+    df: pd.DataFrame | None = None
 
+    # Preferred: unified projections artifact. Resolve run_id using the same
+    # blessed/pinned/promoted pointer logic as the dashboard so all consumers
+    # agree on the default run selection.
+    resolved = resolve_unified_projections_run(game_date, run_id=run_id, data_root=root)
+    if resolved.projections_path is not None:
+        df = pd.read_parquet(resolved.projections_path)
+        df = add_canonical_projection_fields(df)
+        logger.info(
+            "Loaded unified projections for %s from run=%s (source=%s, rows=%d)",
+            game_date,
+            resolved.run_id,
+            resolved.source,
+            len(df),
+        )
+
+    # When we need to fall back to per-model artifacts, treat run_id as a minutes run id
+    # (historically minutes + sim outputs were partitioned by the same run token).
     minutes_root = get_minutes_daily_root()
-    resolved_run_id = run_id or _latest_minutes_run_id(game_date, minutes_root)
-
-    # Try unified projections artifact first (has sim + ownership)
-    # Path matches minutes_api: artifacts/projections/{date}/run=...
-    unified_dir = root / "artifacts" / "projections" / game_date
-    if unified_dir.exists():
-        run_dir = None
-        if resolved_run_id:
-            candidate = unified_dir / f"run={resolved_run_id}"
-            if candidate.exists():
-                run_dir = candidate
-
-        if run_dir is None:
-            promoted = control_plane.read_promoted_run_id(unified_dir)
-            if promoted:
-                candidate = unified_dir / f"run={promoted}"
-                if candidate.exists():
-                    run_dir = candidate
-
-            # Fall back to most recent run dir only when explicitly allowed.
-            if (run_dir is None or not run_dir.exists()) and control_plane.allow_unpromoted_run_reads():
-                run_dirs = sorted(
-                    [p for p in unified_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
-                    reverse=True,
-                )
-                run_dir = run_dirs[0] if run_dirs else None
-        
-        if run_dir and run_dir.exists():
-            parquet_path = run_dir / "projections.parquet"
-            if parquet_path.exists():
-                df = pd.read_parquet(parquet_path)
-                # Normalize column names: dk_fpts_* -> sim_dk_fpts_*
-                rename_map = {}
-                for col in df.columns:
-                    if col.startswith("dk_fpts_") and not col.startswith("sim_"):
-                        rename_map[col] = f"sim_{col}"
-                if rename_map:
-                    df = df.rename(columns=rename_map)
-                logger.info(
-                    "Loaded unified projections for %s from %s (%d rows)",
-                    game_date,
-                    run_dir.name,
-                    len(df),
-                )
+    resolved_minutes_run_id = run_id or _latest_minutes_run_id(game_date, minutes_root)
 
     # Fall back to gold projections_minutes_v1
     if df is None:
@@ -364,39 +339,25 @@ def load_projections_for_date(
     has_fpts = any(c in df.columns and df[c].notna().any() for c in fpts_cols)
 
     if not has_fpts:
-        sim_df = _load_sim_projections(game_date, root, minutes_run_id=resolved_run_id)
+        sim_df = _load_sim_projections(game_date, root, minutes_run_id=resolved_minutes_run_id)
         if sim_df is not None and not sim_df.empty:
             # Merge sim projections
             join_keys = ["player_id"]
             if "game_id" in df.columns and "game_id" in sim_df.columns:
                 join_keys.append("game_id")
 
-            # Rename sim columns
-            rename_map = {}
-            for col in sim_df.columns:
-                if col in join_keys:
-                    continue
-                if col == "dk_fpts_mean":
-                    rename_map[col] = "sim_dk_fpts_mean"
-                elif col == "dk_fpts_std":
-                    rename_map[col] = "sim_dk_fpts_std"
-                elif not col.startswith("sim_"):
-                    rename_map[col] = f"sim_{col}"
-
-            sim_df = sim_df.rename(columns=rename_map)
-
             # Merge
             df = df.merge(sim_df, on=join_keys, how="left", suffixes=("", "_sim"))
             logger.info(
                 "Merged sim_v2 projections for %s (%d players with FPTS)",
                 game_date,
-                df["sim_dk_fpts_mean"].notna().sum() if "sim_dk_fpts_mean" in df.columns else 0,
+                df["dk_fpts_mean"].notna().sum() if "dk_fpts_mean" in df.columns else 0,
             )
 
     # Final fallback: compute deterministic mean FPTS from minutes + rates_v1_live.
     has_fpts = any(c in df.columns and df[c].notna().any() for c in fpts_cols)
     if not has_fpts:
-        rates_df, rates_run_id = _load_rates_v1_live(game_date, root, run_id=resolved_run_id)
+        rates_df, rates_run_id = _load_rates_v1_live(game_date, root, run_id=resolved_minutes_run_id)
         if rates_df is not None and not rates_df.empty:
             before = set(df.columns)
             df = _attach_rates_mean_fpts(df, rates_df)
@@ -408,7 +369,7 @@ def load_projections_for_date(
                 added,
             )
 
-    return df
+    return add_canonical_projection_fields(df)
 
 
 def _load_sim_projections(
@@ -815,9 +776,12 @@ def build_player_pool(
         (
             c
             for c in [
+                # Canonical decision metric (matches sim/contest-sim): unconditional (DNP=0).
+                "fpts_sim_uncond_mean",
                 # Prefer unconditional (DNP=0) world aggregates when available.
                 "sim_dk_fpts_mean_uncond",
                 "dk_fpts_mean_uncond",
+                "fpts_sim_cond_mean",
                 "sim_dk_fpts_mean",
                 "dk_fpts_mean",
                 "proj_fpts",
@@ -836,13 +800,15 @@ def build_player_pool(
         (
             c
             for c in [
-                "sim_minutes_sim_mean_uncond",
+                # Canonical decision metric (matches sim/contest-sim): unconditional (DNP=0).
+                "minutes_sim_uncond_mean",
                 "minutes_sim_mean_uncond",
-                "sim_minutes_sim_mean",
-                "minutes_sim_mean",
-                "sim_minutes_sim_p50_uncond",
+                "minutes_sim_uncond_p50",
                 "minutes_sim_p50_uncond",
-                "sim_minutes_sim_p50",
+                # Conditional (given plays).
+                "minutes_sim_cond_mean",
+                "minutes_sim_mean",
+                "minutes_sim_cond_p50",
                 "minutes_sim_p50",
                 "minutes_final",
                 "minutes_p50_cond",
@@ -866,8 +832,10 @@ def build_player_pool(
         (
             c
             for c in [
+                "fpts_sim_uncond_std",
                 "sim_dk_fpts_std_uncond",
                 "dk_fpts_std_uncond",
+                "fpts_sim_cond_std",
                 "sim_dk_fpts_std",
                 "stddev",
                 "fpts_std",
@@ -882,8 +850,10 @@ def build_player_pool(
         (
             c
             for c in [
+                "fpts_sim_uncond_p90",
                 "sim_dk_fpts_p90_uncond",
                 "dk_fpts_p90_uncond",
+                "fpts_sim_cond_p90",
                 "sim_dk_fpts_p90",
                 "dk_fpts_p90",
                 "fpts_p90",
@@ -950,14 +920,14 @@ def build_player_pool(
             used_fppm_fallback = False
             fppm = float(proj / model_minutes) if model_minutes and model_minutes > 0 else 1.0
 
-            # Back-compat guardrail: older sim_v2 outputs expose dk_fpts_* conditional on playing.
-            # For decision metrics (optimizer objective), treat DNP as 0 by multiplying by play_prob
-            # when an explicit *_uncond metric is not available.
-            if proj_col in {"sim_dk_fpts_mean", "dk_fpts_mean"} and "play_prob" in merged.columns:
+            # Back-compat guardrail: if we only have a conditional-on-playing mean, convert to an
+            # unconditional (DNP=0) decision metric by multiplying by the best available play prob.
+            if proj_col in {"fpts_sim_cond_mean", "sim_dk_fpts_mean", "dk_fpts_mean"}:
                 try:
-                    p_play = float(row.get("play_prob", 1.0))
-                    if 0.0 <= p_play <= 1.0 and proj is not None and not pd.isna(proj):
-                        proj = float(proj) * p_play
+                    p_play = row.get("p_play_eff", row.get("minutes_sim_p_active", row.get("play_prob", 1.0)))
+                    p_play_f = float(p_play)
+                    if 0.0 <= p_play_f <= 1.0 and proj is not None and not pd.isna(proj):
+                        proj = float(proj) * p_play_f
                 except Exception:
                     pass
         
@@ -1321,6 +1291,17 @@ def run_quick_build(
             run_id = None
             if isinstance(job.config, dict):
                 run_id = job.config.get("run_id")
+            sim_run_id: str | None = None
+            if run_id:
+                try:
+                    from projections.projections_bundle import load_unified_projections_df
+
+                    bundle = load_unified_projections_df(job.game_date, run_id=str(run_id), data_root=data_root)
+                    if "sim_run_id" in bundle.df.columns:
+                        vals = bundle.df["sim_run_id"].dropna().astype(str).unique().tolist()
+                        sim_run_id = vals[0] if len(vals) == 1 else None
+                except Exception:
+                    sim_run_id = None
 
             def _resolve_worlds_dir(base_root: Path, game_date: str, run_id: str | None) -> Path | None:
                 import json
@@ -1375,7 +1356,7 @@ def run_quick_build(
                         return base
                 return None
 
-            worlds_dir = _resolve_worlds_dir(worlds_root, job.game_date, run_id)
+            worlds_dir = _resolve_worlds_dir(worlds_root, job.game_date, sim_run_id or run_id)
             if worlds_dir is None:
                 raise FileNotFoundError(
                     f"sim_v2 worlds directory not found for {job.game_date} under {worlds_root}"

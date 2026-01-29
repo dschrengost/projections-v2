@@ -26,7 +26,6 @@ from projections.minutes import (
     MINUTES_CONTRACT_VERSION,
     PLAY_THRESHOLD_MINUTES,
     ROTATION_THRESHOLD_MINUTES,
-    load_provenance_from_summary,
     minutes_contract_hash,
 )
 from projections.api.pipeline_status_api import router as pipeline_status_router
@@ -41,6 +40,7 @@ from projections.api.props_api import router as props_router
 from projections.pipeline import control_plane
 from projections.pipeline import minutes_models as minutes_models_store
 from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
+from projections.projections_bundle import add_canonical_projection_fields
 
 DEFAULT_DAILY_ROOT = paths.data_path("artifacts", "minutes_v1", "daily")
 DEFAULT_MINUTES_MODELS_ROOT = paths.data_path("artifacts", "minutes_models", "daily")
@@ -74,6 +74,9 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "is_confirmed_starter",
     "pos_bucket",
     "play_prob",
+    # Canonical play prob fields (explicit conditioning)
+    "p_play_raw",
+    "p_play_eff",
     # Effective minutes layer diagnostics
     "ops_override_applied",
     "minutes_delta",
@@ -118,6 +121,17 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "sim_dk_fpts_p75",
     "sim_dk_fpts_p90",
     "sim_dk_fpts_p95",
+    # Canonical sim FPTS summaries
+    "fpts_sim_cond_mean",
+    "fpts_sim_cond_std",
+    "fpts_sim_cond_p05",
+    "fpts_sim_cond_p50",
+    "fpts_sim_cond_p95",
+    "fpts_sim_uncond_mean",
+    "fpts_sim_uncond_std",
+    "fpts_sim_uncond_p05",
+    "fpts_sim_uncond_p50",
+    "fpts_sim_uncond_p95",
     "sim_pts_mean",
     "sim_reb_mean",
     "sim_ast_mean",
@@ -134,6 +148,13 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "sim_minutes_sim_p50_uncond",
     "sim_minutes_sim_p90_uncond",
     "sim_minutes_sim_std_uncond",
+    # Canonical sim minutes summaries
+    "minutes_sim_p_active",
+    "minutes_sim_cond_mean",
+    "minutes_sim_cond_std",
+    "minutes_sim_uncond_mean",
+    "minutes_sim_uncond_std",
+    "minutes_sim_uncond_p50",
     # Ownership/DFS columns
     "salary",
     "pred_own_pct",
@@ -797,9 +818,12 @@ def create_app(
             return JSONResponse(payload)
 
         if unified_df is not None and not unified_df.empty:
+            # Add canonical (explicitly-conditioned) projection fields.
+            canonical_df = add_canonical_projection_fields(unified_df)
+
             # Rename sim columns to match expected dashboard format
             has_sim_minutes = any(
-                col in unified_df.columns
+                col in canonical_df.columns
                 for col in (
                     "minutes_sim_mean",
                     "minutes_sim_p50",
@@ -809,7 +833,7 @@ def create_app(
                 )
             )
             rename_map = {}
-            for col in unified_df.columns:
+            for col in canonical_df.columns:
                 if col == "minutes_mean":
                     if has_sim_minutes:
                         continue
@@ -819,7 +843,13 @@ def create_app(
                 elif col.startswith("dk_fpts_") or col in ("pts_mean", "reb_mean", "ast_mean", "stl_mean", "blk_mean", "tov_mean"):
                     rename_map[col] = f"sim_{col}"
             if rename_map:
-                unified_df = unified_df.rename(columns=rename_map)
+                unified_df = canonical_df.rename(columns=rename_map)
+                # Ensure canonical columns remain available under their canonical names.
+                for col in canonical_df.columns:
+                    if col not in unified_df.columns:
+                        unified_df[col] = canonical_df[col]
+            else:
+                unified_df = canonical_df
             
             players = _serialize_players(unified_df)
             run_summary = None
