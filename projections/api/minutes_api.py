@@ -960,6 +960,10 @@ def create_app(
                 # Clean up temp columns
                 df = df.drop(columns=["_join_name", "_join_team"], errors="ignore")
 
+        # Even in the legacy (minutes + sim joins) path, attach canonical fields so the
+        # UI can display the same decision metrics the optimizer/sim consume.
+        df = add_canonical_projection_fields(df)
+
         players = _serialize_players(df)
         payload = {"date": slate_day.isoformat(), "count": len(players), "players": players}
         return JSONResponse(payload)
