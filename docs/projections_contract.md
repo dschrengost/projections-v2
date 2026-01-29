@@ -144,6 +144,8 @@ All consumers may assume:
    - `p_play_eff == minutes_sim_p_active`
 4. DNP implies zeros in unconditional moments:
    - if `minutes_sim_p_active == 0`, then `minutes_sim_uncond_mean == 0` and `fpts_sim_uncond_mean == 0`
+5. Unconditional median minutes is zero when most worlds are inactive:
+   - if `minutes_sim_p_active < 0.5`, then `minutes_sim_uncond_p50` should be `0` (at least half of worlds are zero)
 
 ## Implementation References
 

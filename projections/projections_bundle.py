@@ -299,6 +299,18 @@ def add_canonical_projection_fields(df: pd.DataFrame) -> pd.DataFrame:
         if legacy in out.columns and canon not in out.columns:
             out[canon] = pd.to_numeric(out[legacy], errors="coerce")
 
+    # Some legacy/serialized payloads prefix sim columns with `sim_` (e.g. minutes API legacy path).
+    sim_minutes_cond_map_prefixed = {
+        "sim_minutes_sim_mean": "minutes_sim_cond_mean",
+        "sim_minutes_sim_p10": "minutes_sim_cond_p10",
+        "sim_minutes_sim_p50": "minutes_sim_cond_p50",
+        "sim_minutes_sim_p90": "minutes_sim_cond_p90",
+        "sim_minutes_sim_std": "minutes_sim_cond_std",
+    }
+    for legacy, canon in sim_minutes_cond_map_prefixed.items():
+        if legacy in out.columns and canon not in out.columns:
+            out[canon] = pd.to_numeric(out[legacy], errors="coerce")
+
     # Sim unconditional (DNP=0) minutes summaries.
     sim_minutes_uncond_map = {
         "minutes_sim_mean_uncond": "minutes_sim_uncond_mean",
@@ -308,6 +320,17 @@ def add_canonical_projection_fields(df: pd.DataFrame) -> pd.DataFrame:
         "minutes_sim_std_uncond": "minutes_sim_uncond_std",
     }
     for legacy, canon in sim_minutes_uncond_map.items():
+        if legacy in out.columns and canon not in out.columns:
+            out[canon] = pd.to_numeric(out[legacy], errors="coerce")
+
+    sim_minutes_uncond_map_prefixed = {
+        "sim_minutes_sim_mean_uncond": "minutes_sim_uncond_mean",
+        "sim_minutes_sim_p10_uncond": "minutes_sim_uncond_p10",
+        "sim_minutes_sim_p50_uncond": "minutes_sim_uncond_p50",
+        "sim_minutes_sim_p90_uncond": "minutes_sim_uncond_p90",
+        "sim_minutes_sim_std_uncond": "minutes_sim_uncond_std",
+    }
+    for legacy, canon in sim_minutes_uncond_map_prefixed.items():
         if legacy in out.columns and canon not in out.columns:
             out[canon] = pd.to_numeric(out[legacy], errors="coerce")
 
@@ -339,6 +362,21 @@ def add_canonical_projection_fields(df: pd.DataFrame) -> pd.DataFrame:
         if legacy in out.columns and canon not in out.columns:
             out[canon] = pd.to_numeric(out[legacy], errors="coerce")
 
+    fpts_cond_map_prefixed = {
+        "sim_dk_fpts_mean": "fpts_sim_cond_mean",
+        "sim_dk_fpts_std": "fpts_sim_cond_std",
+        "sim_dk_fpts_p05": "fpts_sim_cond_p05",
+        "sim_dk_fpts_p10": "fpts_sim_cond_p10",
+        "sim_dk_fpts_p25": "fpts_sim_cond_p25",
+        "sim_dk_fpts_p50": "fpts_sim_cond_p50",
+        "sim_dk_fpts_p75": "fpts_sim_cond_p75",
+        "sim_dk_fpts_p90": "fpts_sim_cond_p90",
+        "sim_dk_fpts_p95": "fpts_sim_cond_p95",
+    }
+    for legacy, canon in fpts_cond_map_prefixed.items():
+        if legacy in out.columns and canon not in out.columns:
+            out[canon] = pd.to_numeric(out[legacy], errors="coerce")
+
     # Unconditional (DNP=0) FPTS summaries.
     fpts_uncond_map = {
         "dk_fpts_mean_uncond": "fpts_sim_uncond_mean",
@@ -352,6 +390,21 @@ def add_canonical_projection_fields(df: pd.DataFrame) -> pd.DataFrame:
         "dk_fpts_p95_uncond": "fpts_sim_uncond_p95",
     }
     for legacy, canon in fpts_uncond_map.items():
+        if legacy in out.columns and canon not in out.columns:
+            out[canon] = pd.to_numeric(out[legacy], errors="coerce")
+
+    fpts_uncond_map_prefixed = {
+        "sim_dk_fpts_mean_uncond": "fpts_sim_uncond_mean",
+        "sim_dk_fpts_std_uncond": "fpts_sim_uncond_std",
+        "sim_dk_fpts_p05_uncond": "fpts_sim_uncond_p05",
+        "sim_dk_fpts_p10_uncond": "fpts_sim_uncond_p10",
+        "sim_dk_fpts_p25_uncond": "fpts_sim_uncond_p25",
+        "sim_dk_fpts_p50_uncond": "fpts_sim_uncond_p50",
+        "sim_dk_fpts_p75_uncond": "fpts_sim_uncond_p75",
+        "sim_dk_fpts_p90_uncond": "fpts_sim_uncond_p90",
+        "sim_dk_fpts_p95_uncond": "fpts_sim_uncond_p95",
+    }
+    for legacy, canon in fpts_uncond_map_prefixed.items():
         if legacy in out.columns and canon not in out.columns:
             out[canon] = pd.to_numeric(out[legacy], errors="coerce")
 
