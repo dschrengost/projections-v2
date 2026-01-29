@@ -1406,8 +1406,19 @@ tbody tr:hover {
   cursor: pointer;
 }
 
+.export-btn.primary {
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
+  border-color: #a855f7;
+  color: #fff;
+  font-weight: 600;
+}
+
 .export-btn:hover {
   background: #1e4976;
+}
+
+.export-btn.primary:hover {
+  opacity: 0.9;
 }
 
 /* Player Pool */
@@ -1728,6 +1739,14 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
+.lineup-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.5rem;
+}
+
 .lineups-action-btn:hover {
   background: #1e293b;
 }
@@ -1801,6 +1820,13 @@ tbody tr:hover {
   font-size: 0.8rem;
   color: #94a3b8;
   margin-bottom: 0.4rem;
+}
+
+.lineup-header-left,
+.lineup-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .lineup-salary {

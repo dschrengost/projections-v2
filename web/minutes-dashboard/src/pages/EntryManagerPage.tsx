@@ -18,6 +18,7 @@ import { getSavedBuilds, getSlates, loadSavedBuild, SavedBuild, Slate } from '..
 import { getSavedSimBuilds, loadSavedSimBuild, SavedSimBuildSummary } from '../api/contest_sim'
 import { useSlateDateAndSlate } from '../hooks/useSlateDate'
 import { formatSlateLabel } from '../utils/slateFormat'
+import { computeRealSwaps, LineupSlots } from '../utils/lateSwapUtils'
 
 const DK_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL']
 const ENTRIES_PER_PAGE = 25
@@ -37,10 +38,50 @@ interface ContestSwapResult {
     unmappedEntries: number
 }
 
+interface LineupState {
+    baselineLineup: LineupSlots
+    currentLineup: LineupSlots
+    isSelected: boolean
+}
+
 const extractPlayerName = (playerStr: string): string => {
     // "Player Name (12345)" -> "Player Name"
     const match = playerStr.match(/^(.+?)\s*\(\d+\)$/)
     return match ? match[1] : playerStr
+}
+
+const getEntryKey = (entry: Record<string, string>, idx: number): string => {
+    return String(entry.entry_key || entry.entry_id || `row-${idx + 1}`)
+}
+
+const buildLineupSlots = (entry: Record<string, string>): LineupSlots => {
+    const slots: LineupSlots = {}
+    for (const slot of DK_SLOTS) {
+        slots[slot] = entry[slot] || ''
+    }
+    return slots
+}
+
+const buildLineupStates = (
+    baselineEntries: Record<string, string>[],
+    currentEntries: Record<string, string>[],
+): Record<string, LineupState> => {
+    const baselineById = new Map<string, LineupSlots>()
+    baselineEntries.forEach((entry, idx) => {
+        baselineById.set(getEntryKey(entry, idx), buildLineupSlots(entry))
+    })
+
+    const next: Record<string, LineupState> = {}
+    currentEntries.forEach((entry, idx) => {
+        const entryId = getEntryKey(entry, idx)
+        const currentLineup = buildLineupSlots(entry)
+        next[entryId] = {
+            baselineLineup: baselineById.get(entryId) ?? currentLineup,
+            currentLineup,
+            isSelected: true,
+        }
+    })
+    return next
 }
 
 export default function EntryManagerPage() {
@@ -55,9 +96,11 @@ export default function EntryManagerPage() {
     const [contestOrder, setContestOrder] = useState<string[]>([])
     const [entryFile, setEntryFile] = useState<EntryFileState | null>(null)
     const [entryError, setEntryError] = useState<string | null>(null)
-    const [entryDiffs, setEntryDiffs] = useState<Record<string, string[]>>({})
     const [lockedSlotsByEntryId, setLockedSlotsByEntryId] = useState<Record<string, string[]>>({})
     const [entryPage, setEntryPage] = useState(1)
+    const [lineupStates, setLineupStates] = useState<Record<string, LineupState>>({})
+    const [lineupStateKey, setLineupStateKey] = useState<string | null>(null)
+    const [lineupBaselineLocked, setLineupBaselineLocked] = useState(false)
 
     const [savedBuilds, setSavedBuilds] = useState<SavedBuild[]>([])
     const [savedSimBuilds, setSavedSimBuilds] = useState<SavedSimBuildSummary[]>([])
@@ -128,7 +171,6 @@ export default function EntryManagerPage() {
             setEntryFile(null)
             return
         }
-        setEntryDiffs({})
         setLockedSlotsByEntryId({})
         setEntryPage(1)
         const load = async () => {
@@ -145,6 +187,47 @@ export default function EntryManagerPage() {
         }
         void load()
     }, [selectedDate, selectedContestId])
+
+    useEffect(() => {
+        if (!entryFile) {
+            setLineupStates({})
+            setLineupStateKey(null)
+            setLineupBaselineLocked(false)
+            return
+        }
+        const contestKey = `${selectedDate}:${entryFile.contest_id}`
+        if (contestKey !== lineupStateKey) {
+            setLineupStates(buildLineupStates(entryFile.entries, entryFile.entries))
+            setLineupStateKey(contestKey)
+            setLineupBaselineLocked(false)
+            return
+        }
+        setLineupStates(prev => {
+            if (Object.keys(prev).length === 0) {
+                return buildLineupStates(entryFile.entries, entryFile.entries)
+            }
+            const next = { ...prev }
+            entryFile.entries.forEach((entry, idx) => {
+                const entryId = getEntryKey(entry, idx)
+                const currentLineup = buildLineupSlots(entry)
+                const existing = next[entryId]
+                if (existing) {
+                    next[entryId] = {
+                        baselineLineup: lineupBaselineLocked ? existing.baselineLineup : currentLineup,
+                        isSelected: existing.isSelected,
+                        currentLineup,
+                    }
+                } else {
+                    next[entryId] = {
+                        baselineLineup: currentLineup,
+                        currentLineup,
+                        isSelected: true,
+                    }
+                }
+            })
+            return next
+        })
+    }, [entryFile, lineupBaselineLocked, lineupStateKey, selectedDate])
 
     useEffect(() => {
         if (!selectedSlate) {
@@ -338,7 +421,23 @@ export default function EntryManagerPage() {
         }
     }
 
-    const handleExportSelected = async () => {
+    const handleExportSelectedLineups = async () => {
+        if (!entryFile) return
+        if (selectedLineupIds.length === 0) return
+        try {
+            const blob = await exportEntryFile(selectedDate, entryFile.contest_id, selectedLineupIds)
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `entries_${selectedDate}_${entryFile.contest_id}_selected.csv`
+            a.click()
+            URL.revokeObjectURL(url)
+        } catch (err) {
+            alert('Export failed: ' + (err as Error).message)
+        }
+    }
+
+    const handleExportSelectedContests = async () => {
         const targetIds = selectedContestIds.size > 0
             ? contestOrder.filter(id => selectedContestIds.has(id))
             : entryFiles.map(entry => entry.contest_id)
@@ -354,29 +453,6 @@ export default function EntryManagerPage() {
         } catch (err) {
             alert('Export failed: ' + (err as Error).message)
         }
-    }
-
-    const computeEntryDiffs = (
-        prevEntries: Record<string, string>[],
-        nextEntries: Record<string, string>[],
-    ): Record<string, string[]> => {
-        const prevMap = new Map(
-            prevEntries.map((entry, idx) => [
-                String(entry.entry_key || entry.entry_id || `row-${idx + 1}`),
-                entry,
-            ]),
-        )
-        const diffs: Record<string, string[]> = {}
-        for (const [idx, entry] of nextEntries.entries()) {
-            const entryId = String(entry.entry_key || entry.entry_id || `row-${idx + 1}`)
-            const prev = prevMap.get(entryId)
-            if (!prev) continue
-            const changedSlots = DK_SLOTS.filter(slot => (prev[slot] || '') !== (entry[slot] || ''))
-            if (changedSlots.length) {
-                diffs[entryId] = changedSlots
-            }
-        }
-        return diffs
     }
 
     const handleLateSwap = async () => {
@@ -458,11 +534,11 @@ export default function EntryManagerPage() {
 
                 if (contestId === selectedContestId) {
                     setEntryFile(result.entry_state)
-                    if (prevEntries) {
-                        const diffs = computeEntryDiffs(prevEntries, result.entry_state.entries)
-                        setEntryDiffs(diffs)
-                        setEntryPage(1)
-                    }
+                    const baselineEntries = prevEntries ?? result.entry_state.entries
+                    setLineupStates(buildLineupStates(baselineEntries, result.entry_state.entries))
+                    setLineupStateKey(`${selectedDate}:${result.entry_state.contest_id}`)
+                    setLineupBaselineLocked(true)
+                    setEntryPage(1)
                     setLockedSlotsByEntryId(result.locked_slots_by_entry_id || {})
                 }
             }
@@ -486,6 +562,14 @@ export default function EntryManagerPage() {
         entryPageStart,
         entryPageStart + ENTRIES_PER_PAGE,
     ) ?? []
+
+    const selectedLineupIds = useMemo(() => {
+        return Object.entries(lineupStates)
+            .filter(([, state]) => state.isSelected)
+            .map(([entryId]) => entryId)
+    }, [lineupStates])
+
+    const selectedLineupCount = selectedLineupIds.length
 
     const selectedBuildInfo = useMemo(() => {
         if (!selectedBuildId) return null
@@ -519,6 +603,43 @@ export default function EntryManagerPage() {
                 next.delete(contestId)
             } else {
                 next.add(contestId)
+            }
+            return next
+        })
+    }
+
+    const toggleLineupSelection = (entryId: string, fallbackLineup: LineupSlots) => {
+        setLineupStates(prev => {
+            const next = { ...prev }
+            const existing = next[entryId]
+            if (existing) {
+                next[entryId] = { ...existing, isSelected: !existing.isSelected }
+            } else {
+                next[entryId] = {
+                    baselineLineup: fallbackLineup,
+                    currentLineup: fallbackLineup,
+                    isSelected: true,
+                }
+            }
+            return next
+        })
+    }
+
+    const selectAllLineups = () => {
+        setLineupStates(prev => {
+            const next: Record<string, LineupState> = {}
+            for (const [entryId, state] of Object.entries(prev)) {
+                next[entryId] = { ...state, isSelected: true }
+            }
+            return next
+        })
+    }
+
+    const clearAllLineups = () => {
+        setLineupStates(prev => {
+            const next: Record<string, LineupState> = {}
+            for (const [entryId, state] of Object.entries(prev)) {
+                next[entryId] = { ...state, isSelected: false }
             }
             return next
         })
@@ -734,18 +855,42 @@ export default function EntryManagerPage() {
                         )}
                     </div>
                     <button
+                        className="export-btn primary"
+                        onClick={handleExportSelectedLineups}
+                        disabled={!entryFile || selectedLineupCount === 0}
+                    >
+                        Export Selected
+                    </button>
+                    <button
                         className="export-btn"
                         onClick={handleExport}
                         disabled={!selectedContestId || currentEntriesCount === 0}
                     >
-                        Export CSV
+                        Export All Lineups
                     </button>
+                    <div className="lineup-export-actions">
+                        <button
+                            className="lineups-action-btn"
+                            onClick={selectAllLineups}
+                            disabled={!entryFile}
+                        >
+                            Select All
+                        </button>
+                        <button
+                            className="lineups-action-btn"
+                            onClick={clearAllLineups}
+                            disabled={!entryFile}
+                        >
+                            Select None
+                        </button>
+                        <span className="muted">{selectedLineupCount} selected</span>
+                    </div>
                     <button
                         className="export-btn"
-                        onClick={handleExportSelected}
+                        onClick={handleExportSelectedContests}
                         disabled={entryFiles.length === 0}
                     >
-                        Export Selected
+                        Export Selected Contests
                     </button>
                 </aside>
 
@@ -839,12 +984,14 @@ export default function EntryManagerPage() {
                             </div>
                             <div className="lineups-grid">
                                 {entryPageEntries.map((entry, idx) => {
-                                    const entryId = String(
-                                        entry.entry_key
-                                        || entry.entry_id
-                                        || `row-${entryPageStart + idx + 1}`,
+                                    const entryId = getEntryKey(entry, entryPageStart + idx)
+                                    const lineupState = lineupStates[entryId]
+                                    const baselineLineup = lineupState?.baselineLineup ?? buildLineupSlots(entry)
+                                    const currentLineup = lineupState?.currentLineup ?? buildLineupSlots(entry)
+                                    const isSelected = lineupState?.isSelected ?? true
+                                    const changedSlots = new Set(
+                                        DK_SLOTS.filter(slot => (baselineLineup[slot] || '') !== (currentLineup[slot] || '')),
                                     )
-                                    const changedSlots = new Set(entryDiffs[entryId] ?? [])
                                     const lockedSlots = new Set(lockedSlotsByEntryId[entryId] ?? [])
                                     const alternatives = alternativesByEntryId[entryId]
                                     const selectedAltIdx = selectedAlternatives[entryId] ?? 0
@@ -873,30 +1020,41 @@ export default function EntryManagerPage() {
                                         }
                                     }
 
-                                    const currentAlt = alternatives?.alternatives[selectedAltIdx]
+                                    const realSwaps = computeRealSwaps(baselineLineup, currentLineup, DK_SLOTS)
 
                                     return (
-                                        <div key={entryId} className="lineup-card">
+                                        <div key={entryId} className={`lineup-card ${isSelected ? 'selected' : ''}`}>
                                             <div className="lineup-header">
-                                                <span>Entry {entryId}</span>
-                                                {alternatives && alternatives.alternatives.length > 1 && (
-                                                    <select
-                                                        value={selectedAltIdx}
-                                                        onChange={(e) => handleAlternativeChange(Number(e.target.value))}
-                                                        className="alternative-select"
-                                                    >
-                                                        {alternatives.alternatives.map((alt, i) => (
-                                                            <option key={i} value={i}>
-                                                                Alt {i + 1}: {alt.projected_score.toFixed(1)} pts
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                )}
-                                                <span className="lineup-salary">{entry.entry_fee || ''}</span>
+                                                <div className="lineup-header-left">
+                                                    <label className="lineup-select" title="Select lineup for export">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={() => toggleLineupSelection(entryId, currentLineup)}
+                                                        />
+                                                    </label>
+                                                    <span>Entry {entryId}</span>
+                                                </div>
+                                                <div className="lineup-header-right">
+                                                    {alternatives && alternatives.alternatives.length > 1 && (
+                                                        <select
+                                                            value={selectedAltIdx}
+                                                            onChange={(e) => handleAlternativeChange(Number(e.target.value))}
+                                                            className="alternative-select"
+                                                        >
+                                                            {alternatives.alternatives.map((alt, i) => (
+                                                                <option key={i} value={i}>
+                                                                    Alt {i + 1}: {alt.projected_score.toFixed(1)} pts
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                    <span className="lineup-salary">{entry.entry_fee || ''}</span>
+                                                </div>
                                             </div>
                                             <div className="lineup-players">
                                                 {DK_SLOTS.map(slot => {
-                                                    const val = entry[slot] || '-'
+                                                    const val = currentLineup[slot] || '-'
                                                     const highlight = changedSlots.has(slot)
                                                     const locked = lockedSlots.has(slot)
                                                     return (
@@ -912,23 +1070,30 @@ export default function EntryManagerPage() {
                                                 })}
                                             </div>
                                             {/* Player swaps display */}
-                                            {currentAlt?.player_swaps && currentAlt.player_swaps.length > 0 && (
-                                                <div className="player-swaps">
-                                                    {currentAlt.player_swaps.map((swap, i) => (
-                                                        <div key={i} className="swap-item">
-                                                            <span className="swap-slot">{swap.slot}:</span>
-                                                            <span className="swap-old">{extractPlayerName(swap.old_player)}</span>
-                                                            <span className="swap-arrow"> → </span>
-                                                            <span className="swap-new">{extractPlayerName(swap.new_player)}</span>
-                                                            {swap.old_proj !== null && swap.new_proj !== null && (
-                                                                <span className={`swap-delta ${swap.new_proj > swap.old_proj ? 'positive' : 'negative'}`}>
-                                                                    ({swap.new_proj > swap.old_proj ? '+' : ''}{(swap.new_proj - swap.old_proj).toFixed(1)})
+                                            <div className="player-swaps">
+                                                {realSwaps.outs.length === 0 && realSwaps.ins.length === 0 ? (
+                                                    <div className="swap-item muted">No player swaps</div>
+                                                ) : (
+                                                    <>
+                                                        {realSwaps.outs.length > 0 && (
+                                                            <div className="swap-item">
+                                                                <span className="swap-slot">OUT:</span>
+                                                                <span className="swap-old">
+                                                                    {realSwaps.outs.map(extractPlayerName).join(', ')}
                                                                 </span>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
+                                                            </div>
+                                                        )}
+                                                        {realSwaps.ins.length > 0 && (
+                                                            <div className="swap-item">
+                                                                <span className="swap-slot">IN:</span>
+                                                                <span className="swap-new">
+                                                                    {realSwaps.ins.map(extractPlayerName).join(', ')}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
                                     )
                                 })}
