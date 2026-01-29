@@ -435,6 +435,9 @@ def build_player_pool_from_gold(
     proj_col = _first_present(
         merged,
         [
+            # Canonical decision metric (unconditional, DNP=0) when available.
+            "fpts_sim_uncond_mean",
+            "dk_fpts_mean_uncond",
             "proj_fpts",
             "dk_fpts_mean",
             "fpts_mean",
