@@ -341,6 +341,7 @@ def run_contest_simulation(
     *,
     user_lineups: List[List[str]],
     game_date: str,
+    run_id: str | None = None,
     archetype: str = "medium",
     field_size_bucket: str = "medium",
     field_size_override: int | None = None,
@@ -456,7 +457,24 @@ def run_contest_simulation(
         raise ValueError("Field weights must sum to a positive value after scaling")
 
     # Load worlds and score both user + field lineups
-    worlds_matrix, player_index = load_worlds_matrix(game_date, data_root)
+    sim_run_id: str | None = None
+    try:
+        # Prefer the sim_run_id referenced by the unified projections bundle so the
+        # contest sim uses the same worlds as the projections shown/optimized.
+        from projections.projections_bundle import load_unified_projections_df
+
+        bundle = load_unified_projections_df(game_date, run_id=run_id, data_root=data_root)
+        if "sim_run_id" in bundle.df.columns:
+            vals = bundle.df["sim_run_id"].dropna().astype(str).unique().tolist()
+            sim_run_id = vals[0] if len(vals) == 1 else None
+    except Exception:
+        sim_run_id = None
+
+    worlds_matrix, player_index = load_worlds_matrix(
+        game_date,
+        data_root,
+        run_id=sim_run_id or run_id,
+    )
     user_scores = score_lineups(user_lineups, worlds_matrix, player_index)
     field_scores = score_lineups(field_lineups, worlds_matrix, player_index)
 

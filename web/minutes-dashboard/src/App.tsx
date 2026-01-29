@@ -87,6 +87,11 @@ type SortKey =
   | 'sim_dk_fpts_p95'
   | 'sim_minutes_sim_mean'
   | 'sim_minutes_sim_mean_uncond'
+  // Canonical sim fields (explicit conditioning)
+  | 'fpts_sim_uncond_mean'
+  | 'fpts_sim_uncond_p95'
+  | 'minutes_sim_uncond_mean'
+  | 'minutes_sim_p_active'
 
 type RunOption = {
   run_id: string
@@ -113,6 +118,10 @@ const SORT_LABELS: Record<SortKey, string> = {
   sim_dk_fpts_p95: 'Sim p95',
   sim_minutes_sim_mean: 'Sim MIN',
   sim_minutes_sim_mean_uncond: 'Sim MIN (Uncond)',
+  fpts_sim_uncond_mean: 'FPTS (Sim Mean, Uncond)',
+  fpts_sim_uncond_p95: 'FPTS (Sim p95, Uncond)',
+  minutes_sim_uncond_mean: 'MIN (Sim Mean, Uncond)',
+  minutes_sim_p_active: 'p(active) (Sim)',
 }
 
 type ModelOption = {
@@ -175,6 +184,13 @@ function App() {
   const [overrides, setOverrides] = useState<Map<string, PlayerOverride>>(new Map())
 
   const resolveSimMinutesValue = (row: PlayerRow, key: SortKey) => {
+    if (key === 'minutes_sim_uncond_mean') {
+      return (
+        row.minutes_sim_uncond_mean ??
+        row.sim_minutes_sim_mean_uncond ??
+        row.sim_minutes_sim_mean
+      )
+    }
     if (key === 'sim_minutes_sim_mean_uncond') {
       return row.sim_minutes_sim_mean_uncond ?? row.sim_minutes_sim_mean
     }
@@ -444,12 +460,13 @@ function App() {
 
 
   const simFptsColumns: Array<{ key: SortKey; label: string }> = [
-    { key: 'sim_dk_fpts_mean', label: 'Sim Mean' },
-    { key: 'sim_dk_fpts_p95', label: 'Sim p95' },
+    { key: 'fpts_sim_uncond_mean', label: 'FPTS (Uncond Mean)' },
+    { key: 'fpts_sim_uncond_p95', label: 'FPTS (Uncond p95)' },
   ]
 
   const simStatColumns: Array<{ key: SortKey; label: string }> = [
-    { key: 'sim_minutes_sim_mean_uncond', label: 'Sim MIN (Uncond)' },
+    { key: 'minutes_sim_uncond_mean', label: 'MIN (Uncond Mean)' },
+    { key: 'minutes_sim_p_active', label: 'p(active)' },
   ]
 
   const nav = (
@@ -940,9 +957,11 @@ function App() {
                           </td>
                           {simStatColumns.map(({ key }) => (
                             <td key={key}>
-                              {key.startsWith('sim_minutes_sim_')
+                              {key === 'minutes_sim_uncond_mean'
                                 ? formatMinutesSim(resolveSimMinutesValue(row, key))
-                                : formatStat(row[key as keyof PlayerRow] as number | undefined)}
+                                : key === 'minutes_sim_p_active'
+                                  ? formatPercent(row.minutes_sim_p_active)
+                                  : formatStat(row[key as keyof PlayerRow] as number | undefined)}
                             </td>
                           ))}
                         </>

@@ -25,11 +25,22 @@ def _normalize_positions(val: object) -> List[str]:
 
 
 def _pick_projection_column(df: pd.DataFrame) -> str:
-    for col in ("dk_fpts_mean", "proj", "fpts_mean", "fpts", "projection"):
+    for col in (
+        # Canonical decision metric (unconditional, DNP=0).
+        "fpts_sim_uncond_mean",
+        "dk_fpts_mean_uncond",
+        # Legacy / fallback.
+        "dk_fpts_mean",
+        "proj",
+        "fpts_mean",
+        "fpts",
+        "projection",
+    ):
         if col in df.columns:
             return col
     raise ValueError(
-        "Player pool missing a projection column (looked for dk_fpts_mean/proj/fpts_mean/fpts/projection)."
+        "Player pool missing a projection column (looked for fpts_sim_uncond_mean/dk_fpts_mean_uncond/"
+        "dk_fpts_mean/proj/fpts_mean/fpts/projection)."
     )
 
 
@@ -71,7 +82,10 @@ def build_lineups_from_player_pool(
                 "proj": float(row[proj_col]),
                 "own_proj": row.get("own_proj"),
                 "stddev": row.get("stddev"),
-                "minutes": row.get("minutes_p50", row.get("minutes")),
+                "minutes": row.get(
+                    "minutes_sim_uncond_mean",
+                    row.get("minutes_sim_mean_uncond", row.get("minutes_p50", row.get("minutes"))),
+                ),
                 "dk_id": row.get("dk_id"),
             }
         )
