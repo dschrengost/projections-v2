@@ -32,6 +32,7 @@ from projections.sim_v2.minutes_physics import (
     compute_max_increase_by_depth,
     compute_rotation_lock_mask,
 )
+from projections.sim_v2.play_prob_policy import apply_play_prob_policy_with_diagnostics
 from projections.sim_v2.minutes_stabilization import (
     apply_pre_sim_qp_reconcile,
     recenter_team_minutes_to_conditional_means,
@@ -2173,36 +2174,73 @@ def main(
             play_prob_raw = np.clip(play_prob_arr.astype(float), 0.0, 1.0)
             play_prob_eff = play_prob_raw
             rotation_lock_mask = None
-            availability_policy_cfg = getattr(profile_cfg, "minutes_availability_policy", None)
-            if availability_policy_cfg is not None and getattr(availability_policy_cfg, "enabled", False) and group_map:
-                status_bucket_arr = (
-                    mu_df["status_bucket"].astype(str).to_numpy()
-                    if "status_bucket" in mu_df.columns
-                    else None
+            play_prob_policy_cfg = getattr(profile_cfg, "play_prob_policy", None)
+            if play_prob_policy_cfg is not None and getattr(play_prob_policy_cfg, "enabled", False) and group_map:
+                policy_df, policy_diag = apply_play_prob_policy_with_diagnostics(
+                    mu_df,
+                    play_prob_policy_cfg,
+                    asof_ts=None,
+                    lock_ts=None,
                 )
-                rotation_lock_mask, play_prob_eff, policy_diag = apply_minutes_availability_policy(
-                    play_prob_raw=play_prob_raw,
-                    baseline_minutes=minutes_sim_base,
-                    is_starter=(gs_is_starter > 0) if gs_is_starter is not None else None,
-                    status_bucket=status_bucket_arr,
-                    group_map=group_map,
-                    cfg=availability_policy_cfg,
-                )
-                minutes_alloc_metrics["minutes_availability_policy_enabled"] = True
-                minutes_alloc_metrics["minutes_availability_policy"] = {
+                # Keep raw play_prob column unchanged for downstream/UI; use p_eff only for sampling.
+                play_prob_eff = pd.to_numeric(policy_df["play_prob_eff"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                play_prob_eff = np.clip(play_prob_eff, 0.0, 1.0)
+                rotation_lock_mask = policy_df["rotation_lock"].astype(bool).to_numpy()
+
+                minutes_alloc_metrics["play_prob_policy_enabled"] = True
+                minutes_alloc_metrics["play_prob_policy"] = {
+                    "n_players": int(policy_diag.n_players),
                     "n_rotation_locks": int(policy_diag.n_rotation_locks),
-                    "n_floored": int(policy_diag.n_floored),
-                    "max_floor_delta": float(policy_diag.max_floor_delta),
-                    "p_floor": float(getattr(availability_policy_cfg, "play_prob_floor", 0.0)),
+                    "n_changed": int(policy_diag.n_changed),
+                    "reasons": dict(policy_diag.reasons),
+                    "play_prob_raw": dict(policy_diag.play_prob_raw_summary),
+                    "play_prob_eff": dict(policy_diag.play_prob_eff_summary),
+                    "max_delta": float(policy_diag.max_delta),
+                    "rotation_lock_floor": float(getattr(play_prob_policy_cfg, "rotation_lock_floor", 0.0)),
+                    "probable_floor": float(getattr(play_prob_policy_cfg, "probable_floor", 0.0)),
+                    "rotation_lock_min_cond_p50": float(getattr(play_prob_policy_cfg, "rotation_lock_min_cond_p50", 0.0)),
+                    "rotation_lock_topk": int(getattr(play_prob_policy_cfg, "rotation_lock_topk", 0)),
                 }
                 if sim_audit:
                     typer.echo(
-                        "[sim-physics] availability_policy enabled: "
-                        f"locks={policy_diag.n_rotation_locks} floored={policy_diag.n_floored} "
-                        f"max_delta={policy_diag.max_floor_delta:.3f}"
+                        "[sim-physics] play_prob_policy enabled: "
+                        f"locks={policy_diag.n_rotation_locks} changed={policy_diag.n_changed} "
+                        f"max_delta={policy_diag.max_delta:.3f} reasons={policy_diag.reasons}"
                     )
             else:
-                minutes_alloc_metrics["minutes_availability_policy_enabled"] = False
+                minutes_alloc_metrics["play_prob_policy_enabled"] = False
+
+                # Legacy availability policy (older floor-only policy), if enabled.
+                availability_policy_cfg = getattr(profile_cfg, "minutes_availability_policy", None)
+                if availability_policy_cfg is not None and getattr(availability_policy_cfg, "enabled", False) and group_map:
+                    status_bucket_arr = (
+                        mu_df["status_bucket"].astype(str).to_numpy()
+                        if "status_bucket" in mu_df.columns
+                        else None
+                    )
+                    rotation_lock_mask, play_prob_eff, policy_diag = apply_minutes_availability_policy(
+                        play_prob_raw=play_prob_raw,
+                        baseline_minutes=minutes_sim_base,
+                        is_starter=(gs_is_starter > 0) if gs_is_starter is not None else None,
+                        status_bucket=status_bucket_arr,
+                        group_map=group_map,
+                        cfg=availability_policy_cfg,
+                    )
+                    minutes_alloc_metrics["minutes_availability_policy_enabled"] = True
+                    minutes_alloc_metrics["minutes_availability_policy"] = {
+                        "n_rotation_locks": int(policy_diag.n_rotation_locks),
+                        "n_floored": int(policy_diag.n_floored),
+                        "max_floor_delta": float(policy_diag.max_floor_delta),
+                        "p_floor": float(getattr(availability_policy_cfg, "play_prob_floor", 0.0)),
+                    }
+                    if sim_audit:
+                        typer.echo(
+                            "[sim-physics] availability_policy enabled: "
+                            f"locks={policy_diag.n_rotation_locks} floored={policy_diag.n_floored} "
+                            f"max_delta={policy_diag.max_floor_delta:.3f}"
+                        )
+                else:
+                    minutes_alloc_metrics["minutes_availability_policy_enabled"] = False
 
             # Increase-only absorption caps: compute per-player max increase minutes (delta_i_max).
             absorption_cfg = getattr(profile_cfg, "minutes_absorption_caps", None)
@@ -3240,6 +3278,48 @@ def main(
                         all_fpts, [q * 100 for q in quantiles], axis=0
                     ).astype(float)
                     active_rate_sim = (active_counts / float(max(1, n_worlds_total))).astype(float)
+
+                # Play-prob policy audit (best-effort; aggregate only).
+                if (
+                    minutes_alloc_metrics.get("play_prob_policy_enabled")
+                    and rotation_lock_mask is not None
+                    and "status_bucket" in mu_df.columns
+                ):
+                    sb = mu_df["status_bucket"].astype(str).str.strip().str.lower().to_numpy(dtype=object)
+                    not_out_or_q = ~np.isin(sb, np.array(["out", "questionable"], dtype=object))
+                    rot_mask = rotation_lock_mask.astype(bool) & not_out_or_q
+                    fringe_mask = (~rotation_lock_mask.astype(bool)) & not_out_or_q
+
+                    def _dist(arr: np.ndarray) -> dict[str, float]:
+                        v = np.asarray(arr, dtype=float)
+                        if v.size == 0:
+                            return {"mean": 0.0, "p10": 0.0, "p50": 0.0, "p90": 0.0}
+                        return {
+                            "mean": float(np.mean(v)),
+                            "p10": float(np.percentile(v, 10)),
+                            "p50": float(np.percentile(v, 50)),
+                            "p90": float(np.percentile(v, 90)),
+                        }
+
+                    sim_p_active = np.asarray(active_rate_sim, dtype=float)
+                    p_raw = np.asarray(play_prob_raw, dtype=float)
+                    p_eff = np.asarray(play_prob_eff, dtype=float)
+
+                    minutes_alloc_metrics["play_prob_policy_audit"] = {
+                        "rotation_lock": {
+                            "n": int(rot_mask.sum()),
+                            "sim_p_active": _dist(sim_p_active[rot_mask]),
+                            "play_prob_raw": _dist(p_raw[rot_mask]),
+                            "play_prob_eff": _dist(p_eff[rot_mask]),
+                        },
+                        "fringe": {
+                            "n": int(fringe_mask.sum()),
+                            "sim_p_active": _dist(sim_p_active[fringe_mask]),
+                            "play_prob_raw": _dist(p_raw[fringe_mask]),
+                            "play_prob_eff": _dist(p_eff[fringe_mask]),
+                        },
+                        "abs_sim_minus_eff": _dist(np.abs(sim_p_active - p_eff)),
+                    }
 
                 if all_minutes is not None:
                     if (not use_play_prob_masking) and ("play_prob" in mu_df.columns):
