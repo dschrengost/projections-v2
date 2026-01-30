@@ -17,7 +17,6 @@ import time
 from dataclasses import dataclass, field, asdict, replace
 from multiprocessing import Event, Process, Queue
 import multiprocessing as mp
-import multiprocessing as mp
 from pathlib import Path
 from queue import Empty, Full
 from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple
@@ -236,6 +235,42 @@ def _make_emit_fn(
         return False
 
     return emit
+
+
+def _collector_worker(
+    raw_queue: Queue,
+    dedup_queue: Queue,
+    stop_event: Event,
+    seen_dups: mp.Value,
+    bloom_rejects: mp.Value,
+    forwarded: mp.Value,
+    cross_bloom: "ShardedBloom | None",
+) -> None:
+    seen: set[int] = set()
+    while not stop_event.is_set():
+        try:
+            key = raw_queue.get(timeout=0.1)
+        except (Empty, EOFError, OSError):
+            continue
+        if key is None:
+            continue
+        h = fnv1a_64(tuple(key))
+        if h in seen:
+            with seen_dups.get_lock():
+                seen_dups.value += 1
+            continue
+        if cross_bloom is not None and not cross_bloom.test_and_set(h):
+            with bloom_rejects.get_lock():
+                bloom_rejects.value += 1
+            continue
+        seen.add(h)
+        try:
+            dedup_queue.put(key, timeout=0.1)
+            with forwarded.get_lock():
+                forwarded.value += 1
+        except Full:
+            # drop under backpressure
+            pass
 
 
 class ShardedBloom:
@@ -1426,34 +1461,19 @@ def quick_build_pool(
     forwarded = mp.Value('Q', 0)
     no_solution_cycles = mp.Value('Q', 0)
 
-    def _collector():
-        seen: set[int] = set()
-        while not stop.is_set():
-            try:
-                key = raw_queue.get(timeout=0.1)
-            except (Empty, EOFError, OSError):
-                continue
-            if key is None:
-                continue
-            h = fnv1a_64(tuple(key))
-            if h in seen:
-                with seen_dups.get_lock():
-                    seen_dups.value += 1
-                continue
-            if cross_bloom is not None and not cross_bloom.test_and_set(h):
-                with bloom_rejects.get_lock():
-                    bloom_rejects.value += 1
-                continue
-            seen.add(h)
-            try:
-                dedup_queue.put(key, timeout=0.1)
-                with forwarded.get_lock():
-                    forwarded.value += 1
-            except Full:
-                # drop under backpressure
-                pass
-
-    collector = Process(target=_collector, daemon=True)
+    collector = Process(
+        target=_collector_worker,
+        kwargs={
+            "raw_queue": raw_queue,
+            "dedup_queue": dedup_queue,
+            "stop_event": stop,
+            "seen_dups": seen_dups,
+            "bloom_rejects": bloom_rejects,
+            "forwarded": forwarded,
+            "cross_bloom": cross_bloom,
+        },
+        daemon=True,
+    )
     collector.start()
 
     processes: List[Process] = []
