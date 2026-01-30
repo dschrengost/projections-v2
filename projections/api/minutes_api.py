@@ -79,6 +79,7 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "p_play_eff",
     # Effective minutes layer diagnostics
     "ops_override_applied",
+    "ops_depth_role",
     "minutes_delta",
     "minutes_delta_applied",
     "minutes_final",

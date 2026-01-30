@@ -15,6 +15,11 @@ export type PlayerRow = {
     is_projected_starter?: boolean
     is_confirmed_starter?: boolean
     play_prob?: number
+    // Ops manual overrides (GameView)
+    ops_override_applied?: boolean
+    ops_depth_role?: string
+    minutes_delta?: number
+    minutes_delta_applied?: boolean
     // Canonical play probability fields (explicit conditioning)
     p_play_raw?: number
     p_play_eff?: number

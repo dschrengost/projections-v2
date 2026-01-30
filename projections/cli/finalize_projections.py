@@ -70,6 +70,7 @@ MINUTES_COLUMNS = [
     "minutes_delta",
     "minutes_delta_applied",
     "ops_override_applied",
+    "ops_depth_role",
     "minutes_contract_version",
     "minutes_contract_hash",
     # Game context

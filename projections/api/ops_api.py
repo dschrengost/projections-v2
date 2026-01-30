@@ -93,6 +93,8 @@ class OpsPlayerOverrideUpdate(BaseModel):
 
     sticky_fields: list[str] | None = None
 
+    ops_depth_role: str | None = None
+
     status: str | None = None
     is_confirmed_starter: bool | None = None
     is_projected_starter: bool | None = None

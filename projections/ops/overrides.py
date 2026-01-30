@@ -18,6 +18,11 @@ from projections.minutes.reconcile import (
 
 OPS_OVERRIDES_VERSION = 1
 
+# Gameview-only manual classification for UI + downstream heuristics.
+# This is persisted alongside minutes/rates overrides so it survives future flows.
+OPS_DEPTH_ROLE_FIELD = "ops_depth_role"
+OPS_DEPTH_ROLE_VALUES: tuple[str, ...] = ("starter", "rotation", "deep_bench", "out")
+
 # Curated set: usage + efficiency predictions (rates_v1 outputs).
 USAGE_RATE_FIELDS: tuple[str, ...] = (
     "pred_fga2_per_min",
@@ -46,6 +51,7 @@ MINUTES_FIELDS: tuple[str, ...] = (
     "status",
     "is_confirmed_starter",
     "is_projected_starter",
+    OPS_DEPTH_ROLE_FIELD,
 )
 
 OPS_OVERRIDE_FIELDS: tuple[str, ...] = tuple(sorted(set(USAGE_RATE_FIELDS + MINUTES_FIELDS)))
@@ -128,6 +134,16 @@ def _coerce_override_field(name: str, value: Any) -> Any:
         if not isinstance(value, str):
             raise ValueError(f"Invalid status: {value!r}")
         return value.strip()
+
+    if name == OPS_DEPTH_ROLE_FIELD:
+        if not isinstance(value, str):
+            raise ValueError(f"Invalid {OPS_DEPTH_ROLE_FIELD}: {value!r}")
+        normalized = value.strip().lower()
+        if normalized not in set(OPS_DEPTH_ROLE_VALUES):
+            raise ValueError(
+                f"Invalid {OPS_DEPTH_ROLE_FIELD}: {value!r} (expected one of {OPS_DEPTH_ROLE_VALUES})"
+            )
+        return normalized
 
     if name.endswith("_pct"):
         numeric = float(value)
@@ -819,13 +835,16 @@ def apply_overrides_to_minutes_df(
     for col in MINUTES_FIELDS:
         if col not in ops_df.columns:
             continue
-        override_col = f"{col}_ops"
+        # Some fields only exist in ops_df (no collision with minutes_df), in which case
+        # pandas keeps the original column name (no "_ops" suffix).
+        override_col = f"{col}_ops" if f"{col}_ops" in merged.columns else col
         if override_col not in merged.columns:
             continue
-        if col in merged.columns:
+
+        if override_col != col:
+            # Typical case: base column exists and override column is suffixed.
             merged[col] = merged[override_col].where(merged[override_col].notna(), merged[col])
-        else:
-            merged[col] = merged[override_col]
+
         if col == "minutes_p50":
             if "effective_minutes" in merged.columns:
                 merged["effective_minutes"] = merged[override_col].where(
@@ -833,6 +852,7 @@ def apply_overrides_to_minutes_df(
                     merged["effective_minutes"],
                 )
             locked_mask = locked_mask | merged[override_col].notna()
+
         ops_applied = ops_applied | merged[override_col].notna()
 
     # Apply minutes_delta as additive adjustment (takes precedence over raw quantile overrides)
@@ -863,6 +883,15 @@ def apply_overrides_to_minutes_df(
             merged["minutes_delta_applied"] = False
     else:
         merged["minutes_delta_applied"] = False
+
+    # If operator sets ops depth role to OUT, normalize to status='out' so downstream consistently
+    # zeros minutes/play_prob and any other consumers relying on status behave the same.
+    if OPS_DEPTH_ROLE_FIELD in merged.columns:
+        role = merged[OPS_DEPTH_ROLE_FIELD]
+        role_lower = role.astype(str).str.strip().str.lower()
+        role_out = role.notna() & role_lower.eq("out")
+        if role_out.any():
+            merged.loc[role_out, "status"] = "out"
 
     # If operator marks player OUT, force play_prob=0 and minutes=0 (keep row for downstream).
     status_raw = merged.get("status")

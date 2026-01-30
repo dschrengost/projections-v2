@@ -150,6 +150,48 @@ def test_apply_overrides_minutes_delta_before_reconcile(tmp_path: Path) -> None:
     assert bool(p100["ops_override_applied"]) is True
 
 
+def test_apply_overrides_ops_depth_role_out_zeroes_minutes(tmp_path: Path) -> None:
+    slate_day = date(2026, 1, 18)
+    upsert_overrides(
+        slate_day,
+        [
+            {
+                "game_id": "1",
+                "player_id": "100",
+                "fields": {"ops_depth_role": "out"},
+            }
+        ],
+        data_root=tmp_path,
+    )
+
+    base = pd.DataFrame(
+        [
+            {"game_id": 1, "team_id": 10, "player_id": 100, "status": "available", "play_prob": 0.8, "minutes_p50": 35.0},
+            {"game_id": 1, "team_id": 10, "player_id": 101, "status": "available", "play_prob": 0.9, "minutes_p50": 34.0},
+            {"game_id": 1, "team_id": 10, "player_id": 102, "status": "available", "play_prob": 0.9, "minutes_p50": 33.0},
+            {"game_id": 1, "team_id": 10, "player_id": 103, "status": "available", "play_prob": 0.9, "minutes_p50": 32.0},
+            {"game_id": 1, "team_id": 10, "player_id": 104, "status": "available", "play_prob": 0.9, "minutes_p50": 31.0},
+            {"game_id": 1, "team_id": 10, "player_id": 105, "status": "available", "play_prob": 0.9, "minutes_p50": 25.0},
+            {"game_id": 1, "team_id": 10, "player_id": 106, "status": "available", "play_prob": 0.9, "minutes_p50": 25.0},
+            {"game_id": 1, "team_id": 10, "player_id": 107, "status": "available", "play_prob": 0.9, "minutes_p50": 25.0},
+        ]
+    )
+    base["minutes_p50_cond"] = base["minutes_p50"]
+
+    out = apply_overrides_to_minutes_df(base, game_date=slate_day, data_root=tmp_path, force_reconcile=True)
+    team = out[(out["game_id"] == 1) & (out["team_id"] == 10)].copy()
+    team["minutes_final"] = pd.to_numeric(team["minutes_final"], errors="coerce").fillna(0.0)
+    assert float(team["minutes_final"].sum()) == pytest.approx(240.0, abs=1e-3)
+
+    p100 = team[team["player_id"].astype(int) == 100].iloc[0]
+    assert str(p100["status"]).strip().lower() == "out"
+    assert float(p100["play_prob"]) == pytest.approx(0.0, abs=1e-9)
+    assert float(p100["minutes_p50"]) == pytest.approx(0.0, abs=1e-9)
+    assert float(p100["minutes_p50_cond"]) == pytest.approx(0.0, abs=1e-9)
+    assert str(p100.get("ops_depth_role") or "").strip().lower() == "out"
+    assert bool(p100["ops_override_applied"]) is True
+
+
 def test_minutes_api_prefers_effective_minutes(tmp_path: Path) -> None:
     from projections.api import minutes_api
     from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME

@@ -93,6 +93,25 @@ export const GameView: React.FC<GameViewProps> = ({ rows, gameId }) => {
 
         sorted.forEach((p) => {
             const status = p.status?.toLowerCase() || ''
+            const manualRole = (p.ops_depth_role || '').toLowerCase()
+            if (manualRole) {
+                if (manualRole === 'out') {
+                    injured.push(p)
+                    return
+                }
+                if (manualRole === 'starter') {
+                    starters.push(p)
+                    return
+                }
+                if (manualRole === 'rotation') {
+                    rotation.push(p)
+                    return
+                }
+                if (manualRole === 'deep_bench') {
+                    bench.push(p)
+                    return
+                }
+            }
             if (status === 'out') {
                 injured.push(p)
             } else if (p.is_confirmed_starter || p.is_projected_starter) {
@@ -446,6 +465,14 @@ const ExpandablePlayerList: React.FC<{
                                                 title={statusBadge.title}
                                             >
                                                 {statusBadge.label}
+                                            </span>
+                                        )}
+                                        {(p.ops_depth_role || p.ops_override_applied) && (
+                                            <span
+                                                className="status-tag badge-ops"
+                                                title={p.ops_depth_role ? `Manual role: ${p.ops_depth_role}` : 'Manual override applied'}
+                                            >
+                                                OPS
                                             </span>
                                         )}
                                         {p.is_confirmed_starter && (

@@ -20,6 +20,7 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
     onOverridesSaved
 }) => {
     const [deltas, setDeltas] = useState<Record<string, number>>({})
+    const [roles, setRoles] = useState<Record<string, string>>({})
     const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
     const [runningWorlds, setRunningWorlds] = useState(false)
     const [worldsMessage, setWorldsMessage] = useState<string | null>(null)
@@ -39,15 +40,38 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
         setSaveStatus('idle')
     }
 
+    const handleRoleChange = (playerId: string | number, val: string) => {
+        const pid = String(playerId)
+        const normalized = val.trim().toLowerCase()
+        setRoles(prev => {
+            const next = { ...prev }
+            if (!normalized) {
+                delete next[pid]
+            } else {
+                next[pid] = normalized
+            }
+            return next
+        })
+        setSaveStatus('idle')
+    }
+
     const saveOverrides = useCallback(async () => {
-        if (Object.keys(deltas).length === 0) return
+        if (Object.keys(deltas).length === 0 && Object.keys(roles).length === 0) return
 
         setSaveStatus('saving')
         try {
-            const updates = Object.entries(deltas).map(([playerId, delta]) => ({
+            const byPlayer: Record<string, Record<string, unknown>> = {}
+            for (const [playerId, delta] of Object.entries(deltas)) {
+                byPlayer[playerId] = { ...(byPlayer[playerId] ?? {}), minutes_delta: delta }
+            }
+            for (const [playerId, role] of Object.entries(roles)) {
+                byPlayer[playerId] = { ...(byPlayer[playerId] ?? {}), ops_depth_role: role }
+            }
+
+            const updates = Object.entries(byPlayer).map(([playerId, fields]) => ({
                 game_id: gameId,
                 player_id: playerId,
-                minutes_delta: delta,
+                ...fields,
             }))
 
             const res = await fetch(apiUrl('/api/ops/overrides'), {
@@ -67,7 +91,7 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
             console.error('Failed to save overrides:', err)
             setSaveStatus('error')
         }
-    }, [deltas, gameId, date, onOverridesSaved])
+    }, [deltas, roles, gameId, date, onOverridesSaved])
 
     const runWorlds = useCallback(async () => {
         setRunningWorlds(true)
@@ -123,12 +147,12 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
     }, [players, teams])
 
     const totalDeltas = Object.values(deltas).reduce((sum, d) => sum + d, 0)
-    const hasPendingChanges = Object.keys(deltas).length > 0
+    const hasPendingChanges = Object.keys(deltas).length > 0 || Object.keys(roles).length > 0
 
     return (
         <div className="sidebar-card ops-panel">
             <div className="ops-header">
-                <h3 className="sidebar-card-title">⚙️ Minute Adjustments</h3>
+                <h3 className="sidebar-card-title">⚙️ Manual Overrides</h3>
                 <div className="ops-header-actions">
                     {totalDeltas !== 0 && (
                         <span className={`delta-total ${totalDeltas > 0 ? 'positive' : 'negative'}`}>
@@ -160,17 +184,32 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
                                     {teamPlayers.map(p => {
                                         const pid = String(p.player_id)
                                         const delta = deltas[pid]
+                                        const role = roles[pid] ?? (p.ops_depth_role ?? '')
                                         const baseMin = p.minutes_final ?? p.minutes_p50 ?? 0
                                         const finalMin = baseMin + (delta || 0)
                                         const isStarter = p.is_confirmed_starter || p.is_projected_starter
 
                                         return (
-                                            <tr key={pid} className={delta !== undefined ? 'modified' : ''}>
+                                            <tr key={pid} className={(delta !== undefined || roles[pid] !== undefined) ? 'modified' : ''}>
                                                 <td className="name-cell">
                                                     <div className="name-row">
                                                         <span className="name" title={p.player_name}>{p.player_name}</span>
                                                         {isStarter && <span className="starter-dot" title="Starter">S</span>}
                                                     </div>
+                                                </td>
+                                                <td className="role-cell">
+                                                    <select
+                                                        className="role-select"
+                                                        value={role}
+                                                        onChange={(e) => handleRoleChange(p.player_id ?? pid, e.target.value)}
+                                                        title="Manual role override"
+                                                    >
+                                                        <option value="">Role…</option>
+                                                        <option value="starter">Starter</option>
+                                                        <option value="rotation">Rotation</option>
+                                                        <option value="deep_bench">Deep bench</option>
+                                                        <option value="out">OUT</option>
+                                                    </select>
                                                 </td>
                                                 <td className="base-minutes-cell">
                                                     {baseMin.toFixed(1)}

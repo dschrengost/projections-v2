@@ -252,6 +252,25 @@ tbody tr:hover {
   color: #60a5fa;
 }
 
+.badge-ops {
+  background: #3f2d16;
+  color: #fbbf24;
+}
+
+.role-select {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.75rem;
+}
+
+.role-select:focus {
+  outline: none;
+  border-color: #64748b;
+}
+
 .app-nav {
   display: flex;
   gap: 0.5rem;
