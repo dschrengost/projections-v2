@@ -61,31 +61,38 @@ def derive_roster_active_pre_tip(
     df: pd.DataFrame,
     *,
     is_out_col: str = "is_out",
+    injury_snapshot_missing_col: str = "injury_snapshot_missing",
+    minutes_col: str | None = None,
 ) -> pd.Series:
     """Derive the roster_active_pre_tip signal from existing columns.
 
     Definition: A player is considered "roster active pre-tip" if:
     - They appear in the dataset row (spine presence)
     - They are NOT explicitly OUT (is_out == 0)
+    - AND we have a valid injury snapshot (injury_snapshot_missing == 0)
+      OR they played minutes > 0 (proving they were active)
 
     This is a conservative definition that treats:
     - QUESTIONABLE, PROBABLE, AVAILABLE as roster active
     - restriction_flag, ramp_flag players as roster active (they may still play)
     - Only OUT status as inactive
 
-    IMPORTANT: This does NOT infer "active" from label row presence or minutes > 0.
-    The signal is derived from pre-tip injury/availability status only.
+    IMPORTANT: When injury_snapshot_missing == 1 AND minutes == 0, we now treat
+    the player as INACTIVE. This prevents players returning from injury from
+    having inflated consecutive_active_dnp counts due to missing historical
+    injury snapshots.
 
     Args:
         df: DataFrame with injury/status columns
         is_out_col: Column name for the is_out flag (1 = OUT, 0 = not OUT)
+        injury_snapshot_missing_col: Column name for snapshot missing flag
+        minutes_col: Optional column name for minutes played (used to infer
+            active status when snapshot is missing but player played)
 
     Returns:
-        Series of int8: 1 if roster active, 0 if inactive (OUT)
+        Series of int8: 1 if roster active, 0 if inactive (OUT or unknown)
 
     Limitations documented:
-    - If injury_snapshot_missing == 1, we cannot definitively know status.
-      We treat these rows as roster_active = 1 (conservative, may overcount).
     - This definition may miss cases where a player is on an inactive list
       that isn't captured in the injury report (e.g., G-League assignment).
     """
@@ -95,6 +102,29 @@ def derive_roster_active_pre_tip(
 
     is_out = pd.to_numeric(df[is_out_col], errors="coerce").fillna(0).astype(int)
     roster_active = (is_out == 0).astype("int8")
+
+    # If injury snapshot is missing and player got 0 minutes, treat as inactive.
+    # This fixes the case where players returning from injury have corrupted
+    # DNP history features because historical snapshots show them as "active"
+    # (is_out=0 default) when they were actually injured/out.
+    if injury_snapshot_missing_col in df.columns:
+        snapshot_missing = (
+            pd.to_numeric(df[injury_snapshot_missing_col], errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
+        # Check if we have minutes data to disambiguate
+        if minutes_col and minutes_col in df.columns:
+            minutes = pd.to_numeric(df[minutes_col], errors="coerce").fillna(0.0)
+            # snapshot_missing=1 AND minutes=0 => treat as inactive
+            # snapshot_missing=1 AND minutes>0 => player was active (keep roster_active=1)
+            uncertain_inactive = (snapshot_missing == 1) & (minutes == 0)
+            roster_active = roster_active.where(~uncertain_inactive, 0).astype("int8")
+        else:
+            # Without minutes data, snapshot_missing=1 => treat as inactive
+            # This is more conservative but avoids false active-DNP counts
+            roster_active = roster_active.where(snapshot_missing == 0, 0).astype("int8")
+
     return roster_active
 
 
@@ -106,6 +136,7 @@ def compute_dnp_history_features(
     player_id_col: str = "player_id",
     team_id_col: str = "team_id",
     is_out_col: str = "is_out",
+    injury_snapshot_missing_col: str = "injury_snapshot_missing",
     minutes_col: str = "minutes",
     tip_ts_col: str = "tip_ts",
     validate_pit: bool = True,
@@ -130,6 +161,7 @@ def compute_dnp_history_features(
         player_id_col: Column name for player ID
         team_id_col: Column name for team ID
         is_out_col: Column name for is_out flag
+        injury_snapshot_missing_col: Column name for injury snapshot missing flag
         minutes_col: Column name for minutes played (label)
         tip_ts_col: Column name for tip timestamp (for PIT validation)
         validate_pit: If True, validates point-in-time correctness
@@ -157,8 +189,13 @@ def compute_dnp_history_features(
     work[player_id_col] = pd.to_numeric(work[player_id_col], errors="coerce").astype("Int64")
     work[team_id_col] = pd.to_numeric(work[team_id_col], errors="coerce").astype("Int64")
 
-    # Derive roster_active_pre_tip
-    work["roster_active_pre_tip"] = derive_roster_active_pre_tip(work, is_out_col=is_out_col)
+    # Derive roster_active_pre_tip (now considers injury_snapshot_missing)
+    work["roster_active_pre_tip"] = derive_roster_active_pre_tip(
+        work,
+        is_out_col=is_out_col,
+        injury_snapshot_missing_col=injury_snapshot_missing_col,
+        minutes_col=minutes_col,
+    )
 
     # Get minutes for DNP determination (from label or feature column)
     if minutes_col in work.columns:
@@ -366,6 +403,7 @@ def compute_dnp_history_features_for_live(
     player_id_col: str = "player_id",
     team_id_col: str = "team_id",
     is_out_col: str = "is_out",
+    injury_snapshot_missing_col: str = "injury_snapshot_missing",
     minutes_col: str = "minutes",
 ) -> pd.DataFrame:
     """Compute DNP history features for live inference.
@@ -384,6 +422,7 @@ def compute_dnp_history_features_for_live(
         player_id_col: Column name for player ID
         team_id_col: Column name for team ID
         is_out_col: Column name for is_out flag
+        injury_snapshot_missing_col: Column name for injury snapshot missing flag
         minutes_col: Column name for minutes played (in historical_df only)
 
     Returns:
@@ -392,16 +431,27 @@ def compute_dnp_history_features_for_live(
     if config is None:
         config = DNPHistoryConfig()
 
-    # Derive roster_active_pre_tip for current game
+    # Derive roster_active_pre_tip for current game (no minutes yet, so don't pass minutes_col)
     current = current_game_df.copy()
-    current["roster_active_pre_tip"] = derive_roster_active_pre_tip(current, is_out_col=is_out_col)
+    current["roster_active_pre_tip"] = derive_roster_active_pre_tip(
+        current,
+        is_out_col=is_out_col,
+        injury_snapshot_missing_col=injury_snapshot_missing_col,
+        minutes_col=None,  # Current game has no minutes yet
+    )
 
     # Prepare historical data
     hist = historical_df.copy()
     hist[game_date_col] = pd.to_datetime(hist[game_date_col], errors="coerce")
     hist[player_id_col] = pd.to_numeric(hist[player_id_col], errors="coerce").astype("Int64")
     hist[team_id_col] = pd.to_numeric(hist[team_id_col], errors="coerce").astype("Int64")
-    hist["roster_active_pre_tip"] = derive_roster_active_pre_tip(hist, is_out_col=is_out_col)
+    # For historical games, use minutes to disambiguate when snapshot is missing
+    hist["roster_active_pre_tip"] = derive_roster_active_pre_tip(
+        hist,
+        is_out_col=is_out_col,
+        injury_snapshot_missing_col=injury_snapshot_missing_col,
+        minutes_col=minutes_col,
+    )
     hist["_minutes"] = pd.to_numeric(hist[minutes_col], errors="coerce").fillna(0.0)
     hist["_active_dnp"] = ((hist["roster_active_pre_tip"] == 1) & (hist["_minutes"] == 0)).astype("int8")
 

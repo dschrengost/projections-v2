@@ -1546,6 +1546,7 @@ class SharedFeaturesBuilder:
                                     "ramp_flag",
                                     "games_since_return",
                                     "days_since_return",
+                                    "snapshot_missing",
                                 ],
                             )
                         )
@@ -1578,6 +1579,7 @@ class SharedFeaturesBuilder:
             else:
                 # No injuries history available; fall back to conservative "active" interpretation.
                 history_spine["is_out"] = 0
+                history_spine["injury_snapshot_missing"] = 1
 
             # Call the live inference function
             result = compute_dnp_history_features_for_live(
@@ -1587,6 +1589,7 @@ class SharedFeaturesBuilder:
                 player_id_col="player_id",
                 team_id_col="team_id",
                 is_out_col="is_out",
+                injury_snapshot_missing_col="injury_snapshot_missing",
                 minutes_col="minutes",
             )
 
