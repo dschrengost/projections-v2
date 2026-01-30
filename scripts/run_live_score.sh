@@ -392,6 +392,7 @@ else
     --minutes-run-id "${LIVE_RUN_ID}" \
     --sim-run-id "${LIVE_RUN_ID}" \
     --ownership-run-id "${LIVE_RUN_ID}" \
+    --merge-locked-games \
     --draft-group-id "${MAIN_DRAFT_GROUP}" \
     --data-root "${DATA_ROOT}"
   then
