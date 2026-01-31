@@ -199,6 +199,33 @@ Vendor lineup state fill: Some vendor event rows (often substitution/timeout at 
 - On-court 10 identified per event
 - Consecutive identical on-court states collapsed into stints
 
+#### Stint Semantics
+
+A **stint** is a maximal contiguous time interval within a game where **both teams’ 5-man lineups are constant**, using the filled on-court state on each `pbp_events` row.
+
+**Deterministic ordering (per game)**: events are ordered by `(period asc, clock_sec desc, play_id asc)`. This ordering is the basis for both lineup state fill and stint construction.
+
+**Time interval semantics**:
+- Each ordered `pbp_events` row represents the on-court state for the half-open interval `[start, end)` within its period.
+- `start_period_elapsed_sec` comes from the first row in the stint.
+- `end_period_elapsed_sec` comes from the next row’s `period_elapsed_sec` when the next row is in the same period; otherwise it is the period end (`period_length_sec(period)`).
+- `start_clock_sec` is taken directly from the first row’s `clock_sec`.
+- `end_clock_sec` is derived from `end_period_elapsed_sec` via `end_clock_sec = period_length_sec(period) - end_period_elapsed_sec`.
+
+**Same-clock multiple actions**:
+- When multiple rows share the same `(period, clock_sec)`, `play_id` breaks ties.
+- Intermediate rows at the same clock can have a 0-second interval to the next row; when a lineup changes at the same clock, this can create **zero-duration stints**.
+
+**Zero-duration stints policy**:
+- Zero-duration stints (`duration_sec = 0`) are **allowed and preserved** (not filtered) to keep the on-court state sequence fully traceable.
+- QA tracks them via trust metrics (season total and per-game max) to detect subtle drift.
+
+**Consumer invariants (when QA passes)**:
+- `duration_sec >= 0` for all stints; per-game `sum(duration_sec)` matches inferred game seconds (± tolerance).
+- Stint IDs are 1-indexed and monotonic within each `game_id`.
+- Each stint has 5 non-null player IDs per team (`home_p1..home_p5`, `away_p1..away_p5`), unique within team, and with no player appearing on both teams.
+- `player_stints` contains exactly 10 rows per `(game_id, stint_id)` (5 home + 5 away).
+
 **Deliverables**
 - `stints.parquet`
 - `player_stints.parquet`

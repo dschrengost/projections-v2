@@ -44,6 +44,7 @@ def run_qa_gates(
 
     failures: list[dict[str, Any]] = []
     zero_duration_count = 0
+    max_zero_duration_stints_in_game = 0
     total_stints = len(stints)
 
     for game_id, g in stints.groupby("game_id", sort=True):
@@ -113,7 +114,9 @@ def run_qa_gates(
                 }
             )
 
-        zero_duration_count += int((g["duration_sec"] == 0).sum())
+        zero_stints_in_game = int((g["duration_sec"] == 0).sum())
+        zero_duration_count += zero_stints_in_game
+        max_zero_duration_stints_in_game = max(max_zero_duration_stints_in_game, zero_stints_in_game)
 
         # Coverage check (per-team is the same for these stints, but validate against expected game_seconds).
         max_period = int(g["period"].max())
@@ -148,6 +151,22 @@ def run_qa_gates(
     reason_counts = Counter(failures_df["reason"].tolist()) if len(failures_df) else Counter()
     top_reasons = dict(reason_counts.most_common(20))
 
+    durations = stints["duration_sec"].astype(int) if len(stints) else pd.Series([], dtype="int64")
+    if len(durations):
+        stint_duration_summary = {
+            "min": int(durations.min()),
+            "p50": int(durations.quantile(0.50, interpolation="nearest")),
+            "p95": int(durations.quantile(0.95, interpolation="nearest")),
+            "max": int(durations.max()),
+        }
+    else:
+        stint_duration_summary = {
+            "min": None,
+            "p50": None,
+            "p95": None,
+            "max": None,
+        }
+
     report: dict[str, Any] = {
         "schema_version": schema_version,
         "season_id": season_id,
@@ -160,6 +179,11 @@ def run_qa_gates(
             "pass_rate": pass_rate,
             "stints_total": total_stints,
             "zero_duration_stints_total": int(zero_duration_count),
+        },
+        "trust_metrics": {
+            "zero_duration_stints_total": int(zero_duration_count),
+            "max_zero_duration_stints_in_game": int(max_zero_duration_stints_in_game),
+            "stint_duration_summary": stint_duration_summary,
         },
         "top_failure_reasons": top_reasons,
         "failed_games": failed_games[:200],

@@ -85,8 +85,10 @@ def build_stints_from_pbp_events(
         raise ValueError(f"pbp_events missing required columns for stint build: {missing}")
 
     # Deterministic ordering within each game.
+    # Canonical ordering: period asc, clock_sec desc, play_id asc.
     df = pbp_events.sort_values(
-        ["game_id", "period", "period_elapsed_sec", "play_id"],
+        ["game_id", "period", "clock_sec", "play_id"],
+        ascending=[True, True, False, True],
         kind="mergesort",
     ).reset_index(drop=True)
 
