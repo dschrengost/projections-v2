@@ -15,6 +15,7 @@ import pandas as pd
 import typer
 
 from projections.fpts_v2.scoring import compute_dk_fpts
+from projections.minutes import PLAY_THRESHOLD_MINUTES, ROTATION_THRESHOLD_MINUTES
 from projections.paths import data_path, get_project_root
 from projections.sim_v2.bench_zero_mixture import apply_bench_zero_mixture
 from projections.sim_v2.config import DEFAULT_PROFILES_PATH, UsageSharesConfig, load_sim_v2_profile
@@ -43,6 +44,7 @@ from projections.sim_v2.minutes_worlds_model_space_v1 import (
     sample_minutes_worlds_model_space_v1,
 )
 from projections.sim_v2.noise import load_rates_noise_params
+from projections.sim_v2.worlds_summary import compute_played_mask
 
 app = typer.Typer(add_completion=False)
 
@@ -2408,7 +2410,9 @@ def main(
                         )
 
             stat_world_samples: dict[str, list[np.ndarray]] = {}
-            active_mask_samples: list[np.ndarray] = []  # Track active masks for conditional aggregation
+            # Track realized availability draw counts (pre bench-zero mixture) for audit/debug.
+            # Conditional moments later use minutes > 0 as the definition of "played".
+            avail_counts_total = np.zeros(len(mu_df), dtype=np.int64)
 
             # Pre-sim QP reconciliation: when preserve_input_rotation=True and pre_sim_reconcile.enabled,
             # run QP once before simulation to ensure team totals = 240.
@@ -2524,6 +2528,22 @@ def main(
             phys_promoted_team_worlds = 0
             phys_promoted_players_total = 0
 
+            # Bench-zero mixture per-player drop probability (deterministic, pre world sampling).
+            # This is a second regime on top of play_prob_eff: availability draws happen first, then
+            # low-minute players can be dropped to 0 minutes with this probability.
+            bz_cfg = getattr(profile_cfg, "bench_zero_mixture", None)
+            bench_zero_p_zero = np.zeros(len(mu_df), dtype=float)
+            bench_zero_threshold: float | None = None
+            if bz_cfg is not None and getattr(bz_cfg, "enabled", False):
+                bench_zero_threshold = float(getattr(bz_cfg, "minutes_threshold", 0.0))
+                p_zero_base = float(getattr(bz_cfg, "p_zero_base", 0.0))
+                p_zero_slope = float(getattr(bz_cfg, "p_zero_slope", 0.0))
+                if bench_zero_threshold > 0.0 and p_zero_base >= 0.0:
+                    in_bucket = minutes_sim_base < bench_zero_threshold
+                    x = np.clip((bench_zero_threshold - minutes_sim_base) / bench_zero_threshold, 0.0, 1.0)
+                    p_zero = np.clip(p_zero_base + p_zero_slope * x, 0.0, 0.95)
+                    bench_zero_p_zero = np.where(in_bucket, p_zero, 0.0).astype(float)
+
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
                 rng = np.random.default_rng(date_seed + chunk_start)
@@ -2599,6 +2619,9 @@ def main(
                             f"promoted_worlds={gate_diag.n_promoted_team_worlds} promoted_players={gate_diag.promoted_players_total}"
                         )
 
+                # Snapshot realized availability counts (pre bench-zero mixture and pre minutes allocation).
+                # This should roughly match play_prob_eff, except for feasibility-gate promotions.
+                avail_counts_total += active_mask.sum(axis=0).astype(np.int64, copy=False)
 
                 # 2. Sample minutes based on backend: model_space_v1 > structured_noise > game_scripts > fallback
                 if use_model_space_minutes:
@@ -2969,10 +2992,7 @@ def main(
                             f"cap_infeasible_team_worlds={cap_infeasible_chunk} all_inactive_team_worlds={all_inactive_chunk}"
                         )
 
-                # IMPORTANT: Snapshot the final active mask AFTER any in-place mutations (e.g. bench_zero_mixture drops).
-                # Audits compute conditional moments like E[minutes | plays] and must use the same "plays" mask that
-                # produced the realized minutes/stats in this chunk.
-                active_mask_samples.append(active_mask.copy())
+                # NOTE: Conditional moments are computed post-hoc using minutes >= PLAY_THRESHOLD_MINUTES.
                 minutes_world_samples.append(minutes_worlds)
 
                 stat_totals: dict[str, np.ndarray] = {}
@@ -3217,8 +3237,25 @@ def main(
                 # fpts_chunk is shape (chunk_size, n_players), stack all chunks
                 all_fpts = np.vstack(world_fpts_samples)  # shape: (n_worlds, n_players)
                 all_minutes = np.vstack(minutes_world_samples) if minutes_world_samples else None
-                all_active = np.vstack(active_mask_samples)  # shape: (n_worlds, n_players)
+                n_worlds_total, n_players = all_fpts.shape
 
+                # Define "played" for conditional moments.
+                # - When play_prob_masking=True (sim_v3/prod), worlds are unconditional and DNP => 0 minutes.
+                #   Use minutes >= PLAY_THRESHOLD_MINUTES as the definition of "played".
+                # - When play_prob_masking=False (baseline), worlds are generated conditional-on-playing
+                #   except play_prob_eff==0 players; conditional moments should count all worlds.
+                use_play_prob_masking = getattr(profile_cfg, "use_play_prob_masking", True)
+                if all_minutes is not None:
+                    all_active = compute_played_mask(
+                        minutes_worlds=all_minutes,
+                        play_prob_eff=play_prob_eff,
+                        use_play_prob_masking=use_play_prob_masking,
+                        play_threshold_minutes=float(PLAY_THRESHOLD_MINUTES),
+                    )
+                else:
+                    # Fallback: treat FPTS > 0 as "played". This is imperfect but only used when minutes
+                    # outputs are missing (should not happen in production).
+                    all_active = all_fpts > 0.0
 
                 # Sanitize inf/nan values AND physically impossible values that cause instability.
                 # We interpret any valid NBA fantasy score as < 2000. Anything higher is numerical noise.
@@ -3232,6 +3269,8 @@ def main(
                         err=True,
                     )
                     all_fpts = np.where(bad_mask, 0.0, all_fpts)
+                    if all_minutes is not None:
+                        all_minutes = np.where(bad_mask, 0.0, all_minutes)
                     all_active = all_active & ~bad_mask
 
                 # Sanity guardrail: warn about extreme but plausible FPTS values (> 120).
@@ -3408,8 +3447,7 @@ def main(
                         minutes_std_uncond = np.sqrt(np.maximum(minutes_var_uncond, 0.0))
 
                         # Mixture quantiles using the conditional 10/50/90 grid.
-                        levels = np.asarray([0.10, 0.50, 0.90], dtype=float)
-                        q_levels = levels
+                        q_levels = np.asarray([0.10, 0.50, 0.90], dtype=float)
                         q0 = 1.0 - p_play
                         q_adj = np.where(p_play > 0, (q_levels[:, None] - q0[None, :]) / p_play[None, :], 0.0)
                         q_adj = np.minimum(q_adj, q_levels.max())
@@ -3439,47 +3477,146 @@ def main(
                     minutes_std_uncond = None
                     minutes_quantiles_uncond = None
 
-                # Lightweight worlds integrity report (aggregates only; no heavy output).
-                if all_minutes is not None:
-                    zero_mask = all_minutes == 0.0
-                else:
-                    zero_mask = all_fpts == 0.0
-                worlds_integrity_payload = {
-                    "worlds_shape": [int(n_worlds_total), int(n_players)],
-                    "invalid_fpts_values": int(bad_mask.sum()) if "bad_mask" in locals() else 0,
-                    "active_rate_sim": {
-                        "mean": float(active_rate_sim.mean()) if active_rate_sim.size else 0.0,
-                        "p10": float(np.percentile(active_rate_sim, 10)) if active_rate_sim.size else 0.0,
-                        "p50": float(np.percentile(active_rate_sim, 50)) if active_rate_sim.size else 0.0,
-                        "p90": float(np.percentile(active_rate_sim, 90)) if active_rate_sim.size else 0.0,
-                    },
-                    "zero_cells": {
-                        "total": int(zero_mask.sum()),
-                        "inactive": int((zero_mask & (~all_active)).sum()),
-                        "active": int((zero_mask & all_active).sum()),
-                    },
-                }
-                if "play_prob" in mu_df.columns:
-                    play_prob_vals = pd.to_numeric(mu_df["play_prob"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-                    worlds_integrity_payload["play_prob"] = {
-                        "mean": float(np.mean(play_prob_vals)) if play_prob_vals.size else 0.0,
-                        "p10": float(np.percentile(play_prob_vals, 10)) if play_prob_vals.size else 0.0,
-                        "p50": float(np.percentile(play_prob_vals, 50)) if play_prob_vals.size else 0.0,
-                        "p90": float(np.percentile(play_prob_vals, 90)) if play_prob_vals.size else 0.0,
-                        "n_zero": int(np.sum(play_prob_vals <= 0.0)),
-                        "n_one": int(np.sum(play_prob_vals >= 1.0)),
-                    }
+                    # ------------------------------------------------------------------
+                    # Coherence / sanity-check invariants (warn loudly; do not silently drift)
+                    # ------------------------------------------------------------------
+                    if n_worlds_total > 0 and all_minutes is not None:
+                        # Availability draws should roughly match the effective play_prob used for sampling.
+                        # Small differences are expected due to feasibility gate promotions.
+                        p_avail_realized = (avail_counts_total / float(n_worlds_total)).astype(float)
+                        if p_avail_realized.shape == play_prob_eff.shape:
+                            diff_avail = np.abs(p_avail_realized - play_prob_eff)
+                            worst = float(np.max(diff_avail)) if diff_avail.size else 0.0
+                            if worst > 0.10:
+                                topk = np.argsort(-diff_avail)[:5]
+                                pid = mu_df["player_id"].astype(str).to_numpy()
+                                rows = ", ".join(
+                                    f"{pid[i]}:|p_avail-p_eff|={diff_avail[i]:.3f}" for i in topk if diff_avail[i] > 0
+                                )
+                                typer.echo(
+                                    f"[sim_v2][coherence] WARNING: availability mismatch vs play_prob_eff "
+                                    f"(max_abs={worst:.3f}): {rows}",
+                                    err=True,
+                                )
 
-                # Build output projection DataFrame
-                dk_fpts_mean_target = pd.to_numeric(mu_df["dk_fpts_mean"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-                proj_df = mu_df[["game_date", "game_id", "team_id", "player_id"]].copy()
-                # Expose play_prob used for world activation so downstream audits can validate
-                # unconditional mean targets (E[stat] = E[stat|plays] * play_prob).
-                if "play_prob" in mu_df.columns:
-                    proj_df["play_prob"] = play_prob_arr
-                proj_df["minutes_mean"] = minutes_sim_base
-                proj_df["minutes_sim_mean"] = minutes_mean
-                proj_df["minutes_sim_std"] = minutes_std
+                        # Played rate should not exceed realized availability.
+                        if active_rate_sim.size and p_avail_realized.size and active_rate_sim.shape == p_avail_realized.shape:
+                            exceed = active_rate_sim > (p_avail_realized + 0.01)
+                            if exceed.any():
+                                idx = int(np.argmax(active_rate_sim - p_avail_realized))
+                                pid = str(mu_df["player_id"].iloc[idx])
+                                typer.echo(
+                                    "[sim_v2][coherence] WARNING: p_played > p_available "
+                                    f"(player_id={pid} p_played={float(active_rate_sim[idx]):.3f} "
+                                    f"p_available={float(p_avail_realized[idx]):.3f})",
+                                    err=True,
+                                )
+
+                        # Unconditional mean minutes must not exceed conditional mean minutes.
+                        if minutes_mean_uncond is not None and minutes_mean is not None:
+                            bad = minutes_mean_uncond > (minutes_mean + 1e-6)
+                            if bad.any():
+                                idx = int(np.argmax(minutes_mean_uncond - minutes_mean))
+                                pid = str(mu_df["player_id"].iloc[idx])
+                                typer.echo(
+                                    "[sim_v2][coherence] WARNING: minutes_mean_uncond > minutes_mean_cond "
+                                    f"(player_id={pid} uncond={float(minutes_mean_uncond[idx]):.3f} "
+                                    f"cond={float(minutes_mean[idx]):.3f})",
+                                    err=True,
+                                )
+
+                        # Non-core players should not be effectively always-active unless play_prob_eff is near 1.
+                        if rotation_lock_mask is not None and active_rate_sim.size == play_prob_eff.size:
+                            non_core = ~rotation_lock_mask.astype(bool)
+                            suspicious = non_core & (play_prob_eff < 0.9) & (active_rate_sim > 0.98)
+                            if suspicious.any():
+                                idx = int(np.argmax(active_rate_sim * suspicious.astype(float)))
+                                pid = str(mu_df["player_id"].iloc[idx])
+                                typer.echo(
+                                    "[sim_v2][coherence] WARNING: non-core player nearly always played despite "
+                                    f"play_prob_eff<0.9 (player_id={pid} p_eff={float(play_prob_eff[idx]):.3f} "
+                                    f"p_played={float(active_rate_sim[idx]):.3f})",
+                                    err=True,
+                                )
+
+                    # Lightweight worlds integrity report (aggregates only; no heavy output).
+                    if all_minutes is not None:
+                        zero_mask = all_minutes == 0.0
+                    else:
+                        zero_mask = all_fpts == 0.0
+
+                    worlds_integrity_payload = {
+                        "worlds_shape": [int(n_worlds_total), int(n_players)],
+                        "invalid_fpts_values": int(bad_mask.sum()) if "bad_mask" in locals() else 0,
+                        "active_rate_sim": {
+                            "mean": float(active_rate_sim.mean()) if active_rate_sim.size else 0.0,
+                            "p10": float(np.percentile(active_rate_sim, 10)) if active_rate_sim.size else 0.0,
+                            "p50": float(np.percentile(active_rate_sim, 50)) if active_rate_sim.size else 0.0,
+                            "p90": float(np.percentile(active_rate_sim, 90)) if active_rate_sim.size else 0.0,
+                        },
+                        "avail_rate_sim": {
+                            "mean": float((avail_counts_total / float(max(1, n_worlds_total))).mean())
+                            if avail_counts_total.size
+                            else 0.0,
+                        },
+                        "bench_zero": {
+                            "enabled": bool(bz_cfg is not None and getattr(bz_cfg, "enabled", False)),
+                            "minutes_threshold": float(bench_zero_threshold) if bench_zero_threshold is not None else None,
+                            "p_zero_mean": float(np.mean(bench_zero_p_zero)) if bench_zero_p_zero.size else 0.0,
+                            "p_zero_p90": float(np.percentile(bench_zero_p_zero, 90)) if bench_zero_p_zero.size else 0.0,
+                        },
+                        "zero_cells": {
+                            "total": int(zero_mask.sum()),
+                            "inactive": int((zero_mask & (~all_active)).sum()),
+                            "active": int((zero_mask & all_active).sum()),
+                        },
+                    }
+                    if "play_prob" in mu_df.columns:
+                        play_prob_vals = pd.to_numeric(mu_df["play_prob"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                        worlds_integrity_payload["play_prob"] = {
+                            "mean": float(np.mean(play_prob_vals)) if play_prob_vals.size else 0.0,
+                            "p10": float(np.percentile(play_prob_vals, 10)) if play_prob_vals.size else 0.0,
+                            "p50": float(np.percentile(play_prob_vals, 50)) if play_prob_vals.size else 0.0,
+                            "p90": float(np.percentile(play_prob_vals, 90)) if play_prob_vals.size else 0.0,
+                            "n_zero": int(np.sum(play_prob_vals <= 0.0)),
+                            "n_one": int(np.sum(play_prob_vals >= 1.0)),
+                        }
+
+                    # Rotation (meaningful minutes) rate across worlds.
+                    if all_minutes is not None:
+                        sim_p_rotation = (
+                            (all_minutes >= float(ROTATION_THRESHOLD_MINUTES)).mean(axis=0, dtype=float).astype(float)
+                        )
+                    else:
+                        sim_p_rotation = np.zeros(n_players, dtype=float)
+
+                    # Build output projection DataFrame
+                    dk_fpts_mean_target = pd.to_numeric(mu_df["dk_fpts_mean"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                    proj_df = mu_df[["game_date", "game_id", "team_id", "player_id"]].copy()
+                    # Expose play_prob used for world activation so downstream audits can validate
+                    # unconditional mean targets (E[stat] = E[stat|plays] * play_prob).
+                    if "play_prob" in mu_df.columns:
+                        proj_df["play_prob"] = play_prob_arr
+                    # Simulation availability input and regime diagnostics.
+                    proj_df["play_prob_raw"] = play_prob_raw
+                    proj_df["play_prob_eff"] = play_prob_eff
+                    proj_df["sim_p_available"] = (avail_counts_total / float(max(1, n_worlds_total))).astype(float)
+                    proj_df["sim_p_rotation"] = sim_p_rotation
+                    proj_df["bench_zero_p_zero"] = bench_zero_p_zero
+                    proj_df["bench_zero_threshold_minutes"] = (
+                        float(bench_zero_threshold) if bench_zero_threshold is not None else float("nan")
+                    )
+                    if rotation_lock_mask is not None:
+                        proj_df["rotation_lock"] = rotation_lock_mask.astype(bool)
+                    else:
+                        proj_df["rotation_lock"] = False
+                    if policy_reason_arr is not None:
+                        proj_df["play_prob_policy_reason"] = policy_reason_arr.astype(str)
+                    else:
+                        proj_df["play_prob_policy_reason"] = "n/a"
+                    proj_df["minutes_mean"] = minutes_sim_base
+                    proj_df["minutes_sim_mean"] = minutes_mean
+                    proj_df["minutes_sim_std"] = minutes_std
                 if minutes_quantiles is not None:
                     proj_df["minutes_sim_p10"] = minutes_quantiles[0]
                     proj_df["minutes_sim_p50"] = minutes_quantiles[1]

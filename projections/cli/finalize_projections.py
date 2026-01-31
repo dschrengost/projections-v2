@@ -128,6 +128,15 @@ SIM_COLUMNS = [
     "rates_run_id",
     "is_starter",  # sim's view of starter
     "sim_p_active",
+    # Availability/rotation regime diagnostics (sim_v3)
+    "sim_p_available",
+    "sim_p_rotation",
+    "play_prob_raw",
+    "play_prob_eff",
+    "rotation_lock",
+    "play_prob_policy_reason",
+    "bench_zero_p_zero",
+    "bench_zero_threshold_minutes",
 ]
 
 OWNERSHIP_COLUMNS = [

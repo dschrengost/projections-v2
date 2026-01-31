@@ -77,6 +77,14 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     # Canonical play prob fields (explicit conditioning)
     "p_play_raw",
     "p_play_eff",
+    # Sim availability / two-regime diagnostics
+    "play_prob_eff",
+    "rotation_lock",
+    "play_prob_policy_reason",
+    "sim_p_available",
+    "sim_p_rotation",
+    "bench_zero_p_zero",
+    "bench_zero_threshold_minutes",
     # Effective minutes layer diagnostics
     "ops_override_applied",
     "ops_depth_role",
