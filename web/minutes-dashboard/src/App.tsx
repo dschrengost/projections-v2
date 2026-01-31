@@ -91,6 +91,10 @@ type SortKey =
   | 'fpts_sim_uncond_mean'
   | 'fpts_sim_uncond_p95'
   | 'minutes_sim_uncond_mean'
+  | 'play_prob_eff'
+  | 'sim_p_available'
+  | 'sim_p_rotation'
+  | 'bench_zero_p_zero'
   | 'minutes_sim_p_active'
 
 type RunOption = {
@@ -106,7 +110,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   minutes_p50: 'P50',
   minutes_p90: 'P90',
   minutes_final: 'MIN',
-  play_prob: 'Play Prob',
+  play_prob: 'p(avail)',
   p_in_rotation: 'In Rotation',
   proj_fpts: 'FPTS',
   fpts_per_min_pred: 'FPTS/min',
@@ -121,7 +125,11 @@ const SORT_LABELS: Record<SortKey, string> = {
   fpts_sim_uncond_mean: 'FPTS (Sim Mean, Uncond)',
   fpts_sim_uncond_p95: 'FPTS (Sim p95, Uncond)',
   minutes_sim_uncond_mean: 'MIN (Sim Mean, Uncond)',
-  minutes_sim_p_active: 'p(active) (Sim)',
+  play_prob_eff: 'p(avail used)',
+  sim_p_available: 'p(avail realized)',
+  sim_p_rotation: 'p(MIN≥5)',
+  bench_zero_p_zero: 'p(drop|avail)',
+  minutes_sim_p_active: 'p(MIN≥1)',
 }
 
 type ModelOption = {
@@ -466,7 +474,10 @@ function App() {
 
   const simStatColumns: Array<{ key: SortKey; label: string }> = [
     { key: 'minutes_sim_uncond_mean', label: 'MIN (Uncond Mean)' },
-    { key: 'minutes_sim_p_active', label: 'p(active)' },
+    { key: 'play_prob_eff', label: 'p(avail used)' },
+    { key: 'bench_zero_p_zero', label: 'p(drop|avail)' },
+    { key: 'sim_p_rotation', label: 'p(MIN≥5)' },
+    { key: 'minutes_sim_p_active', label: 'p(MIN≥1)' },
   ]
 
   const nav = (
@@ -798,13 +809,15 @@ function App() {
 	                  <th>Opponent</th>
 	                  {(['minutes_p10', 'minutes_final', 'minutes_p90', probSortKey] as SortKey[]).map(
 	                    (key) => (
-	                      <th
-	                        key={key}
-	                        onClick={() => toggleSort(key)}
-	                        className="sortable"
+                      <th
+                        key={key}
+                        onClick={() => toggleSort(key)}
+                        className="sortable"
                         title={
                           key === 'p_in_rotation' && modelId === 'rmh_v1_1'
                             ? `RMH: In rotation probability (minutes >= T=${selectedModel?.meta?.play_threshold ?? 5})`
+                            : key === 'play_prob'
+                              ? 'Model play_prob: base availability input to sim; sim_v3 also applies core locks and bench-zero rotation gating. Compare with p(MIN≥1) and p(MIN≥5) in sim columns.'
                             : undefined
                         }
                       >
@@ -839,7 +852,22 @@ function App() {
                       {/* My MIN before sim MIN */}
                       <th className="override-col">My MIN</th>
                       {simStatColumns.map(({ key, label }) => (
-                        <th key={key} onClick={() => toggleSort(key)} className="sortable">
+                        <th
+                          key={key}
+                          onClick={() => toggleSort(key)}
+                          className="sortable"
+                          title={
+                            key === 'minutes_sim_p_active'
+                              ? 'Sim played probability: share of worlds with minutes >= 1.0.'
+                              : key === 'sim_p_rotation'
+                                ? 'Sim rotation probability: share of worlds with minutes >= 5.0.'
+                                : key === 'bench_zero_p_zero'
+                                  ? 'Bench-zero regime: per-player drop probability (conditional on being available) for low-minute players.'
+                                  : key === 'play_prob_eff'
+                                    ? 'Effective availability probability used for sim availability sampling after policy floors (core locks, probable floor, OUT=0).'
+                                    : undefined
+                          }
+                        >
                           {label}
                           {sortKey === key && <span>{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}
                         </th>
@@ -955,15 +983,19 @@ function App() {
                               )}
                             />
                           </td>
-                          {simStatColumns.map(({ key }) => (
-                            <td key={key}>
-                              {key === 'minutes_sim_uncond_mean'
-                                ? formatMinutesSim(resolveSimMinutesValue(row, key))
-                                : key === 'minutes_sim_p_active'
-                                  ? formatPercent(row.minutes_sim_p_active)
-                                  : formatStat(row[key as keyof PlayerRow] as number | undefined)}
-                            </td>
-                          ))}
+	                          {simStatColumns.map(({ key }) => (
+	                            <td key={key}>
+	                              {key === 'minutes_sim_uncond_mean'
+	                                ? formatMinutesSim(resolveSimMinutesValue(row, key))
+	                                : key === 'minutes_sim_p_active' ||
+	                                    key === 'play_prob_eff' ||
+	                                    key === 'sim_p_available' ||
+	                                    key === 'sim_p_rotation' ||
+	                                    key === 'bench_zero_p_zero'
+	                                  ? formatPercent(row[key as keyof PlayerRow] as number | undefined)
+	                                  : formatStat(row[key as keyof PlayerRow] as number | undefined)}
+	                            </td>
+	                          ))}
                         </>
                       )}
                     </tr>

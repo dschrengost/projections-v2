@@ -23,6 +23,14 @@ export type PlayerRow = {
     // Canonical play probability fields (explicit conditioning)
     p_play_raw?: number
     p_play_eff?: number
+    // Sim availability / two-regime diagnostics
+    play_prob_eff?: number
+    rotation_lock?: boolean
+    play_prob_policy_reason?: string
+    sim_p_available?: number
+    sim_p_rotation?: number
+    bench_zero_p_zero?: number
+    bench_zero_threshold_minutes?: number
     p_in_rotation?: number
     minutes_p10?: number
     minutes_p50?: number
