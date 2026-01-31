@@ -188,6 +188,8 @@ Produce **trusted stint tables** with full QA coverage.
 - Unmapped names logged and audited
 - Raw vendor rows preserved or hash-logged
 
+Vendor lineup state fill: Some vendor event rows (often substitution/timeout at the same clock) may contain sparse lineup cells (e.g., `a5` null) even when the surrounding on-court state is present. Policy: after deterministic ordering (period asc, clock desc, play_id asc), apply per-(game_id, period) lineup state fill (ffill + bfill) for `a1..a5,h1..h5` before validating lineup completeness. A game is only failed/skipped if lineup fields remain missing after fill. Metrics for remaining failures are written to `ingest_failures.parquet` when applicable.
+
 ---
 
 ### Phase 1.2 — Stint Construction
