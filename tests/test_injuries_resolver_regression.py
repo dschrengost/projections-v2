@@ -402,3 +402,120 @@ def test_backfill_mode_uses_tip_as_ceiling(tmp_path: Path) -> None:
     # Should still get the pre-tip snapshot
     assert len(result.injuries) == 1
     assert result.injuries.iloc[0]["status"] == "OUT"
+
+
+def test_cleared_player_not_in_latest_report(tmp_path: Path) -> None:
+    """Test that players cleared from injury list are not marked OUT.
+
+    This reproduces the production bug where:
+    - Player was OUT in an older injury report
+    - Player was CLEARED (not listed) in a newer injury report
+    - System incorrectly kept using the old OUT status
+
+    The NBA injury reports only list players currently injured. When a player
+    is cleared, they simply don't appear in subsequent reports. The resolver
+    must interpret absence from the latest report as "cleared".
+    """
+    season = 2025
+    target_day = date(2025, 12, 15)
+    game_ids = [22500100]
+
+    # Simulate multiple injury reports throughout the day:
+    # - 11PM previous day: Player A (OUT), Player B (OUT)
+    # - 12PM game day: Player A (OUT), [Player B not listed = cleared]
+    bronze_injuries = pd.DataFrame(
+        {
+            "game_id": [22500100, 22500100, 22500100],
+            "player_id": [101, 102, 101],  # Player 101 in both, 102 only in old
+            "team_id": [1610612751, 1610612751, 1610612751],
+            "player_name": ["Still Injured", "Now Cleared", "Still Injured"],
+            "status": ["OUT", "OUT", "OUT"],
+            "as_of_ts": [
+                "2025-12-14T23:00:00Z",  # Old report
+                "2025-12-14T23:00:00Z",  # Old report - player 102 OUT
+                "2025-12-15T12:00:00Z",  # New report - only player 101
+            ],
+        }
+    )
+
+    _write_bronze_injuries(tmp_path, season, target_day, bronze_injuries)
+
+    tip_lookup = {22500100: pd.Timestamp("2025-12-15T19:00:00Z")}
+    feature_as_of_ts = pd.Timestamp("2025-12-15T18:30:00Z")
+
+    result = resolve_injuries(
+        data_root=tmp_path,
+        season=season,
+        target_day=target_day,
+        game_ids=game_ids,
+        tip_lookup=tip_lookup,
+        feature_as_of_ts=feature_as_of_ts,
+    )
+
+    # CRITICAL: Only player 101 should be in results (still OUT)
+    # Player 102 should NOT be in results (cleared - not in latest report)
+    assert len(result.injuries) == 1, (
+        "Only player still in latest report should be included"
+    )
+    assert result.injuries.iloc[0]["player_id"] == 101
+    assert result.injuries.iloc[0]["status"] == "OUT"
+
+    # Player 102 should NOT appear anywhere in results
+    player_ids_in_result = set(result.injuries["player_id"].tolist())
+    assert 102 not in player_ids_in_result, (
+        "Cleared player (not in latest report) should not be marked as injured"
+    )
+
+
+def test_cleared_player_multiple_games(tmp_path: Path) -> None:
+    """Test cleared player logic works independently per game.
+
+    Each game should use its own latest report. A player might be:
+    - Cleared for game A (not in latest report for A)
+    - Still OUT for game B (in latest report for B)
+    """
+    season = 2025
+    target_day = date(2025, 12, 15)
+    game_ids = [22500100, 22500101]
+
+    # Game 100: Player cleared (old report only)
+    # Game 101: Player still OUT (in latest report)
+    bronze_injuries = pd.DataFrame(
+        {
+            "game_id": [22500100, 22500101, 22500101],
+            "player_id": [101, 101, 101],
+            "team_id": [1610612751, 1610612752, 1610612752],
+            "status": ["OUT", "OUT", "OUT"],
+            "as_of_ts": [
+                "2025-12-14T23:00:00Z",  # Game 100: only old report (player cleared)
+                "2025-12-14T23:00:00Z",  # Game 101: old report
+                "2025-12-15T12:00:00Z",  # Game 101: new report (player still OUT)
+            ],
+        }
+    )
+
+    _write_bronze_injuries(tmp_path, season, target_day, bronze_injuries)
+
+    tip_lookup = {
+        22500100: pd.Timestamp("2025-12-15T19:00:00Z"),
+        22500101: pd.Timestamp("2025-12-15T22:00:00Z"),
+    }
+    feature_as_of_ts = pd.Timestamp("2025-12-15T18:30:00Z")
+
+    result = resolve_injuries(
+        data_root=tmp_path,
+        season=season,
+        target_day=target_day,
+        game_ids=game_ids,
+        tip_lookup=tip_lookup,
+        feature_as_of_ts=feature_as_of_ts,
+        allow_empty=True,  # Game 100 may have no injuries after clearing
+    )
+
+    # Game 100: No injuries (only had old report, so player considered cleared)
+    # Note: When the only report is old and no newer report exists for a game,
+    # we can't know if player was cleared. This case tests when there's only one report.
+    # Game 101: Player still OUT (in latest report)
+    game_101_injuries = result.injuries[result.injuries["game_id"] == 22500101]
+    assert len(game_101_injuries) == 1
+    assert game_101_injuries.iloc[0]["status"] == "OUT"

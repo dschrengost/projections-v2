@@ -254,7 +254,13 @@ class InjuriesResolver:
         backfill_mode: bool,
         warnings: list[str],
     ) -> pd.DataFrame:
-        """Filter injuries to latest snapshot per game where as_of_ts <= ceiling."""
+        """Filter injuries to latest snapshot per game where as_of_ts <= ceiling.
+
+        Important: Players who appeared in older reports but are NOT in the latest
+        report for a game are considered cleared (removed from injury list). This
+        handles the NBA's reporting pattern where cleared players simply disappear
+        from subsequent reports rather than being explicitly marked as available.
+        """
         if df.empty or "as_of_ts" not in df.columns:
             return df
 
@@ -271,6 +277,10 @@ class InjuriesResolver:
             df["_order_ts"] = df["source"].apply(_parse_report_ts_from_source)
         else:
             df["_order_ts"] = df["as_of_ts"]
+
+        # Fall back to as_of_ts where _order_ts is NaT (e.g., non-standard source URLs)
+        mask = df["_order_ts"].isna()
+        df.loc[mask, "_order_ts"] = df.loc[mask, "as_of_ts"]
 
         result_frames: list[pd.DataFrame] = []
         for game_id in df["game_id"].dropna().unique():
@@ -299,6 +309,17 @@ class InjuriesResolver:
             if valid_rows.empty:
                 # Log but continue - games_without will capture this
                 continue
+
+            # Find the latest report for this game (by _order_ts)
+            # Players who were in older reports but NOT in the latest report are considered cleared
+            latest_report_ts = valid_rows["_order_ts"].max()
+            latest_report_rows = valid_rows[valid_rows["_order_ts"] == latest_report_ts]
+
+            # Only keep players who appear in the latest report
+            # This handles the case where a player was OUT in an older report but cleared (not listed) in newer ones
+            if "player_id" in latest_report_rows.columns:
+                players_in_latest = set(latest_report_rows["player_id"].dropna().unique())
+                valid_rows = valid_rows[valid_rows["player_id"].isin(players_in_latest)]
 
             # Keep latest snapshot per player for this game, ordered by actual report time
             valid_rows = valid_rows.sort_values("_order_ts", ascending=False, na_position="last")
