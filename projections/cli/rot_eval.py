@@ -9,6 +9,7 @@ from rich.console import Console
 
 from projections.rotations.eval import run_rotation_generator_eval
 from projections.rotations.priors_humility import HumilityConfig, load_humility_config_json
+from projections.rotations.rotation_gate import GateConfig, load_gate_config_json
 
 console = Console()
 app = typer.Typer(help="Evaluate TemplateRotationGenerator realism against rot_v1 rotation_labels truth.")
@@ -51,6 +52,31 @@ def main(
         "--restrict-to-prior-games/--no-restrict-to-prior-games",
         help="When --minutes-prior-parquet is provided, restrict evaluation to games present in the prior.",
     ),
+    candidate_pool: str = typer.Option(
+        "truth",
+        "--candidate-pool",
+        help="Candidate pool mode: truth|prior_topn|prior_threshold|roster (default: truth).",
+    ),
+    candidate_top_n: int = typer.Option(
+        12,
+        "--candidate-top-n",
+        help="For prior_topn: include top N by minutes_prior (ties by player_id). Also used for backfill in other pools.",
+    ),
+    candidate_min_minutes_prior: float = typer.Option(
+        0.0,
+        "--candidate-min-minutes-prior",
+        help="For prior pools: include anyone with minutes_prior >= this threshold.",
+    ),
+    candidate_min_play_prob: float = typer.Option(
+        0.8,
+        "--candidate-min-play-prob",
+        help="For prior pools: include anyone with play_prob >= this threshold.",
+    ),
+    candidate_min_candidates: int = typer.Option(
+        8,
+        "--candidate-min-candidates",
+        help="Ensure each team-game candidate pool has at least this many players (deterministic backfill).",
+    ),
     humility: bool = typer.Option(
         True,
         "--humility/--no-humility",
@@ -60,6 +86,36 @@ def main(
         None,
         "--humility-config",
         help="Optional JSON file of HumilityConfig overrides.",
+    ),
+    gate: bool = typer.Option(
+        False,
+        "--gate/--no-gate",
+        help="Enable RotationGateLayer hard gating (default: off).",
+    ),
+    gate_config: Path | None = typer.Option(
+        None,
+        "--gate-config",
+        help="Optional JSON file of GateConfig overrides.",
+    ),
+    rotation_predictor_bundle: Path | None = typer.Option(
+        None,
+        "--rotation-predictor-bundle",
+        help="Path to artifacts/rotation_predictor_v1/<run_id> (or a pointer file).",
+    ),
+    gate_feature_source: str = typer.Option(
+        "cached_preds",
+        "--gate-feature-source",
+        help="Gate feature source: cached_all|cached_preds|cached_train|none (recommend cached_all; default: cached_preds).",
+    ),
+    gate_max_train_rows: int | None = typer.Option(
+        None,
+        "--gate-max-train-rows",
+        help="Optional max rows to read from cached training dataset (cached_train mode).",
+    ),
+    baseline_out_dir: Path | None = typer.Option(
+        None,
+        "--baseline-out-dir",
+        help="Optional prior rot_eval_v1 output directory to compare against in report.md.",
     ),
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing output directory."),
 ) -> None:
@@ -77,6 +133,11 @@ def main(
         cfg = load_humility_config_json(Path(humility_config), base=cfg)
     cfg = replace(cfg, enabled=bool(humility))
 
+    gate_cfg = GateConfig()
+    if gate_config is not None:
+        gate_cfg = load_gate_config_json(Path(gate_config), base=gate_cfg)
+    gate_cfg = replace(gate_cfg, enabled=bool(gate))
+
     result = run_rotation_generator_eval(
         rot_bundle_path=rot_bundle,
         run_id=run_id,
@@ -89,7 +150,17 @@ def main(
         use_truth_minutes_prior=use_truth_minutes_prior,
         minutes_prior_parquet=minutes_prior_parquet_path,
         restrict_to_prior_games=bool(restrict_to_prior_games),
+        candidate_pool=str(candidate_pool),
+        candidate_top_n=int(candidate_top_n),
+        candidate_min_minutes_prior=float(candidate_min_minutes_prior),
+        candidate_min_play_prob=float(candidate_min_play_prob),
+        candidate_min_candidates=int(candidate_min_candidates),
         humility_config=cfg,
+        gate_config=gate_cfg,
+        rotation_predictor_bundle=Path(rotation_predictor_bundle) if rotation_predictor_bundle is not None else None,
+        gate_feature_source=str(gate_feature_source),
+        gate_max_train_rows=int(gate_max_train_rows) if gate_max_train_rows is not None else None,
+        baseline_out_dir=Path(baseline_out_dir) if baseline_out_dir is not None else None,
     )
 
     metrics = result.get("metrics", {})

@@ -23,6 +23,8 @@ import numpy as np
 import pandas as pd
 import typer
 
+from projections.rotations.rotation_predictor import canonicalize_game_id
+
 # ==============================================================================
 # CONFIGURABLE SAMPLE WEIGHTS (DFS RISK CONTROL)
 # ==============================================================================
@@ -532,6 +534,31 @@ def main(
     y_val_ge15 = val_df["y_ge15"].values
     model_ge15 = _train_classifier(X_train, y_train_ge15, weights, X_val, y_val_ge15, random_state)
 
+    # Predict on full dataset (cached_all artifact).
+    typer.echo("[predict] Generating predictions on full dataset (predictions_all.parquet)")
+    df_all = df.copy()
+    X_all = df_all[feature_columns].astype(float)
+    pred_all = df_all[["game_id", "team_id", "player_id"]].copy()
+    pred_all["p_ge5_pred"] = model_ge5.predict(X_all)
+    pred_all["p_ge15_pred"] = model_ge15.predict(X_all)
+
+    pred_all["game_id"] = pred_all["game_id"].map(canonicalize_game_id).astype("string")
+    pred_all["team_id"] = pd.to_numeric(pred_all["team_id"], errors="coerce").astype("Int64")
+    pred_all["player_id"] = pd.to_numeric(pred_all["player_id"], errors="coerce").astype("Int64")
+    pred_all["p_ge5_pred"] = pd.to_numeric(pred_all["p_ge5_pred"], errors="coerce").astype(np.float64).clip(0.0, 1.0)
+    pred_all["p_ge15_pred"] = pd.to_numeric(pred_all["p_ge15_pred"], errors="coerce").astype(np.float64).clip(0.0, 1.0)
+    pred_all = pred_all.dropna(subset=["game_id", "team_id", "player_id"]).copy()
+    pred_all["team_id"] = pred_all["team_id"].astype(int)
+    pred_all["player_id"] = pred_all["player_id"].astype(int)
+    pred_all = pred_all.drop_duplicates(subset=["game_id", "team_id", "player_id"], keep="last").copy()
+    pred_all = pred_all.sort_values(["game_id", "team_id", "player_id"], kind="mergesort").reset_index(drop=True)
+
+    typer.echo("[save] Saving predictions_all.parquet")
+    pred_all[["game_id", "team_id", "player_id", "p_ge5_pred", "p_ge15_pred"]].to_parquet(
+        run_dir / "predictions_all.parquet",
+        index=False,
+    )
+
     # Predict on test
     typer.echo("[predict] Generating predictions on test set")
     test_df = test_df.copy()
@@ -628,6 +655,7 @@ def main(
     typer.echo(f"[done] Artifacts written to: {run_dir}")
     typer.echo(f"  - model_ge5.lgb")
     typer.echo(f"  - model_ge15.lgb")
+    typer.echo(f"  - predictions_all.parquet")
     typer.echo(f"  - predictions_test.parquet")
     typer.echo(f"  - report.md")
     typer.echo(f"  - meta.json")

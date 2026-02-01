@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import textwrap
 from dataclasses import dataclass
@@ -16,14 +17,30 @@ from projections.rotations.eval_manifest import (
     resolve_rot_bundle_dir,
     write_rot_eval_input_hashes,
 )
+from projections.rotations.candidate_pool import (
+    build_candidate_pool_prior,
+    build_candidate_pool_roster,
+    build_candidate_pool_truth,
+)
 from projections.rotations.generator import TeamContext
 from projections.rotations.manifest import write_json, write_latest_published_run_id
 from projections.rotations.priors_humility import HumilityConfig, humility_config_as_dict
+from projections.rotations.rotation_gate import GateConfig, gate_config_as_dict
 from projections.rotations.schemas import LINEUP_COLS
 from projections.rotations.template_generator import TemplateRotationGenerator
+from projections.rotations.rotation_predictor import (
+    canonicalize_game_id,
+    load_cached_all_predictions,
+    load_cached_predictions,
+    load_cached_train_predictions,
+    load_rotation_predictor_bundle,
+    season_start_year_from_game_id,
+)
+from projections.rotations.player_map import build_person_id_to_internal_id_map
 
 
 SampleMode = Literal["random", "first"]
+CandidatePoolMode = Literal["truth", "prior_topn", "prior_threshold", "roster"]
 REQUIRED_MINUTES_PRIOR_COLS: tuple[str, ...] = ("game_id", "team_id", "player_id", "minutes_prior", "play_prob")
 OPTIONAL_MINUTES_PRIOR_COLS: tuple[str, ...] = ("minutes_p10", "minutes_p90")
 
@@ -182,20 +199,48 @@ def run_rotation_generator_eval(
     use_truth_minutes_prior: bool = True,
     minutes_prior_parquet: Path | None = None,
     restrict_to_prior_games: bool = True,
+    candidate_pool: CandidatePoolMode = "truth",
+    candidate_top_n: int = 12,
+    candidate_min_minutes_prior: float = 0.0,
+    candidate_min_play_prob: float = 0.8,
+    candidate_min_candidates: int = 8,
     humility_config: HumilityConfig | None = None,
+    gate_config: GateConfig | None = None,
+    rotation_predictor_bundle: Path | None = None,
+    gate_feature_source: str = "cached_preds",
+    gate_max_train_rows: int | None = None,
+    baseline_out_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Evaluate TemplateRotationGenerator realism using truth candidate sets from rot_v1 labels.
+    """Evaluate TemplateRotationGenerator realism under different candidate-pool modes.
 
-    This evaluation intentionally *does not* test candidate-set prediction. It fixes:
-    - `candidate_player_ids` to truth participants (minutes_actual>0 or played_ge_1==True)
-    - `starter_candidates` to truth starters (fallback: first segment lineup)
-    - `minutes_prior` optionally to truth minutes (default True) to stabilize role mapping
+    Legacy/default (`candidate_pool=truth`) evaluates mapping + template sampling realism:
+    - `candidate_player_ids` fixed to truth participants (minutes_actual>0 OR played_ge_1==True)
+    - `starter_candidates` fixed to truth starters (fallback: first segment lineup)
+    - `minutes_prior` can optionally use truth minutes (default True) as a mapping stabilizer
+
+    Non-truth pools must not use minutes_actual/played flags for membership; they are intended
+    to mimic live availability errors (false promotions/missed promotions) under injury chaos.
     """
     rot_bundle_path = Path(rot_bundle_path)
     out_dir = Path(out_dir)
     sample_mode = str(sample_mode)  # runtime validation
     if sample_mode not in {"random", "first"}:
         raise ValueError(f"Unknown sample_mode: {sample_mode}")
+
+    candidate_pool = str(candidate_pool).strip().lower()
+    if candidate_pool not in {"truth", "prior_topn", "prior_threshold", "roster"}:
+        raise ValueError(
+            f"Unknown candidate_pool: {candidate_pool} (expected truth|prior_topn|prior_threshold|roster)"
+        )
+
+    gate_cfg = gate_config or GateConfig()
+    gate_feature_source = str(gate_feature_source).strip().lower()
+    if gate_feature_source not in {"cached_all", "cached_preds", "cached_train", "none"}:
+        raise ValueError(
+            f"Unknown gate_feature_source: {gate_feature_source} (expected cached_all|cached_preds|cached_train|none)"
+        )
+    if bool(gate_cfg.enabled) and gate_feature_source != "none" and rotation_predictor_bundle is None:
+        raise ValueError("--rotation-predictor-bundle is required when --gate is enabled (unless --gate-feature-source none)")
 
     if out_dir.exists():
         if not overwrite:
@@ -241,6 +286,11 @@ def run_rotation_generator_eval(
     overlap_players_total = 0
     prior_coverage_rate = float("nan")
     use_truth_minutes_prior_for_mapping = bool(use_truth_minutes_prior) and minutes_prior_parquet is None
+    if candidate_pool != "truth" and use_truth_minutes_prior_for_mapping:
+        raise ValueError(
+            "Non-truth candidate pools must not use truth minutes as a prior. "
+            "Pass --minutes-prior-parquet (recommended) and/or disable --use-truth-minutes-prior."
+        )
 
     if minutes_prior_parquet is not None:
         p = Path(minutes_prior_parquet)
@@ -255,7 +305,7 @@ def run_rotation_generator_eval(
             )
         keep_cols = list(REQUIRED_MINUTES_PRIOR_COLS) + [c for c in OPTIONAL_MINUTES_PRIOR_COLS if c in priors.columns]
         priors = priors[keep_cols].copy()
-        priors["game_id"] = priors["game_id"].astype("string")
+        priors["game_id"] = priors["game_id"].astype("string").map(canonicalize_game_id)
         priors["team_id"] = pd.to_numeric(priors["team_id"], errors="coerce").astype("Int64")
         priors["player_id"] = pd.to_numeric(priors["player_id"], errors="coerce").astype("Int64")
         priors["minutes_prior"] = pd.to_numeric(priors["minutes_prior"], errors="coerce").astype(np.float64).fillna(0.0)
@@ -267,6 +317,7 @@ def run_rotation_generator_eval(
         priors = priors.dropna(subset=["game_id", "team_id", "player_id"]).copy()
         priors["team_id"] = priors["team_id"].astype(int)
         priors["player_id"] = priors["player_id"].astype(int)
+        priors = priors[priors["game_id"].astype("string") != ""].copy()
         if not priors.empty:
             max_pid = int(priors["player_id"].max())
             # Guardrail: rot_v1 internal IDs are small contiguous ints (historically ~1-600).
@@ -281,7 +332,7 @@ def run_rotation_generator_eval(
 
     # Normalize core dtypes up-front for stable sampling + joins.
     events["season_id"] = events["season_id"].astype("string")
-    events["game_id"] = events["game_id"].astype("string")
+    events["game_id"] = events["game_id"].astype("string").map(canonicalize_game_id)
     events["team_id"] = pd.to_numeric(events["team_id"], errors="coerce").astype("Int64")
     events["opponent_team_id"] = pd.to_numeric(events["opponent_team_id"], errors="coerce").astype("Int64")
     events["is_home"] = _coerce_bool(events["is_home"])
@@ -290,7 +341,7 @@ def run_rotation_generator_eval(
     for c in LINEUP_COLS:
         events[c] = pd.to_numeric(events[c], errors="coerce").astype("Int64")
 
-    labels["game_id"] = labels["game_id"].astype("string")
+    labels["game_id"] = labels["game_id"].astype("string").map(canonicalize_game_id)
     labels["team_id"] = pd.to_numeric(labels["team_id"], errors="coerce").astype("Int64")
     labels["player_id"] = pd.to_numeric(labels["player_id"], errors="coerce").astype("Int64")
     labels["minutes_actual"] = pd.to_numeric(labels["minutes_actual"], errors="coerce").astype(np.float64).fillna(0.0)
@@ -301,6 +352,8 @@ def run_rotation_generator_eval(
 
     events = events.dropna(subset=["game_id", "team_id"]).copy()
     labels = labels.dropna(subset=["game_id", "team_id", "player_id"]).copy()
+    events = events[events["game_id"].astype("string") != ""].copy()
+    labels = labels[labels["game_id"].astype("string") != ""].copy()
     events["team_id"] = events["team_id"].astype(int)
     events["opponent_team_id"] = events["opponent_team_id"].fillna(-1).astype(int)
     events["segment_idx"] = events["segment_idx"].fillna(0).astype(int)
@@ -367,11 +420,116 @@ def run_rotation_generator_eval(
     labels_gb = labels.groupby(["game_id", "team_id"], sort=False)
     events_gb = events.groupby(["game_id", "team_id"], sort=False)
 
-    gen = TemplateRotationGenerator(rot_bundle=rot_bundle_path, humility_config=humility_config)
+    if candidate_pool in {"prior_topn", "prior_threshold"} and priors is None:
+        raise ValueError("--minutes-prior-parquet is required for candidate_pool prior_topn/prior_threshold")
+
+    candidate_pool_params: dict[str, Any] = {
+        "candidate_top_n": int(candidate_top_n),
+        "candidate_min_minutes_prior": float(candidate_min_minutes_prior),
+        "candidate_min_play_prob": float(candidate_min_play_prob),
+        "candidate_min_candidates": int(candidate_min_candidates),
+    }
+
+    candidate_pool_by_team_game: dict[tuple[str, int], list[int]] = {}
+    if candidate_pool in {"prior_topn", "prior_threshold"} and priors is not None and not priors.empty:
+        top_n = int(candidate_top_n) if candidate_pool == "prior_topn" else 0
+        pool_df = build_candidate_pool_prior(
+            priors,
+            top_n=top_n,
+            min_minutes_prior=float(candidate_min_minutes_prior),
+            min_play_prob=float(candidate_min_play_prob),
+            min_candidates=int(candidate_min_candidates),
+        )
+        if not pool_df.empty:
+            for (gid, tid), grp in pool_df.groupby(["game_id", "team_id"], sort=False):
+                candidate_pool_by_team_game[(str(gid), int(tid))] = _unique_ints_sorted(grp["player_id"].tolist())
+
+    gate_preds = None
+    gate_bundle_dir: str | None = None
+    gate_pred_source_counts: dict[str, int] | None = None
+    gate_person_id_to_internal_id: dict[int, int] | None = None
+    if bool(gate_cfg.enabled) and gate_feature_source != "none":
+        bundle = load_rotation_predictor_bundle(Path(rotation_predictor_bundle))
+        gate_bundle_dir = str(bundle.bundle_dir)
+
+        game_allow = {canonicalize_game_id(v) for v in selected["game_id"].astype("string").tolist() if canonicalize_game_id(v)}
+        team_allow = {int(v) for v in selected["team_id"].dropna().tolist()}
+
+        years_raw = sorted({y for y in (season_start_year_from_game_id(g) for g in game_allow) if y is not None})
+        # Only build personId->internal_id mapping for plausible modern seasons. For synthetic/unit-test
+        # game_ids (e.g. "0000000001" -> year 2000), skip mapping and allow internal-id preds to pass through.
+        years = [int(y) for y in years_raw if 2010 <= int(y) <= 2035]
+
+        # Build a deterministic personId->internal_id mapping for the seasons present in this eval slice.
+        gate_person_id_to_internal_id = {}
+        for y in years:
+            diag_dir = out_dir / "_gate_id_map" / f"season_start_year={int(y)}"
+            res = build_person_id_to_internal_id_map(
+                season_start_year=int(y),
+                diagnostics_dir=diag_dir,
+            )
+            for pid, internal in res.person_id_to_internal_id.items():
+                if pid in gate_person_id_to_internal_id and int(gate_person_id_to_internal_id[pid]) != int(internal):
+                    raise ValueError(
+                        f"personId mapping collision across seasons: nba_person_id={pid} -> {gate_person_id_to_internal_id[pid]} vs {internal}"
+                    )
+                gate_person_id_to_internal_id[int(pid)] = int(internal)
+
+        if gate_feature_source == "cached_preds":
+            gate_preds = load_cached_predictions(
+                bundle,
+                person_id_to_internal_id=gate_person_id_to_internal_id,
+                game_id_allow=game_allow,
+                team_id_allow=team_allow,
+            )
+        elif gate_feature_source == "cached_all":
+            gate_preds = load_cached_all_predictions(
+                bundle,
+                person_id_to_internal_id=gate_person_id_to_internal_id,
+                game_id_allow=game_allow,
+                team_id_allow=team_allow,
+            )
+        elif gate_feature_source == "cached_train":
+            gate_preds = load_cached_train_predictions(
+                bundle,
+                person_id_to_internal_id=gate_person_id_to_internal_id,
+                game_id_allow=game_allow,
+                team_id_allow=team_allow,
+                max_rows=gate_max_train_rows,
+            )
+
+        if gate_preds is not None and not gate_preds.empty and "pred_source" in gate_preds.columns:
+            gate_pred_source_counts = gate_preds["pred_source"].fillna("unknown").value_counts(dropna=False).to_dict()
+
+    gen = TemplateRotationGenerator(
+        rot_bundle=rot_bundle_path,
+        humility_config=humility_config,
+        gate_config=gate_cfg,
+        gate_preds=gate_preds,
+    )
     generator_name = type(gen).__name__
 
     player_rows: list[dict[str, Any]] = []
     team_rows: list[dict[str, Any]] = []
+    candidate_pool_rows: list[dict[str, Any]] = []
+    candidate_pool_team_game_rows: list[dict[str, Any]] = []
+
+    roster_person_id_to_internal_id: dict[int, int] | None = None
+    if candidate_pool == "roster":
+        # Build a deterministic personId->internal_id mapping for the seasons present in this eval slice.
+        # For synthetic/unit-test game_ids (e.g. "0000000001"), we skip mapping and rely on priors/events fallback.
+        years_raw = sorted({y for y in (season_start_year_from_game_id(g) for g in selected["game_id"].tolist()) if y is not None})
+        years = [int(y) for y in years_raw if 2010 <= int(y) <= 2035]
+        if years:
+            roster_person_id_to_internal_id = {}
+            for y in years:
+                diag_dir = out_dir / "_roster_id_map" / f"season_start_year={int(y)}"
+                res = build_person_id_to_internal_id_map(
+                    season_start_year=int(y),
+                    diagnostics_dir=diag_dir,
+                )
+                for pid, internal in res.person_id_to_internal_id.items():
+                    roster_person_id_to_internal_id[int(pid)] = int(internal)
 
     for r in selected.itertuples(index=False):
         game_id = str(r.game_id)
@@ -385,36 +543,129 @@ def run_rotation_generator_eval(
         if g_labels.empty:
             continue
 
-        # Truth candidate set: evaluate generator realism (mapping + template sampling), not candidate prediction.
-        cand_mask = (g_labels["minutes_actual"] > 0.0) | (g_labels["played_ge_1"])
-        candidate_ids = _unique_ints_sorted(g_labels.loc[cand_mask, "player_id"].tolist())
+        g_prior = (
+            priors_gb.get_group((game_id, team_id)).copy()
+            if priors_gb is not None and (game_id, team_id) in priors_gb.groups
+            else None
+        )
 
-        starter_pool = g_labels.loc[g_labels["starter_actual"], ["player_id", "minutes_actual"]].copy()
-        if not starter_pool.empty:
-            starter_pool = starter_pool.sort_values(["minutes_actual", "player_id"], ascending=[False, True], kind="mergesort")
-            starter_candidates = [int(v) for v in starter_pool["player_id"].tolist()]
+        if candidate_pool == "truth":
+            cand_df = build_candidate_pool_truth(g_labels)
+            candidate_ids = _unique_ints_sorted(cand_df["player_id"].tolist())
+        elif candidate_pool in {"prior_topn", "prior_threshold"}:
+            candidate_ids = candidate_pool_by_team_game.get((game_id, team_id), [])
         else:
-            starter_candidates = _infer_starters_from_events(g_events)
+            season_start_year = season_start_year_from_game_id(game_id) or 0
+            cand_df = build_candidate_pool_roster(
+                game_id,
+                team_id,
+                season_start_year,
+                person_id_to_internal_id=roster_person_id_to_internal_id,
+                priors_team_game=g_prior,
+                events_team_game=g_events,
+            )
+            candidate_ids = _unique_ints_sorted(cand_df["player_id"].tolist())
+
+        if not candidate_ids:
+            continue
+
+        if candidate_pool == "truth":
+            starter_pool = g_labels.loc[g_labels["starter_actual"], ["player_id", "minutes_actual"]].copy()
+            if not starter_pool.empty:
+                starter_pool = starter_pool.sort_values(
+                    ["minutes_actual", "player_id"],
+                    ascending=[False, True],
+                    kind="mergesort",
+                )
+                starter_candidates = [int(v) for v in starter_pool["player_id"].tolist()]
+            else:
+                starter_candidates = _infer_starters_from_events(g_events)
+        else:
+            inferred = _infer_starters_from_events(g_events)
+            inferred_in_pool = [int(pid) for pid in inferred if int(pid) in set(candidate_ids)]
+            starter_candidates = inferred_in_pool or [int(x) for x in candidate_ids[:5]]
+            if len(starter_candidates) < 5 and g_prior is not None and not g_prior.empty:
+                ranked = (
+                    g_prior[g_prior["player_id"].isin(candidate_ids)]
+                    .sort_values(["minutes_prior", "player_id"], ascending=[False, True], kind="mergesort")
+                    .get("player_id", pd.Series([], dtype="int64"))
+                    .tolist()
+                )
+                for pid in ranked:
+                    if int(pid) in starter_candidates:
+                        continue
+                    starter_candidates.append(int(pid))
+                    if len(starter_candidates) >= 5:
+                        break
 
         minutes_prior: Optional[dict[int, float]] = None
         minutes_p10_prior: Optional[dict[int, float]] = None
         minutes_p90_prior: Optional[dict[int, float]] = None
         play_prob_prior: Optional[dict[int, float]] = None
-        if priors_gb is not None and (game_id, team_id) in priors_gb.groups:
-            g_prior = priors_gb.get_group((game_id, team_id)).copy()
-            if candidate_ids:
-                g_prior = g_prior[g_prior["player_id"].isin(candidate_ids)].copy()
-            minutes_prior = {int(pid): float(v) for pid, v in zip(g_prior["player_id"].tolist(), g_prior["minutes_prior"].tolist())}
-            if "minutes_p10" in g_prior.columns:
-                minutes_p10_prior = {int(pid): float(v) for pid, v in zip(g_prior["player_id"].tolist(), g_prior["minutes_p10"].tolist())}
-            if "minutes_p90" in g_prior.columns:
-                minutes_p90_prior = {int(pid): float(v) for pid, v in zip(g_prior["player_id"].tolist(), g_prior["minutes_p90"].tolist())}
-            play_prob_prior = {int(pid): float(v) for pid, v in zip(g_prior["player_id"].tolist(), g_prior["play_prob"].tolist())}
+        g_prior_cand = None
+        if g_prior is not None and not g_prior.empty:
+            g_prior_cand = g_prior[g_prior["player_id"].isin(candidate_ids)].copy() if candidate_ids else g_prior.copy()
+            minutes_prior = {
+                int(pid): float(v)
+                for pid, v in zip(g_prior_cand["player_id"].tolist(), g_prior_cand["minutes_prior"].tolist())
+            }
+            if "minutes_p10" in g_prior_cand.columns:
+                minutes_p10_prior = {
+                    int(pid): float(v)
+                    for pid, v in zip(g_prior_cand["player_id"].tolist(), g_prior_cand["minutes_p10"].tolist())
+                }
+            if "minutes_p90" in g_prior_cand.columns:
+                minutes_p90_prior = {
+                    int(pid): float(v)
+                    for pid, v in zip(g_prior_cand["player_id"].tolist(), g_prior_cand["minutes_p90"].tolist())
+                }
+            play_prob_prior = {
+                int(pid): float(v)
+                for pid, v in zip(g_prior_cand["player_id"].tolist(), g_prior_cand["play_prob"].tolist())
+            }
         elif use_truth_minutes_prior_for_mapping:
             minutes_prior = {
                 int(pid): float(mins)
                 for pid, mins in zip(g_labels["player_id"].tolist(), g_labels["minutes_actual"].tolist())
             }
+
+        truth_played = set(
+            g_labels.loc[g_labels["played_ge_1"].fillna(False).astype(bool), "player_id"].astype(int).tolist()
+        )
+        pool_set = set(int(x) for x in candidate_ids)
+        overlap = pool_set & truth_played
+        recall_played_ge1 = float(len(overlap) / len(truth_played)) if truth_played else float("nan")
+        precision_played_ge1 = float(len(overlap) / len(pool_set)) if pool_set else float("nan")
+
+        chaos_index = 0
+        missing_prior_players = 0
+        if g_prior_cand is not None and not g_prior_cand.empty:
+            present = set(int(x) for x in g_prior_cand["player_id"].astype(int).tolist())
+            missing_prior_players = int(len(pool_set - present))
+            mp = pd.to_numeric(g_prior_cand["minutes_prior"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+            pp = (
+                pd.to_numeric(g_prior_cand["play_prob"], errors="coerce")
+                .fillna(0.0)
+                .clip(0.0, 1.0)
+                .to_numpy(dtype=np.float64)
+            )
+            chaos_index = int(((mp == 0.0) & (pp >= 0.8)).sum())
+
+        candidate_pool_team_game_rows.append(
+            {
+                "season_id": season_id,
+                "game_id": game_id,
+                "team_id": int(team_id),
+                "pool_mode": str(candidate_pool),
+                "pool_size": int(len(candidate_ids)),
+                "recall_played_ge1": recall_played_ge1,
+                "precision_played_ge1": precision_played_ge1,
+                "chaos_index": int(chaos_index),
+                "missing_prior_players": int(missing_prior_players),
+            }
+        )
+        for pid in candidate_ids:
+            candidate_pool_rows.append({"game_id": game_id, "team_id": int(team_id), "player_id": int(pid)})
 
         regime_label = None
         if "regime_label" in g_labels.columns:
@@ -450,6 +701,21 @@ def run_rotation_generator_eval(
         heur_applied_n = diag.get("rotation_prior_heuristics_applied_n", None)
         heur_applied_by_tier = diag.get("rotation_prior_heuristics_applied_by_tier", None)
         heur_stats = diag.get("rotation_prior_heuristics_stats", None)
+        gate_tier_counts = diag.get("gate_tier_counts", None)
+        gate_missing_preds_n = diag.get("gate_missing_preds_n", None)
+        gate_excluded_n = diag.get("gate_excluded_n", None)
+        gate_player_p_ge5 = diag.get("gate_player_p_ge5_pred", None) or {}
+        gate_player_p_ge15 = diag.get("gate_player_p_ge15_pred", None) or {}
+        gate_player_p_ge5_used = diag.get("gate_player_p_ge5_used", None) or {}
+        gate_player_p_ge15_used = diag.get("gate_player_p_ge15_used", None) or {}
+        gate_player_tier = diag.get("gate_player_tier", None) or {}
+        gate_player_reason = diag.get("gate_player_reason", None) or {}
+        gate_player_missing_pred = diag.get("gate_player_missing_pred", None) or {}
+        gate_player_excluded = diag.get("gate_player_excluded", None) or {}
+        gate_player_minutes_cap = diag.get("gate_player_minutes_cap", None) or {}
+        gate_player_play_prob_cap = diag.get("gate_player_play_prob_cap", None) or {}
+        gate_player_minutes_prior_adj = diag.get("gate_player_minutes_prior_adj", None) or {}
+        gate_player_play_prob_adj = diag.get("gate_player_play_prob_adj", None) or {}
 
         # Build per-player rows (stable order).
         g_labels_idx = g_labels.set_index("player_id", drop=False)
@@ -480,6 +746,18 @@ def run_rotation_generator_eval(
                     "starter_actual": bool(truth_row["starter_actual"]) if truth_row is not None else False,
                     "regime_label": str(truth_row["regime_label"]) if truth_row is not None else (regime_label or "unknown"),
                     **pred,
+                    "p_ge5_pred": float(gate_player_p_ge5.get(int(pid), np.nan)),
+                    "p_ge15_pred": float(gate_player_p_ge15.get(int(pid), np.nan)),
+                    "p_ge5_used": float(gate_player_p_ge5_used.get(int(pid), np.nan)),
+                    "p_ge15_used": float(gate_player_p_ge15_used.get(int(pid), np.nan)),
+                    "gate_tier": str(gate_player_tier.get(int(pid), "")) if int(pid) in gate_player_tier else "",
+                    "gate_reason": str(gate_player_reason.get(int(pid), "")) if int(pid) in gate_player_reason else "",
+                    "gate_missing_pred": bool(gate_player_missing_pred.get(int(pid), False)),
+                    "gate_excluded": bool(gate_player_excluded.get(int(pid), False)),
+                    "gate_minutes_cap": float(gate_player_minutes_cap.get(int(pid), np.nan)),
+                    "gate_play_prob_cap": float(gate_player_play_prob_cap.get(int(pid), np.nan)),
+                    "minutes_prior_adj": float(gate_player_minutes_prior_adj.get(int(pid), np.nan)),
+                    "play_prob_adj": float(gate_player_play_prob_adj.get(int(pid), np.nan)),
                     "n_worlds": int(n_worlds),
                     "seed": int(seed),
                     "generator_name": generator_name,
@@ -529,6 +807,9 @@ def run_rotation_generator_eval(
                 "rotation_prior_heuristics_applied_n": heur_applied_n,
                 "rotation_prior_heuristics_applied_by_tier": heur_applied_by_tier,
                 "rotation_prior_heuristics_stats": heur_stats,
+                "gate_tier_counts": gate_tier_counts,
+                "gate_missing_preds_n": gate_missing_preds_n,
+                "gate_excluded_n": gate_excluded_n,
                 "n_worlds": int(n_worlds),
                 "seed": int(seed),
                 "generator_name": generator_name,
@@ -577,6 +858,41 @@ def run_rotation_generator_eval(
     )
 
     repo_root = Path(__file__).resolve().parents[2]
+
+    candidate_pool_team_games_df = pd.DataFrame(candidate_pool_team_game_rows)
+    if not candidate_pool_team_games_df.empty:
+        candidate_pool_team_games_df = candidate_pool_team_games_df.sort_values(
+            ["season_id", "game_id", "team_id"], kind="mergesort"
+        ).reset_index(drop=True)
+    candidate_pool_team_games_path = out_dir / "candidate_pool_team_games.parquet"
+    _atomic_write_parquet(candidate_pool_team_games_df, candidate_pool_team_games_path)
+
+    candidate_pool_summary: dict[str, Any] = {
+        "pool_mode": str(candidate_pool),
+        "pool_params": candidate_pool_params,
+        "team_games": int(len(candidate_pool_team_games_df)),
+        "pool_size_stats": {},
+        "overlap_stats": {},
+    }
+    if not candidate_pool_team_games_df.empty:
+        sizes = pd.to_numeric(candidate_pool_team_games_df["pool_size"], errors="coerce").dropna().astype(float)
+        recall = pd.to_numeric(candidate_pool_team_games_df["recall_played_ge1"], errors="coerce").dropna().astype(float)
+        precision = pd.to_numeric(
+            candidate_pool_team_games_df["precision_played_ge1"], errors="coerce"
+        ).dropna().astype(float)
+        candidate_pool_summary["pool_size_stats"] = {
+            "mean": float(sizes.mean()) if len(sizes) else float("nan"),
+            "p50": float(sizes.quantile(0.5)) if len(sizes) else float("nan"),
+            "p90": float(sizes.quantile(0.9)) if len(sizes) else float("nan"),
+        }
+        candidate_pool_summary["overlap_stats"] = {
+            "recall_played_ge1_mean": float(recall.mean()) if len(recall) else float("nan"),
+            "precision_mean": float(precision.mean()) if len(precision) else float("nan"),
+        }
+
+    candidate_pool_summary_path = out_dir / "candidate_pool_summary.json"
+    write_json(candidate_pool_summary_path, candidate_pool_summary)
+
     manifest = build_rot_eval_manifest(
         repo_root=repo_root,
         rot_bundle_path=rot_bundle_path,
@@ -589,12 +905,54 @@ def run_rotation_generator_eval(
         use_truth_minutes_prior=use_truth_minutes_prior_for_mapping,
         minutes_prior_parquet=minutes_prior_parquet,
         restrict_to_prior_games=bool(restrict_to_prior_games),
+        candidate_pool=str(candidate_pool),
+        candidate_pool_params=candidate_pool_params,
         humility_enabled=bool((humility_config or HumilityConfig()).enabled),
         humility_config=humility_config_as_dict(humility_config or HumilityConfig()),
+        gate_enabled=bool(gate_cfg.enabled),
+        gate_config=gate_config_as_dict(gate_cfg),
+        rotation_predictor_bundle=str(gate_bundle_dir) if gate_bundle_dir is not None else (str(rotation_predictor_bundle) if rotation_predictor_bundle is not None else None),
+        gate_feature_source=str(gate_feature_source),
+        gate_max_train_rows=int(gate_max_train_rows) if gate_max_train_rows is not None else None,
         input_hashes_path=input_hashes_path,
     )
     manifest_path = out_dir / "manifest.json"
     write_json(manifest_path, manifest)
+
+    if bool(gate_cfg.enabled):
+        gate_tier_counts_total = (
+            player_eval["gate_tier"].fillna("unknown").value_counts(dropna=False).to_dict()
+            if not player_eval.empty and "gate_tier" in player_eval.columns
+            else {}
+        )
+        gate_missing_pred_total = (
+            int(_coerce_bool(player_eval["gate_missing_pred"]).sum())
+            if not player_eval.empty and "gate_missing_pred" in player_eval.columns
+            else 0
+        )
+        gate_excluded_total = (
+            int(_coerce_bool(player_eval["gate_excluded"]).sum())
+            if not player_eval.empty and "gate_excluded" in player_eval.columns
+            else 0
+        )
+        gate_summary = {
+            "gate_enabled": bool(gate_cfg.enabled),
+            "gate_config": gate_config_as_dict(gate_cfg),
+            "rotation_predictor_bundle": str(rotation_predictor_bundle) if rotation_predictor_bundle is not None else None,
+            "rotation_predictor_bundle_dir": gate_bundle_dir,
+            "gate_feature_source": str(gate_feature_source),
+            "gate_max_train_rows": int(gate_max_train_rows) if gate_max_train_rows is not None else None,
+            "person_id_map_size": int(len(gate_person_id_to_internal_id or {})),
+            "pred_source_counts": gate_pred_source_counts,
+            "pred_rows": int(len(gate_preds)) if gate_preds is not None else 0,
+            "pred_team_games": int(gate_preds[["game_id", "team_id"]].drop_duplicates().shape[0])
+            if gate_preds is not None and not gate_preds.empty
+            else 0,
+            "gate_tier_counts_total": gate_tier_counts_total,
+            "gate_missing_pred_total": gate_missing_pred_total,
+            "gate_excluded_total": gate_excluded_total,
+        }
+        write_json(out_dir / "gate_summary.json", gate_summary)
 
     # Build report.md (human-readable).
     report_path = out_dir / "report.md"
@@ -608,6 +966,18 @@ def run_rotation_generator_eval(
         if not team_eval.empty and "template_source" in team_eval.columns
         else {}
     )
+    gate_tier_counts_total: dict[str, int] = {}
+    gate_missing_pred_total = 0
+    gate_excluded_total = 0
+    if not player_eval.empty and "gate_tier" in player_eval.columns:
+        gate_tier_counts_total = (
+            player_eval["gate_tier"].fillna("unknown").value_counts(dropna=False).to_dict()
+        )
+        if "gate_missing_pred" in player_eval.columns:
+            gate_missing_pred_total = int(_coerce_bool(player_eval["gate_missing_pred"]).sum())
+        if "gate_excluded" in player_eval.columns:
+            gate_excluded_total = int(_coerce_bool(player_eval["gate_excluded"]).sum())
+
     humility_tier_counts_total: dict[str, int] = {}
     heur_applied_by_tier_total: dict[str, int] = {}
     heur_applied_players_total = 0
@@ -645,6 +1015,308 @@ def run_rotation_generator_eval(
         else float("nan")
     )
 
+    # Catastrophic promotion diagnostics (generator output, not gate predictions):
+    # - truth<=5 but pred_mean>=15 (or >=20)
+    # - truth<=1 but pred_mean>=10
+    catastrophic_truth_le5_pred_ge15 = 0
+    catastrophic_truth_le5_pred_ge20 = 0
+    catastrophic_truth_le1_pred_ge10 = 0
+    brier_ge5_starters = float("nan")
+    if not player_eval.empty:
+        m_truth = pd.to_numeric(player_eval["minutes_actual"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+        m_pred = pd.to_numeric(player_eval["minutes_mean"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+        catastrophic_truth_le5_pred_ge15 = int(((m_truth <= 5.0) & (m_pred >= 15.0)).sum())
+        catastrophic_truth_le5_pred_ge20 = int(((m_truth <= 5.0) & (m_pred >= 20.0)).sum())
+        catastrophic_truth_le1_pred_ge10 = int(((m_truth <= 1.0) & (m_pred >= 10.0)).sum())
+        starters_slice = player_eval[player_eval["starter_actual"].fillna(False).astype(bool)].copy()
+        _, brier_ge5_starters = _compute_calibration(
+            player_eval=starters_slice,
+            p_col="p_played_ge_5_pred",
+            y_col="played_ge_5",
+        )
+
+    baseline_summary: str = ""
+    prevented_lines: list[str] = []
+    base_player_eval = pd.DataFrame()
+    base_candidate_pool_team_games_df = pd.DataFrame()
+    base_manifest: dict[str, Any] = {}
+    if baseline_out_dir is not None:
+        base_dir = Path(baseline_out_dir)
+        base_player_path = base_dir / "player_eval.parquet"
+        if not base_player_path.exists():
+            raise FileNotFoundError(f"--baseline-out-dir missing player_eval.parquet: {base_player_path}")
+
+        base_player_eval = pd.read_parquet(base_player_path)
+        if not base_player_eval.empty:
+            base_player_eval = base_player_eval.copy()
+            base_player_eval["season_id"] = base_player_eval["season_id"].astype("string")
+            base_player_eval["game_id"] = base_player_eval["game_id"].astype("string")
+            base_player_eval["team_id"] = (
+                pd.to_numeric(base_player_eval["team_id"], errors="coerce").astype("Int64").fillna(-1).astype(int)
+            )
+            base_player_eval["player_id"] = (
+                pd.to_numeric(base_player_eval["player_id"], errors="coerce").astype("Int64").fillna(-1).astype(int)
+            )
+
+        base_manifest_path = base_dir / "manifest.json"
+        if base_manifest_path.exists():
+            try:
+                base_manifest = json.loads(base_manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                base_manifest = {}
+
+        base_cand_team_games_path = base_dir / "candidate_pool_team_games.parquet"
+        if base_cand_team_games_path.exists():
+            try:
+                base_candidate_pool_team_games_df = pd.read_parquet(base_cand_team_games_path)
+            except Exception:
+                base_candidate_pool_team_games_df = pd.DataFrame()
+
+        _, base_brier_ge1 = _compute_calibration(player_eval=base_player_eval, p_col="p_played_ge_1_pred", y_col="played_ge_1")
+        _, base_brier_ge5 = _compute_calibration(player_eval=base_player_eval, p_col="p_played_ge_5_pred", y_col="played_ge_5")
+        base_minutes_mae = float(
+            (base_player_eval["minutes_mean"] - base_player_eval["minutes_actual"]).abs().mean()
+        ) if not base_player_eval.empty else float("nan")
+
+        base_brier_ge5_starters = float("nan")
+        if not base_player_eval.empty and "starter_actual" in base_player_eval.columns:
+            base_starters_slice = base_player_eval[base_player_eval["starter_actual"].fillna(False).astype(bool)].copy()
+            _, base_brier_ge5_starters = _compute_calibration(
+                player_eval=base_starters_slice,
+                p_col="p_played_ge_5_pred",
+                y_col="played_ge_5",
+            )
+
+        base_cat_truth_le5_pred_ge15 = 0
+        base_cat_truth_le5_pred_ge20 = 0
+        base_cat_truth_le1_pred_ge10 = 0
+        if not base_player_eval.empty:
+            m_truth_b = pd.to_numeric(base_player_eval["minutes_actual"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+            m_pred_b = pd.to_numeric(base_player_eval["minutes_mean"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+            base_cat_truth_le5_pred_ge15 = int(((m_truth_b <= 5.0) & (m_pred_b >= 15.0)).sum())
+            base_cat_truth_le5_pred_ge20 = int(((m_truth_b <= 5.0) & (m_pred_b >= 20.0)).sum())
+            base_cat_truth_le1_pred_ge10 = int(((m_truth_b <= 1.0) & (m_pred_b >= 10.0)).sum())
+
+        baseline_summary = textwrap.dedent(
+            f"""\
+            ## Baseline comparison
+
+            baseline_out_dir: {base_dir}
+
+            - brier_played_ge_1: baseline={float(base_brier_ge1):.6f} current={metrics.brier_ge1:.6f} delta={(metrics.brier_ge1 - float(base_brier_ge1)):.6f}
+            - brier_played_ge_5: baseline={float(base_brier_ge5):.6f} current={metrics.brier_ge5:.6f} delta={(metrics.brier_ge5 - float(base_brier_ge5)):.6f}
+            - minutes_mae: baseline={base_minutes_mae:.3f} current={metrics.minutes_mae:.3f} delta={(metrics.minutes_mae - base_minutes_mae):.3f}
+            - brier_played_ge_5 (starters): baseline={float(base_brier_ge5_starters):.6f} current={float(brier_ge5_starters):.6f} delta={(float(brier_ge5_starters) - float(base_brier_ge5_starters)):.6f}
+
+            - catastrophic (truth<=5 & pred_mean>=15): baseline={base_cat_truth_le5_pred_ge15} current={catastrophic_truth_le5_pred_ge15} delta={catastrophic_truth_le5_pred_ge15 - base_cat_truth_le5_pred_ge15}
+            - catastrophic (truth<=5 & pred_mean>=20): baseline={base_cat_truth_le5_pred_ge20} current={catastrophic_truth_le5_pred_ge20} delta={catastrophic_truth_le5_pred_ge20 - base_cat_truth_le5_pred_ge20}
+            - catastrophic (truth<=1 & pred_mean>=10): baseline={base_cat_truth_le1_pred_ge10} current={catastrophic_truth_le1_pred_ge10} delta={catastrophic_truth_le1_pred_ge10 - base_cat_truth_le1_pred_ge10}
+            """
+        )
+
+        if not base_player_eval.empty and not player_eval.empty:
+            keys = ["season_id", "game_id", "team_id", "player_id"]
+            merged = base_player_eval[keys + ["minutes_actual", "minutes_mean"]].merge(
+                player_eval[keys + ["minutes_mean"]],
+                on=keys,
+                how="inner",
+                suffixes=("_baseline", "_current"),
+            )
+            prevented = merged[
+                (pd.to_numeric(merged["minutes_actual"], errors="coerce").fillna(0.0) <= 5.0)
+                & (pd.to_numeric(merged["minutes_mean_baseline"], errors="coerce").fillna(0.0) >= 15.0)
+                & (pd.to_numeric(merged["minutes_mean_current"], errors="coerce").fillna(0.0) < 15.0)
+            ].copy()
+            if not prevented.empty:
+                prevented = prevented.sort_values(["minutes_mean_baseline", "team_id", "player_id"], ascending=[False, True, True], kind="mergesort").head(20)
+                for row in prevented.itertuples(index=False):
+                    prevented_lines.append(
+                        f"- {row.season_id} {row.game_id} team={int(row.team_id)} player={int(row.player_id)} "
+                        f"truth={float(row.minutes_actual):.1f} baseline={float(row.minutes_mean_baseline):.1f} current={float(row.minutes_mean_current):.1f}"
+                    )
+
+        baseline_summary += "\n## Top prevented catastrophes (baseline -> current, top 20)\n\n"
+        if prevented_lines:
+            baseline_summary += "\n".join(prevented_lines) + "\n"
+        else:
+            baseline_summary += "- (no rows)\n"
+
+    def _pool_size_stats(team_games_df: pd.DataFrame) -> dict[str, float]:
+        if team_games_df.empty or "pool_size" not in team_games_df.columns:
+            return {"mean": float("nan"), "p50": float("nan"), "p90": float("nan")}
+        s = pd.to_numeric(team_games_df["pool_size"], errors="coerce").dropna().astype(float)
+        if s.empty:
+            return {"mean": float("nan"), "p50": float("nan"), "p90": float("nan")}
+        return {"mean": float(s.mean()), "p50": float(s.quantile(0.5)), "p90": float(s.quantile(0.9))}
+
+    def _overlap_stats(team_games_df: pd.DataFrame) -> dict[str, float]:
+        if team_games_df.empty:
+            return {"recall_played_ge1_mean": float("nan"), "precision_mean": float("nan")}
+        r = pd.to_numeric(team_games_df.get("recall_played_ge1"), errors="coerce").dropna().astype(float)
+        p = pd.to_numeric(team_games_df.get("precision_played_ge1"), errors="coerce").dropna().astype(float)
+        return {
+            "recall_played_ge1_mean": float(r.mean()) if not r.empty else float("nan"),
+            "precision_mean": float(p.mean()) if not p.empty else float("nan"),
+        }
+
+    def _cat_miss_counts(player_df: pd.DataFrame) -> dict[str, int]:
+        if player_df.empty:
+            return {
+                "cat_10": 0,
+                "cat_15": 0,
+                "cat_20": 0,
+                "cat_25": 0,
+                "miss_5": 0,
+                "miss_8": 0,
+                "miss_10": 0,
+            }
+        m_truth = pd.to_numeric(player_df["minutes_actual"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+        m_pred = pd.to_numeric(player_df["minutes_mean"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+        cats = {
+            "cat_10": int(((m_truth <= 5.0) & (m_pred >= 10.0)).sum()),
+            "cat_15": int(((m_truth <= 5.0) & (m_pred >= 15.0)).sum()),
+            "cat_20": int(((m_truth <= 5.0) & (m_pred >= 20.0)).sum()),
+            "cat_25": int(((m_truth <= 5.0) & (m_pred >= 25.0)).sum()),
+        }
+        misses = {
+            "miss_5": int(((m_truth >= 15.0) & (m_pred <= 5.0)).sum()),
+            "miss_8": int(((m_truth >= 15.0) & (m_pred <= 8.0)).sum()),
+            "miss_10": int(((m_truth >= 15.0) & (m_pred <= 10.0)).sum()),
+        }
+        return {**cats, **misses}
+
+    def _chaos_terciles(team_games_df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
+        if team_games_df.empty or "chaos_index" not in team_games_df.columns:
+            return team_games_df.copy(), {"q33": float("nan"), "q66": float("nan")}
+        out = team_games_df.copy()
+        chaos = pd.to_numeric(out["chaos_index"], errors="coerce").fillna(0).astype(int)
+        q33 = float(chaos.quantile(1 / 3))
+        q66 = float(chaos.quantile(2 / 3))
+
+        def _bin(v: int) -> str:
+            if v <= q33:
+                return "low"
+            if v <= q66:
+                return "med"
+            return "high"
+
+        out["chaos_bin"] = chaos.map(_bin).astype("string")
+        return out, {"q33": q33, "q66": q66}
+
+    def _counts_by_chaos(player_df: pd.DataFrame, team_games_df: pd.DataFrame) -> tuple[dict[str, dict[str, int]], dict[str, int], dict[str, float]]:
+        tg, cutoffs = _chaos_terciles(team_games_df)
+        if tg.empty or "chaos_bin" not in tg.columns:
+            return {}, {}, cutoffs
+        keys = tg[["game_id", "team_id", "chaos_bin"]].copy()
+        keys["game_id"] = keys["game_id"].astype("string")
+        keys["team_id"] = pd.to_numeric(keys["team_id"], errors="coerce").astype("Int64").fillna(-1).astype(int)
+        merged = player_df.merge(keys, on=["game_id", "team_id"], how="left")
+        out: dict[str, dict[str, int]] = {}
+        team_games_counts = tg["chaos_bin"].value_counts(dropna=False).to_dict()
+        for bin_name in ["low", "med", "high"]:
+            df_bin = merged[merged["chaos_bin"] == bin_name]
+            out[bin_name] = _cat_miss_counts(df_bin)
+        return out, {str(k): int(v) for k, v in team_games_counts.items()}, cutoffs
+
+    def _pool_report_block(
+        *,
+        label: str,
+        pool_mode: str,
+        gate_enabled_flag: bool,
+        player_df: pd.DataFrame,
+        team_games_df: pd.DataFrame,
+    ) -> str:
+        ps = _pool_size_stats(team_games_df)
+        ov = _overlap_stats(team_games_df)
+        counts = _cat_miss_counts(player_df)
+        by_chaos, chaos_team_games_counts, cutoffs = _counts_by_chaos(player_df, team_games_df)
+        lines = []
+        lines.append(f"### {label}")
+        lines.append("")
+        lines.append(f"- pool_mode: {pool_mode}")
+        lines.append(f"- gate_enabled: {bool(gate_enabled_flag)}")
+        lines.append(f"- pool_size mean/p50/p90: {ps['mean']:.2f} / {ps['p50']:.0f} / {ps['p90']:.0f}")
+        lines.append(
+            f"- overlap (post-hoc): recall_played_ge1_mean={ov['recall_played_ge1_mean']:.3f} precision_mean={ov['precision_mean']:.3f}"
+        )
+        lines.append(
+            "- catastrophic promotions (truth<=5 & pred_mean>=X): "
+            f"cat_10={counts['cat_10']} cat_15={counts['cat_15']} cat_20={counts['cat_20']} cat_25={counts['cat_25']}"
+        )
+        lines.append(
+            "- missed promotions (truth>=15 & pred_mean<=X): "
+            f"miss_5={counts['miss_5']} miss_8={counts['miss_8']} miss_10={counts['miss_10']}"
+        )
+        lines.append("")
+        lines.append(
+            f"Chaos proxy: chaos_index := count(candidates with minutes_prior==0 & play_prob>=0.8). "
+            f"Terciles cutoffs: q33={cutoffs['q33']:.1f} q66={cutoffs['q66']:.1f}"
+        )
+        lines.append("")
+        lines.append("| chaos_bin | team_games | cat_15 | cat_20 | cat_25 | miss_5 | miss_8 | miss_10 |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+        for bin_name in ["low", "med", "high"]:
+            c = by_chaos.get(bin_name, _cat_miss_counts(pd.DataFrame()))
+            n_tg = int(chaos_team_games_counts.get(bin_name, 0))
+            lines.append(
+                f"| {bin_name} | {n_tg} | {c['cat_15']} | {c['cat_20']} | {c['cat_25']} | {c['miss_5']} | {c['miss_8']} | {c['miss_10']} |"
+            )
+        lines.append("")
+        return "\n".join(lines)
+
+    candidate_pool_report_section = "## Candidate pool realism + gate impact\n\n"
+    candidate_pool_report_section += _pool_report_block(
+        label="current",
+        pool_mode=str(candidate_pool),
+        gate_enabled_flag=bool(gate_cfg.enabled),
+        player_df=player_eval,
+        team_games_df=candidate_pool_team_games_df,
+    )
+    candidate_pool_report_section += "\n"
+    if baseline_out_dir is None:
+        candidate_pool_report_section += (
+            "_Tip: pass `--baseline-out-dir` to compare pool modes and/or compute a clean gate delta table "
+            "(e.g. baseline=no-gate, current=gate; or baseline=truth, current=prior_topn)._"
+        )
+        candidate_pool_report_section += "\n\n"
+
+    if baseline_out_dir is not None and not base_player_eval.empty:
+        base_pool_mode = str(base_manifest.get("candidate_pool", "unknown"))
+        base_gate_enabled = bool(base_manifest.get("gate_enabled", False))
+        candidate_pool_report_section += _pool_report_block(
+            label="baseline",
+            pool_mode=base_pool_mode,
+            gate_enabled_flag=base_gate_enabled,
+            player_df=base_player_eval,
+            team_games_df=base_candidate_pool_team_games_df,
+        )
+        candidate_pool_report_section += "\n"
+
+        # Gate delta: interpret baseline as "no gate" and current as "with gate" when applicable.
+        cur_counts = _cat_miss_counts(player_eval)
+        base_counts = _cat_miss_counts(base_player_eval)
+        delta = {k: int(cur_counts.get(k, 0) - base_counts.get(k, 0)) for k in sorted(cur_counts.keys())}
+        verdict = "n/a"
+        if (not base_gate_enabled) and bool(gate_cfg.enabled) and base_pool_mode == str(candidate_pool):
+            cats_delta = delta["cat_15"] + delta["cat_20"] + delta["cat_25"]
+            verdict = "YES" if (cats_delta < 0 and delta["miss_5"] <= 0) else "NO"
+
+        candidate_pool_report_section += "### Gate delta (current - baseline)\n\n"
+        candidate_pool_report_section += f"- baseline_gate_enabled: {base_gate_enabled}\n"
+        candidate_pool_report_section += f"- current_gate_enabled: {bool(gate_cfg.enabled)}\n"
+        candidate_pool_report_section += f"- same_pool_mode: {base_pool_mode == str(candidate_pool)}\n"
+        candidate_pool_report_section += (
+            "- verdict_rule: gate helps iff (delta_cat_15+delta_cat_20+delta_cat_25) < 0 AND delta_miss_5 <= 0 (same pool_mode)\n"
+        )
+        candidate_pool_report_section += f"- verdict_gate_helps: {verdict}\n\n"
+        candidate_pool_report_section += "| metric | baseline | current | delta |\n"
+        candidate_pool_report_section += "|---|---:|---:|---:|\n"
+        for k in ["cat_10", "cat_15", "cat_20", "cat_25", "miss_5", "miss_8", "miss_10"]:
+            candidate_pool_report_section += (
+                f"| {k} | {base_counts.get(k, 0)} | {cur_counts.get(k, 0)} | {delta.get(k, 0)} |\n"
+            )
+        candidate_pool_report_section += "\n"
+
     worst_minutes = pd.DataFrame()
     if not player_eval.empty:
         worst_minutes = player_eval.assign(abs_err=(player_eval["minutes_mean"] - player_eval["minutes_actual"]).abs())
@@ -664,12 +1336,16 @@ def run_rotation_generator_eval(
         ## What this evaluates
 
         This is a “generator realism” backtest for `TemplateRotationGenerator`:
-        - Uses *truth candidate sets* from `rotation_labels` (minutes_actual>0 OR played_ge_1==True)
-        - Uses truth starters when available (fallback: first segment lineup)
-        - Uses truth minutes as `minutes_prior` **only** as a mapping stabilizer (`use_truth_minutes_prior={use_truth_minutes_prior_for_mapping}`)
-        - If `minutes_prior_parquet` is provided, uses that prior instead (and can restrict game universe)
+        - candidate_pool: {candidate_pool}
+        - candidate_pool_params: {candidate_pool_params}
+        - candidate_pool_summary: {candidate_pool_summary}
+        - starters source: truth starters (truth mode) else first-segment lineup proxy
+        - minutes_prior mapping stabilizer: truth minutes only when candidate_pool=truth and minutes_prior_parquet is None (`use_truth_minutes_prior={use_truth_minutes_prior_for_mapping}`)
+        - minutes_prior_parquet: {str(minutes_prior_parquet) if minutes_prior_parquet is not None else None}
 
-        It does **not** attempt to predict availability / candidate sets; it evaluates mapping + template sampling realism.
+        Notes:
+        - Non-truth pools do **not** use minutes_actual/played flags for membership (no leakage).
+        - Roster pool uses roster_nightly + personId->internal_id mapping; when roster is missing it falls back to priors and first-segment lineup ids.
 
         ## Prior humility layer
 
@@ -679,6 +1355,18 @@ def run_rotation_generator_eval(
         - heuristics_applied_players_total: {heur_applied_players_total}
         - heuristics_applied_by_tier_total: {heur_applied_by_tier_total}
         - humility_tier_counts_total: {humility_tier_counts_total}
+
+        ## Rotation gate layer
+
+        - gate_enabled: {bool(gate_cfg.enabled)}
+        - gate_config: {gate_config_as_dict(gate_cfg)}
+        - gate_feature_source: {gate_feature_source}
+        - gate_missing_pred_behavior: fail_open_noop (no caps/exclusions when p_ge5/p_ge15 is missing)
+        - rotation_predictor_bundle_dir: {gate_bundle_dir}
+        - gate_pred_source_counts: {gate_pred_source_counts}
+        - gate_tier_counts_total: {gate_tier_counts_total}
+        - gate_missing_pred_total: {gate_missing_pred_total}
+        - gate_excluded_total: {gate_excluded_total}
 
         ## Headline metrics
 
@@ -694,6 +1382,7 @@ def run_rotation_generator_eval(
         - players: {metrics.n_players}
         - brier_played_ge_1: {metrics.brier_ge1:.6f}
         - brier_played_ge_5: {metrics.brier_ge5:.6f}
+        - brier_played_ge_5 (starters): {float(brier_ge5_starters):.6f}
         - minutes_mae: {metrics.minutes_mae:.3f}
 
         ## Tail / mass metrics
@@ -701,11 +1390,21 @@ def run_rotation_generator_eval(
         - avg P(minutes==0): {avg_p_zero:.4f}
         - avg P(minutes<5): {avg_p_lt5:.4f}
 
+        ## Catastrophic promotions
+
+        - catastrophic (truth<=5 & pred_mean>=15): {catastrophic_truth_le5_pred_ge15}
+        - catastrophic (truth<=5 & pred_mean>=20): {catastrophic_truth_le5_pred_ge20}
+        - catastrophic (truth<=1 & pred_mean>=10): {catastrophic_truth_le1_pred_ge10}
+
+        {candidate_pool_report_section}
+
         ## Mapping diagnostics
 
         - avg mapping_success_rate: {mapping_success_avg:.4f}
         - avg template_fallback_rate: {fallback_rate_avg:.4f}
         - template_source counts: {template_sources}
+
+        {baseline_summary}
 
         ## Worst minutes errors (top 25)
 
@@ -747,6 +1446,7 @@ def run_rotation_generator_eval(
         "team_eval_path": str(team_eval_path),
         "calibration_played_ge_1_path": str(calib_ge1_path),
         "calibration_played_ge_5_path": str(calib_ge5_path),
+        "candidate_pool_summary_path": str(candidate_pool_summary_path),
         "report_path": str(report_path),
         "manifest_path": str(manifest_path),
         "input_hashes_path": str(input_hashes_path),

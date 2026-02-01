@@ -67,6 +67,7 @@ def test_rotation_predictor_cli_smoke(temp_artifact_dir: Path):
 
     assert run_dir.exists(), f"Run directory not created: {run_dir}"
     assert (run_dir / "report.md").exists(), "report.md not created"
+    assert (run_dir / "predictions_all.parquet").exists(), "predictions_all.parquet not created"
     assert (run_dir / "predictions_test.parquet").exists(), "predictions_test.parquet not created"
     assert (run_dir / "model_ge5.lgb").exists(), "model_ge5.lgb not created"
     assert (run_dir / "model_ge15.lgb").exists(), "model_ge15.lgb not created"
