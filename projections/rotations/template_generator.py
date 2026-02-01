@@ -9,6 +9,7 @@ import pandas as pd
 
 from projections.rotations.generator import RotationWorlds, TeamContext
 from projections.rotations.priors_humility import HumilityConfig, apply_prior_humility, humility_config_as_dict
+from projections.rotations.rotation_gate import GateConfig, apply_rotation_gate, gate_config_as_dict
 from projections.rotations.schemas import LINEUP_COLS
 
 
@@ -102,16 +103,41 @@ class TemplateRotationGenerator:
         duration_jitter_std_sec: float = 0.0,
         max_attempts_per_world: int = 50,
         humility_config: HumilityConfig | None = None,
+        gate_config: GateConfig | None = None,
+        gate_preds: pd.DataFrame | None = None,
     ) -> None:
         self._rot_bundle_path = rot_bundle or (DEFAULT_ROT_ARTIFACTS_ROOT / "LATEST_PUBLISHED")
         self._duration_jitter_std_sec = float(duration_jitter_std_sec)
         self._max_attempts_per_world = int(max_attempts_per_world)
         self._humility_config = humility_config or HumilityConfig()
+        self._gate_config = gate_config or GateConfig()
 
         self._loaded = False
         self._templates: dict[tuple[int, str], _Template] = {}
         self._templates_by_team_regime: dict[tuple[int, str], list[tuple[int, str]]] = {}
         self._templates_by_regime: dict[str, list[tuple[int, str]]] = {}
+        self._gate_preds_by_team_game: dict[tuple[int, str], pd.DataFrame] = {}
+
+        if gate_preds is not None and not gate_preds.empty:
+            required = {"game_id", "team_id", "player_id", "p_ge5_pred", "p_ge15_pred"}
+            missing = sorted([c for c in required if c not in gate_preds.columns])
+            if missing:
+                raise ValueError(f"gate_preds missing required columns: {missing}")
+            tmp = gate_preds[["game_id", "team_id", "player_id", "p_ge5_pred", "p_ge15_pred"]].copy()
+            tmp["game_id"] = tmp["game_id"].astype("string")
+            tmp["team_id"] = pd.to_numeric(tmp["team_id"], errors="coerce").astype("Int64")
+            tmp["player_id"] = pd.to_numeric(tmp["player_id"], errors="coerce").astype("Int64")
+            tmp["p_ge5_pred"] = pd.to_numeric(tmp["p_ge5_pred"], errors="coerce").astype(np.float64).clip(0.0, 1.0)
+            tmp["p_ge15_pred"] = pd.to_numeric(tmp["p_ge15_pred"], errors="coerce").astype(np.float64).clip(0.0, 1.0)
+            tmp = tmp.dropna(subset=["game_id", "team_id", "player_id"]).copy()
+            tmp["team_id"] = tmp["team_id"].astype(int)
+            tmp["player_id"] = tmp["player_id"].astype(int)
+            tmp = tmp.sort_values(["team_id", "game_id", "player_id"], kind="mergesort").drop_duplicates(
+                subset=["team_id", "game_id", "player_id"],
+                keep="last",
+            )
+            for (team_id, game_id), g in tmp.groupby(["team_id", "game_id"], sort=True):
+                self._gate_preds_by_team_game[(int(team_id), str(game_id))] = g.copy()
 
     def _load(self) -> None:
         if self._loaded:
@@ -303,6 +329,22 @@ class TemplateRotationGenerator:
         heuristics_applied_n = None
         heuristics_applied_by_tier = None
         heuristics_stats = None
+        gate_tier_counts = None
+        gate_missing_preds_n = None
+        gate_excluded_n = None
+        gate_player_p_ge5 = None
+        gate_player_p_ge15 = None
+        gate_player_p_ge5_used = None
+        gate_player_p_ge15_used = None
+        gate_player_tier = None
+        gate_player_reason = None
+        gate_player_missing_pred = None
+        gate_player_excluded = None
+        gate_player_minutes_cap = None
+        gate_player_play_prob_cap = None
+        gate_player_minutes_prior_adj = None
+        gate_player_play_prob_adj = None
+        gate_minutes_cap_by_player: dict[int, float] = {}
         if (
             bool(self._humility_config.enabled)
             and candidate_ids is not None
@@ -384,6 +426,170 @@ class TemplateRotationGenerator:
         if not template_keys:
             raise RuntimeError("Template library is empty (no rot_v1 templates loaded).")
 
+        # Rotation Gate: purely non-structural post-map capper.
+        #
+        # - NEVER changes candidate eligibility, mapping inputs, regime selection, or template selection.
+        # - ONLY produces diagnostics + optional caps used during minutes/world generation below.
+        if (
+            bool(self._gate_config.enabled)
+            and candidate_ids is not None
+            and (effective_ctx.minutes_prior is not None)
+            and len(candidate_ids) > 0
+        ):
+            prior = effective_ctx.minutes_prior or {}
+            p10 = effective_ctx.minutes_p10_prior
+            p90 = effective_ctx.minutes_p90_prior
+            pp = effective_ctx.play_prob_prior or {}
+            starters = set(int(v) for v in (effective_ctx.starter_candidates or []))
+
+            data: dict[str, list] = {
+                "game_id": [str(effective_ctx.game_id)] * len(candidate_ids),
+                "team_id": [int(effective_ctx.team_id)] * len(candidate_ids),
+                "player_id": [int(pid) for pid in candidate_ids],
+                "minutes_prior": [float(prior.get(int(pid), 0.0)) for pid in candidate_ids],
+                "play_prob": [float(pp.get(int(pid), 1.0)) for pid in candidate_ids],
+            }
+            if p10 is not None:
+                data["minutes_p10"] = [float(p10.get(int(pid), prior.get(int(pid), 0.0))) for pid in candidate_ids]
+            if p90 is not None:
+                data["minutes_p90"] = [float(p90.get(int(pid), prior.get(int(pid), 0.0))) for pid in candidate_ids]
+            df_priors = pd.DataFrame(data)
+
+            preds_df = self._gate_preds_by_team_game.get((int(effective_ctx.team_id), str(effective_ctx.game_id)))
+            if preds_df is None:
+                preds_df = pd.DataFrame(columns=["game_id", "team_id", "player_id", "p_ge5_pred", "p_ge15_pred"])
+
+            df_adj = apply_rotation_gate(
+                df_priors,
+                preds_df,
+                starters_set=starters,
+                cfg=self._gate_config,
+                seed=int(effective_ctx.rng_seed),
+            )
+
+            gate_tier_counts = (
+                df_adj["gate_tier"].fillna("unknown").value_counts(dropna=False).to_dict()
+                if "gate_tier" in df_adj.columns
+                else None
+            )
+            missing_mask = df_adj["gate_missing_pred"].fillna(False).astype(bool) if "gate_missing_pred" in df_adj.columns else None
+            gate_missing_preds_n = int(missing_mask.sum()) if missing_mask is not None else None
+            excluded_mask = df_adj["gate_excluded"].fillna(False).astype(bool) if "gate_excluded" in df_adj.columns else None
+            gate_excluded_n = int(excluded_mask.sum()) if excluded_mask is not None else None
+
+            gate_player_p_ge5 = (
+                {
+                    int(pid): float(v)
+                    for pid, v in zip(
+                        df_adj["player_id"].tolist(),
+                        pd.to_numeric(df_adj["p_ge5_pred"], errors="coerce").astype(np.float64).fillna(np.nan).tolist(),
+                    )
+                }
+                if "p_ge5_pred" in df_adj.columns
+                else None
+            )
+            gate_player_p_ge15 = (
+                {
+                    int(pid): float(v)
+                    for pid, v in zip(
+                        df_adj["player_id"].tolist(),
+                        pd.to_numeric(df_adj["p_ge15_pred"], errors="coerce").astype(np.float64).fillna(np.nan).tolist(),
+                    )
+                }
+                if "p_ge15_pred" in df_adj.columns
+                else None
+            )
+            gate_player_p_ge5_used = (
+                {
+                    int(pid): float(v)
+                    for pid, v in zip(
+                        df_adj["player_id"].tolist(),
+                        pd.to_numeric(df_adj["p_ge5_used"], errors="coerce").astype(np.float64).fillna(np.nan).tolist(),
+                    )
+                }
+                if "p_ge5_used" in df_adj.columns
+                else None
+            )
+            gate_player_p_ge15_used = (
+                {
+                    int(pid): float(v)
+                    for pid, v in zip(
+                        df_adj["player_id"].tolist(),
+                        pd.to_numeric(df_adj["p_ge15_used"], errors="coerce").astype(np.float64).fillna(np.nan).tolist(),
+                    )
+                }
+                if "p_ge15_used" in df_adj.columns
+                else None
+            )
+            gate_player_tier = (
+                {
+                    int(pid): str(v)
+                    for pid, v in zip(
+                        df_adj["player_id"].tolist(),
+                        df_adj["gate_tier"].fillna("unknown").astype("string").tolist(),
+                    )
+                }
+                if "gate_tier" in df_adj.columns
+                else None
+            )
+            gate_player_reason = (
+                {
+                    int(pid): str(v)
+                    for pid, v in zip(
+                        df_adj["player_id"].tolist(),
+                        df_adj["gate_reason"].fillna("").astype("string").tolist(),
+                    )
+                }
+                if "gate_reason" in df_adj.columns
+                else None
+            )
+            gate_player_missing_pred = (
+                {int(pid): bool(v) for pid, v in zip(df_adj["player_id"].tolist(), missing_mask.tolist())}
+                if ("player_id" in df_adj.columns and missing_mask is not None)
+                else None
+            )
+            gate_player_excluded = (
+                {int(pid): bool(v) for pid, v in zip(df_adj["player_id"].tolist(), excluded_mask.tolist())}
+                if ("player_id" in df_adj.columns and excluded_mask is not None)
+                else None
+            )
+            gate_player_minutes_cap = (
+                {
+                    int(pid): float(v)
+                    for pid, v in zip(
+                        df_adj["player_id"].tolist(),
+                        pd.to_numeric(df_adj["gate_minutes_cap"], errors="coerce").astype(np.float64).fillna(np.nan).tolist(),
+                    )
+                }
+                if "gate_minutes_cap" in df_adj.columns
+                else None
+            )
+            gate_player_play_prob_cap = (
+                {
+                    int(pid): float(v)
+                    for pid, v in zip(
+                        df_adj["player_id"].tolist(),
+                        pd.to_numeric(df_adj["gate_play_prob_cap"], errors="coerce").astype(np.float64).fillna(np.nan).tolist(),
+                    )
+                }
+                if "gate_play_prob_cap" in df_adj.columns
+                else None
+            )
+            gate_player_minutes_prior_adj = {
+                int(pid): float(v) for pid, v in zip(df_adj["player_id"].tolist(), df_adj["minutes_prior_adj"].tolist())
+            }
+            gate_player_play_prob_adj = {
+                int(pid): float(v) for pid, v in zip(df_adj["player_id"].tolist(), df_adj["play_prob_adj"].tolist())
+            }
+
+            # Caps are applied during minutes/world generation (never used for mapping/template selection).
+            if gate_player_minutes_cap is not None:
+                gate_minutes_cap_by_player = {
+                    int(pid): float(cap)
+                    for pid, cap in gate_player_minutes_cap.items()
+                    if cap is not None and np.isfinite(float(cap))
+                }
+
         if candidate_ids is not None:
             minutes_by_player: dict[int, np.ndarray] = {
                 int(pid): np.zeros(n_worlds, dtype=np.float64) for pid in candidate_ids
@@ -409,7 +615,12 @@ class TemplateRotationGenerator:
                     mapping = None
                     break
 
-                mapping_try = self._map_roles(template=tmpl, ctx=effective_ctx, rng=rng, candidate_ids=candidate_ids)
+                mapping_try = self._map_roles(
+                    template=tmpl,
+                    ctx=effective_ctx,
+                    rng=rng,
+                    candidate_ids=candidate_ids,
+                )
                 if mapping_try is not None:
                     chosen_template_key = key
                     mapping = mapping_try
@@ -420,15 +631,22 @@ class TemplateRotationGenerator:
                 fallback_to_prior += 1
                 # Fallback: allocate regulation minutes proportional to minutes_prior (if any), else zeros.
                 prior = effective_ctx.minutes_prior or {}
-                if candidate_ids is None or not candidate_ids:
+                if (candidate_ids is None) or (not candidate_ids):
                     continue
-                weights = np.array([max(float(prior.get(int(pid), 0.0)), 0.0) for pid in candidate_ids], dtype=float)
+                weights = np.array(
+                    [max(float(prior.get(int(pid), 0.0)), 0.0) for pid in candidate_ids],
+                    dtype=float,
+                )
                 if weights.sum() <= 0:
                     continue
                 weights = weights / weights.sum()
                 team_minutes = 240.0
                 for pid, frac in zip(candidate_ids, weights.tolist()):
                     minutes_by_player[int(pid)][w] = team_minutes * float(frac)
+                if gate_minutes_cap_by_player:
+                    for pid, cap in gate_minutes_cap_by_player.items():
+                        if int(pid) in minutes_by_player:
+                            minutes_by_player[int(pid)][w] = float(np.minimum(minutes_by_player[int(pid)][w], cap))
                 continue
 
             tmpl = self._templates[chosen_template_key]
@@ -449,7 +667,15 @@ class TemplateRotationGenerator:
                 for duration, lineup in zip(durations.tolist(), lineups.tolist()):
                     for template_pid in lineup:
                         pid = int(mapping[int(template_pid)])
-                        minutes_by_player[pid][w] += float(duration) / 60.0
+                        add = float(duration) / 60.0
+                        cap = gate_minutes_cap_by_player.get(int(pid), np.nan)
+                        if np.isfinite(cap):
+                            cur = float(minutes_by_player[pid][w])
+                            if cur >= float(cap):
+                                continue
+                            minutes_by_player[pid][w] = float(min(cur + add, float(cap)))
+                        else:
+                            minutes_by_player[pid][w] += add
 
         diagnostics = {
             "regime_label": regime_label,
@@ -463,6 +689,23 @@ class TemplateRotationGenerator:
             "rotation_prior_heuristics_applied_n": heuristics_applied_n,
             "rotation_prior_heuristics_applied_by_tier": heuristics_applied_by_tier,
             "rotation_prior_heuristics_stats": heuristics_stats,
+            "gate_enabled": bool(self._gate_config.enabled),
+            "gate_config": gate_config_as_dict(self._gate_config),
+            "gate_tier_counts": gate_tier_counts,
+            "gate_missing_preds_n": gate_missing_preds_n,
+            "gate_excluded_n": gate_excluded_n,
+            "gate_player_p_ge5_pred": gate_player_p_ge5,
+            "gate_player_p_ge15_pred": gate_player_p_ge15,
+            "gate_player_p_ge5_used": gate_player_p_ge5_used,
+            "gate_player_p_ge15_used": gate_player_p_ge15_used,
+            "gate_player_tier": gate_player_tier,
+            "gate_player_reason": gate_player_reason,
+            "gate_player_missing_pred": gate_player_missing_pred,
+            "gate_player_excluded": gate_player_excluded,
+            "gate_player_minutes_cap": gate_player_minutes_cap,
+            "gate_player_play_prob_cap": gate_player_play_prob_cap,
+            "gate_player_minutes_prior_adj": gate_player_minutes_prior_adj,
+            "gate_player_play_prob_adj": gate_player_play_prob_adj,
         }
 
         return RotationWorlds(minutes_by_player=minutes_by_player, diagnostics=diagnostics)
