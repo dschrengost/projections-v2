@@ -67,6 +67,16 @@ def _sort_candidates_by_prior(candidate_ids: list[int], prior: dict[int, float])
     return sorted(candidate_ids, key=lambda pid: (-float(prior.get(int(pid), 0.0)), int(pid)))
 
 
+def _summary_stats_1d(values: pd.Series) -> dict[str, float]:
+    s = pd.to_numeric(values, errors="coerce").astype(np.float64)
+    s = s.replace([np.inf, -np.inf], np.nan).dropna()
+    if s.empty:
+        return {"mean": float("nan"), "p10": float("nan"), "p50": float("nan"), "p90": float("nan")}
+    arr = s.to_numpy(dtype=np.float64)
+    q10, q50, q90 = np.quantile(arr, [0.1, 0.5, 0.9]).tolist()
+    return {"mean": float(arr.mean()), "p10": float(q10), "p50": float(q50), "p90": float(q90)}
+
+
 @dataclass(frozen=True)
 class _Template:
     team_id: int
@@ -290,6 +300,9 @@ class TemplateRotationGenerator:
 
         candidate_ids = self._candidate_ids(ctx)
         humility_tier_counts = None
+        heuristics_applied_n = None
+        heuristics_applied_by_tier = None
+        heuristics_stats = None
         if (
             bool(self._humility_config.enabled)
             and candidate_ids is not None
@@ -339,6 +352,22 @@ class TemplateRotationGenerator:
                 if "humility_tier" in df_adj.columns
                 else None
             )
+
+            if "rotation_prior_heuristics_applied" in df_adj.columns:
+                applied_mask = df_adj["rotation_prior_heuristics_applied"].fillna(False).astype(bool)
+                heuristics_applied_n = int(applied_mask.sum())
+                if "humility_tier" in df_adj.columns:
+                    tmp = df_adj.loc[applied_mask, ["humility_tier"]].copy()
+                    heuristics_applied_by_tier = (
+                        tmp["humility_tier"].fillna("unknown").value_counts(dropna=False).to_dict()
+                        if not tmp.empty
+                        else None
+                    )
+            if ("p_ge5_prior_heur" in df_adj.columns) and ("p_eq0_prior_heur" in df_adj.columns):
+                heuristics_stats = {
+                    "p_ge5_prior_heur": _summary_stats_1d(df_adj["p_ge5_prior_heur"]),
+                    "p_eq0_prior_heur": _summary_stats_1d(df_adj["p_eq0_prior_heur"]),
+                }
 
             effective_ctx = replace(
                 effective_ctx,
@@ -431,6 +460,9 @@ class TemplateRotationGenerator:
             "humility_enabled": bool(self._humility_config.enabled),
             "humility_config": humility_config_as_dict(self._humility_config),
             "humility_tier_counts": humility_tier_counts,
+            "rotation_prior_heuristics_applied_n": heuristics_applied_n,
+            "rotation_prior_heuristics_applied_by_tier": heuristics_applied_by_tier,
+            "rotation_prior_heuristics_stats": heuristics_stats,
         }
 
         return RotationWorlds(minutes_by_player=minutes_by_player, diagnostics=diagnostics)

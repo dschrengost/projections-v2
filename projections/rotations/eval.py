@@ -446,6 +446,10 @@ def run_rotation_generator_eval(
         template_source = diag.get("template_source", None)
         fallback_to_prior_worlds = diag.get("fallback_to_prior_worlds", None)
         template_resamples_total = diag.get("template_resamples_total", None)
+        humility_tier_counts = diag.get("humility_tier_counts", None)
+        heur_applied_n = diag.get("rotation_prior_heuristics_applied_n", None)
+        heur_applied_by_tier = diag.get("rotation_prior_heuristics_applied_by_tier", None)
+        heur_stats = diag.get("rotation_prior_heuristics_stats", None)
 
         # Build per-player rows (stable order).
         g_labels_idx = g_labels.set_index("player_id", drop=False)
@@ -521,6 +525,10 @@ def run_rotation_generator_eval(
                 "template_source": template_source,
                 "template_resamples_total": template_resamples_total,
                 "fallback_to_prior_worlds": fallback_to_prior_worlds,
+                "humility_tier_counts": humility_tier_counts,
+                "rotation_prior_heuristics_applied_n": heur_applied_n,
+                "rotation_prior_heuristics_applied_by_tier": heur_applied_by_tier,
+                "rotation_prior_heuristics_stats": heur_stats,
                 "n_worlds": int(n_worlds),
                 "seed": int(seed),
                 "generator_name": generator_name,
@@ -600,6 +608,32 @@ def run_rotation_generator_eval(
         if not team_eval.empty and "template_source" in team_eval.columns
         else {}
     )
+    humility_tier_counts_total: dict[str, int] = {}
+    heur_applied_by_tier_total: dict[str, int] = {}
+    heur_applied_players_total = 0
+    heur_applied_team_games = 0
+    if not team_eval.empty and "humility_tier_counts" in team_eval.columns:
+        for v in team_eval["humility_tier_counts"].dropna().tolist():
+            if not isinstance(v, dict):
+                continue
+            for k, cnt in v.items():
+                try:
+                    humility_tier_counts_total[str(k)] = int(humility_tier_counts_total.get(str(k), 0)) + int(cnt)
+                except Exception:
+                    continue
+    if not team_eval.empty and "rotation_prior_heuristics_applied_by_tier" in team_eval.columns:
+        for v in team_eval["rotation_prior_heuristics_applied_by_tier"].dropna().tolist():
+            if not isinstance(v, dict):
+                continue
+            for k, cnt in v.items():
+                try:
+                    heur_applied_by_tier_total[str(k)] = int(heur_applied_by_tier_total.get(str(k), 0)) + int(cnt)
+                except Exception:
+                    continue
+    if not team_eval.empty and "rotation_prior_heuristics_applied_n" in team_eval.columns:
+        nums = pd.to_numeric(team_eval["rotation_prior_heuristics_applied_n"], errors="coerce").fillna(0).astype(int)
+        heur_applied_players_total = int(nums.sum())
+        heur_applied_team_games = int((nums > 0).sum())
     mapping_success_avg = (
         float(pd.to_numeric(team_eval["mapping_success_rate"], errors="coerce").mean())
         if not team_eval.empty and "mapping_success_rate" in team_eval.columns
@@ -641,6 +675,10 @@ def run_rotation_generator_eval(
 
         - humility_enabled: {bool((humility_config or HumilityConfig()).enabled)}
         - humility_config: {humility_config_as_dict(humility_config or HumilityConfig())}
+        - heuristics_applied_team_games: {heur_applied_team_games}
+        - heuristics_applied_players_total: {heur_applied_players_total}
+        - heuristics_applied_by_tier_total: {heur_applied_by_tier_total}
+        - humility_tier_counts_total: {humility_tier_counts_total}
 
         ## Headline metrics
 
