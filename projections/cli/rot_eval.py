@@ -55,7 +55,7 @@ def main(
     candidate_pool: str = typer.Option(
         "truth",
         "--candidate-pool",
-        help="Candidate pool mode: truth|prior_topn|prior_threshold|roster (default: truth).",
+        help="Candidate pool mode: truth|prior_topn|prior_threshold|predictor_threshold|roster (default: truth).",
     ),
     candidate_top_n: int = typer.Option(
         12,
@@ -76,6 +76,26 @@ def main(
         8,
         "--candidate-min-candidates",
         help="Ensure each team-game candidate pool has at least this many players (deterministic backfill).",
+    ),
+    pool_max_size: int = typer.Option(
+        11,
+        "--pool-max-size",
+        help="For predictor_threshold: maximum candidate pool size per team-game.",
+    ),
+    t_ge15: float = typer.Option(
+        0.35,
+        "--t-ge15",
+        help="For predictor_threshold: include players with p_ge15_pred >= this threshold.",
+    ),
+    t_ge5: float = typer.Option(
+        0.35,
+        "--t-ge5",
+        help="For predictor_threshold: include players with p_ge5_pred >= this threshold (only when p_ge15_pred is below t_ge15).",
+    ),
+    always_include_top_n: int = typer.Option(
+        8,
+        "--always-include-top-n",
+        help="For predictor_threshold: always include top N by minutes_prior (ties by p_ge15 then p_ge5).",
     ),
     humility: bool = typer.Option(
         True,
@@ -138,6 +158,17 @@ def main(
         gate_cfg = load_gate_config_json(Path(gate_config), base=gate_cfg)
     gate_cfg = replace(gate_cfg, enabled=bool(gate))
 
+    pool_mode = str(candidate_pool).strip().lower()
+    if pool_mode == "predictor_threshold":
+        if minutes_prior_parquet_path is None:
+            raise typer.BadParameter(
+                "--minutes-prior-parquet is required when --candidate-pool predictor_threshold"
+            )
+        if rotation_predictor_bundle is None:
+            raise typer.BadParameter(
+                "--rotation-predictor-bundle is required when --candidate-pool predictor_threshold"
+            )
+
     result = run_rotation_generator_eval(
         rot_bundle_path=rot_bundle,
         run_id=run_id,
@@ -155,6 +186,10 @@ def main(
         candidate_min_minutes_prior=float(candidate_min_minutes_prior),
         candidate_min_play_prob=float(candidate_min_play_prob),
         candidate_min_candidates=int(candidate_min_candidates),
+        pool_max_size=int(pool_max_size),
+        pool_t_ge15=float(t_ge15),
+        pool_t_ge5=float(t_ge5),
+        pool_always_include_top_n=int(always_include_top_n),
         humility_config=cfg,
         gate_config=gate_cfg,
         rotation_predictor_bundle=Path(rotation_predictor_bundle) if rotation_predictor_bundle is not None else None,

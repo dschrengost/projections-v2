@@ -69,6 +69,49 @@ uv run python -m projections.cli.build_minutes_live --date 2025-01-01
 uv run python -m projections.cli.finalize_projections --date 2025-01-01
 ```
 
+### Rotation Eval (rot_eval)
+
+```bash
+# Baseline: prior_topn candidate pool, no gate
+uv run python -m projections.cli.rot_eval \
+  --rot-bundle $ROT_BUNDLE \
+  --run-id prior_topn_nogate \
+  --minutes-prior-parquet $PRIORS \
+  --candidate-pool prior_topn \
+  --candidate-top-n 11 \
+  --no-gate
+
+# Candidate pool: predictor_threshold, no gate
+uv run python -m projections.cli.rot_eval \
+  --rot-bundle $ROT_BUNDLE \
+  --run-id predictor_pool_nogate \
+  --minutes-prior-parquet $PRIORS \
+  --rotation-predictor-bundle $PRED_BUNDLE \
+  --gate-feature-source cached_all \
+  --candidate-pool predictor_threshold \
+  --pool-max-size 11 \
+  --t-ge15 0.35 \
+  --t-ge5 0.35 \
+  --always-include-top-n 8 \
+  --no-gate \
+  --baseline-out-dir $BASELINE_OUT_DIR
+
+# Candidate pool: predictor_threshold, with gate
+uv run python -m projections.cli.rot_eval \
+  --rot-bundle $ROT_BUNDLE \
+  --run-id predictor_pool_gate \
+  --minutes-prior-parquet $PRIORS \
+  --rotation-predictor-bundle $PRED_BUNDLE \
+  --gate-feature-source cached_all \
+  --candidate-pool predictor_threshold \
+  --pool-max-size 11 \
+  --t-ge15 0.35 \
+  --t-ge5 0.35 \
+  --always-include-top-n 8 \
+  --gate \
+  --baseline-out-dir $BASELINE_OUT_DIR
+```
+
 ### Production Pipeline (Prefect)
 
 **Prefect is the single source of truth** for production orchestration.

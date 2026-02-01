@@ -18,7 +18,9 @@ from projections.rotations.eval_manifest import (
     write_rot_eval_input_hashes,
 )
 from projections.rotations.candidate_pool import (
+    build_candidate_pool_predictor_threshold,
     build_candidate_pool_prior,
+    build_candidate_pool_prior_topn_team_game,
     build_candidate_pool_roster,
     build_candidate_pool_truth,
 )
@@ -40,7 +42,7 @@ from projections.rotations.player_map import build_person_id_to_internal_id_map
 
 
 SampleMode = Literal["random", "first"]
-CandidatePoolMode = Literal["truth", "prior_topn", "prior_threshold", "roster"]
+CandidatePoolMode = Literal["truth", "prior_topn", "prior_threshold", "predictor_threshold", "roster"]
 REQUIRED_MINUTES_PRIOR_COLS: tuple[str, ...] = ("game_id", "team_id", "player_id", "minutes_prior", "play_prob")
 OPTIONAL_MINUTES_PRIOR_COLS: tuple[str, ...] = ("minutes_p10", "minutes_p90")
 
@@ -204,6 +206,10 @@ def run_rotation_generator_eval(
     candidate_min_minutes_prior: float = 0.0,
     candidate_min_play_prob: float = 0.8,
     candidate_min_candidates: int = 8,
+    pool_max_size: int = 11,
+    pool_t_ge15: float = 0.35,
+    pool_t_ge5: float = 0.35,
+    pool_always_include_top_n: int = 8,
     humility_config: HumilityConfig | None = None,
     gate_config: GateConfig | None = None,
     rotation_predictor_bundle: Path | None = None,
@@ -228,9 +234,10 @@ def run_rotation_generator_eval(
         raise ValueError(f"Unknown sample_mode: {sample_mode}")
 
     candidate_pool = str(candidate_pool).strip().lower()
-    if candidate_pool not in {"truth", "prior_topn", "prior_threshold", "roster"}:
+    if candidate_pool not in {"truth", "prior_topn", "prior_threshold", "predictor_threshold", "roster"}:
         raise ValueError(
-            f"Unknown candidate_pool: {candidate_pool} (expected truth|prior_topn|prior_threshold|roster)"
+            "Unknown candidate_pool: "
+            f"{candidate_pool} (expected truth|prior_topn|prior_threshold|predictor_threshold|roster)"
         )
 
     gate_cfg = gate_config or GateConfig()
@@ -420,15 +427,35 @@ def run_rotation_generator_eval(
     labels_gb = labels.groupby(["game_id", "team_id"], sort=False)
     events_gb = events.groupby(["game_id", "team_id"], sort=False)
 
-    if candidate_pool in {"prior_topn", "prior_threshold"} and priors is None:
-        raise ValueError("--minutes-prior-parquet is required for candidate_pool prior_topn/prior_threshold")
+    if candidate_pool in {"prior_topn", "prior_threshold", "predictor_threshold"} and priors is None:
+        raise ValueError(
+            "--minutes-prior-parquet is required for candidate_pool prior_topn/prior_threshold/predictor_threshold"
+        )
 
-    candidate_pool_params: dict[str, Any] = {
-        "candidate_top_n": int(candidate_top_n),
-        "candidate_min_minutes_prior": float(candidate_min_minutes_prior),
-        "candidate_min_play_prob": float(candidate_min_play_prob),
-        "candidate_min_candidates": int(candidate_min_candidates),
-    }
+    if candidate_pool == "predictor_threshold":
+        if rotation_predictor_bundle is None:
+            raise ValueError("--rotation-predictor-bundle is required for candidate_pool predictor_threshold")
+        if str(gate_feature_source).strip().lower() == "none":
+            raise ValueError("--gate-feature-source cannot be 'none' for candidate_pool predictor_threshold")
+
+    candidate_pool_params: dict[str, Any] = {}
+    if candidate_pool in {"prior_topn", "prior_threshold"}:
+        candidate_pool_params = {
+            "candidate_top_n": int(candidate_top_n),
+            "candidate_min_minutes_prior": float(candidate_min_minutes_prior),
+            "candidate_min_play_prob": float(candidate_min_play_prob),
+            "candidate_min_candidates": int(candidate_min_candidates),
+        }
+    elif candidate_pool == "predictor_threshold":
+        candidate_pool_params = {
+            "pool_max_size": int(pool_max_size),
+            "t_ge15": float(pool_t_ge15),
+            "t_ge5": float(pool_t_ge5),
+            "always_include_starters": True,
+            "always_include_top_n": int(pool_always_include_top_n),
+            "rank_key": ["p_ge15_desc", "p_ge5_desc", "minutes_prior_desc", "player_id_asc"],
+            "fail_open_fallback": "prior_topn_by_minutes_prior",
+        }
 
     candidate_pool_by_team_game: dict[tuple[str, int], list[int]] = {}
     if candidate_pool in {"prior_topn", "prior_threshold"} and priors is not None and not priors.empty:
@@ -501,6 +528,78 @@ def run_rotation_generator_eval(
         if gate_preds is not None and not gate_preds.empty and "pred_source" in gate_preds.columns:
             gate_pred_source_counts = gate_preds["pred_source"].fillna("unknown").value_counts(dropna=False).to_dict()
 
+    pool_preds = None
+    pool_bundle_dir: str | None = None
+    pool_person_id_to_internal_id: dict[int, int] | None = None
+    pool_preds_team_games: set[tuple[str, int]] = set()
+    pool_preds_gb = None
+    missing_pred_team_games = 0
+    missing_pred_player_rows = 0
+    if candidate_pool == "predictor_threshold":
+        # Reuse gate-loaded predictions when available; otherwise load once for pool selection.
+        if gate_preds is not None and not gate_preds.empty and gate_bundle_dir is not None:
+            pool_preds = gate_preds.copy()
+            pool_bundle_dir = str(gate_bundle_dir)
+            pool_person_id_to_internal_id = gate_person_id_to_internal_id
+        else:
+            bundle = load_rotation_predictor_bundle(Path(rotation_predictor_bundle))
+            pool_bundle_dir = str(bundle.bundle_dir)
+
+            game_allow = {canonicalize_game_id(v) for v in selected["game_id"].astype("string").tolist() if canonicalize_game_id(v)}
+            team_allow = {int(v) for v in selected["team_id"].dropna().tolist()}
+
+            years_raw = sorted({y for y in (season_start_year_from_game_id(g) for g in game_allow) if y is not None})
+            years = [int(y) for y in years_raw if 2010 <= int(y) <= 2035]
+
+            pool_person_id_to_internal_id = {}
+            for y in years:
+                diag_dir = out_dir / "_pool_id_map" / f"season_start_year={int(y)}"
+                res = build_person_id_to_internal_id_map(
+                    season_start_year=int(y),
+                    diagnostics_dir=diag_dir,
+                )
+                for pid, internal in res.person_id_to_internal_id.items():
+                    if (
+                        pid in pool_person_id_to_internal_id
+                        and int(pool_person_id_to_internal_id[pid]) != int(internal)
+                    ):
+                        raise ValueError(
+                            f"personId mapping collision across seasons: nba_person_id={pid} -> {pool_person_id_to_internal_id[pid]} vs {internal}"
+                        )
+                    pool_person_id_to_internal_id[int(pid)] = int(internal)
+
+            if gate_feature_source == "cached_preds":
+                pool_preds = load_cached_predictions(
+                    bundle,
+                    person_id_to_internal_id=pool_person_id_to_internal_id,
+                    game_id_allow=game_allow,
+                    team_id_allow=team_allow,
+                )
+            elif gate_feature_source == "cached_all":
+                pool_preds = load_cached_all_predictions(
+                    bundle,
+                    person_id_to_internal_id=pool_person_id_to_internal_id,
+                    game_id_allow=game_allow,
+                    team_id_allow=team_allow,
+                )
+            elif gate_feature_source == "cached_train":
+                pool_preds = load_cached_train_predictions(
+                    bundle,
+                    person_id_to_internal_id=pool_person_id_to_internal_id,
+                    game_id_allow=game_allow,
+                    team_id_allow=team_allow,
+                    max_rows=gate_max_train_rows,
+                )
+
+        if pool_preds is not None and not pool_preds.empty:
+            pool_preds_team_games = set(
+                zip(
+                    pool_preds["game_id"].astype("string").tolist(),
+                    pool_preds["team_id"].astype(int).tolist(),
+                )
+            )
+            pool_preds_gb = pool_preds.groupby(["game_id", "team_id"], sort=False)
+
     gen = TemplateRotationGenerator(
         rot_bundle=rot_bundle_path,
         humility_config=humility_config,
@@ -554,6 +653,47 @@ def run_rotation_generator_eval(
             candidate_ids = _unique_ints_sorted(cand_df["player_id"].tolist())
         elif candidate_pool in {"prior_topn", "prior_threshold"}:
             candidate_ids = candidate_pool_by_team_game.get((game_id, team_id), [])
+        elif candidate_pool == "predictor_threshold":
+            # Truth starters are allowed here (rot_eval already uses truth starters for starter selection).
+            starters = []
+            if "starter_actual" in g_labels.columns:
+                starter_mask = _coerce_bool(g_labels["starter_actual"].fillna(False))
+                starters = g_labels.loc[starter_mask, "player_id"].astype(int).tolist()
+
+            g_prior_use = g_prior if g_prior is not None else pd.DataFrame()
+            prior_sorted = pd.DataFrame()
+            if g_prior_use is not None and not g_prior_use.empty:
+                prior_sorted = g_prior_use.sort_values(["minutes_prior", "player_id"], ascending=[False, True], kind="mergesort")
+
+            team_missing_pred_team_game = (game_id, team_id) not in pool_preds_team_games
+            team_missing_pred_rows = 0
+            if team_missing_pred_team_game:
+                missing_pred_team_games += 1
+                if not prior_sorted.empty:
+                    team_missing_pred_rows = int(len(prior_sorted))
+                    missing_pred_player_rows += int(team_missing_pred_rows)
+                # Fail open to prior_topn-by-minutes (deterministic).
+                cand_df = build_candidate_pool_prior_topn_team_game(g_prior_use, top_n=int(pool_max_size))
+                candidate_ids = _unique_ints_sorted(cand_df["player_id"].tolist()) if not cand_df.empty else []
+            else:
+                g_pred = pool_preds_gb.get_group((game_id, team_id)).copy() if pool_preds_gb is not None else pd.DataFrame()
+                if g_prior_use is not None and not g_prior_use.empty and not g_pred.empty:
+                    prior_ids = set(int(x) for x in pd.to_numeric(g_prior_use["player_id"], errors="coerce").dropna().astype(int).tolist())
+                    pred_ids = set(int(x) for x in pd.to_numeric(g_pred["player_id"], errors="coerce").dropna().astype(int).tolist())
+                    team_missing_pred_rows = int(len(prior_ids - pred_ids))
+                    missing_pred_player_rows += int(team_missing_pred_rows)
+
+                cand_df = build_candidate_pool_predictor_threshold(
+                    g_prior_use,
+                    g_pred,
+                    starters=starters,
+                    pool_max_size=int(pool_max_size),
+                    t_ge15=float(pool_t_ge15),
+                    t_ge5=float(pool_t_ge5),
+                    always_include_starters=True,
+                    always_include_top_n=int(pool_always_include_top_n),
+                )
+                candidate_ids = _unique_ints_sorted(cand_df["player_id"].tolist()) if not cand_df.empty else []
         else:
             season_start_year = season_start_year_from_game_id(game_id) or 0
             cand_df = build_candidate_pool_roster(
@@ -662,6 +802,8 @@ def run_rotation_generator_eval(
                 "precision_played_ge1": precision_played_ge1,
                 "chaos_index": int(chaos_index),
                 "missing_prior_players": int(missing_prior_players),
+                "missing_pred_team_game": bool(team_missing_pred_team_game) if candidate_pool == "predictor_threshold" else False,
+                "missing_pred_player_rows": int(team_missing_pred_rows) if candidate_pool == "predictor_threshold" else 0,
             }
         )
         for pid in candidate_ids:
@@ -873,6 +1015,8 @@ def run_rotation_generator_eval(
         "team_games": int(len(candidate_pool_team_games_df)),
         "pool_size_stats": {},
         "overlap_stats": {},
+        "missing_pred_team_games": int(missing_pred_team_games),
+        "missing_pred_player_rows": int(missing_pred_player_rows),
     }
     if not candidate_pool_team_games_df.empty:
         sizes = pd.to_numeric(candidate_pool_team_games_df["pool_size"], errors="coerce").dropna().astype(float)
@@ -882,6 +1026,7 @@ def run_rotation_generator_eval(
         ).dropna().astype(float)
         candidate_pool_summary["pool_size_stats"] = {
             "mean": float(sizes.mean()) if len(sizes) else float("nan"),
+            "p10": float(sizes.quantile(0.1)) if len(sizes) else float("nan"),
             "p50": float(sizes.quantile(0.5)) if len(sizes) else float("nan"),
             "p90": float(sizes.quantile(0.9)) if len(sizes) else float("nan"),
         }
@@ -911,7 +1056,7 @@ def run_rotation_generator_eval(
         humility_config=humility_config_as_dict(humility_config or HumilityConfig()),
         gate_enabled=bool(gate_cfg.enabled),
         gate_config=gate_config_as_dict(gate_cfg),
-        rotation_predictor_bundle=str(gate_bundle_dir) if gate_bundle_dir is not None else (str(rotation_predictor_bundle) if rotation_predictor_bundle is not None else None),
+        rotation_predictor_bundle=str(gate_bundle_dir) if gate_bundle_dir is not None else (pool_bundle_dir if pool_bundle_dir is not None else (str(rotation_predictor_bundle) if rotation_predictor_bundle is not None else None)),
         gate_feature_source=str(gate_feature_source),
         gate_max_train_rows=int(gate_max_train_rows) if gate_max_train_rows is not None else None,
         input_hashes_path=input_hashes_path,
@@ -1143,11 +1288,11 @@ def run_rotation_generator_eval(
 
     def _pool_size_stats(team_games_df: pd.DataFrame) -> dict[str, float]:
         if team_games_df.empty or "pool_size" not in team_games_df.columns:
-            return {"mean": float("nan"), "p50": float("nan"), "p90": float("nan")}
+            return {"mean": float("nan"), "p10": float("nan"), "p50": float("nan"), "p90": float("nan")}
         s = pd.to_numeric(team_games_df["pool_size"], errors="coerce").dropna().astype(float)
         if s.empty:
-            return {"mean": float("nan"), "p50": float("nan"), "p90": float("nan")}
-        return {"mean": float(s.mean()), "p50": float(s.quantile(0.5)), "p90": float(s.quantile(0.9))}
+            return {"mean": float("nan"), "p10": float("nan"), "p50": float("nan"), "p90": float("nan")}
+        return {"mean": float(s.mean()), "p10": float(s.quantile(0.1)), "p50": float(s.quantile(0.5)), "p90": float(s.quantile(0.9))}
 
     def _overlap_stats(team_games_df: pd.DataFrame) -> dict[str, float]:
         if team_games_df.empty:
@@ -1235,7 +1380,12 @@ def run_rotation_generator_eval(
         lines.append("")
         lines.append(f"- pool_mode: {pool_mode}")
         lines.append(f"- gate_enabled: {bool(gate_enabled_flag)}")
-        lines.append(f"- pool_size mean/p50/p90: {ps['mean']:.2f} / {ps['p50']:.0f} / {ps['p90']:.0f}")
+        lines.append(f"- pool_size mean/p10/p50/p90: {ps['mean']:.2f} / {ps['p10']:.0f} / {ps['p50']:.0f} / {ps['p90']:.0f}")
+        if "missing_pred_team_game" in team_games_df.columns:
+            mp_tg = int(_coerce_bool(team_games_df["missing_pred_team_game"]).sum())
+            mp_rows = int(pd.to_numeric(team_games_df.get("missing_pred_player_rows"), errors="coerce").fillna(0).sum())
+            if mp_tg or mp_rows:
+                lines.append(f"- missing predictor coverage: team_games={mp_tg} player_rows={mp_rows} (fail-open to prior_topn)")
         lines.append(
             f"- overlap (post-hoc): recall_played_ge1_mean={ov['recall_played_ge1_mean']:.3f} precision_mean={ov['precision_mean']:.3f}"
         )
