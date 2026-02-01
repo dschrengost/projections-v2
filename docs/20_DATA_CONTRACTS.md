@@ -61,6 +61,24 @@ artifacts/sim_v2/worlds_fpts_v2/game_date=YYYY-MM-DD/
 - **Conditional-on-playing** (historical default): `dk_fpts_*`, `minutes_sim_*` are computed over only worlds where the player is active.
 - **Unconditional (DNP=0)**: `*_uncond` variants (e.g., `dk_fpts_mean_uncond`, `minutes_sim_p50_uncond`) include inactive/DNP worlds as 0 and should be preferred for decision metrics.
 
+### Rotation Priors (Minutes Quantile Priors)
+
+Rotation generation and `rot_eval_v1` can consume a “minutes prior” parquet with (at minimum):
+
+- `game_id` (string)
+- `team_id` (int)
+- `player_id` (int)
+- `minutes_prior` (float; typically p50-ish)
+- `play_prob` (float in [0,1])
+- Optional quantiles: `minutes_p10`, `minutes_p50`, `minutes_p90`
+
+Important notes:
+
+- `play_prob` in current internal priors is a placeholder (often constant `1.0`) and must not be treated as meaningful availability.
+- In-memory only (not required on disk): rotation prior heuristics may add optional columns:
+  - `p_ge5_prior_heur`: heuristic `P(minutes >= 5)` derived from `minutes_prior` + quantiles
+  - `p_eq0_prior_heur`: heuristic `P(minutes == 0)` / DNP-ish derived from `minutes_prior` + quantiles
+
 ## Schema Evolution
 
 When modifying schemas:

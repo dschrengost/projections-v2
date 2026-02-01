@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from projections.rotations.rotation_prior_heuristics import derive_rotation_priors
+
 
 @dataclass(frozen=True)
 class HumilityConfig:
@@ -21,6 +23,11 @@ class HumilityConfig:
     top_n_lock: int = 8
     protect_starters: bool = True
     protect_top_n: bool = True
+    use_rotation_prior_heuristics: bool = True
+    cap_with_p_ge5_prior_heur: bool = True
+    floor_with_p_eq0_prior_heur: bool = True
+    min_cap_p_ge5: float = 0.05
+    max_floor_p_eq0: float = 0.85
     seed: int = 0
 
 
@@ -129,6 +136,9 @@ def apply_prior_humility(df_priors: pd.DataFrame, cfg: HumilityConfig) -> pd.Dat
 
     Adds (new, additive) columns:
     - minutes_prior_adj, minutes_p10_adj, minutes_p90_adj, play_prob_adj
+    - p_played_ge_5_pred_adj, p_minutes_eq0_pred_adj
+    - p_ge5_prior_heur, p_eq0_prior_heur (optional; derived if enabled)
+    - rotation_prior_heuristics_applied (optional; bool)
     - humility_tier in {starter, top_n, core, bench, fringe}
     - humility_reason (short string codes; '|' delimited)
     """
@@ -156,7 +166,14 @@ def apply_prior_humility(df_priors: pd.DataFrame, cfg: HumilityConfig) -> pd.Dat
     minutes_p10 = minutes_p10.fillna(minutes_prior).astype(np.float64).clip(lower=0.0)
     minutes_p90 = minutes_p90.fillna(minutes_prior).astype(np.float64).clip(lower=0.0)
 
+    # NOTE: `play_prob` in minutes priors is currently a placeholder (often constant 1.0). Keep it
+    # for contract compatibility, but avoid treating it as meaningful availability.
     play_prob = _as_float_series(df, "play_prob", default=1.0).clip(0.0, 1.0)
+
+    # Optional rotation-prior heuristics derived from quantiles/minutes_prior. These are used only
+    # for suppression/flooring, never for promotion.
+    if bool(cfg.use_rotation_prior_heuristics):
+        df = derive_rotation_priors(df)
 
     n = len(df)
     tier = np.full(n, "core", dtype=object)
@@ -204,13 +221,42 @@ def apply_prior_humility(df_priors: pd.DataFrame, cfg: HumilityConfig) -> pd.Dat
     p90_adj = np.zeros(n, dtype=np.float64)
     play_prob_adj = play_prob.to_numpy(dtype=np.float64).copy()
 
+    # Optional per-player probability priors (some pipelines provide these directly).
+    p_ge5_pred = _as_float_series(df, "p_played_ge_5_pred", default=np.nan).clip(0.0, 1.0)
+    p0_pred = _as_float_series(df, "p_minutes_eq0_pred", default=np.nan).clip(0.0, 1.0)
+
+    # Fill missing probability priors with deterministic proxies.
+    # - p_ge5: implied from (p10,p90) if quantiles exist else from minutes_prior thresholding.
+    # - p0: default to 1 - play_prob.
+    p_ge5_pred_adj = np.zeros(n, dtype=np.float64)
+    p0_pred_adj = np.zeros(n, dtype=np.float64)
+    heur_applied = np.zeros(n, dtype=bool)
+
     p10_arr = minutes_p10.to_numpy(dtype=np.float64)
     p50_base_arr = minutes_p50.to_numpy(dtype=np.float64)
     p90_arr = minutes_p90.to_numpy(dtype=np.float64)
+    m_arr = minutes_prior.to_numpy(dtype=np.float64)
+
+    p_ge5_heur_arr = _as_float_series(df, "p_ge5_prior_heur", default=np.nan).to_numpy(dtype=np.float64)
+    p0_heur_arr = _as_float_series(df, "p_eq0_prior_heur", default=np.nan).to_numpy(dtype=np.float64)
 
     for i in range(n):
         p10_i, p50_i, p90_i = _ensure_quantile_order(p10_arr[i], p50_base_arr[i], p90_arr[i])
         t = str(tier[i])
+
+        # Baseline probability priors (filled if missing).
+        base_p_ge5 = float(p_ge5_pred.iloc[i]) if np.isfinite(float(p_ge5_pred.iloc[i])) else float("nan")
+        if not np.isfinite(base_p_ge5):
+            if has_minutes_p10_p90:
+                base_p_ge5 = _implied_p_ge5_from_p10_p90(p10=p10_i, p50=p50_i, p90=p90_i)
+            else:
+                base_p_ge5 = 0.80 if float(m_arr[i]) >= 10.0 else (0.25 if float(m_arr[i]) < 5.0 else 0.65)
+        base_p0 = float(p0_pred.iloc[i]) if np.isfinite(float(p0_pred.iloc[i])) else float("nan")
+        if not np.isfinite(base_p0):
+            base_p0 = float(1.0 - float(np.clip(play_prob_adj[i], 0.0, 1.0)))
+
+        p_ge5_pred_adj[i] = float(np.clip(base_p_ge5, 0.0, 1.0))
+        p0_pred_adj[i] = float(np.clip(base_p0, 0.0, 1.0))
 
         if not bool(cfg.enabled):
             p10_adj[i], p50_adj[i], p90_adj[i] = p10_i, p50_i, p90_i
@@ -237,15 +283,38 @@ def apply_prior_humility(df_priors: pd.DataFrame, cfg: HumilityConfig) -> pd.Dat
         scale_upper = float(np.clip(scale_upper, 0.0, 1.0))
 
         scale = scale_upper
+        cap_effective = cap
         if has_minutes_p10_p90:
-            scale = _max_scale_for_p_ge5_cap(
+            cap_base = cap
+            if bool(cfg.use_rotation_prior_heuristics) and bool(cfg.cap_with_p_ge5_prior_heur):
+                heur_cap = float(p_ge5_heur_arr[i])
+                if np.isfinite(heur_cap):
+                    cap_effective = float(min(cap_effective, heur_cap))
+                    cap_effective = float(max(float(cfg.min_cap_p_ge5), cap_effective))
+
+            scale_base = _max_scale_for_p_ge5_cap(
                 p10=p10_i,
                 p50=p50_i,
                 p90=p90_i,
-                cap=cap,
+                cap=cap_base,
                 scale_upper=scale_upper,
                 enabled=True,
             )
+            scale = scale_base
+            if cap_effective < cap_base - 1e-12:
+                scale_heur = _max_scale_for_p_ge5_cap(
+                    p10=p10_i,
+                    p50=p50_i,
+                    p90=p90_i,
+                    cap=cap_effective,
+                    scale_upper=scale_upper,
+                    enabled=True,
+                )
+                if scale_heur < scale_base - 1e-9:
+                    scale = float(scale_heur)
+                    heur_applied[i] = True
+                    reason_parts[i].append("cap_ge5_heur")
+
             if scale < scale_upper - 1e-9:
                 reason_parts[i].append("cap_ge5")
 
@@ -254,6 +323,18 @@ def apply_prior_humility(df_priors: pd.DataFrame, cfg: HumilityConfig) -> pd.Dat
 
         p10_j, p50_j, p90_j = _ensure_quantile_order(scale * p10_i, scale * p50_i, scale * p90_i)
         p10_adj[i], p50_adj[i], p90_adj[i] = p10_j, p50_j, p90_j
+
+        # Cap p_played_ge_5_pred_adj by tier cap and (optionally) heuristic cap (suppression only).
+        p_ge5_before = float(p_ge5_pred_adj[i])
+        if p_ge5_before > cap_effective + 1e-12:
+            p_ge5_pred_adj[i] = float(cap_effective)
+            reason_parts[i].append("cap_p_ge5_pred")
+            if (
+                bool(cfg.use_rotation_prior_heuristics)
+                and bool(cfg.cap_with_p_ge5_prior_heur)
+                and float(cap_effective) < float(cap) - 1e-12
+            ):
+                heur_applied[i] = True
 
         if t == "fringe":
             pp = float(play_prob_adj[i])
@@ -266,12 +347,35 @@ def apply_prior_humility(df_priors: pd.DataFrame, cfg: HumilityConfig) -> pd.Dat
                 if pp_new <= (1.0 - float(cfg.min_p_eq0_fringe)) + 1e-12:
                     reason_parts[i].append("min_p_eq0")
 
+        # Floor p_minutes_eq0_pred_adj (suppression only). This can tighten the implicit play_prob.
+        floor_p0 = float(cfg.min_p_eq0_fringe) if t == "fringe" else 0.0
+        if bool(cfg.use_rotation_prior_heuristics) and bool(cfg.floor_with_p_eq0_prior_heur):
+            heur_floor = float(p0_heur_arr[i])
+            if np.isfinite(heur_floor):
+                floor_p0 = float(max(floor_p0, min(float(cfg.max_floor_p_eq0), heur_floor)))
+        if p0_pred_adj[i] < floor_p0 - 1e-12:
+            p0_pred_adj[i] = float(floor_p0)
+            reason_parts[i].append("floor_p0")
+            if bool(cfg.use_rotation_prior_heuristics) and bool(cfg.floor_with_p_eq0_prior_heur):
+                heur_applied[i] = True
+                reason_parts[i].append("floor_p0_heur")
+
+        # Keep play_prob_adj coherent with p0_pred_adj (suppression-only: lower play_prob if needed).
+        pp_bound = float(np.clip(1.0 - p0_pred_adj[i], 0.0, 1.0))
+        if play_prob_adj[i] > pp_bound + 1e-12:
+            play_prob_adj[i] = pp_bound
+            reason_parts[i].append("cohere_play_prob")
+
     humility_reason = ["|".join(parts) if parts else "" for parts in reason_parts]
 
     df["minutes_prior_adj"] = p50_adj.astype(np.float64)
     df["minutes_p10_adj"] = p10_adj.astype(np.float64)
     df["minutes_p90_adj"] = p90_adj.astype(np.float64)
     df["play_prob_adj"] = np.clip(play_prob_adj.astype(np.float64), 0.0, 1.0)
+    df["p_played_ge_5_pred_adj"] = np.clip(p_ge5_pred_adj.astype(np.float64), 0.0, 1.0)
+    df["p_minutes_eq0_pred_adj"] = np.clip(p0_pred_adj.astype(np.float64), 0.0, 1.0)
+    if bool(cfg.use_rotation_prior_heuristics):
+        df["rotation_prior_heuristics_applied"] = pd.Series(heur_applied, index=df.index, dtype=bool)
     df["humility_tier"] = pd.Series(tier, index=df.index, dtype="string")
     df["humility_reason"] = pd.Series(humility_reason, index=df.index, dtype="string")
 
@@ -284,4 +388,3 @@ def humility_config_as_dict(cfg: HumilityConfig) -> dict[str, Any]:
     out["top_n_lock"] = int(out["top_n_lock"])
     out["seed"] = int(out["seed"])
     return out
-

@@ -73,6 +73,13 @@ def build_rot_eval_manifest(
     created_at = datetime.now(timezone.utc).isoformat()
     git_sha = get_git_sha(repo_root)
     input_hashes = json.loads(input_hashes_path.read_text(encoding="utf-8")).get("files", {})
+    rotation_prior_heuristics = {
+        "use_rotation_prior_heuristics": bool(humility_config.get("use_rotation_prior_heuristics", False)),
+        "cap_with_p_ge5_prior_heur": bool(humility_config.get("cap_with_p_ge5_prior_heur", False)),
+        "floor_with_p_eq0_prior_heur": bool(humility_config.get("floor_with_p_eq0_prior_heur", False)),
+        "min_cap_p_ge5": float(humility_config.get("min_cap_p_ge5", 0.05)),
+        "max_floor_p_eq0": float(humility_config.get("max_floor_p_eq0", 0.85)),
+    }
     return {
         "schema_version": ROT_EVAL_V1_SCHEMA_VERSION,
         "created_at": created_at,
@@ -89,5 +96,6 @@ def build_rot_eval_manifest(
         "use_truth_minutes_prior": bool(use_truth_minutes_prior),
         "humility_enabled": bool(humility_enabled),
         "humility_config": humility_config,
+        "rotation_prior_heuristics": rotation_prior_heuristics,
         "input_hashes": input_hashes,
     }
