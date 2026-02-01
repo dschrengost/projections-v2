@@ -18,11 +18,14 @@ from projections.rotations.eval_manifest import (
 )
 from projections.rotations.generator import TeamContext
 from projections.rotations.manifest import write_json, write_latest_published_run_id
+from projections.rotations.priors_humility import HumilityConfig, humility_config_as_dict
 from projections.rotations.schemas import LINEUP_COLS
 from projections.rotations.template_generator import TemplateRotationGenerator
 
 
 SampleMode = Literal["random", "first"]
+REQUIRED_MINUTES_PRIOR_COLS: tuple[str, ...] = ("game_id", "team_id", "player_id", "minutes_prior", "play_prob")
+OPTIONAL_MINUTES_PRIOR_COLS: tuple[str, ...] = ("minutes_p10", "minutes_p90")
 
 
 def _atomic_write_parquet(df: pd.DataFrame, out_path: Path) -> None:
@@ -177,6 +180,9 @@ def run_rotation_generator_eval(
     overwrite: bool,
     *,
     use_truth_minutes_prior: bool = True,
+    minutes_prior_parquet: Path | None = None,
+    restrict_to_prior_games: bool = True,
+    humility_config: HumilityConfig | None = None,
 ) -> dict[str, Any]:
     """Evaluate TemplateRotationGenerator realism using truth candidate sets from rot_v1 labels.
 
@@ -225,6 +231,54 @@ def run_rotation_generator_eval(
     events = pd.read_parquet(events_path, columns=events_cols)
     labels = pd.read_parquet(labels_path, columns=labels_cols)
 
+    priors = None
+    priors_gb = None
+    rot_games_total = 0
+    prior_games_total = 0
+    overlap_games_total = 0
+    overlap_rate = float("nan")
+    prior_players_total = 0
+    overlap_players_total = 0
+    prior_coverage_rate = float("nan")
+    use_truth_minutes_prior_for_mapping = bool(use_truth_minutes_prior) and minutes_prior_parquet is None
+
+    if minutes_prior_parquet is not None:
+        p = Path(minutes_prior_parquet)
+        if not p.exists():
+            raise FileNotFoundError(f"minutes_prior_parquet not found: {p}")
+        priors = pd.read_parquet(p)
+        missing = [c for c in REQUIRED_MINUTES_PRIOR_COLS if c not in priors.columns]
+        if missing:
+            raise ValueError(
+                f"minutes_prior_parquet missing required columns: {missing}. "
+                f"Need {list(REQUIRED_MINUTES_PRIOR_COLS)}. Got columns={list(priors.columns)} from {p}"
+            )
+        keep_cols = list(REQUIRED_MINUTES_PRIOR_COLS) + [c for c in OPTIONAL_MINUTES_PRIOR_COLS if c in priors.columns]
+        priors = priors[keep_cols].copy()
+        priors["game_id"] = priors["game_id"].astype("string")
+        priors["team_id"] = pd.to_numeric(priors["team_id"], errors="coerce").astype("Int64")
+        priors["player_id"] = pd.to_numeric(priors["player_id"], errors="coerce").astype("Int64")
+        priors["minutes_prior"] = pd.to_numeric(priors["minutes_prior"], errors="coerce").astype(np.float64).fillna(0.0)
+        if "minutes_p10" in priors.columns:
+            priors["minutes_p10"] = pd.to_numeric(priors["minutes_p10"], errors="coerce").astype(np.float64).fillna(0.0)
+        if "minutes_p90" in priors.columns:
+            priors["minutes_p90"] = pd.to_numeric(priors["minutes_p90"], errors="coerce").astype(np.float64).fillna(0.0)
+        priors["play_prob"] = pd.to_numeric(priors["play_prob"], errors="coerce").astype(np.float64).fillna(0.0).clip(0.0, 1.0)
+        priors = priors.dropna(subset=["game_id", "team_id", "player_id"]).copy()
+        priors["team_id"] = priors["team_id"].astype(int)
+        priors["player_id"] = priors["player_id"].astype(int)
+        if not priors.empty:
+            max_pid = int(priors["player_id"].max())
+            # Guardrail: rot_v1 internal IDs are small contiguous ints (historically ~1-600).
+            # If this looks like NBA personId space (e.g. 201143), fail fast.
+            if max_pid > 2000:
+                raise ValueError(
+                    f"minutes_prior_parquet appears to use non-internal player_id domain: max(player_id)={max_pid}. "
+                    "Expected rot_v1 internal IDs (small contiguous ints)."
+                )
+        priors = priors.sort_values(["game_id", "team_id", "player_id"], kind="mergesort").reset_index(drop=True)
+        priors_gb = priors.groupby(["game_id", "team_id"], sort=False)
+
     # Normalize core dtypes up-front for stable sampling + joins.
     events["season_id"] = events["season_id"].astype("string")
     events["game_id"] = events["game_id"].astype("string")
@@ -256,6 +310,16 @@ def run_rotation_generator_eval(
     labels["team_id"] = labels["team_id"].astype(int)
     labels["player_id"] = labels["player_id"].astype(int)
 
+    if priors is not None:
+        # Coverage diagnostics in internal-id space (based on rot_v1 labels).
+        labels_key = labels[["game_id", "team_id", "player_id"]].drop_duplicates().copy()
+        priors_key = priors[["game_id", "team_id", "player_id"]].drop_duplicates().copy()
+        prior_players_total = int(priors_key["player_id"].nunique())
+        if len(labels_key):
+            overlap_key = labels_key.merge(priors_key, on=["game_id", "team_id", "player_id"], how="inner")
+            overlap_players_total = int(overlap_key["player_id"].nunique())
+            prior_coverage_rate = float(len(overlap_key) / len(labels_key)) if len(labels_key) else float("nan")
+
     # Team-game metadata comes from events (labels don't include season/opponent/home).
     team_games = (
         labels[["game_id", "team_id"]]
@@ -274,6 +338,19 @@ def run_rotation_generator_eval(
     # Deterministic ordering before sampling.
     team_games = team_games.sort_values(["season_id", "game_id", "team_id"], kind="mergesort").reset_index(drop=True)
 
+    rot_games_total = int(team_games["game_id"].nunique())
+    if priors is not None:
+        prior_games = sorted({str(v) for v in priors["game_id"].dropna().tolist() if str(v) and str(v) != "<NA>"})
+        prior_games_set = set(prior_games)
+        prior_games_total = int(len(prior_games_set))
+        rot_games_set = set(team_games["game_id"].astype("string").tolist())
+        overlap_games_total = int(len(rot_games_set & prior_games_set))
+        overlap_rate = float(overlap_games_total / rot_games_total) if rot_games_total else float("nan")
+
+        if bool(restrict_to_prior_games):
+            team_games = team_games[team_games["game_id"].isin(prior_games_set)].copy()
+            team_games = team_games.sort_values(["season_id", "game_id", "team_id"], kind="mergesort").reset_index(drop=True)
+
     if limit_team_games <= 0:
         selected = team_games
     else:
@@ -290,7 +367,7 @@ def run_rotation_generator_eval(
     labels_gb = labels.groupby(["game_id", "team_id"], sort=False)
     events_gb = events.groupby(["game_id", "team_id"], sort=False)
 
-    gen = TemplateRotationGenerator(rot_bundle=rot_bundle_path)
+    gen = TemplateRotationGenerator(rot_bundle=rot_bundle_path, humility_config=humility_config)
     generator_name = type(gen).__name__
 
     player_rows: list[dict[str, Any]] = []
@@ -319,14 +396,25 @@ def run_rotation_generator_eval(
         else:
             starter_candidates = _infer_starters_from_events(g_events)
 
-        minutes_prior: Optional[dict[int, float]]
-        if use_truth_minutes_prior:
+        minutes_prior: Optional[dict[int, float]] = None
+        minutes_p10_prior: Optional[dict[int, float]] = None
+        minutes_p90_prior: Optional[dict[int, float]] = None
+        play_prob_prior: Optional[dict[int, float]] = None
+        if priors_gb is not None and (game_id, team_id) in priors_gb.groups:
+            g_prior = priors_gb.get_group((game_id, team_id)).copy()
+            if candidate_ids:
+                g_prior = g_prior[g_prior["player_id"].isin(candidate_ids)].copy()
+            minutes_prior = {int(pid): float(v) for pid, v in zip(g_prior["player_id"].tolist(), g_prior["minutes_prior"].tolist())}
+            if "minutes_p10" in g_prior.columns:
+                minutes_p10_prior = {int(pid): float(v) for pid, v in zip(g_prior["player_id"].tolist(), g_prior["minutes_p10"].tolist())}
+            if "minutes_p90" in g_prior.columns:
+                minutes_p90_prior = {int(pid): float(v) for pid, v in zip(g_prior["player_id"].tolist(), g_prior["minutes_p90"].tolist())}
+            play_prob_prior = {int(pid): float(v) for pid, v in zip(g_prior["player_id"].tolist(), g_prior["play_prob"].tolist())}
+        elif use_truth_minutes_prior_for_mapping:
             minutes_prior = {
                 int(pid): float(mins)
                 for pid, mins in zip(g_labels["player_id"].tolist(), g_labels["minutes_actual"].tolist())
             }
-        else:
-            minutes_prior = None
 
         regime_label = None
         if "regime_label" in g_labels.columns:
@@ -343,6 +431,9 @@ def run_rotation_generator_eval(
             candidate_player_ids=candidate_ids,
             starter_candidates=starter_candidates,
             minutes_prior=minutes_prior,
+            minutes_p10_prior=minutes_p10_prior,
+            minutes_p90_prior=minutes_p90_prior,
+            play_prob_prior=play_prob_prior,
             regime_label=regime_label,
             n_worlds=int(n_worlds),
             rng_seed=_stable_team_game_seed(base_seed=int(seed), season_id=season_id, game_id=game_id, team_id=team_id),
@@ -471,7 +562,11 @@ def run_rotation_generator_eval(
 
     # Artifacts: hashes + manifest + report.
     input_hashes_path = out_dir / "input_hashes.json"
-    write_rot_eval_input_hashes(rot_bundle_dir=rot_bundle_dir, out_path=input_hashes_path)
+    write_rot_eval_input_hashes(
+        rot_bundle_dir=rot_bundle_dir,
+        minutes_prior_parquet=minutes_prior_parquet,
+        out_path=input_hashes_path,
+    )
 
     repo_root = Path(__file__).resolve().parents[2]
     manifest = build_rot_eval_manifest(
@@ -483,7 +578,11 @@ def run_rotation_generator_eval(
         seed=seed,
         limit_team_games=limit_team_games,
         sample_mode=sample_mode,
-        use_truth_minutes_prior=use_truth_minutes_prior,
+        use_truth_minutes_prior=use_truth_minutes_prior_for_mapping,
+        minutes_prior_parquet=minutes_prior_parquet,
+        restrict_to_prior_games=bool(restrict_to_prior_games),
+        humility_enabled=bool((humility_config or HumilityConfig()).enabled),
+        humility_config=humility_config_as_dict(humility_config or HumilityConfig()),
         input_hashes_path=input_hashes_path,
     )
     manifest_path = out_dir / "manifest.json"
@@ -533,12 +632,26 @@ def run_rotation_generator_eval(
         This is a “generator realism” backtest for `TemplateRotationGenerator`:
         - Uses *truth candidate sets* from `rotation_labels` (minutes_actual>0 OR played_ge_1==True)
         - Uses truth starters when available (fallback: first segment lineup)
-        - Uses truth minutes as `minutes_prior` **only** as a mapping stabilizer (`use_truth_minutes_prior={use_truth_minutes_prior}`)
+        - Uses truth minutes as `minutes_prior` **only** as a mapping stabilizer (`use_truth_minutes_prior={use_truth_minutes_prior_for_mapping}`)
+        - If `minutes_prior_parquet` is provided, uses that prior instead (and can restrict game universe)
 
         It does **not** attempt to predict availability / candidate sets; it evaluates mapping + template sampling realism.
 
+        ## Prior humility layer
+
+        - humility_enabled: {bool((humility_config or HumilityConfig()).enabled)}
+        - humility_config: {humility_config_as_dict(humility_config or HumilityConfig())}
+
         ## Headline metrics
 
+        - rot_games_total: {rot_games_total}
+        - prior_games_total: {prior_games_total}
+        - overlap_games_total: {overlap_games_total}
+        - overlap_rate: {overlap_rate:.3f}
+        - prior_players_total: {prior_players_total}
+        - overlap_players_total: {overlap_players_total}
+        - prior_coverage_rate: {prior_coverage_rate:.3f}
+        - evaluated_team_games: {metrics.n_team_games}
         - team_games: {metrics.n_team_games}
         - players: {metrics.n_players}
         - brier_played_ge_1: {metrics.brier_ge1:.6f}

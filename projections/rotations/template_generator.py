@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from projections.rotations.generator import RotationWorlds, TeamContext
+from projections.rotations.priors_humility import HumilityConfig, apply_prior_humility, humility_config_as_dict
 from projections.rotations.schemas import LINEUP_COLS
 
 
@@ -90,10 +91,12 @@ class TemplateRotationGenerator:
         rot_bundle: Optional[Path] = None,
         duration_jitter_std_sec: float = 0.0,
         max_attempts_per_world: int = 50,
+        humility_config: HumilityConfig | None = None,
     ) -> None:
         self._rot_bundle_path = rot_bundle or (DEFAULT_ROT_ARTIFACTS_ROOT / "LATEST_PUBLISHED")
         self._duration_jitter_std_sec = float(duration_jitter_std_sec)
         self._max_attempts_per_world = int(max_attempts_per_world)
+        self._humility_config = humility_config or HumilityConfig()
 
         self._loaded = False
         self._templates: dict[tuple[int, str], _Template] = {}
@@ -280,14 +283,75 @@ class TemplateRotationGenerator:
     def generate(self, ctx: TeamContext) -> RotationWorlds:
         self._load()
 
-        rng = np.random.default_rng(int(ctx.rng_seed))
+        effective_ctx = ctx
         n_worlds = int(ctx.n_worlds)
         if n_worlds <= 0:
             raise ValueError("n_worlds must be positive")
 
         candidate_ids = self._candidate_ids(ctx)
-        regime_label = _choose_regime_label(ctx, candidate_ids=candidate_ids)
-        template_keys, source = self._choose_template_keys(team_id=int(ctx.team_id), regime_label=regime_label)
+        humility_tier_counts = None
+        if (
+            bool(self._humility_config.enabled)
+            and candidate_ids is not None
+            and (effective_ctx.minutes_prior is not None)
+            and len(candidate_ids) > 0
+        ):
+            prior = effective_ctx.minutes_prior or {}
+            p10 = effective_ctx.minutes_p10_prior
+            p90 = effective_ctx.minutes_p90_prior
+            pp = effective_ctx.play_prob_prior or {}
+            starters = set(int(v) for v in (effective_ctx.starter_candidates or []))
+
+            data: dict[str, list] = {
+                "game_id": [str(effective_ctx.game_id)] * len(candidate_ids),
+                "team_id": [int(effective_ctx.team_id)] * len(candidate_ids),
+                "player_id": [int(pid) for pid in candidate_ids],
+                "minutes_prior": [float(prior.get(int(pid), 0.0)) for pid in candidate_ids],
+                "play_prob": [float(pp.get(int(pid), 1.0)) for pid in candidate_ids],
+                "starter_candidate": [bool(int(pid) in starters) for pid in candidate_ids],
+            }
+            if p10 is not None:
+                data["minutes_p10"] = [float(p10.get(int(pid), prior.get(int(pid), 0.0))) for pid in candidate_ids]
+            if p90 is not None:
+                data["minutes_p90"] = [float(p90.get(int(pid), prior.get(int(pid), 0.0))) for pid in candidate_ids]
+            df_priors = pd.DataFrame(data)
+            df_adj = apply_prior_humility(df_priors, self._humility_config)
+
+            minutes_prior_adj = {
+                int(pid): float(v)
+                for pid, v in zip(df_adj["player_id"].tolist(), df_adj["minutes_prior_adj"].tolist())
+            }
+            minutes_p10_adj = {
+                int(pid): float(v)
+                for pid, v in zip(df_adj["player_id"].tolist(), df_adj["minutes_p10_adj"].tolist())
+            }
+            minutes_p90_adj = {
+                int(pid): float(v)
+                for pid, v in zip(df_adj["player_id"].tolist(), df_adj["minutes_p90_adj"].tolist())
+            }
+            play_prob_adj = {
+                int(pid): float(v)
+                for pid, v in zip(df_adj["player_id"].tolist(), df_adj["play_prob_adj"].tolist())
+            }
+
+            humility_tier_counts = (
+                df_adj["humility_tier"].fillna("unknown").value_counts(dropna=False).to_dict()
+                if "humility_tier" in df_adj.columns
+                else None
+            )
+
+            effective_ctx = replace(
+                effective_ctx,
+                minutes_prior=minutes_prior_adj,
+                minutes_p10_prior=minutes_p10_adj,
+                minutes_p90_prior=minutes_p90_adj,
+                play_prob_prior=play_prob_adj,
+            )
+
+        rng = np.random.default_rng(int(effective_ctx.rng_seed))
+
+        regime_label = _choose_regime_label(effective_ctx, candidate_ids=candidate_ids)
+        template_keys, source = self._choose_template_keys(team_id=int(effective_ctx.team_id), regime_label=regime_label)
         if not template_keys:
             raise RuntimeError("Template library is empty (no rot_v1 templates loaded).")
 
@@ -316,7 +380,7 @@ class TemplateRotationGenerator:
                     mapping = None
                     break
 
-                mapping_try = self._map_roles(template=tmpl, ctx=ctx, rng=rng, candidate_ids=candidate_ids)
+                mapping_try = self._map_roles(template=tmpl, ctx=effective_ctx, rng=rng, candidate_ids=candidate_ids)
                 if mapping_try is not None:
                     chosen_template_key = key
                     mapping = mapping_try
@@ -326,7 +390,7 @@ class TemplateRotationGenerator:
             if chosen_template_key is None:
                 fallback_to_prior += 1
                 # Fallback: allocate regulation minutes proportional to minutes_prior (if any), else zeros.
-                prior = ctx.minutes_prior or {}
+                prior = effective_ctx.minutes_prior or {}
                 if candidate_ids is None or not candidate_ids:
                     continue
                 weights = np.array([max(float(prior.get(int(pid), 0.0)), 0.0) for pid in candidate_ids], dtype=float)
@@ -364,6 +428,9 @@ class TemplateRotationGenerator:
             "mapping_success_rate": (mapping_success / n_worlds) if candidate_ids is not None else None,
             "template_resamples_total": int(template_resamples),
             "fallback_to_prior_worlds": int(fallback_to_prior),
+            "humility_enabled": bool(self._humility_config.enabled),
+            "humility_config": humility_config_as_dict(self._humility_config),
+            "humility_tier_counts": humility_tier_counts,
         }
 
         return RotationWorlds(minutes_by_player=minutes_by_player, diagnostics=diagnostics)

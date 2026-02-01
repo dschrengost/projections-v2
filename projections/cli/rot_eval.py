@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
 from projections.rotations.eval import run_rotation_generator_eval
+from projections.rotations.priors_humility import HumilityConfig, load_humility_config_json
 
 console = Console()
 app = typer.Typer(help="Evaluate TemplateRotationGenerator realism against rot_v1 rotation_labels truth.")
@@ -34,12 +36,46 @@ def main(
         "--use-truth-minutes-prior/--no-use-truth-minutes-prior",
         help="Use truth minutes_actual as minutes_prior (mapping stabilizer only).",
     ),
+    minutes_prior_parquet: Path | None = typer.Option(
+        None,
+        "--minutes-prior-parquet",
+        help=(
+            "Optional minutes prior parquet keyed by (game_id, team_id, player_id) with columns "
+            "minutes_prior, minutes_p10, minutes_p90, and play_prob (p10/p90 are optional). When provided, "
+            "it is used as the mapping-stabilizer prior "
+            "(instead of truth minutes_actual)."
+        ),
+    ),
+    restrict_to_prior_games: bool | None = typer.Option(
+        None,
+        "--restrict-to-prior-games/--no-restrict-to-prior-games",
+        help="When --minutes-prior-parquet is provided, restrict evaluation to games present in the prior.",
+    ),
+    humility: bool = typer.Option(
+        True,
+        "--humility/--no-humility",
+        help="Enable PriorHumilityLayer guardrails when constructing generator priors (default: on).",
+    ),
+    humility_config: Path | None = typer.Option(
+        None,
+        "--humility-config",
+        help="Optional JSON file of HumilityConfig overrides.",
+    ),
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing output directory."),
 ) -> None:
     data_root = _default_data_root()
     rot_bundle = rot_bundle or (data_root / "artifacts" / "rot_v1" / "LATEST_PUBLISHED")
     artifacts_root = data_root / "artifacts" / "rot_eval_v1"
     out_dir = artifacts_root / run_id
+
+    minutes_prior_parquet_path = Path(minutes_prior_parquet) if minutes_prior_parquet is not None else None
+    if restrict_to_prior_games is None:
+        restrict_to_prior_games = minutes_prior_parquet_path is not None
+
+    cfg = HumilityConfig()
+    if humility_config is not None:
+        cfg = load_humility_config_json(Path(humility_config), base=cfg)
+    cfg = replace(cfg, enabled=bool(humility))
 
     result = run_rotation_generator_eval(
         rot_bundle_path=rot_bundle,
@@ -51,6 +87,9 @@ def main(
         out_dir=out_dir,
         overwrite=overwrite,
         use_truth_minutes_prior=use_truth_minutes_prior,
+        minutes_prior_parquet=minutes_prior_parquet_path,
+        restrict_to_prior_games=bool(restrict_to_prior_games),
+        humility_config=cfg,
     )
 
     metrics = result.get("metrics", {})

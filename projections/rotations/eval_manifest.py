@@ -28,6 +28,7 @@ def resolve_rot_bundle_dir(rot_bundle_path: Path) -> Path:
 def write_rot_eval_input_hashes(
     *,
     rot_bundle_dir: Path,
+    minutes_prior_parquet: Path | None = None,
     out_path: Path,
 ) -> dict[str, Any]:
     """Write file hashes for the rot_v1 bundle inputs used by rot_eval_v1."""
@@ -42,6 +43,11 @@ def write_rot_eval_input_hashes(
         str(events_path): sha256_file(events_path),
         str(labels_path): sha256_file(labels_path),
     }
+    if minutes_prior_parquet is not None:
+        p = Path(minutes_prior_parquet)
+        if not p.exists():
+            raise FileNotFoundError(f"minutes_prior_parquet not found: {p}")
+        files[str(p)] = sha256_file(p)
     payload: dict[str, Any] = {"files": files}
     write_json(out_path, payload)
     return payload
@@ -58,6 +64,10 @@ def build_rot_eval_manifest(
     limit_team_games: int,
     sample_mode: str,
     use_truth_minutes_prior: bool,
+    minutes_prior_parquet: Path | None,
+    restrict_to_prior_games: bool,
+    humility_enabled: bool,
+    humility_config: dict[str, Any],
     input_hashes_path: Path,
 ) -> dict[str, Any]:
     created_at = datetime.now(timezone.utc).isoformat()
@@ -69,12 +79,15 @@ def build_rot_eval_manifest(
         "git_sha": git_sha,
         "rot_bundle_path": str(Path(rot_bundle_path)),
         "rot_bundle_dir": str(Path(rot_bundle_dir)),
+        "minutes_prior_parquet": str(Path(minutes_prior_parquet)) if minutes_prior_parquet is not None else None,
+        "restrict_to_prior_games": bool(restrict_to_prior_games),
         "run_id": str(run_id),
         "n_worlds": int(n_worlds),
         "seed": int(seed),
         "limit_team_games": int(limit_team_games),
         "sample_mode": str(sample_mode),
         "use_truth_minutes_prior": bool(use_truth_minutes_prior),
+        "humility_enabled": bool(humility_enabled),
+        "humility_config": humility_config,
         "input_hashes": input_hashes,
     }
-

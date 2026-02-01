@@ -18,6 +18,8 @@ class TeamContext:
     candidate_player_ids: Optional[List[int]] = None
     starter_candidates: Optional[List[int]] = None
     minutes_prior: Optional[Dict[int, float]] = None
+    minutes_p10_prior: Optional[Dict[int, float]] = None
+    minutes_p90_prior: Optional[Dict[int, float]] = None
     play_prob_prior: Optional[Dict[int, float]] = None
     regime_label: Optional[str] = None
     n_worlds: int = 5000
@@ -33,4 +35,3 @@ class RotationWorlds:
 
 class RotationGenerator(Protocol):
     def generate(self, ctx: TeamContext) -> RotationWorlds: ...
-

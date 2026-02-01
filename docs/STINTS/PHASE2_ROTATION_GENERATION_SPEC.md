@@ -188,7 +188,10 @@ class TeamContext:
     starter_candidates: Optional[List[int]] = None
     # optional priors
     minutes_prior: Optional[Dict[int, float]] = None  # player_id -> mean minutes
+    minutes_p10_prior: Optional[Dict[int, float]] = None
+    minutes_p90_prior: Optional[Dict[int, float]] = None
     play_prob_prior: Optional[Dict[int, float]] = None
+    regime_label: Optional[str] = None
     # knobs
     n_worlds: int = 5000
     rng_seed: int = 0
@@ -270,6 +273,20 @@ Generate realistic minutes distributions by sampling from historical rotation te
 - template_source breakdown (same team vs fallback)
 - per-world team minutes check
 - minutes distribution summaries (p0/p5/p50/p95)
+
+### Prior humility layer (guardrail)
+
+When the upstream priors are overconfident for fringe/bench players (e.g., too many players effectively treated as “>=5 minute rotation locks”),
+the template sampler can choose overly deep regimes and map low-minute players into meaningful bench roles.
+
+We add a deterministic, configurable guardrail layer that transforms raw priors into “humble” priors before template selection + role mapping:
+- module: `projections/rotations/priors_humility.py`
+- entrypoint: `apply_prior_humility(df_priors, cfg)`
+- output columns: `*_adj` plus `humility_tier` + `humility_reason`
+
+The eval CLI (`projections/cli/rot_eval.py`) and dev generator CLI (`projections/cli/generate_minutes_from_rotations.py`) expose:
+- `--humility/--no-humility` (default on)
+- `--humility-config <path.json>` (optional JSON overrides)
 
 ---
 
