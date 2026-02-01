@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 ROT_V1_SCHEMA_VERSION = "rot_v1.0"
+ROT_EVAL_V1_SCHEMA_VERSION = "rot_eval_v1.0"
 
 LINEUP_COLS: tuple[str, ...] = tuple(f"lineup_p{i}" for i in range(1, 6))
 
@@ -29,4 +30,3 @@ ROTATION_LABELS_COLS: tuple[str, ...] = (
     "starter_actual",
     "regime_label",
 )
-

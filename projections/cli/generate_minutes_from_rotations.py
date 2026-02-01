@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,7 @@ import typer
 from rich.console import Console
 
 from projections.rotations.generator import TeamContext
+from projections.rotations.priors_humility import HumilityConfig, load_humility_config_json
 from projections.rotations.template_generator import TemplateRotationGenerator
 
 console = Console()
@@ -56,12 +58,27 @@ def run(
         "--starter-candidates",
         help="Optional CSV list of starter candidates (e.g. '123,456,789,101,102').",
     ),
+    humility: bool = typer.Option(
+        True,
+        "--humility/--no-humility",
+        help="Enable PriorHumilityLayer guardrails when constructing generator priors (default: on).",
+    ),
+    humility_config: Path | None = typer.Option(
+        None,
+        "--humility-config",
+        help="Optional JSON file of HumilityConfig overrides.",
+    ),
 ) -> None:
     minutes_prior = _load_minutes_prior(minutes_prior_json) if minutes_prior_json else None
     candidate_ids = _parse_csv_ints(candidates) if candidates else None
     starter_ids = _parse_csv_ints(starter_candidates) if starter_candidates else None
 
-    gen = TemplateRotationGenerator(rot_bundle=rot_bundle)
+    cfg = HumilityConfig()
+    if humility_config is not None:
+        cfg = load_humility_config_json(Path(humility_config), base=cfg)
+    cfg = replace(cfg, enabled=bool(humility))
+
+    gen = TemplateRotationGenerator(rot_bundle=rot_bundle, humility_config=cfg)
     ctx = TeamContext(
         season_id="unknown",
         game_id="unknown",
