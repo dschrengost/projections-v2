@@ -75,6 +75,8 @@ def main(
         profiles_path=profiles_path,
         output_root=worlds_output,
         sim_run_id=sim_run_id,
+        use_efficiency_scoring=None,
+        export_attempt_means=False,
         use_rates_noise=None,
         rates_noise_split=None,
         team_sigma_scale=None,
