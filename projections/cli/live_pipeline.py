@@ -162,7 +162,7 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
     ),
     odds: bool = typer.Option(True, "--odds/--skip-odds", help="Run the odds ETL stage."),
     run_roster: bool = typer.Option(True, "--run-roster/--skip-roster", help="Run the roster nightly stage."),
-    espn_injuries: bool = typer.Option(True, "--espn-injuries/--skip-espn-injuries", help="Run the ESPN injuries scrape for faster injury updates."),
+    espn_injuries: bool = typer.Option(False, "--espn-injuries/--skip-espn-injuries", help="Run the ESPN injuries scrape (disabled by default; conflicts with NBA official/Rotowire feeds)."),
     rotowire_lineups: bool = typer.Option(True, "--rotowire-lineups/--skip-rotowire-lineups", help="Run Rotowire lineups scrape for faster lineup confirmations."),
     schedule_timeout: float = typer.Option(10.0, "--schedule-timeout", help="Timeout (seconds) for NBA schedule API fallback."),
     injury_timeout: float = typer.Option(15.0, "--injury-timeout", help="HTTP timeout (seconds) for NBA injury PDF scraping."),
