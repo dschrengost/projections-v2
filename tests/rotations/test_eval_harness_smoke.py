@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -186,3 +187,86 @@ def test_eval_harness_smoke_and_determinism(tmp_path: Path) -> None:
     player_eval_2 = player_eval_2.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
     pd.testing.assert_frame_equal(player_eval_1, player_eval_2, check_dtype=False)
 
+
+def test_eval_predictor_threshold_uses_cached_all_by_default_and_has_no_missing_team_games(tmp_path: Path) -> None:
+    rot_bundle_dir = tmp_path / "rot_v1_bundle"
+    _write_synth_rot_bundle(rot_bundle_dir)
+
+    # Minutes priors in internal-id space (required for predictor_threshold).
+    priors_rows: list[dict] = []
+    for game_id, base_pid in [("0000000001", 100), ("0000000002", 200)]:
+        for offset in range(8):  # 0..7 (matches labels)
+            priors_rows.append(
+                {
+                    "game_id": game_id,
+                    "team_id": 10,
+                    "player_id": base_pid + offset,
+                    "minutes_prior": float(30 - offset),
+                    "play_prob": 0.9,
+                }
+            )
+    priors = pd.DataFrame(priors_rows)
+    priors_path = tmp_path / "minutes_priors.parquet"
+    priors.to_parquet(priors_path, index=False)
+
+    # Predictor bundle with:
+    # - predictions_all.parquet matching the rot_eval universe
+    # - predictions_test.parquet intentionally NOT matching (regression guard)
+    pred_bundle_dir = tmp_path / "rotation_predictor_bundle"
+    pred_bundle_dir.mkdir(parents=True, exist_ok=True)
+    (pred_bundle_dir / "meta.json").write_text('{"feature_columns": []}\n', encoding="utf-8")
+
+    preds_all_rows: list[dict] = []
+    for game_id, base_pid in [("0000000001", 100), ("0000000002", 200)]:
+        for offset in range(8):
+            preds_all_rows.append(
+                {
+                    "game_id": game_id,
+                    "team_id": 10,
+                    "player_id": base_pid + offset,
+                    "p_ge5_pred": 0.8,
+                    "p_ge15_pred": 0.6,
+                }
+            )
+    pd.DataFrame(preds_all_rows).to_parquet(pred_bundle_dir / "predictions_all.parquet", index=False)
+
+    pd.DataFrame(
+        [
+            {
+                "game_id": 999,
+                "team_id": 10,
+                "player_id": 100,
+                "p_ge5": 0.1,
+                "p_ge15": 0.1,
+            }
+        ]
+    ).to_parquet(pred_bundle_dir / "predictions_test.parquet", index=False)
+
+    out_dir = tmp_path / "artifacts" / "rot_eval_v1" / "pred_threshold"
+    result = run_rotation_generator_eval(
+        rot_bundle_path=rot_bundle_dir,
+        run_id="pred_threshold",
+        n_worlds=10,
+        seed=0,
+        limit_team_games=2,
+        sample_mode="first",
+        out_dir=out_dir,
+        overwrite=True,
+        use_truth_minutes_prior=False,
+        minutes_prior_parquet=priors_path,
+        candidate_pool="predictor_threshold",
+        rotation_predictor_bundle=pred_bundle_dir,
+        pool_max_size=11,
+        pool_t_ge15=0.3,
+        pool_t_ge5=0.2,
+        pool_always_include_top_n=5,
+    )
+
+    summary_path = Path(result["candidate_pool_summary_path"])
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert int(summary["missing_pred_team_games"]) == 0
+    assert int(summary["missing_pred_player_rows"]) == 0
+
+    debug = summary["predictor_join_debug"]
+    assert debug["gate_feature_source"]["resolved"] == "cached_all"
+    assert debug["artifact_kind"] == "predictions_all.parquet"

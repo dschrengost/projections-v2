@@ -34,11 +34,23 @@ def canonicalize_game_id(game_id: object) -> str:
         return ""
     # Canonical NBA ids are 10 digits; some sources drop leading zeros -> 8 digits.
     if len(s) > 10:
-        # Best-effort: interpret as int to strip any leading zeros beyond 10, then re-pad.
-        try:
-            s = str(int(s))
-        except Exception:
-            return ""
+        # Some sources embed game_id inside larger digit strings (e.g., date + game_id).
+        # Try to extract a plausible 10-digit NBA id before falling back to truncation.
+        prefixes = {"001", "002", "003", "004", "005", "006"}
+        candidates: list[str] = []
+        for i in range(len(s) - 9):
+            chunk = s[i : i + 10]
+            if len(chunk) == 10 and chunk.isdigit() and chunk[:3] in prefixes:
+                candidates.append(chunk)
+        if candidates:
+            s = candidates[-1]
+        else:
+            try:
+                s = str(int(s))
+            except Exception:
+                return ""
+            if len(s) > 10:
+                s = s[-10:]
     return s.zfill(10)
 
 

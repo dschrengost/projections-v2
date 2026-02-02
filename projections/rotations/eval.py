@@ -213,7 +213,7 @@ def run_rotation_generator_eval(
     humility_config: HumilityConfig | None = None,
     gate_config: GateConfig | None = None,
     rotation_predictor_bundle: Path | None = None,
-    gate_feature_source: str = "cached_preds",
+    gate_feature_source: str = "auto",
     gate_max_train_rows: int | None = None,
     baseline_out_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -241,11 +241,21 @@ def run_rotation_generator_eval(
         )
 
     gate_cfg = gate_config or GateConfig()
-    gate_feature_source = str(gate_feature_source).strip().lower()
-    if gate_feature_source not in {"cached_all", "cached_preds", "cached_train", "none"}:
+    gate_feature_source_requested = str(gate_feature_source).strip().lower()
+    if gate_feature_source_requested not in {"auto", "cached_all", "cached_preds", "cached_train", "none"}:
         raise ValueError(
-            f"Unknown gate_feature_source: {gate_feature_source} (expected cached_all|cached_preds|cached_train|none)"
+            "Unknown gate_feature_source: "
+            f"{gate_feature_source_requested} (expected auto|cached_all|cached_preds|cached_train|none)"
         )
+    if gate_feature_source_requested == "auto":
+        # rot_eval: predictor_threshold must have coverage on the eval universe, so default to cached_all.
+        # For other modes, keep historical default (cached_preds) unless the gate is enabled.
+        gate_feature_source = (
+            "cached_all" if (candidate_pool == "predictor_threshold" or bool(gate_cfg.enabled)) else "cached_preds"
+        )
+    else:
+        gate_feature_source = gate_feature_source_requested
+
     if bool(gate_cfg.enabled) and gate_feature_source != "none" and rotation_predictor_bundle is None:
         raise ValueError("--rotation-predictor-bundle is required when --gate is enabled (unless --gate-feature-source none)")
 
@@ -411,6 +421,56 @@ def run_rotation_generator_eval(
             team_games = team_games[team_games["game_id"].isin(prior_games_set)].copy()
             team_games = team_games.sort_values(["season_id", "game_id", "team_id"], kind="mergesort").reset_index(drop=True)
 
+    predictor_team_game_filter: dict[str, Any] | None = None
+    if candidate_pool == "predictor_threshold" and rotation_predictor_bundle is not None and gate_feature_source != "none":
+        # Restrict the sampling universe to team-games where predictor artifacts have *some* cached rows.
+        # This keeps predictor_threshold from degenerating into a prior_topn fallback eval due to sparse coverage
+        # in historical cached prediction bundles.
+        bundle = load_rotation_predictor_bundle(Path(rotation_predictor_bundle))
+        coverage_path: Path | None = None
+        if gate_feature_source == "cached_all":
+            coverage_path = bundle.predictions_all_path
+        elif gate_feature_source == "cached_preds":
+            coverage_path = bundle.predictions_test_path
+        elif gate_feature_source == "cached_train":
+            coverage_path = (bundle.dataset_dir / "features.parquet") if bundle.dataset_dir is not None else None
+
+        cov = pd.DataFrame()
+        if coverage_path is not None and coverage_path.exists():
+            cov = pd.read_parquet(coverage_path, columns=["game_id", "team_id"])
+            cov = cov.copy()
+            cov["game_id"] = cov["game_id"].map(canonicalize_game_id).astype("string")
+            cov["team_id"] = pd.to_numeric(cov["team_id"], errors="coerce").astype("Int64")
+            cov = cov.dropna(subset=["game_id", "team_id"]).copy()
+            cov["team_id"] = cov["team_id"].astype(int)
+            cov = cov[cov["game_id"] != ""].copy()
+
+        cov_set: set[tuple[str, int]] = set()
+        if not cov.empty:
+            cov_set = set(zip(cov["game_id"].astype("string").tolist(), cov["team_id"].astype(int).tolist()))
+
+        before = int(len(team_games))
+        filter_applied = bool(cov_set)
+        if filter_applied:
+            keep_mask = [
+                (str(gid), int(tid)) in cov_set
+                for gid, tid in zip(team_games["game_id"].astype("string").tolist(), team_games["team_id"].astype(int).tolist())
+            ]
+            team_games = team_games.loc[keep_mask].copy()
+            team_games = team_games.sort_values(["season_id", "game_id", "team_id"], kind="mergesort").reset_index(drop=True)
+        after = int(len(team_games))
+        predictor_team_game_filter = {
+            "enabled": bool(filter_applied),
+            "gate_feature_source": str(gate_feature_source),
+            "coverage_path": str(coverage_path) if coverage_path is not None else None,
+            "coverage_rows": int(len(cov)) if not cov.empty else 0,
+            "coverage_team_games": int(len(cov_set)),
+            "team_games_before": before,
+            "team_games_after": after,
+            "team_games_filtered_out": int(before - after),
+            "coverage_rate": float(after / before) if (filter_applied and before) else float("nan"),
+        }
+
     if limit_team_games <= 0:
         selected = team_games
     else:
@@ -473,6 +533,7 @@ def run_rotation_generator_eval(
 
     gate_preds = None
     gate_bundle_dir: str | None = None
+    gate_pred_artifact_path: str | None = None
     gate_pred_source_counts: dict[str, int] | None = None
     gate_person_id_to_internal_id: dict[int, int] | None = None
     if bool(gate_cfg.enabled) and gate_feature_source != "none":
@@ -503,6 +564,7 @@ def run_rotation_generator_eval(
                 gate_person_id_to_internal_id[int(pid)] = int(internal)
 
         if gate_feature_source == "cached_preds":
+            gate_pred_artifact_path = str(bundle.predictions_test_path)
             gate_preds = load_cached_predictions(
                 bundle,
                 person_id_to_internal_id=gate_person_id_to_internal_id,
@@ -510,6 +572,7 @@ def run_rotation_generator_eval(
                 team_id_allow=team_allow,
             )
         elif gate_feature_source == "cached_all":
+            gate_pred_artifact_path = str(bundle.predictions_all_path)
             gate_preds = load_cached_all_predictions(
                 bundle,
                 person_id_to_internal_id=gate_person_id_to_internal_id,
@@ -517,6 +580,7 @@ def run_rotation_generator_eval(
                 team_id_allow=team_allow,
             )
         elif gate_feature_source == "cached_train":
+            gate_pred_artifact_path = str(bundle.dataset_dir / "features.parquet") if bundle.dataset_dir is not None else None
             gate_preds = load_cached_train_predictions(
                 bundle,
                 person_id_to_internal_id=gate_person_id_to_internal_id,
@@ -530,17 +594,20 @@ def run_rotation_generator_eval(
 
     pool_preds = None
     pool_bundle_dir: str | None = None
+    pool_pred_artifact_path: str | None = None
     pool_person_id_to_internal_id: dict[int, int] | None = None
     pool_preds_team_games: set[tuple[str, int]] = set()
     pool_preds_gb = None
     missing_pred_team_games = 0
     missing_pred_player_rows = 0
+    pool_pred_debug: dict[str, Any] | None = None
     if candidate_pool == "predictor_threshold":
         # Reuse gate-loaded predictions when available; otherwise load once for pool selection.
         if gate_preds is not None and not gate_preds.empty and gate_bundle_dir is not None:
             pool_preds = gate_preds.copy()
             pool_bundle_dir = str(gate_bundle_dir)
             pool_person_id_to_internal_id = gate_person_id_to_internal_id
+            pool_pred_artifact_path = gate_pred_artifact_path
         else:
             bundle = load_rotation_predictor_bundle(Path(rotation_predictor_bundle))
             pool_bundle_dir = str(bundle.bundle_dir)
@@ -569,6 +636,7 @@ def run_rotation_generator_eval(
                     pool_person_id_to_internal_id[int(pid)] = int(internal)
 
             if gate_feature_source == "cached_preds":
+                pool_pred_artifact_path = str(bundle.predictions_test_path)
                 pool_preds = load_cached_predictions(
                     bundle,
                     person_id_to_internal_id=pool_person_id_to_internal_id,
@@ -576,6 +644,7 @@ def run_rotation_generator_eval(
                     team_id_allow=team_allow,
                 )
             elif gate_feature_source == "cached_all":
+                pool_pred_artifact_path = str(bundle.predictions_all_path)
                 pool_preds = load_cached_all_predictions(
                     bundle,
                     person_id_to_internal_id=pool_person_id_to_internal_id,
@@ -583,6 +652,7 @@ def run_rotation_generator_eval(
                     team_id_allow=team_allow,
                 )
             elif gate_feature_source == "cached_train":
+                pool_pred_artifact_path = str(bundle.dataset_dir / "features.parquet") if bundle.dataset_dir is not None else None
                 pool_preds = load_cached_train_predictions(
                     bundle,
                     person_id_to_internal_id=pool_person_id_to_internal_id,
@@ -599,6 +669,133 @@ def run_rotation_generator_eval(
                 )
             )
             pool_preds_gb = pool_preds.groupby(["game_id", "team_id"], sort=False)
+
+        # Diagnostics: explain why predictor joins might be missing for this eval universe.
+        selected_team_games_set = set(
+            zip(
+                selected["game_id"].astype("string").tolist(),
+                selected["team_id"].astype(int).tolist(),
+            )
+        )
+        matched_team_games = sorted(selected_team_games_set & pool_preds_team_games)
+        missing_team_games = [tg for tg in selected.itertuples(index=False) if (str(tg.game_id), int(tg.team_id)) not in pool_preds_team_games]
+        extra_team_games = sorted(pool_preds_team_games - selected_team_games_set)
+
+        pool_pred_debug = {
+            "gate_feature_source": {
+                "requested": gate_feature_source_requested,
+                "resolved": gate_feature_source,
+            },
+            "bundle_dir": str(pool_bundle_dir) if pool_bundle_dir is not None else None,
+            "artifact_path": str(pool_pred_artifact_path) if pool_pred_artifact_path is not None else None,
+            "artifact_kind": (
+                Path(pool_pred_artifact_path).name if pool_pred_artifact_path is not None else None
+            ),
+            "pred_rows": int(len(pool_preds)) if pool_preds is not None else 0,
+            "pred_team_games": int(len(pool_preds_team_games)),
+            "selected_team_games": int(len(selected)),
+            "matched_team_games": int(len(matched_team_games)),
+            "missing_team_games": int(len(selected_team_games_set - pool_preds_team_games)),
+            "extra_team_games": int(len(extra_team_games)),
+        }
+        pool_pred_debug["selected_key_stats"] = {
+            "game_id_dtype": str(selected["game_id"].dtype) if "game_id" in selected.columns else None,
+            "team_id_dtype": str(selected["team_id"].dtype) if "team_id" in selected.columns else None,
+            "game_id_examples": [str(v) for v in selected["game_id"].astype("string").head(3).tolist()] if "game_id" in selected.columns else [],
+            "team_id_examples": [int(v) for v in selected["team_id"].head(3).tolist()] if "team_id" in selected.columns else [],
+        }
+
+        if priors is not None and not priors.empty:
+            pool_pred_debug["prior_key_stats"] = {
+                "game_id_dtype": str(priors["game_id"].dtype) if "game_id" in priors.columns else None,
+                "team_id_dtype": str(priors["team_id"].dtype) if "team_id" in priors.columns else None,
+                "player_id_dtype": str(priors["player_id"].dtype) if "player_id" in priors.columns else None,
+                "player_id_min": int(priors["player_id"].min()) if "player_id" in priors.columns and len(priors) else None,
+                "player_id_max": int(priors["player_id"].max()) if "player_id" in priors.columns and len(priors) else None,
+                "game_id_examples": [str(v) for v in priors["game_id"].astype("string").head(3).tolist()] if "game_id" in priors.columns else [],
+                "team_id_examples": [int(v) for v in priors["team_id"].head(3).tolist()] if "team_id" in priors.columns else [],
+                "player_id_examples": [int(v) for v in priors["player_id"].head(3).tolist()] if "player_id" in priors.columns else [],
+            }
+
+        if pool_preds is not None and not pool_preds.empty:
+            pool_pred_debug["pred_key_stats"] = {
+                "game_id_dtype": str(pool_preds["game_id"].dtype) if "game_id" in pool_preds.columns else None,
+                "team_id_dtype": str(pool_preds["team_id"].dtype) if "team_id" in pool_preds.columns else None,
+                "player_id_dtype": str(pool_preds["player_id"].dtype) if "player_id" in pool_preds.columns else None,
+                "player_id_min": int(pool_preds["player_id"].min()) if "player_id" in pool_preds.columns and len(pool_preds) else None,
+                "player_id_max": int(pool_preds["player_id"].max()) if "player_id" in pool_preds.columns and len(pool_preds) else None,
+                "game_id_examples": [str(v) for v in pool_preds["game_id"].astype("string").head(3).tolist()] if "game_id" in pool_preds.columns else [],
+                "team_id_examples": [int(v) for v in pool_preds["team_id"].head(3).tolist()] if "team_id" in pool_preds.columns else [],
+                "player_id_examples": [int(v) for v in pool_preds["player_id"].head(3).tolist()] if "player_id" in pool_preds.columns else [],
+                "columns": [str(c) for c in pool_preds.columns],
+            }
+            if "pred_source" in pool_preds.columns:
+                pool_pred_debug["pred_source_counts"] = (
+                    pool_preds["pred_source"].fillna("unknown").value_counts(dropna=False).to_dict()
+                )
+
+        # Show first 10 missing team-games + some ids to help spot game_id/team_id mismatches.
+        miss_samples: list[dict[str, Any]] = []
+        for tg in missing_team_games[:10]:
+            gid = str(tg.game_id)
+            tid = int(tg.team_id)
+            prior_sample: list[int] = []
+            if priors_gb is not None and (gid, tid) in priors_gb.groups:
+                g = priors_gb.get_group((gid, tid))
+                prior_sample = [int(v) for v in g["player_id"].head(8).tolist()]
+            miss_samples.append({"game_id": gid, "team_id": tid, "prior_player_ids_sample": prior_sample})
+        pool_pred_debug["missing_team_games_sample"] = miss_samples
+
+        extra_samples: list[dict[str, Any]] = []
+        for gid, tid in extra_team_games[:10]:
+            pred_sample: list[int] = []
+            if pool_preds_gb is not None and (gid, tid) in pool_preds_gb.groups:
+                g = pool_preds_gb.get_group((gid, tid))
+                pred_sample = [int(v) for v in g["player_id"].head(8).tolist()]
+            extra_samples.append({"game_id": str(gid), "team_id": int(tid), "pred_player_ids_sample": pred_sample})
+        pool_pred_debug["extra_team_games_sample"] = extra_samples
+
+        mismatch_samples: list[dict[str, Any]] = []
+        for gid, tid in matched_team_games[:10]:
+            prior_ids = set()
+            if priors_gb is not None and (gid, tid) in priors_gb.groups:
+                prior_ids = set(int(v) for v in priors_gb.get_group((gid, tid))["player_id"].tolist())
+            pred_ids = set()
+            if pool_preds_gb is not None and (gid, tid) in pool_preds_gb.groups:
+                pred_ids = set(int(v) for v in pool_preds_gb.get_group((gid, tid))["player_id"].tolist())
+            missing_players = sorted(prior_ids - pred_ids)
+            extra_players = sorted(pred_ids - prior_ids)
+            mismatch_samples.append(
+                {
+                    "game_id": str(gid),
+                    "team_id": int(tid),
+                    "n_prior_players": int(len(prior_ids)),
+                    "n_pred_players": int(len(pred_ids)),
+                    "n_missing_prior_players": int(len(missing_players)),
+                    "n_extra_pred_players": int(len(extra_players)),
+                    "missing_prior_player_ids_sample": [int(v) for v in missing_players[:8]],
+                    "extra_pred_player_ids_sample": [int(v) for v in extra_players[:8]],
+                }
+            )
+        pool_pred_debug["player_id_mismatch_sample"] = mismatch_samples
+
+        # Global row-level join stats (unique key rows) for the selected team-game universe.
+        if priors is not None and pool_preds is not None and not priors.empty and not pool_preds.empty:
+            selected_pairs_df = selected[["game_id", "team_id"]].drop_duplicates().copy()
+            prior_key = priors.merge(selected_pairs_df, on=["game_id", "team_id"], how="inner")[
+                ["game_id", "team_id", "player_id"]
+            ].drop_duplicates()
+            pred_key = pool_preds.merge(selected_pairs_df, on=["game_id", "team_id"], how="inner")[
+                ["game_id", "team_id", "player_id"]
+            ].drop_duplicates()
+            joined = prior_key.merge(pred_key, on=["game_id", "team_id", "player_id"], how="inner")
+            pool_pred_debug["join_row_counts"] = {
+                "prior_player_rows": int(len(prior_key)),
+                "pred_player_rows": int(len(pred_key)),
+                "matched_player_rows": int(len(joined)),
+                "unmatched_prior_player_rows": int(len(prior_key) - len(joined)),
+                "unmatched_pred_player_rows": int(len(pred_key) - len(joined)),
+            }
 
     gen = TemplateRotationGenerator(
         rot_bundle=rot_bundle_path,
@@ -1017,6 +1214,8 @@ def run_rotation_generator_eval(
         "overlap_stats": {},
         "missing_pred_team_games": int(missing_pred_team_games),
         "missing_pred_player_rows": int(missing_pred_player_rows),
+        "predictor_team_game_filter": predictor_team_game_filter,
+        "predictor_join_debug": pool_pred_debug,
     }
     if not candidate_pool_team_games_df.empty:
         sizes = pd.to_numeric(candidate_pool_team_games_df["pool_size"], errors="coerce").dropna().astype(float)

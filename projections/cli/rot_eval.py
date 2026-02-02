@@ -123,9 +123,9 @@ def main(
         help="Path to artifacts/rotation_predictor_v1/<run_id> (or a pointer file).",
     ),
     gate_feature_source: str = typer.Option(
-        "cached_preds",
+        "auto",
         "--gate-feature-source",
-        help="Gate feature source: cached_all|cached_preds|cached_train|none (recommend cached_all; default: cached_preds).",
+        help="Gate feature source: auto|cached_all|cached_preds|cached_train|none (auto defaults predictor_threshold->cached_all).",
     ),
     gate_max_train_rows: int | None = typer.Option(
         None,
