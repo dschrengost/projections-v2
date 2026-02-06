@@ -3817,6 +3817,11 @@ th.override-col {
   padding: 0.2rem;
 }
 
+.ops-player-table .target-cell {
+  width: 55px;
+  padding: 0.2rem;
+}
+
 .ops-player-table .delta-input {
   width: 100%;
   background: #1e293b;
@@ -3837,6 +3842,43 @@ th.override-col {
 
 .ops-player-table .delta-input::placeholder {
   color: #475569;
+}
+
+.ops-player-table .target-input {
+  width: 100%;
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 3px;
+  color: #e2e8f0;
+  padding: 0.2rem 0.25rem;
+  font-size: 0.7rem;
+  text-align: center;
+  font-family: monospace;
+}
+
+.ops-player-table .target-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  background: #334155;
+}
+
+.ops-player-table .target-input::placeholder {
+  color: #475569;
+}
+
+.ops-player-table .lock-cell {
+  width: 26px;
+  padding: 0.2rem;
+  text-align: center;
+}
+
+.ops-player-table .lock-checkbox {
+  transform: scale(0.9);
+  accent-color: #60a5fa;
+}
+
+.ops-player-table .lock-checkbox:disabled {
+  opacity: 0.6;
 }
 
 .ops-player-table .final-minutes-cell {

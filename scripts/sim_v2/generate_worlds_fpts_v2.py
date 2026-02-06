@@ -1516,6 +1516,8 @@ def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> p
     for extra in (
         "minutes_p50_cond",
         "minutes_p50",
+        "minutes_lock_eff",
+        "minutes_target_eff",
         "play_prob",
         "status_bucket",
         "is_starter",
@@ -2369,6 +2371,23 @@ def main(
             minutes_alloc_metrics["minutes_alloc_priority_base_col"] = priority_base_col
             minutes_alloc_metrics["minutes_alloc_priority_starter_bump"] = float(starter_bump)
 
+            # Stage 1A ops overrides: hard minutes locks/targets that must persist through team=240 allocation.
+            fixed_mask_arr: np.ndarray | None = None
+            fixed_minutes_arr: np.ndarray | None = None
+            if "minutes_lock_eff" in mu_df.columns and "minutes_target_eff" in mu_df.columns:
+                fixed_mask_arr = (
+                    pd.to_numeric(mu_df["minutes_lock_eff"], errors="coerce")
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                    > 0.5
+                )
+                fixed_minutes_arr = (
+                    pd.to_numeric(mu_df["minutes_target_eff"], errors="coerce")
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                )
+                fixed_minutes_arr = np.clip(fixed_minutes_arr, 0.0, hard_cap_minutes)
+
             # Vegas implied team points for optional anchoring.
             schedule_df = _load_schedule_for_date(root, pd.Timestamp(game_date))
             implied_team_points = _build_implied_team_points(minutes_df, schedule_df)
@@ -2869,6 +2888,8 @@ def main(
                         cap=hard_cap_minutes,
                         max_increase=(max_increase_arr[idxs_arr] if max_increase_arr is not None else None),
                         baseline=(minutes_sim_base[idxs_arr] if max_increase_arr is not None else None),
+                        fixed_mask=(fixed_mask_arr[idxs_arr] if fixed_mask_arr is not None else None),
+                        fixed_minutes=(fixed_minutes_arr[idxs_arr] if fixed_minutes_arr is not None else None),
                         target_total=TEAM_MINUTES_TARGET,
                         k=3.0,
                         eps=1e-6,
