@@ -148,6 +148,8 @@ def allocate_team_minutes_matrix(
     cap: float | np.ndarray = 48.0,
     max_increase: np.ndarray | None = None,  # (N,) optional additional cap above anchor
     baseline: np.ndarray | None = None,  # (N,) optional anchor minutes (max(demand, baseline))
+    fixed_mask: np.ndarray | None = None,  # (N,) hard fixed players (Stage 1A ops overrides)
+    fixed_minutes: np.ndarray | None = None,  # (N,) hard targets (minutes) for fixed players
     target_total: float = 240.0,
     k: float = 3.0,
     eps: float = 1e-6,
@@ -171,9 +173,28 @@ def allocate_team_minutes_matrix(
     if target <= 0.0:
         return np.zeros_like(d0), {"n_rows": int(n_rows), "n_all_inactive": int((~active.any(axis=1)).sum())}
 
+    all_inactive = ~active.any(axis=1)
+    n_all_inactive = int(all_inactive.sum())
+
     p = np.asarray(priority, dtype=float)
     if p.shape != (n_players,):
         raise ValueError(f"priority must have shape (N,), got {p.shape}")
+
+    if fixed_mask is None:
+        fixed_vec = np.zeros(n_players, dtype=bool)
+    else:
+        fixed_vec = np.asarray(fixed_mask, dtype=bool)
+        if fixed_vec.shape != (n_players,):
+            raise ValueError(f"fixed_mask must have shape (N,), got {fixed_vec.shape}")
+    if fixed_vec.any():
+        if fixed_minutes is None:
+            raise ValueError("fixed_minutes is required when fixed_mask is provided.")
+        fixed_vals = np.asarray(fixed_minutes, dtype=float)
+        if fixed_vals.shape != (n_players,):
+            raise ValueError(f"fixed_minutes must have shape (N,), got {fixed_vals.shape}")
+        fixed_vals = np.nan_to_num(fixed_vals, nan=0.0, posinf=0.0, neginf=0.0)
+    else:
+        fixed_vals = np.zeros(n_players, dtype=float)
 
     if np.isscalar(cap):
         cap_vec = np.full(n_players, float(cap), dtype=float)
@@ -182,12 +203,30 @@ def allocate_team_minutes_matrix(
         if cap_vec.shape != (n_players,):
             raise ValueError(f"cap must be a scalar or have shape (N,), got {cap_vec.shape}")
     cap_vec = np.clip(cap_vec, 0.0, None)
+    fixed_vals = np.clip(fixed_vals, 0.0, cap_vec)
 
-    # Apply play/inactive semantics: inactive players are fixed at 0 with cap=0.
-    demand = np.clip(d0, 0.0, None) * active.astype(float)
+    # Stage 1A: treat fixed players as hard constraints (min=max=fixed_minutes) when active.
+    # Availability overrides locks: if inactive in a world, fixed players get 0 minutes.
+    fixed_active = active & fixed_vec[None, :]
+    fixed_minutes_worlds = fixed_active.astype(float) * fixed_vals[None, :]
+    fixed_sum = fixed_minutes_worlds.sum(axis=1)
+    target_rem = target - fixed_sum
+    locked_infeasible = (~all_inactive) & (target_rem < -eps)
+    if locked_infeasible.any():
+        sample_idx = int(np.flatnonzero(locked_infeasible)[0])
+        raise ValueError(
+            "locked minutes infeasible (sum fixed > target_total): "
+            f"row={sample_idx} fixed_sum={float(fixed_sum[sample_idx]):.3f} target_total={target:.3f}"
+        )
+
+    # Free (non-fixed) actives participate in the allocator.
+    active_free = active & (~fixed_vec[None, :])
+
+    # Apply play/inactive semantics: inactive and fixed players are excluded from demand/caps.
+    demand = np.clip(d0, 0.0, None) * active_free.astype(float)
 
     if max_increase is None:
-        cap_eff = cap_vec[None, :] * active.astype(float)
+        cap_eff = cap_vec[None, :] * active_free.astype(float)
     else:
         inc = np.asarray(max_increase, dtype=float)
         if inc.shape != (n_players,):
@@ -203,18 +242,16 @@ def allocate_team_minutes_matrix(
             anchor = np.maximum(demand, base[None, :])
 
         cap_dyn = anchor + inc[None, :]
-        cap_eff = np.minimum(cap_vec[None, :], cap_dyn) * active.astype(float)
-
-    all_inactive = ~active.any(axis=1)
-    n_all_inactive = int(all_inactive.sum())
+        cap_eff = np.minimum(cap_vec[None, :], cap_dyn) * active_free.astype(float)
 
     # Degenerate: if a row has no demand among active players, return zeros (matches single-world behavior).
     demand_row_sum = demand.sum(axis=1)
-    zero_demand = (demand_row_sum <= eps) & (~all_inactive)
+    # If fixed players exist in the row, don't drop them on the floor; still solve for remaining.
+    zero_demand = (demand_row_sum <= eps) & (~all_inactive) & (fixed_sum <= eps)
 
     # Cap feasibility per row.
     cap_row_sum = cap_eff.sum(axis=1)
-    cap_infeasible = (cap_row_sum > 0.0) & (cap_row_sum + eps < target)
+    cap_infeasible = (~all_inactive) & (target_rem > eps) & ((cap_row_sum + eps) < target_rem)
     n_cap_infeasible = int(cap_infeasible.sum())
 
     out = np.zeros_like(demand)
@@ -223,20 +260,24 @@ def allocate_team_minutes_matrix(
         out[cap_infeasible] = cap_eff[cap_infeasible]
 
     # Solvable rows: bisection on λ.
-    solvable = (~all_inactive) & (~zero_demand) & (~cap_infeasible)
+    fixed_only = (~all_inactive) & (target_rem <= eps)
+    solvable = (~all_inactive) & (~zero_demand) & (~cap_infeasible) & (~fixed_only)
     if solvable.any():
         # Per-row normalization of priority to [0,1] among active players.
         # Inactive players get z=0 (weight=1, but cap=0 anyway).
         p_row = p[None, :]  # (1, N) broadcast
-        p_min = np.min(np.where(active, p_row, np.inf), axis=1)
-        p_max = np.max(np.where(active, p_row, -np.inf), axis=1)
+        has_free = active_free.any(axis=1)
+        p_min = np.min(np.where(active_free, p_row, np.inf), axis=1)
+        p_max = np.max(np.where(active_free, p_row, -np.inf), axis=1)
+        p_min = np.where(has_free, p_min, 0.0)
+        p_max = np.where(has_free, p_max, 0.0)
         denom = p_max - p_min
         denom = np.where(denom > eps, denom, 1.0)  # avoid divide-by-zero
         z = (p_row - p_min[:, None]) / denom[:, None]
         z = np.clip(z, 0.0, 1.0)
-        z = np.where(active, z, 0.0)
+        z = np.where(active_free, z, 0.0)
         w = np.exp(float(k) * z)
-        w = np.where(active, w, 1.0)
+        w = np.where(active_free, w, 1.0)
 
         # Bracket λ per row.
         lam_lo = np.min(2.0 * w * (demand - cap_eff), axis=1) - 1.0
@@ -250,12 +291,12 @@ def allocate_team_minutes_matrix(
             mid = 0.5 * (lo + hi)
             m = np.clip(demand - mid[:, None] / (2.0 * w), 0.0, cap_eff)
             s = m.sum(axis=1)
-            too_high = s > target
+            too_high = s > target_rem
             # If sum too high -> increase λ (move lo up). Else decrease λ (move hi down).
             lo = np.where(solvable & too_high, mid, lo)
             hi = np.where(solvable & (~too_high), mid, hi)
 
-            max_abs = float(np.max(np.abs(s[solvable] - target))) if solvable.any() else 0.0
+            max_abs = float(np.max(np.abs(s[solvable] - target_rem[solvable]))) if solvable.any() else 0.0
             if max_abs <= 1e-6:
                 break
 
@@ -267,6 +308,9 @@ def allocate_team_minutes_matrix(
     out[zero_demand] = 0.0
     out[all_inactive] = 0.0
 
+    # Add fixed minutes back in (fixed active players are min=max=target).
+    out = out + fixed_minutes_worlds
+
     # Keep inactive exactly 0.
     out = np.where(active, out, 0.0)
 
@@ -275,7 +319,7 @@ def allocate_team_minutes_matrix(
     residual[~all_inactive] = sums[~all_inactive] - target
     max_abs_residual = float(np.max(np.abs(residual[solvable]))) if solvable.any() else 0.0
 
-    cap_bind = active & (out >= (cap_eff - 1e-9))
+    cap_bind = active_free & (out >= (cap_eff - 1e-9))
     n_cap_bind_rows = int((cap_bind.any(axis=1) & (~cap_infeasible) & (~all_inactive)).sum())
 
     return out, {
@@ -284,6 +328,7 @@ def allocate_team_minutes_matrix(
         "n_cap_infeasible_rows": int(n_cap_infeasible),
         "n_cap_bind_rows": int(n_cap_bind_rows),
         "max_abs_residual": float(max_abs_residual),
+        "n_fixed_players": int(fixed_vec.sum()),
         **({"cap_infeasible_mask": cap_infeasible} if return_infeasible_mask else {}),
     }
 

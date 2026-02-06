@@ -19,9 +19,11 @@ from projections.ops.overrides import (
     clear_overrides,
     list_overrides,
     load_overrides_map,
+    overrides_path,
     upsert_overrides,
 )
 from projections.ops.worlds_patch import patch_worlds_matrix_for_game
+from projections.pipeline.effective_inputs import write_effective_minutes_layer
 
 router = APIRouter(prefix="/api/ops", tags=["ops"])
 
@@ -106,6 +108,8 @@ class OpsPlayerOverrideUpdate(BaseModel):
     minutes_p10_cond: float | None = None
     minutes_p50_cond: float | None = None
     minutes_p90_cond: float | None = None
+    minutes_target: float | None = None  # Absolute minutes target (0-48). Implies lock.
+    minutes_lock: bool | None = None  # If True, fix minutes to target (or current minutes when target unset).
     minutes_delta: float | None = None  # Additive adjustment to model quantiles (e.g., +5 or -3)
 
     pred_fga2_per_min: float | None = None
@@ -138,7 +142,66 @@ def get_overrides(date: str = Query(...)) -> dict[str, Any]:
 def post_overrides(req: OpsUpsertOverridesRequest) -> dict[str, Any]:
     game_date = _parse_date(req.date)
     updates = [item.model_dump(exclude_none=True) for item in req.updates]
-    merged = upsert_overrides(game_date, updates, note=req.note)
+    data_root = paths.data_path()
+    path = overrides_path(game_date, data_root=data_root)
+    previous_text: str | None = None
+    if path.exists():
+        try:
+            previous_text = path.read_text(encoding="utf-8")
+        except OSError:
+            previous_text = None
+
+    def _restore_previous() -> None:
+        if previous_text is None:
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp.restore.json")
+            tmp.write_text(previous_text, encoding="utf-8")
+            tmp.replace(path)
+        except OSError:
+            # Best-effort: fall back to non-atomic write.
+            path.write_text(previous_text, encoding="utf-8")
+
+    merged = upsert_overrides(game_date, updates, note=req.note, data_root=data_root)
+
+    # Validate hard targets/locks immediately so the UI can surface infeasibility
+    # (e.g., sum locked targets > 240) without waiting for a pipeline run.
+    try:
+        minutes_base_dir = data_root / "artifacts" / "minutes_v1" / "daily" / game_date.isoformat()
+        minutes_dir, _ = _resolve_run_dir(minutes_base_dir, run_id=None, parquet_name="minutes.parquet")
+        minutes_path = minutes_dir / "minutes.parquet"
+        minutes_df = pd.read_parquet(minutes_dir / "minutes.parquet")
+        apply_overrides_to_minutes_df(
+            minutes_df,
+            game_date=game_date,
+            data_root=data_root,
+            force_reconcile=True,
+        )
+
+        # Materialize the effective minutes layer in-place so /api/minutes reflects the change immediately.
+        write_effective_minutes_layer(
+            game_date=game_date,
+            minutes_path=minutes_path,
+            out_dir=minutes_dir,
+            data_root=data_root,
+            source="gameview",
+        )
+    except FileNotFoundError:
+        # Minutes artifact missing; skip validation (dev/backfill scenarios).
+        pass
+    except ValueError as exc:
+        _restore_previous()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        _restore_previous()
+        raise
+
     return {"date": game_date.isoformat(), "overrides": merged}
 
 

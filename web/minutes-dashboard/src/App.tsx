@@ -788,7 +788,13 @@ function App() {
 
       <section className="content">
         {selectedGameId ? (
-          <GameView rows={filteredRows} gameId={selectedGameId} />
+          <GameView
+            rows={filteredRows}
+            gameId={selectedGameId}
+            onOverridesSaved={() => {
+              void fetchData(selectedDate, runId, modelId)
+            }}
+          />
         ) : (
           <div className="table-wrapper">
             <table>

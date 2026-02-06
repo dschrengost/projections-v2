@@ -20,6 +20,10 @@ export type PlayerRow = {
     ops_depth_role?: string
     minutes_delta?: number
     minutes_delta_applied?: boolean
+    minutes_target?: number | null
+    minutes_lock?: boolean | null
+    minutes_target_eff?: number
+    minutes_lock_eff?: boolean
     // Canonical play probability fields (explicit conditioning)
     p_play_raw?: number
     p_play_eff?: number

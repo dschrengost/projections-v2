@@ -13,6 +13,7 @@ import { PlayerOpsPanel } from './PlayerOpsPanel'
 type GameViewProps = {
     rows: PlayerRow[]
     gameId: string
+    onOverridesSaved?: () => void
 }
 
 type PlayerGroup = {
@@ -60,7 +61,7 @@ const computeTeamSummary = (players: PlayerRow[]) => {
     }
 }
 
-export const GameView: React.FC<GameViewProps> = ({ rows, gameId }) => {
+export const GameView: React.FC<GameViewProps> = ({ rows, gameId, onOverridesSaved }) => {
     const [selectedPlayer, setSelectedPlayer] = useState<PlayerRow | null>(null)
 
     const teams = useMemo(() => {
@@ -155,6 +156,7 @@ export const GameView: React.FC<GameViewProps> = ({ rows, gameId }) => {
                     teams={teams.map(([name]) => name)}
                     gameId={gameId}
                     date={rows[0]?.game_date || new Date().toISOString().slice(0, 10)}
+                    onOverridesSaved={onOverridesSaved}
                 />
 
                 {/* Minutes Distribution Chart */}
