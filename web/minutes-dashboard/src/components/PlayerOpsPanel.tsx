@@ -91,26 +91,17 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
         setSaveStatus('saving')
         setSaveError(null)
         try {
-            const baseMinutesById: Record<string, number> = {}
-            for (const p of players) {
-                const pid = String(p.player_id)
-                baseMinutesById[pid] = p.minutes_final ?? p.minutes_p50 ?? 0
-            }
-
             const byPlayer: Record<string, Record<string, unknown>> = {}
             for (const [playerId, delta] of Object.entries(deltas)) {
-                const baseMin = baseMinutesById[playerId] ?? 0
                 byPlayer[playerId] = {
                     ...(byPlayer[playerId] ?? {}),
-                    minutes_target: baseMin + delta,
-                    minutes_lock: true,
+                    minutes_delta: delta,
                 }
             }
             for (const [playerId, target] of Object.entries(targets)) {
                 byPlayer[playerId] = {
                     ...(byPlayer[playerId] ?? {}),
                     minutes_target: target,
-                    minutes_lock: true,
                 }
             }
             for (const [playerId, lockVal] of Object.entries(locks)) {
@@ -288,10 +279,11 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
                         className="ops-help-icon"
                         title={
                             [
-                                'Policy (Stage 1A):',
-                                '• Target + Lock are authoritative and are enforced in effective minutes + sim allocator.',
-                                '• Availability overrides locks: if a locked player is inactive in a sim world, their minutes become 0.',
-                                '• Δ is sugar: on Save it becomes Target = Base + Δ and Lock = true.',
+                                'Manual overrides behavior:',
+                                '• Δ and Target adjust minutes immediately in the effective layer.',
+                                '• Lock decides whether those minutes are fixed through reconcile + sim allocation.',
+                                '• If unlocked, player minutes can still move during team=240 reconciliation.',
+                                '• If locked, minutes are fixed when active. Inactive worlds still set minutes to 0.',
                                 '• OUT implies Target = 0 and Lock = true.',
                                 '• Infeasible locks (sum locked targets > 240) will error on save.',
                             ].join('\n')
@@ -323,115 +315,111 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
                                     {teamTotal.toFixed(0)} min
                                 </span>
                             </div>
-                            <div className="ops-table-scroll">
-                                <table className="ops-player-table">
-                                    <tbody>
-                                        {teamPlayers.map(p => {
-                                            const pid = String(p.player_id)
-                                            const delta = deltas[pid]
-                                            const role = roles[pid] ?? (p.ops_depth_role ?? '')
-                                            const baseMin = p.minutes_final ?? p.minutes_p50 ?? 0
-                                            const targetValue = targets[pid]
-                                            const savedTarget = p.minutes_target ?? null
-                                            const savedLock = p.minutes_lock ?? null
-                                            const effectiveTarget = p.minutes_target_eff
-                                            const effectiveLock = p.minutes_lock_eff ?? false
+                            <div className="ops-player-list">
+                                {teamPlayers.map(p => {
+                                    const pid = String(p.player_id)
+                                    const delta = deltas[pid]
+                                    const savedDelta = p.minutes_delta ?? null
+                                    const role = roles[pid] ?? (p.ops_depth_role ?? '')
+                                    const baseMin = p.minutes_final ?? p.minutes_p50 ?? 0
+                                    const targetValue = targets[pid]
+                                    const savedTarget = p.minutes_target ?? null
+                                    const savedLock = p.minutes_lock ?? null
+                                    const effectiveTarget = p.minutes_target_eff
+                                    const effectiveLock = p.minutes_lock_eff ?? false
 
-                                            const outRole = role.trim().toLowerCase() === 'out'
-                                            const previewTarget =
-                                                outRole
-                                                    ? 0
-                                                    : (targetValue !== undefined && !isNaN(targetValue))
-                                                        ? targetValue
-                                                        : (delta !== undefined)
-                                                            ? baseMin + delta
-                                                            : (savedTarget !== null && savedTarget !== undefined)
-                                                                ? savedTarget
-                                                                : (effectiveLock && effectiveTarget !== undefined)
-                                                                    ? effectiveTarget
-                                                                    : null
-                                            const lockChecked =
-                                                (targetValue !== undefined && !isNaN(targetValue)) ||
-                                                delta !== undefined ||
-                                                (locks[pid] ?? (savedLock ?? effectiveLock))
-                                            const lockDisabled =
-                                                (targetValue !== undefined && !isNaN(targetValue)) || delta !== undefined
-                                            const isStarter = p.is_confirmed_starter || p.is_projected_starter
+                                    const outRole = role.trim().toLowerCase() === 'out'
+                                    const previewTarget =
+                                        outRole
+                                            ? 0
+                                            : (targetValue !== undefined && !isNaN(targetValue))
+                                                ? targetValue
+                                                : (delta !== undefined)
+                                                    ? baseMin + delta
+                                                    : (savedTarget !== null && savedTarget !== undefined)
+                                                        ? savedTarget
+                                                        : (savedDelta !== null && savedDelta !== undefined)
+                                                            ? baseMin + savedDelta
+                                                            : (effectiveLock && effectiveTarget !== undefined)
+                                                                ? effectiveTarget
+                                                                : baseMin
+                                    const lockChecked = locks[pid] ?? (savedLock ?? effectiveLock)
+                                    const isStarter = p.is_confirmed_starter || p.is_projected_starter
+                                    const rowModified = delta !== undefined || targets[pid] !== undefined || locks[pid] !== undefined || roles[pid] !== undefined
+                                    const deltaPlaceholder = savedDelta !== null && savedDelta !== undefined
+                                        ? `${savedDelta > 0 ? '+' : ''}${Number(savedDelta).toFixed(1)}`
+                                        : '±'
+                                    const targetPlaceholder = savedTarget !== null && savedTarget !== undefined
+                                        ? Number(savedTarget).toFixed(1)
+                                        : 'Min'
 
-                                            return (
-                                                <tr
-                                                    key={pid}
-                                                    className={(delta !== undefined || targets[pid] !== undefined || locks[pid] !== undefined || roles[pid] !== undefined) ? 'modified' : ''}
+                                    return (
+                                        <div key={pid} className={`ops-player-row ${rowModified ? 'modified' : ''} ${lockChecked ? 'locked' : ''}`}>
+                                            <div className="ops-player-top">
+                                                <div className="ops-player-identity">
+                                                    <span className="name" title={p.player_name}>{p.player_name}</span>
+                                                    {isStarter && <span className="starter-dot" title="Starter">S</span>}
+                                                    {lockChecked && <span className="ops-lock-pill" title="Currently locked">Locked</span>}
+                                                </div>
+                                                <select
+                                                    className="role-select"
+                                                    value={role}
+                                                    onChange={(e) => handleRoleChange(p.player_id ?? pid, e.target.value)}
+                                                    title="Role override. OUT forces 0 minutes and lock."
                                                 >
-                                                    <td className="name-cell">
-                                                        <div className="name-row">
-                                                            <span className="name" title={p.player_name}>{p.player_name}</span>
-                                                            {isStarter && <span className="starter-dot" title="Starter">S</span>}
-                                                        </div>
-                                                    </td>
-                                                    <td className="role-cell">
-                                                        <select
-                                                            className="role-select"
-                                                            value={role}
-                                                            onChange={(e) => handleRoleChange(p.player_id ?? pid, e.target.value)}
-                                                            title="Role override. OUT implies Target=0 and Lock=true."
-                                                        >
-                                                            <option value="">Role…</option>
-                                                            <option value="starter">Starter</option>
-                                                            <option value="rotation">Rotation</option>
-                                                            <option value="deep_bench">Deep bench</option>
-                                                            <option value="out">OUT</option>
-                                                        </select>
-                                                    </td>
-                                                    <td className="base-minutes-cell" title="Base minutes from model/effective layer (before your local edits).">
-                                                        {baseMin.toFixed(1)}
-                                                    </td>
-                                                    <td className="delta-cell">
-                                                        <input
-                                                            type="number"
-                                                            className="delta-input"
-                                                            placeholder="±"
-                                                            step="0.5"
-                                                            value={delta ?? ''}
-                                                            onChange={(e) => handleDeltaChange(p.player_id, e.target.value)}
-                                                            title="Minutes Δ (sugar). On Save, this becomes Target = Base + Δ and Lock = true."
-                                                        />
-                                                    </td>
-                                                    <td className="target-cell">
-                                                        <input
-                                                            type="number"
-                                                            className="target-input"
-                                                            placeholder="Min"
-                                                            step="0.5"
-                                                            min="0"
-                                                            max="48"
-                                                            value={targetValue ?? ''}
-                                                            onChange={(e) => handleTargetChange(p.player_id, e.target.value)}
-                                                            title="Minutes Target (absolute). On Save, Lock = true and minutes are held fixed through reconcile + sim allocation (when active)."
-                                                        />
-                                                    </td>
-                                                    <td className="lock-cell">
-                                                        <input
-                                                            type="checkbox"
-                                                            className="lock-checkbox"
-                                                            checked={Boolean(lockChecked)}
-                                                            disabled={lockDisabled}
-                                                            onChange={(e) => handleLockToggle(p.player_id, e.target.checked)}
-                                                            title={
-                                                                lockDisabled
-                                                                    ? 'Target/Δ implies lock'
-                                                                    : 'Lock minutes through effective reconcile + sim allocator. Availability overrides locks: if inactive in a sim world, minutes become 0.'
-                                                            }
-                                                        />
-                                                    </td>
-                                                    <td className={`final-minutes-cell ${(delta !== undefined || targetValue !== undefined) ? 'adjusted' : ''}`} title="Preview minutes (local). Effective layer will reconcile unlocked players to team=240.">
-                                                        {previewTarget !== null ? Number(previewTarget).toFixed(1) : ''}
-                                                    </td>
-                                                </tr>
-                                            )
-                                        })}
-                                    </tbody>
-                                </table>
+                                                    <option value="">Role…</option>
+                                                    <option value="starter">Starter</option>
+                                                    <option value="rotation">Rotation</option>
+                                                    <option value="deep_bench">Deep bench</option>
+                                                    <option value="out">OUT</option>
+                                                </select>
+                                            </div>
+                                            <div className="ops-player-controls">
+                                                <div className="ops-control read-only" title="Current baseline minutes before unsaved local edits.">
+                                                    <span className="ops-control-label">Base</span>
+                                                    <span className="ops-control-value">{baseMin.toFixed(1)}</span>
+                                                </div>
+                                                <label className="ops-control" title="Relative adjustment in minutes. Does not auto-lock.">
+                                                    <span className="ops-control-label">Δ</span>
+                                                    <input
+                                                        type="number"
+                                                        className="delta-input"
+                                                        placeholder={deltaPlaceholder}
+                                                        step="0.5"
+                                                        value={delta ?? ''}
+                                                        onChange={(e) => handleDeltaChange(p.player_id, e.target.value)}
+                                                    />
+                                                </label>
+                                                <label className="ops-control" title="Absolute minutes target. Lock controls whether this is enforced.">
+                                                    <span className="ops-control-label">Target</span>
+                                                    <input
+                                                        type="number"
+                                                        className="target-input"
+                                                        placeholder={targetPlaceholder}
+                                                        step="0.5"
+                                                        min="0"
+                                                        max="48"
+                                                        value={targetValue ?? ''}
+                                                        onChange={(e) => handleTargetChange(p.player_id, e.target.value)}
+                                                    />
+                                                </label>
+                                                <label className="ops-control lock-control" title="When checked, this player's minutes are fixed in reconcile + sim (when active).">
+                                                    <span className="ops-control-label">Lock</span>
+                                                    <input
+                                                        type="checkbox"
+                                                        className="lock-checkbox"
+                                                        checked={Boolean(lockChecked)}
+                                                        onChange={(e) => handleLockToggle(p.player_id, e.target.checked)}
+                                                    />
+                                                </label>
+                                                <div className={`ops-control read-only ${rowModified ? 'adjusted' : ''}`} title="Local preview after your current edits.">
+                                                    <span className="ops-control-label">Preview</span>
+                                                    <span className="ops-control-value">{Number(previewTarget).toFixed(1)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
+                                })}
                             </div>
                         </div>
                     )

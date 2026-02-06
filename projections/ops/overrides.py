@@ -1179,7 +1179,7 @@ def apply_overrides_to_minutes_df(
     if "minutes_target" not in merged.columns:
         merged["minutes_target"] = pd.NA
     if "minutes_lock" not in merged.columns:
-        merged["minutes_lock"] = False
+        merged["minutes_lock"] = pd.NA
 
     locked_mask = pd.Series(False, index=merged.index)
     ops_applied = pd.Series(False, index=merged.index)
@@ -1218,6 +1218,7 @@ def apply_overrides_to_minutes_df(
         ops_applied = ops_applied | merged[override_col].notna()
 
     has_target = merged["minutes_target"].notna() if "minutes_target" in merged.columns else pd.Series(False, index=merged.index)
+    has_delta = pd.Series(False, index=merged.index)
 
     if has_target.any():
         # Hard targets: treat as an absolute minutes center (shift all minutes columns by the delta
@@ -1244,7 +1245,6 @@ def apply_overrides_to_minutes_df(
                 pd.to_numeric(merged.loc[has_target, "effective_minutes"], errors="coerce").fillna(0.0).astype(float)
                 + delta_to_target
             ).clip(0.0, 48.0)
-        locked_mask = locked_mask | has_target
         ops_applied = ops_applied | has_target
 
     # Apply minutes_delta as additive adjustment (takes precedence over raw quantile overrides)
@@ -1252,7 +1252,8 @@ def apply_overrides_to_minutes_df(
     # it keeps its original name (no _ops suffix) because suffixes only apply to colliding columns.
     delta_col = "minutes_delta" if "minutes_delta" in merged.columns else "minutes_delta_ops"
     if delta_col in merged.columns:
-        # Stage 1A: treat minutes_delta as sugar for a hard target when minutes_target is absent.
+        # Minutes delta is a soft adjustment by default. Lock behavior is controlled
+        # explicitly by `minutes_lock` (or legacy auto-lock when lock is missing).
         has_delta = merged[delta_col].notna() & ~has_target
         if has_delta.any():
             delta_vals = merged.loc[has_delta, delta_col].astype(float)
@@ -1266,8 +1267,6 @@ def apply_overrides_to_minutes_df(
                     pd.to_numeric(merged.loc[has_delta, "effective_minutes"], errors="coerce").fillna(0.0).astype(float)
                     + delta_vals
                 ).clip(0.0, 48.0)
-            # Mark delta-adjusted players as locked and with overridden quantiles
-            locked_mask = locked_mask | has_delta
             merged.loc[has_delta, "_minutes_p10_overridden"] = True
             merged.loc[has_delta, "_minutes_p90_overridden"] = True
             ops_applied = ops_applied | has_delta
@@ -1305,10 +1304,15 @@ def apply_overrides_to_minutes_df(
     merged["minutes_target_eff"] = pd.to_numeric(merged.get("minutes_target"), errors="coerce") if "minutes_target" in merged.columns else pd.NA
     if "minutes_lock" in merged.columns:
         raw_lock = merged["minutes_lock"]
-        minutes_lock_flag = raw_lock.fillna(False).astype(bool)
+        minutes_lock_flag = raw_lock.astype("boolean").fillna(False).astype(bool)
+        # Backward compatibility: legacy override rows may have target/delta fields
+        # but no explicit minutes_lock. Keep old "adjustment implies lock" behavior
+        # only for those legacy rows.
+        legacy_auto_lock = raw_lock.isna() & (has_target | has_delta)
     else:
         minutes_lock_flag = pd.Series(False, index=merged.index)
-    merged["minutes_lock_eff"] = (minutes_lock_flag | has_target | locked_mask).fillna(False).astype(bool)
+        legacy_auto_lock = pd.Series(False, index=merged.index)
+    merged["minutes_lock_eff"] = (minutes_lock_flag | legacy_auto_lock | locked_mask).fillna(False).astype(bool)
 
     # OUT always implies a hard 0 target + lock.
     if status_raw is not None:

@@ -636,7 +636,7 @@ tbody tr:hover {
 /* === Game View Container (Sidebar Layout) === */
 .game-view-container {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: minmax(380px, 430px) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
@@ -3782,42 +3782,44 @@ th.override-col {
   color: #fbbf24;
 }
 
-.ops-player-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.75rem;
-  min-width: 360px;
+.ops-player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
 }
 
-.ops-table-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
+.ops-player-row {
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 0.35rem 0.45rem;
+  background: rgba(15, 23, 42, 0.8);
 }
 
-.ops-player-table tr {
-  border-bottom: 1px solid #1e293b;
+.ops-player-row.modified {
+  border-color: rgba(96, 165, 250, 0.65);
+  background: rgba(59, 130, 246, 0.12);
 }
 
-.ops-player-table tr:last-child {
-  border-bottom: none;
+.ops-player-row.locked {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.35);
 }
 
-.ops-player-table tr.modified {
-  background: rgba(59, 130, 246, 0.15);
+.ops-player-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
 }
 
-.ops-player-table .name-cell {
-  padding: 0.3rem 0.25rem;
-  max-width: 100px;
-}
-
-.ops-player-table .name-row {
+.ops-player-identity {
   display: flex;
   align-items: center;
   gap: 0.3rem;
+  min-width: 0;
 }
 
-.ops-player-table .name {
+.ops-player-identity .name {
   color: #e2e8f0;
   white-space: nowrap;
   overflow: hidden;
@@ -3825,7 +3827,7 @@ th.override-col {
   font-size: 0.7rem;
 }
 
-.ops-player-table .starter-dot {
+.ops-player-identity .starter-dot {
   color: #4ade80;
   font-size: 0.6rem;
   font-weight: 600;
@@ -3834,25 +3836,64 @@ th.override-col {
   border-radius: 2px;
 }
 
-.ops-player-table .base-minutes-cell {
-  text-align: right;
-  color: #64748b;
-  padding: 0.3rem 0.25rem;
+.ops-lock-pill {
+  font-size: 0.58rem;
+  padding: 0.06rem 0.3rem;
+  border-radius: 999px;
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.25);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ops-player-top .role-select {
+  min-width: 96px;
+  max-width: 110px;
+  font-size: 0.65rem;
+  padding: 0.18rem 0.28rem;
+}
+
+.ops-player-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto 1fr;
+  gap: 0.3rem;
+  align-items: end;
+}
+
+.ops-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.ops-control-label {
+  color: #94a3b8;
+  font-size: 0.56rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.ops-control.read-only {
+  justify-content: flex-end;
+}
+
+.ops-control-value {
+  color: #e2e8f0;
   font-family: monospace;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
 }
 
-.ops-player-table .delta-cell {
-  width: 45px;
-  padding: 0.2rem;
+.ops-control.read-only.adjusted .ops-control-value {
+  color: #60a5fa;
+  font-weight: 700;
 }
 
-.ops-player-table .target-cell {
-  width: 55px;
-  padding: 0.2rem;
-}
-
-.ops-player-table .delta-input {
+.ops-control .delta-input,
+.ops-control .target-input {
   width: 100%;
   background: #1e293b;
   border: 1px solid #475569;
@@ -3864,65 +3905,37 @@ th.override-col {
   font-family: monospace;
 }
 
-.ops-player-table .delta-input:focus {
+.ops-control .delta-input:focus,
+.ops-control .target-input:focus {
   outline: none;
   border-color: #3b82f6;
   background: #334155;
 }
 
-.ops-player-table .delta-input::placeholder {
+.ops-control .delta-input::placeholder,
+.ops-control .target-input::placeholder {
   color: #475569;
 }
 
-.ops-player-table .target-input {
-  width: 100%;
-  background: #1e293b;
-  border: 1px solid #475569;
-  border-radius: 3px;
-  color: #e2e8f0;
-  padding: 0.2rem 0.25rem;
-  font-size: 0.7rem;
-  text-align: center;
-  font-family: monospace;
+.lock-control {
+  align-items: center;
+  justify-content: flex-end;
 }
 
-.ops-player-table .target-input:focus {
-  outline: none;
-  border-color: #3b82f6;
-  background: #334155;
-}
-
-.ops-player-table .target-input::placeholder {
-  color: #475569;
-}
-
-.ops-player-table .lock-cell {
-  width: 26px;
-  padding: 0.2rem;
-  text-align: center;
-}
-
-.ops-player-table .lock-checkbox {
+.lock-control .lock-checkbox {
   transform: scale(0.9);
   accent-color: #60a5fa;
 }
 
-.ops-player-table .lock-checkbox:disabled {
-  opacity: 0.6;
-}
+@media (max-width: 1320px) {
+  .ops-player-controls {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
 
-.ops-player-table .final-minutes-cell {
-  text-align: right;
-  color: #94a3b8;
-  padding: 0.3rem 0.25rem;
-  font-family: monospace;
-  font-size: 0.7rem;
-  min-width: 35px;
-}
-
-.ops-player-table .final-minutes-cell.adjusted {
-  color: #60a5fa;
-  font-weight: 600;
+  .lock-control {
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
 }
 
 .ops-actions {
