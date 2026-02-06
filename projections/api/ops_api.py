@@ -212,7 +212,56 @@ def delete_overrides(
     player_id: str | None = Query(None),
 ) -> dict[str, Any]:
     game_date = _parse_date(date)
-    remaining = clear_overrides(game_date, game_id=game_id, player_id=player_id)
+    data_root = paths.data_path()
+    path = overrides_path(game_date, data_root=data_root)
+    previous_text: str | None = None
+    if path.exists():
+        try:
+            previous_text = path.read_text(encoding="utf-8")
+        except OSError:
+            previous_text = None
+
+    def _restore_previous() -> None:
+        if previous_text is None:
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp.restore.json")
+            tmp.write_text(previous_text, encoding="utf-8")
+            tmp.replace(path)
+        except OSError:
+            # Best-effort: fall back to non-atomic write.
+            path.write_text(previous_text, encoding="utf-8")
+
+    remaining = clear_overrides(game_date, game_id=game_id, player_id=player_id, data_root=data_root)
+
+    # Materialize effective minutes after clearing so /api/minutes reflects the change immediately.
+    try:
+        minutes_base_dir = data_root / "artifacts" / "minutes_v1" / "daily" / game_date.isoformat()
+        minutes_dir, _ = _resolve_run_dir(minutes_base_dir, run_id=None, parquet_name="minutes.parquet")
+        minutes_path = minutes_dir / "minutes.parquet"
+        write_effective_minutes_layer(
+            game_date=game_date,
+            minutes_path=minutes_path,
+            out_dir=minutes_dir,
+            data_root=data_root,
+            source="gameview",
+        )
+    except FileNotFoundError:
+        # Minutes artifact missing; skip in dev/backfill scenarios.
+        pass
+    except Exception as exc:
+        _restore_previous()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to write effective minutes layer after clearing overrides: {exc}",
+        ) from exc
+
     return {"date": game_date.isoformat(), "overrides": remaining}
 
 

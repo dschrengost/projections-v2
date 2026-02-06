@@ -636,8 +636,9 @@ tbody tr:hover {
 /* === Game View Container (Sidebar Layout) === */
 .game-view-container {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 340px 1fr;
   gap: 1rem;
+  align-items: start;
 }
 
 @media (max-width: 1100px) {
@@ -656,12 +657,14 @@ tbody tr:hover {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-width: 0;
 }
 
 .game-main {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-width: 0;
 }
 
 /* === Sidebar Cards === */
@@ -3695,6 +3698,27 @@ th.override-col {
   margin-bottom: 0.5rem;
 }
 
+.ops-panel .ops-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ops-panel .ops-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid #475569;
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  font-size: 0.75rem;
+  cursor: help;
+  user-select: none;
+}
+
 .ops-panel .ops-header .sidebar-card-title {
   margin: 0;
 }
@@ -3762,6 +3786,12 @@ th.override-col {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.75rem;
+  min-width: 360px;
+}
+
+.ops-table-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .ops-player-table tr {
@@ -3896,7 +3926,8 @@ th.override-col {
 }
 
 .ops-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
   margin-top: 0.75rem;
   padding-top: 0.75rem;
@@ -3904,8 +3935,8 @@ th.override-col {
 }
 
 .ops-save-btn,
+.ops-reset-btn,
 .ops-run-btn {
-  flex: 1;
   padding: 0.5rem 0.75rem;
   border: none;
   border-radius: 4px;
@@ -3939,6 +3970,7 @@ th.override-col {
 }
 
 .ops-run-btn {
+  grid-column: 1 / -1;
   background: #0f172a;
   color: #e2e8f0;
   border: 1px solid #475569;
@@ -3951,6 +3983,22 @@ th.override-col {
 
 .ops-run-btn:disabled {
   color: #64748b;
+  cursor: not-allowed;
+}
+
+.ops-reset-btn {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.ops-reset-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.ops-reset-btn:disabled {
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
