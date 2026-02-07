@@ -144,6 +144,64 @@ deployments:
     - cron: "5 4 * * *"
       timezone: "America/New_York"
 
+- name: rates-retrain-pipeline
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: Biweekly rates retrain pipeline (weekly schedule with biweekly gate), calibration diagnostics, head-to-head guardrails, and auto-promotion.
+  entrypoint: prefect_flows/rates_retrain.py:rates_retrain_flow
+  parameters:
+    run_id: null
+    train_window_days: 365
+    cal_window_days: 14
+    val_window_days: 14
+    recency_half_life_days: 75.0
+    feature_set: "stage5_fta_tracking"
+    run_tag: "rates_v1_stage5_recency_h75"
+    refresh_training_base: true
+    run_calibration_diagnostics: true
+    calibration_window_days: 28
+    evaluate_head_to_head: true
+    auto_promote: true
+    max_avg_mae_delta: 0.0
+    max_head_mae_regression: 0.001
+    allow_guardrail_failure: false
+    biweekly_gate_enabled: true
+    biweekly_anchor_date: "2026-02-03"
+    normal_slice_start: null
+    normal_slice_end: null
+    chaos_slice_start: null
+    chaos_slice_end: null
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+  schedules:
+    - cron: "0 10 * * 2"
+      timezone: "America/New_York"
+
+- name: rates-calibration-monitor
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: Weekly rates calibration diagnostics on the current production run.
+  entrypoint: prefect_flows/rates_retrain.py:rates_calibration_monitor_flow
+  parameters:
+    run_id: null
+    calibration_window_days: 28
+    lookback_days: 120
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+  schedules:
+    - cron: "0 9 * * 2"
+      timezone: "America/New_York"
+
 - name: gamerotation-scrape
   version: null
   tags: []
