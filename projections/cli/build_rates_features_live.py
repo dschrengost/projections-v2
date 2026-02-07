@@ -909,11 +909,10 @@ def build_rates_features(
     ]
     for col in track_cols:
         if col not in df.columns:
-            df[col] = 0.0 if "role" not in col else 0
-        df[col] = df[col].fillna(0.0 if "role" not in col else 0)
-        # Ensure role columns are int to avoid mixed bool/int dtype
-        if "role" in col:
-            df[col] = df[col].astype(int)
+            df[col] = np.nan
+        # Leave tracking features nullable; score-time preprocessing applies
+        # bundle-specific train-time imputations for parity.
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # Join vacancy features
     if not vacancy.empty:
