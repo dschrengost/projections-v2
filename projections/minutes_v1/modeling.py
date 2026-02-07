@@ -117,6 +117,7 @@ def train_lightgbm_quantiles(
     quantiles: Iterable[float] = (0.1, 0.5, 0.9),
     random_state: int = 42,
     params: Mapping[str, float] | None = None,
+    sample_weight: pd.Series | np.ndarray | None = None,
 ) -> QuantileArtifacts:
     """Train independent LightGBM models for each requested quantile."""
 
@@ -136,12 +137,24 @@ def train_lightgbm_quantiles(
     imputer = SimpleImputer(strategy="median", keep_empty_features=True)
     X_train_imputed = imputer.fit_transform(X_train)
     X_train_imputed_df = pd.DataFrame(X_train_imputed, columns=X_train.columns, index=X_train.index)
+    train_weights: np.ndarray | None = None
+    if sample_weight is not None:
+        train_weights = np.asarray(sample_weight, dtype=float)
+        if train_weights.shape[0] != len(X_train_imputed_df):
+            raise ValueError(
+                "sample_weight length must match X_train rows "
+                f"({train_weights.shape[0]} vs {len(X_train_imputed_df)})"
+            )
+        train_weights = np.where(train_weights > 0.0, train_weights, 1e-6)
     models: dict[float, lgb.LGBMRegressor] = {}
     for quantile in quantiles:
         if not 0 < quantile < 1:
             raise ValueError("Quantiles must be in (0, 1).")
         model = lgb.LGBMRegressor(objective="quantile", alpha=quantile, **merged_params)
-        model.fit(X_train_imputed_df, y_train)
+        if train_weights is None:
+            model.fit(X_train_imputed_df, y_train)
+        else:
+            model.fit(X_train_imputed_df, y_train, sample_weight=train_weights)
         models[float(quantile)] = model
     return QuantileArtifacts(models=models, imputer=imputer)
 
