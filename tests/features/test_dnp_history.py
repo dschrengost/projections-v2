@@ -425,6 +425,60 @@ class TestInjurySnapshotMissing:
         # Row 1, 2: snapshot_missing, no minutes to check => inactive
         assert list(result) == [1, 0, 0]
 
+    def test_snapshot_missing_with_active_flag_recovers_active(self):
+        """Explicit active_flag should recover active status for missing snapshots."""
+        df = pd.DataFrame({
+            "is_out": [0, 0, 0],
+            "injury_snapshot_missing": [1, 1, 1],
+            "minutes": [0.0, 0.0, 0.0],
+            "active_flag": [True, False, True],
+        })
+        result = derive_roster_active_pre_tip(
+            df,
+            is_out_col="is_out",
+            injury_snapshot_missing_col="injury_snapshot_missing",
+            minutes_col="minutes",
+        )
+        assert list(result) == [1, 0, 1]
+
+    def test_snapshot_missing_with_minutes_uses_no_row_ava_signal(self):
+        """Historical rows with no injury row + Ava should be treated as active."""
+        df = pd.DataFrame({
+            "is_out": [0, 0],
+            "injury_snapshot_missing": [1, 1],
+            "injury_row_present": [False, True],
+            "status": ["Ava", "Ava"],
+            "minutes": [0.0, 0.0],
+        })
+        result = derive_roster_active_pre_tip(
+            df,
+            is_out_col="is_out",
+            injury_snapshot_missing_col="injury_snapshot_missing",
+            minutes_col="minutes",
+        )
+        # Row 0: no row + Ava => active
+        # Row 1: row present => conservative inactive
+        assert list(result) == [1, 0]
+
+    def test_snapshot_missing_without_minutes_uses_no_row_ava_signal(self):
+        """No injury row + Ava should be treated as active for current-game rows."""
+        df = pd.DataFrame({
+            "is_out": [0, 0, 0],
+            "injury_snapshot_missing": [1, 1, 1],
+            "injury_row_present": [False, True, False],
+            "status": ["Ava", "Ava", "UNK"],
+        })
+        result = derive_roster_active_pre_tip(
+            df,
+            is_out_col="is_out",
+            injury_snapshot_missing_col="injury_snapshot_missing",
+            minutes_col=None,
+        )
+        # Row 0: no row + Ava => active
+        # Row 1: row present => still conservative inactive
+        # Row 2: no row but not Ava => conservative inactive
+        assert list(result) == [1, 0, 0]
+
     def test_dnp_history_with_snapshot_missing_returns_from_injury(self):
         """Simulate player returning from injury with missing historical snapshots.
 
@@ -499,3 +553,25 @@ class TestInjurySnapshotMissing:
         row = result.iloc[0]
         # Without snapshot_missing column, G2 is treated as active-DNP
         assert row["consecutive_active_dnp"] == 1
+
+    def test_live_history_with_active_flag_missing_snapshot_counts_active_dnp(self):
+        """Historical active_flag should preserve active-DNP signal under missing snapshots."""
+        historical = pd.DataFrame([
+            {"player_id": 1, "team_id": 100, "game_date": "2024-01-01", "is_out": 0, "injury_snapshot_missing": 1, "active_flag": True, "minutes": 0.0},
+            {"player_id": 1, "team_id": 100, "game_date": "2024-01-02", "is_out": 0, "injury_snapshot_missing": 1, "active_flag": True, "minutes": 0.0},
+        ])
+        historical["game_date"] = pd.to_datetime(historical["game_date"])
+
+        current = pd.DataFrame([
+            {"player_id": 1, "team_id": 100, "game_date": "2024-01-03", "is_out": 0, "injury_snapshot_missing": 1, "active_flag": True},
+        ])
+        current["game_date"] = pd.to_datetime(current["game_date"])
+
+        result = compute_dnp_history_features_for_live(
+            current,
+            historical,
+            injury_snapshot_missing_col="injury_snapshot_missing",
+        )
+
+        row = result.iloc[0]
+        assert row["consecutive_active_dnp"] == 2

@@ -77,10 +77,15 @@ def derive_roster_active_pre_tip(
     - restriction_flag, ramp_flag players as roster active (they may still play)
     - Only OUT status as inactive
 
-    IMPORTANT: When injury_snapshot_missing == 1 AND minutes == 0, we now treat
-    the player as INACTIVE. This prevents players returning from injury from
-    having inflated consecutive_active_dnp counts due to missing historical
-    injury snapshots.
+    IMPORTANT: By default, when injury_snapshot_missing == 1 we treat the row as
+    inactive unless there is an explicit active signal:
+    - active_flag == True
+    - lineup_roster_status == "Active"
+    - no injury row was present (injury_row_present == False) and status == "Ava"
+      (healthy/not listed on injury report)
+
+    This keeps conservative behavior for truly unknown rows while preventing
+    healthy, report-absent players from being incorrectly marked inactive.
 
     Args:
         df: DataFrame with injury/status columns
@@ -103,27 +108,51 @@ def derive_roster_active_pre_tip(
     is_out = pd.to_numeric(df[is_out_col], errors="coerce").fillna(0).astype(int)
     roster_active = (is_out == 0).astype("int8")
 
-    # If injury snapshot is missing and player got 0 minutes, treat as inactive.
-    # This fixes the case where players returning from injury have corrupted
-    # DNP history features because historical snapshots show them as "active"
-    # (is_out=0 default) when they were actually injured/out.
+    # If injury snapshot is missing, default to inactive unless we have
+    # explicit active evidence from roster/lineup or a "no injury row + Ava" signal.
     if injury_snapshot_missing_col in df.columns:
         snapshot_missing = (
             pd.to_numeric(df[injury_snapshot_missing_col], errors="coerce")
             .fillna(0)
             .astype(int)
         )
-        # Check if we have minutes data to disambiguate
+
+        explicit_active = pd.Series(False, index=df.index, dtype=bool)
+        explicit_inactive = pd.Series(False, index=df.index, dtype=bool)
+
+        if "active_flag" in df.columns:
+            active_tokens = df["active_flag"].astype("string").str.strip().str.lower()
+            explicit_active = explicit_active | active_tokens.isin({"1", "true", "t", "yes", "y"})
+            explicit_inactive = explicit_inactive | active_tokens.isin({"0", "false", "f", "no", "n"})
+
+        if "lineup_roster_status" in df.columns:
+            roster_tokens = df["lineup_roster_status"].astype("string").str.strip().str.lower()
+            explicit_active = explicit_active | roster_tokens.eq("active")
+            explicit_inactive = explicit_inactive | roster_tokens.eq("inactive")
+
+        no_row_available = pd.Series(False, index=df.index, dtype=bool)
+        if {"injury_row_present", "status"}.issubset(df.columns):
+            row_present = (
+                df["injury_row_present"]
+                .astype("boolean", copy=False)
+                .fillna(False)
+                .astype(bool)
+            )
+            status_tokens = df["status"].astype("string").str.strip().str.upper()
+            no_row_available = (~row_present) & status_tokens.eq("AVA")
+
         if minutes_col and minutes_col in df.columns:
             minutes = pd.to_numeric(df[minutes_col], errors="coerce").fillna(0.0)
-            # snapshot_missing=1 AND minutes=0 => treat as inactive
-            # snapshot_missing=1 AND minutes>0 => player was active (keep roster_active=1)
-            uncertain_inactive = (snapshot_missing == 1) & (minutes == 0)
-            roster_active = roster_active.where(~uncertain_inactive, 0).astype("int8")
+            uncertain = (snapshot_missing == 1) & (minutes == 0)
         else:
-            # Without minutes data, snapshot_missing=1 => treat as inactive
-            # This is more conservative but avoids false active-DNP counts
-            roster_active = roster_active.where(snapshot_missing == 0, 0).astype("int8")
+            uncertain = snapshot_missing == 1
+
+        # Conservative default for uncertain rows.
+        roster_active = roster_active.where(~uncertain, 0).astype("int8")
+
+        # Recover active status only when we have explicit active evidence.
+        active_recovery = uncertain & (is_out == 0) & ((explicit_active & ~explicit_inactive) | no_row_available)
+        roster_active = roster_active.where(~active_recovery, 1).astype("int8")
 
     return roster_active
 
