@@ -38,6 +38,14 @@ interface ContestSwapResult {
     unmappedEntries: number
 }
 
+interface ApplyBuildResult {
+    contestId: string
+    contestName: string
+    lineupsApplied: number
+    lineupRangeStart: number
+    lineupRangeEnd: number
+}
+
 interface LineupState {
     baselineLineup: LineupSlots
     currentLineup: LineupSlots
@@ -122,6 +130,8 @@ export default function EntryManagerPage() {
     const [contestResults, setContestResults] = useState<ContestSwapResult[]>([])
     const [showResultsPanel, setShowResultsPanel] = useState(false)
     const [randomnessPct, setRandomnessPct] = useState(0)
+    const [applyBuildResults, setApplyBuildResults] = useState<ApplyBuildResult[]>([])
+    const [showApplyResultsPanel, setShowApplyResultsPanel] = useState(false)
 
     useEffect(() => {
         const loadSlates = async () => {
@@ -357,6 +367,7 @@ export default function EntryManagerPage() {
         if (targetIds.length === 0) return
         setApplyLoading(true)
         setEntryError(null)
+        const results: ApplyBuildResult[] = []
         try {
             let lineups: string[][] = []
             let buildDraftGroupId: number | null = null
@@ -394,10 +405,21 @@ export default function EntryManagerPage() {
                     selectedBuildId,
                     slice,
                 )
+                results.push({
+                    contestId,
+                    contestName: entrySummary?.contest_name || contestId,
+                    lineupsApplied: entryCount,
+                    lineupRangeStart: offset + 1,
+                    lineupRangeEnd: offset + entryCount,
+                })
                 if (contestId === selectedContestId) {
                     setEntryFile(updated)
                 }
                 offset += entryCount
+            }
+            setApplyBuildResults(results)
+            if (results.length > 0) {
+                setShowApplyResultsPanel(true)
             }
         } catch (err) {
             setEntryError((err as Error).message)
@@ -596,6 +618,19 @@ export default function EntryManagerPage() {
         return contestOrder.map(id => map.get(id)).filter(Boolean) as EntryFileSummary[]
     }, [contestOrder, entryFiles])
 
+    const applyBuildTargetInfo = useMemo(() => {
+        const targetIds = selectedContestIds.size > 0
+            ? contestOrder.filter(id => selectedContestIds.has(id))
+            : selectedContestId
+                ? [selectedContestId]
+                : []
+        const totalEntries = targetIds.reduce((sum, id) => {
+            const entry = entryFiles.find(e => e.contest_id === id)
+            return sum + (entry?.entry_count ?? 0)
+        }, 0)
+        return { contestCount: targetIds.length, totalEntries }
+    }, [selectedContestIds, selectedContestId, contestOrder, entryFiles])
+
     const toggleContestSelection = (contestId: string) => {
         setSelectedContestIds(prev => {
             const next = new Set(prev)
@@ -763,6 +798,31 @@ export default function EntryManagerPage() {
                 </section>
             )}
 
+            {/* Apply Build Results Panel */}
+            {showApplyResultsPanel && applyBuildResults.length > 0 && (
+                <section className="late-swap-results-panel">
+                    <div className="results-header">
+                        <h4>Apply Build Results</h4>
+                        <button onClick={() => setShowApplyResultsPanel(false)} className="close-btn">×</button>
+                    </div>
+                    <div className="results-list">
+                        {applyBuildResults.map(result => (
+                            <div key={result.contestId} className="result-item">
+                                <div className="result-contest">{result.contestName}</div>
+                                <div className="result-stats">
+                                    <span>{result.lineupsApplied} lineups</span>
+                                    <span className="muted">|</span>
+                                    <span>#{result.lineupRangeStart}-{result.lineupRangeEnd} from build</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="results-summary">
+                        Total: {applyBuildResults.reduce((sum, r) => sum + r.lineupsApplied, 0)} lineups across {applyBuildResults.length} contest{applyBuildResults.length !== 1 ? 's' : ''}
+                    </div>
+                </section>
+            )}
+
             <div className="optimizer-layout">
                 <aside className="optimizer-sidebar">
                     <h3>Upload Entry CSV</h3>
@@ -824,9 +884,13 @@ export default function EntryManagerPage() {
                     <button
                         className="build-btn"
                         onClick={handleApplyBuild}
-                        disabled={!selectedBuildId || applyLoading}
+                        disabled={!selectedBuildId || applyLoading || applyBuildTargetInfo.contestCount === 0}
                     >
-                        {applyLoading ? 'Applying...' : 'Apply Build'}
+                        {applyLoading
+                            ? 'Applying...'
+                            : applyBuildTargetInfo.contestCount > 1
+                                ? `Apply to ${applyBuildTargetInfo.contestCount} Contests (${applyBuildTargetInfo.totalEntries} entries)`
+                                : 'Apply Build'}
                     </button>
                     <button
                         className="build-btn"
