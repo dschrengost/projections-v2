@@ -638,6 +638,7 @@ class LateSwapRequest(BaseModel):
     run_id: Optional[str] = None
     n_alternatives: int = Field(default=5, ge=1, le=20, description="Number of lineup alternatives to generate")
     randomness_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="Randomness percentage for variance-aware noise")
+    only_out_lineups: bool = Field(default=False, description="Only swap lineups containing at least one OUT player")
 
 
 class PlayerSwap(BaseModel):
@@ -672,6 +673,7 @@ class LateSwapSummary(BaseModel):
     entries_held: int
     entries_unmapped: int
     entries_unknown: int
+    entries_skipped_no_out: int = 0
 
 
 class SolverSummary(BaseModel):
@@ -1304,11 +1306,15 @@ async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest
     draftable_start_times = _load_draftable_start_times(entry_state.draft_group_id)
 
     inactive_ids: set[str] = set()
+    out_ids: set[str] = set()
     for p in player_pool:
         pid = str(p.get("player_id"))
         # When overrides are enabled, the pool may contain inactive/out players; ban them unless locked.
         if p.get("is_active") is False or p.get("is_out") is True:
             inactive_ids.add(pid)
+        # Track OUT players separately for only_out_lineups filtering
+        if p.get("is_out") is True:
+            out_ids.add(pid)
 
     now_utc = datetime.now(timezone.utc)
     available_ids = {str(p.get("player_id")) for p in player_pool}
@@ -1322,6 +1328,7 @@ async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest
     entries_held = 0
     entries_unmapped = 0
     entries_unknown = 0
+    entries_skipped_no_out = 0
     solver_status_counts: Dict[str, int] = {}
     solver_gaps: List[float] = []
 
@@ -1374,6 +1381,23 @@ async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest
         if any(slot not in lock_slots for slot in locked_slots):
             updated_entries.append(entry)
             entries_unmapped += 1
+            continue
+
+        # Collect all player IDs in this entry for only_out_lineups filtering
+        entry_player_ids: set[str] = set()
+        for slot in DK_NBA_SLOTS:
+            slot_value = entry.get(slot, "")
+            draftable_id = _extract_draftable_id(slot_value)
+            if draftable_id is not None:
+                internal_id = draftable_to_internal.get(draftable_id)
+                if internal_id:
+                    entry_player_ids.add(internal_id)
+
+        # If only_out_lineups is enabled, skip entries without any OUT players
+        if request.only_out_lineups and not (entry_player_ids & out_ids):
+            updated_entries.append(entry)
+            entries_skipped_no_out += 1
+            entries_held += 1
             continue
 
         # Generate N alternatives instead of just 1
@@ -1515,6 +1539,7 @@ async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest
             entries_held=entries_held,
             entries_unmapped=entries_unmapped,
             entries_unknown=entries_unknown,
+            entries_skipped_no_out=entries_skipped_no_out,
         ),
         solver_summary=SolverSummary(
             status_counts=solver_status_counts,

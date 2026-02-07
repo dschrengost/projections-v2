@@ -58,6 +58,7 @@ export interface LateSwapResult {
         entries_held: number
         entries_unmapped: number
         entries_unknown: number
+        entries_skipped_no_out: number
     }
     solver_summary?: {
         status_counts: Record<string, number>
@@ -232,6 +233,7 @@ export async function runLateSwap(
         runId?: string | null
         nAlternatives?: number
         randomnessPct?: number
+        onlyOutLineups?: boolean
     },
 ): Promise<LateSwapResult> {
     const res = await fetch(
@@ -245,6 +247,7 @@ export async function runLateSwap(
                 run_id: options?.runId ?? null,
                 n_alternatives: options?.nAlternatives ?? 5,
                 randomness_pct: options?.randomnessPct ?? null,
+                only_out_lineups: options?.onlyOutLineups ?? false,
             }),
         },
     )

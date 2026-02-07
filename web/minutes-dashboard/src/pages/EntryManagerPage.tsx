@@ -130,6 +130,7 @@ export default function EntryManagerPage() {
     const [contestResults, setContestResults] = useState<ContestSwapResult[]>([])
     const [showResultsPanel, setShowResultsPanel] = useState(false)
     const [randomnessPct, setRandomnessPct] = useState(0)
+    const [onlyOutLineups, setOnlyOutLineups] = useState(false)
     const [applyBuildResults, setApplyBuildResults] = useState<ApplyBuildResult[]>([])
     const [showApplyResultsPanel, setShowApplyResultsPanel] = useState(false)
 
@@ -504,6 +505,7 @@ export default function EntryManagerPage() {
                 const contestSummary = entryFiles.find(e => e.contest_id === contestId)
                 const result = await runLateSwap(selectedDate, contestId, {
                     randomnessPct: randomnessPct > 0 ? randomnessPct : undefined,
+                    onlyOutLineups,
                 })
 
                 // Calculate stats for results panel
@@ -917,6 +919,18 @@ export default function EntryManagerPage() {
                         {randomnessPct > 0 && (
                             <small className="hint">Adds variance-aware noise for lineup diversity</small>
                         )}
+                    </div>
+                    {/* Only OUT Lineups Toggle */}
+                    <div className="only-out-toggle">
+                        <label>
+                            <input
+                                type="checkbox"
+                                checked={onlyOutLineups}
+                                onChange={e => setOnlyOutLineups(e.target.checked)}
+                            />
+                            Only swap OUT lineups
+                        </label>
+                        <small className="hint">Only optimize lineups containing an OUT player</small>
                     </div>
                     <button
                         className="export-btn primary"
