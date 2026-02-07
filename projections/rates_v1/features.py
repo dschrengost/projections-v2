@@ -79,7 +79,14 @@ TRACKING_FEATURES_FTA = [
     "track_fta_per_drive_szn",         # FTA per drive (foul-drawing skill)
 ]
 
-TRACKING_FEATURES_EXTENDED = TRACKING_FEATURES + TRACKING_FEATURES_FTA
+# Extended tracking features for 3PA prediction
+TRACKING_FEATURES_3PA = [
+    "track_catch_shoot_fg3a_per_min_szn",  # Catch-and-shoot 3PA volume per minute
+    "track_pull_up_fg3a_per_min_szn",      # Pull-up 3PA volume per minute
+    "track_pull_up_3pa_share_szn",         # Pull-up share of tracked 3PA profile
+]
+
+TRACKING_FEATURES_EXTENDED = TRACKING_FEATURES + TRACKING_FEATURES_FTA + TRACKING_FEATURES_3PA
 
 FEATURES_STAGE2_TRACKING = STAGE1_FEATURES + TRACKING_FEATURES
 
@@ -171,11 +178,12 @@ FEATURES_STAGE4_RECENCY = (
     + RECENCY_FEATURES
 )
 
-# Stage 5: Stage 4 + extended FTA tracking + FTA context + sample size
+# Stage 5: Stage 4 + extended FTA/3PA tracking + FTA context + sample size
 # This is the full feature set with all available features
 FEATURES_STAGE5_FTA_TRACKING = (
     FEATURES_STAGE4_RECENCY
     + TRACKING_FEATURES_FTA
+    + TRACKING_FEATURES_3PA
     + FTA_CONTEXT_FEATURES
     + SAMPLE_SIZE_FEATURES
 )
@@ -203,6 +211,7 @@ __all__ = [
     "STAGE1_FEATURES",
     "TRACKING_FEATURES",
     "TRACKING_FEATURES_FTA",
+    "TRACKING_FEATURES_3PA",
     "TRACKING_FEATURES_EXTENDED",
     "FEATURES_STAGE2_TRACKING",
     "CONTEXT_FEATURES",

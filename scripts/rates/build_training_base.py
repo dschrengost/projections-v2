@@ -1521,6 +1521,9 @@ def main(
             "track_drive_pf_per_min_szn",
             "track_paint_touches_per_min_szn",
             "track_fta_per_drive_szn",
+            "track_catch_shoot_fg3a_per_min_szn",
+            "track_pull_up_fg3a_per_min_szn",
+            "track_pull_up_3pa_share_szn",
             "track_role_cluster",
             "track_role_is_low_minutes",
         ]
@@ -1539,6 +1542,9 @@ def main(
         features["track_drive_pf_per_min_szn"] = np.nan
         features["track_paint_touches_per_min_szn"] = np.nan
         features["track_fta_per_drive_szn"] = np.nan
+        features["track_catch_shoot_fg3a_per_min_szn"] = np.nan
+        features["track_pull_up_fg3a_per_min_szn"] = np.nan
+        features["track_pull_up_3pa_share_szn"] = np.nan
         features["track_role_cluster"] = np.nan
         features["track_role_is_low_minutes"] = np.nan
     n_total = len(features)
@@ -1571,6 +1577,9 @@ def main(
         "track_drive_pf_per_min_szn",
         "track_paint_touches_per_min_szn",
         "track_fta_per_drive_szn",
+        "track_catch_shoot_fg3a_per_min_szn",
+        "track_pull_up_fg3a_per_min_szn",
+        "track_pull_up_3pa_share_szn",
     ]
     for col in track_fill_cols:
         if col not in features.columns:

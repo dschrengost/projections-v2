@@ -110,6 +110,48 @@ BASE_PARAMS: dict[str, object] = {
 }
 
 
+def _compute_recency_sample_weights(
+    train_df: pd.DataFrame,
+    *,
+    train_end_ts: pd.Timestamp,
+    half_life_days: float,
+    min_weight: float = 0.0,
+) -> tuple[np.ndarray, dict[str, float]]:
+    if "game_date" not in train_df.columns:
+        raise KeyError("game_date missing from training frame; cannot compute recency weights.")
+    if half_life_days <= 0:
+        raise ValueError("half_life_days must be > 0.")
+    if min_weight < 0:
+        raise ValueError("min_weight must be >= 0.")
+
+    train_dates = pd.to_datetime(train_df["game_date"], errors="coerce").dt.normalize()
+    if train_dates.isna().any():
+        raise ValueError("game_date contains NaT; cannot compute recency weights.")
+    anchor = pd.Timestamp(train_end_ts).normalize()
+    age_days = (anchor - train_dates).dt.days.astype(float)
+    if (age_days < 0).any():
+        raise ValueError("Found train rows with game_date after train_end_ts.")
+    age_days = age_days.clip(lower=0.0)
+
+    weights = np.power(0.5, age_days / float(half_life_days))
+    if min_weight > 0:
+        weights = np.maximum(weights, float(min_weight))
+
+    if not np.isfinite(weights).all() or (weights <= 0).any():
+        raise ValueError("Invalid recency weights (must be finite and >0).")
+
+    q = np.quantile(weights, [0.05, 0.5, 0.95]).tolist()
+    stats = {
+        "min": float(np.min(weights)),
+        "p05": float(q[0]),
+        "p50": float(q[1]),
+        "p95": float(q[2]),
+        "max": float(np.max(weights)),
+        "mean": float(np.mean(weights)),
+    }
+    return np.asarray(weights, dtype=float), stats
+
+
 def _iter_partitions(root: Path, start: pd.Timestamp | None, end: pd.Timestamp | None) -> list[Path]:
     base = root / "gold" / "rates_training_base"
     if not base.exists():
@@ -199,6 +241,13 @@ def _prepare_features(
             "track_sec_per_touch_szn",
             "track_pot_ast_per_min_szn",
             "track_drives_per_min_szn",
+            "track_drive_fta_per_min_szn",
+            "track_drive_pf_per_min_szn",
+            "track_paint_touches_per_min_szn",
+            "track_fta_per_drive_szn",
+            "track_catch_shoot_fg3a_per_min_szn",
+            "track_pull_up_fg3a_per_min_szn",
+            "track_pull_up_3pa_share_szn",
         ]
         for col in tracking_cols:
             if col not in df.columns:
@@ -259,6 +308,7 @@ def _train_one(
     train_df: pd.DataFrame,
     cal_df: pd.DataFrame,
     features: list[str],
+    sample_weight: np.ndarray | None = None,
 ) -> tuple[lgb.Booster | None, dict]:
     train_mask = train_df[label_col].notna()
     cal_mask = cal_df[label_col].notna()
@@ -267,7 +317,14 @@ def _train_one(
 
     X_train = train_df.loc[train_mask, features]
     y_train = train_df.loc[train_mask, label_col]
-    train_set = lgb.Dataset(X_train, label=y_train, free_raw_data=False)
+    train_weight = None
+    if sample_weight is not None:
+        if len(sample_weight) != len(train_df):
+            raise ValueError(
+                f"sample_weight length mismatch: got {len(sample_weight)} expected {len(train_df)}"
+            )
+        train_weight = np.asarray(sample_weight, dtype=float)[train_mask.to_numpy()]
+    train_set = lgb.Dataset(X_train, label=y_train, weight=train_weight, free_raw_data=False)
 
     callbacks = []
     valid_sets = []
@@ -328,13 +385,23 @@ def main(
     ),
     feature_set: str = typer.Option(
         "stage1",
-        help="Feature set to use: stage0, stage1 (minutes_pred), stage2_tracking (+tracking), stage3_context (+vacancy/pace), stage4_recency (+last1/3/5/10 rolling), stage5_fta_tracking (+FTA tracking).",
+        help="Feature set to use: stage0, stage1 (minutes_pred), stage2_tracking (+tracking), stage3_context (+vacancy/pace), stage4_recency (+last1/3/5/10 rolling), stage5_fta_tracking (+extended FTA/3PA tracking).",
         case_sensitive=False,
     ),
     allow_minutes_actual_fallback: bool = typer.Option(
         True,
         "--allow-minutes-actual-fallback/--no-minutes-actual-fallback",
         help="When using predicted minutes, fall back to minutes_actual if minutes_pred_* are missing.",
+    ),
+    recency_half_life_days: Optional[float] = typer.Option(
+        None,
+        "--recency-half-life-days",
+        help="Optional train-split recency decay half-life in days (applies sample_weight=0.5^(age/half_life)).",
+    ),
+    recency_min_weight: float = typer.Option(
+        0.0,
+        "--recency-min-weight",
+        help="Optional floor for recency weights (default 0).",
     ),
 ) -> None:
     root = data_root or data_path()
@@ -386,6 +453,8 @@ def main(
         "cal_end": cal_end_date,
         "start_date": start_date or "None",
         "end_date": end_date or "None",
+        "recency_half_life_days": recency_half_life_days if recency_half_life_days is not None else "None",
+        "recency_min_weight": recency_min_weight,
         **{f"lgb_{k}": v for k, v in BASE_PARAMS.items()},
     })
 
@@ -407,12 +476,34 @@ def main(
     cal_df = _clean_frame(cal_df, TARGET_LABEL_MAP, feature_cols)
     val_df = _clean_frame(val_df, TARGET_LABEL_MAP, feature_cols)
 
+    train_sample_weight = None
+    recency_weight_stats = None
+    if recency_half_life_days is not None:
+        train_sample_weight, recency_weight_stats = _compute_recency_sample_weights(
+            train_df,
+            train_end_ts=train_cutoff,
+            half_life_days=float(recency_half_life_days),
+            min_weight=float(recency_min_weight),
+        )
+        typer.echo(
+            "[train] recency weighting enabled: "
+            f"half_life_days={recency_half_life_days} min_weight={recency_min_weight} "
+            f"stats={recency_weight_stats}"
+        )
+
     metrics: dict[str, dict] = {}
     model_paths: dict[str, str] = {}
     for target in TARGETS:
         label_col = TARGET_LABEL_MAP.get(target, target)
         typer.echo(f"[train] training target={target} (label={label_col})")
-        booster, train_metrics = _train_one(target, label_col, train_df, cal_df, feature_cols)
+        booster, train_metrics = _train_one(
+            target,
+            label_col,
+            train_df,
+            cal_df,
+            feature_cols,
+            sample_weight=train_sample_weight,
+        )
         if booster is None:
             typer.echo(f"[train] skipping target={target}: no rows with non-null labels", err=True)
             metrics[target] = {**train_metrics, "cal_mae": None, "cal_rmse": None, "val_mae": None, "val_rmse": None}
@@ -463,6 +554,12 @@ def main(
             "Stage 2 adds tracking-based rates and role cluster features on top of Stage 1.",
         ],
         "models": model_paths,
+        "recency_weighting": {
+            "enabled": recency_half_life_days is not None,
+            "half_life_days": recency_half_life_days,
+            "min_weight": recency_min_weight,
+            "stats": recency_weight_stats,
+        },
     })
     _write_json(run_dir / "meta.json", meta)
     _write_json(run_dir / "metrics.json", metrics)
