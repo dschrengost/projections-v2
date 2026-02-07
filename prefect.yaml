@@ -79,6 +79,33 @@ deployments:
     - cron: "30 5 * * *"
       timezone: "America/New_York"
 
+- name: minutes-retrain-pipeline
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: Weekly recency retrain for Minutes V1 plus head-to-head evaluation against current production bundle.
+  entrypoint: prefect_flows/minutes_retrain.py:minutes_retrain_flow
+  parameters:
+    season: 2025
+    train_start_date: "2025-02-01"
+    train_end_date: "2026-01-31"
+    cal_start_date: "2026-02-01"
+    cal_end_date: "2026-02-05"
+    half_life_days: 35.0
+    train_random_state: 42
+    allow_guard_failure: true
+    run_head_to_head_eval: true
+    current_bundle_dir: null
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+  schedules:
+    - cron: "0 10 * * 2"
+      timezone: "America/New_York"
+
 - name: gamerotation-scrape
   version: null
   tags: []
