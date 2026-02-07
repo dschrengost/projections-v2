@@ -36,6 +36,7 @@ uv run prefect deployment ls
 |------|----------|---------|
 | `nba-live-pipeline` | Every 5 min (game days) | Main prediction pipeline |
 | `nightly-eval` | 3 AM daily | Model evaluation |
+| `minutes-retrain-pipeline` | Weekly (Tue 10 AM ET) | Minutes recency retrain + head-to-head eval vs prod |
 
 ## Systemd Services
 
