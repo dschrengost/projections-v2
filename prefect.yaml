@@ -62,6 +62,25 @@ deployments:
     - cron: "30 3 * * *"
       timezone: "America/New_York"
 
+- name: minutes-labels-refresh
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: Refresh gold/labels_minutes_v1 partitions from latest available date to yesterday.
+  entrypoint: prefect_flows/minutes_labels_refresh.py:minutes_labels_refresh_flow
+  parameters:
+    start_date: null
+    end_date: null
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+  schedules:
+    - cron: "40 3 * * *"
+      timezone: "America/New_York"
+
 - name: nightly-eval
   version: null
   tags: []
@@ -104,6 +123,25 @@ deployments:
         PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
   schedules:
     - cron: "0 10 * * 2"
+      timezone: "America/New_York"
+
+- name: rates-training-base-refresh
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: Refresh gold/rates_training_base partitions from latest available date to yesterday.
+  entrypoint: prefect_flows/rates_training_base_refresh.py:rates_training_base_refresh_flow
+  parameters:
+    start_date: null
+    end_date: null
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+  schedules:
+    - cron: "5 4 * * *"
       timezone: "America/New_York"
 
 - name: gamerotation-scrape
