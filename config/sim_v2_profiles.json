@@ -138,8 +138,6 @@
         "sigma_min": 1.0
       },
       "minutes_noise_config": {
-        "use_student_t": true,
-        "t_df": 7,
         "include_tail_in_projection": true,
         "tail_min_adjustable_minutes": 2.0,
         "min_minutes_for_noise_override": null
