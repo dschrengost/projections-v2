@@ -178,9 +178,6 @@ def _log_to_mlflow(
     # Try to use centralized mlflow_utils
     try:
         from projections.mlflow_utils import (
-            start_run,
-            log_params as utils_log_params,
-            log_metrics as utils_log_metrics,
             log_dataset_manifest,
             log_schema,
             get_tracking_uri,
@@ -595,6 +592,7 @@ def _train_play_probability_model(
     y_train: pd.Series,
     *,
     random_state: int,
+    sample_weight: pd.Series | np.ndarray | None = None,
 ) -> PlayProbabilityArtifacts:
     if X_train.empty:
         raise ValueError("Cannot train play probability model on an empty frame.")
@@ -612,7 +610,17 @@ def _train_play_probability_model(
         reg_lambda=0.1,
         random_state=random_state,
     )
-    model.fit(X_train_imp, y_array)
+    if sample_weight is None:
+        model.fit(X_train_imp, y_array)
+    else:
+        train_weights = np.asarray(sample_weight, dtype=float)
+        if train_weights.shape[0] != X_train_imp.shape[0]:
+            raise ValueError(
+                "Play-prob sample_weight length must match X_train rows "
+                f"({train_weights.shape[0]} vs {X_train_imp.shape[0]})"
+            )
+        train_weights = np.where(train_weights > 0.0, train_weights, 1e-6)
+        model.fit(X_train_imp, y_array, sample_weight=train_weights)
     return PlayProbabilityArtifacts(
         model=model,
         imputer=imputer,
@@ -1264,6 +1272,8 @@ def _window_defaults(
     cal_end: datetime,
     val_start: datetime | None,
     val_end: datetime,
+    *,
+    allow_val_cal_overlap: bool = False,
 ) -> tuple[DateWindow, DateWindow, DateWindow]:
     cal_start_value = cal_start or (train_end + timedelta(days=1))
     val_start_value = val_start or (cal_end + timedelta(days=1))
@@ -1271,7 +1281,7 @@ def _window_defaults(
     cal_window = DateWindow.from_bounds("cal", cal_start_value, cal_end)
     val_window = DateWindow.from_bounds("val", val_start_value, val_end)
     _warn_overlap(train_window, cal_window)
-    if cal_window.end >= val_window.start:
+    if (not allow_val_cal_overlap) and cal_window.end >= val_window.start:
         raise ValueError(
             "Validation window must start after the calibration window ends "
             f"({cal_window.to_metadata()} vs {val_window.to_metadata()})"
@@ -1420,6 +1430,17 @@ def main(
         "--split-col",
         help="Optional explicit split column (values: train|cal|val). When set, date windows are ignored.",
     ),
+    sample_weight_col: str | None = typer.Option(
+        None,
+        "--sample-weight-col",
+        help="Optional training sample-weight column. Applied to TRAIN rows only.",
+    ),
+    allow_val_cal_overlap: bool = typer.Option(
+        False,
+        "--allow-val-cal-overlap",
+        is_flag=True,
+        help="Allow validation window to overlap calibration window (for fixed short holdout periods).",
+    ),
 ) -> None:
     """Train LightGBM quantile models with a dedicated calibration window."""
 
@@ -1456,6 +1477,8 @@ def main(
         "lgbm_max_depth": lgbm_max_depth,
         "lgbm_learning_rate": lgbm_learning_rate,
         "split_col": split_col,
+        "sample_weight_col": sample_weight_col,
+        "allow_val_cal_overlap": allow_val_cal_overlap,
     }
     resolved_params = _apply_training_overrides(ctx, cli_params, config_path)
     train_start = resolved_params["train_start"]
@@ -1492,6 +1515,8 @@ def main(
     lgbm_max_depth = resolved_params.get("lgbm_max_depth")
     lgbm_learning_rate = resolved_params.get("lgbm_learning_rate")
     split_col = resolved_params.get("split_col")
+    sample_weight_col = resolved_params.get("sample_weight_col")
+    allow_val_cal_overlap = bool(resolved_params.get("allow_val_cal_overlap", False))
 
     if run_id is None:
         raise typer.BadParameter("--run-id is required (set via CLI flag or config file).")
@@ -1533,6 +1558,7 @@ def main(
         cal_end=cal_end,
         val_start=val_start,
         val_end=val_end,
+        allow_val_cal_overlap=allow_val_cal_overlap,
     )
 
     feature_df, feature_columns = _load_feature_frame_with_schema(
@@ -1602,6 +1628,29 @@ def main(
         target_values = pd.to_numeric(frame[target_col], errors="coerce").fillna(0.0)
         frame["plays_target"] = (target_values > 0).astype(int)
 
+    train_weight_series: pd.Series | None = None
+    train_cond_weight_series: pd.Series | None = None
+    weight_summary: dict[str, float] | None = None
+    if sample_weight_col:
+        if sample_weight_col not in train_df.columns:
+            raise ValueError(
+                f"--sample-weight-col '{sample_weight_col}' not found in training frame columns."
+            )
+        train_weight_series = pd.to_numeric(train_df[sample_weight_col], errors="coerce").fillna(1.0)
+        train_weight_series = train_weight_series.where(train_weight_series > 0.0, 1e-6).astype(float)
+        weight_summary = {
+            "min": float(train_weight_series.min()),
+            "p05": float(train_weight_series.quantile(0.05)),
+            "p50": float(train_weight_series.quantile(0.50)),
+            "p95": float(train_weight_series.quantile(0.95)),
+            "max": float(train_weight_series.max()),
+        }
+        typer.echo(
+            "[train] sample weights enabled "
+            f"col={sample_weight_col} "
+            f"min={weight_summary['min']:.4f} p50={weight_summary['p50']:.4f} max={weight_summary['max']:.4f}"
+        )
+
     typer.echo(
         f"Training LightGBM quantiles on {len(train_df):,} rows "
         f"(cal={len(cal_df):,}, val={len(val_df):,}) with {len(feature_columns)} features"
@@ -1619,10 +1668,14 @@ def main(
         X_train_play_prob = train_df[play_prob_feature_columns]
         y_train_play_prob = train_df["plays_target"]
         if y_train_play_prob.nunique() >= 2:
+            play_prob_weights = (
+                train_weight_series.to_numpy(dtype=float) if train_weight_series is not None else None
+            )
             play_prob_artifacts = _train_play_probability_model(
                 X_train_play_prob,
                 y_train_play_prob,
                 random_state=random_state,
+                sample_weight=play_prob_weights,
             )
         else:
             typer.echo("Play probability training skipped (single class).", err=True)
@@ -1634,6 +1687,8 @@ def main(
 
     X_train = train_cond_df[feature_columns]
     y_train = train_cond_df[target_col]
+    if train_weight_series is not None:
+        train_cond_weight_series = train_weight_series.loc[train_cond_df.index]
     X_cal = cal_cond_df[feature_columns]
     y_cal = cal_cond_df[target_col]
     X_val = val_df[feature_columns]
@@ -1652,6 +1707,11 @@ def main(
         y_train,
         random_state=random_state,
         params=params_arg,
+        sample_weight=(
+            train_cond_weight_series.to_numpy(dtype=float)
+            if train_cond_weight_series is not None
+            else None
+        ),
     )
     cal_preds = modeling.predict_quantiles(quantiles, X_cal)
     cal_p10_raw = cal_preds[0.1]
@@ -1822,6 +1882,17 @@ def main(
         if play_target_series is not None
         else (y_val_unique > 0).astype(int).to_numpy(dtype=float)
     )
+    false_active_rate = float(np.mean((play_prob_array >= 0.5) & (y_play_val == 0.0)))
+    false_inactive_rate = float(np.mean((play_prob_array <= 0.2) & (y_play_val == 1.0)))
+    cond_mask = y_play_val == 1.0
+    val_mae_p50_conditional = (
+        float(mean_absolute_error(y_val_unique[cond_mask], val_unique.loc[cond_mask, "p50"]))
+        if int(np.sum(cond_mask)) > 0
+        else None
+    )
+    bench_smear_proxy = float(
+        np.mean((val_unique["p50"].to_numpy(dtype=float) > 10.0) & (y_val_unique.to_numpy(dtype=float) < 1.0))
+    )
     play_brier = _brier_score(y_play_val, play_prob_array)
     play_ece = _expected_calibration_error(y_play_val, play_prob_array)
     floor10 = float(np.mean(np.maximum(ALPHA_TARGET, 1.0 - play_prob_array)))
@@ -1973,9 +2044,13 @@ def main(
         "val_excess_p90": excess90,
         "val_play_prob_brier": play_brier,
         "val_play_prob_ece": play_ece,
+        "val_false_active_rate_p_ge_0_5": false_active_rate,
+        "val_false_inactive_rate_p_le_0_2": false_inactive_rate,
         "val_play_prob_mean": float(np.mean(play_prob_array)),
         "val_play_prob_threshold": 0.5,
         "val_will_play_rate": float(np.mean(y_play_val)),
+        "val_mae_p50_conditional": val_mae_p50_conditional,
+        "val_bench_smear_proxy_p50_gt_10_actual_lt_1": bench_smear_proxy,
         "inside_cov": inside_cov,
         "mpiwn": mpiwn,
         "winkler_alpha_0_2": winkler_mean,
@@ -1987,6 +2062,10 @@ def main(
         "conformal_buckets": bucket_mode,
         "conformal_k": conformal_k,
         "conformal_mode": mode_key,
+        "sample_weight_col": sample_weight_col,
+        "train_sample_weight_summary": weight_summary,
+        "train_sample_weight_used_play_prob_head": bool(sample_weight_col and play_prob_artifacts is not None),
+        "train_sample_weight_used_conditional_head": bool(sample_weight_col and train_cond_weight_series is not None),
     }
     metrics.update({f"val_{name}": value for name, value in val_mae_buckets.items()})
     metrics.update(playable_metrics)
@@ -2006,6 +2085,8 @@ def main(
         "playable_winkler_tolerance": playable_winkler_tolerance,
         "enable_play_prob_head": enable_play_prob_head,
         "enable_play_prob_mixing": enable_play_prob_mixing,
+        "sample_weight_col": sample_weight_col,
+        "allow_val_cal_overlap": allow_val_cal_overlap,
     }
 
     windows_meta = {
@@ -2055,7 +2136,9 @@ def main(
         "LightGBM training complete. "
         f"Validation MAE={val_mae:.3f}, "
         f"P10={val_p10_cov:.3f}, "
-        f"P90={val_p90_cov:.3f}. Artifacts: {run_dir}"
+        f"P90={val_p90_cov:.3f}, "
+        f"false_active={false_active_rate:.4f}, "
+        f"false_inactive={false_inactive_rate:.4f}. Artifacts: {run_dir}"
     )
 
     # Auto-register model in registry
