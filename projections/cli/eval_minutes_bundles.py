@@ -461,7 +461,9 @@ def score_bundle_on_eval_dataset(
 
     play_prob_artifacts = bundle.get("play_probability")
     if play_prob_artifacts is not None:
-        play_prob = ml.predict_play_probability(play_prob_artifacts, feature_matrix)
+        # Use the full eval frame so dedicated play-prob features (for example
+        # prior_play_prob) are available even when excluded from quantile features.
+        play_prob = ml.predict_play_probability(play_prob_artifacts, working)
     else:
         play_prob = np.ones(len(working), dtype=float)
 
