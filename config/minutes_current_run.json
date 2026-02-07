@@ -1,7 +1,7 @@
 {
   "mode": "single",
-  "bundle_dir": "/home/daniel/projections-data/artifacts/minutes_lgbm/minutes_v1_recency_h35_20260207T110500Z",
-  "run_id": "minutes_v1_recency_h35_20260207T110500Z",
+  "bundle_dir": "/home/daniel/projections-data/artifacts/minutes_lgbm/minutes_v1_recency_h35_parityfix_20260207T153231Z",
+  "run_id": "minutes_v1_recency_h35_parityfix_20260207T153231Z",
   "minutes_alloc_mode": "legacy",
   "rotalloc_bundle_dir": "artifacts/experiments/lgbm_rotalloc_final_v1",
   "reconcile_team_minutes": "p50",
