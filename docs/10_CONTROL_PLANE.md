@@ -35,9 +35,13 @@ uv run prefect deployment ls
 | Flow | Schedule | Purpose |
 |------|----------|---------|
 | `nba-live-pipeline` | Every 5 min (game days) | Main prediction pipeline |
+| `boxscores-etl` | 3:30 AM daily | Scrape previous-day boxscores to bronze + legacy labels |
+| `minutes-labels-refresh` | 3:40 AM daily | Materialize `gold/labels_minutes_v1` from boxscore raw partitions |
+| `rates-training-base-refresh` | 4:05 AM daily | Refresh rates training base partitions |
+| `gamerotation-scrape` | 4:15 AM daily | Scrape NBA Stats GameRotation feed |
+| `rotation-priors-update` | 4:45 AM daily | Rebuild rotation priors after scrape |
 | `nightly-eval` | 3 AM daily | Model evaluation |
 | `minutes-retrain-pipeline` | Weekly (Tue 10 AM ET) | Minutes recency retrain + head-to-head eval vs prod |
-| `rates-training-base-refresh` | 4:05 AM daily | Refresh rates training base partitions |
 
 ## Systemd Services
 
