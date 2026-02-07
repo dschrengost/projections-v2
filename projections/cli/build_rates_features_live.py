@@ -519,6 +519,10 @@ def _load_tracking_features(
         "track_drive_pf_per_min_szn",
         "track_paint_touches_per_min_szn",
         "track_fta_per_drive_szn",
+        # 3PA profile tracking features
+        "track_catch_shoot_fg3a_per_min_szn",
+        "track_pull_up_fg3a_per_min_szn",
+        "track_pull_up_3pa_share_szn",
     ]
     available = [c for c in track_cols if c in latest.columns]
     return latest[available].copy()
@@ -898,6 +902,10 @@ def build_rates_features(
         "track_drive_pf_per_min_szn",
         "track_paint_touches_per_min_szn",
         "track_fta_per_drive_szn",
+        # 3PA profile tracking features
+        "track_catch_shoot_fg3a_per_min_szn",
+        "track_pull_up_fg3a_per_min_szn",
+        "track_pull_up_3pa_share_szn",
     ]
     for col in track_cols:
         if col not in df.columns:

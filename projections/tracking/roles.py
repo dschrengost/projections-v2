@@ -73,7 +73,7 @@ def _read_measure(root: Path, day: pd.Timestamp, measure_type: str, columns: lis
 
 def load_tracking_window(data_root: Path, start: pd.Timestamp, end: pd.Timestamp, game_lookup: pd.DataFrame) -> pd.DataFrame:
     """
-    Read tracking tables (Possessions + Passing + Drives) for the date window and return
+    Read tracking tables (Possessions + Passing + Drives + CatchShoot + PullUpShot) for the date window and return
     per-game raw counts merged with game ids where available.
     """
     records: list[pd.DataFrame] = []
@@ -98,6 +98,18 @@ def load_tracking_window(data_root: Path, start: pd.Timestamp, end: pd.Timestamp
             "Drives",
             ["game_date", "team_id", "player_id", "drives", "drive_fta", "drive_pf"],
         )
+        catch_shoot = _read_measure(
+            data_root,
+            day,
+            "CatchShoot",
+            ["game_date", "team_id", "player_id", "catch_shoot_fg3a"],
+        )
+        pull_up = _read_measure(
+            data_root,
+            day,
+            "PullUpShot",
+            ["game_date", "team_id", "player_id", "pull_up_fg3a"],
+        )
         base = poss.rename(columns={"min": "minutes_tracking"}).copy()
         for col in ("touches", "time_of_poss", "minutes_tracking"):
             if col in base.columns:
@@ -119,8 +131,29 @@ def load_tracking_window(data_root: Path, start: pd.Timestamp, end: pd.Timestamp
                 on=["season", "game_date", "team_id", "player_id"],
                 how="left",
             )
+        if catch_shoot is not None and "catch_shoot_fg3a" in catch_shoot.columns:
+            base = base.merge(
+                catch_shoot[["season", "game_date", "team_id", "player_id", "catch_shoot_fg3a"]],
+                on=["season", "game_date", "team_id", "player_id"],
+                how="left",
+            )
+        if pull_up is not None and "pull_up_fg3a" in pull_up.columns:
+            base = base.merge(
+                pull_up[["season", "game_date", "team_id", "player_id", "pull_up_fg3a"]],
+                on=["season", "game_date", "team_id", "player_id"],
+                how="left",
+            )
         # Ensure numeric columns exist and fill missing with 0
-        for col in ["potential_ast_raw", "passes_made", "drives", "drive_fta", "drive_pf", "paint_touches"]:
+        for col in [
+            "potential_ast_raw",
+            "passes_made",
+            "drives",
+            "drive_fta",
+            "drive_pf",
+            "paint_touches",
+            "catch_shoot_fg3a",
+            "pull_up_fg3a",
+        ]:
             if col in base.columns:
                 base[col] = pd.to_numeric(base[col], errors="coerce").fillna(0.0)
             else:
@@ -158,6 +191,8 @@ def compute_cumulative_tracking(df: pd.DataFrame) -> pd.DataFrame:
     df["drive_fta"] = pd.to_numeric(df.get("drive_fta"), errors="coerce").fillna(0.0)
     df["drive_pf"] = pd.to_numeric(df.get("drive_pf"), errors="coerce").fillna(0.0)
     df["paint_touches"] = pd.to_numeric(df.get("paint_touches"), errors="coerce").fillna(0.0)
+    df["catch_shoot_fg3a"] = pd.to_numeric(df.get("catch_shoot_fg3a"), errors="coerce").fillna(0.0)
+    df["pull_up_fg3a"] = pd.to_numeric(df.get("pull_up_fg3a"), errors="coerce").fillna(0.0)
     df.sort_values(["season", "player_id", "game_date", "game_id"], inplace=True)
     group = df.groupby(["season", "player_id"], sort=False)
     df["cumu_minutes"] = group["minutes_tracking"].cumsum().shift(1).fillna(0.0)
@@ -169,6 +204,8 @@ def compute_cumulative_tracking(df: pd.DataFrame) -> pd.DataFrame:
     df["cumu_drive_fta"] = group["drive_fta"].cumsum().shift(1).fillna(0.0)
     df["cumu_drive_pf"] = group["drive_pf"].cumsum().shift(1).fillna(0.0)
     df["cumu_paint_touches"] = group["paint_touches"].cumsum().shift(1).fillna(0.0)
+    df["cumu_catch_shoot_fg3a"] = group["catch_shoot_fg3a"].cumsum().shift(1).fillna(0.0)
+    df["cumu_pull_up_fg3a"] = group["pull_up_fg3a"].cumsum().shift(1).fillna(0.0)
 
     df["track_touches_per_min_szn"] = _safe_div(df["cumu_touches"], df["cumu_minutes"])
     df["track_sec_per_touch_szn"] = _safe_div(df["cumu_time_of_poss"] * 60.0, df["cumu_touches"])
@@ -183,6 +220,13 @@ def compute_cumulative_tracking(df: pd.DataFrame) -> pd.DataFrame:
     df["track_paint_touches_per_min_szn"] = _safe_div(df["cumu_paint_touches"], df["cumu_minutes"])
     # Foul-drawing efficiency: FTA per drive (measures skill at drawing contact)
     df["track_fta_per_drive_szn"] = _safe_div(df["cumu_drive_fta"], df["cumu_drives"])
+    # 3PA shot-profile rates from tracking.
+    df["track_catch_shoot_fg3a_per_min_szn"] = _safe_div(df["cumu_catch_shoot_fg3a"], df["cumu_minutes"])
+    df["track_pull_up_fg3a_per_min_szn"] = _safe_div(df["cumu_pull_up_fg3a"], df["cumu_minutes"])
+    df["track_pull_up_3pa_share_szn"] = _safe_div(
+        df["cumu_pull_up_fg3a"],
+        df["cumu_catch_shoot_fg3a"] + df["cumu_pull_up_fg3a"],
+    )
     df["track_role_is_low_minutes"] = df["cumu_minutes"] < MIN_ROLE_MINUTES
     return df
 
@@ -284,6 +328,9 @@ def write_tracking_partitions(df: pd.DataFrame, output_root: Path, overwrite_exi
             "track_drive_pf_per_min_szn",
             "track_paint_touches_per_min_szn",
             "track_fta_per_drive_szn",
+            "track_catch_shoot_fg3a_per_min_szn",
+            "track_pull_up_fg3a_per_min_szn",
+            "track_pull_up_3pa_share_szn",
             "track_role_cluster",
             "track_role_is_low_minutes",
         ]
