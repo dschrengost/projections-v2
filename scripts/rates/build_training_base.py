@@ -54,6 +54,7 @@ import pandas as pd
 import typer
 
 from projections.paths import data_path
+from projections.rates_v1.preprocess import TRACKING_FILL_FEATURES
 from projections.minutes_v1.pos import canonical_pos_bucket
 from typing import Iterable as _Iterable
 
@@ -1568,35 +1569,10 @@ def main(
         else len(features)
     )
     typer.echo(f"[rates_base] tracking features missing for {track_missing}/{len(features)} rows")
-    track_fill_cols = [
-        "track_touches_per_min_szn",
-        "track_sec_per_touch_szn",
-        "track_pot_ast_per_min_szn",
-        "track_drives_per_min_szn",
-        "track_drive_fta_per_min_szn",
-        "track_drive_pf_per_min_szn",
-        "track_paint_touches_per_min_szn",
-        "track_fta_per_drive_szn",
-        "track_catch_shoot_fg3a_per_min_szn",
-        "track_pull_up_fg3a_per_min_szn",
-        "track_pull_up_3pa_share_szn",
-    ]
-    for col in track_fill_cols:
+    for col in TRACKING_FILL_FEATURES:
         if col not in features.columns:
             features[col] = np.nan
-        mean_val = features[col].mean(skipna=True)
-        fill_val = 0.0 if pd.isna(mean_val) else mean_val
-        features[col] = features[col].fillna(fill_val)
-    if "track_role_cluster" in features.columns:
-        features["track_role_cluster"] = features["track_role_cluster"].fillna(-1).astype(int)
-    else:
-        features["track_role_cluster"] = -1
-    if "track_role_is_low_minutes" in features.columns:
-        features["track_role_is_low_minutes"] = (
-            features["track_role_is_low_minutes"].fillna(True).astype(bool)
-        )
-    else:
-        features["track_role_is_low_minutes"] = True
+        features[col] = pd.to_numeric(features[col], errors="coerce")
     vac_frac = (features["vac_min_szn"] > 0).mean() if "vac_min_szn" in features.columns else 0.0
     typer.echo(f"[rates_base] vacated_minutes>0 for {vac_frac:.3%} of rows")
     _assert_unique_training_keys(features)

@@ -41,6 +41,11 @@ import typer
 
 from projections.paths import data_path
 from projections.rates_v1.features import get_rates_feature_sets
+from projections.rates_v1.preprocess import (
+    TRACKING_FILL_FEATURES,
+    apply_tracking_fill_values,
+    fit_tracking_fill_values,
+)
 from projections.rates_v1.schemas import EFFICIENCY_TARGETS
 from projections.registry.manifest import (
     load_manifest,
@@ -214,55 +219,31 @@ def _prepare_features(
         if col in df.columns:
             df[col] = df[col].fillna(0.0)
 
-        if use_predicted_minutes:
-            if "minutes_pred_spread" not in df.columns:
-                df["minutes_pred_spread"] = np.nan
-            if "minutes_pred_p90" in df.columns and "minutes_pred_p10" in df.columns:
-                df["minutes_pred_spread"] = df["minutes_pred_p90"] - df["minutes_pred_p10"]
-        if fallback_minutes_with_actual:
-            pred_cols = ["minutes_pred_p50", "minutes_pred_spread", "minutes_pred_play_prob"]
-            missing_mask = df[pred_cols].isna().any(axis=1)
-            if missing_mask.any():
-                fallback_count = int(missing_mask.sum())
-                typer.echo(
-                    f"[train] minutes_pred_* missing for {fallback_count:,} rows; "
-                    "falling back to minutes_actual (spread=0, play_prob=1)."
-                )
-                df.loc[missing_mask, "minutes_pred_p50"] = df.loc[missing_mask, "minutes_actual"]
-                df.loc[missing_mask, "minutes_pred_spread"] = 0.0
-                df.loc[missing_mask, "minutes_pred_play_prob"] = 1.0
-                if "minutes_pred_p10" in df.columns:
-                    df.loc[missing_mask, "minutes_pred_p10"] = df.loc[missing_mask, "minutes_actual"]
-                if "minutes_pred_p90" in df.columns:
-                    df.loc[missing_mask, "minutes_pred_p90"] = df.loc[missing_mask, "minutes_actual"]
+    if use_predicted_minutes:
+        if "minutes_pred_spread" not in df.columns:
+            df["minutes_pred_spread"] = np.nan
+        if "minutes_pred_p90" in df.columns and "minutes_pred_p10" in df.columns:
+            df["minutes_pred_spread"] = df["minutes_pred_p90"] - df["minutes_pred_p10"]
+    if fallback_minutes_with_actual:
+        pred_cols = ["minutes_pred_p50", "minutes_pred_spread", "minutes_pred_play_prob"]
+        missing_mask = df[pred_cols].isna().any(axis=1)
+        if missing_mask.any():
+            fallback_count = int(missing_mask.sum())
+            typer.echo(
+                f"[train] minutes_pred_* missing for {fallback_count:,} rows; "
+                "falling back to minutes_actual (spread=0, play_prob=1)."
+            )
+            df.loc[missing_mask, "minutes_pred_p50"] = df.loc[missing_mask, "minutes_actual"]
+            df.loc[missing_mask, "minutes_pred_spread"] = 0.0
+            df.loc[missing_mask, "minutes_pred_play_prob"] = 1.0
+            if "minutes_pred_p10" in df.columns:
+                df.loc[missing_mask, "minutes_pred_p10"] = df.loc[missing_mask, "minutes_actual"]
+            if "minutes_pred_p90" in df.columns:
+                df.loc[missing_mask, "minutes_pred_p90"] = df.loc[missing_mask, "minutes_actual"]
     if use_tracking_features:
-        tracking_cols = [
-            "track_touches_per_min_szn",
-            "track_sec_per_touch_szn",
-            "track_pot_ast_per_min_szn",
-            "track_drives_per_min_szn",
-            "track_drive_fta_per_min_szn",
-            "track_drive_pf_per_min_szn",
-            "track_paint_touches_per_min_szn",
-            "track_fta_per_drive_szn",
-            "track_catch_shoot_fg3a_per_min_szn",
-            "track_pull_up_fg3a_per_min_szn",
-            "track_pull_up_3pa_share_szn",
-        ]
-        for col in tracking_cols:
+        for col in TRACKING_FILL_FEATURES:
             if col not in df.columns:
                 df[col] = np.nan
-            mean_val = df[col].mean(skipna=True)
-            fill_val = 0.0 if pd.isna(mean_val) else mean_val
-            df[col] = df[col].fillna(fill_val)
-        if "track_role_cluster" in df.columns:
-            df["track_role_cluster"] = df["track_role_cluster"].fillna(-1).astype(int)
-        else:
-            df["track_role_cluster"] = -1
-        if "track_role_is_low_minutes" in df.columns:
-            df["track_role_is_low_minutes"] = df["track_role_is_low_minutes"].fillna(True).astype(int)
-        else:
-            df["track_role_is_low_minutes"] = 1
     return df
 
 
@@ -472,6 +453,17 @@ def main(
             f"[train] warning: split sizes train={len(train_df)}, cal={len(cal_df)}, val={len(val_df)}"
         )
     train_df, cal_df, val_df = _impute_odds(train_df, cal_df, val_df)
+
+    tracking_fill_values: dict[str, float] = {}
+    if use_tracking_features:
+        tracking_fill_values = fit_tracking_fill_values(train_df, feature_cols)
+        train_df = apply_tracking_fill_values(train_df, tracking_fill_values)
+        cal_df = apply_tracking_fill_values(cal_df, tracking_fill_values)
+        val_df = apply_tracking_fill_values(val_df, tracking_fill_values)
+        typer.echo(
+            "[train] tracking fill values fitted on TRAIN split: "
+            + ", ".join(f"{k}={v:.6g}" for k, v in sorted(tracking_fill_values.items()))
+        )
     train_df = _clean_frame(train_df, TARGET_LABEL_MAP, feature_cols)
     cal_df = _clean_frame(cal_df, TARGET_LABEL_MAP, feature_cols)
     val_df = _clean_frame(val_df, TARGET_LABEL_MAP, feature_cols)
@@ -559,6 +551,10 @@ def main(
             "half_life_days": recency_half_life_days,
             "min_weight": recency_min_weight,
             "stats": recency_weight_stats,
+        },
+        "preprocess": {
+            "tracking_fill_strategy": "train_split_median_numeric_mode_role",
+            "tracking_fill_values": tracking_fill_values,
         },
     })
     _write_json(run_dir / "meta.json", meta)
