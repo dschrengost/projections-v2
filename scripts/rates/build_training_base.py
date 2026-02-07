@@ -278,7 +278,7 @@ def _latest_snapshot_leq_tip(df: pd.DataFrame, tip_ts: pd.Timestamp) -> pd.Serie
 
 
 def load_odds(
-    data_root: Path, start: pd.Timestamp, end: pd.Timestamp, tips: pd.Series
+    data_root: Path, start: pd.Timestamp, end: pd.Timestamp, tips: pd.DataFrame
 ) -> pd.DataFrame:
     odds_dir = data_root / "silver" / "odds_snapshot"
     raw = _read_parquet_tree(odds_dir)
@@ -289,8 +289,18 @@ def load_odds(
     raw = raw.dropna(subset=["game_id"])
     raw["game_id"] = raw["game_id"].astype(int)
     odds_rows: list[dict] = []
-    tip_map = tips.dropna().to_dict()
-    for game_id, tip_ts in tip_map.items():
+    tip_frame = tips.copy()
+    tip_frame["game_id"] = pd.to_numeric(tip_frame["game_id"], errors="coerce").astype("Int64")
+    tip_frame["game_date"] = pd.to_datetime(tip_frame["game_date"], errors="coerce").dt.normalize()
+    tip_frame["tip_ts"] = pd.to_datetime(tip_frame["tip_ts"], errors="coerce", utc=True)
+    tip_frame = tip_frame.dropna(subset=["game_id", "game_date", "tip_ts"]).copy()
+    tip_frame["game_id"] = tip_frame["game_id"].astype(int)
+    tip_frame = tip_frame.drop_duplicates(subset=["game_id", "game_date"], keep="last")
+
+    for row in tip_frame.itertuples(index=False):
+        game_id = int(row.game_id)
+        tip_ts = pd.Timestamp(row.tip_ts)
+        game_date = pd.Timestamp(row.game_date).normalize()
         subset = raw[raw["game_id"] == game_id]
         row = _latest_snapshot_leq_tip(subset.copy(), tip_ts)
         if row is None:
@@ -299,6 +309,7 @@ def load_odds(
         odds_rows.append(
             {
                 "game_id": game_id,
+                "game_date": game_date,
                 "spread_home": float(row.get("spread_home")) if pd.notna(row.get("spread_home")) else np.nan,
                 "total_close": float(row.get("total")) if pd.notna(row.get("total")) else np.nan,
                 "as_of_ts": row.get("as_of_ts"),
@@ -421,19 +432,38 @@ def _prepare_roster_latest(roster: pd.DataFrame) -> pd.DataFrame:
     ]
     roster_cols = [c for c in roster_cols if c in roster.columns]
     if not roster_cols:
-        return pd.DataFrame(columns=["game_id", "team_id", "player_id"])
+        return pd.DataFrame(columns=["game_id", "team_id", "player_id", "game_date"])
     roster_sub = roster[roster_cols].copy()
+    if "game_date" in roster_sub.columns:
+        roster_sub["game_date"] = pd.to_datetime(roster_sub["game_date"], errors="coerce").dt.normalize()
     if "as_of_ts" in roster_sub.columns:
         roster_sub["as_of_ts"] = pd.to_datetime(roster_sub["as_of_ts"], errors="coerce", utc=True)
         roster_sub.sort_values("as_of_ts", inplace=True)
-    return roster_sub.drop_duplicates(subset=["game_id", "team_id", "player_id"], keep="last")
+    dedupe_keys = [c for c in ["game_id", "game_date", "team_id", "player_id"] if c in roster_sub.columns]
+    return roster_sub.drop_duplicates(subset=dedupe_keys, keep="last")
 
 
 def _player_history_totals(stats: pd.DataFrame, labels: pd.DataFrame) -> pd.DataFrame:
     """Season-to-date cumulative totals per player (excluding current game)."""
 
-    label_minutes = labels[["game_id", "player_id", "minutes_actual"]] if "minutes_actual" in labels.columns else pd.DataFrame()
-    hist = stats.merge(label_minutes, on=["game_id", "player_id"], how="left", suffixes=("", "_label"))
+    label_minutes = pd.DataFrame()
+    if "minutes_actual" in labels.columns:
+        label_cols = [
+            c
+            for c in ["game_id", "game_date", "team_id", "player_id", "minutes_actual"]
+            if c in labels.columns
+        ]
+        label_minutes = labels[label_cols].copy()
+        if "game_date" in label_minutes.columns:
+            label_minutes["game_date"] = pd.to_datetime(
+                label_minutes["game_date"], errors="coerce"
+            ).dt.normalize()
+    join_keys = ["game_id", "player_id"]
+    if "game_date" in stats.columns and "game_date" in label_minutes.columns:
+        join_keys.append("game_date")
+    if "team_id" in stats.columns and "team_id" in label_minutes.columns:
+        join_keys.append("team_id")
+    hist = stats.merge(label_minutes, on=join_keys, how="left", suffixes=("", "_label"))
     hist["minutes_hist"] = hist["minutes_actual"].fillna(hist["minutes_played"]).astype(float)
     hist.sort_values(["season", "player_id", "tip_ts"], inplace=True)
 
@@ -470,7 +500,7 @@ def _compute_vacated_team_features(
         return pd.DataFrame()
 
     tips = (
-        stats.drop_duplicates(subset=["game_id"])[["game_id", "tip_ts", "season", "game_date"]]
+        stats.drop_duplicates(subset=["game_id", "game_date"])[["game_id", "tip_ts", "season", "game_date"]]
         .dropna(subset=["tip_ts"])
         .copy()
     )
@@ -483,7 +513,20 @@ def _compute_vacated_team_features(
     injuries_norm = injuries_norm.dropna(subset=["game_id", "player_id", "as_of_ts"])
     injuries_norm["game_id"] = injuries_norm["game_id"].astype(int)
     injuries_norm["player_id"] = injuries_norm["player_id"].astype(int)
-    injuries_norm = injuries_norm.merge(tips, on="game_id", how="inner")
+    if "game_date" in injuries_norm.columns:
+        injuries_norm["game_date"] = pd.to_datetime(injuries_norm["game_date"], errors="coerce").dt.normalize()
+        injuries_norm = injuries_norm.merge(tips, on=["game_id", "game_date"], how="inner")
+    else:
+        injuries_norm = injuries_norm.merge(tips, on="game_id", how="inner")
+        # Resolve repeated game_id across different dates by selecting the nearest future tip.
+        injuries_norm["tip_lag_s"] = (
+            injuries_norm["tip_ts"] - injuries_norm["as_of_ts"]
+        ).dt.total_seconds()
+        injuries_norm = injuries_norm[injuries_norm["tip_lag_s"] >= 0]
+        injuries_norm.sort_values(["game_id", "player_id", "as_of_ts", "tip_lag_s"], inplace=True)
+        injuries_norm = injuries_norm.drop_duplicates(
+            subset=["game_id", "player_id", "as_of_ts"], keep="first"
+        )
     injuries_norm = injuries_norm[injuries_norm["as_of_ts"] <= injuries_norm["tip_ts"]]
     if injuries_norm.empty:
         return pd.DataFrame()
@@ -492,17 +535,28 @@ def _compute_vacated_team_features(
     latest = injuries_norm.groupby(["game_id", "player_id"], as_index=False).tail(1)
 
     # Attach team + position from roster (if not already present)
-    roster_map_cols = [c for c in ["game_id", "team_id", "player_id", "listed_pos"] if c in roster_sub.columns]
-    roster_map = roster_sub[roster_map_cols].drop_duplicates(subset=["game_id", "player_id"]) if roster_map_cols else pd.DataFrame()
-    if "team_id" not in latest.columns or latest["team_id"].isna().any():
-        latest = latest.merge(roster_map, on=["game_id", "player_id"], how="left", suffixes=("", "_roster"))
+    roster_map_cols = [c for c in ["game_id", "game_date", "team_id", "player_id", "listed_pos"] if c in roster_sub.columns]
+    roster_map = pd.DataFrame()
+    if roster_map_cols:
+        roster_map = roster_sub[roster_map_cols].drop_duplicates(
+            subset=[c for c in ["game_id", "game_date", "player_id"] if c in roster_map_cols]
+        )
+    roster_join_keys = ["game_id", "player_id"]
+    if "game_date" in latest.columns and "game_date" in roster_map.columns:
+        roster_join_keys.append("game_date")
+    if ("team_id" not in latest.columns or latest["team_id"].isna().any()) and not roster_map.empty:
+        latest = latest.merge(roster_map, on=roster_join_keys, how="left", suffixes=("", "_roster"))
         if "team_id" not in latest.columns and "team_id_roster" in latest.columns:
             latest.rename(columns={"team_id_roster": "team_id"}, inplace=True)
         elif "team_id_roster" in latest.columns:
             latest["team_id"] = latest["team_id"].fillna(latest["team_id_roster"])
         latest.drop(columns=[c for c in ["team_id_roster"] if c in latest.columns], inplace=True)
     if "listed_pos" not in latest.columns and not roster_map.empty:
-        latest = latest.merge(roster_map[["game_id", "player_id", "listed_pos"]], on=["game_id", "player_id"], how="left")
+        latest = latest.merge(
+            roster_map[[c for c in ["game_id", "game_date", "player_id", "listed_pos"] if c in roster_map.columns]],
+            on=[c for c in roster_join_keys if c in roster_map.columns],
+            how="left",
+        )
     latest = latest.dropna(subset=["team_id"])
     if latest.empty:
         return pd.DataFrame()
@@ -543,7 +597,7 @@ def _compute_vacated_team_features(
         latest["pos_bucket"] = "UNK"
     latest["pos_group"] = latest["pos_bucket"].map({"G": "G", "W": "W", "BIG": "B"}).fillna("UNK")
 
-    group_cols = ["season", "game_id", "team_id"]
+    group_cols = ["season", "game_date", "game_id", "team_id"]
     grouped = latest.groupby(group_cols).agg(
         vac_min_szn=("hist_minutes_szn", "sum"),
         vac_fga_szn=("hist_fga_szn", "sum"),
@@ -583,7 +637,7 @@ def _compute_vacated_team_features_from_minutes_preds(
         return pd.DataFrame()
 
     tips = (
-        stats.drop_duplicates(subset=["game_id"])[["game_id", "tip_ts", "season", "game_date"]]
+        stats.drop_duplicates(subset=["game_id", "game_date"])[["game_id", "tip_ts", "season", "game_date"]]
         .dropna(subset=["tip_ts"])
         .copy()
     )
@@ -597,11 +651,20 @@ def _compute_vacated_team_features_from_minutes_preds(
     preds["game_id"] = pd.to_numeric(preds["game_id"], errors="coerce").astype("Int64")
     preds["team_id"] = pd.to_numeric(preds["team_id"], errors="coerce").astype("Int64")
     preds["player_id"] = pd.to_numeric(preds["player_id"], errors="coerce").astype("Int64")
+    if "game_date" in preds.columns:
+        preds["game_date"] = pd.to_datetime(preds["game_date"], errors="coerce").dt.normalize()
     preds = preds.dropna(subset=["game_id", "team_id", "player_id"]).copy()
     preds["game_id"] = preds["game_id"].astype(int)
     preds["team_id"] = preds["team_id"].astype(int)
     preds["player_id"] = preds["player_id"].astype(int)
-    preds = preds.merge(tips[["game_id", "tip_ts"]], on="game_id", how="left")
+    pred_tip_keys = ["game_id"]
+    if "game_date" in preds.columns and "game_date" in tips.columns:
+        pred_tip_keys.append("game_date")
+    preds = preds.merge(
+        tips[[c for c in ["game_id", "game_date", "tip_ts"] if c in tips.columns]],
+        on=pred_tip_keys,
+        how="left",
+    )
     preds = preds.dropna(subset=["tip_ts"]).copy()
 
     status_col = "status_min" if "status_min" in preds.columns else "status"
@@ -618,8 +681,24 @@ def _compute_vacated_team_features_from_minutes_preds(
     preds["pos_group"] = preds["pos_bucket"].map({"G": "G", "W": "W", "BIG": "B"}).fillna("UNK")
 
     # Per-player season-to-date cumulative totals from stats (inclusive).
-    label_minutes = labels[["game_id", "player_id", "minutes_actual"]] if "minutes_actual" in labels.columns else pd.DataFrame()
-    hist = stats.merge(label_minutes, on=["game_id", "player_id"], how="left", suffixes=("", "_label"))
+    label_minutes = pd.DataFrame()
+    if "minutes_actual" in labels.columns:
+        label_cols = [
+            c
+            for c in ["game_id", "game_date", "team_id", "player_id", "minutes_actual"]
+            if c in labels.columns
+        ]
+        label_minutes = labels[label_cols].copy()
+        if "game_date" in label_minutes.columns:
+            label_minutes["game_date"] = pd.to_datetime(
+                label_minutes["game_date"], errors="coerce"
+            ).dt.normalize()
+    hist_join_keys = ["game_id", "player_id"]
+    if "game_date" in stats.columns and "game_date" in label_minutes.columns:
+        hist_join_keys.append("game_date")
+    if "team_id" in stats.columns and "team_id" in label_minutes.columns:
+        hist_join_keys.append("team_id")
+    hist = stats.merge(label_minutes, on=hist_join_keys, how="left", suffixes=("", "_label"))
     hist["tip_ts"] = pd.to_datetime(hist["tip_ts"], errors="coerce", utc=True)
     hist = hist.dropna(subset=["season", "player_id", "tip_ts"]).copy()
     hist["season"] = pd.to_numeric(hist["season"], errors="coerce").astype(int)
@@ -652,7 +731,7 @@ def _compute_vacated_team_features_from_minutes_preds(
     for col in hist_cols:
         merged[col] = merged[col].fillna(0.0)
 
-    group_cols = ["season", "game_id", "team_id"]
+    group_cols = ["season", "game_date", "game_id", "team_id"]
     grouped = merged.groupby(group_cols, as_index=False).agg(
         vac_min_szn=("cum_minutes_szn", "sum"),
         vac_fga_szn=("cum_fga_szn", "sum"),
@@ -690,10 +769,16 @@ def _compute_team_context(stats: pd.DataFrame) -> pd.DataFrame:
     )
     team_game["poss"] = team_game["fga"] + 0.44 * team_game["fta"] + team_game["tov"]
 
-    opp_map = team_game[["season", "game_id", "team_id", "pts_for", "poss", "fta"]].rename(
+    opp_map = team_game[
+        ["season", "game_date", "game_id", "team_id", "pts_for", "poss", "fta"]
+    ].rename(
         columns={"team_id": "opponent_id", "pts_for": "pts_against", "poss": "opp_poss", "fta": "fta_against"}
     )
-    team_game = team_game.merge(opp_map, on=["season", "game_id", "opponent_id"], how="left")
+    team_game = team_game.merge(
+        opp_map,
+        on=["season", "game_date", "game_id", "opponent_id"],
+        how="left",
+    )
 
     team_game.sort_values(["season", "team_id", "tip_ts"], inplace=True)
     team_game["games_played_prior"] = team_game.groupby(["season", "team_id"]).cumcount()
@@ -711,7 +796,18 @@ def _compute_team_context(stats: pd.DataFrame) -> pd.DataFrame:
     # FTA allowed per game (how many FTA the team gives up on defense)
     team_game["team_fta_allowed_per_game"] = team_game["cum_fta_allowed"] / games
 
-    return team_game[["season", "game_id", "team_id", "team_pace_szn", "team_off_rtg_szn", "team_def_rtg_szn", "team_fta_allowed_per_game"]]
+    return team_game[
+        [
+            "season",
+            "game_date",
+            "game_id",
+            "team_id",
+            "team_pace_szn",
+            "team_off_rtg_szn",
+            "team_def_rtg_szn",
+            "team_fta_allowed_per_game",
+        ]
+    ]
 
 
 def build_features(
@@ -723,11 +819,18 @@ def build_features(
     injuries: pd.DataFrame,
 ) -> pd.DataFrame:
     roster_sub = _prepare_roster_latest(roster)
-    label_cols = [c for c in ["game_id", "player_id", "team_id", "minutes_actual", "starter_flag", "listed_pos"] if c in labels.columns]
+    label_cols = [
+        c
+        for c in ["game_id", "game_date", "player_id", "team_id", "minutes_actual", "starter_flag", "listed_pos"]
+        if c in labels.columns
+    ]
+    join_keys = ["game_id", "player_id", "team_id"]
+    if "game_date" in label_cols:
+        join_keys.append("game_date")
     df = stats.merge(
         labels[label_cols],
         how="left",
-        on=["game_id", "player_id", "team_id"],
+        on=join_keys,
     )
     if "game_date_x" in df.columns and "game_date" not in df.columns:
         df.rename(columns={"game_date_x": "game_date"}, inplace=True)
@@ -743,8 +846,10 @@ def build_features(
     # Missing roster rows default to bench (0).
     if "starter_flag" in df.columns:
         df.rename(columns={"starter_flag": "starter_flag_label"}, inplace=True)
-    roster_merge = roster_sub.drop(columns=["game_date"], errors="ignore")
-    df = df.merge(roster_merge, on=["game_id", "team_id", "player_id"], how="left")
+    roster_merge_keys = ["game_id", "team_id", "player_id"]
+    if "game_date" in roster_sub.columns and "game_date" in df.columns:
+        roster_merge_keys.append("game_date")
+    df = df.merge(roster_sub, on=roster_merge_keys, how="left")
     if "lineup_role" in df.columns:
         df["starter_flag_lineup"] = df["lineup_role"].isin({"confirmed_starter", "projected_starter"}).astype("Int64")
 
@@ -774,9 +879,12 @@ def build_features(
     if "listed_pos" in df.columns:
         df["position_primary"] = df["listed_pos"].fillna("UNK").apply(canonical_pos_bucket)
     elif "listed_pos" in roster_sub.columns:
+        roster_pos_keys = ["game_id", "player_id"]
+        if "game_date" in roster_sub.columns and "game_date" in df.columns:
+            roster_pos_keys.append("game_date")
         df = df.merge(
-            roster_sub[["game_id", "player_id", "listed_pos"]],
-            on=["game_id", "player_id"],
+            roster_sub[[c for c in ["game_id", "game_date", "player_id", "listed_pos"] if c in roster_sub.columns]],
+            on=roster_pos_keys,
             how="left",
         )
         df["position_primary"] = df["listed_pos"].fillna("UNK").apply(canonical_pos_bucket)
@@ -955,7 +1063,6 @@ def build_features(
         pfx = f"last{window}"
         df[f"{pfx}_minutes_sum"] = df[f"{pfx}_minutes_sum"].fillna(0.0)
         for stat_name, rate_col in recency_stat_cols:
-            szn_col = f"season_{stat_name}_per_min" if f"season_{stat_name}_per_min" in df.columns else None
             # Map stat names to season column names
             szn_map = {
                 "fga2": "season_fga_per_min",  # Approximate with total FGA
@@ -989,7 +1096,14 @@ def build_features(
 
     # Odds join (tip-aware snapshots)
     if not odds.empty:
-        df = df.merge(odds[["game_id", "spread_home", "total_close"]], on="game_id", how="left")
+        odds_join_keys = ["game_id"]
+        if "game_date" in odds.columns and "game_date" in df.columns:
+            odds_join_keys.append("game_date")
+        df = df.merge(
+            odds[[c for c in ["game_id", "game_date", "spread_home", "total_close"] if c in odds.columns]],
+            on=odds_join_keys,
+            how="left",
+        )
     else:
         df["spread_home"] = np.nan
         df["total_close"] = np.nan
@@ -1020,7 +1134,7 @@ def build_features(
         df["vac_min_wing_szn"] = 0.0
         df["vac_min_big_szn"] = 0.0
     else:
-        df = df.merge(vacated_team, on=["season", "game_id", "team_id"], how="left")
+        df = df.merge(vacated_team, on=["season", "game_date", "game_id", "team_id"], how="left")
         vac_cols = [
             "vac_min_szn",
             "vac_fga_szn",
@@ -1053,7 +1167,7 @@ def build_features(
         pace_non_null = 0.0
         def_non_null = 0.0
     else:
-        df = df.merge(team_context, on=["season", "game_id", "team_id"], how="left")
+        df = df.merge(team_context, on=["season", "game_date", "game_id", "team_id"], how="left")
         opp_context = team_context.rename(
             columns={
                 "team_id": "opponent_id",
@@ -1063,7 +1177,21 @@ def build_features(
                 "team_fta_allowed_per_game": "opp_fta_allowed_per_game",
             }
         )
-        df = df.merge(opp_context[["season", "game_id", "opponent_id", "opp_pace_szn", "opp_def_rtg_szn", "opp_fta_allowed_per_game"]], on=["season", "game_id", "opponent_id"], how="left")
+        df = df.merge(
+            opp_context[
+                [
+                    "season",
+                    "game_date",
+                    "game_id",
+                    "opponent_id",
+                    "opp_pace_szn",
+                    "opp_def_rtg_szn",
+                    "opp_fta_allowed_per_game",
+                ]
+            ],
+            on=["season", "game_date", "game_id", "opponent_id"],
+            how="left",
+        )
         pace_non_null = 1.0 - df["team_pace_szn"].isna().mean()
         def_non_null = 1.0 - df["team_def_rtg_szn"].isna().mean()
     typer.echo(f"[rates_base] team_pace_szn coverage: {pace_non_null:.3%}; team_def_rtg_szn coverage: {def_non_null:.3%}")
@@ -1259,6 +1387,28 @@ def _write_partitions(df: pd.DataFrame, output_root: Path) -> None:
         frame.to_parquet(output_path, index=False)
 
 
+def _assert_unique_training_keys(df: pd.DataFrame) -> None:
+    key_cols = ["season", "game_date", "game_id", "team_id", "player_id"]
+    missing = [c for c in key_cols if c not in df.columns]
+    if missing:
+        raise RuntimeError(f"Cannot validate training-base uniqueness; missing key columns: {missing}")
+    dup_mask = df.duplicated(subset=key_cols, keep=False)
+    if not dup_mask.any():
+        return
+    dup_rows = df.loc[dup_mask, key_cols].copy()
+    dup_counts = (
+        dup_rows.value_counts(subset=key_cols)
+        .reset_index(name="rows")
+        .sort_values("rows", ascending=False)
+    )
+    sample = dup_counts.head(10).to_dict(orient="records")
+    raise RuntimeError(
+        "rates_training_base has duplicate rows for key "
+        "(season, game_date, game_id, team_id, player_id). "
+        f"duplicate_keys={len(dup_counts)} sample={sample}"
+    )
+
+
 @app.command()
 def main(
     start_date: str = typer.Option(..., help="Start date (YYYY-MM-DD) inclusive."),
@@ -1314,7 +1464,7 @@ def main(
         root,
         start,
         end,
-        stats.drop_duplicates(subset=["game_id"]).set_index("game_id")["tip_ts"],
+        stats.drop_duplicates(subset=["game_id", "game_date"])[["game_id", "game_date", "tip_ts"]],
     )
     minutes_preds = load_minutes_predictions(root, start, end, minutes_for_rates_root=minutes_for_rates_root)
     if minutes_for_rates_root:
@@ -1440,6 +1590,7 @@ def main(
         features["track_role_is_low_minutes"] = True
     vac_frac = (features["vac_min_szn"] > 0).mean() if "vac_min_szn" in features.columns else 0.0
     typer.echo(f"[rates_base] vacated_minutes>0 for {vac_frac:.3%} of rows")
+    _assert_unique_training_keys(features)
     _write_partitions(features, out_root)
 
     min_date = pd.to_datetime(features["game_date"]).min()
