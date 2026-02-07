@@ -5,6 +5,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+import pytest
 
 from projections.cli import score_minutes_v1
 from projections.minutes_v1 import modeling
@@ -98,3 +99,24 @@ def test_resolved_bundle_scoring_includes_play_prob(tmp_path: Path) -> None:
     scored = score_minutes_v1._score_rows(df, loaded_bundle, enable_play_prob_head=True)
     assert "play_prob" in scored.columns
     assert scored["play_prob"].notna().all()
+
+
+def test_play_prob_head_uses_dedicated_features_not_quantile_subset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    df = _toy_minutes_frame()
+    df["prior_play_prob"] = [0.05, 0.2, 0.85, 0.9, 0.6]
+    bundle = _fit_toy_bundle(df)
+
+    captured_columns: dict[str, list[str]] = {}
+
+    def _fake_predict_play_probability(_artifacts, X, *, _calibrated: bool = True):
+        captured_columns["columns"] = list(X.columns)
+        return np.full(len(X), 0.5, dtype=float)
+
+    monkeypatch.setattr(score_minutes_v1, "predict_play_probability", _fake_predict_play_probability)
+    scored = score_minutes_v1._score_rows(df, bundle, enable_play_prob_head=True)
+
+    assert "play_prob" in scored.columns
+    assert captured_columns["columns"]
+    assert "prior_play_prob" in captured_columns["columns"]

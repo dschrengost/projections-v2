@@ -1383,7 +1383,9 @@ def _score_rows(
         bundle.get("play_probability") if (enable_play_prob_head and bundle_play_prob_enabled) else None
     )
     if play_prob_artifacts is not None:
-        play_prob = predict_play_probability(play_prob_artifacts, feature_matrix)
+        # Use the full scoring frame so dedicated play-prob features (for example
+        # prior_play_prob) are available even when excluded from quantile features.
+        play_prob = predict_play_probability(play_prob_artifacts, working)
     else:
         play_prob = np.ones(len(working), dtype=float)
     play_prob = _apply_play_prob_calibration(play_prob, working, play_prob_calibration)
