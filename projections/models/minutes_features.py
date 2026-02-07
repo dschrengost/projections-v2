@@ -30,6 +30,9 @@ EXCLUDED_FEATURE_COLUMNS = {
     "ingested_ts",
     "time_to_tip_min",
     "odds_missing",
+    # Retrain-only supervision/weighting artifacts (must never be model inputs).
+    "plays_target",
+    "weight_recency",
     # Label columns - these are ground truth derived post-game, not pre-game features.
     "starter_flag_label",
     "starter_flag_x",

@@ -413,6 +413,13 @@ def _load_feature_frame_with_schema(
         target_col=target_col,
         excluded={"prior_play_prob", "play_prob", "play_probability", "p_play"},
     )
+    forbidden_training_columns = {"plays_target", "weight_recency"}
+    leaked_training_columns = sorted(forbidden_training_columns.intersection(feature_columns))
+    if leaked_training_columns:
+        raise ValueError(
+            "Training-only columns leaked into model feature set: "
+            f"{', '.join(leaked_training_columns)}"
+        )
     return feature_df, feature_columns
 
 
