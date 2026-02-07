@@ -40,9 +40,11 @@ class MinutesFeatureBuilder:
     def build(self, labels: pd.DataFrame) -> pd.DataFrame:
         base = self._attach_schedule(labels)
         base = self._attach_injuries(base)
+        base = self._attach_depth(base)
+        # Attach DNP history after roster/depth so active roster hints are available
+        # when injury snapshots are sparse or missing for a player-game.
         base = self._attach_dnp_history_features(base)
         base = self._attach_odds(base)
-        base = self._attach_depth(base)
         base = self._player_history_features(base)
         base = self._attach_within_team_rotation_ranks(base)
         base = self._attach_archetype_features(base)

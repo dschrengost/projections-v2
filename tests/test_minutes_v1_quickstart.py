@@ -257,3 +257,72 @@ def test_minutes_feature_builder_history_not_corrupted_by_duplicate_odds() -> No
     features = builder.build(labels)
 
     assert features.loc[features["game_id"] == 102, "min_last1"].iloc[0] == pytest.approx(32.0)
+
+
+def test_minutes_feature_builder_uses_roster_active_hints_for_dnp_history() -> None:
+    schedule = pd.DataFrame(
+        {
+            "game_id": [101, 102],
+            "season": ["2024-25", "2024-25"],
+            "game_date": ["2024-10-21", "2024-10-23"],
+            "tip_ts": ["2024-10-21T23:00:00Z", "2024-10-23T00:00:00Z"],
+            "home_team_id": [1, 2],
+            "away_team_id": [2, 1],
+        }
+    )
+    injuries = pd.DataFrame(
+        {
+            "game_id": [101, 102],
+            "player_id": [900, 900],
+            "status": ["Available", "Available"],
+            "restriction_flag": [False, False],
+            "ramp_flag": [False, False],
+            "games_since_return": [0, 0],
+            "days_since_return": [0, 0],
+            "snapshot_missing": [1, 1],
+            "as_of_ts": ["2024-10-21T20:00:00Z", "2024-10-22T20:00:00Z"],
+        }
+    )
+    odds = pd.DataFrame(
+        {
+            "game_id": [101, 102],
+            "home_line": [-5.5, 4.0],
+            "total": [225.5, 219.0],
+            "as_of_ts": ["2024-10-21T21:00:00Z", "2024-10-22T21:00:00Z"],
+        }
+    )
+    roster = pd.DataFrame(
+        {
+            "team_id": [1, 1],
+            "game_date": ["2024-10-21", "2024-10-23"],
+            "player_id": [900, 900],
+            "active_flag": [True, True],
+            "listed_pos": ["PG", "PG"],
+            "as_of_ts": ["2024-10-20T12:00:00Z", "2024-10-22T12:00:00Z"],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "game_id": [101, 102],
+            "player_id": [900, 900],
+            "team_id": [1, 1],
+            "season": ["2024-25", "2024-25"],
+            "game_date": ["2024-10-21", "2024-10-23"],
+            "minutes": [0.0, 0.0],
+            "starter_flag": [0, 0],
+        }
+    )
+
+    builder = MinutesFeatureBuilder(
+        schedule=schedule,
+        injuries_snapshot=injuries,
+        odds_snapshot=odds,
+        roster_nightly=roster,
+        coach_tenure=pd.DataFrame(),
+    )
+    features = builder.build(labels).sort_values("game_date").reset_index(drop=True)
+
+    # Game 1 has no prior history.
+    assert features.loc[0, "consecutive_active_dnp"] == 0
+    # Game 2 should see game 1 as active+DNP due roster active hints.
+    assert features.loc[1, "consecutive_active_dnp"] == 1

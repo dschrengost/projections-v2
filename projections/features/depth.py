@@ -25,6 +25,7 @@ def attach_depth_features(
                 merged[col] = 0
             merged[col] = merged[col].fillna(0).astype(int)
         for col, default in (
+            ("active_flag", pd.NA),
             ("lineup_role", pd.NA),
             ("lineup_status", pd.NA),
             ("lineup_roster_status", pd.NA),
@@ -77,7 +78,7 @@ def attach_depth_features(
         )
         if col in roster.columns
     ]
-    base_cols = ["team_id", "game_date", "player_id", "archetype", "as_of_ts"] + extra_lineup_cols
+    base_cols = ["team_id", "game_date", "player_id", "archetype", "active_flag", "as_of_ts"] + extra_lineup_cols
     player_positions = (
         roster[base_cols]
         .sort_values("as_of_ts")
@@ -97,6 +98,7 @@ def attach_depth_features(
                 "game_id",
                 "team_id",
                 "player_id",
+                "active_flag",
                 "lineup_status",
                 "is_projected_starter",
                 "is_confirmed_starter",
@@ -115,14 +117,14 @@ def attach_depth_features(
         # Only apply fallback if we are missing lineup metadata after the merge.
         missing_meta = merged[["lineup_status", "is_projected_starter", "is_confirmed_starter"]].isna().any(axis=None)
         if missing_meta:
-            for col in ("lineup_status", "is_projected_starter", "is_confirmed_starter"):
+            for col in ("active_flag", "lineup_status", "is_projected_starter", "is_confirmed_starter"):
                 alt_col = f"{col}_alt"
                 if alt_col in merged.columns:
                     merged[col] = merged[col].combine_first(merged[alt_col])
             if "roster_as_of_ts_alt" in merged.columns:
                 merged["roster_as_of_ts"] = merged["roster_as_of_ts"].combine_first(merged["roster_as_of_ts_alt"])
         # Clean up alt columns
-        for col in ("lineup_status", "is_projected_starter", "is_confirmed_starter", "roster_as_of_ts"):
+        for col in ("active_flag", "lineup_status", "is_projected_starter", "is_confirmed_starter", "roster_as_of_ts"):
             alt_col = f"{col}_alt"
             if alt_col in merged.columns:
                 merged.drop(columns=[alt_col], inplace=True)
