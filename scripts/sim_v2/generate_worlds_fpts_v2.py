@@ -1518,6 +1518,8 @@ def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> p
         "minutes_p50",
         "minutes_lock_eff",
         "minutes_target_eff",
+        "ops_depth_role",
+        "ops_override_applied",
         "play_prob",
         "status_bucket",
         "is_starter",
@@ -2388,6 +2390,95 @@ def main(
                 )
                 fixed_minutes_arr = np.clip(fixed_minutes_arr, 0.0, hard_cap_minutes)
 
+            # Hard-force inactive rows from authoritative override signals.
+            # This prevents override-marked out-of-rotation players from leaking into worlds.
+            forced_inactive_mask = np.zeros(len(mu_df), dtype=bool)
+            forced_reasons: dict[str, int] = {}
+
+            forced_by_play_prob = play_prob_raw <= 0.0
+            if forced_by_play_prob.any():
+                forced_reasons["play_prob_le_0"] = int(forced_by_play_prob.sum())
+                forced_inactive_mask |= forced_by_play_prob
+
+            status_text = None
+            for status_col in ("status_bucket", "status", "injury_status", "availability_status"):
+                if status_col in mu_df.columns:
+                    status_text = mu_df[status_col].astype(str).str.strip().str.lower().to_numpy(dtype=object)
+                    break
+            if status_text is not None and status_text.size:
+                forced_by_status = status_text == "out"
+                forced_by_status |= np.char.find(status_text.astype(str), "inactive") >= 0
+                forced_by_status |= np.char.find(status_text.astype(str), "susp") >= 0
+                if forced_by_status.any():
+                    forced_reasons["status_out_like"] = int(forced_by_status.sum())
+                    forced_inactive_mask |= forced_by_status
+
+            if "ops_depth_role" in mu_df.columns:
+                role_text = mu_df["ops_depth_role"].astype(str).str.strip().str.lower().to_numpy(dtype=object)
+                forced_by_role = role_text == "out"
+                if forced_by_role.any():
+                    forced_reasons["ops_depth_role_out"] = int(forced_by_role.sum())
+                    forced_inactive_mask |= forced_by_role
+
+            if "minutes_lock_eff" in mu_df.columns and "minutes_target_eff" in mu_df.columns:
+                lock_eff_mask = (
+                    pd.to_numeric(mu_df["minutes_lock_eff"], errors="coerce")
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                    > 0.5
+                )
+                target_eff = pd.to_numeric(mu_df["minutes_target_eff"], errors="coerce").to_numpy(dtype=float)
+                forced_by_locked_zero = lock_eff_mask & np.isfinite(target_eff) & (target_eff <= 1e-9)
+                if forced_by_locked_zero.any():
+                    forced_reasons["minutes_lock_target_zero"] = int(forced_by_locked_zero.sum())
+                    forced_inactive_mask |= forced_by_locked_zero
+
+                if "ops_override_applied" in mu_df.columns:
+                    ops_override = (
+                        pd.to_numeric(mu_df["ops_override_applied"], errors="coerce")
+                        .fillna(0.0)
+                        .to_numpy(dtype=float)
+                        > 0.5
+                    )
+                    forced_by_ops_near_zero = (
+                        lock_eff_mask
+                        & ops_override
+                        & np.isfinite(target_eff)
+                        & (target_eff <= float(PLAY_THRESHOLD_MINUTES))
+                    )
+                    if forced_by_ops_near_zero.any():
+                        forced_reasons["ops_lock_target_le_play_threshold"] = int(forced_by_ops_near_zero.sum())
+                        forced_inactive_mask |= forced_by_ops_near_zero
+
+            if forced_inactive_mask.any():
+                play_prob_eff = np.where(forced_inactive_mask, 0.0, play_prob_eff)
+                if rotation_lock_mask is not None:
+                    rotation_lock_mask = rotation_lock_mask.astype(bool, copy=True)
+                    rotation_lock_mask[forced_inactive_mask] = False
+                if policy_reason_arr is not None:
+                    policy_reason_arr = policy_reason_arr.astype(object, copy=True)
+                    policy_reason_arr[forced_inactive_mask] = "forced_inactive_override"
+                else:
+                    policy_reason_arr = np.full(len(mu_df), "n/a", dtype=object)
+                    policy_reason_arr[forced_inactive_mask] = "forced_inactive_override"
+
+                # Keep forced-inactive rows hard-zero in legacy/team allocator paths.
+                if fixed_mask_arr is None:
+                    fixed_mask_arr = forced_inactive_mask.copy()
+                    fixed_minutes_arr = np.zeros(len(mu_df), dtype=float)
+                else:
+                    fixed_mask_arr = fixed_mask_arr.astype(bool, copy=True)
+                    fixed_minutes_arr = (
+                        fixed_minutes_arr.copy() if fixed_minutes_arr is not None else np.zeros(len(mu_df), dtype=float)
+                    )
+                    fixed_mask_arr |= forced_inactive_mask
+                fixed_minutes_arr[forced_inactive_mask] = 0.0
+
+            minutes_alloc_metrics["forced_inactive_overrides"] = {
+                "n_players": int(forced_inactive_mask.sum()),
+                "reasons": {k: int(v) for k, v in sorted(forced_reasons.items())},
+            }
+
             # Vegas implied team points for optional anchoring.
             schedule_df = _load_schedule_for_date(root, pd.Timestamp(game_date))
             implied_team_points = _build_implied_team_points(minutes_df, schedule_df)
@@ -2577,6 +2668,8 @@ def main(
                 else:
                     # All players with play_prob > 0 are active; OUT players (play_prob=0) stay inactive
                     active_mask = np.broadcast_to(play_prob_eff > 0, (chunk_size, len(play_prob_eff)))
+                if forced_inactive_mask.any():
+                    active_mask[:, forced_inactive_mask] = False
                 if eligible_flag_arr is not None and not getattr(profile_cfg, "preserve_input_rotation", False):
                     # Only apply eligible_flag filtering when NOT preserving input rotation.
                     # With preserve_input_rotation=True, the input frame is assumed to already reflect the
@@ -2590,11 +2683,16 @@ def main(
                     and getattr(feasibility_cfg, "enabled", False)
                     and group_map
                 ):
-                    eligible_mask_for_gate = (
-                        eligible_flag_arr
-                        if (eligible_flag_arr is not None and not getattr(profile_cfg, "preserve_input_rotation", False))
-                        else None
-                    )
+                    eligible_mask_for_gate = None
+                    if eligible_flag_arr is not None and not getattr(profile_cfg, "preserve_input_rotation", False):
+                        eligible_mask_for_gate = eligible_flag_arr.copy()
+                    if forced_inactive_mask.any():
+                        forced_eligible = ~forced_inactive_mask
+                        eligible_mask_for_gate = (
+                            forced_eligible
+                            if eligible_mask_for_gate is None
+                            else (eligible_mask_for_gate & forced_eligible)
+                        )
                     active_mask, gate_diag = apply_team_feasibility_gate(
                         active_mask,
                         play_prob=play_prob_eff,
@@ -2614,6 +2712,8 @@ def main(
                     phys_resample_attempts_total += int(gate_diag.resample_attempts_total)
                     phys_promoted_team_worlds += int(gate_diag.n_promoted_team_worlds)
                     phys_promoted_players_total += int(gate_diag.promoted_players_total)
+                    if forced_inactive_mask.any():
+                        active_mask[:, forced_inactive_mask] = False
                     if sim_audit and chunk_start == 0:
                         frac_infeasible = (
                             float(gate_diag.n_infeasible_pre_resample) / float(gate_diag.n_team_worlds)
@@ -2685,6 +2785,9 @@ def main(
                     )
                     minutes_worlds = pr5_result.minutes_worlds
                     active_mask = pr5_result.active_mask
+                    if forced_inactive_mask.any():
+                        active_mask[:, forced_inactive_mask] = False
+                        minutes_worlds[:, forced_inactive_mask] = 0.0
 
                     # Log diagnostics on first chunk
                     if chunk_start == 0:
@@ -3265,6 +3368,10 @@ def main(
                 all_fpts = np.vstack(world_fpts_samples)  # shape: (n_worlds, n_players)
                 all_minutes = np.vstack(minutes_world_samples) if minutes_world_samples else None
                 n_worlds_total, n_players = all_fpts.shape
+                if forced_inactive_mask.any() and forced_inactive_mask.shape[0] == n_players:
+                    all_fpts[:, forced_inactive_mask] = 0.0
+                    if all_minutes is not None:
+                        all_minutes[:, forced_inactive_mask] = 0.0
 
                 # Define "played" for conditional moments.
                 # - When play_prob_masking=True (sim_v3/prod), worlds are unconditional and DNP => 0 minutes.
@@ -3387,6 +3494,8 @@ def main(
                     # When availability masking is disabled, worlds are generated conditional-on-playing.
                     # Still emit unconditional moments by mixing with a point mass at 0 using play_prob.
                     p_play = np.clip(play_prob_arr.astype(float), 0.0, 1.0)
+                    if forced_inactive_mask.any() and forced_inactive_mask.shape == p_play.shape:
+                        p_play = np.where(forced_inactive_mask, 0.0, p_play)
                     active_rate_sim = p_play
 
                     fpts_mean_uncond = fpts_mean * p_play
@@ -3422,6 +3531,8 @@ def main(
                         all_fpts, [q * 100 for q in quantiles], axis=0
                     ).astype(float)
                     active_rate_sim = (active_counts / float(max(1, n_worlds_total))).astype(float)
+                if forced_inactive_mask.any() and forced_inactive_mask.shape == active_rate_sim.shape:
+                    active_rate_sim = np.where(forced_inactive_mask, 0.0, active_rate_sim)
 
                 # Play-prob policy audit (best-effort; aggregate only).
                 if (
@@ -3468,6 +3579,8 @@ def main(
                 if all_minutes is not None:
                     if (not use_play_prob_masking) and ("play_prob" in mu_df.columns):
                         p_play = np.clip(play_prob_arr.astype(float), 0.0, 1.0)
+                        if forced_inactive_mask.any() and forced_inactive_mask.shape == p_play.shape:
+                            p_play = np.where(forced_inactive_mask, 0.0, p_play)
                         minutes_mean_uncond = minutes_mean * p_play
                         minutes_second_moment_cond = (minutes_std**2) + (minutes_mean**2)
                         minutes_var_uncond = p_play * minutes_second_moment_cond - (minutes_mean_uncond**2)
@@ -3523,6 +3636,19 @@ def main(
                             typer.echo(
                                 f"[sim_v2][coherence] WARNING: availability mismatch vs play_prob_eff "
                                 f"(max_abs={worst:.3f}): {rows}",
+                                err=True,
+                            )
+                    if forced_inactive_mask.any() and forced_inactive_mask.shape == p_avail_realized.shape:
+                        leaked = forced_inactive_mask & (p_avail_realized > 1e-6)
+                        if leaked.any():
+                            pid = mu_df["player_id"].astype(str).to_numpy()
+                            rows = ", ".join(
+                                f"{pid[i]}:p_avail={float(p_avail_realized[i]):.4f}"
+                                for i in np.flatnonzero(leaked)[:5]
+                            )
+                            typer.echo(
+                                "[sim_v2][coherence] WARNING: forced-inactive players had non-zero availability "
+                                f"(n={int(leaked.sum())}): {rows}",
                                 err=True,
                             )
 
@@ -3610,12 +3736,17 @@ def main(
                     }
 
                 # Rotation (meaningful minutes) rate across worlds.
+                sim_p_available = (avail_counts_total / float(max(1, n_worlds_total))).astype(float)
+                if forced_inactive_mask.any() and forced_inactive_mask.shape == sim_p_available.shape:
+                    sim_p_available = np.where(forced_inactive_mask, 0.0, sim_p_available)
                 if all_minutes is not None:
                     sim_p_rotation = (
                         (all_minutes >= float(ROTATION_THRESHOLD_MINUTES)).mean(axis=0, dtype=float).astype(float)
                     )
                 else:
                     sim_p_rotation = np.zeros(n_players, dtype=float)
+                if forced_inactive_mask.any() and forced_inactive_mask.shape == sim_p_rotation.shape:
+                    sim_p_rotation = np.where(forced_inactive_mask, 0.0, sim_p_rotation)
 
                 # Build output projection DataFrame
                 dk_fpts_mean_target = (
@@ -3629,7 +3760,7 @@ def main(
                 # Simulation availability input and regime diagnostics.
                 proj_df["play_prob_raw"] = play_prob_raw
                 proj_df["play_prob_eff"] = play_prob_eff
-                proj_df["sim_p_available"] = (avail_counts_total / float(max(1, n_worlds_total))).astype(float)
+                proj_df["sim_p_available"] = sim_p_available
                 proj_df["sim_p_rotation"] = sim_p_rotation
                 proj_df["bench_zero_p_zero"] = bench_zero_p_zero
                 proj_df["bench_zero_threshold_minutes"] = (
