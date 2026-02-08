@@ -102,6 +102,17 @@ def _season_from_day(day: pd.Timestamp) -> int:
     return day.year if day.month >= 8 else day.year - 1
 
 
+def _season_history_start(day: pd.Timestamp) -> pd.Timestamp:
+    """Return the history start date for season-to-date feature computation."""
+    season_year = _season_start_from_day(day)
+    return pd.Timestamp(f"{season_year}-08-01").normalize()
+
+
+def _groupwise_cumsum_shift1(df: pd.DataFrame, group_cols: list[str], value_col: str) -> pd.Series:
+    """Compute group-wise cumulative sum shifted by one row within each group."""
+    return df.groupby(group_cols, sort=False)[value_col].transform(lambda s: s.cumsum().shift(1))
+
+
 app = typer.Typer(add_completion=False)
 
 
@@ -468,11 +479,11 @@ def _player_history_totals(stats: pd.DataFrame, labels: pd.DataFrame) -> pd.Data
     hist["minutes_hist"] = hist["minutes_actual"].fillna(hist["minutes_played"]).astype(float)
     hist.sort_values(["season", "player_id", "tip_ts"], inplace=True)
 
-    hist["hist_minutes_szn"] = hist.groupby(["season", "player_id"])["minutes_hist"].cumsum().shift(1)
-    hist["hist_fga_szn"] = hist.groupby(["season", "player_id"])["fga"].cumsum().shift(1)
-    hist["hist_3pa_szn"] = hist.groupby(["season", "player_id"])["three_pa"].cumsum().shift(1)
-    hist["hist_fta_szn"] = hist.groupby(["season", "player_id"])["fta"].cumsum().shift(1)
-    hist["hist_ast_szn"] = hist.groupby(["season", "player_id"])["assists"].cumsum().shift(1)
+    hist["hist_minutes_szn"] = _groupwise_cumsum_shift1(hist, ["season", "player_id"], "minutes_hist")
+    hist["hist_fga_szn"] = _groupwise_cumsum_shift1(hist, ["season", "player_id"], "fga")
+    hist["hist_3pa_szn"] = _groupwise_cumsum_shift1(hist, ["season", "player_id"], "three_pa")
+    hist["hist_fta_szn"] = _groupwise_cumsum_shift1(hist, ["season", "player_id"], "fta")
+    hist["hist_ast_szn"] = _groupwise_cumsum_shift1(hist, ["season", "player_id"], "assists")
     hist_cols = ["hist_minutes_szn", "hist_fga_szn", "hist_3pa_szn", "hist_fta_szn", "hist_ast_szn"]
     hist[hist_cols] = hist[hist_cols].fillna(0.0)
     return hist[
@@ -783,11 +794,11 @@ def _compute_team_context(stats: pd.DataFrame) -> pd.DataFrame:
 
     team_game.sort_values(["season", "team_id", "tip_ts"], inplace=True)
     team_game["games_played_prior"] = team_game.groupby(["season", "team_id"]).cumcount()
-    team_game["cum_poss"] = team_game.groupby(["season", "team_id"])["poss"].cumsum().shift(1)
-    team_game["cum_pts_for"] = team_game.groupby(["season", "team_id"])["pts_for"].cumsum().shift(1)
-    team_game["cum_pts_against"] = team_game.groupby(["season", "team_id"])["pts_against"].cumsum().shift(1)
+    team_game["cum_poss"] = _groupwise_cumsum_shift1(team_game, ["season", "team_id"], "poss")
+    team_game["cum_pts_for"] = _groupwise_cumsum_shift1(team_game, ["season", "team_id"], "pts_for")
+    team_game["cum_pts_against"] = _groupwise_cumsum_shift1(team_game, ["season", "team_id"], "pts_against")
     # FTA allowed = opponent's FTA when playing against this team (defensive foul-drawing exposure)
-    team_game["cum_fta_allowed"] = team_game.groupby(["season", "team_id"])["fta_against"].cumsum().shift(1)
+    team_game["cum_fta_allowed"] = _groupwise_cumsum_shift1(team_game, ["season", "team_id"], "fta_against")
 
     games = team_game["games_played_prior"].replace(0, np.nan)
     poss_denom = team_game["cum_poss"].replace(0.0, np.nan)
@@ -944,7 +955,7 @@ def build_features(
         "ft_att",
     ]
     for col in season_cum_cols:
-        df[f"{col}_season_cum"] = df.groupby(season_group_keys)[col].cumsum().shift(1)
+        df[f"{col}_season_cum"] = _groupwise_cumsum_shift1(df, season_group_keys, col)
 
     df["season_fg2_pct"] = np.divide(
         df["fg2_made_season_cum"],
@@ -1000,12 +1011,7 @@ def build_features(
     df["n_games_season"] = (
         df.groupby(["season", "player_id"]).cumcount()  # 0-indexed count of prior games
     )
-    df["season_minutes_sum"] = (
-        df.groupby(["season", "player_id"])["minutes_actual"]
-        .cumsum()
-        .shift(1)
-        .fillna(0.0)
-    )
+    df["season_minutes_sum"] = _groupwise_cumsum_shift1(df, ["season", "player_id"], "minutes_actual").fillna(0.0)
 
     # Recency features: rolling windows of last 1/3/5/10 games
     # These capture recent form and are important predictors
@@ -1458,27 +1464,35 @@ def main(
     else:
         typer.echo("[rates] existing partitions will be skipped.")
 
-    labels = load_minutes_labels(root, start, end)
-    stats = load_boxscores(root, start, end)
-    roster = load_roster(root, start, end)
+    history_start = _season_history_start(start)
+    typer.echo(
+        f"[rates] computing season context with history window {history_start.date()} to {end.date()} "
+        f"(target write window {start.date()} to {end.date()})"
+    )
+
+    labels = load_minutes_labels(root, history_start, end)
+    stats = load_boxscores(root, history_start, end)
+    roster = load_roster(root, history_start, end)
     odds = load_odds(
         root,
-        start,
+        history_start,
         end,
         stats.drop_duplicates(subset=["game_id", "game_date"])[["game_id", "game_date", "tip_ts"]],
     )
-    minutes_preds = load_minutes_predictions(root, start, end, minutes_for_rates_root=minutes_for_rates_root)
+    minutes_preds = load_minutes_predictions(root, history_start, end, minutes_for_rates_root=minutes_for_rates_root)
     if minutes_for_rates_root:
         typer.echo(f"[rates] using custom minutes_for_rates_root: {minutes_for_rates_root}")
     minutes_pred_dates: set[pd.Timestamp] | set[pd.Timestamp.date] = set()
     if not minutes_preds.empty and "game_date" in minutes_preds.columns:
         minutes_pred_dates = set(pd.to_datetime(minutes_preds["game_date"]).dt.normalize())
-    tracking_roles = load_tracking_roles(root, start, end)
+    tracking_roles = load_tracking_roles(root, history_start, end)
     injuries = load_injuries(root)  # reserved for future vacated usage features
     if injuries.empty:
         typer.echo("[rates] injuries snapshot empty; vacated usage features will remain placeholders.")
 
     features = build_features(labels, stats, roster, odds, minutes_preds, injuries)
+    features["game_date"] = pd.to_datetime(features["game_date"]).dt.normalize()
+    features = features[(features["game_date"] >= start) & (features["game_date"] <= end)].copy()
     if desert_csv:
         desert_df = pd.read_csv(desert_csv)
         if "game_date" in desert_df.columns:
