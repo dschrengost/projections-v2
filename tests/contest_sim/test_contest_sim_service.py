@@ -202,3 +202,28 @@ def test_select_score_applies_dupe_penalty(monkeypatch) -> None:
 
     assert abs(r0.select_score - expected_select) < 0.01
     assert r0.select_score < r0.tail_score  # penalty reduces score
+
+
+def test_robust_floor_metrics_computed(monkeypatch) -> None:
+    """score_lcb95/score_cvar10/robust_floor should be populated and coherent."""
+    worlds = np.arange(100, dtype=np.float64).reshape(-1, 1)
+    player_index = {"1": 0}
+
+    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None):
+        return worlds, player_index
+
+    monkeypatch.setattr(contest_sim_service, "load_worlds_matrix", _fake_load_worlds_matrix)
+
+    result = contest_sim_service.run_contest_simulation(
+        user_lineups=[["1"]],
+        game_date="2099-01-01",
+        field_size_override=2,
+        entry_fee=1.0,
+        archetype="GPP Standard (20% paid)",
+    )
+
+    r0 = result.results[0]
+    assert r0.score_lcb95 is not None
+    assert r0.score_cvar10 is not None
+    assert r0.robust_floor is not None
+    assert r0.robust_floor == min(r0.score_lcb95, r0.score_cvar10)

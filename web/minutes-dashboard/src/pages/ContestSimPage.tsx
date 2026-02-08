@@ -30,7 +30,7 @@ import { formatSlateLabel } from '../utils/slateFormat'
 
 const ownershipStorageKey = 'contestSim.useOwnership'
 
-type SortKey = 'lineup_id' | 'mean' | 'p90' | 'p95' | 'expected_value' | 'roi' | 'win_rate' | 'top_1pct_rate' | 'top_10pct_rate' | 'cash_rate' | 'total_own' | 'ucv90' | 'tail_score' | 'select_score'
+type SortKey = 'lineup_id' | 'mean' | 'p90' | 'p95' | 'expected_value' | 'roi' | 'win_rate' | 'top_1pct_rate' | 'top_10pct_rate' | 'cash_rate' | 'total_own' | 'ucv90' | 'tail_score' | 'select_score' | 'score_lcb95' | 'score_cvar10' | 'robust_floor'
 
 type LineupResultWithOwnership = ContestSimResponse['results'][number] & { total_own: number }
 
@@ -46,6 +46,13 @@ interface ConstrainedSelectionResult {
     minUniquesPassCount: number
     exposureCapError: string | null
     targetCount: number
+}
+
+interface SetAndForgetSelection {
+    orderedIds: number[]
+    coreIds: Set<number>
+    upsideIds: Set<number>
+    safetyFloor: number
 }
 
 function toMinCount(pct: number, targetCount: number): number {
@@ -64,6 +71,76 @@ function getSharedCount(a: string[], b: Set<string>): number {
         }
     }
     return shared
+}
+
+function getNumericOrNegInf(value: unknown): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : -Infinity
+}
+
+function buildSetAndForgetSelection(
+    pool: LineupResultWithOwnership[],
+    targetSize: number,
+): SetAndForgetSelection {
+    const size = Math.max(0, Math.min(targetSize, pool.length))
+    if (size <= 0) {
+        return {
+            orderedIds: [],
+            coreIds: new Set<number>(),
+            upsideIds: new Set<number>(),
+            safetyFloor: -Infinity,
+        }
+    }
+
+    const byRobust = [...pool].sort((a, b) => {
+        const robustDelta = getNumericOrNegInf(b.robust_floor) - getNumericOrNegInf(a.robust_floor)
+        if (robustDelta !== 0) return robustDelta
+        return b.expected_value - a.expected_value
+    })
+
+    const robustValsAsc = byRobust
+        .map(r => getNumericOrNegInf(r.robust_floor))
+        .filter(v => Number.isFinite(v))
+        .sort((a, b) => a - b)
+    const floorIdx = Math.min(
+        Math.max(0, Math.floor(0.3 * Math.max(0, robustValsAsc.length - 1))),
+        Math.max(0, robustValsAsc.length - 1),
+    )
+    const safetyFloor = robustValsAsc.length > 0 ? robustValsAsc[floorIdx] : -Infinity
+
+    const coreCount = Math.min(size, Math.max(1, Math.floor(size * 0.8)))
+    const upsideCount = size - coreCount
+
+    const core = byRobust.slice(0, coreCount)
+    const coreIds = new Set(core.map(r => r.lineup_id))
+
+    const upsideCandidates = byRobust
+        .filter(r => !coreIds.has(r.lineup_id))
+        .filter(r => getNumericOrNegInf(r.robust_floor) >= safetyFloor)
+        .sort((a, b) => {
+            const topDelta = b.top_1pct_rate - a.top_1pct_rate
+            if (topDelta !== 0) return topDelta
+            return getNumericOrNegInf(b.robust_floor) - getNumericOrNegInf(a.robust_floor)
+        })
+
+    const upside = upsideCandidates.slice(0, upsideCount)
+    const upsideIds = new Set(upside.map(r => r.lineup_id))
+
+    const orderedIds: number[] = [...core.map(r => r.lineup_id), ...upside.map(r => r.lineup_id)]
+    if (orderedIds.length < size) {
+        for (const r of byRobust) {
+            if (orderedIds.length >= size) break
+            if (!coreIds.has(r.lineup_id) && !upsideIds.has(r.lineup_id)) {
+                orderedIds.push(r.lineup_id)
+            }
+        }
+    }
+
+    return {
+        orderedIds,
+        coreIds,
+        upsideIds,
+        safetyFloor,
+    }
 }
 
 function selectConstrainedLineups(
@@ -129,6 +206,16 @@ function selectConstrainedLineups(
     // Fast path: when there are no exposure minimum constraints, a single-pass greedy
     // keeps the page responsive even for large candidate pools.
     if (minEntries.length === 0) {
+        const maxFastMinUniquesTarget = 200
+        if (minUniques > 0 && targetCount > maxFastMinUniquesTarget) {
+            return {
+                constrainedResults: sortedResults.slice(0, targetCount),
+                minUniquesPassCount: sortedResults.length,
+                exposureCapError: `Min uniques requires Top N ≤ ${maxFastMinUniquesTarget}. Lower Top N to enforce min uniques safely.`,
+                targetCount,
+            }
+        }
+
         const result: LineupResultWithOwnership[] = []
         const selectedSets: Set<string>[] = []
         const counts = new Map<string, number>()
@@ -515,8 +602,15 @@ export default function ContestSimPage() {
     const [maxOwnership, setMaxOwnership] = useState<number | null>(null)
     const [playerSearch, setPlayerSearch] = useState('')
     const [requiredPlayerIds, setRequiredPlayerIds] = useState<string[]>([])
+    const [finalSetSize, setFinalSetSize] = useState(40)
 
     const [selectedLineups, setSelectedLineups] = useState<Set<number>>(new Set())
+    const [manualIncludeFinal, setManualIncludeFinal] = useState<Set<number>>(new Set())
+    const [manualExcludeFinal, setManualExcludeFinal] = useState<Set<number>>(new Set())
+    const [editedLineupsById, setEditedLineupsById] = useState<Record<number, string[]>>({})
+    const [editingLineupId, setEditingLineupId] = useState<number | null>(null)
+    const [editingLineupInputs, setEditingLineupInputs] = useState<string[]>([])
+    const [editingLineupError, setEditingLineupError] = useState<string | null>(null)
 
     // Pagination & Top N Filter
     const [page, setPage] = useState(1)
@@ -758,6 +852,12 @@ export default function ContestSimPage() {
     // Clear selection when results change
     useEffect(() => {
         setSelectedLineups(new Set())
+        setManualIncludeFinal(new Set())
+        setManualExcludeFinal(new Set())
+        setEditedLineupsById({})
+        setEditingLineupId(null)
+        setEditingLineupInputs([])
+        setEditingLineupError(null)
     }, [simResult])
 
     // Player name lookup
@@ -790,6 +890,10 @@ export default function ContestSimPage() {
         setRequiredPlayerIds(prev => (prev.includes(player.player_id) ? prev : [...prev, player.player_id]))
         return true
     }, [resolvePlayerFromSearch])
+
+    const getEffectivePlayerIds = useCallback((lineup: LineupResultWithOwnership): string[] => {
+        return editedLineupsById[lineup.lineup_id] ?? lineup.player_ids
+    }, [editedLineupsById])
 
     // Calculate total ownership for each lineup result
     const resultsWithOwnership = useMemo(() => {
@@ -846,6 +950,39 @@ export default function ContestSimPage() {
         )
     }, [constrainedResults, requiredPlayerIds])
 
+    const poolByLineupId = useMemo(() => {
+        return new Map(filteredByPlayersResults.map(r => [r.lineup_id, r] as const))
+    }, [filteredByPlayersResults])
+
+    const setAndForgetAuto = useMemo(() => {
+        return buildSetAndForgetSelection(filteredByPlayersResults, finalSetSize)
+    }, [filteredByPlayersResults, finalSetSize])
+
+    const finalSetLineupIds = useMemo(() => {
+        const poolIds = new Set(filteredByPlayersResults.map(r => r.lineup_id))
+        const included = Array.from(manualIncludeFinal).filter(id => poolIds.has(id) && !manualExcludeFinal.has(id))
+        const desiredSize = Math.min(filteredByPlayersResults.length, Math.max(finalSetSize, included.length))
+        const ordered: number[] = [...included]
+        for (const id of setAndForgetAuto.orderedIds) {
+            if (ordered.length >= desiredSize) break
+            if (manualExcludeFinal.has(id)) continue
+            if (!ordered.includes(id)) {
+                ordered.push(id)
+            }
+        }
+        return ordered
+    }, [filteredByPlayersResults, finalSetSize, manualIncludeFinal, manualExcludeFinal, setAndForgetAuto])
+
+    const finalSetIdSet = useMemo(() => new Set(finalSetLineupIds), [finalSetLineupIds])
+    const finalSetResults = useMemo(() => {
+        return finalSetLineupIds
+            .map(id => poolByLineupId.get(id))
+            .filter((r): r is LineupResultWithOwnership => Boolean(r))
+    }, [finalSetLineupIds, poolByLineupId])
+    const editedFinalCount = useMemo(() => {
+        return finalSetResults.filter(r => Boolean(editedLineupsById[r.lineup_id])).length
+    }, [finalSetResults, editedLineupsById])
+
     const activeResults = useMemo(() => {
         if (selectedLineups.size === 0) return filteredByPlayersResults
         return filteredByPlayersResults.filter(r => selectedLineups.has(r.lineup_id))
@@ -895,6 +1032,17 @@ export default function ContestSimPage() {
                 }
             })
             return changed ? next : prev
+        })
+        setManualIncludeFinal(prev => new Set(Array.from(prev).filter(id => visibleIds.has(id))))
+        setManualExcludeFinal(prev => new Set(Array.from(prev).filter(id => visibleIds.has(id))))
+        setEditedLineupsById(prev => {
+            const next: Record<number, string[]> = {}
+            Object.entries(prev).forEach(([id, pids]) => {
+                if (visibleIds.has(Number(id))) {
+                    next[Number(id)] = pids
+                }
+            })
+            return next
         })
     }, [filteredByPlayersResults])
 
@@ -1025,11 +1173,16 @@ export default function ContestSimPage() {
     const handleSaveSimLineups = async () => {
         if (!selectedSlate) return
         if (filteredByPlayersResults.length === 0) return
+        const editedCount = filteredByPlayersResults.filter(r => Boolean(editedLineupsById[r.lineup_id])).length
+        if (editedCount > 0) {
+            alert(`There are ${editedCount} edited lineups in view. Run sim on the edited set first, then save.`)
+            return
+        }
         const defaultName = `Sim lineups (${filteredByPlayersResults.length})`
         const name = prompt('Save lineups as:', defaultName)?.trim()
         if (!name) return
         try {
-            const lineupsToSave = filteredByPlayersResults.map(r => r.player_ids)
+            const lineupsToSave = filteredByPlayersResults.map(getEffectivePlayerIds)
             const resultIds = new Set(filteredByPlayersResults.map(r => r.lineup_id))
             const resultsToSave = simResult?.results.filter(r => resultIds.has(r.lineup_id)) ?? null
             const saved = await saveSimLineups(
@@ -1047,6 +1200,38 @@ export default function ContestSimPage() {
             setSelectedSimLineupId(saved.build_id)
         } catch (err) {
             alert('Failed to save sim lineups: ' + (err as Error).message)
+        }
+    }
+
+    const handleSaveFinalSet = async () => {
+        if (!selectedSlate) return
+        if (finalSetResults.length === 0) return
+        if (editedFinalCount > 0) {
+            alert(`There are ${editedFinalCount} edited lineups in the final set. Run sim on final set first, then save.`)
+            return
+        }
+        const defaultName = `Final set (${finalSetResults.length})`
+        const name = prompt('Save final set as:', defaultName)?.trim()
+        if (!name) return
+        try {
+            const lineupsToSave = finalSetResults.map(getEffectivePlayerIds)
+            const resultIds = new Set(finalSetResults.map(r => r.lineup_id))
+            const resultsToSave = simResult?.results.filter(r => resultIds.has(r.lineup_id)) ?? null
+            const saved = await saveSimLineups(
+                selectedDate,
+                selectedSlate,
+                name,
+                lineupsToSave,
+                resultsToSave,
+                simResult?.config ?? null,
+                simResult?.stats ?? null,
+            )
+            const builds = await getSavedSimBuilds(selectedDate)
+            setSavedSimBuilds(builds)
+            setSelectedSimBuildId(null)
+            setSelectedSimLineupId(saved.build_id)
+        } catch (err) {
+            alert('Failed to save final set: ' + (err as Error).message)
         }
     }
 
@@ -1091,20 +1276,23 @@ export default function ContestSimPage() {
     }
 
     // Export handler
-    const handleExport = async (type: 'selected' | 'view') => {
+    const handleExport = async (type: 'selected' | 'view' | 'final') => {
         if (!selectedSlate) return
 
-        let lineupsToExport = []
+        let lineupsToExport: LineupResultWithOwnership[] = []
 
         if (type === 'selected') {
             if (selectedLineups.size === 0) return
             lineupsToExport = filteredByPlayersResults.filter(r => selectedLineups.has(r.lineup_id))
+        } else if (type === 'final') {
+            if (finalSetResults.length === 0) return
+            lineupsToExport = finalSetResults
         } else {
             // Export current filtered view (Top N + constraints + player filters)
             lineupsToExport = filteredByPlayersResults
         }
 
-        const selectedPlayerIds = lineupsToExport.map(r => r.player_ids)
+        const selectedPlayerIds = lineupsToExport.map(getEffectivePlayerIds)
         const filename = `contest_sim_${selectedDate}_${lineupsToExport.length}lineups.csv`
 
         try {
@@ -1135,6 +1323,98 @@ export default function ContestSimPage() {
 
     const removePlayerFilter = (playerId: string) => {
         setRequiredPlayerIds(prev => prev.filter(pid => pid !== playerId))
+    }
+
+    const toggleFinalSetMembership = (lineupId: number) => {
+        if (finalSetIdSet.has(lineupId)) {
+            setManualExcludeFinal(prev => new Set(prev).add(lineupId))
+            setManualIncludeFinal(prev => {
+                const next = new Set(prev)
+                next.delete(lineupId)
+                return next
+            })
+        } else {
+            setManualIncludeFinal(prev => new Set(prev).add(lineupId))
+            setManualExcludeFinal(prev => {
+                const next = new Set(prev)
+                next.delete(lineupId)
+                return next
+            })
+        }
+    }
+
+    const clearFinalOverride = (lineupId: number) => {
+        setManualIncludeFinal(prev => {
+            const next = new Set(prev)
+            next.delete(lineupId)
+            return next
+        })
+        setManualExcludeFinal(prev => {
+            const next = new Set(prev)
+            next.delete(lineupId)
+            return next
+        })
+    }
+
+    const applyFinalSetToSelection = () => {
+        setSelectedLineups(new Set(finalSetLineupIds))
+    }
+
+    const runFinalSet = async () => {
+        if (finalSetResults.length === 0) {
+            setSimError('No final-set lineups available.')
+            return
+        }
+        const lineupsToRun = finalSetResults.map(getEffectivePlayerIds)
+        await runSimWithLineups(lineupsToRun)
+    }
+
+    const openLineupEditor = (lineup: LineupResultWithOwnership) => {
+        const current = getEffectivePlayerIds(lineup)
+        setEditingLineupId(lineup.lineup_id)
+        setEditingLineupInputs(current.map(pid => playerMap.get(pid)?.name ?? pid))
+        setEditingLineupError(null)
+    }
+
+    const closeLineupEditor = () => {
+        setEditingLineupId(null)
+        setEditingLineupInputs([])
+        setEditingLineupError(null)
+    }
+
+    const saveLineupEditor = () => {
+        if (editingLineupId === null) return
+        if (editingLineupInputs.length !== 8) {
+            setEditingLineupError('Lineup must have exactly 8 players.')
+            return
+        }
+
+        const resolved = editingLineupInputs.map(input => resolvePlayerFromSearch(input))
+        if (resolved.some(p => p === null)) {
+            setEditingLineupError('One or more player names were not recognized.')
+            return
+        }
+        const pids = resolved.filter((p): p is PoolPlayer => p !== null).map(p => p.player_id)
+        const unique = new Set(pids)
+        if (unique.size !== pids.length) {
+            setEditingLineupError('Lineup contains duplicate players.')
+            return
+        }
+        const salary = pids.reduce((sum, pid) => sum + (playerMap.get(pid)?.salary ?? 0), 0)
+        if (salary > 50000) {
+            setEditingLineupError(`Salary cap exceeded: $${salary.toLocaleString()} > $50,000`)
+            return
+        }
+        setEditedLineupsById(prev => ({ ...prev, [editingLineupId]: pids }))
+        closeLineupEditor()
+    }
+
+    const resetEditedLineup = (lineupId: number) => {
+        setEditedLineupsById(prev => {
+            const next = { ...prev }
+            delete next[lineupId]
+            return next
+        })
     }
 
     const requiredPlayerNames = requiredPlayerIds.map(pid => playerMap.get(pid)?.name ?? pid)
@@ -1513,6 +1793,9 @@ export default function ContestSimPage() {
                                     >
                                         <option value="expected_value">EV</option>
                                         <option value="roi">ROI</option>
+                                        <option value="robust_floor">Robust Floor</option>
+                                        <option value="score_lcb95">Score LCB95</option>
+                                        <option value="score_cvar10">Score CVaR10</option>
                                         <option value="select_score">Tail Select</option>
                                         <option value="tail_score">Tail Score</option>
                                         <option value="ucv90">UCVaR90</option>
@@ -1607,6 +1890,32 @@ export default function ContestSimPage() {
                                 </div>
 
                                 <div className="toolbar-group">
+                                    <label>Final:</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={Math.max(1, filteredByPlayersResults.length)}
+                                        value={finalSetSize}
+                                        onChange={e => setFinalSetSize(Math.max(1, Number(e.target.value) || 1))}
+                                        style={{ width: '70px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                    />
+                                    <button
+                                        onClick={applyFinalSetToSelection}
+                                        disabled={finalSetResults.length === 0}
+                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
+                                    >
+                                        Select Final ({finalSetResults.length})
+                                    </button>
+                                    <button
+                                        onClick={runFinalSet}
+                                        disabled={simLoading || finalSetResults.length === 0}
+                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: '4px', color: '#60a5fa', cursor: 'pointer' }}
+                                    >
+                                        Run Final
+                                    </button>
+                                </div>
+
+                                <div className="toolbar-group">
                                     <label>Top N:</label>
                                     <input
                                         type="number"
@@ -1632,6 +1941,13 @@ export default function ContestSimPage() {
                                         Export View ({filteredByPlayersResults.length})
                                     </button>
                                     <button
+                                        onClick={() => handleExport('final')}
+                                        disabled={finalSetResults.length === 0}
+                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer', marginRight: '0.5rem' }}
+                                    >
+                                        Export Final ({finalSetResults.length})
+                                    </button>
+                                    <button
                                         className="export-btn"
                                         onClick={() => handleExport('selected')}
                                         disabled={selectedLineups.size === 0}
@@ -1645,7 +1961,28 @@ export default function ContestSimPage() {
                                     >
                                         Save Sim Lineups ({filteredByPlayersResults.length})
                                     </button>
+                                    <button
+                                        onClick={handleSaveFinalSet}
+                                        disabled={finalSetResults.length === 0}
+                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #334155', borderRadius: '4px', color: '#cbd5e1', cursor: 'pointer', marginLeft: '0.5rem' }}
+                                    >
+                                        Save Final ({finalSetResults.length})
+                                    </button>
                                 </div>
+                            </div>
+
+                            <div className="contest-sim-finalset-banner">
+                                <span className="muted">Set &amp; Forget</span>
+                                <span>Final {finalSetResults.length}</span>
+                                <span>Core {finalSetResults.filter(r => setAndForgetAuto.coreIds.has(r.lineup_id)).length}</span>
+                                <span>Upside {finalSetResults.filter(r => setAndForgetAuto.upsideIds.has(r.lineup_id)).length}</span>
+                                <span>Safety floor {Number.isFinite(setAndForgetAuto.safetyFloor) ? setAndForgetAuto.safetyFloor.toFixed(1) : '—'}</span>
+                                {(manualIncludeFinal.size > 0 || manualExcludeFinal.size > 0) && (
+                                    <span>Manual ± {manualIncludeFinal.size}/{manualExcludeFinal.size}</span>
+                                )}
+                                {editedFinalCount > 0 && (
+                                    <span className="warning">Edited in final: {editedFinalCount} (rerun before save)</span>
+                                )}
                             </div>
 
                             {requiredPlayerNames.length > 0 && (
@@ -1710,8 +2047,23 @@ export default function ContestSimPage() {
                                         key={result.lineup_id}
                                         result={result}
                                         players={playerMap}
+                                        playerIdsOverride={getEffectivePlayerIds(result)}
                                         selected={selectedLineups.has(result.lineup_id)}
                                         onToggleSelect={() => toggleLineupSelection(result.lineup_id)}
+                                        isInFinalSet={finalSetIdSet.has(result.lineup_id)}
+                                        finalTag={
+                                            setAndForgetAuto.coreIds.has(result.lineup_id)
+                                                ? 'core'
+                                                : setAndForgetAuto.upsideIds.has(result.lineup_id)
+                                                    ? 'upside'
+                                                    : null
+                                        }
+                                        isEdited={Boolean(editedLineupsById[result.lineup_id])}
+                                        onToggleFinalSet={() => toggleFinalSetMembership(result.lineup_id)}
+                                        onClearFinalOverride={() => clearFinalOverride(result.lineup_id)}
+                                        hasFinalOverride={manualIncludeFinal.has(result.lineup_id) || manualExcludeFinal.has(result.lineup_id)}
+                                        onEditLineup={() => openLineupEditor(result)}
+                                        onResetEditLineup={() => resetEditedLineup(result.lineup_id)}
                                         highlighted={
                                             result.lineup_id === simResult.stats.best_ev_lineup_id
                                                 ? 'best-ev'
@@ -1722,6 +2074,37 @@ export default function ContestSimPage() {
                                     />
                                 ))}
                             </div>
+
+                            {editingLineupId !== null && (
+                                <div className="contest-sim-editor-backdrop" onClick={closeLineupEditor}>
+                                    <div className="contest-sim-editor-modal" onClick={e => e.stopPropagation()}>
+                                        <h4>Edit Lineup #{editingLineupId + 1}</h4>
+                                        <p className="muted">Use player name or ID. Position legality is not enforced here.</p>
+                                        <div className="contest-sim-editor-grid">
+                                            {editingLineupInputs.map((value, idx) => (
+                                                <label key={idx}>
+                                                    Slot {idx + 1}
+                                                    <input
+                                                        type="text"
+                                                        list="contest-sim-player-options"
+                                                        value={value}
+                                                        onChange={e => {
+                                                            const next = [...editingLineupInputs]
+                                                            next[idx] = e.target.value
+                                                            setEditingLineupInputs(next)
+                                                        }}
+                                                    />
+                                                </label>
+                                            ))}
+                                        </div>
+                                        {editingLineupError && <div className="sim-error">{editingLineupError}</div>}
+                                        <div className="contest-sim-editor-actions">
+                                            <button onClick={closeLineupEditor}>Cancel</button>
+                                            <button onClick={saveLineupEditor}>Save Edit</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 

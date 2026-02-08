@@ -246,6 +246,9 @@ class LineupEVResultResponse(BaseModel):
     ucv90: Optional[float] = None  # Upper CVaR at 90th pctile (mean of top 10% scores)
     tail_score: Optional[float] = None  # Weighted combo: 0.6*p90 + 0.4*ucv90
     select_score: Optional[float] = None  # tail_score - dupe penalty impact
+    score_lcb95: Optional[float] = None  # mean - 1.96*std (score-space lower confidence bound)
+    score_cvar10: Optional[float] = None  # mean score in worst 10% worlds
+    robust_floor: Optional[float] = None  # min(score_lcb95, score_cvar10)
 
 
 class ContestConfigResponse(BaseModel):
@@ -570,6 +573,8 @@ def _backfill_tail_metrics(results: List[Dict]) -> List[Dict]:
     """Backfill ucv90/tail_score/select_score for legacy saved builds."""
     tail_weight_p90 = 0.6
     tail_weight_ucv = 0.4
+    # Standard-normal CVaR at alpha=10%: mu - sigma * (phi(z_alpha)/alpha)
+    cvar10_sigma_mult = 1.755
     for r in results:
         # Skip if already has tail metrics
         if r.get("ucv90") is not None:
@@ -587,6 +592,14 @@ def _backfill_tail_metrics(results: List[Dict]) -> List[Dict]:
             r["tail_score"] = round(tail_score, 2)
             penalty_impact = (1.0 - dupe_penalty) * mean
             r["select_score"] = round(tail_score - penalty_impact, 2)
+        if r.get("score_lcb95") is None and mean is not None:
+            std = r.get("std")
+            if std is not None:
+                lcb95 = float(mean) - 1.96 * float(std)
+                cvar10 = float(mean) - cvar10_sigma_mult * float(std)
+                r["score_lcb95"] = round(lcb95, 2)
+                r["score_cvar10"] = round(cvar10, 2)
+                r["robust_floor"] = round(min(lcb95, cvar10), 2)
     return results
 
 
