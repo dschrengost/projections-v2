@@ -32,6 +32,357 @@ const ownershipStorageKey = 'contestSim.useOwnership'
 
 type SortKey = 'lineup_id' | 'mean' | 'p90' | 'p95' | 'expected_value' | 'roi' | 'win_rate' | 'top_1pct_rate' | 'top_10pct_rate' | 'cash_rate' | 'total_own' | 'ucv90' | 'tail_score' | 'select_score'
 
+type LineupResultWithOwnership = ContestSimResponse['results'][number] & { total_own: number }
+
+interface ExposureCountBounds {
+    minCount?: number
+    maxCount?: number
+    minPct?: number
+    maxPct?: number
+}
+
+interface ConstrainedSelectionResult {
+    constrainedResults: LineupResultWithOwnership[]
+    minUniquesPassCount: number
+    exposureCapError: string | null
+    targetCount: number
+}
+
+function toMinCount(pct: number, targetCount: number): number {
+    return Math.ceil((pct / 100) * targetCount)
+}
+
+function toMaxCount(pct: number, targetCount: number): number {
+    return Math.floor((pct / 100) * targetCount)
+}
+
+function getSharedCount(a: string[], b: Set<string>): number {
+    let shared = 0
+    for (const pid of a) {
+        if (b.has(pid)) {
+            shared += 1
+        }
+    }
+    return shared
+}
+
+function selectConstrainedLineups(
+    sortedResults: LineupResultWithOwnership[],
+    requestedTargetCount: number,
+    minUniques: number,
+    exposureBounds: Map<string, ExposureBounds>,
+    playerMap: Map<string, PoolPlayer>,
+): ConstrainedSelectionResult {
+    const targetCount = Math.max(0, Math.min(requestedTargetCount, sortedResults.length))
+    if (targetCount === 0 || sortedResults.length === 0) {
+        return {
+            constrainedResults: [],
+            minUniquesPassCount: 0,
+            exposureCapError: null,
+            targetCount,
+        }
+    }
+
+    const normalizedBounds = new Map<string, ExposureCountBounds>()
+    const boundErrors: string[] = []
+    for (const [pid, bounds] of exposureBounds.entries()) {
+        const minPct = bounds.min !== undefined && Number.isFinite(bounds.min)
+            ? Math.max(0, Math.min(100, bounds.min))
+            : undefined
+        const maxPct = bounds.max !== undefined && Number.isFinite(bounds.max)
+            ? Math.max(0, Math.min(100, bounds.max))
+            : undefined
+        if (minPct === undefined && maxPct === undefined) {
+            continue
+        }
+        const minCount = minPct !== undefined ? toMinCount(minPct, targetCount) : undefined
+        const maxCount = maxPct !== undefined ? toMaxCount(maxPct, targetCount) : undefined
+        if (minCount !== undefined && maxCount !== undefined && minCount > maxCount) {
+            const playerName = playerMap.get(pid)?.name ?? pid
+            boundErrors.push(`${playerName}: min ${minPct}% > max ${maxPct}%`)
+        }
+        normalizedBounds.set(pid, { minCount, maxCount, minPct, maxPct })
+    }
+
+    const hasExposureConstraints = normalizedBounds.size > 0
+    const hasConstraints = hasExposureConstraints || minUniques > 0
+    if (!hasConstraints) {
+        return {
+            constrainedResults: sortedResults.slice(0, targetCount),
+            minUniquesPassCount: sortedResults.length,
+            exposureCapError: null,
+            targetCount,
+        }
+    }
+
+    const minEntries: Array<{ pid: string; minCount: number }> = []
+    const maxByPid = new Map<string, number>()
+    for (const [pid, bounds] of normalizedBounds.entries()) {
+        if (bounds.minCount !== undefined && bounds.minCount > 0) {
+            minEntries.push({ pid, minCount: bounds.minCount })
+        }
+        if (bounds.maxCount !== undefined) {
+            maxByPid.set(pid, bounds.maxCount)
+        }
+    }
+
+    const constrainedPidSet = new Set(normalizedBounds.keys())
+    const lineupSets = sortedResults.map(r => new Set(r.player_ids))
+    const lineupConstrainedPids = sortedResults.map(r => r.player_ids.filter(pid => constrainedPidSet.has(pid)))
+    const lineupConstrainedPidSet = lineupConstrainedPids.map(pids => new Set(pids))
+    const lineupRankScore = sortedResults.map((_, idx) => sortedResults.length - idx)
+
+    for (const { pid, minCount } of minEntries) {
+        const coverage = lineupConstrainedPidSet.reduce((count, pidSet) => count + (pidSet.has(pid) ? 1 : 0), 0)
+        if (coverage < minCount) {
+            const playerName = playerMap.get(pid)?.name ?? pid
+            boundErrors.push(
+                `${playerName}: needs ${minCount}/${targetCount} lineups, only ${coverage} available`,
+            )
+        }
+    }
+
+    const selectedIndices: number[] = []
+    const selectedIndexSet = new Set<number>()
+    const selectedCounts = new Map<string, number>()
+
+    const addIndex = (idx: number) => {
+        selectedIndices.push(idx)
+        selectedIndexSet.add(idx)
+        for (const pid of lineupConstrainedPids[idx]) {
+            selectedCounts.set(pid, (selectedCounts.get(pid) ?? 0) + 1)
+        }
+    }
+
+    const canAddIndex = (idx: number): boolean => {
+        for (const pid of lineupConstrainedPids[idx]) {
+            const maxCount = maxByPid.get(pid)
+            if (maxCount !== undefined && (selectedCounts.get(pid) ?? 0) + 1 > maxCount) {
+                return false
+            }
+        }
+        if (minUniques <= 0) {
+            return true
+        }
+        for (const existingIdx of selectedIndices) {
+            const shared = getSharedCount(sortedResults[idx].player_ids, lineupSets[existingIdx])
+            if (sortedResults[idx].player_ids.length - shared < minUniques) {
+                return false
+            }
+        }
+        return true
+    }
+
+    const computeDeficits = (): Array<{ pid: string; deficit: number }> => {
+        if (minEntries.length === 0) {
+            return []
+        }
+        const deficits: Array<{ pid: string; deficit: number }> = []
+        for (const { pid, minCount } of minEntries) {
+            const deficit = minCount - (selectedCounts.get(pid) ?? 0)
+            if (deficit > 0) {
+                deficits.push({ pid, deficit })
+            }
+        }
+        return deficits
+    }
+
+    const computeTotalDeficit = (): number => {
+        return computeDeficits().reduce((sum, d) => sum + d.deficit, 0)
+    }
+
+    let minUniquesPassCount = sortedResults.length
+    if (minUniques > 0) {
+        const uniquesOnlySelected: number[] = []
+        minUniquesPassCount = 0
+        for (let idx = 0; idx < sortedResults.length; idx += 1) {
+            const compatible = uniquesOnlySelected.every(existingIdx => {
+                const shared = getSharedCount(sortedResults[idx].player_ids, lineupSets[existingIdx])
+                return sortedResults[idx].player_ids.length - shared >= minUniques
+            })
+            if (compatible) {
+                uniquesOnlySelected.push(idx)
+                minUniquesPassCount += 1
+            }
+        }
+    }
+
+    while (selectedIndices.length < targetCount) {
+        const deficits = computeDeficits()
+        let bestIdx = -1
+        let bestScore = -Infinity
+
+        for (let idx = 0; idx < sortedResults.length; idx += 1) {
+            if (selectedIndexSet.has(idx) || !canAddIndex(idx)) {
+                continue
+            }
+            let gain = 0
+            if (deficits.length > 0) {
+                for (const { pid } of deficits) {
+                    if (lineupConstrainedPidSet[idx].has(pid)) {
+                        gain += 1
+                    }
+                }
+                if (gain === 0) {
+                    continue
+                }
+            }
+            const score = gain * 1_000_000 + lineupRankScore[idx]
+            if (score > bestScore) {
+                bestScore = score
+                bestIdx = idx
+            }
+        }
+
+        if (bestIdx < 0) {
+            break
+        }
+        addIndex(bestIdx)
+    }
+
+    if (selectedIndices.length < targetCount) {
+        for (let idx = 0; idx < sortedResults.length && selectedIndices.length < targetCount; idx += 1) {
+            if (selectedIndexSet.has(idx) || !canAddIndex(idx)) {
+                continue
+            }
+            addIndex(idx)
+        }
+    }
+
+    const canSwap = (addIdx: number, removeIdx: number): boolean => {
+        for (const [pid, maxCount] of maxByPid.entries()) {
+            let nextCount = selectedCounts.get(pid) ?? 0
+            if (lineupConstrainedPidSet[removeIdx].has(pid)) {
+                nextCount -= 1
+            }
+            if (lineupConstrainedPidSet[addIdx].has(pid)) {
+                nextCount += 1
+            }
+            if (nextCount > maxCount) {
+                return false
+            }
+        }
+
+        if (minUniques > 0) {
+            for (const existingIdx of selectedIndices) {
+                if (existingIdx === removeIdx) {
+                    continue
+                }
+                const shared = getSharedCount(sortedResults[addIdx].player_ids, lineupSets[existingIdx])
+                if (sortedResults[addIdx].player_ids.length - shared < minUniques) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    const deficitAfterSwap = (addIdx: number, removeIdx: number): number => {
+        let deficit = 0
+        for (const { pid, minCount } of minEntries) {
+            let nextCount = selectedCounts.get(pid) ?? 0
+            if (lineupConstrainedPidSet[removeIdx].has(pid)) {
+                nextCount -= 1
+            }
+            if (lineupConstrainedPidSet[addIdx].has(pid)) {
+                nextCount += 1
+            }
+            deficit += Math.max(0, minCount - nextCount)
+        }
+        return deficit
+    }
+
+    let repairIterations = 0
+    while (computeTotalDeficit() > 0 && repairIterations < 200) {
+        repairIterations += 1
+        const deficits = computeDeficits()
+        let bestSwap: { addIdx: number; removeIdx: number; deficit: number; scoreDelta: number } | null = null
+
+        for (let addIdx = 0; addIdx < sortedResults.length; addIdx += 1) {
+            if (selectedIndexSet.has(addIdx)) {
+                continue
+            }
+            const hasDeficitPlayer = deficits.some(({ pid }) => lineupConstrainedPidSet[addIdx].has(pid))
+            if (!hasDeficitPlayer) {
+                continue
+            }
+            for (const removeIdx of selectedIndices) {
+                if (!canSwap(addIdx, removeIdx)) {
+                    continue
+                }
+                const deficit = deficitAfterSwap(addIdx, removeIdx)
+                const scoreDelta = lineupRankScore[addIdx] - lineupRankScore[removeIdx]
+                if (
+                    bestSwap === null
+                    || deficit < bestSwap.deficit
+                    || (deficit === bestSwap.deficit && scoreDelta > bestSwap.scoreDelta)
+                ) {
+                    bestSwap = { addIdx, removeIdx, deficit, scoreDelta }
+                }
+            }
+        }
+
+        if (bestSwap === null) {
+            break
+        }
+        const currentDeficit = computeTotalDeficit()
+        if (bestSwap.deficit > currentDeficit) {
+            break
+        }
+        if (bestSwap.deficit === currentDeficit && bestSwap.scoreDelta <= 0) {
+            break
+        }
+
+        const swap = bestSwap
+        if (!swap) {
+            continue
+        }
+        const removePos = selectedIndices.findIndex(idx => idx === swap.removeIdx)
+        if (removePos < 0) {
+            continue
+        }
+        selectedIndices[removePos] = swap.addIdx
+        selectedIndexSet.delete(swap.removeIdx)
+        selectedIndexSet.add(swap.addIdx)
+
+        for (const pid of lineupConstrainedPids[swap.removeIdx]) {
+            selectedCounts.set(pid, (selectedCounts.get(pid) ?? 0) - 1)
+        }
+        for (const pid of lineupConstrainedPids[swap.addIdx]) {
+            selectedCounts.set(pid, (selectedCounts.get(pid) ?? 0) + 1)
+        }
+    }
+
+    selectedIndices.sort((a, b) => a - b)
+    const constrainedResults = selectedIndices.map(idx => sortedResults[idx])
+
+    const unmetMin: string[] = []
+    for (const { pid, minCount } of minEntries) {
+        const currentCount = selectedCounts.get(pid) ?? 0
+        if (currentCount < minCount) {
+            const playerName = playerMap.get(pid)?.name ?? pid
+            const currentPct = constrainedResults.length > 0 ? (currentCount / constrainedResults.length) * 100 : 0
+            const targetPct = normalizedBounds.get(pid)?.minPct ?? 0
+            unmetMin.push(`${playerName}: ${currentPct.toFixed(1)}% < ${targetPct}%`)
+        }
+    }
+
+    const errors = [...boundErrors]
+    if (selectedIndices.length < targetCount) {
+        errors.push(`Only ${selectedIndices.length} of ${targetCount} lineups meet constraints (pool exhausted)`)
+    }
+    if (unmetMin.length > 0) {
+        errors.push(`Min not met: ${unmetMin.join(', ')}`)
+    }
+
+    return {
+        constrainedResults,
+        minUniquesPassCount,
+        exposureCapError: errors.length > 0 ? errors.join(' | ') : null,
+        targetCount,
+    }
+}
+
 export default function ContestSimPage() {
     // Date and slate selection (persisted in URL)
     const [selectedDate, setSelectedDate, selectedSlate, setSelectedSlate] = useSlateDateAndSlate()
@@ -85,6 +436,8 @@ export default function ContestSimPage() {
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
     const [filterPositiveEV, setFilterPositiveEV] = useState(false)
     const [maxOwnership, setMaxOwnership] = useState<number | null>(null)
+    const [playerSearch, setPlayerSearch] = useState('')
+    const [requiredPlayerIds, setRequiredPlayerIds] = useState<string[]>([])
 
     const [selectedLineups, setSelectedLineups] = useState<Set<number>>(new Set())
 
@@ -329,6 +682,30 @@ export default function ContestSimPage() {
         return map
     }, [pool])
 
+    const sortedPlayers = useMemo(() => {
+        return [...pool].sort((a, b) => a.name.localeCompare(b.name))
+    }, [pool])
+
+    const resolvePlayerFromSearch = useCallback((query: string): PoolPlayer | null => {
+        const raw = query.trim()
+        if (!raw) return null
+        const q = raw.toLowerCase()
+        const exactId = sortedPlayers.find(p => p.player_id === raw)
+        if (exactId) return exactId
+        const exactName = sortedPlayers.find(p => p.name.toLowerCase() === q)
+        if (exactName) return exactName
+        const prefixMatch = sortedPlayers.find(p => p.name.toLowerCase().startsWith(q))
+        if (prefixMatch) return prefixMatch
+        return sortedPlayers.find(p => p.name.toLowerCase().includes(q)) ?? null
+    }, [sortedPlayers])
+
+    const addRequiredPlayer = useCallback((query: string) => {
+        const player = resolvePlayerFromSearch(query)
+        if (!player) return false
+        setRequiredPlayerIds(prev => (prev.includes(player.player_id) ? prev : [...prev, player.player_id]))
+        return true
+    }, [resolvePlayerFromSearch])
+
     // Calculate total ownership for each lineup result
     const resultsWithOwnership = useMemo(() => {
         if (!simResult) return []
@@ -364,93 +741,30 @@ export default function ContestSimPage() {
 
         return results
     }, [resultsWithOwnership, filterPositiveEV, maxOwnership, sortKey, sortDir])
-    // Combined constraint filter: min uniques + exposure bounds, fills to target N
-    const { constrainedResults, minUniquesPassCount, exposureCapError } = useMemo(() => {
-        const targetCount = topN ?? sortedResults.length  // null means "all that fit"
-        const hasMaxBounds = Array.from(exposureBounds.values()).some(b => b.max !== undefined)
-        const hasMinBounds = Array.from(exposureBounds.values()).some(b => b.min !== undefined)
-        const hasConstraints = minUniques > 0 || hasMaxBounds
-
-        const result: typeof sortedResults = []
-        const counts = new Map<string, number>()
-        let minUniquesChecked = 0
-
-        for (const lineup of sortedResults) {
-            // Stop if we've reached target count
-            if (result.length >= targetCount) break
-
-            const pids = new Set(lineup.player_ids)
-            let valid = true
-
-            // Check min uniques constraint
-            if (minUniques > 0) {
-                for (const existing of result) {
-                    const shared = existing.player_ids.filter(p => pids.has(p)).length
-                    if (lineup.player_ids.length - shared < minUniques) {
-                        valid = false
-                        break
-                    }
-                }
-            }
-            if (!valid) continue
-            minUniquesChecked++
-
-            // Check max exposure caps
-            if (hasMaxBounds) {
-                for (const pid of lineup.player_ids) {
-                    const bounds = exposureBounds.get(pid)
-                    if (bounds?.max !== undefined) {
-                        const newCount = (counts.get(pid) || 0) + 1
-                        const newExposure = (newCount / (result.length + 1)) * 100
-                        if (newExposure > bounds.max) {
-                            valid = false
-                            break
-                        }
-                    }
-                }
-            }
-
-            if (valid) {
-                result.push(lineup)
-                lineup.player_ids.forEach(pid => counts.set(pid, (counts.get(pid) || 0) + 1))
-            }
-        }
-
-        // Check if we hit target count
-        let error: string | null = null
-        if (result.length < targetCount && hasConstraints) {
-            error = `Only ${result.length} of ${targetCount} lineups meet constraints (pool exhausted)`
-        }
-
-        // Validate min exposures
-        if (!error && hasMinBounds) {
-            const minErrors: string[] = []
-            for (const [pid, bounds] of exposureBounds.entries()) {
-                if (bounds.min !== undefined) {
-                    const count = counts.get(pid) || 0
-                    const exposure = result.length > 0 ? (count / result.length) * 100 : 0
-                    if (exposure < bounds.min) {
-                        const playerName = playerMap.get(pid)?.name ?? pid
-                        minErrors.push(`${playerName}: ${exposure.toFixed(1)}% < ${bounds.min}%`)
-                    }
-                }
-            }
-            if (minErrors.length > 0) {
-                error = `Min not met: ${minErrors.join(', ')}`
-            }
-        }
-
-        return {
-            constrainedResults: result,
-            minUniquesPassCount: minUniquesChecked,
-            exposureCapError: error
-        }
+    // Combined constraint filter: top-N + min uniques + exposure min/max.
+    const { constrainedResults, minUniquesPassCount, exposureCapError, targetCount } = useMemo(() => {
+        return selectConstrainedLineups(
+            sortedResults,
+            topN ?? sortedResults.length,
+            minUniques,
+            exposureBounds,
+            playerMap,
+        )
     }, [sortedResults, topN, minUniques, exposureBounds, playerMap])
 
+    const filteredByPlayersResults = useMemo(() => {
+        if (requiredPlayerIds.length === 0) {
+            return constrainedResults
+        }
+        return constrainedResults.filter(r =>
+            requiredPlayerIds.every(pid => r.player_ids.includes(pid)),
+        )
+    }, [constrainedResults, requiredPlayerIds])
+
     const activeResults = useMemo(() => {
-        if (selectedLineups.size === 0) return constrainedResults
-        return constrainedResults.filter(r => selectedLineups.has(r.lineup_id))
-    }, [constrainedResults, selectedLineups])
+        if (selectedLineups.size === 0) return filteredByPlayersResults
+        return filteredByPlayersResults.filter(r => selectedLineups.has(r.lineup_id))
+    }, [filteredByPlayersResults, selectedLineups])
 
     const activeSummary = useMemo(() => {
         if (!simResult || activeResults.length === 0) {
@@ -472,15 +786,32 @@ export default function ContestSimPage() {
     // Paginated results
     const paginatedResults = useMemo(() => {
         const start = (page - 1) * pageSize
-        return constrainedResults.slice(start, start + pageSize)
-    }, [constrainedResults, page, pageSize])
+        return filteredByPlayersResults.slice(start, start + pageSize)
+    }, [filteredByPlayersResults, page, pageSize])
 
-    const totalPages = Math.ceil(constrainedResults.length / pageSize)
+    const totalPages = Math.max(1, Math.ceil(filteredByPlayersResults.length / pageSize))
+    const hasVisibleResults = filteredByPlayersResults.length > 0
 
     // Reset page when filters change
     useEffect(() => {
         setPage(1)
-    }, [filterPositiveEV, maxOwnership, topN, sortKey, sortDir, minUniques, exposureBounds])
+    }, [filterPositiveEV, maxOwnership, topN, sortKey, sortDir, minUniques, exposureBounds, requiredPlayerIds])
+
+    useEffect(() => {
+        const visibleIds = new Set(filteredByPlayersResults.map(r => r.lineup_id))
+        setSelectedLineups(prev => {
+            let changed = false
+            const next = new Set<number>()
+            prev.forEach(id => {
+                if (visibleIds.has(id)) {
+                    next.add(id)
+                } else {
+                    changed = true
+                }
+            })
+            return changed ? next : prev
+        })
+    }, [filteredByPlayersResults])
 
     const runSimWithLineups = useCallback(async (lineupsToRun: string[][]) => {
         if (lineupsToRun.length === 0) {
@@ -604,13 +935,13 @@ export default function ContestSimPage() {
 
     const handleSaveSimLineups = async () => {
         if (!selectedSlate) return
-        if (constrainedResults.length === 0) return
-        const defaultName = `Sim lineups (${constrainedResults.length})`
+        if (filteredByPlayersResults.length === 0) return
+        const defaultName = `Sim lineups (${filteredByPlayersResults.length})`
         const name = prompt('Save lineups as:', defaultName)?.trim()
         if (!name) return
         try {
-            const lineupsToSave = constrainedResults.map(r => r.player_ids)
-            const resultIds = new Set(constrainedResults.map(r => r.lineup_id))
+            const lineupsToSave = filteredByPlayersResults.map(r => r.player_ids)
+            const resultIds = new Set(filteredByPlayersResults.map(r => r.lineup_id))
             const resultsToSave = simResult?.results.filter(r => resultIds.has(r.lineup_id)) ?? null
             const saved = await saveSimLineups(
                 selectedDate,
@@ -662,7 +993,7 @@ export default function ContestSimPage() {
     }
 
     const selectAll = () => {
-        setSelectedLineups(new Set(constrainedResults.map(r => r.lineup_id)))
+        setSelectedLineups(new Set(filteredByPlayersResults.map(r => r.lineup_id)))
     }
 
     const clearSelection = () => {
@@ -677,10 +1008,10 @@ export default function ContestSimPage() {
 
         if (type === 'selected') {
             if (selectedLineups.size === 0) return
-            lineupsToExport = resultsWithOwnership.filter(r => selectedLineups.has(r.lineup_id))
+            lineupsToExport = filteredByPlayersResults.filter(r => selectedLineups.has(r.lineup_id))
         } else {
-            // Export current filtered view (Top N + Min Uniques + Exposure Caps)
-            lineupsToExport = constrainedResults
+            // Export current filtered view (Top N + constraints + player filters)
+            lineupsToExport = filteredByPlayersResults
         }
 
         const selectedPlayerIds = lineupsToExport.map(r => r.player_ids)
@@ -703,6 +1034,20 @@ export default function ContestSimPage() {
             alert('Export failed: ' + (err as Error).message)
         }
     }
+
+    const handleAddPlayerFilter = () => {
+        if (!playerSearch.trim()) return
+        const added = addRequiredPlayer(playerSearch)
+        if (added) {
+            setPlayerSearch('')
+        }
+    }
+
+    const removePlayerFilter = (playerId: string) => {
+        setRequiredPlayerIds(prev => prev.filter(pid => pid !== playerId))
+    }
+
+    const requiredPlayerNames = requiredPlayerIds.map(pid => playerMap.get(pid)?.name ?? pid)
 
     return (
         <div className="contest-sim-page">
@@ -1024,6 +1369,7 @@ export default function ContestSimPage() {
                                 minUniques={minUniques}
                                 onMinUniquesChange={setMinUniques}
                                 minUniquesPassCount={minUniquesPassCount}
+                                candidateLineupCount={sortedResults.length}
                                 exposureBounds={exposureBounds}
                                 onExposureBoundsChange={handleExposureBoundsChange}
                                 exposureCapError={exposureCapError}
@@ -1033,7 +1379,7 @@ export default function ContestSimPage() {
                             <div className="sim-summary compact">
                                 <div className="summary-card">
                                     <div className="card-label">Lineups</div>
-                                    <div className="card-value">{activeSummary?.lineupCount ?? simResult.stats.lineup_count}</div>
+                                    <div className="card-value">{activeSummary?.lineupCount ?? filteredByPlayersResults.length}</div>
                                 </div>
                                 <div className="summary-card">
                                     <div className="card-label">Worlds</div>
@@ -1056,7 +1402,7 @@ export default function ContestSimPage() {
                                 <div className="summary-card">
                                     <div className="card-label">+EV Lineups</div>
                                     <div className="card-value">
-                                        {activeSummary?.positiveEv ?? simResult.stats.positive_ev_count} / {activeSummary?.lineupCount ?? simResult.stats.lineup_count}
+                                        {activeSummary?.positiveEv ?? filteredByPlayersResults.filter(r => r.expected_value >= 0).length} / {activeSummary?.lineupCount ?? filteredByPlayersResults.length}
                                     </div>
                                 </div>
                                 <div className="summary-card">
@@ -1125,8 +1471,45 @@ export default function ContestSimPage() {
                                 <div className="toolbar-divider" />
 
                                 <div className="toolbar-group">
+                                    <label>Players:</label>
+                                    <input
+                                        type="text"
+                                        list="contest-sim-player-options"
+                                        placeholder="Add player..."
+                                        value={playerSearch}
+                                        onChange={e => setPlayerSearch(e.target.value)}
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault()
+                                                handleAddPlayerFilter()
+                                            }
+                                        }}
+                                        style={{ width: '170px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                    />
+                                    <datalist id="contest-sim-player-options">
+                                        {sortedPlayers.map(p => (
+                                            <option key={p.player_id} value={p.name} />
+                                        ))}
+                                    </datalist>
+                                    <button
+                                        onClick={handleAddPlayerFilter}
+                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
+                                    >
+                                        Add
+                                    </button>
+                                    {requiredPlayerIds.length > 0 && (
+                                        <button
+                                            onClick={() => setRequiredPlayerIds([])}
+                                            style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
+                                        >
+                                            Clear
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="toolbar-group">
                                     <button onClick={selectAll} style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}>
-                                        Select All ({constrainedResults.length})
+                                        Select All ({filteredByPlayersResults.length})
                                     </button>
                                     <button onClick={clearSelection} style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}>
                                         Clear
@@ -1143,6 +1526,9 @@ export default function ContestSimPage() {
                                         onChange={e => setTopN(e.target.value ? Number(e.target.value) : null)}
                                         style={{ width: '90px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
                                     />
+                                    <span style={{ color: '#64748b', fontSize: '0.78rem' }}>
+                                        {filteredByPlayersResults.length}/{targetCount}
+                                    </span>
                                 </div>
 
                                 <div className="toolbar-divider" />
@@ -1150,10 +1536,10 @@ export default function ContestSimPage() {
                                 <div className="toolbar-group">
                                     <button
                                         onClick={() => handleExport('view')}
-                                        disabled={constrainedResults.length === 0}
+                                        disabled={filteredByPlayersResults.length === 0}
                                         style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer', marginRight: '0.5rem' }}
                                     >
-                                        Export View ({constrainedResults.length})
+                                        Export View ({filteredByPlayersResults.length})
                                     </button>
                                     <button
                                         className="export-btn"
@@ -1164,31 +1550,51 @@ export default function ContestSimPage() {
                                     </button>
                                     <button
                                         onClick={handleSaveSimLineups}
-                                        disabled={constrainedResults.length === 0}
+                                        disabled={filteredByPlayersResults.length === 0}
                                         style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: '4px', color: '#60a5fa', cursor: 'pointer', marginLeft: '0.5rem' }}
                                     >
-                                        Save Sim Lineups ({constrainedResults.length})
+                                        Save Sim Lineups ({filteredByPlayersResults.length})
                                     </button>
                                 </div>
                             </div>
 
+                            {requiredPlayerNames.length > 0 && (
+                                <div className="contest-sim-player-filters">
+                                    <span className="muted">Lineups must include:</span>
+                                    {requiredPlayerIds.map((pid, idx) => (
+                                        <button
+                                            key={pid}
+                                            className="contest-sim-player-chip"
+                                            onClick={() => removePlayerFilter(pid)}
+                                            title="Remove player filter"
+                                        >
+                                            {requiredPlayerNames[idx]} ×
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+
                             {/* Pagination */}
                             <div className="pagination-controls">
                                 <div className="page-info">
-                                    Showing {((page - 1) * pageSize) + 1}-{Math.min(page * pageSize, constrainedResults.length)} of {constrainedResults.length}
+                                    {hasVisibleResults
+                                        ? `Showing ${((page - 1) * pageSize) + 1}-${Math.min(page * pageSize, filteredByPlayersResults.length)} of ${filteredByPlayersResults.length}`
+                                        : 'Showing 0 of 0'}
                                 </div>
                                 <div className="page-buttons">
                                     <button
                                         className="page-btn"
-                                        disabled={page === 1}
+                                        disabled={!hasVisibleResults || page === 1}
                                         onClick={() => setPage(p => Math.max(1, p - 1))}
                                     >
                                         Previous
                                     </button>
-                                    <span style={{ margin: '0 0.5rem', color: '#94a3b8' }}>Page {page} of {totalPages}</span>
+                                    <span style={{ margin: '0 0.5rem', color: '#94a3b8' }}>
+                                        Page {hasVisibleResults ? page : 0} of {hasVisibleResults ? totalPages : 0}
+                                    </span>
                                     <button
                                         className="page-btn"
-                                        disabled={page >= totalPages}
+                                        disabled={!hasVisibleResults || page >= totalPages}
                                         onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                                     >
                                         Next

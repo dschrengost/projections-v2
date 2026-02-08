@@ -20,6 +20,7 @@ interface PlayerExposurePanelProps {
     minUniques: number
     onMinUniquesChange: (n: number) => void
     minUniquesPassCount: number
+    candidateLineupCount: number
     exposureBounds: Map<string, ExposureBounds>
     onExposureBoundsChange: (playerId: string, bounds: ExposureBounds | null) => void
     exposureCapError: string | null
@@ -31,6 +32,7 @@ export default function PlayerExposurePanel({
     minUniques,
     onMinUniquesChange,
     minUniquesPassCount,
+    candidateLineupCount,
     exposureBounds,
     onExposureBoundsChange,
     exposureCapError,
@@ -169,7 +171,7 @@ export default function PlayerExposurePanel({
                                 className="min-uniques-input"
                             />
                             <span className="min-uniques-info">
-                                {minUniquesPassCount} / {lineupResults.length} pass
+                                {minUniquesPassCount} / {candidateLineupCount} pass
                             </span>
                         </div>
 
