@@ -55,6 +55,41 @@ interface SetAndForgetSelection {
     safetyFloor: number
 }
 
+const DK_EDITOR_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL'] as const
+
+function isEligibleForSlot(player: PoolPlayer, slot: string): boolean {
+    const posSet = new Set((player.positions ?? []).map(pos => pos.trim().toUpperCase()))
+    switch (slot) {
+        case 'PG':
+        case 'SG':
+        case 'SF':
+        case 'PF':
+        case 'C':
+            return posSet.has(slot)
+        case 'G':
+            return posSet.has('PG') || posSet.has('SG') || posSet.has('G')
+        case 'F':
+            return posSet.has('SF') || posSet.has('PF') || posSet.has('F')
+        case 'UTIL':
+            return posSet.has('PG')
+                || posSet.has('SG')
+                || posSet.has('SF')
+                || posSet.has('PF')
+                || posSet.has('C')
+                || posSet.has('G')
+                || posSet.has('F')
+        default:
+            return true
+    }
+}
+
+function editorSlotLabels(slotCount: number): string[] {
+    if (slotCount === DK_EDITOR_SLOTS.length) {
+        return [...DK_EDITOR_SLOTS]
+    }
+    return Array.from({ length: slotCount }, (_, idx) => `Slot ${idx + 1}`)
+}
+
 function toMinCount(pct: number, targetCount: number): number {
     return Math.ceil((pct / 100) * targetCount)
 }
@@ -619,6 +654,8 @@ export default function ContestSimPage() {
     const [editedLineupsById, setEditedLineupsById] = useState<Record<number, string[]>>({})
     const [editingLineupId, setEditingLineupId] = useState<number | null>(null)
     const [editingLineupInputs, setEditingLineupInputs] = useState<string[]>([])
+    const [editingActiveSlotIndex, setEditingActiveSlotIndex] = useState(0)
+    const [editingEligibleSearch, setEditingEligibleSearch] = useState('')
     const [editingLineupError, setEditingLineupError] = useState<string | null>(null)
 
     // Pagination & Top N Filter
@@ -900,21 +937,84 @@ export default function ContestSimPage() {
         return true
     }, [resolvePlayerFromSearch])
 
-    const getEffectivePlayerIds = useCallback((lineup: LineupResultWithOwnership): string[] => {
+    const getEffectivePlayerIds = useCallback((lineup: { lineup_id: number; player_ids: string[] }): string[] => {
         return editedLineupsById[lineup.lineup_id] ?? lineup.player_ids
     }, [editedLineupsById])
+
+    const editingSlotNames = useMemo(() => editorSlotLabels(editingLineupInputs.length), [editingLineupInputs.length])
+
+    const editingResolvedPlayers = useMemo(
+        () => editingLineupInputs.map(input => resolvePlayerFromSearch(input)),
+        [editingLineupInputs, resolvePlayerFromSearch],
+    )
+
+    const editingTotalSalary = useMemo(
+        () => editingResolvedPlayers.reduce((sum, player) => sum + (player?.salary ?? 0), 0),
+        [editingResolvedPlayers],
+    )
+
+    const editingTotalProjection = useMemo(
+        () => editingResolvedPlayers.reduce((sum, player) => sum + (player?.proj ?? 0), 0),
+        [editingResolvedPlayers],
+    )
+
+    const activeEditorSlotName = editingSlotNames[editingActiveSlotIndex] ?? null
+
+    const eligiblePlayersForActiveSlot = useMemo(() => {
+        if (editingLineupId === null || !activeEditorSlotName) {
+            return [] as PoolPlayer[]
+        }
+
+        const enforceSlotEligibility = editingSlotNames.length === DK_EDITOR_SLOTS.length
+        const activePlayerId = editingResolvedPlayers[editingActiveSlotIndex]?.player_id
+        const usedIds = new Set(
+            editingResolvedPlayers
+                .map(player => player?.player_id)
+                .filter((pid): pid is string => Boolean(pid)),
+        )
+        if (activePlayerId) {
+            usedIds.delete(activePlayerId)
+        }
+        const query = editingEligibleSearch.trim().toLowerCase()
+
+        return sortedPlayers
+            .filter(player => !usedIds.has(player.player_id))
+            .filter(player => !enforceSlotEligibility || isEligibleForSlot(player, activeEditorSlotName))
+            .filter(player => {
+                if (!query) return true
+                const pid = player.player_id.toLowerCase()
+                const name = player.name.toLowerCase()
+                const team = (player.team ?? '').toLowerCase()
+                return name.includes(query) || pid.includes(query) || team.includes(query)
+            })
+            .sort((a, b) => {
+                if (b.proj !== a.proj) {
+                    return b.proj - a.proj
+                }
+                return a.name.localeCompare(b.name)
+            })
+    }, [
+        activeEditorSlotName,
+        editingActiveSlotIndex,
+        editingEligibleSearch,
+        editingLineupId,
+        editingResolvedPlayers,
+        editingSlotNames,
+        sortedPlayers,
+    ])
 
     // Calculate total ownership for each lineup result
     const resultsWithOwnership = useMemo(() => {
         if (!simResult) return []
         return simResult.results.map(r => {
-            const totalOwn = r.player_ids.reduce((sum, pid) => {
+            const effectivePlayerIds = getEffectivePlayerIds(r)
+            const totalOwn = effectivePlayerIds.reduce((sum, pid) => {
                 const p = playerMap.get(pid)
                 return sum + (p?.own_proj ?? 0)
             }, 0)
-            return { ...r, total_own: totalOwn }
+            return { ...r, player_ids: effectivePlayerIds, total_own: totalOwn }
         })
-    }, [simResult, playerMap])
+    }, [simResult, playerMap, getEffectivePlayerIds])
 
     // Filter and sort results (NO Top N here - that's applied after constraint filters)
     const sortedResults = useMemo(() => {
@@ -955,9 +1055,9 @@ export default function ContestSimPage() {
             return constrainedResults
         }
         return constrainedResults.filter(r =>
-            requiredPlayerIds.every(pid => r.player_ids.includes(pid)),
+            requiredPlayerIds.every(pid => getEffectivePlayerIds(r).includes(pid)),
         )
-    }, [constrainedResults, requiredPlayerIds])
+    }, [constrainedResults, requiredPlayerIds, getEffectivePlayerIds])
 
     const poolByLineupId = useMemo(() => {
         return new Map(filteredByPlayersResults.map(r => [r.lineup_id, r] as const))
@@ -1382,12 +1482,28 @@ export default function ContestSimPage() {
         const current = getEffectivePlayerIds(lineup)
         setEditingLineupId(lineup.lineup_id)
         setEditingLineupInputs(current.map(pid => playerMap.get(pid)?.name ?? pid))
+        setEditingActiveSlotIndex(0)
+        setEditingEligibleSearch('')
         setEditingLineupError(null)
     }
 
     const closeLineupEditor = () => {
         setEditingLineupId(null)
         setEditingLineupInputs([])
+        setEditingActiveSlotIndex(0)
+        setEditingEligibleSearch('')
+        setEditingLineupError(null)
+    }
+
+    const setEditingSlotToPlayer = (slotIdx: number, player: PoolPlayer) => {
+        setEditingLineupInputs(prev => {
+            if (slotIdx < 0 || slotIdx >= prev.length) {
+                return prev
+            }
+            const next = [...prev]
+            next[slotIdx] = player.name
+            return next
+        })
         setEditingLineupError(null)
     }
 
@@ -1409,6 +1525,20 @@ export default function ContestSimPage() {
             setEditingLineupError('Lineup contains duplicate players.')
             return
         }
+
+        const enforceSlotEligibility = editingSlotNames.length === DK_EDITOR_SLOTS.length
+        if (enforceSlotEligibility) {
+            for (let idx = 0; idx < resolved.length; idx += 1) {
+                const player = resolved[idx]
+                const slot = editingSlotNames[idx]
+                if (!player) continue
+                if (!isEligibleForSlot(player, slot)) {
+                    setEditingLineupError(`${player.name} is not eligible for ${slot}.`)
+                    return
+                }
+            }
+        }
+
         const salary = pids.reduce((sum, pid) => sum + (playerMap.get(pid)?.salary ?? 0), 0)
         if (salary > 50000) {
             setEditingLineupError(`Salary cap exceeded: $${salary.toLocaleString()} > $50,000`)
@@ -2097,24 +2227,115 @@ export default function ContestSimPage() {
                                 <div className="contest-sim-editor-backdrop" onClick={closeLineupEditor}>
                                     <div className="contest-sim-editor-modal" onClick={e => e.stopPropagation()}>
                                         <h4>Edit Lineup #{editingLineupId + 1}</h4>
-                                        <p className="muted">Use player name or ID. Position legality is not enforced here.</p>
-                                        <div className="contest-sim-editor-grid">
-                                            {editingLineupInputs.map((value, idx) => (
-                                                <label key={idx}>
-                                                    Slot {idx + 1}
+                                        <p className="muted">Pick players by slot. Slot legality, duplicates, and salary cap are enforced on save.</p>
+
+                                        <div className="contest-sim-editor-summary">
+                                            <span>Salary: ${editingTotalSalary.toLocaleString()} / $50,000</span>
+                                            <span className={editingTotalSalary > 50000 ? 'bad' : ''}>
+                                                Remaining: ${(50000 - editingTotalSalary).toLocaleString()}
+                                            </span>
+                                            <span>Proj: {editingTotalProjection.toFixed(1)}</span>
+                                        </div>
+
+                                        <div className="contest-sim-editor-layout">
+                                            <div className="contest-sim-editor-grid">
+                                                {editingLineupInputs.map((value, idx) => {
+                                                    const slotName = editingSlotNames[idx] ?? `Slot ${idx + 1}`
+                                                    const resolvedPlayer = editingResolvedPlayers[idx]
+                                                    const hasTypedValue = value.trim().length > 0
+                                                    const enforceSlotEligibility = editingSlotNames.length === DK_EDITOR_SLOTS.length
+                                                    const invalidSlot = Boolean(
+                                                        resolvedPlayer
+                                                        && enforceSlotEligibility
+                                                        && !isEligibleForSlot(resolvedPlayer, slotName),
+                                                    )
+                                                    const unresolved = hasTypedValue && !resolvedPlayer
+
+                                                    return (
+                                                        <div
+                                                            key={`${slotName}-${idx}`}
+                                                            className={`contest-sim-editor-slot ${editingActiveSlotIndex === idx ? 'active' : ''} ${invalidSlot || unresolved ? 'invalid' : ''}`}
+                                                            onClick={() => setEditingActiveSlotIndex(idx)}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            onKeyDown={e => {
+                                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                                    e.preventDefault()
+                                                                    setEditingActiveSlotIndex(idx)
+                                                                }
+                                                            }}
+                                                        >
+                                                            <div className="contest-sim-editor-slot-title">{slotName}</div>
+                                                            <input
+                                                                type="text"
+                                                                list="contest-sim-player-options"
+                                                                value={value}
+                                                                onFocus={() => setEditingActiveSlotIndex(idx)}
+                                                                onClick={e => e.stopPropagation()}
+                                                                onChange={e => {
+                                                                    const next = [...editingLineupInputs]
+                                                                    next[idx] = e.target.value
+                                                                    setEditingLineupInputs(next)
+                                                                    setEditingActiveSlotIndex(idx)
+                                                                    setEditingLineupError(null)
+                                                                }}
+                                                            />
+                                                            {resolvedPlayer && (
+                                                                <div className="contest-sim-editor-slot-meta">
+                                                                    {resolvedPlayer.positions.join('/')} • {resolvedPlayer.team} • {resolvedPlayer.proj.toFixed(1)} proj • ${resolvedPlayer.salary.toLocaleString()}
+                                                                </div>
+                                                            )}
+                                                            {invalidSlot && (
+                                                                <div className="contest-sim-editor-slot-warning">
+                                                                    Not eligible for {slotName}
+                                                                </div>
+                                                            )}
+                                                            {unresolved && (
+                                                                <div className="contest-sim-editor-slot-warning">
+                                                                    Player not recognized
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+
+                                            <aside className="contest-sim-editor-eligible-panel">
+                                                <div className="contest-sim-editor-eligible-header">
+                                                    <strong>
+                                                        Eligible for {activeEditorSlotName ?? 'Slot'}
+                                                    </strong>
                                                     <input
                                                         type="text"
-                                                        list="contest-sim-player-options"
-                                                        value={value}
-                                                        onChange={e => {
-                                                            const next = [...editingLineupInputs]
-                                                            next[idx] = e.target.value
-                                                            setEditingLineupInputs(next)
-                                                        }}
+                                                        placeholder="Search eligible players"
+                                                        value={editingEligibleSearch}
+                                                        onChange={e => setEditingEligibleSearch(e.target.value)}
                                                     />
-                                                </label>
-                                            ))}
+                                                </div>
+                                                <div className="contest-sim-editor-eligible-list">
+                                                    {eligiblePlayersForActiveSlot.slice(0, 120).map(player => {
+                                                        const selectedHere = editingResolvedPlayers[editingActiveSlotIndex]?.player_id === player.player_id
+                                                        return (
+                                                            <button
+                                                                key={player.player_id}
+                                                                type="button"
+                                                                className={`contest-sim-editor-eligible-item ${selectedHere ? 'selected' : ''}`}
+                                                                onClick={() => setEditingSlotToPlayer(editingActiveSlotIndex, player)}
+                                                            >
+                                                                <span className="name">{player.name}</span>
+                                                                <span className="meta">{player.positions.join('/')} • {player.team}</span>
+                                                                <span className="proj">{player.proj.toFixed(1)} proj</span>
+                                                                <span className="salary">${player.salary.toLocaleString()}</span>
+                                                            </button>
+                                                        )
+                                                    })}
+                                                    {eligiblePlayersForActiveSlot.length === 0 && (
+                                                        <div className="contest-sim-editor-empty">No eligible players match this filter.</div>
+                                                    )}
+                                                </div>
+                                            </aside>
                                         </div>
+
                                         {editingLineupError && <div className="sim-error">{editingLineupError}</div>}
                                         <div className="contest-sim-editor-actions">
                                             <button onClick={closeLineupEditor}>Cancel</button>
