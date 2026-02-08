@@ -90,6 +90,67 @@ function editorSlotLabels(slotCount: number): string[] {
     return Array.from({ length: slotCount }, (_, idx) => `Slot ${idx + 1}`)
 }
 
+function orderLineupForEditorSlots(
+    playerIds: string[],
+    playerMap: Map<string, PoolPlayer>,
+): string[] {
+    if (playerIds.length !== DK_EDITOR_SLOTS.length) {
+        return playerIds
+    }
+
+    const players = playerIds.map(pid => playerMap.get(pid))
+    if (players.some(player => !player)) {
+        return playerIds
+    }
+
+    const eligibleSlotsByPlayer = players.map((player) => {
+        const p = player as PoolPlayer
+        return DK_EDITOR_SLOTS
+            .map((slot, slotIdx) => (isEligibleForSlot(p, slot) ? slotIdx : -1))
+            .filter(slotIdx => slotIdx >= 0)
+    })
+
+    if (eligibleSlotsByPlayer.some(slots => slots.length === 0)) {
+        return playerIds
+    }
+
+    const playerOrder = playerIds
+        .map((_, idx) => idx)
+        .sort((a, b) => {
+            const flexDelta = eligibleSlotsByPlayer[a].length - eligibleSlotsByPlayer[b].length
+            if (flexDelta !== 0) return flexDelta
+            return a - b
+        })
+
+    const slotToPlayer = Array<number>(DK_EDITOR_SLOTS.length).fill(-1)
+
+    const tryAssign = (playerIdx: number, seen: boolean[]): boolean => {
+        for (const slotIdx of eligibleSlotsByPlayer[playerIdx]) {
+            if (seen[slotIdx]) continue
+            seen[slotIdx] = true
+            const occupyingPlayerIdx = slotToPlayer[slotIdx]
+            if (occupyingPlayerIdx === -1 || tryAssign(occupyingPlayerIdx, seen)) {
+                slotToPlayer[slotIdx] = playerIdx
+                return true
+            }
+        }
+        return false
+    }
+
+    for (const playerIdx of playerOrder) {
+        const seen = Array<boolean>(DK_EDITOR_SLOTS.length).fill(false)
+        if (!tryAssign(playerIdx, seen)) {
+            return playerIds
+        }
+    }
+
+    if (slotToPlayer.some(playerIdx => playerIdx < 0)) {
+        return playerIds
+    }
+
+    return slotToPlayer.map(playerIdx => playerIds[playerIdx])
+}
+
 function toMinCount(pct: number, targetCount: number): number {
     return Math.ceil((pct / 100) * targetCount)
 }
@@ -1479,7 +1540,7 @@ export default function ContestSimPage() {
     }
 
     const openLineupEditor = (lineup: LineupResultWithOwnership) => {
-        const current = getEffectivePlayerIds(lineup)
+        const current = orderLineupForEditorSlots(getEffectivePlayerIds(lineup), playerMap)
         setEditingLineupId(lineup.lineup_id)
         setEditingLineupInputs(current.map(pid => playerMap.get(pid)?.name ?? pid))
         setEditingActiveSlotIndex(0)
