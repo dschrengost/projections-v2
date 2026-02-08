@@ -3059,6 +3059,29 @@ tbody tr:hover {
   color: #94a3b8;
 }
 
+.contest-sim-player-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: -0.25rem 0 0.75rem 0;
+}
+
+.contest-sim-player-chip {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.contest-sim-player-chip:hover {
+  border-color: #60a5fa;
+  color: #dbeafe;
+}
+
 /* === Override Input Columns === */
 th.override-col {
   background: #1d3a5f;
