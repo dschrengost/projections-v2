@@ -68,6 +68,9 @@ class LineupEVResult:
     ucv90: Optional[float] = None  # Upper CVaR at 90th pctile (mean of top 10% scores)
     tail_score: Optional[float] = None  # Weighted combo: 0.6*p90 + 0.4*ucv90
     select_score: Optional[float] = None  # tail_score - (1 - dupe_penalty) penalty
+    score_lcb95: Optional[float] = None  # mean - 1.96*std (score-space lower confidence bound)
+    score_cvar10: Optional[float] = None  # mean score in worst 10% worlds
+    robust_floor: Optional[float] = None  # set-and-forget floor metric: min(score_lcb95, score_cvar10)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -94,6 +97,9 @@ class LineupEVResult:
             "ucv90": round(self.ucv90, 2) if self.ucv90 is not None else None,
             "tail_score": round(self.tail_score, 2) if self.tail_score is not None else None,
             "select_score": round(self.select_score, 2) if self.select_score is not None else None,
+            "score_lcb95": round(self.score_lcb95, 2) if self.score_lcb95 is not None else None,
+            "score_cvar10": round(self.score_cvar10, 2) if self.score_cvar10 is not None else None,
+            "robust_floor": round(self.robust_floor, 2) if self.robust_floor is not None else None,
         }
 
 

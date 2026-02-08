@@ -2898,6 +2898,63 @@ tbody tr:hover {
   margin-bottom: 0.25rem;
 }
 
+.lineup-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.lineup-quick-btn {
+  border: 1px solid #334155;
+  background: #111827;
+  color: #cbd5e1;
+  border-radius: 4px;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.65rem;
+  cursor: pointer;
+}
+
+.lineup-quick-btn.in-final {
+  border-color: #22c55e;
+  color: #bbf7d0;
+}
+
+.lineup-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  margin-bottom: 0.25rem;
+}
+
+.lineup-flag {
+  font-size: 0.63rem;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 0.05rem 0.35rem;
+  color: #cbd5e1;
+}
+
+.lineup-flag.final {
+  border-color: #22c55e;
+  color: #bbf7d0;
+}
+
+.lineup-flag.core {
+  border-color: #38bdf8;
+  color: #bae6fd;
+}
+
+.lineup-flag.upside {
+  border-color: #a78bfa;
+  color: #ddd6fe;
+}
+
+.lineup-flag.edited {
+  border-color: #f59e0b;
+  color: #fde68a;
+}
+
 .lineup-check {
   display: flex;
   align-items: center;
@@ -3080,6 +3137,87 @@ tbody tr:hover {
 .contest-sim-player-chip:hover {
   border-color: #60a5fa;
   color: #dbeafe;
+}
+
+.contest-sim-finalset-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: 0 0 0.75rem 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+}
+
+.contest-sim-finalset-banner .warning {
+  color: #fca5a5;
+}
+
+.contest-sim-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.72);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.contest-sim-editor-modal {
+  width: min(680px, 96vw);
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+  padding: 0.9rem;
+}
+
+.contest-sim-editor-modal h4 {
+  margin: 0 0 0.35rem 0;
+  color: #f1f5f9;
+}
+
+.contest-sim-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(200px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.contest-sim-editor-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.contest-sim-editor-grid input {
+  border: 1px solid #334155;
+  border-radius: 4px;
+  background: #020617;
+  color: #e2e8f0;
+  padding: 0.32rem 0.45rem;
+}
+
+.contest-sim-editor-actions {
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.contest-sim-editor-actions button {
+  border: 1px solid #334155;
+  border-radius: 4px;
+  background: #0b1323;
+  color: #e2e8f0;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
 }
 
 /* === Override Input Columns === */

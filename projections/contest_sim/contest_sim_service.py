@@ -516,18 +516,27 @@ def run_contest_simulation(
     lineup_stds = user_scores.std(axis=1)
     lineup_p90 = np.percentile(user_scores, 90, axis=1)
     lineup_p95 = np.percentile(user_scores, 95, axis=1)
+    lineup_p10 = np.percentile(user_scores, 10, axis=1)
 
     # Compute UCVaR90: mean of top 10% scores (above p90) for each lineup
     # Vectorized: for each lineup, mask scores >= p90 and compute mean
     lineup_ucv90 = np.zeros(n_user_lineups, dtype=np.float64)
+    lineup_cvar10 = np.zeros(n_user_lineups, dtype=np.float64)
+    lineup_lcb95 = lineup_means - 1.96 * lineup_stds
     for idx in range(n_user_lineups):
         scores = user_scores[idx]
         q90 = lineup_p90[idx]
+        q10 = lineup_p10[idx]
         tail_mask = scores >= q90
+        downside_mask = scores <= q10
         if tail_mask.any():
             lineup_ucv90[idx] = scores[tail_mask].mean()
         else:
             lineup_ucv90[idx] = q90  # fallback if no scores above threshold
+        if downside_mask.any():
+            lineup_cvar10[idx] = scores[downside_mask].mean()
+        else:
+            lineup_cvar10[idx] = q10
 
     # Compute dupe penalties if ownership data is provided.
     #
@@ -580,6 +589,9 @@ def run_contest_simulation(
 
         p90_val = float(lineup_p90[idx])
         ucv90_val = float(lineup_ucv90[idx])
+        cvar10_val = float(lineup_cvar10[idx])
+        lcb95_val = float(lineup_lcb95[idx])
+        robust_floor_val = min(lcb95_val, cvar10_val)
         tail_score_val = tail_weight_p90 * p90_val + tail_weight_ucv * ucv90_val
         # select_score subtracts the "penalty" portion: (1 - dupe_penalty) scaled
         # We use the raw tail_score - penalty_impact where penalty_impact reflects
@@ -617,6 +629,9 @@ def run_contest_simulation(
             ucv90=ucv90_val,
             tail_score=tail_score_val,
             select_score=select_score_val,
+            score_lcb95=lcb95_val,
+            score_cvar10=cvar10_val,
+            robust_floor=robust_floor_val,
         )
         results.append(result)
 

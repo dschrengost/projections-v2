@@ -26,6 +26,9 @@ export interface LineupEVResult {
     ucv90?: number | null  // Upper CVaR at 90th pctile (mean of top 10% scores)
     tail_score?: number | null  // Weighted combo: 0.6*p90 + 0.4*ucv90
     select_score?: number | null  // tail_score - dupe penalty impact
+    score_lcb95?: number | null  // mean - 1.96*std
+    score_cvar10?: number | null  // mean of worst 10% worlds
+    robust_floor?: number | null  // min(score_lcb95, score_cvar10)
 }
 
 export interface ContestConfig {

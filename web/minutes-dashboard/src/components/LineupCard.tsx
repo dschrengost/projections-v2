@@ -4,17 +4,35 @@ import { PoolPlayer } from '../api/optimizer'
 interface LineupCardProps {
     result: LineupEVResult
     players: Map<string, PoolPlayer>
+    playerIdsOverride?: string[]
     selected: boolean
     onToggleSelect: () => void
     highlighted?: 'best-ev' | 'best-ceiling' | null
+    isInFinalSet?: boolean
+    finalTag?: 'core' | 'upside' | null
+    isEdited?: boolean
+    hasFinalOverride?: boolean
+    onToggleFinalSet?: () => void
+    onClearFinalOverride?: () => void
+    onEditLineup?: () => void
+    onResetEditLineup?: () => void
 }
 
 export default function LineupCard({
     result,
     players,
+    playerIdsOverride,
     selected,
     onToggleSelect,
     highlighted,
+    isInFinalSet = false,
+    finalTag = null,
+    isEdited = false,
+    hasFinalOverride = false,
+    onToggleFinalSet,
+    onClearFinalOverride,
+    onEditLineup,
+    onResetEditLineup,
 }: LineupCardProps) {
     const formatMoney = (val: number) =>
         val >= 0 ? `$${val.toFixed(2)}` : `-$${Math.abs(val).toFixed(2)}`
@@ -23,23 +41,20 @@ export default function LineupCard({
         const pct = (val * 100).toFixed(1)
         return val >= 0 ? `+${pct}%` : `${pct}%`
     }
-    const formatRiskAdj = (val: number) => {
-        if (!Number.isFinite(val)) return '—'
-        const s = val.toFixed(2)
-        return val >= 0 ? `+${s}` : s
-    }
+    const formatScore = (val?: number | null) => (typeof val === 'number' && Number.isFinite(val) ? val.toFixed(1) : '—')
 
     // Get player info with fallbacks
     const getPlayer = (pid: string) => players.get(pid)
+    const lineupPlayerIds = playerIdsOverride ?? result.player_ids
 
     // Calculate total ownership
-    const totalOwn = result.player_ids.reduce((sum, pid) => {
+    const totalOwn = lineupPlayerIds.reduce((sum, pid) => {
         const p = getPlayer(pid)
         return sum + (p?.own_proj ?? 0)
     }, 0)
 
     // Calculate total salary
-    const totalSalary = result.player_ids.reduce((sum, pid) => {
+    const totalSalary = lineupPlayerIds.reduce((sum, pid) => {
         const p = getPlayer(pid)
         return sum + (p?.salary ?? 0)
     }, 0)
@@ -68,9 +83,61 @@ export default function LineupCard({
                             ${totalSalary.toLocaleString()}
                         </div>
                     </div>
+                    <div className="lineup-quick-actions">
+                        {onToggleFinalSet && (
+                            <button
+                                className={`lineup-quick-btn ${isInFinalSet ? 'in-final' : ''}`}
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    onToggleFinalSet()
+                                }}
+                            >
+                                {isInFinalSet ? 'Remove Final' : 'Add Final'}
+                            </button>
+                        )}
+                        {hasFinalOverride && onClearFinalOverride && (
+                            <button
+                                className="lineup-quick-btn"
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    onClearFinalOverride()
+                                }}
+                            >
+                                Reset Override
+                            </button>
+                        )}
+                        {onEditLineup && (
+                            <button
+                                className="lineup-quick-btn"
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    onEditLineup()
+                                }}
+                            >
+                                Edit
+                            </button>
+                        )}
+                        {isEdited && onResetEditLineup && (
+                            <button
+                                className="lineup-quick-btn"
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    onResetEditLineup()
+                                }}
+                            >
+                                Reset Edit
+                            </button>
+                        )}
+                    </div>
+                    <div className="lineup-flags">
+                        {isInFinalSet && <span className="lineup-flag final">Final</span>}
+                        {finalTag === 'core' && <span className="lineup-flag core">Core</span>}
+                        {finalTag === 'upside' && <span className="lineup-flag upside">Upside</span>}
+                        {isEdited && <span className="lineup-flag edited">Edited</span>}
+                    </div>
 
                     <div className="players-list-compact">
-                        {result.player_ids.map((pid, idx) => {
+                        {lineupPlayerIds.map((pid, idx) => {
                             const player = getPlayer(pid)
                             const posLabel = player?.positions?.join('/') ?? '?'
 
@@ -124,12 +191,24 @@ export default function LineupCard({
                             <span className="value">{result.mean.toFixed(1)}</span>
                         </div>
                         <div className="stat-box">
+                            <span className="label">Robust</span>
+                            <span className="value">{formatScore(result.robust_floor)}</span>
+                        </div>
+                        <div className="stat-box">
                             <span className="label">Ceiling</span>
                             <span className="value">{result.p90.toFixed(1)}</span>
                         </div>
                         <div className="stat-box">
+                            <span className="label">LCB95</span>
+                            <span className="value">{formatScore(result.score_lcb95)}</span>
+                        </div>
+                        <div className="stat-box">
                             <span className="label" title="Mean of top 10% scores">UCVaR</span>
                             <span className="value">{result.ucv90?.toFixed(1) ?? '—'}</span>
+                        </div>
+                        <div className="stat-box">
+                            <span className="label">CVaR10</span>
+                            <span className="value">{formatScore(result.score_cvar10)}</span>
                         </div>
                         <div className="stat-box">
                             <span className="label" title="0.6×p90 + 0.4×UCVaR90">Tail</span>
