@@ -80,6 +80,7 @@ function getNumericOrNegInf(value: unknown): number {
 function buildSetAndForgetSelection(
     pool: LineupResultWithOwnership[],
     targetSize: number,
+    upsidePct: number,
 ): SetAndForgetSelection {
     const size = Math.max(0, Math.min(targetSize, pool.length))
     if (size <= 0) {
@@ -107,8 +108,15 @@ function buildSetAndForgetSelection(
     )
     const safetyFloor = robustValsAsc.length > 0 ? robustValsAsc[floorIdx] : -Infinity
 
-    const coreCount = Math.min(size, Math.max(1, Math.floor(size * 0.8)))
-    const upsideCount = size - coreCount
+    const clippedUpsidePct = Math.max(0, Math.min(100, upsidePct))
+    let upsideCount = Math.round((size * clippedUpsidePct) / 100)
+    if (size > 1 && clippedUpsidePct > 0) {
+        upsideCount = Math.max(1, upsideCount)
+    }
+    if (size > 1 && clippedUpsidePct < 100) {
+        upsideCount = Math.min(size - 1, upsideCount)
+    }
+    const coreCount = size - upsideCount
 
     const core = byRobust.slice(0, coreCount)
     const coreIds = new Set(core.map(r => r.lineup_id))
@@ -603,6 +611,7 @@ export default function ContestSimPage() {
     const [playerSearch, setPlayerSearch] = useState('')
     const [requiredPlayerIds, setRequiredPlayerIds] = useState<string[]>([])
     const [finalSetSize, setFinalSetSize] = useState(40)
+    const [finalUpsidePct, setFinalUpsidePct] = useState(20)
 
     const [selectedLineups, setSelectedLineups] = useState<Set<number>>(new Set())
     const [manualIncludeFinal, setManualIncludeFinal] = useState<Set<number>>(new Set())
@@ -955,8 +964,8 @@ export default function ContestSimPage() {
     }, [filteredByPlayersResults])
 
     const setAndForgetAuto = useMemo(() => {
-        return buildSetAndForgetSelection(filteredByPlayersResults, finalSetSize)
-    }, [filteredByPlayersResults, finalSetSize])
+        return buildSetAndForgetSelection(filteredByPlayersResults, finalSetSize, finalUpsidePct)
+    }, [filteredByPlayersResults, finalSetSize, finalUpsidePct])
 
     const finalSetLineupIds = useMemo(() => {
         const poolIds = new Set(filteredByPlayersResults.map(r => r.lineup_id))
@@ -1898,6 +1907,15 @@ export default function ContestSimPage() {
                                         value={finalSetSize}
                                         onChange={e => setFinalSetSize(Math.max(1, Number(e.target.value) || 1))}
                                         style={{ width: '70px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                    />
+                                    <label>Upside %:</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={100}
+                                        value={finalUpsidePct}
+                                        onChange={e => setFinalUpsidePct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                                        style={{ width: '60px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
                                     />
                                     <button
                                         onClick={applyFinalSetToSelection}
