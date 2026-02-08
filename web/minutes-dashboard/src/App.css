@@ -3169,7 +3169,9 @@ tbody tr:hover {
 }
 
 .contest-sim-editor-modal {
-  width: min(680px, 96vw);
+  width: min(1120px, 96vw);
+  max-height: min(90vh, 940px);
+  overflow: hidden;
   border: 1px solid #334155;
   border-radius: 10px;
   background: #0f172a;
@@ -3183,25 +3185,166 @@ tbody tr:hover {
 
 .contest-sim-editor-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(200px, 1fr));
-  gap: 0.5rem;
-  margin-top: 0.6rem;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 0.55rem;
 }
 
-.contest-sim-editor-grid label {
+.contest-sim-editor-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin: 0.5rem 0 0.7rem 0;
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.contest-sim-editor-summary .bad {
+  color: #fca5a5;
+}
+
+.contest-sim-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(460px, 1fr) minmax(360px, 0.9fr);
+  gap: 0.7rem;
+  align-items: start;
+  max-height: min(68vh, 680px);
+}
+
+.contest-sim-editor-grid {
+  display: grid;
+  gap: 0.55rem;
+  overflow: auto;
+  max-height: min(68vh, 680px);
+  padding-right: 0.2rem;
+}
+
+.contest-sim-editor-slot {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.78rem;
+  gap: 0.28rem;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 0.42rem;
+  background: #020617;
+  cursor: pointer;
+}
+
+.contest-sim-editor-slot.active {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.25);
+}
+
+.contest-sim-editor-slot.invalid {
+  border-color: #dc2626;
+}
+
+.contest-sim-editor-slot-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
   color: #cbd5e1;
 }
 
-.contest-sim-editor-grid input {
+.contest-sim-editor-slot input {
   border: 1px solid #334155;
   border-radius: 4px;
   background: #020617;
   color: #e2e8f0;
   padding: 0.32rem 0.45rem;
+}
+
+.contest-sim-editor-slot-meta {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.contest-sim-editor-slot-warning {
+  color: #fca5a5;
+  font-size: 0.72rem;
+}
+
+.contest-sim-editor-eligible-panel {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #020617;
+  display: flex;
+  flex-direction: column;
+  max-height: min(68vh, 680px);
+  overflow: hidden;
+}
+
+.contest-sim-editor-eligible-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem;
+  border-bottom: 1px solid #1f2937;
+}
+
+.contest-sim-editor-eligible-header strong {
+  color: #f1f5f9;
+  font-size: 0.85rem;
+}
+
+.contest-sim-editor-eligible-header input {
+  border: 1px solid #334155;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 0.32rem 0.45rem;
+}
+
+.contest-sim-editor-eligible-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.45rem;
+  overflow: auto;
+}
+
+.contest-sim-editor-eligible-item {
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #e2e8f0;
+  text-align: left;
+  padding: 0.36rem 0.45rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.2rem 0.45rem;
+  cursor: pointer;
+}
+
+.contest-sim-editor-eligible-item:hover {
+  border-color: #60a5fa;
+}
+
+.contest-sim-editor-eligible-item.selected {
+  border-color: #22c55e;
+}
+
+.contest-sim-editor-eligible-item .name {
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.contest-sim-editor-eligible-item .meta {
+  color: #94a3b8;
+  font-size: 0.73rem;
+}
+
+.contest-sim-editor-eligible-item .proj,
+.contest-sim-editor-eligible-item .salary {
+  color: #cbd5e1;
+  font-size: 0.73rem;
+}
+
+.contest-sim-editor-empty {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  padding: 0.4rem;
 }
 
 .contest-sim-editor-actions {
@@ -3218,6 +3361,27 @@ tbody tr:hover {
   color: #e2e8f0;
   padding: 0.35rem 0.55rem;
   cursor: pointer;
+}
+
+@media (max-width: 1080px) {
+  .contest-sim-editor-layout {
+    grid-template-columns: 1fr;
+    max-height: none;
+  }
+
+  .contest-sim-editor-grid {
+    max-height: none;
+  }
+
+  .contest-sim-editor-eligible-panel {
+    max-height: 300px;
+  }
+}
+
+@media (max-width: 640px) {
+  .contest-sim-editor-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* === Override Input Columns === */
