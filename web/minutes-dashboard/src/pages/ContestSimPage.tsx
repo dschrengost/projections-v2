@@ -126,6 +126,83 @@ function selectConstrainedLineups(
         }
     }
 
+    // Fast path: when there are no exposure minimum constraints, a single-pass greedy
+    // keeps the page responsive even for large candidate pools.
+    if (minEntries.length === 0) {
+        const result: LineupResultWithOwnership[] = []
+        const selectedSets: Set<string>[] = []
+        const counts = new Map<string, number>()
+        let minUniquesPassCount = sortedResults.length
+        if (minUniques > 0) {
+            minUniquesPassCount = 0
+        }
+
+        for (const lineup of sortedResults) {
+            if (result.length >= targetCount) {
+                break
+            }
+
+            let valid = true
+            if (minUniques > 0) {
+                const lineupSet = new Set(lineup.player_ids)
+                for (const existingSet of selectedSets) {
+                    const shared = getSharedCount(lineup.player_ids, existingSet)
+                    if (lineup.player_ids.length - shared < minUniques) {
+                        valid = false
+                        break
+                    }
+                }
+                if (valid) {
+                    minUniquesPassCount += 1
+                }
+            }
+            if (!valid) {
+                continue
+            }
+
+            for (const pid of lineup.player_ids) {
+                const maxCount = maxByPid.get(pid)
+                if (maxCount !== undefined && (counts.get(pid) ?? 0) + 1 > maxCount) {
+                    valid = false
+                    break
+                }
+            }
+            if (!valid) {
+                continue
+            }
+
+            result.push(lineup)
+            selectedSets.push(new Set(lineup.player_ids))
+            for (const pid of lineup.player_ids) {
+                if (maxByPid.has(pid)) {
+                    counts.set(pid, (counts.get(pid) ?? 0) + 1)
+                }
+            }
+        }
+
+        let error: string | null = null
+        if (result.length < targetCount) {
+            error = `Only ${result.length} of ${targetCount} lineups meet constraints (pool exhausted)`
+        }
+        return {
+            constrainedResults: result,
+            minUniquesPassCount,
+            exposureCapError: error,
+            targetCount,
+        }
+    }
+
+    // Exposure minimums are combinatorial; cap exact solve size to avoid UI lockups.
+    const maxExactSolveTarget = 120
+    if (targetCount > maxExactSolveTarget) {
+        return {
+            constrainedResults: sortedResults.slice(0, targetCount),
+            minUniquesPassCount: sortedResults.length,
+            exposureCapError: `Exposure mins require Top N ≤ ${maxExactSolveTarget}. Lower Top N to apply min exposures.`,
+            targetCount,
+        }
+    }
+
     const constrainedPidSet = new Set(normalizedBounds.keys())
     const lineupSets = sortedResults.map(r => new Set(r.player_ids))
     const lineupConstrainedPids = sortedResults.map(r => r.player_ids.filter(pid => constrainedPidSet.has(pid)))
@@ -445,7 +522,7 @@ export default function ContestSimPage() {
     const [page, setPage] = useState(1)
     const [pageSize, setPageSize] = useState(50)
     const [topN, setTopN] = useState<number | null>(null) // null = all
-    const [minUniques, setMinUniques] = useState(3)
+    const [minUniques, setMinUniques] = useState(0)
     const [exposureBounds, setExposureBounds] = useState<Map<string, ExposureBounds>>(new Map())
 
     const ownershipMode = useOwnership ? 'full' : 'off'
@@ -548,9 +625,14 @@ export default function ContestSimPage() {
                 const builds = await getSavedSimBuilds(selectedDate)
                 setSavedSimBuilds(builds)
                 const latestRun = builds.find(b => b.kind === 'run')?.build_id ?? null
-                setSelectedSimBuildId(latestRun)
                 const latestLineup = builds.find(b => b.kind === 'lineups')?.build_id ?? null
-                setSelectedSimLineupId(latestLineup)
+                if (latestRun) {
+                    setSelectedSimBuildId(latestRun)
+                    setSelectedSimLineupId(null)
+                } else {
+                    setSelectedSimBuildId(null)
+                    setSelectedSimLineupId(latestLineup)
+                }
             } catch {
                 setSavedSimBuilds([])
                 setSelectedSimBuildId(null)
@@ -655,6 +737,9 @@ export default function ContestSimPage() {
             try {
                 const build = await loadSavedSimBuild(selectedDate, selectedSimBuildId)
                 if (build.kind === 'run' && build.results && build.config && build.stats) {
+                    if (build.draft_group_id && build.draft_group_id !== selectedSlate) {
+                        setSelectedSlate(build.draft_group_id)
+                    }
                     setSimResult({
                         results: build.results,
                         config: build.config as unknown as ContestSimResponse['config'],
@@ -668,7 +753,7 @@ export default function ContestSimPage() {
             }
         }
         void load()
-    }, [selectedDate, selectedSimBuildId])
+    }, [selectedDate, selectedSimBuildId, selectedSlate, setSelectedSlate])
 
     // Clear selection when results change
     useEffect(() => {
@@ -842,6 +927,7 @@ export default function ContestSimPage() {
             const builds = await getSavedSimBuilds(selectedDate)
             setSavedSimBuilds(builds)
             setSelectedSimBuildId(result.build_id ?? builds.find(b => b.kind === 'run')?.build_id ?? null)
+            setSelectedSimLineupId(null)
         } catch (err) {
             setSimError((err as Error).message)
         } finally {
@@ -913,6 +999,9 @@ export default function ContestSimPage() {
             try {
                 const build = await loadSavedSimBuild(selectedDate, selectedSimLineupId)
                 if (build.kind === 'lineups') {
+                    if (build.draft_group_id && build.draft_group_id !== selectedSlate) {
+                        setSelectedSlate(build.draft_group_id)
+                    }
                     setLineups(build.lineups ?? [])
                     if (build.results && build.config && build.stats) {
                         setSimResult({
@@ -931,7 +1020,7 @@ export default function ContestSimPage() {
             }
         }
         void load()
-    }, [selectedDate, selectedSimLineupId])
+    }, [selectedDate, selectedSimLineupId, selectedSlate, setSelectedSlate])
 
     const handleSaveSimLineups = async () => {
         if (!selectedSlate) return
@@ -954,6 +1043,7 @@ export default function ContestSimPage() {
             )
             const builds = await getSavedSimBuilds(selectedDate)
             setSavedSimBuilds(builds)
+            setSelectedSimBuildId(null)
             setSelectedSimLineupId(saved.build_id)
         } catch (err) {
             alert('Failed to save sim lineups: ' + (err as Error).message)
