@@ -968,9 +968,17 @@ def _solve_best_objective(spec: Spec, cfg: QuickBuildConfig, seed: int) -> tuple
 
 
 def _solve_best_raw_objective(
-    spec: Spec, cfg: QuickBuildConfig, seed: int
+    spec: Spec, cfg: QuickBuildConfig, seed: int, *, ignore_proj_bounds: bool = False
 ) -> tuple[float | None, dict]:
-    """Find best raw-projection objective (no jitter/randomness/bonus/penalty)."""
+    """Find best raw-projection objective (no jitter/randomness/bonus/penalty).
+
+    Args:
+        spec: Optimization spec with players and constraints
+        cfg: QuickBuild configuration
+        seed: Random seed for solver
+        ignore_proj_bounds: If True, ignore min_proj_sum/max_proj_sum to compute
+            true unconstrained optimal. Used for max_offoptimal_pct floor.
+    """
     diag: dict = {"status": "", "is_optimal": False, "best_obj": 0.0, "time_s": 0.0}
     start_t = time.time()
     try:
@@ -989,25 +997,39 @@ def _solve_best_raw_objective(
         return None, diag
     obj_expr = cp_model.LinearExpr.Sum(obj_terms)
     model.Maximize(obj_expr)
-    if getattr(spec, "min_proj_sum", None) is not None:
-        try:
-            floor_val = int(math.floor(float(spec.min_proj_sum) * float(scale)))
-            model.Add(obj_expr >= floor_val)
-        except Exception:
-            pass
-    if getattr(spec, "max_proj_sum", None) is not None:
-        try:
-            ceil_val = int(math.ceil(float(spec.max_proj_sum) * float(scale)))
-            model.Add(obj_expr <= ceil_val)
-        except Exception:
-            pass
+
+    # Only apply proj bounds if not computing unconstrained optimal
+    if not ignore_proj_bounds:
+        if getattr(spec, "min_proj_sum", None) is not None:
+            try:
+                floor_val = int(math.floor(float(spec.min_proj_sum) * float(scale)))
+                model.Add(obj_expr >= floor_val)
+            except Exception:
+                pass
+        if getattr(spec, "max_proj_sum", None) is not None:
+            try:
+                ceil_val = int(math.ceil(float(spec.max_proj_sum) * float(scale)))
+                model.Add(obj_expr <= ceil_val)
+            except Exception:
+                pass
 
     solver = cp_model.CpSolver()
     _configure_solver(solver, spec, cfg, seed)
+
+    # For optimal solve, use longer time budget to ensure true optimal
+    # Start with warm time, then extend if needed
     warm = cfg.enum_warm_time if cfg.enum_warm_time is not None else min(cfg.timeout or 60.0, 5.0)
-    if warm and warm > 0:
-        solver.parameters.max_time_in_seconds = float(warm)
+    initial_time = max(warm if warm and warm > 0 else 5.0, 2.0)
+    solver.parameters.max_time_in_seconds = float(initial_time)
+
     status = solver.Solve(model)
+
+    # If we only got FEASIBLE (not OPTIMAL), retry with extended time
+    if status == cp_model.FEASIBLE:
+        extended_time = min(float(initial_time) * 3.0, 30.0)
+        solver.parameters.max_time_in_seconds = extended_time
+        status = solver.Solve(model)
+
     diag["time_s"] = round(time.time() - start_t, 3)
 
     status_map = {
@@ -1398,7 +1420,10 @@ def quick_build_pool(
             max_empty_cycles=max(int(getattr(cfg, "max_empty_cycles", 3) or 3), 8),
         )
         base_seed = cfg.seed if cfg.seed is not None else int(time.time())
-        best_raw, raw_diag = _solve_best_raw_objective(spec, cfg, base_seed)
+        # Compute unconstrained optimal (ignore min/max proj bounds)
+        best_raw, raw_diag = _solve_best_raw_objective(
+            spec, cfg, base_seed, ignore_proj_bounds=True
+        )
         stats.raw_optimal_status = raw_diag.get("status", "")
         stats.raw_optimal_is_optimal = bool(raw_diag.get("is_optimal", False))
         stats.raw_optimal_best_obj = float(raw_diag.get("best_obj", 0.0) or 0.0)
