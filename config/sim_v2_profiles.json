@@ -214,16 +214,7 @@
       "efficiency_scoring": true,
       "game_script": {
         "enabled": true,
-        "margin_std": 13.4,
-        "spread_coef": -0.726,
-        "quantile_noise_std": 0.08,
-        "quantile_targets": {
-          "blowout_win": {"starter": 0.35, "bench": 0.55},
-          "comfortable_win": {"starter": 0.45, "bench": 0.52},
-          "close": {"starter": 0.65, "bench": 0.48},
-          "comfortable_loss": {"starter": 0.50, "bench": 0.50},
-          "blowout_loss": {"starter": 0.30, "bench": 0.45}
-        }
+        "margin_std": 14.0
       },
       "usage_shares": {
         "enabled": true,
@@ -241,7 +232,7 @@
       },
       "vacancy_mode": "game",
       "preserve_input_rotation": true,
-      "note": "sim_v3: rates_noise.enabled=true, game_script.enabled=true adds game-level variance via margin sampling. preserve_input_rotation=true uses structured minutes noise."
+      "note": "sim_v3: game_script uses margin surprise (deviation from spread) with empirically calibrated shift factors. margin_std=14 matches historical data."
     },
     "sim_v3_rates_noise": {
       "mean_source": "rates",

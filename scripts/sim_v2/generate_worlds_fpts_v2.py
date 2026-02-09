@@ -2807,13 +2807,12 @@ def main(
                     mnc = profile_cfg.minutes_noise_config
 
                     # Optionally apply game-script-based shifts before noise
+                    # Uses margin surprise (deviation from spread) with empirically calibrated factors
                     minutes_base_per_world: np.ndarray | None = None
                     if use_game_scripts and game_script_config is not None:
                         gs_shift_config = GameScriptShiftConfig(
-                            spread_coef=game_script_config.spread_coef,
                             margin_std=game_script_config.margin_std,
-                            blowout_threshold=float(game_script_config.blowout_threshold),
-                            comfortable_threshold=float(game_script_config.comfortable_threshold),
+                            # Use defaults for thresholds and shift factors (empirically calibrated)
                         )
                         minutes_base_per_world = compute_game_script_shifts(
                             minutes_p50=gs_minutes_p50,
@@ -2831,7 +2830,7 @@ def main(
                             # Log shift variance across worlds for first chunk
                             shift_std = minutes_base_per_world.std(axis=0).mean()
                             typer.echo(
-                                f"[sim_v2] game_script shifts: mean_per_player_std={shift_std:.2f}"
+                                f"[sim_v2] game_script shifts (margin_surprise): mean_per_player_std={shift_std:.2f}"
                             )
 
                     minutes_worlds, noise_stats = sample_minutes_noise_per_world(
