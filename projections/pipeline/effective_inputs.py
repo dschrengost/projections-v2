@@ -15,6 +15,10 @@ from typing import Any
 
 import pandas as pd
 
+from projections.minutes.depth_chart_crosswalk import (
+    refresh_realgm_player_crosswalk_from_minutes,
+    summarize_crosswalk_json,
+)
 from projections.minutes.depth_chart_prior import apply_depth_chart_prior_from_realgm
 from projections.ops.overrides import load_overrides_map
 
@@ -96,6 +100,10 @@ def _log_depth_chart_prior(diagnostics: dict[str, Any]) -> None:
         logger.info("[dc-disagree] top=%s", diagnostics.get("model_vs_depth_disagreements"))
 
 
+def _log_depth_chart_crosswalk(diag: dict[str, Any]) -> None:
+    logger.info("[dc-crosswalk] %s", summarize_crosswalk_json(diag))
+
+
 def build_effective_minutes(
     *,
     game_date: date,
@@ -116,6 +124,12 @@ def build_effective_minutes(
         log_diagnostics=True,
         force_reconcile=True,
     )
+    crosswalk_diag = refresh_realgm_player_crosswalk_from_minutes(
+        after,
+        data_root=data_root,
+        as_of_ts=run_as_of_ts,
+    )
+    _log_depth_chart_crosswalk(crosswalk_diag)
     depth_prior = apply_depth_chart_prior_from_realgm(
         after,
         data_root=data_root,
@@ -190,6 +204,7 @@ def build_effective_minutes(
         "changed_players": len(diff_rows),
         "diffs": diff_rows,
         "run_as_of_ts": run_as_of_ts.isoformat().replace("+00:00", "Z") if run_as_of_ts is not None else None,
+        "depth_chart_crosswalk": crosswalk_diag,
         "depth_chart_prior": depth_prior.diagnostics,
     }
     return after, summary

@@ -9,6 +9,7 @@ Pipeline orchestration, Prefect flows, and systemd services for `projections-v2`
 The primary pipeline is `nba_live_pipeline_flow` in `prefect_flows/live_nba_pipeline.py`. It orchestrates:
 
 1. **Data scraping** - Injuries, lineups, odds, salaries
+   - Includes RealGM depth charts scrape (non-blocking) used for inference-time minutes priors.
 2. **Feature building** - Minutes features, rates features
 3. **Model scoring** - Minutes, ownership, rates predictions
 4. **Projection finalization** - Unified projections artifact

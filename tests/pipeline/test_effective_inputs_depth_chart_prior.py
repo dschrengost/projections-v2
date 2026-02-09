@@ -221,6 +221,9 @@ def test_write_effective_minutes_layer_applies_depth_chart_prior(
 
     summary = json.loads((run_dir / EFFECTIVE_INPUTS_SUMMARY).read_text(encoding="utf-8"))
     assert summary["run_as_of_ts"] == "2026-01-18T18:20:00Z"
+    assert isinstance(summary.get("depth_chart_crosswalk"), dict)
+    assert summary["depth_chart_crosswalk"]["applied"] is True
+    assert int(summary["depth_chart_crosswalk"]["matched_rows"]) >= 2
     assert isinstance(summary.get("depth_chart_prior"), dict)
     assert summary["depth_chart_prior"]["applied"] is True
     assert summary["depth_chart_prior"]["dc_snapshot_ts"] == "2026-01-18T18:15:00Z"

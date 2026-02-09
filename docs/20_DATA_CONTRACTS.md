@@ -96,6 +96,22 @@ Derived columns (when available):
 
 Diagnostics are written to `effective_inputs_summary.json` under `depth_chart_prior`.
 
+Crosswalk artifact used by the prior:
+
+- `bronze/realgm/player_id_crosswalk.parquet`
+  - `realgm_player_id` (int)
+  - `player_id` (int; canonical NBA person id used by live minutes/sim)
+  - `updated_at` (UTC timestamp)
+  - `match_method` (`team_name` or `override`)
+  - `source_snapshot_ts` (UTC timestamp, nullable)
+  - `note` (string, nullable)
+
+Optional manual overrides file:
+
+- `bronze/realgm/player_id_crosswalk_overrides.csv`
+  - required: `realgm_player_id`, `player_id`
+  - optional: `note`, `updated_at`
+
 ## Schema Evolution
 
 When modifying schemas:
