@@ -86,3 +86,57 @@ def test_refresh_crosswalk_from_minutes_builds_mapping_and_applies_overrides(tmp
     got = dict(zip(cw["realgm_player_id"].astype(int), cw["player_id"].astype(int)))
     assert got[1001] == 1
     assert got[1002] == 22  # override wins
+
+
+def test_refresh_crosswalk_uses_history_snapshot_when_latest_is_newer_than_as_of(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path
+    _seed_depth_snapshot(data_root)
+
+    realgm_dir = data_root / "bronze" / "realgm"
+    latest_only = pd.read_parquet(realgm_dir / "depth_charts.parquet")
+    latest_only["scraped_at"] = pd.Timestamp("2026-01-18T19:15:00Z")
+    latest_only.to_parquet(realgm_dir / "depth_charts_latest.parquet", index=False)
+    latest_only.to_parquet(realgm_dir / "depth_charts.parquet", index=False)
+
+    history = latest_only.copy()
+    history["scraped_at"] = pd.Timestamp("2026-01-18T18:10:00Z")
+    history_path = (
+        realgm_dir
+        / "depth_charts"
+        / "season=2025"
+        / "date=2026-01-18"
+        / "run_ts=20260118T181000Z"
+        / "depth_charts.parquet"
+    )
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history.to_parquet(history_path, index=False)
+
+    minutes = pd.DataFrame(
+        [
+            {
+                "game_id": 10,
+                "team_id": 1610612752,
+                "team_name": "New York Knicks",
+                "player_id": 1,
+                "player_name": "Jalen Brunson",
+            },
+            {
+                "game_id": 10,
+                "team_id": 1610612752,
+                "team_name": "New York Knicks",
+                "player_id": 2,
+                "player_name": "Miles McBride",
+            },
+        ]
+    )
+
+    diag = refresh_realgm_player_crosswalk_from_minutes(
+        minutes,
+        data_root=data_root,
+        as_of_ts=pd.Timestamp("2026-01-18T18:30:00Z"),
+    )
+    assert diag["applied"] is True
+    assert diag["snapshot_ts"] == "2026-01-18T18:10:00Z"
+    assert "/run_ts=20260118T181000Z/" in str(diag["snapshot_source"])

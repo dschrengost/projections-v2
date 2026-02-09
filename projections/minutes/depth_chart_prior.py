@@ -172,6 +172,63 @@ def _read_table(path: Path) -> pd.DataFrame:
     raise ValueError(f"Unsupported table type for depth chart prior: {path}")
 
 
+def _parse_run_ts_from_name(name: str) -> pd.Timestamp | None:
+    token = str(name).strip()
+    if token.startswith("run_ts="):
+        token = token.split("=", 1)[1].strip()
+    if not token:
+        return None
+    ts = pd.to_datetime(token, utc=True, errors="coerce")
+    if ts is None or pd.isna(ts):
+        return None
+    return pd.Timestamp(ts)
+
+
+def _extract_run_ts_from_path(path: Path) -> pd.Timestamp | None:
+    for part in (path, *path.parents):
+        name = part.name
+        if not name.startswith("run_ts="):
+            continue
+        parsed = _parse_run_ts_from_name(name)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _history_snapshot_file_for_asof(
+    *,
+    data_root: Path,
+    cfg: dict[str, Any],
+    as_of_ts: pd.Timestamp | None,
+) -> Path | None:
+    if as_of_ts is None:
+        return None
+    cutoff = pd.Timestamp(as_of_ts)
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.tz_localize("UTC")
+    else:
+        cutoff = cutoff.tz_convert("UTC")
+
+    snapshots_root = Path(str(cfg.get("snapshots_root") or "")).expanduser()
+    if not snapshots_root.exists() or not snapshots_root.is_dir():
+        snapshots_root = data_root / "bronze" / "realgm" / "depth_charts"
+    if not snapshots_root.exists() or not snapshots_root.is_dir():
+        return None
+
+    best_path: Path | None = None
+    best_ts: pd.Timestamp | None = None
+    for candidate in snapshots_root.rglob("depth_charts.parquet"):
+        if not candidate.parent.name.startswith("run_ts="):
+            continue
+        run_ts = _extract_run_ts_from_path(candidate)
+        if run_ts is None or run_ts > cutoff:
+            continue
+        if best_ts is None or run_ts > best_ts:
+            best_ts = run_ts
+            best_path = candidate
+    return best_path
+
+
 def _candidate_snapshot_files(*, data_root: Path, cfg: dict[str, Any]) -> list[Path]:
     candidates: list[Path] = []
 
@@ -247,8 +304,26 @@ def _load_snapshot_for_asof(*, data_root: Path, cfg: dict[str, Any], as_of_ts: p
     if as_of_ts is not None:
         filtered = depth.loc[depth["scraped_at"] <= as_of_ts].copy()
         if filtered.empty:
-            return pd.DataFrame(), None, source_path
-        depth = filtered
+            history_path = _history_snapshot_file_for_asof(
+                data_root=data_root,
+                cfg=cfg,
+                as_of_ts=as_of_ts,
+            )
+            if history_path is None:
+                return pd.DataFrame(), None, source_path
+            try:
+                history = _read_table(history_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[dc-prior] failed reading history snapshot %s (%s)", history_path, exc)
+                return pd.DataFrame(), None, source_path
+            if history.empty:
+                return pd.DataFrame(), None, source_path
+            history = history.copy()
+            history["_dc_source_path"] = str(history_path)
+            depth = history
+            source_path = str(history_path)
+        else:
+            depth = filtered
 
     selected_ts = pd.to_datetime(depth["scraped_at"], utc=True, errors="coerce").max()
     if pd.isna(selected_ts):

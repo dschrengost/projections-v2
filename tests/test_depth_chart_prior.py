@@ -207,3 +207,39 @@ def test_depth_chart_prior_caps_and_preserves_inactive_zero(tmp_path: Path) -> N
     assert float(deep["minutes_p50"]) == 0.0
     assert float(deep["minutes_p90"]) == 0.0
     assert result.diagnostics["dc_snapshot_ts"] == t1.isoformat().replace("+00:00", "Z")
+
+
+def test_depth_chart_prior_falls_back_to_history_snapshot_when_latest_is_newer_than_as_of(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path
+    t0, t1 = _write_depth_inputs(data_root)
+    as_of = pd.Timestamp("2026-01-18T18:30:00Z")
+    assert t0 < as_of < t1
+
+    snap_dir = data_root / "bronze" / "realgm"
+    latest_rows = pd.read_parquet(snap_dir / "depth_charts.parquet")
+    latest_only = latest_rows.loc[latest_rows["scraped_at"] == t1].copy()
+    latest_only.to_parquet(snap_dir / "depth_charts_latest.parquet", index=False)
+    latest_only.to_parquet(snap_dir / "depth_charts.parquet", index=False)
+
+    history_path = (
+        snap_dir
+        / "depth_charts"
+        / "season=2025"
+        / "date=2026-01-18"
+        / "run_ts=20260118T180000Z"
+        / "depth_charts.parquet"
+    )
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_rows.loc[latest_rows["scraped_at"] == t0].to_parquet(history_path, index=False)
+
+    result = apply_depth_chart_prior_from_realgm(
+        _base_minutes_frame(),
+        data_root=data_root,
+        as_of_ts=as_of,
+    )
+    diag = result.diagnostics
+    assert diag["applied"] is True
+    assert diag["dc_snapshot_ts"] == t0.isoformat().replace("+00:00", "Z")
+    assert "/run_ts=20260118T180000Z/" in str(diag.get("snapshot_source"))
