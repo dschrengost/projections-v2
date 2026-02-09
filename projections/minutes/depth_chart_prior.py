@@ -60,6 +60,8 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "vacancy_max_relax": 0.35,
     "use_name_fallback": True,
     "top_n_debug": 15,
+    "warn_min_match_rate": 0.25,
+    "warn_max_snapshot_age_minutes": 360.0,
     "snapshot_path": None,
     "snapshots_root": None,
     "crosswalk_path": None,
@@ -160,6 +162,8 @@ def load_depth_chart_prior_config(*, data_root: Path) -> tuple[dict[str, Any], P
     cfg["vacancy_threshold"] = float(cfg.get("vacancy_threshold", 48.0))
     cfg["vacancy_slope"] = float(cfg.get("vacancy_slope", 0.01))
     cfg["vacancy_max_relax"] = float(cfg.get("vacancy_max_relax", 0.35))
+    cfg["warn_min_match_rate"] = float(cfg.get("warn_min_match_rate", 0.25))
+    cfg["warn_max_snapshot_age_minutes"] = float(cfg.get("warn_max_snapshot_age_minutes", 360.0))
 
     return cfg, loaded_from
 
@@ -869,6 +873,13 @@ def apply_depth_chart_prior_from_realgm(
         )
 
     cfg, cfg_path = load_depth_chart_prior_config(data_root=data_root)
+    as_of_norm: pd.Timestamp | None = None
+    if as_of_ts is not None:
+        as_of_norm = pd.Timestamp(as_of_ts)
+        if as_of_norm.tzinfo is None:
+            as_of_norm = as_of_norm.tz_localize("UTC")
+        else:
+            as_of_norm = as_of_norm.tz_convert("UTC")
     if not bool(cfg.get("enabled", False)):
         return DepthChartPriorResult(
             frame=minutes_df,
@@ -902,6 +913,19 @@ def apply_depth_chart_prior_from_realgm(
         "unmatched": int(attach_diag.get("unmatched", len(joined))),
         "team_mismatch_dropped": int(attach_diag.get("team_mismatch_dropped", 0)),
     }
+    players_total = int(len(joined))
+    matched_total = int(diagnostics["matched_id"]) + int(diagnostics["matched_name_fallback"])
+    matched_rate = float(matched_total / players_total) if players_total > 0 else 0.0
+    diagnostics["players_total"] = players_total
+    diagnostics["matched_total"] = matched_total
+    diagnostics["matched_rate"] = matched_rate
+    diagnostics["warn_min_match_rate"] = float(cfg.get("warn_min_match_rate", 0.25))
+    diagnostics["warn_max_snapshot_age_minutes"] = float(cfg.get("warn_max_snapshot_age_minutes", 360.0))
+    if selected_ts is not None and as_of_norm is not None:
+        age_minutes = float((as_of_norm - selected_ts).total_seconds() / 60.0)
+        diagnostics["snapshot_age_minutes"] = max(0.0, age_minutes)
+    else:
+        diagnostics["snapshot_age_minutes"] = None
 
     if not bool(attach_diag.get("applied", False)):
         # Ensure derived fields exist for contract stability.
@@ -920,6 +944,14 @@ def apply_depth_chart_prior_from_realgm(
             out["dc_is_primary_backup"] = False
         if "dc_snapshot_ts" not in out.columns:
             out["dc_snapshot_ts"] = pd.NA
+        alerts = ["prior_not_applied"]
+        if float(diagnostics.get("matched_rate", 0.0)) < float(diagnostics.get("warn_min_match_rate", 0.25)):
+            alerts.append("low_match_rate")
+        snap_age = diagnostics.get("snapshot_age_minutes")
+        if snap_age is not None and float(snap_age) > float(diagnostics.get("warn_max_snapshot_age_minutes", 360.0)):
+            alerts.append("stale_snapshot")
+        diagnostics["alert_flags"] = alerts
+        diagnostics["has_alerts"] = bool(alerts)
         return DepthChartPriorResult(frame=out, diagnostics=diagnostics)
 
     out = joined.copy()
@@ -1023,6 +1055,16 @@ def apply_depth_chart_prior_from_realgm(
         out,
         top_n=int(cfg.get("top_n_debug", 15)),
     )
+    alerts: list[str] = []
+    if not bool(diagnostics.get("applied", False)):
+        alerts.append("prior_not_applied")
+    if float(diagnostics.get("matched_rate", 0.0)) < float(diagnostics.get("warn_min_match_rate", 0.25)):
+        alerts.append("low_match_rate")
+    snap_age = diagnostics.get("snapshot_age_minutes")
+    if snap_age is not None and float(snap_age) > float(diagnostics.get("warn_max_snapshot_age_minutes", 360.0)):
+        alerts.append("stale_snapshot")
+    diagnostics["alert_flags"] = alerts
+    diagnostics["has_alerts"] = bool(alerts)
 
     return DepthChartPriorResult(frame=out, diagnostics=diagnostics)
 

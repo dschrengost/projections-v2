@@ -42,7 +42,7 @@ except ImportError:
 # RealGM depth charts for inference-time minutes priors
 try:
     from scrapers.realgm_depth_charts import (
-        realgm_dependencies_available,
+        realgm_dependency_report,
         save_realgm_depth_charts_bronze,
         scrape_realgm_depth_charts,
     )
@@ -266,10 +266,15 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
 
     # RealGM depth charts - weak prior source for inference-time membership/tails.
     if realgm_depth_charts and REALGM_AVAILABLE:
-        deps_ok = realgm_dependencies_available()
+        dep_report = realgm_dependency_report()
+        deps_ok = bool(dep_report.get("available", False))
         if not deps_ok:
+            missing = ",".join(str(x) for x in dep_report.get("missing", []))
+            details = ",".join(str(x) for x in dep_report.get("details", []))
             _echo_stage(
-                "skipping RealGM depth charts (dependencies missing - install beautifulsoup4 lxml playwright + chromium)"
+                "skipping RealGM depth charts "
+                f"(dependencies missing: {missing}; details: {details}; "
+                "install beautifulsoup4 lxml playwright && playwright install chromium)"
             )
         else:
             _echo_stage("running RealGM depth charts scrape")

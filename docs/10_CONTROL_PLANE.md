@@ -10,8 +10,10 @@ The primary pipeline is `nba_live_pipeline_flow` in `prefect_flows/live_nba_pipe
 
 1. **Data scraping** - Injuries, lineups, odds, salaries
    - Includes RealGM depth charts scrape (non-blocking) used for inference-time minutes priors.
+   - Missing RealGM dependencies are reported with explicit missing components (including Chromium runtime).
 2. **Feature building** - Minutes features, rates features
 3. **Model scoring** - Minutes, ownership, rates predictions
+   - Effective minutes layer applies depth-chart prior before simulation and emits `[dc-*]` diagnostics.
 4. **Projection finalization** - Unified projections artifact
 5. **Simulation** - Monte Carlo world generation
 

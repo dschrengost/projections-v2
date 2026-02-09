@@ -77,6 +77,8 @@ def test_refresh_crosswalk_from_minutes_builds_mapping_and_applies_overrides(tmp
     )
     assert diag["applied"] is True
     assert int(diag["matched_rows"]) == 2
+    assert abs(float(diag["match_rate"]) - 1.0) < 1e-9
+    assert int(diag["snapshot_unique_players"]) == 2
     assert int(diag["override_rows"]) == 1
     assert int(diag["rows_written"]) == 2
 

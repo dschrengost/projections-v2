@@ -78,9 +78,59 @@ def _check_playwright() -> bool:
         return False
 
 
+def _check_playwright_chromium() -> tuple[bool, str | None]:
+    """Check whether Playwright Chromium is installed and launchable."""
+    if not _check_playwright():
+        return False, "playwright_import_missing"
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return False, "playwright_import_missing"
+
+    try:
+        with sync_playwright() as p:
+            exe_path = p.chromium.executable_path
+            if not exe_path:
+                return False, "chromium_executable_missing"
+            if not Path(exe_path).exists():
+                return False, "chromium_not_installed"
+        return True, None
+    except Exception:
+        return False, "chromium_not_installed"
+
+
+def realgm_dependency_report() -> dict[str, object]:
+    """Return dependency readiness report for RealGM scraping."""
+    missing: list[str] = []
+    details: list[str] = []
+
+    if BeautifulSoup is None:
+        missing.append("beautifulsoup4")
+    try:
+        import lxml  # noqa: F401
+    except Exception:
+        missing.append("lxml")
+    if not _check_playwright():
+        missing.append("playwright")
+    else:
+        chromium_ok, chromium_reason = _check_playwright_chromium()
+        if not chromium_ok:
+            missing.append("chromium")
+            if chromium_reason:
+                details.append(str(chromium_reason))
+
+    available = len(missing) == 0
+    return {
+        "available": available,
+        "missing": missing,
+        "details": details,
+    }
+
+
 def realgm_dependencies_available() -> bool:
     """Check if all required dependencies are available."""
-    return BeautifulSoup is not None and _check_playwright()
+    report = realgm_dependency_report()
+    return bool(report.get("available", False))
 
 
 @dataclass(frozen=True)
@@ -465,6 +515,7 @@ __all__ = [
     "get_starters",
     "save_realgm_depth_charts_bronze",
     "realgm_dependencies_available",
+    "realgm_dependency_report",
 ]
 
 

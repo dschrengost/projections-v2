@@ -95,6 +95,17 @@ Derived columns (when available):
 - `dc_snapshot_ts` (timestamp)
 
 Diagnostics are written to `effective_inputs_summary.json` under `depth_chart_prior`.
+Key diagnostics include:
+
+- `matched_total`, `players_total`, `matched_rate`
+- `snapshot_age_minutes`
+- `alert_flags` (e.g., `low_match_rate`, `stale_snapshot`, `prior_not_applied`)
+- `has_alerts` (bool)
+
+Crosswalk diagnostics are written under `depth_chart_crosswalk` and include:
+
+- `matched_rows`, `unmatched_snapshot_rows`
+- `snapshot_unique_players`, `match_rate`
 
 Crosswalk artifact used by the prior:
 
@@ -111,6 +122,11 @@ Optional manual overrides file:
 - `bronze/realgm/player_id_crosswalk_overrides.csv`
   - required: `realgm_player_id`, `player_id`
   - optional: `note`, `updated_at`
+
+Optional alert tuning knobs (in `config/depth_chart_prior.json`):
+
+- `warn_min_match_rate` (default `0.25`)
+- `warn_max_snapshot_age_minutes` (default `360.0`)
 
 ## Schema Evolution
 

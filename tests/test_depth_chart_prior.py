@@ -174,6 +174,11 @@ def test_depth_chart_prior_selects_latest_snapshot_le_as_of(tmp_path: Path) -> N
     assert diag["applied"] is True
     assert diag["dc_snapshot_ts"] == t0.isoformat().replace("+00:00", "Z")
     assert diag["matched_id"] == 3
+    assert diag["players_total"] == 4
+    assert diag["matched_total"] == 3
+    assert abs(float(diag["matched_rate"]) - 0.75) < 1e-9
+    assert abs(float(diag["snapshot_age_minutes"]) - 30.0) < 1e-9
+    assert diag["has_alerts"] is False
     assert {"dc_present", "dc_role", "dc_role_priority", "dc_order_in_role", "dc_ahead_global", "dc_is_primary_backup", "dc_snapshot_ts"} <= set(
         out.columns
     )
@@ -207,6 +212,7 @@ def test_depth_chart_prior_caps_and_preserves_inactive_zero(tmp_path: Path) -> N
     assert float(deep["minutes_p50"]) == 0.0
     assert float(deep["minutes_p90"]) == 0.0
     assert result.diagnostics["dc_snapshot_ts"] == t1.isoformat().replace("+00:00", "Z")
+    assert abs(float(result.diagnostics["snapshot_age_minutes"]) - 60.0) < 1e-9
 
 
 def test_depth_chart_prior_falls_back_to_history_snapshot_when_latest_is_newer_than_as_of(

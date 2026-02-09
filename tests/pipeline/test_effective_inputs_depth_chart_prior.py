@@ -227,6 +227,7 @@ def test_write_effective_minutes_layer_applies_depth_chart_prior(
     assert isinstance(summary.get("depth_chart_prior"), dict)
     assert summary["depth_chart_prior"]["applied"] is True
     assert summary["depth_chart_prior"]["dc_snapshot_ts"] == "2026-01-18T18:15:00Z"
+    assert isinstance(summary.get("depth_chart_alerts"), list)
 
     messages = [rec.getMessage() for rec in caplog.records]
     assert any("[dc-prior]" in msg for msg in messages)

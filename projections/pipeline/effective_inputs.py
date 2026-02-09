@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -98,10 +99,35 @@ def _log_depth_chart_prior(diagnostics: dict[str, Any]) -> None:
         logger.info("[dc-cap] largest_q_reductions=%s", diagnostics.get("largest_q_reductions"))
     if diagnostics.get("model_vs_depth_disagreements"):
         logger.info("[dc-disagree] top=%s", diagnostics.get("model_vs_depth_disagreements"))
+    if diagnostics.get("has_alerts"):
+        logger.warning(
+            "[dc-alert] flags=%s matched_rate=%s snapshot_age_minutes=%s",
+            diagnostics.get("alert_flags"),
+            diagnostics.get("matched_rate"),
+            diagnostics.get("snapshot_age_minutes"),
+        )
 
 
 def _log_depth_chart_crosswalk(diag: dict[str, Any]) -> None:
     logger.info("[dc-crosswalk] %s", summarize_crosswalk_json(diag))
+    if not bool(diag.get("applied", False)):
+        logger.warning("[dc-alert] crosswalk_not_applied reason=%s", diag.get("reason"))
+        return
+    match_rate = diag.get("match_rate")
+    if match_rate is None:
+        return
+    try:
+        threshold = float(os.environ.get("PROJECTIONS_DC_CROSSWALK_WARN_MIN_MATCH_RATE", "0.30"))
+    except ValueError:
+        threshold = 0.30
+    if float(match_rate) < threshold:
+        logger.warning(
+            "[dc-alert] crosswalk_low_match_rate rate=%.3f threshold=%.3f matched_rows=%s unmatched_snapshot_rows=%s",
+            float(match_rate),
+            threshold,
+            diag.get("matched_rows"),
+            diag.get("unmatched_snapshot_rows"),
+        )
 
 
 def build_effective_minutes(
@@ -206,6 +232,7 @@ def build_effective_minutes(
         "run_as_of_ts": run_as_of_ts.isoformat().replace("+00:00", "Z") if run_as_of_ts is not None else None,
         "depth_chart_crosswalk": crosswalk_diag,
         "depth_chart_prior": depth_prior.diagnostics,
+        "depth_chart_alerts": list(depth_prior.diagnostics.get("alert_flags") or []),
     }
     return after, summary
 

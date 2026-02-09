@@ -9,7 +9,7 @@ import typer
 
 from projections import paths
 from scrapers.realgm_depth_charts import (
-    realgm_dependencies_available,
+    realgm_dependency_report,
     save_realgm_depth_charts_bronze,
     scrape_realgm_depth_charts,
 )
@@ -41,9 +41,14 @@ def scrape(
         help="RealGM page load timeout in seconds.",
     ),
 ) -> None:
-    if not realgm_dependencies_available():
+    report = realgm_dependency_report()
+    if not bool(report.get("available", False)):
+        missing = ",".join(str(x) for x in report.get("missing", []))
+        details = ",".join(str(x) for x in report.get("details", []))
         raise typer.BadParameter(
-            "RealGM dependencies unavailable. Install: beautifulsoup4 lxml playwright && playwright install chromium"
+            "RealGM dependencies unavailable. "
+            f"missing={missing} details={details}. "
+            "Install: beautifulsoup4 lxml playwright && playwright install chromium"
         )
 
     target_date = date.fromisoformat(game_date) if game_date else date.today()

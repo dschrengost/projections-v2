@@ -219,12 +219,14 @@ def refresh_realgm_player_crosswalk_from_minutes(
             cfg=cfg,
             as_of_ts=as_of_ts,
         )
+        snapshot_unique_players = int(snapshot_df["realgm_player_id"].nunique()) if not snapshot_df.empty else 0
         if snapshot_df.empty:
             return {
                 "applied": False,
                 "reason": "no_snapshot",
                 "snapshot_source": snapshot_source,
                 "crosswalk_path": str(crosswalk_path),
+                "snapshot_unique_players": snapshot_unique_players,
             }
 
         matched_rows, unmatched_snapshot = _build_team_name_matches(
@@ -242,6 +244,7 @@ def refresh_realgm_player_crosswalk_from_minutes(
                 "reason": "no_matches",
                 "snapshot_source": snapshot_source,
                 "crosswalk_path": str(crosswalk_path),
+                "snapshot_unique_players": snapshot_unique_players,
             }
         records: list[dict[str, Any]] = []
         for frame in frames:
@@ -261,6 +264,11 @@ def refresh_realgm_player_crosswalk_from_minutes(
         combined = combined.drop(columns=["_priority"], errors="ignore")
         _atomic_write_table(combined, crosswalk_path)
 
+        match_rate = (
+            float(len(matched_rows) / snapshot_unique_players)
+            if snapshot_unique_players > 0
+            else 0.0
+        )
         return {
             "applied": True,
             "reason": "ok",
@@ -270,6 +278,8 @@ def refresh_realgm_player_crosswalk_from_minutes(
             "rows_written": int(len(combined)),
             "existing_rows": int(len(existing)),
             "matched_rows": int(len(matched_rows)),
+            "match_rate": match_rate,
+            "snapshot_unique_players": snapshot_unique_players,
             "override_rows": int(len(overrides)),
             "unmatched_snapshot_rows": int(unmatched_snapshot),
             "overrides_path": str(overrides_path),
