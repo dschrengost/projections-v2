@@ -142,3 +142,36 @@ def test_refresh_crosswalk_uses_history_snapshot_when_latest_is_newer_than_as_of
     assert diag["applied"] is True
     assert diag["snapshot_ts"] == "2026-01-18T18:10:00Z"
     assert "/run_ts=20260118T181000Z/" in str(diag["snapshot_source"])
+
+
+def test_refresh_crosswalk_matches_short_team_names(tmp_path: Path) -> None:
+    data_root = tmp_path
+    _seed_depth_snapshot(data_root)
+
+    minutes = pd.DataFrame(
+        [
+            {
+                "game_id": 10,
+                "team_id": 1610612752,
+                "team_name": "Knicks",
+                "player_id": 1,
+                "player_name": "Jalen Brunson",
+            },
+            {
+                "game_id": 10,
+                "team_id": 1610612752,
+                "team_name": "Knicks",
+                "player_id": 2,
+                "player_name": "Miles McBride",
+            },
+        ]
+    )
+
+    diag = refresh_realgm_player_crosswalk_from_minutes(
+        minutes,
+        data_root=data_root,
+        as_of_ts=pd.Timestamp("2026-01-18T18:30:00Z"),
+    )
+    assert diag["applied"] is True
+    assert int(diag["matched_rows"]) == 2
+    assert abs(float(diag["match_rate"]) - 1.0) < 1e-9

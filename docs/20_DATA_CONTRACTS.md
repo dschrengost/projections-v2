@@ -101,6 +101,7 @@ Key diagnostics include:
 - `snapshot_age_minutes`
 - `alert_flags` (e.g., `low_match_rate`, `stale_snapshot`, `prior_not_applied`)
 - `has_alerts` (bool)
+- `dnp_guardrail` (diagnostics for inference-time DNP history penalty/caps)
 
 Crosswalk diagnostics are written under `depth_chart_crosswalk` and include:
 
@@ -127,6 +128,12 @@ Optional alert tuning knobs (in `config/depth_chart_prior.json`):
 
 - `warn_min_match_rate` (default `0.25`)
 - `warn_max_snapshot_age_minutes` (default `360.0`)
+- DNP guardrail knobs:
+  - `dnp_guardrail_enabled`
+  - `dnp_streak_threshold`, `dnp_rate_threshold`, `dnp_inactive_streak_threshold`
+  - `dnp_k_streak`, `dnp_k_rate`, `dnp_k_inactive_streak`, `dnp_rotation_scale`
+  - `dnp_penalty_min`, `dnp_guardrail_max_p50`, `dnp_require_non_starter`
+  - `dnp_severe_*` caps for `minutes_p50/p90/p95`
 
 ## Schema Evolution
 
