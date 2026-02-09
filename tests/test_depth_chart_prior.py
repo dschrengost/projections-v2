@@ -249,3 +249,46 @@ def test_depth_chart_prior_falls_back_to_history_snapshot_when_latest_is_newer_t
     assert diag["applied"] is True
     assert diag["dc_snapshot_ts"] == t0.isoformat().replace("+00:00", "Z")
     assert "/run_ts=20260118T180000Z/" in str(diag.get("snapshot_source"))
+
+
+def test_depth_chart_prior_applies_dnp_guardrail_without_depth_matches(tmp_path: Path) -> None:
+    data_root = tmp_path
+    minutes = pd.DataFrame(
+        [
+            {
+                "game_id": 10,
+                "team_id": 1610612740,
+                "team_name": "Pelicans",
+                "player_id": 1629673,
+                "player_name": "Jordan Poole",
+                "status": "active",
+                "play_prob": 0.62,
+                "rotation_prob": 0.80,
+                "minutes_p10": 9.0,
+                "minutes_p50": 18.0,
+                "minutes_p90": 34.0,
+                "consecutive_active_dnp": 7.0,
+                "active_but_dnp_rate_last10": 0.70,
+                "inactive_streak_len": 0.0,
+            }
+        ]
+    )
+    result = apply_depth_chart_prior_from_realgm(
+        minutes,
+        data_root=data_root,
+        as_of_ts=pd.Timestamp("2026-01-18T20:00:00Z", tz=UTC),
+    )
+
+    out = result.frame.iloc[0]
+    diag = result.diagnostics
+    dnp_diag = diag.get("dnp_guardrail", {})
+    assert diag["applied"] is False  # no depth snapshot/crosswalk in this fixture
+    assert dnp_diag.get("applied") is True
+    assert int(dnp_diag.get("n_adjusted_play_prob", 0)) >= 1
+    assert int(dnp_diag.get("n_adjusted_rotation_prob", 0)) >= 1
+    assert int(dnp_diag.get("n_severe_capped", 0)) >= 1
+
+    assert float(out["play_prob"]) < 0.62
+    assert float(out["rotation_prob"]) < 0.80
+    assert float(out["minutes_p50"]) <= 14.0 + 1e-9
+    assert float(out["minutes_p90"]) <= 24.0 + 1e-9

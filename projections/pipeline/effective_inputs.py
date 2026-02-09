@@ -99,6 +99,8 @@ def _log_depth_chart_prior(diagnostics: dict[str, Any]) -> None:
         logger.info("[dc-cap] largest_q_reductions=%s", diagnostics.get("largest_q_reductions"))
     if diagnostics.get("model_vs_depth_disagreements"):
         logger.info("[dc-disagree] top=%s", diagnostics.get("model_vs_depth_disagreements"))
+    if diagnostics.get("dnp_guardrail"):
+        logger.info("[dnp-guardrail] %s", diagnostics.get("dnp_guardrail"))
     if diagnostics.get("has_alerts"):
         logger.warning(
             "[dc-alert] flags=%s matched_rate=%s snapshot_age_minutes=%s",

@@ -87,6 +87,7 @@ Operator notes:
 - Manual crosswalk overrides live at `bronze/realgm/player_id_crosswalk_overrides.csv`.
 - Required override columns: `realgm_player_id`, `player_id`.
 - Live pipeline logs include `[dc-prior]`, `[dc-cap]`, `[dc-disagree]`, `[dc-crosswalk]`, and `[dc-alert]`.
+- DNP-history inference guardrail logs under `[dnp-guardrail]` and is configured in `config/depth_chart_prior.json`.
 - `PROJECTIONS_DC_CROSSWALK_WARN_MIN_MATCH_RATE` controls crosswalk warning threshold (default `0.30`).
 
 ### Rotation Eval (rot_eval)

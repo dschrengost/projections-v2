@@ -62,6 +62,23 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "top_n_debug": 15,
     "warn_min_match_rate": 0.25,
     "warn_max_snapshot_age_minutes": 360.0,
+    "dnp_guardrail_enabled": True,
+    "dnp_streak_threshold": 2.0,
+    "dnp_rate_threshold": 0.30,
+    "dnp_inactive_streak_threshold": 1.0,
+    "dnp_k_streak": -0.35,
+    "dnp_k_rate": -2.00,
+    "dnp_k_inactive_streak": -0.10,
+    "dnp_rotation_scale": 1.10,
+    "dnp_penalty_min": -1.60,
+    "dnp_guardrail_max_p50": 26.0,
+    "dnp_require_non_starter": True,
+    "dnp_severe_streak_threshold": 6.0,
+    "dnp_severe_rate_threshold": 0.60,
+    "dnp_severe_max_p50_eligible": 22.0,
+    "dnp_severe_cap_p50": 14.0,
+    "dnp_severe_cap_p90": 24.0,
+    "dnp_severe_cap_p95": 28.0,
     "snapshot_path": None,
     "snapshots_root": None,
     "crosswalk_path": None,
@@ -69,13 +86,75 @@ _DEFAULT_CONFIG: dict[str, Any] = {
 
 
 _TEAM_ALIASES: dict[str, str] = {
+    # Canonical NBA team names.
+    "atlanta hawks": "atlanta hawks",
+    "boston celtics": "boston celtics",
+    "brooklyn nets": "brooklyn nets",
+    "charlotte hornets": "charlotte hornets",
+    "chicago bulls": "chicago bulls",
+    "cleveland cavaliers": "cleveland cavaliers",
+    "dallas mavericks": "dallas mavericks",
+    "denver nuggets": "denver nuggets",
+    "detroit pistons": "detroit pistons",
+    "golden state warriors": "golden state warriors",
+    "houston rockets": "houston rockets",
+    "indiana pacers": "indiana pacers",
     "la clippers": "los angeles clippers",
-    "phoenix suns": "phoenix suns",
+    "los angeles clippers": "los angeles clippers",
+    "los angeles lakers": "los angeles lakers",
+    "memphis grizzlies": "memphis grizzlies",
+    "miami heat": "miami heat",
+    "milwaukee bucks": "milwaukee bucks",
+    "minnesota timberwolves": "minnesota timberwolves",
     "new orleans pelicans": "new orleans pelicans",
     "new york knicks": "new york knicks",
-    "utah jazz": "utah jazz",
+    "oklahoma city thunder": "oklahoma city thunder",
+    "orlando magic": "orlando magic",
+    "philadelphia sixers": "philadelphia sixers",
+    "phoenix suns": "phoenix suns",
     "portland trail blazers": "portland trail blazers",
-    "golden state warriors": "golden state warriors",
+    "sacramento kings": "sacramento kings",
+    "san antonio spurs": "san antonio spurs",
+    "toronto raptors": "toronto raptors",
+    "utah jazz": "utah jazz",
+    "washington wizards": "washington wizards",
+    # Common shortened names used by minutes pipeline team_name.
+    "hawks": "atlanta hawks",
+    "celtics": "boston celtics",
+    "nets": "brooklyn nets",
+    "hornets": "charlotte hornets",
+    "bulls": "chicago bulls",
+    "cavaliers": "cleveland cavaliers",
+    "cavs": "cleveland cavaliers",
+    "mavericks": "dallas mavericks",
+    "nuggets": "denver nuggets",
+    "pistons": "detroit pistons",
+    "warriors": "golden state warriors",
+    "rockets": "houston rockets",
+    "pacers": "indiana pacers",
+    "clippers": "los angeles clippers",
+    "lakers": "los angeles lakers",
+    "grizzlies": "memphis grizzlies",
+    "heat": "miami heat",
+    "bucks": "milwaukee bucks",
+    "timberwolves": "minnesota timberwolves",
+    "wolves": "minnesota timberwolves",
+    "pelicans": "new orleans pelicans",
+    "knicks": "new york knicks",
+    "thunder": "oklahoma city thunder",
+    "magic": "orlando magic",
+    "76ers": "philadelphia sixers",
+    "sixers": "philadelphia sixers",
+    "suns": "phoenix suns",
+    "trail blazers": "portland trail blazers",
+    "blazers": "portland trail blazers",
+    "kings": "sacramento kings",
+    "spurs": "san antonio spurs",
+    "raptors": "toronto raptors",
+    "jazz": "utah jazz",
+    "wizards": "washington wizards",
+    # Keep explicit legacy aliases.
+    "philadelphia 76ers": "philadelphia sixers",
 }
 
 
@@ -164,6 +243,21 @@ def load_depth_chart_prior_config(*, data_root: Path) -> tuple[dict[str, Any], P
     cfg["vacancy_max_relax"] = float(cfg.get("vacancy_max_relax", 0.35))
     cfg["warn_min_match_rate"] = float(cfg.get("warn_min_match_rate", 0.25))
     cfg["warn_max_snapshot_age_minutes"] = float(cfg.get("warn_max_snapshot_age_minutes", 360.0))
+    cfg["dnp_streak_threshold"] = float(cfg.get("dnp_streak_threshold", 2.0))
+    cfg["dnp_rate_threshold"] = float(cfg.get("dnp_rate_threshold", 0.30))
+    cfg["dnp_inactive_streak_threshold"] = float(cfg.get("dnp_inactive_streak_threshold", 1.0))
+    cfg["dnp_k_streak"] = float(cfg.get("dnp_k_streak", -0.35))
+    cfg["dnp_k_rate"] = float(cfg.get("dnp_k_rate", -2.00))
+    cfg["dnp_k_inactive_streak"] = float(cfg.get("dnp_k_inactive_streak", -0.10))
+    cfg["dnp_rotation_scale"] = float(cfg.get("dnp_rotation_scale", 1.10))
+    cfg["dnp_penalty_min"] = float(cfg.get("dnp_penalty_min", -1.60))
+    cfg["dnp_guardrail_max_p50"] = float(cfg.get("dnp_guardrail_max_p50", 26.0))
+    cfg["dnp_severe_streak_threshold"] = float(cfg.get("dnp_severe_streak_threshold", 6.0))
+    cfg["dnp_severe_rate_threshold"] = float(cfg.get("dnp_severe_rate_threshold", 0.60))
+    cfg["dnp_severe_max_p50_eligible"] = float(cfg.get("dnp_severe_max_p50_eligible", 22.0))
+    cfg["dnp_severe_cap_p50"] = float(cfg.get("dnp_severe_cap_p50", 14.0))
+    cfg["dnp_severe_cap_p90"] = float(cfg.get("dnp_severe_cap_p90", 24.0))
+    cfg["dnp_severe_cap_p95"] = float(cfg.get("dnp_severe_cap_p95", 28.0))
 
     return cfg, loaded_from
 
@@ -816,6 +910,150 @@ def _top_probability_deltas(df: pd.DataFrame, *, col_pre: str, col_post: str, to
     return out
 
 
+def _apply_dnp_guardrail(df: pd.DataFrame, cfg: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
+    out = df.copy()
+    if out.empty:
+        return out, {"enabled": bool(cfg.get("dnp_guardrail_enabled", True)), "applied": False, "reason": "empty"}
+    if not bool(cfg.get("dnp_guardrail_enabled", True)):
+        return out, {"enabled": False, "applied": False, "reason": "disabled"}
+
+    def _as_numeric_feature(name: str) -> np.ndarray:
+        if name in out.columns:
+            series = pd.to_numeric(out[name], errors="coerce").fillna(0.0)
+        else:
+            series = pd.Series(0.0, index=out.index, dtype=float)
+        return series.to_numpy(dtype=float)
+
+    streak = _as_numeric_feature("consecutive_active_dnp")
+    dnp_rate = _as_numeric_feature("active_but_dnp_rate_last10")
+    inactive_streak = _as_numeric_feature("inactive_streak_len")
+
+    streak_signal = np.maximum(streak - float(cfg.get("dnp_streak_threshold", 2.0)), 0.0)
+    rate_signal = np.maximum(dnp_rate - float(cfg.get("dnp_rate_threshold", 0.30)), 0.0)
+    inactive_signal = np.maximum(
+        inactive_streak - float(cfg.get("dnp_inactive_streak_threshold", 1.0)),
+        0.0,
+    )
+    penalty = (
+        float(cfg.get("dnp_k_streak", -0.35)) * streak_signal
+        + float(cfg.get("dnp_k_rate", -2.00)) * rate_signal
+        + float(cfg.get("dnp_k_inactive_streak", -0.10)) * inactive_signal
+    )
+    penalty = np.maximum(penalty, float(cfg.get("dnp_penalty_min", -1.60)))
+    forced_inactive = _forced_inactive_mask(out).to_numpy(dtype=bool)
+    target = (streak_signal > 0.0) | (rate_signal > 0.0) | (inactive_signal > 0.0)
+
+    p50_for_gate = pd.to_numeric(out.get("minutes_p50"), errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    gate_by_minutes = p50_for_gate <= float(cfg.get("dnp_guardrail_max_p50", 26.0))
+    starter_mask = np.zeros(len(out), dtype=bool)
+    for col in ("is_confirmed_starter", "is_projected_starter", "is_starter", "starter_flag"):
+        if col in out.columns:
+            v = pd.to_numeric(out[col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            starter_mask = starter_mask | (v >= 0.5)
+    if bool(cfg.get("dnp_require_non_starter", True)):
+        gate_by_role = ~starter_mask
+    else:
+        gate_by_role = np.ones(len(out), dtype=bool)
+
+    target = target & (~forced_inactive) & gate_by_minutes & gate_by_role
+
+    diag: dict[str, Any] = {
+        "enabled": True,
+        "applied": bool(np.any(target)),
+        "n_flagged": int(np.sum(target)),
+        "n_adjusted_play_prob": 0,
+        "n_adjusted_rotation_prob": 0,
+        "n_severe_capped": 0,
+        "top_play_prob_deltas": [],
+        "top_rotation_prob_deltas": [],
+    }
+    if not np.any(target):
+        diag["reason"] = "no_dnp_signal"
+        return out, diag
+
+    if "play_prob" in out.columns:
+        pre = pd.to_numeric(out["play_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0).to_numpy(dtype=float)
+        post = pre.copy()
+        post[target] = _sigmoid(_logit(pre[target]) + penalty[target])
+        post = np.clip(post, 0.0, 1.0)
+        out["play_prob"] = post
+        out["play_prob_pre_dnp"] = pre
+        diag["n_adjusted_play_prob"] = int(np.sum(np.abs(post - pre) > 1e-12))
+
+    if "rotation_prob" in out.columns:
+        rot_pre = pd.to_numeric(out["rotation_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0).to_numpy(dtype=float)
+        rot_post = rot_pre.copy()
+        rot_penalty = penalty * float(cfg.get("dnp_rotation_scale", 1.10))
+        rot_post[target] = _sigmoid(_logit(rot_pre[target]) + rot_penalty[target])
+        rot_post = np.clip(rot_post, 0.0, 1.0)
+        out["rotation_prob"] = rot_post
+        out["rotation_prob_pre_dnp"] = rot_pre
+        diag["n_adjusted_rotation_prob"] = int(np.sum(np.abs(rot_post - rot_pre) > 1e-12))
+
+    severe_mask = (
+        (streak >= float(cfg.get("dnp_severe_streak_threshold", 6.0)))
+        | (dnp_rate >= float(cfg.get("dnp_severe_rate_threshold", 0.60)))
+    ) & target & (p50_for_gate <= float(cfg.get("dnp_severe_max_p50_eligible", 22.0)))
+    diag["n_severe_capped"] = int(np.sum(severe_mask))
+    if np.any(severe_mask):
+        cap_p50 = float(cfg.get("dnp_severe_cap_p50", 14.0))
+        cap_p90 = float(cfg.get("dnp_severe_cap_p90", 24.0))
+        cap_p95 = float(cfg.get("dnp_severe_cap_p95", 28.0))
+
+        if "minutes_p50" in out.columns:
+            q50 = pd.to_numeric(out["minutes_p50"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            q50[severe_mask] = np.minimum(q50[severe_mask], cap_p50)
+            out["minutes_p50"] = np.clip(q50, 0.0, 48.0)
+        if "minutes_p90" in out.columns:
+            q90 = pd.to_numeric(out["minutes_p90"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            q90[severe_mask] = np.minimum(q90[severe_mask], cap_p90)
+            out["minutes_p90"] = np.clip(q90, 0.0, 48.0)
+        if "minutes_p95" in out.columns:
+            q95 = pd.to_numeric(out["minutes_p95"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            q95[severe_mask] = np.minimum(q95[severe_mask], cap_p95)
+            out["minutes_p95"] = np.clip(q95, 0.0, 48.0)
+
+        # Keep basic quantile monotonicity for severe-capped rows.
+        if {"minutes_p10", "minutes_p50"}.issubset(out.columns):
+            q10 = pd.to_numeric(out["minutes_p10"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            q50 = pd.to_numeric(out["minutes_p50"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            q10 = np.minimum(q10, q50)
+            out["minutes_p10"] = np.clip(q10, 0.0, 48.0)
+        if {"minutes_p50", "minutes_p90"}.issubset(out.columns):
+            q50 = pd.to_numeric(out["minutes_p50"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            q90 = pd.to_numeric(out["minutes_p90"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            q90 = np.maximum(q90, q50)
+            out["minutes_p90"] = np.clip(q90, 0.0, 48.0)
+        if {"minutes_p90", "minutes_p95"}.issubset(out.columns):
+            q90 = pd.to_numeric(out["minutes_p90"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            q95 = pd.to_numeric(out["minutes_p95"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            q95 = np.maximum(q95, q90)
+            out["minutes_p95"] = np.clip(q95, 0.0, 48.0)
+
+        for base in ("minutes_p10", "minutes_p50", "minutes_p90", "minutes_p95"):
+            cond = f"{base}_cond"
+            if base in out.columns and cond in out.columns:
+                out[cond] = out[base]
+
+    if "play_prob_pre_dnp" in out.columns:
+        diag["top_play_prob_deltas"] = _top_probability_deltas(
+            out,
+            col_pre="play_prob_pre_dnp",
+            col_post="play_prob",
+            top_n=int(cfg.get("top_n_debug", 15)),
+        )
+    if "rotation_prob_pre_dnp" in out.columns:
+        diag["top_rotation_prob_deltas"] = _top_probability_deltas(
+            out,
+            col_pre="rotation_prob_pre_dnp",
+            col_post="rotation_prob",
+            top_n=int(cfg.get("top_n_debug", 15)),
+        )
+
+    out = out.drop(columns=["play_prob_pre_dnp", "rotation_prob_pre_dnp"], errors="ignore")
+    return out, diag
+
+
 def _disagreement_rows(df: pd.DataFrame, *, top_n: int) -> list[dict[str, Any]]:
     if "rotation_prob_pre" not in df.columns:
         return []
@@ -899,6 +1137,7 @@ def apply_depth_chart_prior_from_realgm(
     crosswalk_df, crosswalk_source = _load_crosswalk(data_root=data_root, cfg=cfg)
 
     joined, attach_diag = _attach_depth_view(minutes_df, snapshot_df, crosswalk_df, cfg)
+    joined, dnp_diag = _apply_dnp_guardrail(joined, cfg)
 
     diagnostics: dict[str, Any] = {
         "enabled": True,
@@ -912,6 +1151,7 @@ def apply_depth_chart_prior_from_realgm(
         "matched_name_fallback": int(attach_diag.get("matched_name_fallback", 0)),
         "unmatched": int(attach_diag.get("unmatched", len(joined))),
         "team_mismatch_dropped": int(attach_diag.get("team_mismatch_dropped", 0)),
+        "dnp_guardrail": dnp_diag,
     }
     players_total = int(len(joined))
     matched_total = int(diagnostics["matched_id"]) + int(diagnostics["matched_name_fallback"])
