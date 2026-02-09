@@ -319,6 +319,11 @@ def _load_snapshot_for_asof(*, data_root: Path, cfg: dict[str, Any], as_of_ts: p
             if history.empty:
                 return pd.DataFrame(), None, source_path
             history = history.copy()
+            history["scraped_at"] = pd.to_datetime(history["scraped_at"], utc=True, errors="coerce")
+            history = history.dropna(subset=["scraped_at"]).copy()
+            history = history.loc[history["scraped_at"] <= as_of_ts].copy()
+            if history.empty:
+                return pd.DataFrame(), None, source_path
             history["_dc_source_path"] = str(history_path)
             depth = history
             source_path = str(history_path)
