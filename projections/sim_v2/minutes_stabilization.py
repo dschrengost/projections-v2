@@ -897,50 +897,55 @@ class GameScriptShiftConfig:
     """Configuration for game-script-based minutes shifts.
 
     This config is used to add game-level variance to the structured minutes noise.
-    Each world samples a game margin, classifies it into a script (blowout/close/etc.),
-    and applies multiplicative shifts to player minutes based on starter/bench status.
+    Each world samples a game margin surprise (deviation from spread), classifies it
+    into a script category, and applies multiplicative shifts to player minutes.
+
+    The shift factors are empirically calibrated from historical data by:
+    1. Computing actual game margin vs expected margin (from spread)
+    2. Classifying the "margin surprise" into categories
+    3. Measuring actual minutes played vs predicted minutes by category
     """
 
-    # Spread coefficient: margin_mean = spread_coef * team_spread
-    spread_coef: float = -0.726
-    # Residual std for margin sampling
-    margin_std: float = 13.4
-    # Script thresholds (from team's perspective, in points)
-    blowout_threshold: float = 15.0
-    comfortable_threshold: float = 8.0
+    # Residual std for margin sampling (empirical std of margin - expected)
+    margin_std: float = 14.0
+    # Script thresholds for margin SURPRISE (deviation from spread, in points)
+    # big_beat: beat spread by 15+, big_miss: missed spread by 15+
+    big_threshold: float = 15.0
+    solid_threshold: float = 8.0
     # Multiplicative shift factors by script: {script: (starter_mult, bench_mult)}
-    # Values > 1.0 increase minutes, < 1.0 decrease minutes
-    # These are applied to p50 before noise to shift the baseline up/down by script.
+    # These are RELATIVE to baseline (as_expected = 1.0 reference)
+    # Empirically calibrated from 2025 season data
     shift_factors: dict[str, tuple[float, float]] | None = None
 
     def __post_init__(self) -> None:
         if self.shift_factors is None:
-            # Default shift factors derived from original quantile targets:
-            # blowout_win: starters rest (-10%), bench plays more (+5%)
-            # comfortable_win: slight reduction for starters (-3%), bench neutral
-            # close: starters play more (+10%), bench less (-5%)
-            # comfortable_loss: baseline (no shift)
-            # blowout_loss: starters pulled early (-12%), bench garbage time (neutral)
+            # Empirically calibrated shift factors (2025 season, spread-conditioned)
+            # These represent minutes deviation ratios relative to as_expected baseline
+            # Raw empirical values:
+            #   big_beat: (1.048, 0.971), solid_beat: (1.067, 0.981)
+            #   as_expected: (1.081, 0.998), solid_miss: (1.129, 0.986)
+            #   big_miss: (1.018, 0.961)
+            # Normalized to as_expected = 1.0:
             self.shift_factors = {
-                "blowout_win": (0.90, 1.05),
-                "comfortable_win": (0.97, 1.00),
-                "close": (1.10, 0.95),
-                "comfortable_loss": (1.00, 1.00),
-                "blowout_loss": (0.88, 1.00),
+                "big_beat": (0.970, 0.973),      # Beat spread by 15+: starters slightly less
+                "solid_beat": (0.987, 0.983),    # Beat spread by 8-15
+                "as_expected": (1.000, 1.000),   # Within 7 pts of spread (baseline)
+                "solid_miss": (1.044, 0.988),    # Missed spread by 8-14: starters more (comeback)
+                "big_miss": (0.942, 0.963),      # Missed spread by 15+: garbage time
             }
 
 
-def _classify_game_script(margin: float, config: GameScriptShiftConfig) -> str:
-    """Classify game margin into a script category (from team's perspective)."""
-    if margin >= config.blowout_threshold:
-        return "blowout_win"
-    if margin >= config.comfortable_threshold:
-        return "comfortable_win"
-    if margin >= -config.comfortable_threshold + 1:
-        return "close"
-    if margin >= -config.blowout_threshold + 1:
-        return "comfortable_loss"
-    return "blowout_loss"
+def _classify_margin_surprise(surprise: float, config: GameScriptShiftConfig) -> str:
+    """Classify margin surprise (actual - expected from spread) into a script category."""
+    if surprise >= config.big_threshold:
+        return "big_beat"
+    if surprise >= config.solid_threshold:
+        return "solid_beat"
+    if surprise >= -config.solid_threshold + 1:
+        return "as_expected"
+    if surprise >= -config.big_threshold + 1:
+        return "solid_miss"
+    return "big_miss"
 
 
 def compute_game_script_shifts(
@@ -957,11 +962,12 @@ def compute_game_script_shifts(
     rotation_p50_threshold: float = 20.0,
 ) -> np.ndarray:
     """
-    Compute per-player per-world additive shifts to baseline minutes based on game script.
+    Compute per-player per-world minutes shifts based on game script (margin surprise).
 
     For each world:
-    1. Sample a game margin for each game from N(spread_coef * spread, margin_std)
-    2. Classify margin into script (blowout_win, close, etc.)
+    1. Sample a margin surprise for each game from N(0, margin_std)
+       The surprise represents deviation from spread (actual margin - expected margin)
+    2. Classify surprise into script (big_beat, as_expected, big_miss, etc.)
     3. Apply multiplicative shift factors to baseline minutes based on script + starter status
     4. Return the shifted minutes (not the delta)
 
@@ -992,8 +998,10 @@ def compute_game_script_shifts(
     # Identify rotation players: starters OR high-minute bench
     is_rotation = (np.asarray(is_starter, dtype=bool)) | (minutes_p50 >= rotation_p50_threshold)
 
-    # Build (game_id, team_id) -> team_spread mapping
-    unique_games: dict[tuple[int, int], float] = {}
+    # Build set of unique games (we only need game_id, not team perspective for margin surprise)
+    # The margin surprise is the same for both teams in a game (one beats spread, other misses)
+    unique_game_ids: set[int] = set()
+    player_home_flags: np.ndarray = np.zeros(n_players, dtype=bool)
     for i in range(n_players):
         gid = int(game_ids[i])
         tid = int(team_ids[i])
@@ -1002,20 +1010,19 @@ def compute_game_script_shifts(
         if pd.isna(spread_home):
             continue
 
+        unique_game_ids.add(gid)
         home_tid = home_team_ids.get(gid)
-        is_home = (tid == home_tid) if home_tid is not None else True
-        team_spread = spread_home if is_home else -spread_home
+        player_home_flags[i] = (tid == home_tid) if home_tid is not None else True
 
-        key = (gid, tid)
-        if key not in unique_games:
-            unique_games[key] = team_spread
-
-    # Sample margins per game per world
-    game_margins: dict[tuple[int, int], np.ndarray] = {}
-    for (gid, tid), team_spread in unique_games.items():
-        mean_margin = config.spread_coef * team_spread
-        margins = rng.normal(mean_margin, config.margin_std, size=n_worlds)
-        game_margins[(gid, tid)] = margins
+    # Sample margin surprise per game per world
+    # Margin surprise = actual_margin - expected_margin, centered at 0
+    # We sample from N(0, margin_std) to represent random deviation from spread
+    game_surprises: dict[int, np.ndarray] = {}
+    for gid in unique_game_ids:
+        # Sample margin surprise (deviation from spread) for this game
+        # Positive = home team beat spread, negative = home team missed spread
+        surprises = rng.normal(0.0, config.margin_std, size=n_worlds)
+        game_surprises[gid] = surprises
 
     # Build per-player per-world multipliers
     multipliers = np.ones((n_worlds, n_players), dtype=float)
@@ -1024,14 +1031,16 @@ def compute_game_script_shifts(
     for w in range(n_worlds):
         for i in range(n_players):
             gid = int(game_ids[i])
-            tid = int(team_ids[i])
-            key = (gid, tid)
 
-            if key not in game_margins:
+            if gid not in game_surprises:
                 continue
 
-            margin = game_margins[key][w]
-            script = _classify_game_script(margin, config)
+            # Get margin surprise from team's perspective
+            # If home team, use surprise directly; if away, negate it
+            home_surprise = game_surprises[gid][w]
+            team_surprise = home_surprise if player_home_flags[i] else -home_surprise
+
+            script = _classify_margin_surprise(team_surprise, config)
 
             if script in shift_factors:
                 starter_mult, bench_mult = shift_factors[script]
