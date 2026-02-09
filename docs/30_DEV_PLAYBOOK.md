@@ -8,6 +8,7 @@ Setup, workflows, and common tasks for developing `projections-v2`.
 - [uv](https://github.com/astral-sh/uv) package manager
 - Java (for tabula-py PDF parsing)
 - Node.js 18+ (for frontend)
+- Playwright Chromium (for RealGM depth chart scraper)
 
 ## Initial Setup
 
@@ -17,6 +18,9 @@ cd ~/projects/projections-v2
 
 # Install Python dependencies
 uv sync
+
+# Install Playwright browser runtime used by RealGM scraper
+uv run playwright install chromium
 
 # Verify installation
 uv run python -c "import projections; print('OK')"
@@ -68,6 +72,22 @@ uv run python -m projections.cli.build_minutes_live --date 2025-01-01
 # Finalize projections (dev only)
 uv run python -m projections.cli.finalize_projections --date 2025-01-01
 ```
+
+### RealGM Depth Chart Prior Ops
+
+```bash
+# Manually scrape + persist RealGM depth charts into bronze
+uv run python -m projections.cli.scrape_realgm_depth_charts scrape --date 2026-01-18
+
+# Rebuild/update RealGM->canonical player crosswalk from a minutes run
+uv run python -m projections.cli.build_realgm_player_crosswalk run --date 2026-01-18
+```
+
+Operator notes:
+- Manual crosswalk overrides live at `bronze/realgm/player_id_crosswalk_overrides.csv`.
+- Required override columns: `realgm_player_id`, `player_id`.
+- Live pipeline logs include `[dc-prior]`, `[dc-cap]`, `[dc-disagree]`, `[dc-crosswalk]`, and `[dc-alert]`.
+- `PROJECTIONS_DC_CROSSWALK_WARN_MIN_MATCH_RATE` controls crosswalk warning threshold (default `0.30`).
 
 ### Rotation Eval (rot_eval)
 

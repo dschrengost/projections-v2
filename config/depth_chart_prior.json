@@ -1,0 +1,39 @@
+{
+  "enabled": true,
+  "seed_rotation_prob_from_play_prob": true,
+  "apply_to_play_prob": true,
+  "play_prob_scale": 0.35,
+  "k_role": {
+    "starter": 0.7,
+    "rotation": 0.2,
+    "limited": -0.7,
+    "not_listed": -1.1
+  },
+  "k_ahead": -0.12,
+  "cap_p90": {
+    "starter": 42.0,
+    "rotation": 34.0,
+    "limited": 22.0,
+    "not_listed": 12.0
+  },
+  "cap_p95": {
+    "starter": 44.0,
+    "rotation": 37.0,
+    "limited": 24.0,
+    "not_listed": 14.0
+  },
+  "spread_mult": {
+    "starter": 1.0,
+    "rotation": 0.9,
+    "limited": 0.65,
+    "not_listed": 0.5
+  },
+  "vacancy_col": "vac_min_szn",
+  "vacancy_threshold": 48.0,
+  "vacancy_slope": 0.01,
+  "vacancy_max_relax": 0.35,
+  "warn_min_match_rate": 0.25,
+  "warn_max_snapshot_age_minutes": 360.0,
+  "use_name_fallback": true,
+  "top_n_debug": 15
+}

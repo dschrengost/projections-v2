@@ -39,6 +39,17 @@ try:
 except ImportError:
     ROTOWIRE_AVAILABLE = False
 
+# RealGM depth charts for inference-time minutes priors
+try:
+    from scrapers.realgm_depth_charts import (
+        realgm_dependency_report,
+        save_realgm_depth_charts_bronze,
+        scrape_realgm_depth_charts,
+    )
+    REALGM_AVAILABLE = True
+except ImportError:
+    REALGM_AVAILABLE = False
+
 app = typer.Typer(help="Run injuries, daily lineups, odds, and roster ETLs sequentially.")
 
 
@@ -164,12 +175,23 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
     run_roster: bool = typer.Option(True, "--run-roster/--skip-roster", help="Run the roster nightly stage."),
     espn_injuries: bool = typer.Option(False, "--espn-injuries/--skip-espn-injuries", help="Run the ESPN injuries scrape (disabled by default; conflicts with NBA official/Rotowire feeds)."),
     rotowire_lineups: bool = typer.Option(True, "--rotowire-lineups/--skip-rotowire-lineups", help="Run Rotowire lineups scrape for faster lineup confirmations."),
+    realgm_depth_charts: bool = typer.Option(
+        True,
+        "--realgm-depth-charts/--skip-realgm-depth-charts",
+        help="Run RealGM depth charts scrape for inference-time minutes priors.",
+    ),
     schedule_timeout: float = typer.Option(10.0, "--schedule-timeout", help="Timeout (seconds) for NBA schedule API fallback."),
     injury_timeout: float = typer.Option(15.0, "--injury-timeout", help="HTTP timeout (seconds) for NBA injury PDF scraping."),
     injury_player_timeout: float = typer.Option(10.0, "--injury-player-timeout", help="Timeout (seconds) for NBA player resolver."),
     lineups_timeout: float = typer.Option(10.0, "--lineups-timeout", help="HTTP timeout (seconds) for stats.nba.com daily lineups."),
     odds_timeout: float = typer.Option(10.0, "--odds-timeout", help="HTTP timeout (seconds) for Oddstrader."),
     roster_timeout: float = typer.Option(10.0, "--roster-timeout", help="Timeout (seconds) for roster fallback scraper."),
+    realgm_timeout: float = typer.Option(60.0, "--realgm-timeout", help="Timeout (seconds) for RealGM depth charts."),
+    realgm_headless: bool = typer.Option(
+        True,
+        "--realgm-headless/--realgm-visible",
+        help="Run RealGM browser headless (recommended for automation).",
+    ),
 ) -> None:
     """Run the core scrapers for the requested window."""
 
@@ -241,6 +263,44 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
         _echo_stage("skipping Rotowire lineups (module not available - install beautifulsoup4 lxml)")
     else:
         _echo_stage("skipping Rotowire lineups stage")
+
+    # RealGM depth charts - weak prior source for inference-time membership/tails.
+    if realgm_depth_charts and REALGM_AVAILABLE:
+        dep_report = realgm_dependency_report()
+        deps_ok = bool(dep_report.get("available", False))
+        if not deps_ok:
+            missing = ",".join(str(x) for x in dep_report.get("missing", []))
+            details = ",".join(str(x) for x in dep_report.get("details", []))
+            _echo_stage(
+                "skipping RealGM depth charts "
+                f"(dependencies missing: {missing}; details: {details}; "
+                "install beautifulsoup4 lxml playwright && playwright install chromium)"
+            )
+        else:
+            _echo_stage("running RealGM depth charts scrape")
+            try:
+                depth_df = scrape_realgm_depth_charts(
+                    headless=realgm_headless,
+                    timeout=realgm_timeout,
+                )
+                if depth_df.empty:
+                    _echo_stage("RealGM depth charts: no rows returned")
+                else:
+                    outputs = save_realgm_depth_charts_bronze(
+                        depth_df,
+                        game_date=start_day.date(),
+                        data_root=data_root,
+                    )
+                    _echo_stage(
+                        "RealGM depth charts: "
+                        f"{len(depth_df)} rows -> {outputs['history_path']}"
+                    )
+            except Exception as exc:
+                typer.echo(f"[live] warning: RealGM depth charts failed ({exc}); continuing", err=True)
+    elif realgm_depth_charts and not REALGM_AVAILABLE:
+        _echo_stage("skipping RealGM depth charts (module not available)")
+    else:
+        _echo_stage("skipping RealGM depth charts stage")
 
     if odds:
         _echo_stage("running odds ETL")
