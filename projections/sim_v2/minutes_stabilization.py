@@ -65,6 +65,7 @@ def sample_minutes_noise_per_world(
     team_indices: np.ndarray,  # (P,) int, team code per player
     n_worlds: int,
     active_mask: np.ndarray | None = None,  # (W, P) bool - inactive players are fixed at 0 in that world
+    minutes_base_per_world: np.ndarray | None = None,  # (W, P) optional pre-shifted baselines (e.g., from game scripts)
     sigma_starter: float = 2.0,
     sigma_bench: float = 3.0,
     use_position_aware_sigma: bool = False,
@@ -85,12 +86,17 @@ def sample_minutes_noise_per_world(
     Sample per-world minutes with noise and project back to team total 240.
 
     Algorithm per world, per team:
-    1. Start from reconciled minutes m_i (sum=240).
+    1. Start from reconciled minutes m_i (sum=240), or from pre-shifted baselines if provided.
     2. For players with m_i >= min_minutes_for_noise, sample ε_i:
        - Normal(0, σ) or Student-t(0, σ) where σ depends on starter flag.
        - Hard cap ε_i to [-cap_abs, cap_abs].
     3. Apply m'_i = clamp(m_i + ε_i, lo_i, hi_i).
     4. Project back to 240 via fast redistribution.
+
+    Args:
+        minutes_base_per_world: Optional (W, P) array of pre-shifted baseline minutes per world.
+            When provided, this is used as the baseline instead of broadcasting minutes_reconciled.
+            Useful for integrating game-script-based shifts that vary per world.
 
     Returns:
         minutes_world: (W, P) array with team sums = 240
@@ -110,8 +116,16 @@ def sample_minutes_noise_per_world(
 
     n_teams = int(team_indices.max()) + 1 if team_indices.size else 0
 
-    # Broadcast baseline to all worlds
-    m_base = np.broadcast_to(minutes_reconciled[None, :], (n_worlds, n_players)).copy()
+    # Use pre-shifted baselines if provided, otherwise broadcast reconciled minutes
+    if minutes_base_per_world is not None:
+        if minutes_base_per_world.shape != (n_worlds, n_players):
+            raise ValueError(
+                f"minutes_base_per_world must have shape ({n_worlds}, {n_players}), "
+                f"got {minutes_base_per_world.shape}"
+            )
+        m_base = np.asarray(minutes_base_per_world, dtype=float).copy()
+    else:
+        m_base = np.broadcast_to(minutes_reconciled[None, :], (n_worlds, n_players)).copy()
 
     # Compute sigma per player (starter vs bench)
     if use_position_aware_sigma:
@@ -878,10 +892,162 @@ def apply_pre_sim_qp_reconcile(
     return result
 
 
+@dataclass
+class GameScriptShiftConfig:
+    """Configuration for game-script-based minutes shifts.
+
+    This config is used to add game-level variance to the structured minutes noise.
+    Each world samples a game margin, classifies it into a script (blowout/close/etc.),
+    and applies multiplicative shifts to player minutes based on starter/bench status.
+    """
+
+    # Spread coefficient: margin_mean = spread_coef * team_spread
+    spread_coef: float = -0.726
+    # Residual std for margin sampling
+    margin_std: float = 13.4
+    # Script thresholds (from team's perspective, in points)
+    blowout_threshold: float = 15.0
+    comfortable_threshold: float = 8.0
+    # Multiplicative shift factors by script: {script: (starter_mult, bench_mult)}
+    # Values > 1.0 increase minutes, < 1.0 decrease minutes
+    # These are applied to p50 before noise to shift the baseline up/down by script.
+    shift_factors: dict[str, tuple[float, float]] | None = None
+
+    def __post_init__(self) -> None:
+        if self.shift_factors is None:
+            # Default shift factors derived from original quantile targets:
+            # blowout_win: starters rest (-10%), bench plays more (+5%)
+            # comfortable_win: slight reduction for starters (-3%), bench neutral
+            # close: starters play more (+10%), bench less (-5%)
+            # comfortable_loss: baseline (no shift)
+            # blowout_loss: starters pulled early (-12%), bench garbage time (neutral)
+            self.shift_factors = {
+                "blowout_win": (0.90, 1.05),
+                "comfortable_win": (0.97, 1.00),
+                "close": (1.10, 0.95),
+                "comfortable_loss": (1.00, 1.00),
+                "blowout_loss": (0.88, 1.00),
+            }
+
+
+def _classify_game_script(margin: float, config: GameScriptShiftConfig) -> str:
+    """Classify game margin into a script category (from team's perspective)."""
+    if margin >= config.blowout_threshold:
+        return "blowout_win"
+    if margin >= config.comfortable_threshold:
+        return "comfortable_win"
+    if margin >= -config.comfortable_threshold + 1:
+        return "close"
+    if margin >= -config.blowout_threshold + 1:
+        return "comfortable_loss"
+    return "blowout_loss"
+
+
+def compute_game_script_shifts(
+    *,
+    minutes_p50: np.ndarray,  # (P,) baseline minutes per player
+    is_starter: np.ndarray,  # (P,) bool
+    game_ids: np.ndarray,  # (P,) game_id per player
+    team_ids: np.ndarray,  # (P,) team_id per player
+    spreads_home: np.ndarray,  # (P,) home team spread for each player's game
+    home_team_ids: dict[int, int],  # game_id -> home_team_id
+    n_worlds: int,
+    config: GameScriptShiftConfig,
+    rng: np.random.Generator,
+    rotation_p50_threshold: float = 20.0,
+) -> np.ndarray:
+    """
+    Compute per-player per-world additive shifts to baseline minutes based on game script.
+
+    For each world:
+    1. Sample a game margin for each game from N(spread_coef * spread, margin_std)
+    2. Classify margin into script (blowout_win, close, etc.)
+    3. Apply multiplicative shift factors to baseline minutes based on script + starter status
+    4. Return the shifted minutes (not the delta)
+
+    Players with p50 >= rotation_p50_threshold are treated as "rotation players"
+    and use starter shift factors even if not marked as starters.
+
+    Args:
+        minutes_p50: Baseline reconciled minutes per player (P,)
+        is_starter: Boolean array of starter status (P,)
+        game_ids: Game ID per player (P,)
+        team_ids: Team ID per player (P,)
+        spreads_home: Home team spread for each player's game (P,)
+        home_team_ids: Mapping of game_id -> home_team_id
+        n_worlds: Number of simulation worlds
+        config: Game script shift configuration
+        rng: Random generator
+        rotation_p50_threshold: Players with p50 >= this use starter shifts
+
+    Returns:
+        shifted_minutes: (n_worlds, P) minutes after applying game script shifts
+    """
+    import pandas as pd  # Local import to avoid issues if pd not used elsewhere
+
+    n_players = len(minutes_p50)
+    if n_players == 0:
+        return np.zeros((n_worlds, 0), dtype=float)
+
+    # Identify rotation players: starters OR high-minute bench
+    is_rotation = (np.asarray(is_starter, dtype=bool)) | (minutes_p50 >= rotation_p50_threshold)
+
+    # Build (game_id, team_id) -> team_spread mapping
+    unique_games: dict[tuple[int, int], float] = {}
+    for i in range(n_players):
+        gid = int(game_ids[i])
+        tid = int(team_ids[i])
+        spread_home = spreads_home[i]
+
+        if pd.isna(spread_home):
+            continue
+
+        home_tid = home_team_ids.get(gid)
+        is_home = (tid == home_tid) if home_tid is not None else True
+        team_spread = spread_home if is_home else -spread_home
+
+        key = (gid, tid)
+        if key not in unique_games:
+            unique_games[key] = team_spread
+
+    # Sample margins per game per world
+    game_margins: dict[tuple[int, int], np.ndarray] = {}
+    for (gid, tid), team_spread in unique_games.items():
+        mean_margin = config.spread_coef * team_spread
+        margins = rng.normal(mean_margin, config.margin_std, size=n_worlds)
+        game_margins[(gid, tid)] = margins
+
+    # Build per-player per-world multipliers
+    multipliers = np.ones((n_worlds, n_players), dtype=float)
+
+    shift_factors = config.shift_factors or {}
+    for w in range(n_worlds):
+        for i in range(n_players):
+            gid = int(game_ids[i])
+            tid = int(team_ids[i])
+            key = (gid, tid)
+
+            if key not in game_margins:
+                continue
+
+            margin = game_margins[key][w]
+            script = _classify_game_script(margin, config)
+
+            if script in shift_factors:
+                starter_mult, bench_mult = shift_factors[script]
+                multipliers[w, i] = starter_mult if is_rotation[i] else bench_mult
+
+    # Apply multipliers to baseline minutes
+    shifted_minutes = minutes_p50[None, :] * multipliers
+    return np.maximum(shifted_minutes, 0.0)
+
+
 __all__ = [
+    "GameScriptShiftConfig",
     "MinutesNoiseStats",
     "_position_aware_target_cv",
     "apply_pre_sim_qp_reconcile",
+    "compute_game_script_shifts",
     "reconcile_team_minutes_active_softmax",
     "sample_minutes_noise_per_world",
 ]
