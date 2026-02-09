@@ -35,7 +35,9 @@ from projections.sim_v2.minutes_physics import (
 )
 from projections.sim_v2.play_prob_policy import apply_play_prob_policy_with_diagnostics
 from projections.sim_v2.minutes_stabilization import (
+    GameScriptShiftConfig,
     apply_pre_sim_qp_reconcile,
+    compute_game_script_shifts,
     recenter_team_minutes_to_conditional_means,
     sample_minutes_noise_per_world,
 )
@@ -2803,6 +2805,35 @@ def main(
                     # When preserve_input_rotation=True, we skip the heavy per-world QP
                     # and instead use fast bounded noise + team-240 projection.
                     mnc = profile_cfg.minutes_noise_config
+
+                    # Optionally apply game-script-based shifts before noise
+                    minutes_base_per_world: np.ndarray | None = None
+                    if use_game_scripts and game_script_config is not None:
+                        gs_shift_config = GameScriptShiftConfig(
+                            spread_coef=game_script_config.spread_coef,
+                            margin_std=game_script_config.margin_std,
+                            blowout_threshold=float(game_script_config.blowout_threshold),
+                            comfortable_threshold=float(game_script_config.comfortable_threshold),
+                        )
+                        minutes_base_per_world = compute_game_script_shifts(
+                            minutes_p50=gs_minutes_p50,
+                            is_starter=gs_is_starter > 0,
+                            game_ids=gs_game_ids,
+                            team_ids=gs_team_ids,
+                            spreads_home=gs_spreads_home,
+                            home_team_ids=gs_home_team_ids,
+                            n_worlds=chunk_size,
+                            config=gs_shift_config,
+                            rng=rng,
+                            rotation_p50_threshold=profile_cfg.game_script_rotation_threshold,
+                        )
+                        if chunk_start == 0:
+                            # Log shift variance across worlds for first chunk
+                            shift_std = minutes_base_per_world.std(axis=0).mean()
+                            typer.echo(
+                                f"[sim_v2] game_script shifts: mean_per_player_std={shift_std:.2f}"
+                            )
+
                     minutes_worlds, noise_stats = sample_minutes_noise_per_world(
                         minutes_reconciled=gs_minutes_p50,
                         minutes_p10=gs_minutes_p10,
@@ -2810,6 +2841,7 @@ def main(
                         is_starter=gs_is_starter > 0,
                         team_indices=team_indices,
                         n_worlds=chunk_size,
+                        minutes_base_per_world=minutes_base_per_world,
                         sigma_starter=mnc.sigma_starter,
                         sigma_bench=mnc.sigma_bench,
                         min_minutes_for_noise=mnc.min_minutes_for_noise,
