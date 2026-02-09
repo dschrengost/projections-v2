@@ -79,6 +79,23 @@ Important notes:
   - `p_ge5_prior_heur`: heuristic `P(minutes >= 5)` derived from `minutes_prior` + quantiles
   - `p_eq0_prior_heur`: heuristic `P(minutes == 0)` / DNP-ish derived from `minutes_prior` + quantiles
 
+### Depth Chart Prior (Inference-Only)
+
+`effective_minutes.parquet` may include RealGM-derived depth-chart fields that are applied at inference time only
+(after model scoring/overrides, before world generation). The prior does not add new model heads and is not part of training data.
+
+Derived columns (when available):
+
+- `dc_present` (bool)
+- `dc_role` (`starter` | `rotation` | `limited` | `not_listed`)
+- `dc_role_priority` (int)
+- `dc_order_in_role` (nullable int)
+- `dc_ahead_global` (int)
+- `dc_is_primary_backup` (bool)
+- `dc_snapshot_ts` (timestamp)
+
+Diagnostics are written to `effective_inputs_summary.json` under `depth_chart_prior`.
+
 ## Schema Evolution
 
 When modifying schemas:

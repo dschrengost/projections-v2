@@ -7,6 +7,7 @@ materialize a deterministic parquet layer for downstream consumption.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -14,11 +15,14 @@ from typing import Any
 
 import pandas as pd
 
+from projections.minutes.depth_chart_prior import apply_depth_chart_prior_from_realgm
 from projections.ops.overrides import load_overrides_map
 
 EFFECTIVE_MINUTES_FILENAME = "effective_minutes.parquet"
 EFFECTIVE_RATES_FILENAME = "effective_rates.parquet"
 EFFECTIVE_INPUTS_SUMMARY = "effective_inputs_summary.json"
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now_iso() -> str:
@@ -39,12 +43,66 @@ class EffectiveInputsResult:
     overrides_count: int
 
 
+def _coerce_timestamp(value: object) -> pd.Timestamp | None:
+    ts = pd.to_datetime(value, utc=True, errors="coerce")
+    if ts is None or pd.isna(ts):
+        return None
+    return pd.Timestamp(ts)
+
+
+def _load_run_as_of_ts(run_dir: Path) -> tuple[pd.Timestamp | None, Path | None]:
+    manifest_path = run_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None, None
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None, manifest_path
+    if not isinstance(payload, dict):
+        return None, manifest_path
+
+    as_of = _coerce_timestamp(payload.get("as_of_ts"))
+    if as_of is not None:
+        return as_of, manifest_path
+
+    # Back-compat when only run_as_of_ts was written to run summaries.
+    fallback = _coerce_timestamp(payload.get("run_as_of_ts"))
+    return fallback, manifest_path
+
+
+def _log_depth_chart_prior(diagnostics: dict[str, Any]) -> None:
+    if not isinstance(diagnostics, dict):
+        return
+    logger.info(
+        "[dc-prior] applied=%s reason=%s matched_id=%s matched_name_fallback=%s unmatched=%s snapshot=%s",
+        diagnostics.get("applied"),
+        diagnostics.get("reason"),
+        diagnostics.get("matched_id"),
+        diagnostics.get("matched_name_fallback"),
+        diagnostics.get("unmatched"),
+        diagnostics.get("dc_snapshot_ts"),
+    )
+    if diagnostics.get("role_distribution"):
+        logger.info("[dc-prior] role_distribution=%s", diagnostics.get("role_distribution"))
+    if diagnostics.get("top_rotation_prob_deltas"):
+        logger.info("[dc-prior] top_rotation_prob_deltas=%s", diagnostics.get("top_rotation_prob_deltas"))
+    if diagnostics.get("top_play_prob_deltas"):
+        logger.info("[dc-prior] top_play_prob_deltas=%s", diagnostics.get("top_play_prob_deltas"))
+    if diagnostics.get("cap_hits_by_role"):
+        logger.info("[dc-cap] cap_hits_by_role=%s", diagnostics.get("cap_hits_by_role"))
+    if diagnostics.get("largest_q_reductions"):
+        logger.info("[dc-cap] largest_q_reductions=%s", diagnostics.get("largest_q_reductions"))
+    if diagnostics.get("model_vs_depth_disagreements"):
+        logger.info("[dc-disagree] top=%s", diagnostics.get("model_vs_depth_disagreements"))
+
+
 def build_effective_minutes(
     *,
     game_date: date,
     minutes_df: pd.DataFrame,
     data_root: Path,
     source: str = "gameview",
+    run_as_of_ts: pd.Timestamp | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Apply authorized overrides to minutes and emit a structured diff summary."""
     from projections.ops.overrides import apply_overrides_to_minutes_df
@@ -58,6 +116,13 @@ def build_effective_minutes(
         log_diagnostics=True,
         force_reconcile=True,
     )
+    depth_prior = apply_depth_chart_prior_from_realgm(
+        after,
+        data_root=data_root,
+        as_of_ts=run_as_of_ts,
+    )
+    after = depth_prior.frame
+    _log_depth_chart_prior(depth_prior.diagnostics)
 
     key_cols = [c for c in ("game_id", "player_id", "player_name", "team_id", "team_tricode") if c in before.columns]
     tracked_cols = [
@@ -65,6 +130,7 @@ def build_effective_minutes(
         for c in (
             "status",
             "play_prob",
+            "rotation_prob",
             "is_confirmed_starter",
             "is_projected_starter",
             "minutes_p10",
@@ -123,6 +189,8 @@ def build_effective_minutes(
         "overrides_count": len(overrides_map),
         "changed_players": len(diff_rows),
         "diffs": diff_rows,
+        "run_as_of_ts": run_as_of_ts.isoformat().replace("+00:00", "Z") if run_as_of_ts is not None else None,
+        "depth_chart_prior": depth_prior.diagnostics,
     }
     return after, summary
 
@@ -137,7 +205,21 @@ def write_effective_minutes_layer(
 ) -> EffectiveInputsResult:
     """Load minutes parquet, write effective_minutes.parquet + effective_inputs_summary.json."""
     df = pd.read_parquet(minutes_path)
-    effective, summary = build_effective_minutes(game_date=game_date, minutes_df=df, data_root=data_root, source=source)
+    run_dir = minutes_path.parent
+    run_as_of_ts, manifest_path = _load_run_as_of_ts(run_dir)
+    if manifest_path is not None:
+        logger.info(
+            "[effective-inputs] manifest=%s run_as_of_ts=%s",
+            manifest_path,
+            run_as_of_ts.isoformat().replace("+00:00", "Z") if run_as_of_ts is not None else None,
+        )
+    effective, summary = build_effective_minutes(
+        game_date=game_date,
+        minutes_df=df,
+        data_root=data_root,
+        source=source,
+        run_as_of_ts=run_as_of_ts,
+    )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     eff_path = out_dir / EFFECTIVE_MINUTES_FILENAME
