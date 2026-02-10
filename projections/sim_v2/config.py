@@ -151,6 +151,11 @@ class PlayProbPolicyConfig:
 
     enabled: bool = False
 
+    # Policy mode:
+    # - legacy: existing broad rotation-lock flooring behavior
+    # - guarded_v2: starter/core floors with depth+DNP blockers and bounded uplift
+    mode: str = "legacy"
+
     # Rotation-lock heuristic.
     rotation_lock_min_cond_p50: float = 18.0
     rotation_lock_topk: int = 8
@@ -162,6 +167,24 @@ class PlayProbPolicyConfig:
     # Optional injury snapshot freshness gating (best-effort; disabled by default).
     require_fresh_injury_snapshot: bool = False
     freshness_minutes: float = 90.0
+
+    # Guarded v2 knobs (used when mode == "guarded_v2").
+    starter_floor: float = 0.995
+    core_floor: float = 0.90
+    core_lock_min_cond_p50: float = 24.0
+    core_lock_topk: int = 5
+    max_floor_delta: float = 0.25
+    min_raw_play_prob_for_floor: float = 0.35
+    min_rotation_prob_for_floor: float = 0.65
+
+    # Guarded v2 blockers:
+    # - depth blockers prevent flooring for deep/limited players
+    # - DNP blockers prevent flooring for players with strong DNP signals
+    depth_block_roles: tuple[str, ...] = ("limited", "not_listed")
+    depth_block_min_ahead_global: int = 7
+    dnp_block_streak_threshold: float = 3.0
+    dnp_block_rate_threshold: float = 0.50
+    dnp_block_inactive_streak_threshold: float = 2.0
 
 
 @dataclass
@@ -482,14 +505,34 @@ def load_sim_v2_profile(
     )
 
     play_prob_policy_raw = config.get("play_prob_policy", {}) or {}
+    depth_block_roles_raw = play_prob_policy_raw.get("depth_block_roles")
+    if depth_block_roles_raw is None:
+        depth_block_roles = ("limited", "not_listed")
+    else:
+        depth_block_roles = tuple(str(x).strip().lower() for x in depth_block_roles_raw if str(x).strip())
     play_prob_policy = PlayProbPolicyConfig(
         enabled=bool(play_prob_policy_raw.get("enabled", False)),
+        mode=str(play_prob_policy_raw.get("mode", "legacy")).strip().lower(),
         rotation_lock_min_cond_p50=float(play_prob_policy_raw.get("rotation_lock_min_cond_p50", 18.0)),
         rotation_lock_topk=int(play_prob_policy_raw.get("rotation_lock_topk", 8)),
         rotation_lock_floor=float(play_prob_policy_raw.get("rotation_lock_floor", 0.995)),
         probable_floor=float(play_prob_policy_raw.get("probable_floor", 0.90)),
         require_fresh_injury_snapshot=bool(play_prob_policy_raw.get("require_fresh_injury_snapshot", False)),
         freshness_minutes=float(play_prob_policy_raw.get("freshness_minutes", 90.0)),
+        starter_floor=float(play_prob_policy_raw.get("starter_floor", 0.995)),
+        core_floor=float(play_prob_policy_raw.get("core_floor", 0.90)),
+        core_lock_min_cond_p50=float(play_prob_policy_raw.get("core_lock_min_cond_p50", 24.0)),
+        core_lock_topk=int(play_prob_policy_raw.get("core_lock_topk", 5)),
+        max_floor_delta=float(play_prob_policy_raw.get("max_floor_delta", 0.25)),
+        min_raw_play_prob_for_floor=float(play_prob_policy_raw.get("min_raw_play_prob_for_floor", 0.35)),
+        min_rotation_prob_for_floor=float(play_prob_policy_raw.get("min_rotation_prob_for_floor", 0.65)),
+        depth_block_roles=depth_block_roles,
+        depth_block_min_ahead_global=int(play_prob_policy_raw.get("depth_block_min_ahead_global", 7)),
+        dnp_block_streak_threshold=float(play_prob_policy_raw.get("dnp_block_streak_threshold", 3.0)),
+        dnp_block_rate_threshold=float(play_prob_policy_raw.get("dnp_block_rate_threshold", 0.50)),
+        dnp_block_inactive_streak_threshold=float(
+            play_prob_policy_raw.get("dnp_block_inactive_streak_threshold", 2.0)
+        ),
     )
 
     # Minutes worlds config (PR5 model-space backend)

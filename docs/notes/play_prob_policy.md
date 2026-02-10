@@ -23,7 +23,12 @@ The policy is used only for *availability sampling*:
 
 Downstream schemas are unchanged: sim outputs still include the original `play_prob` column, and do not persist the new policy columns.
 
-## Rotation lock heuristic (v1)
+## Policy modes
+
+- `legacy`: historical broad rotation-lock floor behavior.
+- `guarded_v2`: starter/core floors with depth+DNP blockers and bounded uplift.
+
+## Rotation lock heuristic (shared)
 
 `rotation_lock=True` if any:
 
@@ -34,7 +39,7 @@ Downstream schemas are unchanged: sim outputs still include the original `play_p
 Conditional minutes p50 is resolved from the first available column in:
 `cond_minutes_p50`, `minutes_p50_cond`, `baseline_minutes_p50`, `minutes_p50`, `minutes_mean`.
 
-## Policy rules (v1)
+## Legacy rules
 
 In priority order:
 
@@ -48,6 +53,19 @@ Notes:
 - "Not listed" is represented in the minutes input as `status_bucket="healthy"` (typically raw status values `Ava` / `AVAIL`).
 - Freshness gating is supported in config but is off by default (best-effort; requires timestamp columns).
 
+## Guarded-v2 rules
+
+Guarded-v2 keeps OUT/probable handling, but replaces broad lock flooring with:
+
+1) starter floor: for healthy starters only, with bounded uplift
+2) core floor: for healthy non-starters with strong minutes/rotation evidence, with bounded uplift
+3) block floors when depth or DNP risk is high (`dc_role`/`dc_ahead_global`, DNP streak/rate/inactive streak)
+
+Bounded uplift:
+- `play_prob_eff <= play_prob_raw + max_floor_delta`
+
+This prevents jumps like `0.14 -> 0.995` while still protecting true lock starters/cores.
+
 ## Config
 
 Configured per profile in `config/sim_v2_profiles.json` under `play_prob_policy`.
@@ -59,12 +77,20 @@ The production `sim_v3` profile enables the policy and sets `rotation_lock_min_c
 Fields:
 
 - `enabled` (bool, default false)
+- `mode` (`legacy` | `guarded_v2`, default `legacy`)
 - `rotation_lock_floor` (float, default 0.995)
 - `rotation_lock_min_cond_p50` (float, default 18.0)
 - `rotation_lock_topk` (int, default 8)
 - `probable_floor` (float, default 0.90)
 - `require_fresh_injury_snapshot` (bool, default false)
 - `freshness_minutes` (float, default 90.0)
+- Guarded-v2:
+  - `starter_floor`, `core_floor`
+  - `core_lock_min_cond_p50`, `core_lock_topk`
+  - `max_floor_delta`
+  - `min_raw_play_prob_for_floor`, `min_rotation_prob_for_floor`
+  - `depth_block_roles`, `depth_block_min_ahead_global`
+  - `dnp_block_streak_threshold`, `dnp_block_rate_threshold`, `dnp_block_inactive_streak_threshold`
 
 ## Reproducing diagnostics
 

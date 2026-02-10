@@ -74,7 +74,8 @@ Rotation generation and `rot_eval_v1` can consume a “minutes prior” parquet 
 
 Important notes:
 
-- `play_prob` in current internal priors is a placeholder (often constant `1.0`) and must not be treated as meaningful availability.
+- `play_prob` is a model/effective-input availability signal (not a constant placeholder).
+- `effective_minutes.parquet` can modify `play_prob` via inference-time priors (e.g., depth-chart + DNP guardrails).
 - In-memory only (not required on disk): rotation prior heuristics may add optional columns:
   - `p_ge5_prior_heur`: heuristic `P(minutes >= 5)` derived from `minutes_prior` + quantiles
   - `p_eq0_prior_heur`: heuristic `P(minutes == 0)` / DNP-ish derived from `minutes_prior` + quantiles
@@ -134,6 +135,28 @@ Optional alert tuning knobs (in `config/depth_chart_prior.json`):
   - `dnp_k_streak`, `dnp_k_rate`, `dnp_k_inactive_streak`, `dnp_rotation_scale`
   - `dnp_penalty_min`, `dnp_guardrail_max_p50`, `dnp_require_non_starter`
   - `dnp_severe_*` caps for `minutes_p50/p90/p95`
+
+### Sim Play-Prob Policy (Availability Sampling)
+
+`scripts/sim_v2/generate_worlds_fpts_v2.py` applies an optional play-prob policy layer used only for
+world availability sampling.
+
+Input:
+- `play_prob` (raw availability from effective minutes)
+
+Policy outputs in sim projections (`artifacts/sim_v2/worlds_fpts_v2/.../projections.parquet`):
+- `play_prob_raw`
+- `play_prob_eff`
+- `rotation_lock`
+- `play_prob_policy_reason`
+
+Key profile knobs (`config/sim_v2_profiles.json` → `play_prob_policy`):
+- `mode` (`legacy` | `guarded_v2`)
+- legacy knobs: `rotation_lock_min_cond_p50`, `rotation_lock_topk`, `rotation_lock_floor`, `probable_floor`
+- guarded-v2 knobs: `starter_floor`, `core_floor`, `core_lock_min_cond_p50`, `core_lock_topk`,
+  `max_floor_delta`, `min_raw_play_prob_for_floor`, `min_rotation_prob_for_floor`,
+  `depth_block_roles`, `depth_block_min_ahead_global`,
+  `dnp_block_streak_threshold`, `dnp_block_rate_threshold`, `dnp_block_inactive_streak_threshold`
 
 ## Schema Evolution
 
