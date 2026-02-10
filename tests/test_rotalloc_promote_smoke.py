@@ -22,6 +22,11 @@ def test_rotalloc_promote_smoke_respects_eligible_and_sums() -> None:
             "play_prob": [1.0] * 6,
             "is_starter": [1, 0, 0, 1, 0, 0],
             "rotation_prob": [1.0, 1.0, 0.0, 1.0, 1.0, 0.0],
+            "dc_role": ["starter", "rotation", "limited", "starter", "rotation", "not_listed"],
+            "dc_ahead_global": [0, 1, 9, 0, 1, 11],
+            "consecutive_active_dnp": [0, 0, 6, 0, 0, 7],
+            "active_but_dnp_rate_last10": [0.0, 0.0, 0.8, 0.0, 0.0, 0.9],
+            "inactive_streak_len": [0, 0, 0, 0, 0, 0],
         }
     )
 
@@ -42,6 +47,8 @@ def test_rotalloc_promote_smoke_respects_eligible_and_sums() -> None:
     mu_df = build_rates_mean_fpts(minutes_df, rates_df)
     assert "eligible_flag" in mu_df.columns
     assert "minutes_alloc_mode" in mu_df.columns
+    assert "dc_role" in mu_df.columns
+    assert "consecutive_active_dnp" in mu_df.columns
 
     team_codes = mu_df["team_id"].astype("category")
     team_indices = team_codes.cat.codes.to_numpy(dtype=int)
@@ -76,4 +83,3 @@ def test_rotalloc_promote_smoke_respects_eligible_and_sums() -> None:
     for t in range(n_teams):
         idxs = team_indices == t
         assert np.max(np.abs(out[:, idxs].sum(axis=1) - 240.0)) < 1e-6
-

@@ -1526,6 +1526,12 @@ def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> p
         "status_bucket",
         "is_starter",
         "rotation_prob",
+        "dc_present",
+        "dc_role",
+        "dc_ahead_global",
+        "consecutive_active_dnp",
+        "active_but_dnp_rate_last10",
+        "inactive_streak_len",
         "eligible_flag",
         "minutes_alloc_mode",
         "p_rot",
@@ -2239,6 +2245,7 @@ def main(
 
                 minutes_alloc_metrics["play_prob_policy_enabled"] = True
                 minutes_alloc_metrics["play_prob_policy"] = {
+                    "mode": str(getattr(play_prob_policy_cfg, "mode", "legacy")),
                     "n_players": int(policy_diag.n_players),
                     "n_rotation_locks": int(policy_diag.n_rotation_locks),
                     "n_changed": int(policy_diag.n_changed),
@@ -2250,6 +2257,30 @@ def main(
                     "probable_floor": float(getattr(play_prob_policy_cfg, "probable_floor", 0.0)),
                     "rotation_lock_min_cond_p50": float(getattr(play_prob_policy_cfg, "rotation_lock_min_cond_p50", 0.0)),
                     "rotation_lock_topk": int(getattr(play_prob_policy_cfg, "rotation_lock_topk", 0)),
+                    "starter_floor": float(getattr(play_prob_policy_cfg, "starter_floor", 0.0)),
+                    "core_floor": float(getattr(play_prob_policy_cfg, "core_floor", 0.0)),
+                    "core_lock_min_cond_p50": float(getattr(play_prob_policy_cfg, "core_lock_min_cond_p50", 0.0)),
+                    "core_lock_topk": int(getattr(play_prob_policy_cfg, "core_lock_topk", 0)),
+                    "max_floor_delta": float(getattr(play_prob_policy_cfg, "max_floor_delta", 0.0)),
+                    "min_raw_play_prob_for_floor": float(
+                        getattr(play_prob_policy_cfg, "min_raw_play_prob_for_floor", 0.0)
+                    ),
+                    "min_rotation_prob_for_floor": float(
+                        getattr(play_prob_policy_cfg, "min_rotation_prob_for_floor", 0.0)
+                    ),
+                    "depth_block_roles": list(getattr(play_prob_policy_cfg, "depth_block_roles", ()) or ()),
+                    "depth_block_min_ahead_global": int(
+                        getattr(play_prob_policy_cfg, "depth_block_min_ahead_global", 0)
+                    ),
+                    "dnp_block_streak_threshold": float(
+                        getattr(play_prob_policy_cfg, "dnp_block_streak_threshold", 0.0)
+                    ),
+                    "dnp_block_rate_threshold": float(
+                        getattr(play_prob_policy_cfg, "dnp_block_rate_threshold", 0.0)
+                    ),
+                    "dnp_block_inactive_streak_threshold": float(
+                        getattr(play_prob_policy_cfg, "dnp_block_inactive_streak_threshold", 0.0)
+                    ),
                 }
                 if sim_audit:
                     typer.echo(
