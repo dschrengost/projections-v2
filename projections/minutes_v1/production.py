@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 import joblib
 
+from projections.model_selectors import active_minutes_selector_path
+
 DEFAULT_PRODUCTION_RUN_ID = "lgbm_full_v1_no_p_play_20251202"
 DEFAULT_PRODUCTION_ROOT = Path("artifacts/minutes_lgbm")
 DEFAULT_PRODUCTION_CONFIG = Path("config/minutes_current_run.json")
@@ -109,7 +111,11 @@ def resolve_production_run_dir(config_path: Path | None = None) -> tuple[Path, s
         return run_dir, env_run or run_dir.name
 
     config_candidate = os.environ.get(ENV_CONFIG_PATH)
-    config_file = Path(config_candidate).expanduser() if config_candidate else (config_path or DEFAULT_PRODUCTION_CONFIG)
+    config_file = (
+        Path(config_candidate).expanduser()
+        if config_candidate
+        else (config_path or active_minutes_selector_path())
+    )
     config_file = _expand(config_file)
     if config_file.exists():
         payload = _load_json(config_file)
@@ -154,7 +160,7 @@ def load_production_minutes_bundle(
 
     Returns either:
       - a legacy single-bundle payload (backward compatible), or
-      - a dual-bundle payload when `config/minutes_current_run.json` is in dual mode.
+      - a dual-bundle payload when the active minutes selector is in dual mode.
     """
 
     env_dir = os.environ.get(ENV_RUN_DIR)
@@ -164,7 +170,11 @@ def load_production_minutes_bundle(
         return _load_bundle_from_dir(run_dir, env_run or run_dir.name)
 
     config_candidate = os.environ.get(ENV_CONFIG_PATH)
-    config_file = Path(config_candidate).expanduser() if config_candidate else (config_path or DEFAULT_PRODUCTION_CONFIG)
+    config_file = (
+        Path(config_candidate).expanduser()
+        if config_candidate
+        else (config_path or active_minutes_selector_path())
+    )
     config_file = _expand(config_file)
     if config_file.exists():
         payload = _load_json(config_file)

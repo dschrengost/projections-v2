@@ -11,7 +11,7 @@ from projections.rates_v1.loader import load_rates_bundle, RatesBundle
 
 def load_production_rates_bundle(*, config_path: Optional[Path] = None) -> RatesBundle:
     """
-    Load the production rates_v1 bundle indicated by config/rates_current_run.json.
+    Load the production rates_v1 bundle indicated by the active rates selector.
     """
 
     run_id = get_rates_current_run_id(config_path=config_path)

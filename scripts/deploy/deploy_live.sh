@@ -4,7 +4,7 @@ set -euo pipefail
 # ==============================================================================
 # deploy_live.sh - Sync DEV → PROD for projections-v2
 # ==============================================================================
-# Usage: ./scripts/deploy/deploy_live.sh [--dry-run]
+# Usage: ./scripts/deploy/deploy_live.sh [--dry-run] [--sync-pointers]
 #
 # This script syncs the development checkout to the production directory.
 # Prefect runs exclusively from PROD; this is the only sanctioned way to
@@ -13,10 +13,29 @@ set -euo pipefail
 
 DEV_REPO="/home/daniel/projects/projections-v2"
 PROD_REPO="/home/daniel/prod/projections-v2"
+DEFAULT_DATA_ROOT="/home/daniel/projections-data"
 
 DRY_RUN=""
-if [[ "${1:-}" == "--dry-run" ]]; then
-    DRY_RUN="--dry-run"
+SYNC_POINTERS=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)
+            DRY_RUN="--dry-run"
+            ;;
+        --sync-pointers)
+            SYNC_POINTERS=1
+            ;;
+        *)
+            echo "[deploy] ERROR: unknown argument: $1" >&2
+            echo "Usage: ./scripts/deploy/deploy_live.sh [--dry-run] [--sync-pointers]" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+if [[ -n "$DRY_RUN" ]]; then
     echo "[deploy] DRY RUN - no changes will be made"
 fi
 
@@ -42,6 +61,19 @@ mkdir -p "$PROD_REPO"
 # --- Sync ---
 echo "[deploy] Syncing $DEV_REPO → $PROD_REPO"
 echo "[deploy] Source: $DEV_BRANCH @ $DEV_SHA"
+if [[ "$SYNC_POINTERS" -eq 0 ]]; then
+    echo "[deploy] Preserving PROD selector pointers (use --sync-pointers to overwrite):"
+    echo "         - config/minutes_current_run.json"
+    echo "         - config/rates_current_run.json"
+fi
+
+POINTER_EXCLUDES=()
+if [[ "$SYNC_POINTERS" -eq 0 ]]; then
+    POINTER_EXCLUDES+=(
+        "--exclude=config/minutes_current_run.json"
+        "--exclude=config/rates_current_run.json"
+    )
+fi
 
 rsync -av --delete $DRY_RUN \
     --exclude='.git' \
@@ -62,12 +94,43 @@ rsync -av --delete $DRY_RUN \
     --exclude='nohup.out' \
     --exclude='*.log' \
     --exclude='.DS_Store' \
+    "${POINTER_EXCLUDES[@]}" \
     "$DEV_REPO/" "$PROD_REPO/"
 
 if [[ -n "$DRY_RUN" ]]; then
     echo "[deploy] DRY RUN complete - no changes made"
     exit 0
 fi
+
+# --- Runtime selector sync ---
+DATA_ROOT="${PROJECTIONS_DATA_ROOT:-$DEFAULT_DATA_ROOT}"
+RUNTIME_SELECTOR_DIR="$DATA_ROOT/control_plane/model_selectors"
+mkdir -p "$RUNTIME_SELECTOR_DIR"
+
+sync_selector() {
+    local selector_file="$1"
+    local src="$PROD_REPO/config/$selector_file"
+    local dst="$RUNTIME_SELECTOR_DIR/$selector_file"
+
+    if [[ ! -f "$src" ]]; then
+        echo "[deploy] WARNING: selector source missing, skipping: $src"
+        return
+    fi
+
+    if [[ "$SYNC_POINTERS" -eq 1 ]]; then
+        cp "$src" "$dst"
+        echo "[deploy] Synced runtime selector: $dst"
+        return
+    fi
+
+    if [[ ! -f "$dst" ]]; then
+        cp "$src" "$dst"
+        echo "[deploy] Seeded runtime selector: $dst"
+    fi
+}
+
+sync_selector "minutes_current_run.json"
+sync_selector "rates_current_run.json"
 
 # --- Post-sync: deps ---
 echo "[deploy] Running uv sync --frozen in PROD..."

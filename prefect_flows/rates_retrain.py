@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from prefect import flow, get_run_logger, task
 
-from projections import paths
+from projections import model_selectors, paths
 from projections.rates_v1.loader import load_rates_bundle
 from projections.rates_v1.score import predict_rates
 from scripts.rates.train_rates_v1 import (
@@ -27,7 +27,6 @@ from scripts.rates.train_rates_v1 import (
 
 
 PROJECT_ROOT = paths.get_project_root()
-DEFAULT_RATES_CONFIG = PROJECT_ROOT / "config" / "rates_current_run.json"
 _DEFAULT_UV_PATH = Path("/home/daniel/.local/bin/uv")
 
 
@@ -115,6 +114,15 @@ def _read_current_rates_run_id(config_path: Path) -> str:
     if not run_id:
         raise RuntimeError(f"Missing run_id in {config_path}")
     return str(run_id)
+
+
+def _read_selector_payload(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Selector config must be a JSON object: {path}")
+    return payload
 
 
 def _resolve_training_window(
@@ -513,15 +521,24 @@ def evaluate_candidate_task(
 def promote_rates_task(
     *,
     data_root: Path,
-    config_path: Path,
+    source_config_path: Path,
+    runtime_config_path: Path,
+    repo_config_path: Path,
     new_run_id: str,
     eval_summary_path: str | None,
     guardrail_result: dict[str, Any],
+    sync_repo_selector: bool,
 ) -> dict[str, str]:
-    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload = _read_selector_payload(source_config_path)
+    if not payload and source_config_path != repo_config_path:
+        payload = _read_selector_payload(repo_config_path)
     previous_run_id = str(payload.get("run_id", ""))
     payload["run_id"] = new_run_id
-    config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    if sync_repo_selector:
+        repo_config_path.parent.mkdir(parents=True, exist_ok=True)
+        repo_config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     promotions_root = data_root / "artifacts" / "rates_v1" / "promotions"
     promotions_root.mkdir(parents=True, exist_ok=True)
@@ -532,6 +549,10 @@ def promote_rates_task(
         "new_run_id": new_run_id,
         "eval_summary_path": eval_summary_path,
         "guardrails": guardrail_result,
+        "source_config_path": str(source_config_path),
+        "runtime_config_path": str(runtime_config_path),
+        "repo_config_path": str(repo_config_path),
+        "sync_repo_selector": bool(sync_repo_selector),
     }
     history_path = promotions_root / f"promotion_{timestamp}_{new_run_id}.json"
     latest_path = promotions_root / "latest_promotion.json"
@@ -552,6 +573,9 @@ def promote_rates_task(
     return {
         "previous_run_id": previous_run_id,
         "new_run_id": new_run_id,
+        "source_selector_path": str(source_config_path),
+        "runtime_selector_path": str(runtime_config_path),
+        "repo_selector_path": str(repo_config_path),
         "history_path": str(history_path),
         "rollback_pointer_path": str(rollback_path),
     }
@@ -581,6 +605,7 @@ def rates_retrain_flow(
     normal_slice_end: str | None = None,
     chaos_slice_start: str | None = None,
     chaos_slice_end: str | None = None,
+    sync_repo_selector: bool = False,
 ) -> dict[str, Any]:
     logger = get_run_logger()
     data_root = paths.get_data_root()
@@ -650,8 +675,21 @@ def rates_retrain_flow(
 
     eval_result: dict[str, str] | None = None
     guardrail_result: dict[str, Any] | None = None
-    current_run_id = _read_current_rates_run_id(DEFAULT_RATES_CONFIG)
+    active_selector_path = model_selectors.active_rates_selector_path(
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
+    runtime_selector_path = model_selectors.runtime_rates_selector_path(data_root=data_root)
+    repo_selector_path = model_selectors.repo_rates_selector_path(project_root=PROJECT_ROOT)
+    logger.info(
+        "[rates-retrain-flow] selectors active=%s runtime=%s repo=%s",
+        active_selector_path,
+        runtime_selector_path,
+        repo_selector_path,
+    )
+    current_run_id = _read_current_rates_run_id(active_selector_path)
     result["current_run_id"] = current_run_id
+    result["selector_path"] = str(active_selector_path)
     if evaluate_head_to_head:
         eval_result = evaluate_candidate_task(
             data_root=data_root,
@@ -686,10 +724,13 @@ def rates_retrain_flow(
 
         promotion = promote_rates_task(
             data_root=data_root,
-            config_path=DEFAULT_RATES_CONFIG,
+            source_config_path=active_selector_path,
+            runtime_config_path=runtime_selector_path,
+            repo_config_path=repo_selector_path,
             new_run_id=retrain_result["run_id"],
             eval_summary_path=eval_result["summary_path"] if eval_result else None,
             guardrail_result=guardrail_result or {"passed": True, "note": "head-to-head evaluation disabled"},
+            sync_repo_selector=sync_repo_selector,
         )
         result["promotion"] = promotion
 
@@ -708,7 +749,11 @@ def rates_calibration_monitor_flow(
     if labels_max is None:
         raise RuntimeError("Cannot run rates calibration monitor: gold/labels_minutes_v1 is missing or empty.")
 
-    effective_run_id = run_id.strip() if run_id else _read_current_rates_run_id(DEFAULT_RATES_CONFIG)
+    active_selector_path = model_selectors.active_rates_selector_path(
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
+    effective_run_id = run_id.strip() if run_id else _read_current_rates_run_id(active_selector_path)
     end_ts = labels_max.normalize()
     start_ts = max(labels_min or end_ts, end_ts - pd.Timedelta(days=max(lookback_days, calibration_window_days + 14)))
     cal_end_ts = end_ts - pd.Timedelta(days=max(calibration_window_days, 1))
