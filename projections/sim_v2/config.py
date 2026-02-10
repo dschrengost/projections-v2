@@ -152,9 +152,9 @@ class PlayProbPolicyConfig:
     enabled: bool = False
 
     # Policy mode:
-    # - legacy: existing broad rotation-lock flooring behavior
     # - guarded_v2: starter/core floors with depth+DNP blockers and bounded uplift
-    mode: str = "legacy"
+    # - legacy: deprecated alias for guarded_v2 (broad rotation-lock floor disabled)
+    mode: str = "guarded_v2"
 
     # Rotation-lock heuristic.
     rotation_lock_min_cond_p50: float = 18.0
@@ -512,7 +512,7 @@ def load_sim_v2_profile(
         depth_block_roles = tuple(str(x).strip().lower() for x in depth_block_roles_raw if str(x).strip())
     play_prob_policy = PlayProbPolicyConfig(
         enabled=bool(play_prob_policy_raw.get("enabled", False)),
-        mode=str(play_prob_policy_raw.get("mode", "legacy")).strip().lower(),
+        mode=str(play_prob_policy_raw.get("mode", "guarded_v2")).strip().lower(),
         rotation_lock_min_cond_p50=float(play_prob_policy_raw.get("rotation_lock_min_cond_p50", 18.0)),
         rotation_lock_topk=int(play_prob_policy_raw.get("rotation_lock_topk", 8)),
         rotation_lock_floor=float(play_prob_policy_raw.get("rotation_lock_floor", 0.995)),
