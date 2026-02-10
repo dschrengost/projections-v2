@@ -255,6 +255,8 @@ Safety guardrails now in place:
 - `projections.etl.odds` and `projections.etl.injuries` refuse non-regressive snapshot overwrites by default.
 - Use `--allow-snapshot-regression` only for intentional recovery operations.
 - `build_features_minutes_v1` now upserts into existing month outputs by default (`--merge-with-existing`), so daily jobs do not clobber full month partitions.
+- `projections.etl.odds` / `projections.etl.injuries` now include schedule-aware coverage checks:
+  no-game days are treated as expected empty windows, while game days with zero overlap fail fast unless `--no-strict-schedule-coverage` is set.
 
 ## See Also
 

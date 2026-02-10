@@ -28,6 +28,20 @@ REQUIRED_SCHEDULE_COLUMNS: tuple[str, ...] = (
     "away_team_tricode",
 )
 
+SCHEDULE_HELPER_COLUMNS: tuple[str, ...] = (
+    "tip_day",
+    "local_game_date",
+    "tip_local_ts",
+    "arena_id",
+    "arena_name",
+    "arena_city",
+    "arena_state",
+)
+
+SCHEDULE_OUTPUT_COLUMNS: tuple[str, ...] = tuple(
+    dict.fromkeys((*REQUIRED_SCHEDULE_COLUMNS, *SCHEDULE_HELPER_COLUMNS))
+)
+
 LOCAL_RUN_TZ = ZoneInfo("America/New_York")
 
 
@@ -63,11 +77,14 @@ def read_schedule(parquet_paths: Iterable[str]) -> pd.DataFrame:
     return df
 
 
+def _empty_schedule_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=SCHEDULE_OUTPUT_COLUMNS)
+
+
 def schedule_from_api(start: pd.Timestamp, end: pd.Timestamp, timeout: float) -> pd.DataFrame:
     """Fetch schedule rows from the live NBA API for the requested window."""
 
     scraper = NbaScheduleScraper(timeout=timeout)
-    season_label = f"{start.year}-{(start.year + 1) % 100:02d}"
     records: list[dict] = []
     current = start
     while current <= end:
@@ -157,6 +174,8 @@ def load_schedule_data(
     start: pd.Timestamp,
     end: pd.Timestamp,
     timeout: float,
+    *,
+    allow_empty: bool = False,
 ) -> pd.DataFrame:
     """Load schedule data from parquet with API fallback when globs are empty."""
 
@@ -190,7 +209,12 @@ def load_schedule_data(
             if not slice_df.empty:
                 return _dedupe(slice_df)
 
-    api_df = schedule_from_api(start, end, timeout)
+    try:
+        api_df = schedule_from_api(start, end, timeout)
+    except RuntimeError as exc:
+        if allow_empty and "did not return any games" in str(exc):
+            return _empty_schedule_frame()
+        raise
     normalized = normalize_schedule_frame(api_df)
     game_dates = normalized["game_date"]
     if getattr(game_dates.dtype, "tz", None) is not None:
@@ -207,6 +231,8 @@ def load_schedule_data(
         mask |= (local_dates >= start) & (local_dates <= end)
     normalized = normalized.loc[mask].copy()
     if normalized.empty:
+        if allow_empty:
+            return _empty_schedule_frame()
         raise RuntimeError("Schedule filter removed all rows for requested window.")
     return _dedupe(normalized)
 

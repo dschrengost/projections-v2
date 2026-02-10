@@ -11,6 +11,11 @@ import typer
 from zoneinfo import ZoneInfo
 
 from projections import paths
+from projections.etl.coverage_guard import (
+    compute_game_coverage,
+    enforce_game_coverage,
+    format_game_coverage,
+)
 from projections.etl import storage
 from projections.etl.common import load_schedule_data
 from projections.etl.snapshot_guard import enforce_non_regression
@@ -278,6 +283,11 @@ def main(
         "--allow-snapshot-regression/--no-allow-snapshot-regression",
         help="Allow writing a silver snapshot with lower key coverage than the existing file (recovery only).",
     ),
+    strict_schedule_coverage: bool = typer.Option(
+        True,
+        "--strict-schedule-coverage/--no-strict-schedule-coverage",
+        help="Fail when scheduled games exist but odds snapshot has zero overlap (no-op on no-game days).",
+    ),
 ) -> None:
     start_day = pd.Timestamp(start).normalize()
     end_day = pd.Timestamp(end).normalize()
@@ -289,7 +299,13 @@ def main(
     run_ts = run_dt.isoformat()
     rows_written = 0
     try:
-        schedule_df = load_schedule_data(schedule, start_day, end_day, schedule_timeout)
+        schedule_df = load_schedule_data(
+            schedule,
+            start_day,
+            end_day,
+            schedule_timeout,
+            allow_empty=True,
+        )
         resolver = TeamResolver(schedule_df)
 
         scraper = OddstraderScraper(timeout=scraper_timeout)
@@ -369,6 +385,14 @@ def main(
                         f"[odds] bronze latest date={game_date}: "
                         f"{latest_result.rows} rows -> {latest_result.path}"
                     )
+
+        coverage = compute_game_coverage(schedule_df=schedule_df, observed_df=odds_snapshot)
+        typer.echo(format_game_coverage("odds", coverage))
+        enforce_game_coverage(
+            dataset_name="odds",
+            stats=coverage,
+            strict=strict_schedule_coverage,
+        )
 
         silver_path = silver_out or silver_default
         silver_path.parent.mkdir(parents=True, exist_ok=True)

@@ -12,6 +12,11 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.etl.coverage_guard import (
+    compute_game_coverage,
+    enforce_game_coverage,
+    format_game_coverage,
+)
 from projections.etl import storage
 from projections.etl.common import load_schedule_data
 from projections.etl.snapshot_guard import enforce_non_regression
@@ -86,6 +91,16 @@ def _parse_matchup_text(matchup: str | None) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _normalize_game_day(value: Any) -> pd.Timestamp | None:
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return None
+    stamp = pd.Timestamp(ts)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("America/New_York").tz_localize(None)
+    return stamp.normalize()
+
+
 def _build_injuries_raw(
     records: list[dict],
     *,
@@ -103,9 +118,12 @@ def _build_injuries_raw(
         report_day = report_time.tz_convert("America/New_York").tz_localize(None).normalize()
         if not (start_pad <= report_day <= end_pad):
             continue
+        game_day = _normalize_game_day(row.get("game_date"))
+        if game_day is None or not (start_pad <= game_day <= end_pad):
+            continue
         matchup = row.get("matchup", "")
         away_tri, home_tri = _parse_matchup_text(matchup)
-        game_date_str = row.get("game_date")
+        game_date_str = game_day.strftime("%Y-%m-%d")
         game_id = (
             resolver.lookup_game_id(game_date_str, away_tri, home_tri)
             if away_tri and home_tri
@@ -348,6 +366,11 @@ def main(
         "--allow-snapshot-regression/--no-allow-snapshot-regression",
         help="Allow writing a silver snapshot with lower key coverage than the existing file (recovery only).",
     ),
+    strict_schedule_coverage: bool = typer.Option(
+        True,
+        "--strict-schedule-coverage/--no-strict-schedule-coverage",
+        help="Fail when scheduled games exist but injury snapshot has zero overlap (no-op on no-game days).",
+    ),
 ) -> None:
     """Main injuries ETL entry point; intended usage relies on the live scraper + bronze/silver sinks."""
     start_day = pd.Timestamp(start).normalize()
@@ -367,7 +390,13 @@ def main(
             end=end_day,
             timeout=injury_timeout,
         )
-        schedule_df = load_schedule_data(schedule, start_day, end_day, schedule_timeout)
+        schedule_df = load_schedule_data(
+            schedule,
+            start_day,
+            end_day,
+            schedule_timeout,
+            allow_empty=True,
+        )
         resolver = TeamResolver(schedule_df)
         player_resolver = _build_player_resolver(scraper_timeout)
 
@@ -384,6 +413,14 @@ def main(
         injuries_snapshot = _build_injury_snapshot(injuries_raw, schedule_df)
         injuries_snapshot = enforce_schema(injuries_snapshot, INJURIES_SNAPSHOT_SCHEMA)
         validate_with_pandera(injuries_snapshot, INJURIES_SNAPSHOT_SCHEMA)
+
+        coverage = compute_game_coverage(schedule_df=schedule_df, observed_df=injuries_snapshot)
+        typer.echo(format_game_coverage("injuries", coverage))
+        enforce_game_coverage(
+            dataset_name="injuries",
+            stats=coverage,
+            strict=strict_schedule_coverage,
+        )
 
         partition_key = _snapshot_partition_key(start_day, month_override=month)
         default_silver = _default_silver_path(data_root, season, partition_key)
