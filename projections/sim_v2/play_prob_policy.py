@@ -372,9 +372,9 @@ def apply_play_prob_policy_with_diagnostics(
     blocked_mask = rotation_lock & not_listed_like & fresh_ok & ~out_like & risk_block
     reasons = np.where((reasons == "raw") & blocked_mask, "raw_blocked_depth_dnp", reasons)
 
-    # Rule (c): PROBABLE => floor.
+    # Rule (c): PROBABLE => floor, but keep guarded blockers (depth/DNP/freshness).
     prob_floor = float(np.clip(float(getattr(config, "probable_floor", 0.90)), 0.0, 1.0))
-    prob_mask = probable_like & ~out_like
+    prob_mask = probable_like & ~out_like & fresh_ok & ~risk_block
     before = p_eff.copy()
     p_eff = np.where(prob_mask, np.maximum(p_eff, prob_floor), p_eff)
     bumped_prob = (p_eff > before) & prob_mask

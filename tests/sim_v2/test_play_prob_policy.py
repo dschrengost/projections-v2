@@ -113,19 +113,19 @@ def test_play_prob_policy_guarded_v2_blocks_depth_and_dnp_risk() -> None:
 
     df = pd.DataFrame(
         {
-            "game_id": [1, 1, 1],
-            "team_id": [10, 10, 10],
-            "player_id": [101, 102, 103],
-            "minutes_p50_cond": [34.0, 28.0, 26.0],
-            "starter_flag": [1, 0, 0],
-            "rotation_prob": [0.95, 0.90, 0.90],
-            "play_prob": [0.40, 0.60, 0.60],
-            "status_bucket": ["healthy", "healthy", "healthy"],
-            "dc_role": ["starter", "rotation", "limited"],
-            "dc_ahead_global": [0, 1, 9],
-            "consecutive_active_dnp": [0, 0, 7],
-            "active_but_dnp_rate_last10": [0.0, 0.0, 0.7],
-            "inactive_streak_len": [0, 0, 0],
+            "game_id": [1, 1, 1, 1],
+            "team_id": [10, 10, 10, 10],
+            "player_id": [101, 102, 103, 104],
+            "minutes_p50_cond": [34.0, 28.0, 26.0, 18.0],
+            "starter_flag": [1, 0, 0, 0],
+            "rotation_prob": [0.95, 0.90, 0.90, 0.80],
+            "play_prob": [0.40, 0.60, 0.60, 0.55],
+            "status_bucket": ["healthy", "healthy", "healthy", "probable"],
+            "dc_role": ["starter", "rotation", "limited", "limited"],
+            "dc_ahead_global": [0, 1, 9, 9],
+            "consecutive_active_dnp": [0, 0, 7, 6],
+            "active_but_dnp_rate_last10": [0.0, 0.0, 0.7, 0.6],
+            "inactive_streak_len": [0, 0, 0, 0],
         }
     )
 
@@ -142,6 +142,10 @@ def test_play_prob_policy_guarded_v2_blocks_depth_and_dnp_risk() -> None:
     # Depth + DNP risk blocks flooring.
     assert float(out.loc[2, "play_prob_eff"]) == float(out.loc[2, "play_prob_raw"])
     assert out.loc[2, "play_prob_policy_reason"] == "raw_blocked_depth_dnp"
+
+    # Probable still respects guarded blockers; no probable floor for depth/DNP risk.
+    assert float(out.loc[3, "play_prob_eff"]) == float(out.loc[3, "play_prob_raw"])
+    assert out.loc[3, "play_prob_policy_reason"] == "raw"
 
 
 def test_play_prob_policy_guarded_v2_requires_raw_and_rotation_thresholds() -> None:
