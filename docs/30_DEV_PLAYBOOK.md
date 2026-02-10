@@ -229,6 +229,33 @@ prefect server status
 systemctl --user status prefect-worker
 ```
 
+### Snapshot Coverage Recovery
+
+If monthly silver snapshots are missing historical games (for example after an unexpected overwrite),
+rebuild them from bronze history:
+
+```bash
+uv run python scripts/rebuild_silver_snapshots_from_bronze.py \
+  --start-date 2025-12-01 \
+  --end-date 2026-01-31 \
+  --season 2025
+```
+
+If you intentionally need to allow a smaller rebuilt snapshot (rare), pass:
+`--allow-snapshot-regression`
+
+Then rebuild gold features for affected months:
+
+```bash
+uv run python -m projections.pipelines.build_features_minutes_v1 \
+  --start-date 2025-12-01 --end-date 2025-12-31 --season 2025 --month 12
+```
+
+Safety guardrails now in place:
+- `projections.etl.odds` and `projections.etl.injuries` refuse non-regressive snapshot overwrites by default.
+- Use `--allow-snapshot-regression` only for intentional recovery operations.
+- `build_features_minutes_v1` now upserts into existing month outputs by default (`--merge-with-existing`), so daily jobs do not clobber full month partitions.
+
 ## See Also
 
 - [00_REPO_MAP.md](./00_REPO_MAP.md) - Repository structure
