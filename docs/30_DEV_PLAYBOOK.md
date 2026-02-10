@@ -90,6 +90,20 @@ Operator notes:
 - DNP-history inference guardrail logs under `[dnp-guardrail]` and is configured in `config/depth_chart_prior.json`.
 - `PROJECTIONS_DC_CROSSWALK_WARN_MIN_MATCH_RATE` controls crosswalk warning threshold (default `0.30`).
 
+### Play-Prob Policy Tuning
+
+```bash
+# Grid-search guarded-v2 play_prob_policy knobs against realized played labels
+uv run python -m scripts.diagnostics.grid_search_play_prob_policy \
+  --start 2026-01-15 \
+  --end 2026-02-09 \
+  --holdout-days 5
+```
+
+Notes:
+- Uses `artifacts/minutes_v1/daily/<date>/run=*/effective_minutes.parquet` + `labels/season=*/boxscore_labels.parquet`.
+- Writes ranking outputs under `artifacts/tuning/play_prob_policy/<run_id>/`.
+
 ### Rotation Eval (rot_eval)
 
 ```bash
