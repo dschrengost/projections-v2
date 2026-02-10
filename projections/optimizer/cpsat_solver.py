@@ -956,6 +956,8 @@ def solve_cpsat_iterative(players: List[Dict], constraints: Any, seed: int, site
                 proj=p["proj"],
                 dk_id=p.get("dk_id"),
                 own_proj=p.get("own_proj"),  # PRP-16: Pass ownership data
+                stddev=p.get("stddev"),
+                game_start_utc=p.get("game_start_utc"),
             )
             for p in players
         ],
@@ -973,6 +975,7 @@ def solve_cpsat_iterative(players: List[Dict], constraints: Any, seed: int, site
         cp_sat_params=getattr(constraints, "cp_sat_params", {}) or {},
         engine="cp_sat",
         ownership_penalty=ownership_penalty_dict,  # PRP-16: Pass ownership penalty settings
+        randomness_pct=getattr(constraints, "randomness_pct", 0.0),
     )
 
     # Wiring check: Input contract + objective telemetry (prints + returns diagnostics)
@@ -1079,7 +1082,8 @@ def solve_cpsat_iterative(players: List[Dict], constraints: Any, seed: int, site
         # Rebuild objective weights per iteration if penalty/bonus configs are active
         cfg_active, aggro_active = get_active_ownership_penalty()
         late_swap_cfg_active = get_active_late_swap_bonus()
-        if cfg_active is not None or late_swap_cfg_active is not None:
+        rp_active = float(getattr(spec, "randomness_pct", 0.0) or 0.0)
+        if cfg_active is not None or late_swap_cfg_active is not None or rp_active > 0.0:
             try:
                 import pandas as _pd
                 SCALE = 1000
@@ -1094,10 +1098,21 @@ def solve_cpsat_iterative(players: List[Dict], constraints: Any, seed: int, site
                         "game_start_utc": [
                             getattr(p, "game_start_utc", None) for p in spec.players
                         ],
+                        "stddev": [
+                            getattr(p, "stddev", None) for p in spec.players
+                        ],
                     }
                 )
                 # Start with base projections
                 _w = _df["proj"].astype(float).to_numpy().copy()
+                if rp_active > 0.0:
+                    _seed_base = int(seed) + int(built)
+                    for _i, (_pid, _std) in enumerate(zip(_df["player_id"], _df["stddev"])):
+                        try:
+                            _std_f = None if _std is None else float(_std)
+                        except Exception:
+                            _std_f = None
+                        _w[_i] += _player_level_randomness(str(_pid), _std_f, rp_active, _seed_base)
                 # Apply ownership penalty (negative) if configured
                 if cfg_active is not None:
                     _pen = build_ownership_penalty(
@@ -1408,6 +1423,8 @@ def solve_cpsat_iterative_counts(
                 proj=p["proj"],
                 dk_id=p.get("dk_id"),
                 own_proj=p.get("own_proj"),  # PRP-16: Pass ownership data
+                stddev=p.get("stddev"),
+                game_start_utc=p.get("game_start_utc"),
             )
             for p in players
         ],
@@ -1425,6 +1442,7 @@ def solve_cpsat_iterative_counts(
         cp_sat_params=getattr(constraints, "cp_sat_params", {}) or {},
         engine="cp_sat",
         ownership_penalty=ownership_penalty_dict,  # PRP-16: Pass ownership penalty settings
+        randomness_pct=getattr(constraints, "randomness_pct", 0.0),
     )
 
     # Counts-only currently implemented for DK only; fallback to per-slot solver for others
@@ -1517,7 +1535,8 @@ def solve_cpsat_iterative_counts(
         # Rebuild objective per iteration if penalty/bonus configs are active
         cfg_active, aggro_active = get_active_ownership_penalty()
         late_swap_cfg_active = get_active_late_swap_bonus()
-        if cfg_active is not None or late_swap_cfg_active is not None:
+        rp_active = float(getattr(spec, "randomness_pct", 0.0) or 0.0)
+        if cfg_active is not None or late_swap_cfg_active is not None or rp_active > 0.0:
             try:
                 import pandas as _pd
                 SCALE = 1000
@@ -1532,10 +1551,21 @@ def solve_cpsat_iterative_counts(
                         "game_start_utc": [
                             getattr(p, "game_start_utc", None) for p in spec.players
                         ],
+                        "stddev": [
+                            getattr(p, "stddev", None) for p in spec.players
+                        ],
                     }
                 )
                 # Start with base projections
                 _w = _df["proj"].astype(float).to_numpy().copy()
+                if rp_active > 0.0:
+                    _seed_base = int(seed) + int(built)
+                    for _i, (_pid, _std) in enumerate(zip(_df["player_id"], _df["stddev"])):
+                        try:
+                            _std_f = None if _std is None else float(_std)
+                        except Exception:
+                            _std_f = None
+                        _w[_i] += _player_level_randomness(str(_pid), _std_f, rp_active, _seed_base)
                 # Apply ownership penalty (negative) if configured
                 if cfg_active is not None:
                     _pen = build_ownership_penalty(

@@ -612,6 +612,50 @@ def _normalize_team(val: object) -> str:
     return aliases.get(text, text)
 
 
+def _normalize_status(val: object) -> str:
+    """Normalize salary status value."""
+    if val is None:
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except Exception:
+        pass
+    text = str(val).strip().upper()
+    if text in {"", "NONE", "NAN", "<NA>"}:
+        return ""
+    return text
+
+
+def _coerce_bool(val: object, default: bool = False) -> bool:
+    """Safely coerce scalar values to bool."""
+    if val is None:
+        return default
+    try:
+        if pd.isna(val):
+            return default
+    except Exception:
+        pass
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, np.integer)):
+        return bool(val)
+    if isinstance(val, (float, np.floating)):
+        return bool(val)
+    text = str(val).strip().lower()
+    if text in {"1", "true", "t", "yes", "y"}:
+        return True
+    if text in {"0", "false", "f", "no", "n", ""}:
+        return False
+    return default
+
+
+def _is_out_status(status: object) -> bool:
+    """Return True when DK status clearly indicates player is out."""
+    # Observed values are mostly OUT / Q / null. Keep this conservative.
+    return _normalize_status(status) in {"OUT", "O", "INACTIVE"}
+
+
 def build_player_pool(
     game_date: str,
     draft_group_id: int,
@@ -866,6 +910,8 @@ def build_player_pool(
     # Game info columns (prefer _sal suffix from merge)
     matchup_col = "game_matchup_sal" if "game_matchup_sal" in merged.columns else "game_matchup"
     start_col = "game_start_utc_sal" if "game_start_utc_sal" in merged.columns else "game_start_utc"
+    status_col = "status_sal" if "status_sal" in merged.columns else "status"
+    disabled_col = "is_disabled_sal" if "is_disabled_sal" in merged.columns else "is_disabled"
 
     for _, row in merged.iterrows():
         # Get player_id (prefer projection's player_id, fall back to dk_player_id)
@@ -954,6 +1000,18 @@ def build_player_pool(
             "dk_id": dk_id,
         }
 
+        status_val = row.get(status_col) if status_col in row.index else None
+        disabled_val = row.get(disabled_col) if disabled_col in row.index else None
+        status_out = _is_out_status(status_val)
+        disabled = _coerce_bool(disabled_val, default=False)
+        # Legacy overrides may publish explicit activity fields.
+        row_is_out = _coerce_bool(row.get("is_out") if "is_out" in row.index else None, default=False)
+        row_is_active = _coerce_bool(row.get("is_active") if "is_active" in row.index else True, default=True)
+        is_out = bool(row_is_out or status_out)
+        is_active = bool(row_is_active and (not disabled) and (not is_out))
+        player["is_out"] = is_out
+        player["is_active"] = is_active
+
         # Optional fields
         if own_col and pd.notna(row.get(own_col)):
             player["own_proj"] = float(effective_own if use_user_overrides else row[own_col])
@@ -992,8 +1050,6 @@ def build_player_pool(
             player["override_own"] = (
                 float(row.get("override_own")) if pd.notna(row.get("override_own")) else None
             )
-            player["is_out"] = bool(row.get("is_out", False))
-            player["is_active"] = bool(row.get("is_active", True))
 
         pool.append(player)
 
