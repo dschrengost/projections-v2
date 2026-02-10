@@ -12,8 +12,14 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.etl.coverage_guard import (
+    compute_game_coverage,
+    enforce_game_coverage,
+    format_game_coverage,
+)
 from projections.etl import storage
 from projections.etl.common import load_schedule_data
+from projections.etl.snapshot_guard import enforce_non_regression
 from projections.minutes_v1.schemas import (
     INJURIES_RAW_SCHEMA,
     INJURIES_SNAPSHOT_SCHEMA,
@@ -85,6 +91,16 @@ def _parse_matchup_text(matchup: str | None) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _normalize_game_day(value: Any) -> pd.Timestamp | None:
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return None
+    stamp = pd.Timestamp(ts)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("America/New_York").tz_localize(None)
+    return stamp.normalize()
+
+
 def _build_injuries_raw(
     records: list[dict],
     *,
@@ -102,9 +118,12 @@ def _build_injuries_raw(
         report_day = report_time.tz_convert("America/New_York").tz_localize(None).normalize()
         if not (start_pad <= report_day <= end_pad):
             continue
+        game_day = _normalize_game_day(row.get("game_date"))
+        if game_day is None or not (start_pad <= game_day <= end_pad):
+            continue
         matchup = row.get("matchup", "")
         away_tri, home_tri = _parse_matchup_text(matchup)
-        game_date_str = row.get("game_date")
+        game_date_str = game_day.strftime("%Y-%m-%d")
         game_id = (
             resolver.lookup_game_id(game_date_str, away_tri, home_tri)
             if away_tri and home_tri
@@ -239,6 +258,61 @@ def _default_silver_path(data_root: Path, season: int, partition_key: str) -> Pa
     )
 
 
+def _merge_with_existing_snapshot(
+    incoming_snapshot: pd.DataFrame,
+    *,
+    silver_path: Path,
+    allow_snapshot_regression: bool,
+) -> pd.DataFrame:
+    merged_snapshot = incoming_snapshot
+    if not silver_path.exists():
+        return merged_snapshot
+
+    try:
+        existing_snapshot = pd.read_parquet(silver_path)
+    except Exception as exc:  # noqa: BLE001
+        if not allow_snapshot_regression:
+            raise RuntimeError(
+                f"[injuries] refusing overwrite because existing snapshot cannot be read: {exc}"
+            ) from exc
+        typer.echo(
+            f"[injuries] warning: failed reading existing snapshot ({exc}); allowing overwrite due to --allow-snapshot-regression.",
+            err=True,
+        )
+        return merged_snapshot
+
+    try:
+        existing_snapshot = enforce_schema(existing_snapshot, INJURIES_SNAPSHOT_SCHEMA)
+    except Exception as exc:  # noqa: BLE001
+        if not allow_snapshot_regression:
+            raise RuntimeError(
+                f"[injuries] refusing overwrite because existing snapshot schema is invalid: {exc}"
+            ) from exc
+        typer.echo(
+            f"[injuries] warning: existing snapshot schema mismatch ({exc}); allowing overwrite due to --allow-snapshot-regression.",
+            err=True,
+        )
+        return merged_snapshot
+
+    # Combine, preferring new data for duplicates (same game_id + player_id).
+    combined = pd.concat([existing_snapshot, incoming_snapshot], ignore_index=True)
+    combined = combined.sort_values("as_of_ts", ascending=True)
+    merged_snapshot = combined.drop_duplicates(subset=["game_id", "player_id"], keep="last")
+    merged_snapshot = enforce_schema(merged_snapshot, INJURIES_SNAPSHOT_SCHEMA)
+    enforce_non_regression(
+        dataset_name="injuries",
+        existing=existing_snapshot,
+        candidate=merged_snapshot,
+        key_cols=("game_id", "player_id"),
+        allow_regression=allow_snapshot_regression,
+    )
+    typer.echo(
+        f"[injuries] merged with existing: {len(existing_snapshot)} existing + "
+        f"{len(merged_snapshot) - len(existing_snapshot)} new = {len(merged_snapshot)} total"
+    )
+    return merged_snapshot
+
+
 @app.command()
 def main(
     injuries_json: Path | None = typer.Option(
@@ -287,6 +361,16 @@ def main(
         "--injury-timeout",
         help="HTTP timeout (seconds) for NBA injury PDF scraping.",
     ),
+    allow_snapshot_regression: bool = typer.Option(
+        False,
+        "--allow-snapshot-regression/--no-allow-snapshot-regression",
+        help="Allow writing a silver snapshot with lower key coverage than the existing file (recovery only).",
+    ),
+    strict_schedule_coverage: bool = typer.Option(
+        True,
+        "--strict-schedule-coverage/--no-strict-schedule-coverage",
+        help="Fail when scheduled games exist but injury snapshot has zero overlap (no-op on no-game days).",
+    ),
 ) -> None:
     """Main injuries ETL entry point; intended usage relies on the live scraper + bronze/silver sinks."""
     start_day = pd.Timestamp(start).normalize()
@@ -306,7 +390,13 @@ def main(
             end=end_day,
             timeout=injury_timeout,
         )
-        schedule_df = load_schedule_data(schedule, start_day, end_day, schedule_timeout)
+        schedule_df = load_schedule_data(
+            schedule,
+            start_day,
+            end_day,
+            schedule_timeout,
+            allow_empty=True,
+        )
         resolver = TeamResolver(schedule_df)
         player_resolver = _build_player_resolver(scraper_timeout)
 
@@ -323,6 +413,14 @@ def main(
         injuries_snapshot = _build_injury_snapshot(injuries_raw, schedule_df)
         injuries_snapshot = enforce_schema(injuries_snapshot, INJURIES_SNAPSHOT_SCHEMA)
         validate_with_pandera(injuries_snapshot, INJURIES_SNAPSHOT_SCHEMA)
+
+        coverage = compute_game_coverage(schedule_df=schedule_df, observed_df=injuries_snapshot)
+        typer.echo(format_game_coverage("injuries", coverage))
+        enforce_game_coverage(
+            dataset_name="injuries",
+            stats=coverage,
+            strict=strict_schedule_coverage,
+        )
 
         partition_key = _snapshot_partition_key(start_day, month_override=month)
         default_silver = _default_silver_path(data_root, season, partition_key)
@@ -386,17 +484,12 @@ def main(
                         f"{latest_result.rows} rows -> {latest_result.path}"
                     )
 
-        # Merge with existing silver data to preserve historical games
-        if silver_path.exists():
-            existing = pd.read_parquet(silver_path)
-            # Combine, preferring new data for duplicates (same game_id + player_id)
-            combined = pd.concat([existing, injuries_snapshot], ignore_index=True)
-            # Keep latest as_of_ts per game_id + player_id
-            combined = combined.sort_values("as_of_ts", ascending=True)
-            combined = combined.drop_duplicates(subset=["game_id", "player_id"], keep="last")
-            injuries_snapshot = combined
-            typer.echo(f"[injuries] merged with existing: {len(existing)} existing + {len(injuries_snapshot) - len(existing)} new = {len(injuries_snapshot)} total")
-        
+        injuries_snapshot = _merge_with_existing_snapshot(
+            injuries_snapshot,
+            silver_path=silver_path,
+            allow_snapshot_regression=allow_snapshot_regression,
+        )
+
         injuries_snapshot.to_parquet(silver_path, index=False)
         rows_written = len(injuries_snapshot)
 

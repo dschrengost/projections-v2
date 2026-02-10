@@ -11,8 +11,14 @@ import typer
 from zoneinfo import ZoneInfo
 
 from projections import paths
+from projections.etl.coverage_guard import (
+    compute_game_coverage,
+    enforce_game_coverage,
+    format_game_coverage,
+)
 from projections.etl import storage
 from projections.etl.common import load_schedule_data
+from projections.etl.snapshot_guard import enforce_non_regression
 from projections.minutes_v1.schemas import (
     ODDS_RAW_SCHEMA,
     ODDS_SNAPSHOT_SCHEMA,
@@ -180,6 +186,62 @@ def _merge_odds_snapshots(existing: pd.DataFrame, incoming: pd.DataFrame) -> pd.
     return frame
 
 
+def _merge_with_existing_snapshot(
+    incoming_snapshot: pd.DataFrame,
+    *,
+    silver_path: Path,
+    allow_snapshot_regression: bool,
+) -> pd.DataFrame:
+    merged_snapshot = incoming_snapshot
+    if not silver_path.exists():
+        return merged_snapshot
+
+    try:
+        existing_snapshot = pd.read_parquet(silver_path)
+    except Exception as exc:  # noqa: BLE001
+        if not allow_snapshot_regression:
+            raise RuntimeError(
+                f"[odds] refusing overwrite because existing snapshot cannot be read: {exc}"
+            ) from exc
+        typer.echo(
+            f"[odds] warning: failed reading existing snapshot ({exc}); allowing overwrite due to --allow-snapshot-regression.",
+            err=True,
+        )
+        return merged_snapshot
+
+    try:
+        existing_snapshot = enforce_schema(
+            existing_snapshot, ODDS_SNAPSHOT_SCHEMA, allow_missing_optional=True
+        )
+    except Exception as exc:  # noqa: BLE001
+        if not allow_snapshot_regression:
+            raise RuntimeError(
+                f"[odds] refusing overwrite because existing snapshot schema is invalid: {exc}"
+            ) from exc
+        typer.echo(
+            f"[odds] warning: existing snapshot schema mismatch ({exc}); allowing overwrite due to --allow-snapshot-regression.",
+            err=True,
+        )
+        return merged_snapshot
+
+    merged_snapshot = _merge_odds_snapshots(existing_snapshot, incoming_snapshot)
+    merged_snapshot = enforce_schema(
+        merged_snapshot, ODDS_SNAPSHOT_SCHEMA, allow_missing_optional=True
+    )
+    enforce_non_regression(
+        dataset_name="odds",
+        existing=existing_snapshot,
+        candidate=merged_snapshot,
+        key_cols=("game_id",),
+        allow_regression=allow_snapshot_regression,
+    )
+    typer.echo(
+        f"[odds] merged with existing: {len(existing_snapshot)} existing + "
+        f"{len(merged_snapshot) - len(existing_snapshot)} new = {len(merged_snapshot)} total"
+    )
+    return merged_snapshot
+
+
 @app.command()
 def main(
     start: datetime = typer.Option(..., help="Start date inclusive (YYYY-MM-DD)."),
@@ -216,6 +278,16 @@ def main(
         "--schedule-timeout",
         help="Timeout (seconds) for NBA schedule API fallback.",
     ),
+    allow_snapshot_regression: bool = typer.Option(
+        False,
+        "--allow-snapshot-regression/--no-allow-snapshot-regression",
+        help="Allow writing a silver snapshot with lower key coverage than the existing file (recovery only).",
+    ),
+    strict_schedule_coverage: bool = typer.Option(
+        True,
+        "--strict-schedule-coverage/--no-strict-schedule-coverage",
+        help="Fail when scheduled games exist but odds snapshot has zero overlap (no-op on no-game days).",
+    ),
 ) -> None:
     start_day = pd.Timestamp(start).normalize()
     end_day = pd.Timestamp(end).normalize()
@@ -227,7 +299,13 @@ def main(
     run_ts = run_dt.isoformat()
     rows_written = 0
     try:
-        schedule_df = load_schedule_data(schedule, start_day, end_day, schedule_timeout)
+        schedule_df = load_schedule_data(
+            schedule,
+            start_day,
+            end_day,
+            schedule_timeout,
+            allow_empty=True,
+        )
         resolver = TeamResolver(schedule_df)
 
         scraper = OddstraderScraper(timeout=scraper_timeout)
@@ -308,28 +386,21 @@ def main(
                         f"{latest_result.rows} rows -> {latest_result.path}"
                     )
 
+        coverage = compute_game_coverage(schedule_df=schedule_df, observed_df=odds_snapshot)
+        typer.echo(format_game_coverage("odds", coverage))
+        enforce_game_coverage(
+            dataset_name="odds",
+            stats=coverage,
+            strict=strict_schedule_coverage,
+        )
+
         silver_path = silver_out or silver_default
         silver_path.parent.mkdir(parents=True, exist_ok=True)
-        merged_snapshot = odds_snapshot
-        if silver_path.exists():
-            try:
-                existing_snapshot = pd.read_parquet(silver_path)
-            except Exception as exc:  # noqa: BLE001
-                typer.echo(f"[odds] warning: failed reading existing snapshot ({exc}); overwriting.", err=True)
-            else:
-                try:
-                    existing_snapshot = enforce_schema(existing_snapshot, ODDS_SNAPSHOT_SCHEMA, allow_missing_optional=True)
-                except Exception as exc:  # noqa: BLE001
-                    typer.echo(f"[odds] warning: existing snapshot schema mismatch ({exc}); overwriting.", err=True)
-                else:
-                    merged_snapshot = _merge_odds_snapshots(existing_snapshot, odds_snapshot)
-                    merged_snapshot = enforce_schema(
-                        merged_snapshot, ODDS_SNAPSHOT_SCHEMA, allow_missing_optional=True
-                    )
-                    typer.echo(
-                        f"[odds] merged with existing: {len(existing_snapshot)} existing + "
-                        f"{len(merged_snapshot) - len(existing_snapshot)} new = {len(merged_snapshot)} total"
-                    )
+        merged_snapshot = _merge_with_existing_snapshot(
+            odds_snapshot,
+            silver_path=silver_path,
+            allow_snapshot_regression=allow_snapshot_regression,
+        )
 
         merged_snapshot.to_parquet(silver_path, index=False)
         rows_written = len(merged_snapshot)

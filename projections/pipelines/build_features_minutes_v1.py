@@ -274,6 +274,35 @@ def _ids_sidecar_path(parquet_path: Path) -> Path:
     return parquet_path.with_name(parquet_path.stem + ".ids.csv")
 
 
+def _is_full_calendar_month(start: pd.Timestamp, end: pd.Timestamp) -> bool:
+    if start.year != end.year or start.month != end.month:
+        return False
+    month_end = (start + pd.offsets.MonthEnd(0)).normalize()
+    return bool(start.day == 1 and end == month_end)
+
+
+def _merge_features_with_existing(
+    existing: pd.DataFrame,
+    incoming: pd.DataFrame,
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pd.DataFrame:
+    if existing.empty:
+        return incoming.copy()
+
+    work_existing = existing.copy()
+    work_incoming = incoming.copy()
+    work_existing["game_date"] = pd.to_datetime(work_existing["game_date"], errors="coerce").dt.normalize()
+    work_incoming["game_date"] = pd.to_datetime(work_incoming["game_date"], errors="coerce").dt.normalize()
+
+    keep_mask = (work_existing["game_date"] < start) | (work_existing["game_date"] > end)
+    preserved = work_existing.loc[keep_mask].copy()
+    combined = pd.concat([preserved, work_incoming], ignore_index=True, sort=False)
+    combined = deduplicate_latest(combined, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
+    return combined
+
+
 def _season_partition_candidates(season: int | str) -> list[str]:
     label = str(season)
     parts = [label]
@@ -432,6 +461,11 @@ def main(
         "--month",
         help="Month partition (1-12). Defaults to the start date month.",
     ),
+    merge_with_existing: bool = typer.Option(
+        True,
+        "--merge-with-existing/--overwrite-existing",
+        help="When output parquet exists, upsert requested date range instead of replacing the full file.",
+    ),
 ) -> None:
     """Entry point executed via `python -m projections.pipelines.build_features_minutes_v1`."""
 
@@ -548,6 +582,25 @@ def main(
         raise RuntimeError("Detected feature_as_of_ts > tip_ts rows; aborting write.")
 
     output_path = _ensure_output_path(data_root, season_value, month_value, out)
+    using_default_output = out is None
+    if output_path.exists():
+        if merge_with_existing:
+            existing = pd.read_parquet(output_path)
+            existing = enforce_schema(existing, FEATURES_MINUTES_V1_SCHEMA)
+            features = _merge_features_with_existing(
+                existing,
+                features,
+                start=start_day,
+                end=end_day,
+            )
+            features = enforce_schema(features, FEATURES_MINUTES_V1_SCHEMA)
+            validate_with_pandera(features, FEATURES_MINUTES_V1_SCHEMA)
+        elif using_default_output and not _is_full_calendar_month(start_day, end_day):
+            raise RuntimeError(
+                "[features] refusing partial overwrite of canonical monthly output. "
+                "Use default merge mode or pass --out to write to a custom path."
+            )
+
     features.to_parquet(output_path, index=False)
     write_ids_csv(features, _ids_sidecar_path(output_path))
     typer.echo(f"Wrote {len(features):,} feature rows to {output_path}")
