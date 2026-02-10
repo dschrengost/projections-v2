@@ -11,6 +11,7 @@ import subprocess
 import sys
 from typing import Any
 
+import pandas as pd
 from prefect import flow, get_run_logger, task
 
 from projections import paths
@@ -72,6 +73,100 @@ def _run_python_module(
 
 def _default_retrain_run_id() -> str:
     return datetime.now(tz=UTC).strftime("minutes_v1_recency_h35_%Y%m%dT%H%M%SZ")
+
+
+def _normalize_date(value: str | datetime | pd.Timestamp) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts.normalize()
+
+
+def _labels_date_bounds(*, data_root: Path, season: int) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    label_path = data_root / "labels" / f"season={season}" / "boxscore_labels.parquet"
+    if not label_path.exists():
+        return None, None
+    labels = pd.read_parquet(label_path, columns=["game_date"])
+    if labels.empty or "game_date" not in labels.columns:
+        return None, None
+    game_dates = pd.to_datetime(labels["game_date"], errors="coerce").dropna().dt.normalize()
+    if game_dates.empty:
+        return None, None
+    return game_dates.min(), game_dates.max()
+
+
+def _resolve_training_window(
+    *,
+    labels_max_date: pd.Timestamp,
+    labels_min_date: pd.Timestamp | None,
+    train_window_days: int,
+    cal_window_days: int,
+) -> dict[str, str]:
+    if train_window_days <= 0:
+        raise ValueError("train_window_days must be > 0")
+    if cal_window_days <= 0:
+        raise ValueError("cal_window_days must be > 0")
+
+    cal_end_date = pd.Timestamp(labels_max_date).normalize()
+    cal_start_date = cal_end_date - pd.Timedelta(days=cal_window_days - 1)
+    train_end_date = cal_start_date - pd.Timedelta(days=1)
+    train_start_date = train_end_date - pd.Timedelta(days=train_window_days - 1)
+
+    if labels_min_date is not None and cal_start_date < labels_min_date:
+        cal_start_date = labels_min_date.normalize()
+        train_end_date = cal_start_date - pd.Timedelta(days=1)
+    if labels_min_date is not None and train_start_date < labels_min_date:
+        train_start_date = labels_min_date.normalize()
+
+    if train_start_date > train_end_date:
+        raise RuntimeError(
+            "invalid rolling window after clamp: "
+            f"train_start={train_start_date.date()} train_end={train_end_date.date()} "
+            f"cal_start={cal_start_date.date()} cal_end={cal_end_date.date()}"
+        )
+
+    return {
+        "train_start_date": str(train_start_date.date()),
+        "train_end_date": str(train_end_date.date()),
+        "cal_start_date": str(cal_start_date.date()),
+        "cal_end_date": str(cal_end_date.date()),
+    }
+
+
+def _resolve_requested_windows(
+    *,
+    labels_max_date: pd.Timestamp | None,
+    labels_min_date: pd.Timestamp | None,
+    train_start_date: str | None,
+    train_end_date: str | None,
+    cal_start_date: str | None,
+    cal_end_date: str | None,
+    train_window_days: int,
+    cal_window_days: int,
+) -> dict[str, str]:
+    explicit_dates = [train_start_date, train_end_date, cal_start_date, cal_end_date]
+    any_explicit = any(v is not None for v in explicit_dates)
+    all_explicit = all(v is not None for v in explicit_dates)
+    if any_explicit and not all_explicit:
+        raise ValueError(
+            "Provide either all explicit train/cal dates or none. "
+            "Missing one or more of train_start_date/train_end_date/cal_start_date/cal_end_date."
+        )
+    if all_explicit:
+        return {
+            "train_start_date": str(_normalize_date(train_start_date).date()),
+            "train_end_date": str(_normalize_date(train_end_date).date()),
+            "cal_start_date": str(_normalize_date(cal_start_date).date()),
+            "cal_end_date": str(_normalize_date(cal_end_date).date()),
+        }
+    if labels_max_date is None:
+        raise RuntimeError("Cannot resolve rolling windows: labels max date is missing.")
+    return _resolve_training_window(
+        labels_max_date=labels_max_date,
+        labels_min_date=labels_min_date,
+        train_window_days=train_window_days,
+        cal_window_days=cal_window_days,
+    )
 
 
 def _resolve_current_bundle_from_config(config_path: Path) -> Path:
@@ -219,10 +314,12 @@ def minutes_retrain_flow(
     run_id: str | None = None,
     eval_run_id: str | None = None,
     season: int = 2025,
-    train_start_date: str = "2025-02-01",
-    train_end_date: str = "2026-01-31",
-    cal_start_date: str = "2026-02-01",
-    cal_end_date: str = "2026-02-05",
+    train_start_date: str | None = None,
+    train_end_date: str | None = None,
+    cal_start_date: str | None = None,
+    cal_end_date: str | None = None,
+    train_window_days: int = 120,
+    cal_window_days: int = 14,
     half_life_days: float = 35.0,
     train_random_state: int = 42,
     allow_guard_failure: bool = True,
@@ -234,15 +331,40 @@ def minutes_retrain_flow(
     logger = get_run_logger()
     data_root = paths.get_data_root()
     logger.info("[minutes-retrain-flow] data_root=%s", data_root)
+    labels_min_date, labels_max_date = _labels_date_bounds(data_root=data_root, season=season)
+    if labels_max_date is None:
+        raise RuntimeError(f"No labels available to retrain for season={season} under {data_root / 'labels'}")
+    windows = _resolve_requested_windows(
+        labels_max_date=labels_max_date,
+        labels_min_date=labels_min_date,
+        train_start_date=train_start_date,
+        train_end_date=train_end_date,
+        cal_start_date=cal_start_date,
+        cal_end_date=cal_end_date,
+        train_window_days=train_window_days,
+        cal_window_days=cal_window_days,
+    )
+    logger.info(
+        "[minutes-retrain-flow] windows train=[%s..%s] cal=[%s..%s] "
+        "(labels_min=%s labels_max=%s train_window_days=%s cal_window_days=%s)",
+        windows["train_start_date"],
+        windows["train_end_date"],
+        windows["cal_start_date"],
+        windows["cal_end_date"],
+        labels_min_date.date() if labels_min_date is not None else "none",
+        labels_max_date.date(),
+        train_window_days,
+        cal_window_days,
+    )
 
     retrain_result = retrain_minutes_task(
         run_id=run_id,
         data_root=data_root,
         season=season,
-        train_start_date=train_start_date,
-        train_end_date=train_end_date,
-        cal_start_date=cal_start_date,
-        cal_end_date=cal_end_date,
+        train_start_date=windows["train_start_date"],
+        train_end_date=windows["train_end_date"],
+        cal_start_date=windows["cal_start_date"],
+        cal_end_date=windows["cal_end_date"],
         half_life_days=half_life_days,
         train_random_state=train_random_state,
         allow_guard_failure=allow_guard_failure,

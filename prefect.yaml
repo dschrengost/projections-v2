@@ -106,10 +106,12 @@ deployments:
   entrypoint: prefect_flows/minutes_retrain.py:minutes_retrain_flow
   parameters:
     season: 2025
-    train_start_date: "2025-02-01"
-    train_end_date: "2026-01-31"
-    cal_start_date: "2026-02-01"
-    cal_end_date: "2026-02-05"
+    train_start_date: null
+    train_end_date: null
+    cal_start_date: null
+    cal_end_date: null
+    train_window_days: 120
+    cal_window_days: 14
     half_life_days: 35.0
     train_random_state: 42
     allow_guard_failure: true
