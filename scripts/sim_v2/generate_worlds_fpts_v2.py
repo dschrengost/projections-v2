@@ -2231,6 +2231,12 @@ def main(
             policy_reason_arr: np.ndarray | None = None
             play_prob_policy_cfg = getattr(profile_cfg, "play_prob_policy", None)
             if play_prob_policy_cfg is not None and getattr(play_prob_policy_cfg, "enabled", False) and group_map:
+                policy_mode = str(getattr(play_prob_policy_cfg, "mode", "guarded_v2")).strip().lower()
+                if policy_mode != "guarded_v2":
+                    raise ValueError(
+                        "[sim_v2] play_prob_policy.mode must be 'guarded_v2' when policy is enabled; "
+                        f"got mode='{policy_mode or '<empty>'}'"
+                    )
                 policy_df, policy_diag = apply_play_prob_policy_with_diagnostics(
                     mu_df,
                     play_prob_policy_cfg,
@@ -2245,7 +2251,7 @@ def main(
 
                 minutes_alloc_metrics["play_prob_policy_enabled"] = True
                 minutes_alloc_metrics["play_prob_policy"] = {
-                    "mode": str(getattr(play_prob_policy_cfg, "mode", "legacy")),
+                    "mode": policy_mode,
                     "n_players": int(policy_diag.n_players),
                     "n_rotation_locks": int(policy_diag.n_rotation_locks),
                     "n_changed": int(policy_diag.n_changed),

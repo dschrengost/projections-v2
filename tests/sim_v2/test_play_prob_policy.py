@@ -42,9 +42,10 @@ def test_rotation_lock_heuristic_topk_threshold_and_starter() -> None:
     assert locks[5] is False
 
 
-def test_play_prob_policy_rules_and_reasons() -> None:
+def test_play_prob_policy_legacy_mode_alias_uses_guarded_rules() -> None:
     cfg = PlayProbPolicyConfig(
         enabled=True,
+        mode="legacy",
         rotation_lock_min_cond_p50=18.0,
         rotation_lock_topk=2,
         rotation_lock_floor=0.995,
@@ -58,6 +59,7 @@ def test_play_prob_policy_rules_and_reasons() -> None:
             "player_id": [101, 102, 103, 104, 105],
             "minutes_p50_cond": [32.0, 28.0, 12.0, 28.0, 6.0],
             "starter_flag": [1, 0, 0, 0, 0],
+            "rotation_prob": [0.95, 0.95, 0.20, 0.90, 0.30],
             "play_prob": [0.8, 0.2, 0.5, 0.6, 0.3],
             "status_bucket": ["out", "healthy", "probable", "questionable", "healthy"],
         }
@@ -69,16 +71,16 @@ def test_play_prob_policy_rules_and_reasons() -> None:
     assert float(out.loc[0, "play_prob_eff"]) == 0.0
     assert out.loc[0, "play_prob_policy_reason"] == "out_like"
 
-    # Healthy rotation lock floors to ~1.0.
+    # Legacy alias should NOT apply broad rotation-lock floor.
     assert bool(out.loc[1, "rotation_lock"]) is True
-    assert float(out.loc[1, "play_prob_eff"]) == cfg.rotation_lock_floor
-    assert out.loc[1, "play_prob_policy_reason"] == "rotation_lock_floor"
+    assert float(out.loc[1, "play_prob_eff"]) == float(out.loc[1, "play_prob_raw"])
+    assert out.loc[1, "play_prob_policy_reason"] == "raw"
 
     # Probable floors to probable_floor even if not a rotation lock.
     assert float(out.loc[2, "play_prob_eff"]) == cfg.probable_floor
     assert out.loc[2, "play_prob_policy_reason"] == "probable_floor"
 
-    # Questionable should not be floored just because they are a rotation lock.
+    # Questionable should not be floored by starter/core guards.
     assert bool(out.loc[3, "rotation_lock"]) is True
     assert float(out.loc[3, "play_prob_eff"]) == float(out.loc[3, "play_prob_raw"])
     assert out.loc[3, "play_prob_policy_reason"] == "raw"
@@ -87,6 +89,8 @@ def test_play_prob_policy_rules_and_reasons() -> None:
     assert bool(out.loc[4, "rotation_lock"]) is False
     assert float(out.loc[4, "play_prob_eff"]) == float(out.loc[4, "play_prob_raw"])
     assert out.loc[4, "play_prob_policy_reason"] == "raw"
+
+    assert "rotation_lock_floor" not in out["play_prob_policy_reason"].tolist()
 
 
 def test_play_prob_policy_guarded_v2_blocks_depth_and_dnp_risk() -> None:
@@ -109,19 +113,19 @@ def test_play_prob_policy_guarded_v2_blocks_depth_and_dnp_risk() -> None:
 
     df = pd.DataFrame(
         {
-            "game_id": [1, 1, 1],
-            "team_id": [10, 10, 10],
-            "player_id": [101, 102, 103],
-            "minutes_p50_cond": [34.0, 28.0, 26.0],
-            "starter_flag": [1, 0, 0],
-            "rotation_prob": [0.95, 0.90, 0.90],
-            "play_prob": [0.40, 0.60, 0.60],
-            "status_bucket": ["healthy", "healthy", "healthy"],
-            "dc_role": ["starter", "rotation", "limited"],
-            "dc_ahead_global": [0, 1, 9],
-            "consecutive_active_dnp": [0, 0, 7],
-            "active_but_dnp_rate_last10": [0.0, 0.0, 0.7],
-            "inactive_streak_len": [0, 0, 0],
+            "game_id": [1, 1, 1, 1],
+            "team_id": [10, 10, 10, 10],
+            "player_id": [101, 102, 103, 104],
+            "minutes_p50_cond": [34.0, 28.0, 26.0, 18.0],
+            "starter_flag": [1, 0, 0, 0],
+            "rotation_prob": [0.95, 0.90, 0.90, 0.80],
+            "play_prob": [0.40, 0.60, 0.60, 0.55],
+            "status_bucket": ["healthy", "healthy", "healthy", "probable"],
+            "dc_role": ["starter", "rotation", "limited", "limited"],
+            "dc_ahead_global": [0, 1, 9, 9],
+            "consecutive_active_dnp": [0, 0, 7, 6],
+            "active_but_dnp_rate_last10": [0.0, 0.0, 0.7, 0.6],
+            "inactive_streak_len": [0, 0, 0, 0],
         }
     )
 
@@ -138,6 +142,10 @@ def test_play_prob_policy_guarded_v2_blocks_depth_and_dnp_risk() -> None:
     # Depth + DNP risk blocks flooring.
     assert float(out.loc[2, "play_prob_eff"]) == float(out.loc[2, "play_prob_raw"])
     assert out.loc[2, "play_prob_policy_reason"] == "raw_blocked_depth_dnp"
+
+    # Probable still respects guarded blockers; no probable floor for depth/DNP risk.
+    assert float(out.loc[3, "play_prob_eff"]) == float(out.loc[3, "play_prob_raw"])
+    assert out.loc[3, "play_prob_policy_reason"] == "raw"
 
 
 def test_play_prob_policy_guarded_v2_requires_raw_and_rotation_thresholds() -> None:
@@ -186,3 +194,32 @@ def test_play_prob_policy_guarded_v2_requires_raw_and_rotation_thresholds() -> N
     # Starter with low raw is still blocked by min_raw threshold.
     assert float(out.loc[2, "play_prob_eff"]) == float(out.loc[2, "play_prob_raw"])
     assert out.loc[2, "play_prob_policy_reason"] == "raw"
+
+
+def test_play_prob_policy_unknown_mode_falls_back_to_guarded_v2() -> None:
+    cfg = PlayProbPolicyConfig(
+        enabled=True,
+        mode="unexpected_mode",
+        rotation_lock_min_cond_p50=8.0,
+        rotation_lock_topk=3,
+        starter_floor=0.995,
+        max_floor_delta=0.25,
+        min_raw_play_prob_for_floor=0.35,
+    )
+
+    df = pd.DataFrame(
+        {
+            "game_id": [1],
+            "team_id": [10],
+            "player_id": [101],
+            "minutes_p50_cond": [34.0],
+            "starter_flag": [1],
+            "rotation_prob": [0.95],
+            "play_prob": [0.40],
+            "status_bucket": ["healthy"],
+        }
+    )
+
+    out, _diag = apply_play_prob_policy_with_diagnostics(df, cfg)
+    assert float(out.loc[0, "play_prob_eff"]) == pytest.approx(0.65, abs=1e-9)
+    assert out.loc[0, "play_prob_policy_reason"] == "starter_floor_guarded_v2"

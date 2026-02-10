@@ -292,92 +292,89 @@ def apply_play_prob_policy_with_diagnostics(
     p_eff = np.where(out_like, 0.0, p_eff)
     reasons = np.where(out_like, "out_like", reasons)
 
-    policy_mode = str(getattr(config, "mode", "legacy")).strip().lower()
+    policy_mode = str(getattr(config, "mode", "guarded_v2")).strip().lower()
     if policy_mode not in {"legacy", "guarded_v2"}:
-        policy_mode = "legacy"
+        policy_mode = "guarded_v2"
+    # "legacy" is intentionally treated as guarded_v2 to prevent broad rotation-lock
+    # flooring from forcing fringe players into near-certain availability.
+    if policy_mode == "legacy":
+        policy_mode = "guarded_v2"
 
-    if policy_mode == "guarded_v2":
-        # Guarded v2:
-        # - protect starters/core locks from under-confident p_play
-        # - never floor players with strong depth/DNP risk
-        # - bound floor uplift by max_floor_delta to avoid p_play jumps
-        _rotation_col, rotation_prob = _resolve_rotation_prob(df)
-        raw_min = float(np.clip(float(getattr(config, "min_raw_play_prob_for_floor", 0.35)), 0.0, 1.0))
-        rot_min = float(np.clip(float(getattr(config, "min_rotation_prob_for_floor", 0.65)), 0.0, 1.0))
-        max_floor_delta = float(getattr(config, "max_floor_delta", 0.25))
+    # Guarded v2:
+    # - protect starters/core locks from under-confident p_play
+    # - never floor players with strong depth/DNP risk
+    # - bound floor uplift by max_floor_delta to avoid p_play jumps
+    _rotation_col, rotation_prob = _resolve_rotation_prob(df)
+    raw_min = float(np.clip(float(getattr(config, "min_raw_play_prob_for_floor", 0.35)), 0.0, 1.0))
+    rot_min = float(np.clip(float(getattr(config, "min_rotation_prob_for_floor", 0.65)), 0.0, 1.0))
+    max_floor_delta = float(getattr(config, "max_floor_delta", 0.25))
 
-        dc_role = (
-            _normalize_text(df["dc_role"])
-            if "dc_role" in cols
-            else np.full(len(df), "", dtype=object)
-        )
-        depth_block_roles_raw = getattr(config, "depth_block_roles", ("limited", "not_listed"))
-        depth_block_roles = np.array(
-            [str(v).strip().lower() for v in depth_block_roles_raw if str(v).strip()],
-            dtype=object,
-        )
-        depth_block = (
-            np.isin(dc_role, depth_block_roles)
-            if depth_block_roles.size > 0
-            else np.zeros(len(df), dtype=bool)
-        )
-        ahead = _numeric_feature(df, "dc_ahead_global")
-        depth_block |= ahead >= float(getattr(config, "depth_block_min_ahead_global", 7))
+    dc_role = (
+        _normalize_text(df["dc_role"])
+        if "dc_role" in cols
+        else np.full(len(df), "", dtype=object)
+    )
+    depth_block_roles_raw = getattr(config, "depth_block_roles", ("limited", "not_listed"))
+    depth_block_roles = np.array(
+        [str(v).strip().lower() for v in depth_block_roles_raw if str(v).strip()],
+        dtype=object,
+    )
+    depth_block = (
+        np.isin(dc_role, depth_block_roles)
+        if depth_block_roles.size > 0
+        else np.zeros(len(df), dtype=bool)
+    )
+    ahead = _numeric_feature(df, "dc_ahead_global")
+    depth_block |= ahead >= float(getattr(config, "depth_block_min_ahead_global", 7))
 
-        streak = _numeric_feature(df, "consecutive_active_dnp")
-        dnp_rate = _numeric_feature(df, "active_but_dnp_rate_last10")
-        inactive_streak = _numeric_feature(df, "inactive_streak_len")
-        dnp_block = streak >= float(getattr(config, "dnp_block_streak_threshold", 3.0))
-        dnp_block |= dnp_rate >= float(getattr(config, "dnp_block_rate_threshold", 0.50))
-        dnp_block |= inactive_streak >= float(getattr(config, "dnp_block_inactive_streak_threshold", 2.0))
+    streak = _numeric_feature(df, "consecutive_active_dnp")
+    dnp_rate = _numeric_feature(df, "active_but_dnp_rate_last10")
+    inactive_streak = _numeric_feature(df, "inactive_streak_len")
+    dnp_block = streak >= float(getattr(config, "dnp_block_streak_threshold", 3.0))
+    dnp_block |= dnp_rate >= float(getattr(config, "dnp_block_rate_threshold", 0.50))
+    dnp_block |= inactive_streak >= float(getattr(config, "dnp_block_inactive_streak_threshold", 2.0))
 
-        risk_block = depth_block | dnp_block
-        base_eligible = not_listed_like & fresh_ok & ~out_like & ~risk_block & (p_raw >= raw_min)
-        rot_ok = rotation_prob >= rot_min
+    risk_block = depth_block | dnp_block
+    base_eligible = not_listed_like & fresh_ok & ~out_like & ~risk_block & (p_raw >= raw_min)
+    rot_ok = rotation_prob >= rot_min
 
-        # Starter lock floor (keeps unconditionals sane for clear starters).
-        starter_floor = float(np.clip(float(getattr(config, "starter_floor", 0.995)), 0.0, 1.0))
-        starter_mask = base_eligible & is_starter
-        p_eff, changed_starter = _apply_bounded_floor(
-            p_eff=p_eff,
-            p_raw=p_raw,
-            mask=starter_mask,
-            floor=starter_floor,
-            max_floor_delta=max_floor_delta,
-        )
-        reasons = np.where(changed_starter, "starter_floor_guarded_v2", reasons)
+    # Starter lock floor (keeps unconditionals sane for clear starters).
+    starter_floor = float(np.clip(float(getattr(config, "starter_floor", 0.995)), 0.0, 1.0))
+    starter_mask = base_eligible & is_starter
+    p_eff, changed_starter = _apply_bounded_floor(
+        p_eff=p_eff,
+        p_raw=p_raw,
+        mask=starter_mask,
+        floor=starter_floor,
+        max_floor_delta=max_floor_delta,
+    )
+    reasons = np.where(changed_starter, "starter_floor_guarded_v2", reasons)
 
-        # Core-lock floor (non-starters only; stricter than legacy top-8 heuristic).
-        core_lock = compute_rotation_lock_mask(
-            baseline_minutes=cond_p50,
-            is_starter=is_starter if is_starter.size else None,
-            group_map=group_map,
-            top_k=int(getattr(config, "core_lock_topk", 5)),
-            minutes_threshold=float(getattr(config, "core_lock_min_cond_p50", 24.0)),
-        )
-        core_floor = float(np.clip(float(getattr(config, "core_floor", 0.90)), 0.0, 1.0))
-        core_mask = base_eligible & (~is_starter) & core_lock & rot_ok
-        p_eff, changed_core = _apply_bounded_floor(
-            p_eff=p_eff,
-            p_raw=p_raw,
-            mask=core_mask,
-            floor=core_floor,
-            max_floor_delta=max_floor_delta,
-        )
-        reasons = np.where(changed_core, "core_floor_guarded_v2", reasons)
+    # Core-lock floor (non-starters only; stricter than legacy top-8 heuristic).
+    core_lock = compute_rotation_lock_mask(
+        baseline_minutes=cond_p50,
+        is_starter=is_starter if is_starter.size else None,
+        group_map=group_map,
+        top_k=int(getattr(config, "core_lock_topk", 5)),
+        minutes_threshold=float(getattr(config, "core_lock_min_cond_p50", 24.0)),
+    )
+    core_floor = float(np.clip(float(getattr(config, "core_floor", 0.90)), 0.0, 1.0))
+    core_mask = base_eligible & (~is_starter) & core_lock & rot_ok
+    p_eff, changed_core = _apply_bounded_floor(
+        p_eff=p_eff,
+        p_raw=p_raw,
+        mask=core_mask,
+        floor=core_floor,
+        max_floor_delta=max_floor_delta,
+    )
+    reasons = np.where(changed_core, "core_floor_guarded_v2", reasons)
 
-        blocked_mask = rotation_lock & not_listed_like & fresh_ok & ~out_like & risk_block
-        reasons = np.where((reasons == "raw") & blocked_mask, "raw_blocked_depth_dnp", reasons)
-    else:
-        # Legacy behavior: broad rotation-lock floor.
-        rot_floor = float(np.clip(float(getattr(config, "rotation_lock_floor", 0.995)), 0.0, 1.0))
-        rot_mask = rotation_lock & not_listed_like & fresh_ok & ~out_like
-        p_eff = np.where(rot_mask, np.maximum(p_eff, rot_floor), p_eff)
-        reasons = np.where((rot_mask) & (p_eff > p_raw), "rotation_lock_floor", reasons)
+    blocked_mask = rotation_lock & not_listed_like & fresh_ok & ~out_like & risk_block
+    reasons = np.where((reasons == "raw") & blocked_mask, "raw_blocked_depth_dnp", reasons)
 
-    # Rule (c): PROBABLE => floor.
+    # Rule (c): PROBABLE => floor, but keep guarded blockers (depth/DNP/freshness).
     prob_floor = float(np.clip(float(getattr(config, "probable_floor", 0.90)), 0.0, 1.0))
-    prob_mask = probable_like & ~out_like
+    prob_mask = probable_like & ~out_like & fresh_ok & ~risk_block
     before = p_eff.copy()
     p_eff = np.where(prob_mask, np.maximum(p_eff, prob_floor), p_eff)
     bumped_prob = (p_eff > before) & prob_mask
