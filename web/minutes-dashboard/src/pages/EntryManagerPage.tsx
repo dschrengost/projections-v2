@@ -46,6 +46,13 @@ interface ApplyBuildResult {
     lineupRangeEnd: number
 }
 
+interface ApplyBuildTargetInfo {
+    contestCount: number
+    totalEntries: number
+    targetIds: string[]
+    applyingAllByDefault: boolean
+}
+
 interface LineupState {
     baselineLineup: LineupSlots
     currentLineup: LineupSlots
@@ -360,11 +367,7 @@ export default function EntryManagerPage() {
 
     const handleApplyBuild = async () => {
         if (!selectedBuildId) return
-        const targetIds = selectedContestIds.size > 0
-            ? contestOrder.filter(id => selectedContestIds.has(id))
-            : selectedContestId
-                ? [selectedContestId]
-                : []
+        const targetIds = applyBuildTargetInfo.targetIds
         if (targetIds.length === 0) return
         setApplyLoading(true)
         setEntryError(null)
@@ -620,17 +623,32 @@ export default function EntryManagerPage() {
         return contestOrder.map(id => map.get(id)).filter(Boolean) as EntryFileSummary[]
     }, [contestOrder, entryFiles])
 
-    const applyBuildTargetInfo = useMemo(() => {
-        const targetIds = selectedContestIds.size > 0
-            ? contestOrder.filter(id => selectedContestIds.has(id))
-            : selectedContestId
-                ? [selectedContestId]
-                : []
+    const applyBuildTargetInfo = useMemo<ApplyBuildTargetInfo>(() => {
+        const explicitTargets = contestOrder.filter(id => selectedContestIds.has(id))
+        let targetIds: string[]
+        let applyingAllByDefault = false
+
+        if (explicitTargets.length > 0) {
+            targetIds = explicitTargets
+        } else if (entryFiles.length > 1) {
+            // Default to all uploaded contests when multiple are present.
+            targetIds = contestOrder.length > 0
+                ? [...contestOrder]
+                : entryFiles.map(entry => entry.contest_id)
+            applyingAllByDefault = true
+        } else if (selectedContestId) {
+            targetIds = [selectedContestId]
+        } else if (entryFiles.length === 1) {
+            targetIds = [entryFiles[0].contest_id]
+        } else {
+            targetIds = []
+        }
+
         const totalEntries = targetIds.reduce((sum, id) => {
             const entry = entryFiles.find(e => e.contest_id === id)
             return sum + (entry?.entry_count ?? 0)
         }, 0)
-        return { contestCount: targetIds.length, totalEntries }
+        return { contestCount: targetIds.length, totalEntries, targetIds, applyingAllByDefault }
     }, [selectedContestIds, selectedContestId, contestOrder, entryFiles])
 
     const toggleContestSelection = (contestId: string) => {
@@ -891,9 +909,14 @@ export default function EntryManagerPage() {
                         {applyLoading
                             ? 'Applying...'
                             : applyBuildTargetInfo.contestCount > 1
-                                ? `Apply to ${applyBuildTargetInfo.contestCount} Contests (${applyBuildTargetInfo.totalEntries} entries)`
+                                ? applyBuildTargetInfo.applyingAllByDefault
+                                    ? `Apply to All Contests (${applyBuildTargetInfo.totalEntries} entries)`
+                                    : `Apply to ${applyBuildTargetInfo.contestCount} Contests (${applyBuildTargetInfo.totalEntries} entries)`
                                 : 'Apply Build'}
                     </button>
+                    {applyBuildTargetInfo.applyingAllByDefault && (
+                        <div className="muted">No contests selected; applying across all uploaded contests.</div>
+                    )}
                     <button
                         className="build-btn"
                         onClick={handleLateSwap}
