@@ -72,7 +72,10 @@ Configured per profile in `config/sim_v2_profiles.json` under `play_prob_policy`
 
 Defaults (when the block is absent) are conservative: policy is disabled.
 
-The production `sim_v3` profile enables the policy and sets `rotation_lock_min_cond_p50=8.0` to reduce feasibility resampling on typical slates.
+The production `sim_v3` profile enables the policy and currently uses:
+- `rotation_lock_min_cond_p50=12.0`
+- guarded core floor lock: `core_lock_min_cond_p50=22.0`, `core_lock_topk=3`
+- floor gates: `min_raw_play_prob_for_floor=0.3`, `min_rotation_prob_for_floor=0.6`
 
 Fields:
 
@@ -105,3 +108,24 @@ For per-player audits:
 ```bash
 uv run python -m scripts.diagnostics.world_sparsity_stats --date 2026-01-29 --n-worlds 1000 --profile sim_v3 --player-out /tmp/play_prob_policy_players.csv
 ```
+
+## Grid-search tuning workflow
+
+Use the dedicated tuner to re-score guarded-v2 knobs on historical `effective_minutes` snapshots against realized boxscore "played" labels:
+
+```bash
+uv run python -m scripts.diagnostics.grid_search_play_prob_policy \
+  --start 2026-01-15 \
+  --end 2026-02-09 \
+  --holdout-days 5
+```
+
+Outputs are written to:
+
+`artifacts/tuning/play_prob_policy/<run_id>/`
+
+Key artifacts:
+- `results.parquet` / `results.csv`: full candidate table with train/holdout/all metrics
+- `top_candidates.csv`: compact ranking table
+- `best_play_prob_policy.json`: config snippet ready for `config/sim_v2_profiles.json`
+- `summary.json`: run metadata, date splits, objective weights, and source run_ids
