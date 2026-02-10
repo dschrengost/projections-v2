@@ -70,6 +70,23 @@ The deploy script:
 3. Writes `.deploy_info` with deployment metadata
 4. Prints the runtime stamp from PROD
 
+By default, deploys preserve production model selector pointers:
+- `config/minutes_current_run.json`
+- `config/rates_current_run.json`
+
+Use this only when you intentionally want to overwrite those selectors from DEV:
+
+```bash
+./scripts/deploy/deploy_live.sh --sync-pointers
+```
+
+Runtime selectors are sourced from:
+- `$PROJECTIONS_DATA_ROOT/control_plane/model_selectors/minutes_current_run.json`
+- `$PROJECTIONS_DATA_ROOT/control_plane/model_selectors/rates_current_run.json`
+
+Repo-local `config/*_current_run.json` files are fallback/defaults and audit context.
+`deploy_live.sh` seeds runtime selectors from PROD config when missing, and only overwrites them with `--sync-pointers`.
+
 ### What NOT to Edit Directly
 
 > **⚠️ Never edit files directly in `/home/daniel/prod/projections-v2`**

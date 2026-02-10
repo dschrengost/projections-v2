@@ -172,6 +172,7 @@ deployments:
     normal_slice_end: null
     chaos_slice_start: null
     chaos_slice_end: null
+    sync_repo_selector: false
   work_pool:
     name: projections-local
     work_queue_name: null

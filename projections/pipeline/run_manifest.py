@@ -20,6 +20,7 @@ from typing import Any
 
 import pandas as pd
 
+from projections import model_selectors
 
 @dataclass
 class ArtifactInfo:
@@ -260,7 +261,7 @@ def build_manifest_config(
     
     # Load minutes config
     if config_path is None:
-        config_path = Path("config/minutes_current_run.json")
+        config_path = model_selectors.active_minutes_selector_path()
     
     if config_path.exists():
         try:

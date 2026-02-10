@@ -83,7 +83,7 @@ def _resolve_minutes_run_id(explicit: Optional[str] = None) -> str:
         return explicit
     _, run_id = resolve_production_run_dir()
     if not run_id:
-        raise RuntimeError("Unable to resolve minutes run_id from config/minutes_current_run.json")
+        raise RuntimeError("Unable to resolve minutes run_id from active minutes selector config")
     return str(run_id)
 
 
@@ -315,7 +315,6 @@ def enforce_team_240_with_pruning(
 
             # Track original active minutes for re-add
             original_m = m.copy()
-            original_active = active_local.copy()
 
             # Step 1: Floor prune (never prune starters)
             pruned_mask = np.zeros_like(active_local, dtype=bool)

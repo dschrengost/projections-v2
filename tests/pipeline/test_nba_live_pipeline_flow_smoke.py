@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from projections import model_selectors
 from projections.pipeline import control_plane
 
 
@@ -24,9 +25,29 @@ def test_nba_live_pipeline_flow_smoke(tmp_path: Path, monkeypatch: pytest.Monkey
     from projections import paths
 
     game_date = "2025-01-01"
+    monkeypatch.setenv("PROJECTIONS_ALLOW_DIRTY", "1")
 
     # Route all pipeline IO into a temporary data_root.
     monkeypatch.setattr(paths, "get_data_root", lambda: tmp_path)
+
+    def fake_build_minutes_features_task(*, game_date: str, run_id: str, run_as_of_ts: str, data_root: Path) -> Path:  # noqa: ARG001
+        out = data_root / "live" / "features_minutes_v1" / game_date / f"run={run_id}" / "features.parquet"
+        df = pd.DataFrame(
+            {
+                "game_date": [game_date] * 20,
+                "game_id": [1] * 20,
+                "team_id": [100] * 10 + [200] * 10,
+                "player_id": list(range(1, 21)),
+                "feature_as_of_ts": ["2025-01-01T00:00:00Z"] * 20,
+                "as_of_ts": ["2025-01-01T00:00:00Z"] * 20,
+                "odds_as_of_ts": ["2025-01-01T00:00:00Z"] * 20,
+                "injuries_as_of_ts": ["2025-01-01T00:00:00Z"] * 20,
+            }
+        )
+        _write_parquet(out, df)
+        return out
+
+    monkeypatch.setattr(live_nba_pipeline, "build_minutes_features_task", fake_build_minutes_features_task)
 
     def fake_run_python_module(module: str, args: list[str], *, data_root: Path, timeout_s: int) -> None:  # noqa: ARG001
         run_id = None
@@ -47,19 +68,6 @@ def test_nba_live_pipeline_flow_smoke(tmp_path: Path, monkeypatch: pytest.Monkey
             return
 
         if run_id is None:
-            return
-
-        if module == "projections.cli.build_minutes_live":
-            out = data_root / "live" / "features_minutes_v1" / game_date / f"run={run_id}" / "features.parquet"
-            df = pd.DataFrame(
-                {
-                    "game_date": [game_date] * 20,
-                    "game_id": [1] * 20,
-                    "team_id": [100] * 10 + [200] * 10,
-                    "player_id": list(range(1, 21)),
-                }
-            )
-            _write_parquet(out, df)
             return
 
         if module == "projections.cli.score_minutes_v1":
@@ -156,8 +164,12 @@ def test_nba_live_pipeline_flow_smoke(tmp_path: Path, monkeypatch: pytest.Monkey
     assert manifest["game_date"] == game_date
     assert manifest["sim_profile"] == "sim_v3"
     assert manifest["entrypoint"] == "prefect"
-    assert manifest["minutes_current_run_path"] == "config/minutes_current_run.json"
-    assert manifest["rates_current_run_path"] == "config/rates_current_run.json"
+    assert Path(manifest["minutes_current_run_path"]).resolve() == model_selectors.active_minutes_selector_path(
+        data_root=tmp_path
+    )
+    assert Path(manifest["rates_current_run_path"]).resolve() == model_selectors.active_rates_selector_path(
+        data_root=tmp_path
+    )
 
     # Pointers are promoted atomically, but only by the guarded Prefect run.
     dataset_dir = tmp_path / "artifacts" / "projections" / game_date

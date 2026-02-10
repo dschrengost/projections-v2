@@ -25,7 +25,7 @@ import typer
 from unidecode import unidecode
 from click.core import ParameterSource
 
-from projections import paths
+from projections import model_selectors, paths
 from projections.labels import derive_starter_flag_labels
 from projections.minutes_v1 import modeling
 from projections.minutes_v1.minute_share import MinuteShareArtifacts, predict_minutes
@@ -75,7 +75,7 @@ UTC = timezone.utc
 DEFAULT_FEATURES_ROOT = paths.data_path("gold", "features_minutes_v1")
 DEFAULT_LIVE_FEATURES_ROOT = paths.data_path("live", "features_minutes_v1")
 DEFAULT_DAILY_ROOT = paths.data_path("artifacts", "minutes_v1", "daily")
-DEFAULT_BUNDLE_CONFIG = Path("config/minutes_current_run.json")
+DEFAULT_BUNDLE_CONFIG = model_selectors.active_minutes_selector_path()
 DEFAULT_INJURIES_ROOT = paths.data_path("bronze", "injuries_raw")
 DEFAULT_SCHEDULE_ROOT = paths.data_path("silver", "schedule")
 DEFAULT_STARTER_PRIORS = paths.data_path("gold", "minutes_priors", "starter_slot_priors.parquet")

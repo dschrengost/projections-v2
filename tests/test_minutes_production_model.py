@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from projections import model_selectors
 from projections.minutes_v1.production import load_production_minutes_bundle, resolve_production_run_dir
 
 
 def _read_current_config() -> dict:
-    path = Path("config/minutes_current_run.json").resolve()
+    path = model_selectors.active_minutes_selector_path().resolve()
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))

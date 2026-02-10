@@ -13,11 +13,10 @@ from typing import Any
 
 from prefect import flow, get_run_logger, task
 
-from projections import paths
+from projections import model_selectors, paths
 
 
 PROJECT_ROOT = paths.get_project_root()
-DEFAULT_MINUTES_CONFIG = PROJECT_ROOT / "config/minutes_current_run.json"
 _DEFAULT_UV_PATH = Path("/home/daniel/.local/bin/uv")
 
 
@@ -164,10 +163,14 @@ def evaluate_candidate_task(
     eval_run_id: str | None,
 ) -> dict[str, str]:
     logger = get_run_logger()
+    config_path = model_selectors.active_minutes_selector_path(
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
     current_bundle = (
         Path(current_bundle_dir).expanduser().resolve()
         if current_bundle_dir
-        else _resolve_current_bundle_from_config(DEFAULT_MINUTES_CONFIG)
+        else _resolve_current_bundle_from_config(config_path)
     )
     retrain_bundle = Path(retrain_bundle_dir).expanduser().resolve()
     effective_eval_run_id = eval_run_id.strip() if eval_run_id else f"minutes_head_to_head_{retrain_run_id}"
@@ -208,6 +211,7 @@ def evaluate_candidate_task(
         "eval_run_id": effective_eval_run_id,
         "summary_path": str(summary_path),
         "report_path": str(eval_report_path),
+        "selector_path": str(config_path),
         "current_bundle_dir": str(current_bundle),
         "retrain_bundle_dir": str(retrain_bundle),
     }

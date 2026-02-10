@@ -6,28 +6,18 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from projections.model_selectors import active_rates_selector_path
 from projections.rates_v1.loader import RatesBundle, load_rates_bundle
-
-
-def _default_config_path() -> Path:
-    """Locate config/rates_current_run.json relative to the repo root."""
-
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        candidate = parent / "config" / "rates_current_run.json"
-        if candidate.exists():
-            return candidate
-    return Path.cwd() / "config" / "rates_current_run.json"
 
 
 def get_rates_current_run_id(config_path: Optional[Path] = None) -> str:
     """
-    Load the current production rates_v1 run_id from config/rates_current_run.json.
+    Load the current production rates_v1 run_id from the active selector config.
 
     Raises RuntimeError if the config is missing or malformed.
     """
 
-    config_file = (config_path or _default_config_path()).expanduser().resolve()
+    config_file = (config_path or active_rates_selector_path()).expanduser().resolve()
     if not config_file.exists():
         raise RuntimeError(f"rates_current_run.json not found at {config_file}")
     try:
@@ -42,7 +32,7 @@ def get_rates_current_run_id(config_path: Optional[Path] = None) -> str:
 
 def load_current_rates_bundle(config_path: Optional[Path] = None) -> RatesBundle:
     """
-    Convenience helper: reads the current run_id from rates_current_run.json
+    Convenience helper: reads the current run_id from the active rates selector
     and returns the corresponding RatesBundle.
     """
 

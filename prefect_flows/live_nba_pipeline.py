@@ -45,6 +45,7 @@ from zoneinfo import ZoneInfo
 from projections import paths
 from projections.builders import build_shared_features
 from projections.cli import build_minutes_live as live_minutes_builder
+from projections import model_selectors
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline import effective_inputs, health
@@ -1032,6 +1033,15 @@ def nba_live_pipeline_flow(
     rotshare_mc_center: str = "mean",
 ) -> dict[str, str]:
     logger = get_run_logger()
+    data_root = paths.get_data_root()
+    minutes_selector_path = model_selectors.active_minutes_selector_path(
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
+    rates_selector_path = model_selectors.active_rates_selector_path(
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
 
     # Runtime stamp - log what code/config is running at flow start
     enforce_clean_tree()  # Fail-fast if dirty tree in prod (set PROJECTIONS_ALLOW_DIRTY=1 to bypass)
@@ -1039,8 +1049,8 @@ def nba_live_pipeline_flow(
     log_runtime_stamp(
         entrypoint="prefect:nba-live-pipeline",
         config_paths={
-            "minutes_current_run": PROJECT_ROOT / "config/minutes_current_run.json",
-            "rates_current_run": PROJECT_ROOT / "config/rates_current_run.json",
+            "minutes_current_run": minutes_selector_path,
+            "rates_current_run": rates_selector_path,
             "rotation_set_minutes_live": PROJECT_ROOT
             / "config/rotation_set_minutes_live.json",
             "sim_v2_profiles": PROJECT_ROOT / "config/sim_v2_profiles.json",
@@ -1048,8 +1058,6 @@ def nba_live_pipeline_flow(
         project_root=PROJECT_ROOT,
         logger=logger,
     )
-
-    data_root = paths.get_data_root()
 
     if game_date is None:
         # Use Eastern Time for NBA slate date (games are scheduled for ET dates).
@@ -1072,8 +1080,8 @@ def nba_live_pipeline_flow(
             as_of_ts=as_of_ts,
             sim_profile="sim_v3",
             entrypoint="prefect",
-            minutes_current_run_path=Path("config/minutes_current_run.json"),
-            rates_current_run_path=Path("config/rates_current_run.json"),
+            minutes_current_run_path=minutes_selector_path,
+            rates_current_run_path=rates_selector_path,
             slate={},
         )
         if minutes_bundle_dir or rotshare_quantiles_mode:
@@ -1326,7 +1334,7 @@ def _utc_now_iso() -> str:
 
 
 def _read_minutes_reconcile_mode() -> str:
-    config_path = Path("config/minutes_current_run.json")
+    config_path = model_selectors.active_minutes_selector_path()
     try:
         payload = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from projections import paths
+from projections import model_selectors, paths
 from projections.minutes import (
     MINUTES_CONTRACT_VERSION,
     PLAY_THRESHOLD_MINUTES,
@@ -621,8 +621,15 @@ def create_app(
 
     # Capture server startup info using unified runtime stamp
     from projections.runtime_stamp import collect_runtime_stamp
+    data_root = paths.get_data_root()
+    minutes_selector_path = model_selectors.active_minutes_selector_path(data_root=data_root)
+    rates_selector_path = model_selectors.active_rates_selector_path(data_root=data_root)
     _stamp = collect_runtime_stamp(
         entrypoint="api",
+        config_paths={
+            "minutes_current_run": minutes_selector_path,
+            "rates_current_run": rates_selector_path,
+        },
         project_root=Path(__file__).parent.parent.parent,
     )
 
