@@ -17,6 +17,11 @@ import typer
 
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.models import minutes_lgbm as ml
+from projections.models.rotalloc import (
+    allocate_adaptive_depth,
+    build_eligible_mask,
+    compute_bench_share_prior,
+)
 
 
 app = typer.Typer(help=__doc__)
@@ -32,6 +37,15 @@ DEFAULT_DATA_ROOT = Path("/home/daniel/projections-data")
 DEFAULT_LABELS = Path("/home/daniel/projections-data/labels/season=2025/boxscore_labels.parquet")
 DEFAULT_EVAL_ROOT = Path("/home/daniel/projections-data/artifacts/minutes_eval_runs")
 DEFAULT_REPORT_PATH = Path("reports/minutes_head_to_head_eval_20260207.md")
+DEFAULT_OCCUPANCY_P_CUTOFF = 0.10
+DEFAULT_OCCUPANCY_K_MIN = 8
+DEFAULT_OCCUPANCY_K_MAX = 11
+DEFAULT_OCCUPANCY_CAP_MAX = 40.0
+DEFAULT_OCCUPANCY_FRINGE_CAP_MAX = 14.0
+DEFAULT_OCCUPANCY_SCALE = 8.0
+DEFAULT_OCCUPANCY_STARTER_FLOOR = 0.85
+_OUT_STATUS_PREFIXES = ("OUT", "INACTIVE", "DNP")
+_STARTER_ROLE_VALUES = {"PROJECTED_STARTER", "CONFIRMED_STARTER"}
 
 
 @dataclass(frozen=True)
@@ -80,6 +94,26 @@ def _git_sha_or_unknown() -> str:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     except Exception:
         return "unknown"
+
+
+def _safe_status_upper(series: pd.Series | None, *, index: pd.Index) -> pd.Series:
+    if series is None:
+        return pd.Series("", index=index, dtype="string")
+    return series.astype("string", copy=False).fillna("").str.upper()
+
+
+def _coerce_bool_series(series: pd.Series | None, *, index: pd.Index) -> pd.Series:
+    if series is None:
+        return pd.Series(False, index=index, dtype=bool)
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False).astype(bool)
+
+    numeric = pd.to_numeric(series, errors="coerce")
+    if numeric.notna().any():
+        return numeric.fillna(0.0).astype(float).ne(0.0)
+
+    text = series.astype("string", copy=False).str.strip().str.lower()
+    return text.fillna("").isin({"1", "true", "t", "yes", "y"})
 
 
 def _read_labels(labels_path: Path) -> pd.DataFrame:
@@ -485,6 +519,216 @@ def score_bundle_on_eval_dataset(
     return out
 
 
+def apply_occupancy_sparse_layer(
+    pred_df: pd.DataFrame,
+    eval_df: pd.DataFrame,
+    *,
+    p_cutoff: float = DEFAULT_OCCUPANCY_P_CUTOFF,
+    k_min: int = DEFAULT_OCCUPANCY_K_MIN,
+    k_max: int = DEFAULT_OCCUPANCY_K_MAX,
+    cap_max: float = DEFAULT_OCCUPANCY_CAP_MAX,
+    fringe_cap_max: float = DEFAULT_OCCUPANCY_FRINGE_CAP_MAX,
+    occupancy_scale: float = DEFAULT_OCCUPANCY_SCALE,
+    starter_floor: float = DEFAULT_OCCUPANCY_STARTER_FLOOR,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Apply an occupancy-aware sparse allocator on top of retrain predictions.
+
+    This is an offline diagnostic transform used only in eval/reporting.
+    """
+    if pred_df.empty:
+        raise ValueError("pred_df is empty.")
+    if eval_df.empty:
+        raise ValueError("eval_df is empty.")
+
+    required_pred_cols = {
+        "game_id",
+        "team_id",
+        "player_id",
+        "play_prob",
+        "pred_p10_minutes",
+        "pred_p50_minutes",
+        "pred_p90_minutes",
+    }
+    missing_pred = sorted(required_pred_cols - set(pred_df.columns))
+    if missing_pred:
+        raise ValueError(f"pred_df missing required columns: {missing_pred}")
+
+    join_cols = ["game_id", "team_id", "player_id"]
+    context_cols = [
+        "status",
+        "is_out",
+        "lineup_role",
+        "starter_flag",
+        "is_projected_starter",
+        "is_confirmed_starter",
+        "is_starter",
+        "spread_home",
+        "total",
+        "home_flag",
+    ]
+    available_context = [c for c in context_cols if c in eval_df.columns]
+    context = eval_df[join_cols + available_context].drop_duplicates(subset=join_cols, keep="last")
+    merged = pred_df.merge(context, on=join_cols, how="left", validate="one_to_one")
+    merged = merged.copy()
+
+    status_upper = _safe_status_upper(merged.get("status"), index=merged.index)
+    role_upper = _safe_status_upper(merged.get("lineup_role"), index=merged.index)
+
+    out_mask = pd.Series(False, index=merged.index, dtype=bool)
+    if "is_out" in merged.columns:
+        out_mask = out_mask | pd.to_numeric(merged["is_out"], errors="coerce").fillna(0).astype(int).eq(1)
+    out_mask = out_mask | status_upper.str.startswith(_OUT_STATUS_PREFIXES)
+    out_mask = out_mask | status_upper.str.contains("SUSP", na=False)
+    out_mask = out_mask | role_upper.eq("OUT")
+
+    starter_mask = pd.Series(False, index=merged.index, dtype=bool)
+    for col in ("starter_flag", "is_projected_starter", "is_confirmed_starter", "is_starter"):
+        starter_mask = starter_mask | _coerce_bool_series(merged.get(col), index=merged.index)
+    starter_mask = starter_mask | role_upper.isin(_STARTER_ROLE_VALUES)
+    starter_mask = starter_mask & ~out_mask
+
+    p_rot = pd.to_numeric(merged["play_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0).to_numpy(dtype=float)
+    mu_pred = pd.to_numeric(merged["pred_p50_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    mu_pred = np.maximum(mu_pred, 0.0)
+
+    p10_orig = pd.to_numeric(merged["pred_p10_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    p90_orig = pd.to_numeric(merged["pred_p90_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    p10_orig = np.maximum(0.0, p10_orig)
+    p90_orig = np.maximum(p10_orig, p90_orig)
+    lower_width = np.maximum(0.0, mu_pred - p10_orig)
+    upper_width = np.maximum(0.0, p90_orig - mu_pred)
+
+    minutes_occ = np.zeros(len(merged), dtype=float)
+    eligible_flags = np.zeros(len(merged), dtype=bool)
+    bench_share_pred_arr = np.zeros(len(merged), dtype=float)
+    diagnostic_rows: list[dict[str, Any]] = []
+
+    home_flag_series = (
+        pd.to_numeric(merged.get("home_flag"), errors="coerce").fillna(0.0)
+        if "home_flag" in merged.columns
+        else pd.Series(0.0, index=merged.index, dtype=float)
+    )
+
+    for (game_id, team_id), group in merged.groupby(["game_id", "team_id"], sort=False):
+        idx = group.index.to_numpy()
+        if idx.size == 0:
+            continue
+
+        p_g = p_rot[idx]
+        mu_g = mu_pred[idx]
+        out_g = out_mask.iloc[idx].to_numpy(dtype=bool)
+        starter_g = starter_mask.iloc[idx].to_numpy(dtype=bool)
+
+        candidate_mask = (~out_g) & np.isfinite(mu_g) & np.isfinite(p_g) & (mu_g > 0.0) & (p_g > 0.0)
+        if not candidate_mask.any():
+            starter_candidates = starter_g & (~out_g)
+            if starter_candidates.any():
+                candidate_mask = starter_candidates
+            elif (~out_g).any():
+                best_idx = int(np.argmax(np.where(~out_g, mu_g, -np.inf)))
+                candidate_mask = np.zeros_like(out_g, dtype=bool)
+                candidate_mask[best_idx] = True
+
+        eligible_g = build_eligible_mask(
+            p_g,
+            mu_g,
+            candidate_mask,
+            a=1.0,
+            mu_power=1.0,
+            p_cutoff=float(p_cutoff),
+            k_min=int(k_min),
+            k_max=int(k_max),
+            use_expected_k=True,
+        )
+        eligible_g = eligible_g | (starter_g & (~out_g))
+        eligible_g = eligible_g & (~out_g)
+        if not eligible_g.any() and (~out_g).any():
+            best_idx = int(np.argmax(np.where(~out_g, mu_g, -np.inf)))
+            eligible_g = np.zeros_like(out_g, dtype=bool)
+            eligible_g[best_idx] = True
+
+        spread_val: float | None = None
+        if "spread_home" in group.columns:
+            spread_raw = pd.to_numeric(group["spread_home"], errors="coerce").iloc[0]
+            if pd.notna(spread_raw):
+                is_home = bool(home_flag_series.iloc[idx[0]] > 0.0)
+                spread_val = float(spread_raw) if is_home else -float(spread_raw)
+
+        total_val: float | None = None
+        if "total" in group.columns:
+            total_raw = pd.to_numeric(group["total"], errors="coerce").iloc[0]
+            if pd.notna(total_raw):
+                total_val = float(total_raw)
+
+        bench_share = compute_bench_share_prior(
+            team_bench_share_avg=None,
+            spread=spread_val,
+            total=total_val,
+            out_count=int(out_g.sum()),
+        )
+        bench_share_pred_arr[idx] = bench_share
+
+        team_minutes = np.zeros(len(idx), dtype=float)
+        depth_diag: dict[str, Any] = {}
+        if eligible_g.any():
+            team_minutes, depth_diag = allocate_adaptive_depth(
+                p_g,
+                mu_g,
+                eligible_g,
+                a=1.0,
+                mu_power=1.0,
+                bench_share_pred=float(bench_share),
+                core_k_min=int(k_min),
+                core_k_max=int(k_max),
+                fringe_cap_max=float(fringe_cap_max),
+                cap_max=float(cap_max),
+            )
+        team_minutes[out_g] = 0.0
+        minutes_occ[idx] = np.maximum(team_minutes, 0.0)
+        eligible_flags[idx] = eligible_g
+
+        diagnostic_rows.append(
+            {
+                "game_id": game_id,
+                "team_id": team_id,
+                "rows": int(len(idx)),
+                "n_out": int(out_g.sum()),
+                "n_starters": int(starter_g.sum()),
+                "n_eligible": int(eligible_g.sum()),
+                "team_minutes_sum": float(team_minutes.sum()),
+                "bench_share_pred": float(bench_share),
+                "bench_share_actual": float(depth_diag.get("bench_share_actual", 0.0)),
+                "core_k": int(depth_diag.get("core_k", 0)),
+                "fringe_minutes_sum": float(depth_diag.get("fringe_minutes_sum", 0.0)),
+            }
+        )
+
+    scale = max(float(occupancy_scale), 1e-6)
+    play_prob_occ = 1.0 - np.exp(-minutes_occ / scale)
+    play_prob_occ = np.clip(play_prob_occ, 0.0, 1.0)
+    out_arr = out_mask.to_numpy(dtype=bool)
+    starter_arr = starter_mask.to_numpy(dtype=bool)
+    play_prob_occ[out_arr] = 0.0
+    starter_active = starter_arr & (~out_arr) & (minutes_occ > 0.0)
+    play_prob_occ[starter_active] = np.maximum(play_prob_occ[starter_active], float(starter_floor))
+
+    p10_occ = np.maximum(0.0, minutes_occ - lower_width)
+    p90_occ = np.maximum(p10_occ, minutes_occ + upper_width)
+    p10_occ[out_arr] = 0.0
+    p90_occ[out_arr] = 0.0
+
+    out = pred_df.copy()
+    out["play_prob"] = play_prob_occ
+    out["pred_p10_minutes"] = p10_occ
+    out["pred_p50_minutes"] = minutes_occ
+    out["pred_p90_minutes"] = p90_occ
+    out["eligible_flag_occ_v0"] = eligible_flags.astype(int)
+    out["bench_share_pred_occ_v0"] = bench_share_pred_arr
+
+    diagnostics = pd.DataFrame(diagnostic_rows)
+    return out, diagnostics
+
+
 def compute_head_to_head_metrics(pred_df: pd.DataFrame) -> dict[str, Any]:
     if pred_df.empty:
         raise ValueError("Prediction dataframe is empty.")
@@ -541,6 +785,7 @@ def _write_slice_metrics(
     slice_dir: Path,
     metrics_current: dict[str, Any],
     metrics_retrain: dict[str, Any],
+    metrics_retrain_occupancy_v0: dict[str, Any] | None = None,
 ) -> Path:
     path = slice_dir / "metrics_head_to_head.json"
     payload = {
@@ -548,11 +793,26 @@ def _write_slice_metrics(
         "retrain": metrics_retrain,
         "delta_retrain_minus_current": _metric_delta(metrics_current, metrics_retrain),
     }
+    if metrics_retrain_occupancy_v0 is not None:
+        payload["retrain_occupancy_v0"] = metrics_retrain_occupancy_v0
+        payload["delta_retrain_occupancy_v0_minus_current"] = _metric_delta(
+            metrics_current, metrics_retrain_occupancy_v0
+        )
+        payload["delta_retrain_occupancy_v0_minus_retrain"] = _metric_delta(
+            metrics_retrain, metrics_retrain_occupancy_v0
+        )
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return path
 
 
 def _render_report(summary: dict[str, Any]) -> str:
+    def _fmt_metric(value: Any) -> str:
+        if value is None:
+            return "N/A"
+        if isinstance(value, (int, np.integer)):
+            return str(int(value))
+        return f"{float(value):.6f}"
+
     lines: list[str] = [
         "# Minutes Bundle Head-to-Head Eval (2026-02-07)",
         "",
@@ -579,6 +839,8 @@ def _render_report(summary: dict[str, Any]) -> str:
         metrics_current = payload["metrics_current"]
         metrics_retrain = payload["metrics_retrain"]
         delta = payload["delta_retrain_minus_current"]
+        metrics_occ = payload.get("metrics_retrain_occupancy_v0")
+        delta_occ_minus_retrain = payload.get("delta_retrain_occupancy_v0_minus_retrain") or {}
         lines.extend(
             [
                 f"## {slice_name}",
@@ -595,16 +857,26 @@ def _render_report(summary: dict[str, Any]) -> str:
             c_val = metrics_current.get(key)
             r_val = metrics_retrain.get(key)
             d_val = delta.get(key)
-
-            def fmt(value: Any) -> str:
-                if value is None:
-                    return "N/A"
-                if isinstance(value, (int, np.integer)):
-                    return str(int(value))
-                return f"{float(value):.6f}"
-
-            lines.append(f"| {key} | {fmt(c_val)} | {fmt(r_val)} | {fmt(d_val)} |")
+            lines.append(
+                f"| {key} | {_fmt_metric(c_val)} | {_fmt_metric(r_val)} | {_fmt_metric(d_val)} |"
+            )
         lines.append("")
+
+        if metrics_occ is not None:
+            lines.extend(
+                [
+                    "| metric | retrain | retrain_occupancy_v0 | delta (occupancy-retrain) |",
+                    "| --- | ---: | ---: | ---: |",
+                ]
+            )
+            for key in metric_order:
+                r_val = metrics_retrain.get(key)
+                o_val = metrics_occ.get(key)
+                d_val = delta_occ_minus_retrain.get(key)
+                lines.append(
+                    f"| {key} | {_fmt_metric(r_val)} | {_fmt_metric(o_val)} | {_fmt_metric(d_val)} |"
+                )
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -623,6 +895,22 @@ def main(
     season: int = typer.Option(2025, "--season"),
     eval_root: Path = typer.Option(DEFAULT_EVAL_ROOT, "--eval-root"),
     report_path: Path = typer.Option(DEFAULT_REPORT_PATH, "--report-path"),
+    run_occupancy_sparse_diagnostic: bool = typer.Option(
+        True,
+        "--run-occupancy-sparse-diagnostic/--skip-occupancy-sparse-diagnostic",
+        help="Run occupancy+sparse allocation diagnostic on retrain predictions.",
+    ),
+    occupancy_p_cutoff: float = typer.Option(DEFAULT_OCCUPANCY_P_CUTOFF, "--occupancy-p-cutoff"),
+    occupancy_k_min: int = typer.Option(DEFAULT_OCCUPANCY_K_MIN, "--occupancy-k-min"),
+    occupancy_k_max: int = typer.Option(DEFAULT_OCCUPANCY_K_MAX, "--occupancy-k-max"),
+    occupancy_cap_max: float = typer.Option(DEFAULT_OCCUPANCY_CAP_MAX, "--occupancy-cap-max"),
+    occupancy_fringe_cap_max: float = typer.Option(
+        DEFAULT_OCCUPANCY_FRINGE_CAP_MAX, "--occupancy-fringe-cap-max"
+    ),
+    occupancy_scale: float = typer.Option(DEFAULT_OCCUPANCY_SCALE, "--occupancy-scale"),
+    occupancy_starter_floor: float = typer.Option(
+        DEFAULT_OCCUPANCY_STARTER_FLOOR, "--occupancy-starter-floor"
+    ),
 ) -> None:
     run_id = eval_run_id.strip() or datetime.now(tz=UTC).strftime("minutes_head_to_head_%Y%m%dT%H%M%SZ")
     eval_run_dir = eval_root / run_id
@@ -641,6 +929,16 @@ def main(
         "git_sha": _git_sha_or_unknown(),
         "current_bundle": str(current_bundle.expanduser().resolve()),
         "retrain_bundle": str(retrain_bundle.expanduser().resolve()),
+        "occupancy_sparse_v0": {
+            "enabled": bool(run_occupancy_sparse_diagnostic),
+            "p_cutoff": float(occupancy_p_cutoff),
+            "k_min": int(occupancy_k_min),
+            "k_max": int(occupancy_k_max),
+            "cap_max": float(occupancy_cap_max),
+            "fringe_cap_max": float(occupancy_fringe_cap_max),
+            "scale": float(occupancy_scale),
+            "starter_floor": float(occupancy_starter_floor),
+        },
         "slices": {},
     }
 
@@ -665,30 +963,73 @@ def main(
         metrics_current = compute_head_to_head_metrics(preds_current)
         metrics_retrain = compute_head_to_head_metrics(preds_retrain)
         delta = _metric_delta(metrics_current, metrics_retrain)
+
+        preds_retrain_occ: pd.DataFrame | None = None
+        occupancy_diag_df: pd.DataFrame | None = None
+        preds_retrain_occ_path: Path | None = None
+        occupancy_diag_path: Path | None = None
+        metrics_retrain_occ: dict[str, Any] | None = None
+        delta_occ_minus_current: dict[str, Any] | None = None
+        delta_occ_minus_retrain: dict[str, Any] | None = None
+        if run_occupancy_sparse_diagnostic:
+            preds_retrain_occ, occupancy_diag_df = apply_occupancy_sparse_layer(
+                preds_retrain,
+                eval_df,
+                p_cutoff=float(occupancy_p_cutoff),
+                k_min=int(occupancy_k_min),
+                k_max=int(occupancy_k_max),
+                cap_max=float(occupancy_cap_max),
+                fringe_cap_max=float(occupancy_fringe_cap_max),
+                occupancy_scale=float(occupancy_scale),
+                starter_floor=float(occupancy_starter_floor),
+            )
+            preds_retrain_occ_path = built.slice_dir / "preds_retrain_occupancy_v0.parquet"
+            preds_retrain_occ.to_parquet(preds_retrain_occ_path, index=False)
+            occupancy_diag_path = built.slice_dir / "occupancy_sparse_v0_team_diagnostics.parquet"
+            assert occupancy_diag_df is not None
+            occupancy_diag_df.to_parquet(occupancy_diag_path, index=False)
+            metrics_retrain_occ = compute_head_to_head_metrics(preds_retrain_occ)
+            delta_occ_minus_current = _metric_delta(metrics_current, metrics_retrain_occ)
+            delta_occ_minus_retrain = _metric_delta(metrics_retrain, metrics_retrain_occ)
         metrics_path = _write_slice_metrics(
             slice_dir=built.slice_dir,
             metrics_current=metrics_current,
             metrics_retrain=metrics_retrain,
+            metrics_retrain_occupancy_v0=metrics_retrain_occ,
         )
 
         meta_payload = json.loads(built.meta_path.read_text(encoding="utf-8"))
-        summary["slices"][slice_cfg.name] = {
+        paths_payload: dict[str, str] = {
+            "eval_dataset": str(built.eval_dataset_path),
+            "preds_current": str(preds_current_path),
+            "preds_retrain": str(preds_retrain_path),
+            "metrics": str(metrics_path),
+        }
+        if preds_retrain_occ_path is not None:
+            paths_payload["preds_retrain_occupancy_v0"] = str(preds_retrain_occ_path)
+        if occupancy_diag_path is not None:
+            paths_payload["occupancy_sparse_v0_team_diagnostics"] = str(occupancy_diag_path)
+
+        slice_payload: dict[str, Any] = {
             "meta": meta_payload,
-            "paths": {
-                "eval_dataset": str(built.eval_dataset_path),
-                "preds_current": str(preds_current_path),
-                "preds_retrain": str(preds_retrain_path),
-                "metrics": str(metrics_path),
-            },
+            "paths": paths_payload,
             "metrics_current": metrics_current,
             "metrics_retrain": metrics_retrain,
             "delta_retrain_minus_current": delta,
         }
+        if metrics_retrain_occ is not None:
+            slice_payload["metrics_retrain_occupancy_v0"] = metrics_retrain_occ
+            slice_payload["delta_retrain_occupancy_v0_minus_current"] = delta_occ_minus_current
+            slice_payload["delta_retrain_occupancy_v0_minus_retrain"] = delta_occ_minus_retrain
+        summary["slices"][slice_cfg.name] = slice_payload
 
-        typer.echo(
+        line = (
             f"[slice:{slice_cfg.name}] rows={metrics_current['rows']} "
             f"brier(current={metrics_current['brier_play_prob']:.6f}, retrain={metrics_retrain['brier_play_prob']:.6f})"
         )
+        if metrics_retrain_occ is not None:
+            line += f", occupancy_v0={metrics_retrain_occ['brier_play_prob']:.6f}"
+        typer.echo(line)
 
     summary_path = eval_run_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
