@@ -7,7 +7,9 @@ export type RealSwapResult = {
 
 export const extractDraftableId = (playerValue: string): number | null => {
     if (!playerValue) return null
-    const match = playerValue.match(/\((\d+)\)\s*$/)
+    // DK can append "(LOCKED)" after the numeric draftable id during live slates.
+    // Match the first numeric parenthesized token, e.g. "Name (12345) (LOCKED)".
+    const match = playerValue.match(/\((\d+)\)/)
     if (!match) return null
     const id = Number(match[1])
     return Number.isFinite(id) ? id : null
