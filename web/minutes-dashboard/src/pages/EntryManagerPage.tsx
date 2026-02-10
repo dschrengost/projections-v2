@@ -721,6 +721,19 @@ export default function EntryManagerPage() {
         })
     }
 
+    const moveContestToIndex = (contestId: string, targetIdx: number) => {
+        setContestOrder(prev => {
+            const idx = prev.indexOf(contestId)
+            if (idx === -1) return prev
+            const boundedTarget = Math.max(0, Math.min(prev.length - 1, targetIdx))
+            if (boundedTarget === idx) return prev
+            const next = [...prev]
+            const [item] = next.splice(idx, 1)
+            next.splice(boundedTarget, 0, item)
+            return next
+        })
+    }
+
     return (
         <div className="optimizer-page">
             <header className="app-header">
@@ -1008,11 +1021,16 @@ export default function EntryManagerPage() {
                             {entriesLoading && <span className="muted">Loading...</span>}
                         </div>
                     </div>
+                    {entryFiles.length > 1 && (
+                        <div className="muted" style={{ marginBottom: '0.5rem' }}>
+                            Apply order is top to bottom. Earlier contests receive earlier (higher-ranked) build lineups.
+                        </div>
+                    )}
                     <div className="saved-builds-list">
                         {entryFiles.length === 0 && !entriesLoading && (
                             <span className="muted">No entry files yet.</span>
                         )}
-                        {orderedEntries.map(entry => (
+                        {orderedEntries.map((entry, orderIdx) => (
                             <div
                                 key={entry.contest_id}
                                 className={`saved-build-card ${selectedContestId === entry.contest_id ? 'selected' : ''}`}
@@ -1023,6 +1041,20 @@ export default function EntryManagerPage() {
                                         checked={selectedContestIds.has(entry.contest_id)}
                                         onChange={() => toggleContestSelection(entry.contest_id)}
                                         title="Select contest"
+                                    />
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={Math.max(1, orderedEntries.length)}
+                                        value={orderIdx + 1}
+                                        onChange={e => {
+                                            const value = Number(e.target.value)
+                                            if (Number.isFinite(value)) {
+                                                moveContestToIndex(entry.contest_id, Math.round(value) - 1)
+                                            }
+                                        }}
+                                        title="Populate order (1 gets top lineups first)"
+                                        style={{ width: '3.25rem' }}
                                     />
                                     <span className="saved-build-count">{entry.entry_count} entries</span>
                                     <span className="saved-build-time">DG{entry.draft_group_id}</span>
@@ -1042,14 +1074,14 @@ export default function EntryManagerPage() {
                                     <button
                                         className="delete-btn"
                                         onClick={() => moveContest(entry.contest_id, 'up')}
-                                        title="Move up"
+                                        title="Move earlier in apply order"
                                     >
                                         ↑
                                     </button>
                                     <button
                                         className="delete-btn"
                                         onClick={() => moveContest(entry.contest_id, 'down')}
-                                        title="Move down"
+                                        title="Move later in apply order"
                                     >
                                         ↓
                                     </button>
