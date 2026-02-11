@@ -6,6 +6,7 @@ from datetime import UTC, datetime, date
 from pathlib import Path
 from typing import Any, Iterable
 
+import numpy as np
 import pandas as pd
 
 from projections import paths
@@ -1276,17 +1277,25 @@ def apply_overrides_to_minutes_df(
     else:
         merged["minutes_delta_applied"] = False
 
+    role_starter = pd.Series(False, index=merged.index)
+    role_rotation = pd.Series(False, index=merged.index)
+    role_deep_bench = pd.Series(False, index=merged.index)
+    role_out = pd.Series(False, index=merged.index)
     # If operator sets ops depth role to OUT, normalize to status='out' so downstream consistently
     # zeros minutes/play_prob and any other consumers relying on status behave the same.
     if OPS_DEPTH_ROLE_FIELD in merged.columns:
         role = merged[OPS_DEPTH_ROLE_FIELD]
         role_lower = role.astype(str).str.strip().str.lower()
+        role_starter = role.notna() & role_lower.eq("starter")
+        role_rotation = role.notna() & role_lower.eq("rotation")
+        role_deep_bench = role.notna() & role_lower.eq("deep_bench")
         role_out = role.notna() & role_lower.eq("out")
         if role_out.any():
             merged.loc[role_out, "status"] = "out"
 
     # If operator marks player OUT, force play_prob=0 and minutes=0 (keep row for downstream).
     status_raw = merged.get("status")
+    is_out = pd.Series(False, index=merged.index)
     if status_raw is not None:
         status_lower = status_raw.astype(str).str.strip().str.lower()
         is_out = status_lower.eq("out")
@@ -1299,6 +1308,120 @@ def apply_overrides_to_minutes_df(
                 merged.loc[is_out, "effective_minutes"] = 0.0
             locked_mask = locked_mask | is_out
             ops_applied = ops_applied | is_out
+
+    # Propagate operator "starter" intent into all starter-like signals used by
+    # downstream membership policies and simulation. This prevents stale starter_flag=0
+    # from suppressing availability floors when an operator promotes a replacement.
+    if role_starter.any():
+        if "is_projected_starter" in merged.columns:
+            projected_col = merged["is_projected_starter"]
+            if pd.api.types.is_bool_dtype(projected_col) or str(projected_col.dtype).lower() == "boolean":
+                merged.loc[role_starter, "is_projected_starter"] = True
+            else:
+                merged.loc[role_starter, "is_projected_starter"] = 1
+        if "is_starter" in merged.columns:
+            merged.loc[role_starter, "is_starter"] = 1
+        if "starter_flag" in merged.columns:
+            merged.loc[role_starter, "starter_flag"] = 1
+        if "play_prob" in merged.columns:
+            play_prob = pd.to_numeric(merged["play_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+            play_prob.loc[role_starter] = np.maximum(play_prob.loc[role_starter], 0.55)
+            merged["play_prob"] = play_prob
+        if "rotation_prob" in merged.columns:
+            rotation_prob = pd.to_numeric(merged["rotation_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+            rotation_prob.loc[role_starter] = np.maximum(rotation_prob.loc[role_starter], 0.65)
+            merged["rotation_prob"] = rotation_prob
+        ops_applied = ops_applied | role_starter
+
+    base_minutes_col = (
+        "effective_minutes"
+        if "effective_minutes" in merged.columns
+        else ("minutes_p50_cond" if "minutes_p50_cond" in merged.columns else "minutes_p50")
+    )
+    p50_now = pd.to_numeric(merged.get(base_minutes_col), errors="coerce").fillna(0.0)
+
+    def _apply_p50_floor(mask: pd.Series, floor_values: pd.Series) -> None:
+        if not mask.any():
+            return
+        floor = pd.to_numeric(floor_values, errors="coerce").fillna(0.0).clip(0.0, 48.0)
+        floor_mask = mask & (floor > 0.0)
+        if not floor_mask.any():
+            return
+
+        for col in ("minutes_p50", "minutes_p50_cond", "effective_minutes"):
+            if col in merged.columns:
+                cur = pd.to_numeric(merged[col], errors="coerce").fillna(0.0)
+                cur.loc[floor_mask] = np.maximum(cur.loc[floor_mask], floor.loc[floor_mask])
+                merged[col] = cur
+
+        if "minutes_p10" in merged.columns:
+            q10 = pd.to_numeric(merged["minutes_p10"], errors="coerce").fillna(0.0)
+            q50_ref = pd.to_numeric(merged.get("minutes_p50"), errors="coerce").fillna(0.0)
+            q10.loc[floor_mask] = np.minimum(q10.loc[floor_mask], q50_ref.loc[floor_mask])
+            merged["minutes_p10"] = q10.clip(0.0, 48.0)
+        if "minutes_p90" in merged.columns:
+            q90 = pd.to_numeric(merged["minutes_p90"], errors="coerce").fillna(0.0)
+            q50_ref = pd.to_numeric(merged.get("minutes_p50"), errors="coerce").fillna(0.0)
+            q90_floor = np.minimum(q50_ref + 8.0, 48.0)
+            q90.loc[floor_mask] = np.maximum(q90.loc[floor_mask], q90_floor.loc[floor_mask])
+            merged["minutes_p90"] = q90.clip(0.0, 48.0)
+
+        for base in ("minutes_p10", "minutes_p50", "minutes_p90"):
+            cond = f"{base}_cond"
+            if base in merged.columns and cond in merged.columns:
+                merged[cond] = pd.to_numeric(merged[base], errors="coerce").fillna(0.0).clip(0.0, 48.0)
+
+    # If an operator explicitly promotes a player to starter but the model has a
+    # degenerate 0-minute center, seed a realistic floor before reconciliation.
+    starter_needs_floor = role_starter & (~is_out) & p50_now.le(0.0)
+    if starter_needs_floor.any():
+        _apply_p50_floor(
+            starter_needs_floor,
+            pd.Series(18.0, index=merged.index, dtype=float),
+        )
+        ops_applied = ops_applied | starter_needs_floor
+
+    # When operators mark multiple players OUT on a team, softly promote at least one
+    # replacement from the bench pool if it was suppressed to exactly zero minutes.
+    if role_out.any() and {"game_id", "team_id"}.issubset(merged.columns):
+        ops_out_team_count = (
+            role_out.astype(int)
+            .groupby([merged["game_id"], merged["team_id"]], sort=False)
+            .transform("sum")
+        )
+        out_trigger = ops_out_team_count >= 2
+        p50_after_starter = pd.to_numeric(merged.get(base_minutes_col), errors="coerce").fillna(0.0)
+        rotation_prob = (
+            pd.to_numeric(merged.get("rotation_prob"), errors="coerce").fillna(0.0).clip(0.0, 1.0)
+            if "rotation_prob" in merged.columns
+            else pd.Series(0.0, index=merged.index, dtype=float)
+        )
+        p90_for_seed = (
+            pd.to_numeric(merged.get("minutes_p90"), errors="coerce").fillna(0.0)
+            if "minutes_p90" in merged.columns
+            else pd.Series(0.0, index=merged.index, dtype=float)
+        )
+        injury_promo_mask = out_trigger & (~is_out) & (~role_starter) & p50_after_starter.le(0.0) & rotation_prob.ge(0.45)
+        if injury_promo_mask.any():
+            seed_floor = pd.Series(
+                np.clip(np.maximum(6.0, p90_for_seed * 0.55), 6.0, 12.0),
+                index=merged.index,
+                dtype=float,
+            )
+            if role_rotation.any():
+                seed_floor.loc[role_rotation] = np.maximum(seed_floor.loc[role_rotation], 8.0)
+            if role_deep_bench.any():
+                seed_floor.loc[role_deep_bench] = np.maximum(seed_floor.loc[role_deep_bench], 6.0)
+            _apply_p50_floor(injury_promo_mask, seed_floor)
+            if "play_prob" in merged.columns:
+                play_prob = pd.to_numeric(merged["play_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+                floor_from_rot = np.clip(np.maximum(0.15, rotation_prob * 0.5), 0.15, 0.55)
+                play_prob.loc[injury_promo_mask] = np.maximum(
+                    play_prob.loc[injury_promo_mask],
+                    floor_from_rot.loc[injury_promo_mask],
+                )
+                merged["play_prob"] = play_prob
+            ops_applied = ops_applied | injury_promo_mask
 
     # Stage 1A: materialize effective hard-target columns for downstream reconcile + sim allocator.
     merged["minutes_target_eff"] = pd.to_numeric(merged.get("minutes_target"), errors="coerce") if "minutes_target" in merged.columns else pd.NA
