@@ -3234,6 +3234,9 @@ def main(
                     "archetype_seeded_total": int(
                         pd.to_numeric(occ_diag["n_archetype_seeded"], errors="coerce").fillna(0).sum()
                     ) if not occ_diag.empty and "n_archetype_seeded" in occ_diag.columns else 0,
+                    "archetype_dnp_rescued_total": int(
+                        pd.to_numeric(occ_diag["n_archetype_dnp_rescued"], errors="coerce").fillna(0).sum()
+                    ) if not occ_diag.empty and "n_archetype_dnp_rescued" in occ_diag.columns else 0,
                     "archetype_shortage_players_total": int(
                         pd.to_numeric(occ_diag["n_archetype_shortage_players"], errors="coerce").fillna(0).sum()
                     ) if not occ_diag.empty and "n_archetype_shortage_players" in occ_diag.columns else 0,
