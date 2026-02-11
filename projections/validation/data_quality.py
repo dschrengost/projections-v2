@@ -25,8 +25,9 @@ class FeatureBounds:
 
 # Default bounds for minutes_v1 features
 MINUTES_FEATURE_BOUNDS: list[FeatureBounds] = [
-    # Target and predictions must be within NBA game bounds
-    FeatureBounds("minutes", 0.0, 48.0, allow_null=True),
+    # Targets can exceed 48 in overtime; keep a generous cap to catch corruption.
+    FeatureBounds("minutes", 0.0, 60.0, allow_null=True),
+    # Model outputs are expected to stay in regulation-like ranges.
     FeatureBounds("p50", 0.0, 48.0),
     FeatureBounds("p10", 0.0, 48.0),
     FeatureBounds("p90", 0.0, 48.0),

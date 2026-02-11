@@ -22,6 +22,14 @@ DEFAULT_OCCUPANCY_CAP_MAX = 40.0
 DEFAULT_OCCUPANCY_FRINGE_CAP_MAX = 14.0
 DEFAULT_OCCUPANCY_SCALE = 8.0
 DEFAULT_OCCUPANCY_STARTER_FLOOR = 0.85
+DEFAULT_OCCUPANCY_DYNAMIC_K_BOUNDS_ENABLED = True
+DEFAULT_OCCUPANCY_DYNAMIC_K_MAX_CAP = 13
+DEFAULT_OCCUPANCY_DYNAMIC_K_MIN_FLOOR = 7
+DEFAULT_OCCUPANCY_DYNAMIC_K_WINDOW = 3
+DEFAULT_OCCUPANCY_DYNAMIC_DEPTH_PROB_FLOOR = 0.06
+DEFAULT_OCCUPANCY_DYNAMIC_DEPTH_MINUTES_FLOOR = 4.0
+DEFAULT_OCCUPANCY_DYNAMIC_BENCH_SHARE_MIDPOINT = 0.18
+DEFAULT_OCCUPANCY_DYNAMIC_BENCH_SHARE_SCALE = 25.0
 
 _OUT_STATUS_PREFIXES = ("OUT", "INACTIVE", "DNP")
 _STARTER_ROLE_VALUES = {"PROJECTED_STARTER", "CONFIRMED_STARTER"}
@@ -36,6 +44,14 @@ class OccupancySparseConfig:
     fringe_cap_max: float = DEFAULT_OCCUPANCY_FRINGE_CAP_MAX
     occupancy_scale: float = DEFAULT_OCCUPANCY_SCALE
     starter_floor: float = DEFAULT_OCCUPANCY_STARTER_FLOOR
+    dynamic_k_bounds_enabled: bool = DEFAULT_OCCUPANCY_DYNAMIC_K_BOUNDS_ENABLED
+    dynamic_k_max_cap: int = DEFAULT_OCCUPANCY_DYNAMIC_K_MAX_CAP
+    dynamic_k_min_floor: int = DEFAULT_OCCUPANCY_DYNAMIC_K_MIN_FLOOR
+    dynamic_k_window: int = DEFAULT_OCCUPANCY_DYNAMIC_K_WINDOW
+    dynamic_depth_prob_floor: float = DEFAULT_OCCUPANCY_DYNAMIC_DEPTH_PROB_FLOOR
+    dynamic_depth_minutes_floor: float = DEFAULT_OCCUPANCY_DYNAMIC_DEPTH_MINUTES_FLOOR
+    dynamic_bench_share_midpoint: float = DEFAULT_OCCUPANCY_DYNAMIC_BENCH_SHARE_MIDPOINT
+    dynamic_bench_share_scale: float = DEFAULT_OCCUPANCY_DYNAMIC_BENCH_SHARE_SCALE
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any] | None) -> OccupancySparseConfig:
@@ -65,6 +81,35 @@ class OccupancySparseConfig:
         if not np.isfinite(starter_floor):
             starter_floor = cls.starter_floor
         starter_floor = float(np.clip(starter_floor, 0.0, 1.0))
+        dynamic_k_bounds_enabled = _coerce_bool(
+            raw.get("dynamic_k_bounds_enabled", raw.get("dynamic_k_bounds", cls.dynamic_k_bounds_enabled)),
+            default=cls.dynamic_k_bounds_enabled,
+        )
+        dynamic_k_max_cap = int(raw.get("dynamic_k_max_cap", cls.dynamic_k_max_cap))
+        if dynamic_k_max_cap <= 0:
+            dynamic_k_max_cap = cls.dynamic_k_max_cap
+        dynamic_k_min_floor = int(raw.get("dynamic_k_min_floor", cls.dynamic_k_min_floor))
+        if dynamic_k_min_floor <= 0:
+            dynamic_k_min_floor = cls.dynamic_k_min_floor
+        dynamic_k_window = int(raw.get("dynamic_k_window", cls.dynamic_k_window))
+        if dynamic_k_window <= 0:
+            dynamic_k_window = cls.dynamic_k_window
+        dynamic_depth_prob_floor = float(raw.get("dynamic_depth_prob_floor", cls.dynamic_depth_prob_floor))
+        if not np.isfinite(dynamic_depth_prob_floor):
+            dynamic_depth_prob_floor = cls.dynamic_depth_prob_floor
+        dynamic_depth_prob_floor = float(np.clip(dynamic_depth_prob_floor, 0.0, 1.0))
+        dynamic_depth_minutes_floor = float(raw.get("dynamic_depth_minutes_floor", cls.dynamic_depth_minutes_floor))
+        if not np.isfinite(dynamic_depth_minutes_floor) or dynamic_depth_minutes_floor < 0.0:
+            dynamic_depth_minutes_floor = cls.dynamic_depth_minutes_floor
+        dynamic_bench_share_midpoint = float(
+            raw.get("dynamic_bench_share_midpoint", cls.dynamic_bench_share_midpoint)
+        )
+        if not np.isfinite(dynamic_bench_share_midpoint):
+            dynamic_bench_share_midpoint = cls.dynamic_bench_share_midpoint
+        dynamic_bench_share_midpoint = float(np.clip(dynamic_bench_share_midpoint, 0.0, 1.0))
+        dynamic_bench_share_scale = float(raw.get("dynamic_bench_share_scale", cls.dynamic_bench_share_scale))
+        if not np.isfinite(dynamic_bench_share_scale) or dynamic_bench_share_scale <= 0.0:
+            dynamic_bench_share_scale = cls.dynamic_bench_share_scale
         return cls(
             p_cutoff=p_cutoff,
             k_min=k_min,
@@ -73,6 +118,14 @@ class OccupancySparseConfig:
             fringe_cap_max=fringe_cap_max,
             occupancy_scale=occupancy_scale,
             starter_floor=starter_floor,
+            dynamic_k_bounds_enabled=dynamic_k_bounds_enabled,
+            dynamic_k_max_cap=dynamic_k_max_cap,
+            dynamic_k_min_floor=dynamic_k_min_floor,
+            dynamic_k_window=dynamic_k_window,
+            dynamic_depth_prob_floor=dynamic_depth_prob_floor,
+            dynamic_depth_minutes_floor=dynamic_depth_minutes_floor,
+            dynamic_bench_share_midpoint=dynamic_bench_share_midpoint,
+            dynamic_bench_share_scale=dynamic_bench_share_scale,
         )
 
 
@@ -94,6 +147,21 @@ def _coerce_bool_series(series: pd.Series | None, *, index: pd.Index) -> pd.Seri
 
     text = series.astype("string", copy=False).str.strip().str.lower()
     return text.fillna("").isin({"1", "true", "t", "yes", "y"})
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "t", "yes", "y"}:
+        return True
+    if text in {"0", "false", "f", "no", "n"}:
+        return False
+    return bool(default)
 
 
 def apply_occupancy_sparse_allocation(
@@ -184,24 +252,6 @@ def apply_occupancy_sparse_allocation(
                 candidate_mask = np.zeros_like(out_g, dtype=bool)
                 candidate_mask[best_idx] = True
 
-        eligible_g = build_eligible_mask(
-            p_g,
-            mu_g,
-            candidate_mask,
-            a=1.0,
-            mu_power=1.0,
-            p_cutoff=float(config.p_cutoff),
-            k_min=int(config.k_min),
-            k_max=int(config.k_max),
-            use_expected_k=True,
-        )
-        eligible_g = eligible_g | (starter_g & (~out_g))
-        eligible_g = eligible_g & (~out_g)
-        if not eligible_g.any() and (~out_g).any():
-            best_idx = int(np.argmax(np.where(~out_g, mu_g, -np.inf)))
-            eligible_g = np.zeros_like(out_g, dtype=bool)
-            eligible_g[best_idx] = True
-
         spread_val: float | None = None
         if "spread_home" in group.columns:
             spread_raw = pd.to_numeric(group["spread_home"], errors="coerce").iloc[0]
@@ -223,6 +273,53 @@ def apply_occupancy_sparse_allocation(
         )
         bench_share_pred_arr[idx] = bench_share
 
+        active_count = int((~out_g).sum())
+        k_min_eff = int(config.k_min)
+        k_max_eff = int(config.k_max)
+        depth_signal_count = 0
+        bench_depth_boost = 0
+        if config.dynamic_k_bounds_enabled and active_count > 0:
+            depth_mask = (~out_g) & (mu_g >= float(config.dynamic_depth_minutes_floor))
+            prob_floor = float(np.clip(config.dynamic_depth_prob_floor, 0.0, 1.0))
+            if prob_floor > 0.0:
+                depth_mask &= p_g >= prob_floor
+            depth_signal_count = int(depth_mask.sum())
+
+            bench_term = (float(bench_share) - float(config.dynamic_bench_share_midpoint)) * float(
+                config.dynamic_bench_share_scale
+            )
+            if np.isfinite(bench_term):
+                bench_depth_boost = int(np.clip(np.round(bench_term), 0.0, 2.0))
+            k_max_cap = max(int(config.k_max), int(config.dynamic_k_max_cap))
+            k_max_candidate = max(int(config.k_max), depth_signal_count, int(config.k_max) + bench_depth_boost)
+            k_max_eff = min(active_count, max(1, min(k_max_candidate, k_max_cap)))
+
+            k_window = max(1, int(config.dynamic_k_window))
+            k_min_floor = max(1, int(config.dynamic_k_min_floor))
+            k_min_from_window = max(k_min_floor, k_max_eff - k_window)
+            k_min_eff = min(k_max_eff, max(int(config.k_min), k_min_from_window))
+        elif active_count > 0:
+            k_max_eff = min(active_count, max(1, int(config.k_max)))
+            k_min_eff = min(k_max_eff, max(1, int(config.k_min)))
+
+        eligible_g = build_eligible_mask(
+            p_g,
+            mu_g,
+            candidate_mask,
+            a=1.0,
+            mu_power=1.0,
+            p_cutoff=float(config.p_cutoff),
+            k_min=k_min_eff,
+            k_max=k_max_eff,
+            use_expected_k=True,
+        )
+        eligible_g = eligible_g | (starter_g & (~out_g))
+        eligible_g = eligible_g & (~out_g)
+        if not eligible_g.any() and (~out_g).any():
+            best_idx = int(np.argmax(np.where(~out_g, mu_g, -np.inf)))
+            eligible_g = np.zeros_like(out_g, dtype=bool)
+            eligible_g[best_idx] = True
+
         team_minutes = np.zeros(len(idx), dtype=float)
         depth_diag: dict[str, Any] = {}
         if eligible_g.any():
@@ -233,8 +330,8 @@ def apply_occupancy_sparse_allocation(
                 a=1.0,
                 mu_power=1.0,
                 bench_share_pred=float(bench_share),
-                core_k_min=int(config.k_min),
-                core_k_max=int(config.k_max),
+                core_k_min=k_min_eff,
+                core_k_max=k_max_eff,
                 fringe_cap_max=float(config.fringe_cap_max),
                 cap_max=float(config.cap_max),
             )
@@ -242,7 +339,6 @@ def apply_occupancy_sparse_allocation(
         minutes_occ[idx] = np.maximum(team_minutes, 0.0)
         eligible_flags[idx] = eligible_g
 
-        active_count = int((~out_g).sum())
         team_sum = float(team_minutes.sum())
         team_sum_dev = abs(team_sum - 240.0) if active_count > 0 else 0.0
         diagnostic_rows.append(
@@ -254,6 +350,11 @@ def apply_occupancy_sparse_allocation(
                 "n_starters": int(starter_g.sum()),
                 "n_eligible": int(eligible_g.sum()),
                 "active_count": active_count,
+                "k_min_eff": int(k_min_eff),
+                "k_max_eff": int(k_max_eff),
+                "depth_signal_count": int(depth_signal_count),
+                "bench_depth_boost": int(bench_depth_boost),
+                "dynamic_k_bounds_enabled": bool(config.dynamic_k_bounds_enabled),
                 "team_minutes_sum": team_sum,
                 "team_minutes_sum_dev": team_sum_dev,
                 "bench_share_pred": float(bench_share),

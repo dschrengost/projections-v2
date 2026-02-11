@@ -7,7 +7,6 @@ import pytest
 
 from projections.validation.data_quality import (
     FeatureBounds,
-    MINUTES_FEATURE_BOUNDS,
     validate_feature_ranges,
 )
 
@@ -26,10 +25,10 @@ def test_valid_features_pass() -> None:
 
 def test_out_of_range_above_detected() -> None:
     """Values above max should be flagged."""
-    df = pd.DataFrame({"minutes": [50.0, 25.0, 30.0]})
+    df = pd.DataFrame({"minutes": [61.0, 25.0, 30.0]})
     violations = validate_feature_ranges(df)
     assert len(violations) == 1
-    assert "above 48" in violations[0].lower()
+    assert "above 60" in violations[0].lower()
 
 
 def test_out_of_range_below_detected() -> None:
