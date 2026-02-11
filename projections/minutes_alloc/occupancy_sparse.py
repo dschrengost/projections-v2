@@ -30,6 +30,11 @@ DEFAULT_OCCUPANCY_DYNAMIC_DEPTH_PROB_FLOOR = 0.06
 DEFAULT_OCCUPANCY_DYNAMIC_DEPTH_MINUTES_FLOOR = 4.0
 DEFAULT_OCCUPANCY_DYNAMIC_BENCH_SHARE_MIDPOINT = 0.18
 DEFAULT_OCCUPANCY_DYNAMIC_BENCH_SHARE_SCALE = 25.0
+DEFAULT_OCCUPANCY_DNP_SUPPRESSION_ENABLED = True
+DEFAULT_OCCUPANCY_DNP_RATE_THRESHOLD = 0.35
+DEFAULT_OCCUPANCY_DNP_PRIOR_PLAY_PROB_MAX = 0.50
+DEFAULT_OCCUPANCY_DNP_INACTIVE_STREAK_THRESHOLD = 3
+DEFAULT_OCCUPANCY_DNP_CONSECUTIVE_ACTIVE_DNP_THRESHOLD = 2
 
 _OUT_STATUS_PREFIXES = ("OUT", "INACTIVE", "DNP")
 _STARTER_ROLE_VALUES = {"PROJECTED_STARTER", "CONFIRMED_STARTER"}
@@ -52,6 +57,13 @@ class OccupancySparseConfig:
     dynamic_depth_minutes_floor: float = DEFAULT_OCCUPANCY_DYNAMIC_DEPTH_MINUTES_FLOOR
     dynamic_bench_share_midpoint: float = DEFAULT_OCCUPANCY_DYNAMIC_BENCH_SHARE_MIDPOINT
     dynamic_bench_share_scale: float = DEFAULT_OCCUPANCY_DYNAMIC_BENCH_SHARE_SCALE
+    dnp_suppression_enabled: bool = DEFAULT_OCCUPANCY_DNP_SUPPRESSION_ENABLED
+    dnp_rate_threshold: float = DEFAULT_OCCUPANCY_DNP_RATE_THRESHOLD
+    dnp_prior_play_prob_max: float = DEFAULT_OCCUPANCY_DNP_PRIOR_PLAY_PROB_MAX
+    dnp_inactive_streak_threshold: int = DEFAULT_OCCUPANCY_DNP_INACTIVE_STREAK_THRESHOLD
+    dnp_consecutive_active_dnp_threshold: int = (
+        DEFAULT_OCCUPANCY_DNP_CONSECUTIVE_ACTIVE_DNP_THRESHOLD
+    )
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any] | None) -> OccupancySparseConfig:
@@ -110,6 +122,31 @@ class OccupancySparseConfig:
         dynamic_bench_share_scale = float(raw.get("dynamic_bench_share_scale", cls.dynamic_bench_share_scale))
         if not np.isfinite(dynamic_bench_share_scale) or dynamic_bench_share_scale <= 0.0:
             dynamic_bench_share_scale = cls.dynamic_bench_share_scale
+        dnp_suppression_enabled = _coerce_bool(
+            raw.get("dnp_suppression_enabled", cls.dnp_suppression_enabled),
+            default=cls.dnp_suppression_enabled,
+        )
+        dnp_rate_threshold = float(raw.get("dnp_rate_threshold", cls.dnp_rate_threshold))
+        if not np.isfinite(dnp_rate_threshold):
+            dnp_rate_threshold = cls.dnp_rate_threshold
+        dnp_rate_threshold = float(np.clip(dnp_rate_threshold, 0.0, 1.0))
+        dnp_prior_play_prob_max = float(raw.get("dnp_prior_play_prob_max", cls.dnp_prior_play_prob_max))
+        if not np.isfinite(dnp_prior_play_prob_max):
+            dnp_prior_play_prob_max = cls.dnp_prior_play_prob_max
+        dnp_prior_play_prob_max = float(np.clip(dnp_prior_play_prob_max, 0.0, 1.0))
+        dnp_inactive_streak_threshold = int(
+            raw.get("dnp_inactive_streak_threshold", cls.dnp_inactive_streak_threshold)
+        )
+        if dnp_inactive_streak_threshold <= 0:
+            dnp_inactive_streak_threshold = cls.dnp_inactive_streak_threshold
+        dnp_consecutive_active_dnp_threshold = int(
+            raw.get(
+                "dnp_consecutive_active_dnp_threshold",
+                cls.dnp_consecutive_active_dnp_threshold,
+            )
+        )
+        if dnp_consecutive_active_dnp_threshold <= 0:
+            dnp_consecutive_active_dnp_threshold = cls.dnp_consecutive_active_dnp_threshold
         return cls(
             p_cutoff=p_cutoff,
             k_min=k_min,
@@ -126,6 +163,11 @@ class OccupancySparseConfig:
             dynamic_depth_minutes_floor=dynamic_depth_minutes_floor,
             dynamic_bench_share_midpoint=dynamic_bench_share_midpoint,
             dynamic_bench_share_scale=dynamic_bench_share_scale,
+            dnp_suppression_enabled=dnp_suppression_enabled,
+            dnp_rate_threshold=dnp_rate_threshold,
+            dnp_prior_play_prob_max=dnp_prior_play_prob_max,
+            dnp_inactive_streak_threshold=dnp_inactive_streak_threshold,
+            dnp_consecutive_active_dnp_threshold=dnp_consecutive_active_dnp_threshold,
         )
 
 
@@ -162,6 +204,17 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
     if text in {"0", "false", "f", "no", "n"}:
         return False
     return bool(default)
+
+
+def _coerce_numeric_series(
+    frame: pd.DataFrame,
+    column: str,
+    *,
+    default: float = 0.0,
+) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series(default, index=frame.index, dtype=float)
+    return pd.to_numeric(frame[column], errors="coerce")
 
 
 def apply_occupancy_sparse_allocation(
@@ -221,6 +274,28 @@ def apply_occupancy_sparse_allocation(
     starter_mask = starter_mask | role_upper.isin(_STARTER_ROLE_VALUES)
     starter_mask = starter_mask & ~out_mask
 
+    active_but_dnp_rate = (
+        _coerce_numeric_series(working, "active_but_dnp_rate_last10", default=0.0)
+        .fillna(0.0)
+        .clip(lower=0.0, upper=1.0)
+        .to_numpy(dtype=float)
+    )
+    consecutive_active_dnp = (
+        _coerce_numeric_series(working, "consecutive_active_dnp", default=0.0)
+        .fillna(0)
+        .clip(lower=0)
+        .to_numpy(dtype=float)
+    )
+    inactive_streak_len = (
+        _coerce_numeric_series(working, "inactive_streak_len", default=0.0)
+        .fillna(0)
+        .clip(lower=0)
+        .to_numpy(dtype=float)
+    )
+    prior_play_prob = _coerce_numeric_series(
+        working, "prior_play_prob", default=np.nan
+    ).to_numpy(dtype=float)
+
     home_flag_series = (
         pd.to_numeric(working.get("home_flag"), errors="coerce").fillna(0.0)
         if "home_flag" in working.columns
@@ -242,13 +317,39 @@ def apply_occupancy_sparse_allocation(
         out_g = out_mask.iloc[idx].to_numpy(dtype=bool)
         starter_g = starter_mask.iloc[idx].to_numpy(dtype=bool)
 
+        dnp_risk_g = np.zeros(len(idx), dtype=bool)
+        if config.dnp_suppression_enabled:
+            dnp_rate_g = active_but_dnp_rate[idx]
+            consec_dnp_g = consecutive_active_dnp[idx]
+            inactive_streak_g = inactive_streak_len[idx]
+            prior_play_g = prior_play_prob[idx]
+            prior_is_low_or_missing = np.isnan(prior_play_g) | (
+                prior_play_g <= float(config.dnp_prior_play_prob_max)
+            )
+            dnp_risk_g = (
+                (
+                    (dnp_rate_g >= float(config.dnp_rate_threshold))
+                    & prior_is_low_or_missing
+                )
+                | (inactive_streak_g >= int(config.dnp_inactive_streak_threshold))
+                | (
+                    consec_dnp_g
+                    >= int(config.dnp_consecutive_active_dnp_threshold)
+                )
+            )
+            dnp_risk_g = dnp_risk_g & (~starter_g) & (~out_g)
+
         candidate_mask = (~out_g) & np.isfinite(mu_g) & np.isfinite(p_g) & (mu_g > 0.0) & (p_g > 0.0)
+        candidate_mask = candidate_mask & (~dnp_risk_g)
         if not candidate_mask.any():
             starter_candidates = starter_g & (~out_g)
             if starter_candidates.any():
                 candidate_mask = starter_candidates
             elif (~out_g).any():
-                best_idx = int(np.argmax(np.where(~out_g, mu_g, -np.inf)))
+                fallback_pool = (~out_g) & (~dnp_risk_g)
+                if not fallback_pool.any():
+                    fallback_pool = ~out_g
+                best_idx = int(np.argmax(np.where(fallback_pool, mu_g, -np.inf)))
                 candidate_mask = np.zeros_like(out_g, dtype=bool)
                 candidate_mask[best_idx] = True
 
@@ -283,6 +384,7 @@ def apply_occupancy_sparse_allocation(
             prob_floor = float(np.clip(config.dynamic_depth_prob_floor, 0.0, 1.0))
             if prob_floor > 0.0:
                 depth_mask &= p_g >= prob_floor
+            depth_mask &= ~dnp_risk_g
             depth_signal_count = int(depth_mask.sum())
 
             bench_term = (float(bench_share) - float(config.dynamic_bench_share_midpoint)) * float(
@@ -314,9 +416,13 @@ def apply_occupancy_sparse_allocation(
             use_expected_k=True,
         )
         eligible_g = eligible_g | (starter_g & (~out_g))
+        eligible_g = eligible_g & (~dnp_risk_g)
         eligible_g = eligible_g & (~out_g)
         if not eligible_g.any() and (~out_g).any():
-            best_idx = int(np.argmax(np.where(~out_g, mu_g, -np.inf)))
+            fallback_pool = (~out_g) & (~dnp_risk_g)
+            if not fallback_pool.any():
+                fallback_pool = ~out_g
+            best_idx = int(np.argmax(np.where(fallback_pool, mu_g, -np.inf)))
             eligible_g = np.zeros_like(out_g, dtype=bool)
             eligible_g[best_idx] = True
 
@@ -349,12 +455,14 @@ def apply_occupancy_sparse_allocation(
                 "n_out": int(out_g.sum()),
                 "n_starters": int(starter_g.sum()),
                 "n_eligible": int(eligible_g.sum()),
+                "n_dnp_suppressed": int(dnp_risk_g.sum()),
                 "active_count": active_count,
                 "k_min_eff": int(k_min_eff),
                 "k_max_eff": int(k_max_eff),
                 "depth_signal_count": int(depth_signal_count),
                 "bench_depth_boost": int(bench_depth_boost),
                 "dynamic_k_bounds_enabled": bool(config.dynamic_k_bounds_enabled),
+                "dnp_suppression_enabled": bool(config.dnp_suppression_enabled),
                 "team_minutes_sum": team_sum,
                 "team_minutes_sum_dev": team_sum_dev,
                 "bench_share_pred": float(bench_share),

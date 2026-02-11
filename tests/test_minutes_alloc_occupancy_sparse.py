@@ -165,6 +165,11 @@ def test_occupancy_sparse_config_parses_dynamic_payload() -> None:
             "dynamic_depth_minutes_floor": 5.0,
             "dynamic_bench_share_midpoint": 0.2,
             "dynamic_bench_share_scale": 30.0,
+            "dnp_suppression_enabled": "true",
+            "dnp_rate_threshold": 0.4,
+            "dnp_prior_play_prob_max": 0.45,
+            "dnp_inactive_streak_threshold": 4,
+            "dnp_consecutive_active_dnp_threshold": 3,
         }
     )
     assert cfg.dynamic_k_bounds_enabled is True
@@ -175,3 +180,52 @@ def test_occupancy_sparse_config_parses_dynamic_payload() -> None:
     assert cfg.dynamic_depth_minutes_floor == pytest.approx(5.0)
     assert cfg.dynamic_bench_share_midpoint == pytest.approx(0.2)
     assert cfg.dynamic_bench_share_scale == pytest.approx(30.0)
+    assert cfg.dnp_suppression_enabled is True
+    assert cfg.dnp_rate_threshold == pytest.approx(0.4)
+    assert cfg.dnp_prior_play_prob_max == pytest.approx(0.45)
+    assert cfg.dnp_inactive_streak_threshold == 4
+    assert cfg.dnp_consecutive_active_dnp_threshold == 3
+
+
+def test_occupancy_sparse_suppresses_high_dnp_risk_bench_players() -> None:
+    frame = _deep_rotation_frame()
+    frame["active_but_dnp_rate_last10"] = 0.0
+    frame["consecutive_active_dnp"] = 0
+    frame["inactive_streak_len"] = 0
+    frame["prior_play_prob"] = 0.8
+
+    # Mark two fringe bench players as high DNP risk with weak/unknown prior.
+    risky = frame["player_id"].isin([12, 13])
+    frame.loc[risky, "active_but_dnp_rate_last10"] = 0.6
+    frame.loc[risky, "prior_play_prob"] = np.nan
+
+    cfg_no_suppress = OccupancySparseConfig(
+        dynamic_k_bounds_enabled=True,
+        dnp_suppression_enabled=False,
+    )
+    out_no, diag_no = apply_occupancy_sparse_allocation(frame, config=cfg_no_suppress)
+    risky_eligible_no = (
+        out_no.loc[out_no["player_id"].isin([12, 13]), "eligible_flag_occ"]
+        .astype(int)
+        .sum()
+    )
+    assert risky_eligible_no >= 1
+
+    cfg_suppress = OccupancySparseConfig(
+        dynamic_k_bounds_enabled=True,
+        dnp_suppression_enabled=True,
+        dnp_rate_threshold=0.35,
+        dnp_prior_play_prob_max=0.5,
+        dnp_inactive_streak_threshold=3,
+        dnp_consecutive_active_dnp_threshold=2,
+    )
+    out_yes, diag_yes = apply_occupancy_sparse_allocation(frame, config=cfg_suppress)
+    risky_eligible_yes = (
+        out_yes.loc[out_yes["player_id"].isin([12, 13]), "eligible_flag_occ"]
+        .astype(int)
+        .sum()
+    )
+
+    assert risky_eligible_yes == 0
+    assert "n_dnp_suppressed" in diag_yes.columns
+    assert int(pd.to_numeric(diag_yes["n_dnp_suppressed"], errors="coerce").fillna(0).iloc[0]) >= 2
