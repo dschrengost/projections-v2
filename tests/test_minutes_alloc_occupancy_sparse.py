@@ -304,6 +304,7 @@ def test_occupancy_sparse_relaxes_suppression_in_injury_regime() -> None:
         dnp_suppression_enabled=True,
         dnp_suppression_relax_in_injury_regime=False,
         dnp_rate_threshold=0.35,
+        archetype_shortage_enabled=False,
     )
     out_no, _ = apply_occupancy_sparse_allocation(frame, config=cfg_no_relax)
     risky_eligible_no = (
@@ -321,6 +322,7 @@ def test_occupancy_sparse_relaxes_suppression_in_injury_regime() -> None:
         dnp_injury_regime_out_starters_threshold=1,
         dnp_injury_regime_min_bench_share_pred=0.10,
         dnp_rate_threshold=0.35,
+        archetype_shortage_enabled=False,
     )
     out_yes, diag_yes = apply_occupancy_sparse_allocation(frame, config=cfg_relax)
     risky_eligible_yes = (
@@ -403,3 +405,47 @@ def test_occupancy_sparse_archetype_shortage_ignores_stale_long_term_out() -> No
     assert int(pd.to_numeric(diag["archetype_out_big"], errors="coerce").fillna(0).iloc[0]) == 0
     assert int(pd.to_numeric(diag["archetype_shortage_active"], errors="coerce").fillna(0).iloc[0]) == 0
     assert int(pd.to_numeric(diag["n_archetype_seeded"], errors="coerce").fillna(0).iloc[0]) == 0
+
+
+def test_occupancy_sparse_archetype_shortage_rescues_dnp_suppressed_replacement() -> None:
+    frame = _deep_rotation_frame()
+    frame["inactive_streak_len"] = 0
+    frame["active_but_dnp_rate_last10"] = 0.0
+    frame["consecutive_active_dnp"] = 0
+
+    # Starter big out; replacement big has strong baseline minutes but high DNP signal.
+    frame.loc[frame["player_id"] == 1, ["status", "is_out"]] = ["OUT", 1]
+    frame.loc[frame["player_id"] == 1, "inactive_streak_len"] = 1
+    frame.loc[frame["player_id"] == 12, ["minutes_p50", "minutes_p10", "minutes_p90", "play_prob"]] = [14.0, 8.0, 20.0, 0.20]
+    frame.loc[frame["player_id"] == 12, "active_but_dnp_rate_last10"] = 0.80
+
+    cfg_disabled = OccupancySparseConfig(
+        dynamic_k_bounds_enabled=True,
+        dnp_suppression_enabled=True,
+        dnp_suppression_relax_in_injury_regime=False,
+        dnp_rate_threshold=0.35,
+        archetype_shortage_enabled=False,
+    )
+    out_disabled, _ = apply_occupancy_sparse_allocation(frame, config=cfg_disabled)
+    repl_disabled = out_disabled.loc[out_disabled["player_id"] == 12].iloc[0]
+    assert float(pd.to_numeric(repl_disabled["minutes_occ"], errors="coerce") or 0.0) == pytest.approx(0.0, abs=1e-9)
+
+    cfg_enabled = OccupancySparseConfig(
+        dynamic_k_bounds_enabled=True,
+        dnp_suppression_enabled=True,
+        dnp_suppression_relax_in_injury_regime=False,
+        dnp_rate_threshold=0.35,
+        archetype_shortage_enabled=True,
+        archetype_out_count_threshold=1,
+        archetype_out_inactive_streak_max=10,
+        archetype_play_prob_floor=0.08,
+        archetype_seed_p90_min=8.0,
+        archetype_seed_max_players=2,
+    )
+    out_enabled, diag_enabled = apply_occupancy_sparse_allocation(frame, config=cfg_enabled)
+    repl_enabled = out_enabled.loc[out_enabled["player_id"] == 12].iloc[0]
+
+    assert float(pd.to_numeric(repl_enabled["minutes_occ"], errors="coerce") or 0.0) > 0.0
+    assert int(pd.to_numeric(repl_enabled["eligible_flag_occ"], errors="coerce")) == 1
+    assert int(pd.to_numeric(diag_enabled["archetype_shortage_active"], errors="coerce").fillna(0).iloc[0]) == 1
+    assert int(pd.to_numeric(diag_enabled["n_archetype_dnp_rescued"], errors="coerce").fillna(0).iloc[0]) >= 1

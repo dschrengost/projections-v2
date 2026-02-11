@@ -542,6 +542,7 @@ def apply_occupancy_sparse_allocation(
         inactive_threshold_used = int(config.dnp_inactive_streak_threshold)
         consecutive_threshold_used = int(config.dnp_consecutive_active_dnp_threshold)
         n_archetype_seeded = 0
+        n_archetype_dnp_rescued = 0
         archetype_seed_mask = np.zeros(len(idx), dtype=bool)
         archetype_out_counts: dict[str, int] = {k: 0 for k in _ARCHETYPE_KNOWN}
         archetype_shortage_mask = np.zeros(len(idx), dtype=bool)
@@ -682,11 +683,11 @@ def apply_occupancy_sparse_allocation(
                     p_for_mask[shortage_active],
                     float(config.archetype_play_prob_floor),
                 )
+            dnp_risk_before_seed = dnp_risk_g.copy()
             seed_candidates = (
                 shortage_active
-                & (~dnp_risk_g)
-                & (mu_for_mask <= 0.0)
                 & (p90_g >= float(config.archetype_seed_p90_min))
+                & ((mu_for_mask <= 0.0) | dnp_risk_g)
             )
             if seed_candidates.any():
                 seed_scores = np.where(seed_candidates, p90_g, -np.inf)
@@ -695,18 +696,23 @@ def apply_occupancy_sparse_allocation(
                 selected = [int(i) for i in order if seed_candidates[int(i)]][:take_n]
                 if selected:
                     sel_idx = np.asarray(selected, dtype=int)
-                    seed_minutes = np.clip(
-                        p90_g[sel_idx] * float(config.archetype_seed_minutes_p90_mult),
-                        float(config.archetype_seed_minutes_min),
-                        float(config.archetype_seed_minutes_max),
-                    )
-                    mu_for_mask[sel_idx] = np.maximum(mu_for_mask[sel_idx], seed_minutes)
+                    seed_zero_mu = mu_for_mask[sel_idx] <= 0.0
+                    if np.any(seed_zero_mu):
+                        seed_idx = sel_idx[seed_zero_mu]
+                        seed_minutes = np.clip(
+                            p90_g[seed_idx] * float(config.archetype_seed_minutes_p90_mult),
+                            float(config.archetype_seed_minutes_min),
+                            float(config.archetype_seed_minutes_max),
+                        )
+                        mu_for_mask[seed_idx] = np.maximum(mu_for_mask[seed_idx], seed_minutes)
+                    dnp_risk_g[sel_idx] = False
                     p_for_mask[sel_idx] = np.maximum(
                         p_for_mask[sel_idx],
                         float(config.archetype_play_prob_floor),
                     )
                     archetype_seed_mask[sel_idx] = True
                     n_archetype_seeded = int(sel_idx.size)
+                    n_archetype_dnp_rescued = int(dnp_risk_before_seed[sel_idx].sum())
 
         candidate_mask = (
             (~out_g)
@@ -823,6 +829,7 @@ def apply_occupancy_sparse_allocation(
                 "archetype_out_big": int(archetype_out_counts["big"]),
                 "n_archetype_shortage_players": int((archetype_shortage_mask & (~out_g)).sum()),
                 "n_archetype_seeded": int(n_archetype_seeded),
+                "n_archetype_dnp_rescued": int(n_archetype_dnp_rescued),
                 "k_min_eff": int(k_min_eff),
                 "k_max_eff": int(k_max_eff),
                 "depth_signal_count": int(depth_signal_count),
