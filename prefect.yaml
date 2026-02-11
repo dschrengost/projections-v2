@@ -15,7 +15,7 @@ push: null
 # pull section allows you to provide instructions for cloning this project in remote locations
 pull:
 - prefect.deployments.steps.set_working_directory:
-    directory: /home/daniel/prod/projections-v2
+    directory: /home/daniel/projects/projections-v2
 
 # the deployments section allows you to provide configuration for deploying flows
 deployments:
@@ -117,6 +117,29 @@ deployments:
     allow_guard_failure: true
     run_head_to_head_eval: true
     current_bundle_dir: null
+    assess_quality_gates: true
+    block_on_quality_gate_failure: false
+    eval_candidate_variant: "retrain_occupancy_v0"
+    adaptive_thresholds_enabled: true
+    adaptive_lookback_runs: 20
+    adaptive_min_history_runs: 6
+    adaptive_iqr_multiplier: 1.5
+    adaptive_threshold_cap_multiplier: 3.0
+    drift_override_enabled: true
+    drift_override_relax_multiplier: 1.25
+    drift_override_min_trigger_metrics: 2
+    drift_override_iqr_multiplier: 1.5
+    min_eval_rows_per_slice: 1000
+    max_weighted_brier_delta: 0.005
+    max_weighted_false_active_delta: 0.01
+    max_weighted_mae_p50_cond_delta: 0.1
+    max_weighted_mae_p50_cond_delta_soft: 0.4
+    max_slice_brier_delta: 0.01
+    max_slice_false_active_delta: 0.015
+    max_slice_mae_p50_cond_delta: 0.2
+    max_slice_mae_p50_cond_delta_soft: 0.6
+    max_abs_p10_coverage_delta: 0.04
+    max_abs_p90_coverage_delta: 0.02
   work_pool:
     name: projections-local
     work_queue_name: null

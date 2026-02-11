@@ -64,6 +64,10 @@ from projections.minutes_alloc.rotalloc_production import (
     resolve_rotalloc_bundle_dir,
     score_rotalloc_minutes,
 )
+from projections.minutes_alloc.occupancy_sparse import (
+    OccupancySparseConfig,
+    apply_occupancy_sparse_allocation,
+)
 from projections.models.rotalloc import allocate_fringe_alpha_blend
 from projections.models.minutes_lgbm import (
     _filter_out_players,
@@ -227,6 +231,19 @@ def _resolve_play_prob_calibration(bundle_config: Path | None) -> dict | None:
         return None
     cfg = payload.get("play_prob_calibration")
     return cfg if isinstance(cfg, dict) else None
+
+
+def _resolve_occupancy_sparse_config(bundle_config: Path | None) -> OccupancySparseConfig:
+    if bundle_config is None:
+        return OccupancySparseConfig()
+    try:
+        payload = json.loads(bundle_config.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return OccupancySparseConfig()
+    raw = payload.get("occupancy_sparse_v0")
+    if not isinstance(raw, dict):
+        raw = payload.get("occupancy_sparse")
+    return OccupancySparseConfig.from_payload(raw if isinstance(raw, dict) else None)
 
 
 def _season_from_date(day: date) -> int:
@@ -1999,6 +2016,18 @@ def score_minutes_range_to_parquet(
     if player_lookup or not team_meta.empty:
         scored = _annotate_metadata(scored, player_lookup=player_lookup, team_meta=team_meta)
 
+    alloc_mode = resolve_minutes_alloc_mode(bundle_config)
+    if is_rotshare_bundle and alloc_mode != "legacy":
+        typer.echo(f"[rotshare] forcing minutes_alloc_mode=legacy (was {alloc_mode})", err=True)
+        alloc_mode = "legacy"
+    if alloc_mode in {"rotalloc_expk", "occupancy_sparse_v0"} and enable_upside_adjustment:
+        typer.echo(
+            f"[upside] disabling upside adjustment in {alloc_mode} "
+            "(allocator tails are derived from legacy deltas; sim_v2 provides variance).",
+            err=True,
+        )
+        enable_upside_adjustment = False
+
     # Apply upside adjustment before reconciliation (for DFS Monte Carlo coverage)
     if enable_upside_adjustment:
         upside_cfg = UpsideConfig()
@@ -2009,13 +2038,8 @@ def score_minutes_range_to_parquet(
             scored["minutes_p50"] = scored["minutes_p50_adj"]
             scored["minutes_p90"] = scored["minutes_p90_adj"]
         typer.echo("[upside] Applied upside adjustment for Monte Carlo coverage.", err=True)
-
-    alloc_mode = resolve_minutes_alloc_mode(bundle_config)
-    if is_rotshare_bundle and alloc_mode != "legacy":
-        typer.echo(f"[rotshare] forcing minutes_alloc_mode=legacy (was {alloc_mode})", err=True)
-        alloc_mode = "legacy"
     normalized_reconcile_mode = reconcile_team_minutes.lower()
-    if alloc_mode == "rotalloc_expk" and normalized_reconcile_mode != "none":
+    if alloc_mode in {"rotalloc_expk", "occupancy_sparse_v0"} and normalized_reconcile_mode != "none":
         typer.echo(
             f"[rotalloc] forcing reconcile_team_minutes=none (was {normalized_reconcile_mode})",
             err=True,
@@ -2032,6 +2056,27 @@ def score_minutes_range_to_parquet(
         scored = reconcile_minutes_p50_all(scored, reconcile_cfg, debug_hook=debug_hook)
         if "play_prob" not in scored.columns:
             scored["play_prob"] = 1.0
+
+    if alloc_mode == "occupancy_sparse_v0":
+        occupancy_cfg = _resolve_occupancy_sparse_config(bundle_config)
+        occ_scored, _ = apply_occupancy_sparse_allocation(scored, config=occupancy_cfg)
+        scored["minutes_mean"] = pd.to_numeric(occ_scored["minutes_occ"], errors="coerce").fillna(0.0).astype(float)
+        scored["minutes_p50"] = scored["minutes_mean"]
+        scored["minutes_p10"] = pd.to_numeric(occ_scored["minutes_p10_occ"], errors="coerce").fillna(0.0).astype(float)
+        scored["minutes_p90"] = pd.to_numeric(occ_scored["minutes_p90_occ"], errors="coerce").fillna(0.0).astype(float)
+        scored["minutes_p10_cond"] = scored["minutes_p10"]
+        scored["minutes_p50_cond"] = scored["minutes_p50"]
+        scored["minutes_p90_cond"] = scored["minutes_p90"]
+        scored["play_prob"] = (
+            pd.to_numeric(occ_scored["play_prob_occ"], errors="coerce")
+            .fillna(0.0)
+            .clip(lower=0.0, upper=1.0)
+            .astype(float)
+        )
+        scored["eligible_flag"] = (
+            pd.to_numeric(occ_scored["eligible_flag_occ"], errors="coerce").fillna(0).astype(int)
+        )
+        scored["minutes_alloc_mode"] = "occupancy_sparse_v0"
 
     if should_debug and "minutes_p50" in scored.columns:
         for day in sorted(set(scored["game_date"].tolist())):
@@ -2498,7 +2543,12 @@ def main(
     if is_rotshare_bundle and alloc_mode != "legacy":
         typer.echo(f"[rotshare] forcing minutes_alloc_mode=legacy (was {alloc_mode})", err=True)
         alloc_mode = "legacy"
-    if alloc_mode in {"rotalloc_expk", "rotalloc_fringe_alpha", "share_with_rotalloc_elig"} and enable_upside_adjustment:
+    if alloc_mode in {
+        "rotalloc_expk",
+        "rotalloc_fringe_alpha",
+        "share_with_rotalloc_elig",
+        "occupancy_sparse_v0",
+    } and enable_upside_adjustment:
         typer.echo(
             f"[upside] disabling upside adjustment in {alloc_mode} "
             "(allocator tails are derived from legacy deltas; sim_v2 provides variance).",
@@ -2517,7 +2567,12 @@ def main(
         typer.echo("[upside] Applied upside adjustment for Monte Carlo coverage.", err=True)
 
     normalized_reconcile_mode = reconcile_team_minutes.lower()
-    if alloc_mode in {"rotalloc_expk", "rotalloc_fringe_alpha", "share_with_rotalloc_elig"} and normalized_reconcile_mode != "none":
+    if alloc_mode in {
+        "rotalloc_expk",
+        "rotalloc_fringe_alpha",
+        "share_with_rotalloc_elig",
+        "occupancy_sparse_v0",
+    } and normalized_reconcile_mode != "none":
         typer.echo(
             f"[rotalloc] forcing reconcile_team_minutes=none (was {normalized_reconcile_mode})",
             err=True,
@@ -3069,6 +3124,110 @@ def main(
                 fail_hard = os.environ.get("PROJECTIONS_ROTALLOC_FAIL_HARD", "").lower() in ("1", "true", "yes")
                 if fail_hard or os.environ.get("CI"):
                     raise
+
+    elif alloc_mode == "occupancy_sparse_v0":
+        occupancy_cfg = _resolve_occupancy_sparse_config(bundle_config)
+        try:
+            occ_scored, occ_diag = apply_occupancy_sparse_allocation(scored, config=occupancy_cfg)
+            minutes_occ = pd.to_numeric(occ_scored["minutes_occ"], errors="coerce").fillna(0.0).astype(float)
+            minutes_p10_occ = pd.to_numeric(occ_scored["minutes_p10_occ"], errors="coerce").fillna(0.0).astype(float)
+            minutes_p90_occ = pd.to_numeric(occ_scored["minutes_p90_occ"], errors="coerce").fillna(0.0).astype(float)
+            play_prob_occ = (
+                pd.to_numeric(occ_scored["play_prob_occ"], errors="coerce")
+                .fillna(0.0)
+                .clip(lower=0.0, upper=1.0)
+                .astype(float)
+            )
+
+            scored["minutes_mean"] = minutes_occ
+            scored["minutes_p50"] = minutes_occ
+            scored["minutes_p50_cond"] = minutes_occ
+            scored["minutes_p10"] = minutes_p10_occ
+            scored["minutes_p90"] = minutes_p90_occ
+            scored["minutes_p10_cond"] = minutes_p10_occ
+            scored["minutes_p90_cond"] = minutes_p90_occ
+            scored["play_prob"] = play_prob_occ
+            scored["eligible_flag"] = (
+                pd.to_numeric(occ_scored["eligible_flag_occ"], errors="coerce").fillna(0).astype(int)
+            )
+            scored["minutes_alloc_mode"] = "occupancy_sparse_v0"
+            for alias, src in {
+                "p10_cond": "minutes_p10",
+                "p50_cond": "minutes_p50",
+                "p90_cond": "minutes_p90",
+            }.items():
+                if alias in scored.columns:
+                    scored[alias] = scored[src]
+
+            team_sum_dev_max = 0.0
+            team_count = 0
+            if not occ_diag.empty and {"game_id", "team_id", "team_minutes_sum"}.issubset(occ_diag.columns):
+                team_diag_unique = (
+                    occ_diag[["game_id", "team_id", "team_minutes_sum", "active_count", "team_minutes_sum_dev"]]
+                    .drop_duplicates(subset=["game_id", "team_id"], keep="last")
+                )
+                scored = scored.merge(
+                    team_diag_unique[["game_id", "team_id", "team_minutes_sum"]],
+                    on=["game_id", "team_id"],
+                    how="left",
+                    suffixes=("", "_occ"),
+                )
+                if "team_minutes_sum_occ" in scored.columns:
+                    scored["team_minutes_sum"] = pd.to_numeric(scored["team_minutes_sum_occ"], errors="coerce")
+                    scored.drop(columns=["team_minutes_sum_occ"], inplace=True)
+                active_mask = pd.to_numeric(team_diag_unique["active_count"], errors="coerce").fillna(0).astype(int) > 0
+                active_teams = team_diag_unique.loc[active_mask]
+                team_count = int(len(active_teams))
+                if not active_teams.empty:
+                    team_sum_dev_max = float(
+                        pd.to_numeric(active_teams["team_minutes_sum_dev"], errors="coerce").fillna(0.0).max()
+                    )
+
+            n_total = len(scored)
+            alloc_summary = {
+                "minutes_alloc_mode": "occupancy_sparse_v0",
+                "config": {
+                    "p_cutoff": occupancy_cfg.p_cutoff,
+                    "k_min": occupancy_cfg.k_min,
+                    "k_max": occupancy_cfg.k_max,
+                    "cap_max": occupancy_cfg.cap_max,
+                    "fringe_cap_max": occupancy_cfg.fringe_cap_max,
+                    "occupancy_scale": occupancy_cfg.occupancy_scale,
+                    "starter_floor": occupancy_cfg.starter_floor,
+                },
+                "diagnostics": {
+                    "teams_with_active_players": team_count,
+                    "team_sum_dev_max": team_sum_dev_max,
+                    "eligible_size_p50": float(occ_diag["n_eligible"].quantile(0.5)) if not occ_diag.empty else float("nan"),
+                    "eligible_size_p90": float(occ_diag["n_eligible"].quantile(0.9)) if not occ_diag.empty else float("nan"),
+                    "bench_share_pred_mean": float(occ_diag["bench_share_pred"].mean()) if not occ_diag.empty else float("nan"),
+                    "bench_share_actual_mean": float(occ_diag["bench_share_actual"].mean()) if not occ_diag.empty else float("nan"),
+                    "frac_p50_ge_40": float((minutes_occ >= 40.0).sum() / n_total) if n_total > 0 else 0.0,
+                    "frac_play_prob_ge_0_5": float((play_prob_occ >= 0.5).sum() / n_total) if n_total > 0 else 0.0,
+                },
+            }
+            typer.echo(
+                "[occupancy_sparse_v0] mode=occupancy_sparse_v0 "
+                f"team_sum_dev_max={team_sum_dev_max:.6f} "
+                f"eligible_size p50/p90="
+                f"{alloc_summary['diagnostics']['eligible_size_p50']:.1f}/"
+                f"{alloc_summary['diagnostics']['eligible_size_p90']:.1f}",
+                err=True,
+            )
+        except Exception as exc:
+            import traceback
+
+            tb_str = traceback.format_exc()
+            typer.echo(f"[occupancy_sparse_v0] ERROR: {exc}", err=True)
+            typer.echo("[occupancy_sparse_v0] falling back to legacy minutes", err=True)
+            alloc_summary = {
+                "minutes_alloc_mode": "legacy",
+                "occupancy_sparse_v0_error": repr(exc),
+                "occupancy_sparse_v0_traceback_summary": tb_str[:500] if len(tb_str) > 500 else tb_str,
+            }
+            fail_hard = os.environ.get("PROJECTIONS_ROTALLOC_FAIL_HARD", "").lower() in ("1", "true", "yes")
+            if fail_hard or os.environ.get("CI"):
+                raise
 
     # Attach quick realism diagnostics for any non-legacy allocator outputs.
     if (
