@@ -3207,6 +3207,10 @@ def main(
                     "dnp_prior_play_prob_max": occupancy_cfg.dnp_prior_play_prob_max,
                     "dnp_inactive_streak_threshold": occupancy_cfg.dnp_inactive_streak_threshold,
                     "dnp_consecutive_active_dnp_threshold": occupancy_cfg.dnp_consecutive_active_dnp_threshold,
+                    "dnp_suppression_relax_in_injury_regime": occupancy_cfg.dnp_suppression_relax_in_injury_regime,
+                    "dnp_injury_regime_out_count_threshold": occupancy_cfg.dnp_injury_regime_out_count_threshold,
+                    "dnp_injury_regime_out_starters_threshold": occupancy_cfg.dnp_injury_regime_out_starters_threshold,
+                    "dnp_injury_regime_min_bench_share_pred": occupancy_cfg.dnp_injury_regime_min_bench_share_pred,
                 },
                 "diagnostics": {
                     "teams_with_active_players": team_count,
@@ -3218,6 +3222,9 @@ def main(
                     "k_max_eff_p90": float(occ_diag["k_max_eff"].quantile(0.9)) if not occ_diag.empty else float("nan"),
                     "dnp_suppressed_p50": float(occ_diag["n_dnp_suppressed"].quantile(0.5)) if not occ_diag.empty and "n_dnp_suppressed" in occ_diag.columns else float("nan"),
                     "dnp_suppressed_p90": float(occ_diag["n_dnp_suppressed"].quantile(0.9)) if not occ_diag.empty and "n_dnp_suppressed" in occ_diag.columns else float("nan"),
+                    "injury_regime_team_count": int(
+                        pd.to_numeric(occ_diag["injury_regime_active"], errors="coerce").fillna(0).astype(int).sum()
+                    ) if not occ_diag.empty and "injury_regime_active" in occ_diag.columns else 0,
                     "bench_share_pred_mean": float(occ_diag["bench_share_pred"].mean()) if not occ_diag.empty else float("nan"),
                     "bench_share_actual_mean": float(occ_diag["bench_share_actual"].mean()) if not occ_diag.empty else float("nan"),
                     "frac_p50_ge_40": float((minutes_occ >= 40.0).sum() / n_total) if n_total > 0 else 0.0,

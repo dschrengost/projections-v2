@@ -35,6 +35,10 @@ DEFAULT_OCCUPANCY_DNP_RATE_THRESHOLD = 0.35
 DEFAULT_OCCUPANCY_DNP_PRIOR_PLAY_PROB_MAX = 0.50
 DEFAULT_OCCUPANCY_DNP_INACTIVE_STREAK_THRESHOLD = 3
 DEFAULT_OCCUPANCY_DNP_CONSECUTIVE_ACTIVE_DNP_THRESHOLD = 2
+DEFAULT_OCCUPANCY_DNP_SUPPRESSION_RELAX_IN_INJURY_REGIME = True
+DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_OUT_COUNT_THRESHOLD = 2
+DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_OUT_STARTERS_THRESHOLD = 1
+DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_MIN_BENCH_SHARE_PRED = 0.22
 
 _OUT_STATUS_PREFIXES = ("OUT", "INACTIVE", "DNP")
 _STARTER_ROLE_VALUES = {"PROJECTED_STARTER", "CONFIRMED_STARTER"}
@@ -63,6 +67,18 @@ class OccupancySparseConfig:
     dnp_inactive_streak_threshold: int = DEFAULT_OCCUPANCY_DNP_INACTIVE_STREAK_THRESHOLD
     dnp_consecutive_active_dnp_threshold: int = (
         DEFAULT_OCCUPANCY_DNP_CONSECUTIVE_ACTIVE_DNP_THRESHOLD
+    )
+    dnp_suppression_relax_in_injury_regime: bool = (
+        DEFAULT_OCCUPANCY_DNP_SUPPRESSION_RELAX_IN_INJURY_REGIME
+    )
+    dnp_injury_regime_out_count_threshold: int = (
+        DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_OUT_COUNT_THRESHOLD
+    )
+    dnp_injury_regime_out_starters_threshold: int = (
+        DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_OUT_STARTERS_THRESHOLD
+    )
+    dnp_injury_regime_min_bench_share_pred: float = (
+        DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_MIN_BENCH_SHARE_PRED
     )
 
     @classmethod
@@ -147,6 +163,40 @@ class OccupancySparseConfig:
         )
         if dnp_consecutive_active_dnp_threshold <= 0:
             dnp_consecutive_active_dnp_threshold = cls.dnp_consecutive_active_dnp_threshold
+        dnp_suppression_relax_in_injury_regime = _coerce_bool(
+            raw.get(
+                "dnp_suppression_relax_in_injury_regime",
+                cls.dnp_suppression_relax_in_injury_regime,
+            ),
+            default=cls.dnp_suppression_relax_in_injury_regime,
+        )
+        dnp_injury_regime_out_count_threshold = int(
+            raw.get(
+                "dnp_injury_regime_out_count_threshold",
+                cls.dnp_injury_regime_out_count_threshold,
+            )
+        )
+        if dnp_injury_regime_out_count_threshold <= 0:
+            dnp_injury_regime_out_count_threshold = cls.dnp_injury_regime_out_count_threshold
+        dnp_injury_regime_out_starters_threshold = int(
+            raw.get(
+                "dnp_injury_regime_out_starters_threshold",
+                cls.dnp_injury_regime_out_starters_threshold,
+            )
+        )
+        if dnp_injury_regime_out_starters_threshold <= 0:
+            dnp_injury_regime_out_starters_threshold = cls.dnp_injury_regime_out_starters_threshold
+        dnp_injury_regime_min_bench_share_pred = float(
+            raw.get(
+                "dnp_injury_regime_min_bench_share_pred",
+                cls.dnp_injury_regime_min_bench_share_pred,
+            )
+        )
+        if not np.isfinite(dnp_injury_regime_min_bench_share_pred):
+            dnp_injury_regime_min_bench_share_pred = cls.dnp_injury_regime_min_bench_share_pred
+        dnp_injury_regime_min_bench_share_pred = float(
+            np.clip(dnp_injury_regime_min_bench_share_pred, 0.0, 1.0)
+        )
         return cls(
             p_cutoff=p_cutoff,
             k_min=k_min,
@@ -168,6 +218,10 @@ class OccupancySparseConfig:
             dnp_prior_play_prob_max=dnp_prior_play_prob_max,
             dnp_inactive_streak_threshold=dnp_inactive_streak_threshold,
             dnp_consecutive_active_dnp_threshold=dnp_consecutive_active_dnp_threshold,
+            dnp_suppression_relax_in_injury_regime=dnp_suppression_relax_in_injury_regime,
+            dnp_injury_regime_out_count_threshold=dnp_injury_regime_out_count_threshold,
+            dnp_injury_regime_out_starters_threshold=dnp_injury_regime_out_starters_threshold,
+            dnp_injury_regime_min_bench_share_pred=dnp_injury_regime_min_bench_share_pred,
         )
 
 
@@ -268,11 +322,11 @@ def apply_occupancy_sparse_allocation(
     out_mask = out_mask | status_upper.str.contains("SUSP", na=False)
     out_mask = out_mask | role_upper.eq("OUT")
 
-    starter_mask = pd.Series(False, index=working.index, dtype=bool)
+    starter_mask_raw = pd.Series(False, index=working.index, dtype=bool)
     for col in ("starter_flag", "is_projected_starter", "is_confirmed_starter", "is_starter"):
-        starter_mask = starter_mask | _coerce_bool_series(working.get(col), index=working.index)
-    starter_mask = starter_mask | role_upper.isin(_STARTER_ROLE_VALUES)
-    starter_mask = starter_mask & ~out_mask
+        starter_mask_raw = starter_mask_raw | _coerce_bool_series(working.get(col), index=working.index)
+    starter_mask_raw = starter_mask_raw | role_upper.isin(_STARTER_ROLE_VALUES)
+    starter_mask = starter_mask_raw & ~out_mask
 
     active_but_dnp_rate = (
         _coerce_numeric_series(working, "active_but_dnp_rate_last10", default=0.0)
@@ -316,42 +370,11 @@ def apply_occupancy_sparse_allocation(
         mu_g = mu_pred[idx]
         out_g = out_mask.iloc[idx].to_numpy(dtype=bool)
         starter_g = starter_mask.iloc[idx].to_numpy(dtype=bool)
+        starter_raw_g = starter_mask_raw.iloc[idx].to_numpy(dtype=bool)
 
         dnp_risk_g = np.zeros(len(idx), dtype=bool)
-        if config.dnp_suppression_enabled:
-            dnp_rate_g = active_but_dnp_rate[idx]
-            consec_dnp_g = consecutive_active_dnp[idx]
-            inactive_streak_g = inactive_streak_len[idx]
-            prior_play_g = prior_play_prob[idx]
-            prior_is_low_or_missing = np.isnan(prior_play_g) | (
-                prior_play_g <= float(config.dnp_prior_play_prob_max)
-            )
-            dnp_risk_g = (
-                (
-                    (dnp_rate_g >= float(config.dnp_rate_threshold))
-                    & prior_is_low_or_missing
-                )
-                | (inactive_streak_g >= int(config.dnp_inactive_streak_threshold))
-                | (
-                    consec_dnp_g
-                    >= int(config.dnp_consecutive_active_dnp_threshold)
-                )
-            )
-            dnp_risk_g = dnp_risk_g & (~starter_g) & (~out_g)
-
-        candidate_mask = (~out_g) & np.isfinite(mu_g) & np.isfinite(p_g) & (mu_g > 0.0) & (p_g > 0.0)
-        candidate_mask = candidate_mask & (~dnp_risk_g)
-        if not candidate_mask.any():
-            starter_candidates = starter_g & (~out_g)
-            if starter_candidates.any():
-                candidate_mask = starter_candidates
-            elif (~out_g).any():
-                fallback_pool = (~out_g) & (~dnp_risk_g)
-                if not fallback_pool.any():
-                    fallback_pool = ~out_g
-                best_idx = int(np.argmax(np.where(fallback_pool, mu_g, -np.inf)))
-                candidate_mask = np.zeros_like(out_g, dtype=bool)
-                candidate_mask[best_idx] = True
+        injury_regime_active = False
+        out_starters_count = int((out_g & starter_raw_g).sum())
 
         spread_val: float | None = None
         if "spread_home" in group.columns:
@@ -372,6 +395,81 @@ def apply_occupancy_sparse_allocation(
             total=total_val,
             out_count=int(out_g.sum()),
         )
+        if config.dnp_suppression_enabled:
+            dnp_rate_g = active_but_dnp_rate[idx]
+            consec_dnp_g = consecutive_active_dnp[idx]
+            inactive_streak_g = inactive_streak_len[idx]
+            prior_play_g = prior_play_prob[idx]
+            prior_is_low_or_missing = np.isnan(prior_play_g) | (
+                prior_play_g <= float(config.dnp_prior_play_prob_max)
+            )
+            dnp_risk_base = (
+                (
+                    (dnp_rate_g >= float(config.dnp_rate_threshold))
+                    & prior_is_low_or_missing
+                )
+                | (inactive_streak_g >= int(config.dnp_inactive_streak_threshold))
+                | (
+                    consec_dnp_g
+                    >= int(config.dnp_consecutive_active_dnp_threshold)
+                )
+            )
+            injury_count_trigger = (
+                int(out_g.sum()) >= int(config.dnp_injury_regime_out_count_threshold)
+            ) or (
+                out_starters_count
+                >= int(config.dnp_injury_regime_out_starters_threshold)
+            )
+            injury_regime_active = (
+                injury_count_trigger
+                and float(bench_share)
+                >= float(config.dnp_injury_regime_min_bench_share_pred)
+            )
+            if (
+                injury_regime_active
+                and config.dnp_suppression_relax_in_injury_regime
+            ):
+                relaxed_rate_threshold = float(
+                    min(1.0, float(config.dnp_rate_threshold) + 0.15)
+                )
+                relaxed_inactive_threshold = int(
+                    max(
+                        int(config.dnp_inactive_streak_threshold),
+                        int(config.dnp_inactive_streak_threshold) + 2,
+                    )
+                )
+                relaxed_consecutive_threshold = int(
+                    max(
+                        int(config.dnp_consecutive_active_dnp_threshold),
+                        int(config.dnp_consecutive_active_dnp_threshold) + 1,
+                    )
+                )
+                dnp_risk_g = (
+                    (
+                        (dnp_rate_g >= relaxed_rate_threshold)
+                        & prior_is_low_or_missing
+                    )
+                    | (inactive_streak_g >= relaxed_inactive_threshold)
+                    | (consec_dnp_g >= relaxed_consecutive_threshold)
+                )
+            else:
+                dnp_risk_g = dnp_risk_base
+            dnp_risk_g = dnp_risk_g & (~starter_g) & (~out_g)
+
+        candidate_mask = (~out_g) & np.isfinite(mu_g) & np.isfinite(p_g) & (mu_g > 0.0) & (p_g > 0.0)
+        candidate_mask = candidate_mask & (~dnp_risk_g)
+        if not candidate_mask.any():
+            starter_candidates = starter_g & (~out_g)
+            if starter_candidates.any():
+                candidate_mask = starter_candidates
+            elif (~out_g).any():
+                fallback_pool = (~out_g) & (~dnp_risk_g)
+                if not fallback_pool.any():
+                    fallback_pool = ~out_g
+                best_idx = int(np.argmax(np.where(fallback_pool, mu_g, -np.inf)))
+                candidate_mask = np.zeros_like(out_g, dtype=bool)
+                candidate_mask[best_idx] = True
+
         bench_share_pred_arr[idx] = bench_share
 
         active_count = int((~out_g).sum())
@@ -457,6 +555,8 @@ def apply_occupancy_sparse_allocation(
                 "n_eligible": int(eligible_g.sum()),
                 "n_dnp_suppressed": int(dnp_risk_g.sum()),
                 "active_count": active_count,
+                "n_out_starters": out_starters_count,
+                "injury_regime_active": bool(injury_regime_active),
                 "k_min_eff": int(k_min_eff),
                 "k_max_eff": int(k_max_eff),
                 "depth_signal_count": int(depth_signal_count),

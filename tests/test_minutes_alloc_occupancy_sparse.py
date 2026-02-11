@@ -170,6 +170,10 @@ def test_occupancy_sparse_config_parses_dynamic_payload() -> None:
             "dnp_prior_play_prob_max": 0.45,
             "dnp_inactive_streak_threshold": 4,
             "dnp_consecutive_active_dnp_threshold": 3,
+            "dnp_suppression_relax_in_injury_regime": "false",
+            "dnp_injury_regime_out_count_threshold": 3,
+            "dnp_injury_regime_out_starters_threshold": 2,
+            "dnp_injury_regime_min_bench_share_pred": 0.25,
         }
     )
     assert cfg.dynamic_k_bounds_enabled is True
@@ -185,6 +189,10 @@ def test_occupancy_sparse_config_parses_dynamic_payload() -> None:
     assert cfg.dnp_prior_play_prob_max == pytest.approx(0.45)
     assert cfg.dnp_inactive_streak_threshold == 4
     assert cfg.dnp_consecutive_active_dnp_threshold == 3
+    assert cfg.dnp_suppression_relax_in_injury_regime is False
+    assert cfg.dnp_injury_regime_out_count_threshold == 3
+    assert cfg.dnp_injury_regime_out_starters_threshold == 2
+    assert cfg.dnp_injury_regime_min_bench_share_pred == pytest.approx(0.25)
 
 
 def test_occupancy_sparse_suppresses_high_dnp_risk_bench_players() -> None:
@@ -229,3 +237,56 @@ def test_occupancy_sparse_suppresses_high_dnp_risk_bench_players() -> None:
     assert risky_eligible_yes == 0
     assert "n_dnp_suppressed" in diag_yes.columns
     assert int(pd.to_numeric(diag_yes["n_dnp_suppressed"], errors="coerce").fillna(0).iloc[0]) >= 2
+
+
+def test_occupancy_sparse_relaxes_suppression_in_injury_regime() -> None:
+    frame = _deep_rotation_frame()
+    frame["active_but_dnp_rate_last10"] = 0.0
+    frame["consecutive_active_dnp"] = 0
+    frame["inactive_streak_len"] = 0
+    frame["prior_play_prob"] = 0.8
+
+    # Create injury regime: two outs, including one starter.
+    frame.loc[frame["player_id"] == 1, ["status", "is_out"]] = ["OUT", 1]
+    frame.loc[frame["player_id"] == 11, ["status", "is_out"]] = ["OUT", 1]
+
+    # Fringe players that should be suppressed in normal regime.
+    risky = frame["player_id"].isin([12, 13])
+    frame.loc[risky, "active_but_dnp_rate_last10"] = 0.45
+    frame.loc[risky, "prior_play_prob"] = np.nan
+    frame.loc[risky, "minutes_p50"] = [20.0, 18.0]
+    frame.loc[risky, "play_prob"] = [0.90, 0.88]
+
+    cfg_no_relax = OccupancySparseConfig(
+        dynamic_k_bounds_enabled=True,
+        dnp_suppression_enabled=True,
+        dnp_suppression_relax_in_injury_regime=False,
+        dnp_rate_threshold=0.35,
+    )
+    out_no, _ = apply_occupancy_sparse_allocation(frame, config=cfg_no_relax)
+    risky_eligible_no = (
+        out_no.loc[out_no["player_id"].isin([12, 13]), "eligible_flag_occ"]
+        .astype(int)
+        .sum()
+    )
+    assert risky_eligible_no == 0
+
+    cfg_relax = OccupancySparseConfig(
+        dynamic_k_bounds_enabled=True,
+        dnp_suppression_enabled=True,
+        dnp_suppression_relax_in_injury_regime=True,
+        dnp_injury_regime_out_count_threshold=2,
+        dnp_injury_regime_out_starters_threshold=1,
+        dnp_injury_regime_min_bench_share_pred=0.10,
+        dnp_rate_threshold=0.35,
+    )
+    out_yes, diag_yes = apply_occupancy_sparse_allocation(frame, config=cfg_relax)
+    risky_eligible_yes = (
+        out_yes.loc[out_yes["player_id"].isin([12, 13]), "eligible_flag_occ"]
+        .astype(int)
+        .sum()
+    )
+
+    assert risky_eligible_yes > risky_eligible_no
+    assert "injury_regime_active" in diag_yes.columns
+    assert int(pd.to_numeric(diag_yes["injury_regime_active"], errors="coerce").fillna(0).iloc[0]) == 1
