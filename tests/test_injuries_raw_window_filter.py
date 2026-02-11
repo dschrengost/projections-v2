@@ -62,3 +62,31 @@ def test_build_injuries_raw_filters_out_of_window_game_dates() -> None:
     assert len(result) == 1
     assert int(result.iloc[0]["game_id"]) == 22500700
     assert str(result.iloc[0]["player_name"]) == "Player Current"
+
+
+def test_build_injuries_raw_uses_report_time_for_asof_when_scraped_late() -> None:
+    records = [
+        {
+            "report_time": "2026-02-10T22:00:00Z",
+            "matchup": "ATL @ BOS",
+            "game_date": "2026-02-10",
+            "team": "Atlanta Hawks",
+            "player_name": "Player Current",
+            "current_status": "Out",
+            "reason": "Injury",
+            "report_url": "https://example.com/current.pdf",
+        },
+    ]
+
+    result = _build_injuries_raw(
+        records,
+        start=pd.Timestamp("2026-02-10"),
+        end=pd.Timestamp("2026-02-10"),
+        resolver=_FakeTeamResolver(),
+        player_resolver=_FakePlayerResolver(),
+    )
+
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert pd.Timestamp(row["report_ts"]) == pd.Timestamp("2026-02-10T22:00:00Z")
+    assert pd.Timestamp(row["as_of_ts"]) == pd.Timestamp("2026-02-10T22:00:00Z")

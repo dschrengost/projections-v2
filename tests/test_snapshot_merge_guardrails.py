@@ -122,3 +122,45 @@ def test_injuries_merge_prefers_latest_for_duplicate_keys(tmp_path: Path) -> Non
     assert len(merged) == 2
     assert merged.loc[0, "status"] == "AVAILABLE"
     assert merged.loc[1, "status"] == "QUESTIONABLE"
+
+
+def test_injuries_merge_does_not_replace_valid_row_with_placeholder(tmp_path: Path) -> None:
+    silver_path = tmp_path / "injuries_snapshot.parquet"
+
+    existing = _injuries_snapshot_frame(
+        game_id=22500774,
+        player_id=1629028,
+        status="OUT",
+        as_of_ts="2026-02-11T03:00:00Z",
+    )
+    existing.to_parquet(silver_path, index=False)
+
+    incoming_placeholder = pd.DataFrame(
+        {
+            "game_id": [22500774],
+            "player_id": [1629028],
+            "as_of_ts": [pd.NaT],
+            "status": ["UNK"],
+            "restriction_flag": [False],
+            "ramp_flag": [False],
+            "games_since_return": [pd.NA],
+            "days_since_return": [pd.NA],
+            "ingested_ts": [pd.NaT],
+            "source": ["missing_pre_tip_snapshot"],
+            "selection_rule": ["no_pre_tip_snapshot"],
+            "snapshot_missing": [1],
+        }
+    )
+    incoming_placeholder = enforce_schema(incoming_placeholder, INJURIES_SNAPSHOT_SCHEMA)
+
+    merged = merge_injuries_snapshot(
+        incoming_placeholder,
+        silver_path=silver_path,
+        allow_snapshot_regression=False,
+    )
+
+    assert len(merged) == 1
+    row = merged.iloc[0]
+    assert str(row["status"]) == "OUT"
+    assert int(row["snapshot_missing"]) == 0
+    assert pd.Timestamp(row["as_of_ts"]) == pd.Timestamp("2026-02-11T03:00:00Z")

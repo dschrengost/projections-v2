@@ -115,6 +115,11 @@ def _build_injuries_raw(
     data: list[dict] = []
     for idx, row in enumerate(records):
         report_time = pd.Timestamp(row["report_time"]).tz_convert("UTC")
+        # as_of_ts is the earliest time we can safely say the report was known.
+        # Use min(scrape_time, report_time):
+        # - Prevents future-dated report slots from leaking into pre-tip filters.
+        # - Preserves true report chronology when we scrape after a report posts.
+        as_of_ts = min(ingested_ts, report_time)
         report_day = report_time.tz_convert("America/New_York").tz_localize(None).normalize()
         if not (start_pad <= report_day <= end_pad):
             continue
@@ -131,15 +136,11 @@ def _build_injuries_raw(
         )
         player_id = player_resolver.resolve(row.get("player_name"))
         team_id = resolver.resolve_team_id(row.get("team"))
-        # Use ingested_ts (actual scrape time) for as_of_ts instead of report_time.
-        # report_time is aligned to :30 report slots which can be in the future,
-        # causing the scoring pipeline to filter out all injury data.
-        # However, we also track report_ts to allow proper ordering when selecting
-        # the latest status per player (e.g., when a player goes from Q to Available).
+        # Keep report_ts for strict report ordering (status updates within the same day).
         data.append(
             {
                 "report_date": report_day,
-                "as_of_ts": ingested_ts,  # Use scrape time, not aligned report slot
+                "as_of_ts": as_of_ts,
                 "report_ts": report_time,  # Actual report timestamp for ordering
                 "team_id": team_id,
                 "player_name": row.get("player_name"),
@@ -294,10 +295,24 @@ def _merge_with_existing_snapshot(
         )
         return merged_snapshot
 
-    # Combine, preferring new data for duplicates (same game_id + player_id).
+    # Combine snapshot keys; prefer rows with a real pre-tip snapshot over placeholders.
+    # This prevents no_pre_tip placeholder rows (as_of_ts=NaT, snapshot_missing=1)
+    # from replacing older valid rows for the same key.
     combined = pd.concat([existing_snapshot, incoming_snapshot], ignore_index=True)
-    combined = combined.sort_values("as_of_ts", ascending=True)
-    merged_snapshot = combined.drop_duplicates(subset=["game_id", "player_id"], keep="last")
+    has_snapshot = (
+        pd.to_numeric(combined.get("snapshot_missing"), errors="coerce").fillna(0).astype(int).eq(0)
+        & combined["as_of_ts"].notna()
+    )
+    combined["_has_snapshot"] = has_snapshot.astype(int)
+    combined = combined.sort_values(
+        by=["game_id", "player_id", "_has_snapshot", "as_of_ts"],
+        ascending=[True, True, True, True],
+        na_position="first",
+        kind="mergesort",
+    )
+    merged_snapshot = (
+        combined.groupby(["game_id", "player_id"], as_index=False).tail(1).drop(columns=["_has_snapshot"])
+    )
     merged_snapshot = enforce_schema(merged_snapshot, INJURIES_SNAPSHOT_SCHEMA)
     enforce_non_regression(
         dataset_name="injuries",
