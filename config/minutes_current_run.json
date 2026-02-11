@@ -2,7 +2,16 @@
   "mode": "single",
   "bundle_dir": "/home/daniel/projections-data/artifacts/minutes_lgbm/minutes_v1_recency_h35_parityfix_20260207T153231Z",
   "run_id": "minutes_v1_recency_h35_parityfix_20260207T153231Z",
-  "minutes_alloc_mode": "legacy",
+  "minutes_alloc_mode": "occupancy_sparse_v0",
+  "occupancy_sparse_v0": {
+    "p_cutoff": 0.1,
+    "k_min": 8,
+    "k_max": 11,
+    "cap_max": 40.0,
+    "fringe_cap_max": 14.0,
+    "occupancy_scale": 8.0,
+    "starter_floor": 0.85
+  },
   "rotalloc_bundle_dir": "artifacts/experiments/lgbm_rotalloc_final_v1",
   "reconcile_team_minutes": "p50",
   "enable_upside_adjustment": false,

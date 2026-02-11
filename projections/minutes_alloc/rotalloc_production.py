@@ -80,6 +80,14 @@ def _normalize_alloc_mode(raw: str | None) -> str:
         "allocator_e",
     }:
         return "rotalloc_fringe_alpha"
+    if value in {
+        "occupancy_sparse_v0",
+        "occupancy-sparse-v0",
+        "occupancy_sparse",
+        "occupancy-sparse",
+        "allocator_f",
+    }:
+        return "occupancy_sparse_v0"
     return value
 
 

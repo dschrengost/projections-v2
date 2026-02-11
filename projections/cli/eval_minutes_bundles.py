@@ -16,12 +16,18 @@ import pandas as pd
 import typer
 
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
-from projections.models import minutes_lgbm as ml
-from projections.models.rotalloc import (
-    allocate_adaptive_depth,
-    build_eligible_mask,
-    compute_bench_share_prior,
+from projections.minutes_alloc.occupancy_sparse import (
+    DEFAULT_OCCUPANCY_CAP_MAX,
+    DEFAULT_OCCUPANCY_FRINGE_CAP_MAX,
+    DEFAULT_OCCUPANCY_K_MAX,
+    DEFAULT_OCCUPANCY_K_MIN,
+    DEFAULT_OCCUPANCY_P_CUTOFF,
+    DEFAULT_OCCUPANCY_SCALE,
+    DEFAULT_OCCUPANCY_STARTER_FLOOR,
+    OccupancySparseConfig,
+    apply_occupancy_sparse_allocation,
 )
+from projections.models import minutes_lgbm as ml
 
 
 app = typer.Typer(help=__doc__)
@@ -37,17 +43,6 @@ DEFAULT_DATA_ROOT = Path("/home/daniel/projections-data")
 DEFAULT_LABELS = Path("/home/daniel/projections-data/labels/season=2025/boxscore_labels.parquet")
 DEFAULT_EVAL_ROOT = Path("/home/daniel/projections-data/artifacts/minutes_eval_runs")
 DEFAULT_REPORT_PATH = Path("reports/minutes_head_to_head_eval_20260207.md")
-DEFAULT_OCCUPANCY_P_CUTOFF = 0.10
-DEFAULT_OCCUPANCY_K_MIN = 8
-DEFAULT_OCCUPANCY_K_MAX = 11
-DEFAULT_OCCUPANCY_CAP_MAX = 40.0
-DEFAULT_OCCUPANCY_FRINGE_CAP_MAX = 14.0
-DEFAULT_OCCUPANCY_SCALE = 8.0
-DEFAULT_OCCUPANCY_STARTER_FLOOR = 0.85
-_OUT_STATUS_PREFIXES = ("OUT", "INACTIVE", "DNP")
-_STARTER_ROLE_VALUES = {"PROJECTED_STARTER", "CONFIRMED_STARTER"}
-
-
 @dataclass(frozen=True)
 class EvalSlice:
     name: str
@@ -94,26 +89,6 @@ def _git_sha_or_unknown() -> str:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     except Exception:
         return "unknown"
-
-
-def _safe_status_upper(series: pd.Series | None, *, index: pd.Index) -> pd.Series:
-    if series is None:
-        return pd.Series("", index=index, dtype="string")
-    return series.astype("string", copy=False).fillna("").str.upper()
-
-
-def _coerce_bool_series(series: pd.Series | None, *, index: pd.Index) -> pd.Series:
-    if series is None:
-        return pd.Series(False, index=index, dtype=bool)
-    if pd.api.types.is_bool_dtype(series):
-        return series.fillna(False).astype(bool)
-
-    numeric = pd.to_numeric(series, errors="coerce")
-    if numeric.notna().any():
-        return numeric.fillna(0.0).astype(float).ne(0.0)
-
-    text = series.astype("string", copy=False).str.strip().str.lower()
-    return text.fillna("").isin({"1", "true", "t", "yes", "y"})
 
 
 def _read_labels(labels_path: Path) -> pd.DataFrame:
@@ -531,10 +506,7 @@ def apply_occupancy_sparse_layer(
     occupancy_scale: float = DEFAULT_OCCUPANCY_SCALE,
     starter_floor: float = DEFAULT_OCCUPANCY_STARTER_FLOOR,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Apply an occupancy-aware sparse allocator on top of retrain predictions.
-
-    This is an offline diagnostic transform used only in eval/reporting.
-    """
+    """Apply the shared occupancy+sparse allocator to retrain eval predictions."""
     if pred_df.empty:
         raise ValueError("pred_df is empty.")
     if eval_df.empty:
@@ -568,164 +540,33 @@ def apply_occupancy_sparse_layer(
     ]
     available_context = [c for c in context_cols if c in eval_df.columns]
     context = eval_df[join_cols + available_context].drop_duplicates(subset=join_cols, keep="last")
-    merged = pred_df.merge(context, on=join_cols, how="left", validate="one_to_one")
-    merged = merged.copy()
+    merged = pred_df.merge(context, on=join_cols, how="left", validate="one_to_one").copy()
 
-    status_upper = _safe_status_upper(merged.get("status"), index=merged.index)
-    role_upper = _safe_status_upper(merged.get("lineup_role"), index=merged.index)
-
-    out_mask = pd.Series(False, index=merged.index, dtype=bool)
-    if "is_out" in merged.columns:
-        out_mask = out_mask | pd.to_numeric(merged["is_out"], errors="coerce").fillna(0).astype(int).eq(1)
-    out_mask = out_mask | status_upper.str.startswith(_OUT_STATUS_PREFIXES)
-    out_mask = out_mask | status_upper.str.contains("SUSP", na=False)
-    out_mask = out_mask | role_upper.eq("OUT")
-
-    starter_mask = pd.Series(False, index=merged.index, dtype=bool)
-    for col in ("starter_flag", "is_projected_starter", "is_confirmed_starter", "is_starter"):
-        starter_mask = starter_mask | _coerce_bool_series(merged.get(col), index=merged.index)
-    starter_mask = starter_mask | role_upper.isin(_STARTER_ROLE_VALUES)
-    starter_mask = starter_mask & ~out_mask
-
-    p_rot = pd.to_numeric(merged["play_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0).to_numpy(dtype=float)
-    mu_pred = pd.to_numeric(merged["pred_p50_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-    mu_pred = np.maximum(mu_pred, 0.0)
-
-    p10_orig = pd.to_numeric(merged["pred_p10_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-    p90_orig = pd.to_numeric(merged["pred_p90_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-    p10_orig = np.maximum(0.0, p10_orig)
-    p90_orig = np.maximum(p10_orig, p90_orig)
-    lower_width = np.maximum(0.0, mu_pred - p10_orig)
-    upper_width = np.maximum(0.0, p90_orig - mu_pred)
-
-    minutes_occ = np.zeros(len(merged), dtype=float)
-    eligible_flags = np.zeros(len(merged), dtype=bool)
-    bench_share_pred_arr = np.zeros(len(merged), dtype=float)
-    diagnostic_rows: list[dict[str, Any]] = []
-
-    home_flag_series = (
-        pd.to_numeric(merged.get("home_flag"), errors="coerce").fillna(0.0)
-        if "home_flag" in merged.columns
-        else pd.Series(0.0, index=merged.index, dtype=float)
+    canonical = merged.rename(
+        columns={
+            "pred_p10_minutes": "minutes_p10",
+            "pred_p50_minutes": "minutes_p50",
+            "pred_p90_minutes": "minutes_p90",
+        }
     )
-
-    for (game_id, team_id), group in merged.groupby(["game_id", "team_id"], sort=False):
-        idx = group.index.to_numpy()
-        if idx.size == 0:
-            continue
-
-        p_g = p_rot[idx]
-        mu_g = mu_pred[idx]
-        out_g = out_mask.iloc[idx].to_numpy(dtype=bool)
-        starter_g = starter_mask.iloc[idx].to_numpy(dtype=bool)
-
-        candidate_mask = (~out_g) & np.isfinite(mu_g) & np.isfinite(p_g) & (mu_g > 0.0) & (p_g > 0.0)
-        if not candidate_mask.any():
-            starter_candidates = starter_g & (~out_g)
-            if starter_candidates.any():
-                candidate_mask = starter_candidates
-            elif (~out_g).any():
-                best_idx = int(np.argmax(np.where(~out_g, mu_g, -np.inf)))
-                candidate_mask = np.zeros_like(out_g, dtype=bool)
-                candidate_mask[best_idx] = True
-
-        eligible_g = build_eligible_mask(
-            p_g,
-            mu_g,
-            candidate_mask,
-            a=1.0,
-            mu_power=1.0,
-            p_cutoff=float(p_cutoff),
-            k_min=int(k_min),
-            k_max=int(k_max),
-            use_expected_k=True,
-        )
-        eligible_g = eligible_g | (starter_g & (~out_g))
-        eligible_g = eligible_g & (~out_g)
-        if not eligible_g.any() and (~out_g).any():
-            best_idx = int(np.argmax(np.where(~out_g, mu_g, -np.inf)))
-            eligible_g = np.zeros_like(out_g, dtype=bool)
-            eligible_g[best_idx] = True
-
-        spread_val: float | None = None
-        if "spread_home" in group.columns:
-            spread_raw = pd.to_numeric(group["spread_home"], errors="coerce").iloc[0]
-            if pd.notna(spread_raw):
-                is_home = bool(home_flag_series.iloc[idx[0]] > 0.0)
-                spread_val = float(spread_raw) if is_home else -float(spread_raw)
-
-        total_val: float | None = None
-        if "total" in group.columns:
-            total_raw = pd.to_numeric(group["total"], errors="coerce").iloc[0]
-            if pd.notna(total_raw):
-                total_val = float(total_raw)
-
-        bench_share = compute_bench_share_prior(
-            team_bench_share_avg=None,
-            spread=spread_val,
-            total=total_val,
-            out_count=int(out_g.sum()),
-        )
-        bench_share_pred_arr[idx] = bench_share
-
-        team_minutes = np.zeros(len(idx), dtype=float)
-        depth_diag: dict[str, Any] = {}
-        if eligible_g.any():
-            team_minutes, depth_diag = allocate_adaptive_depth(
-                p_g,
-                mu_g,
-                eligible_g,
-                a=1.0,
-                mu_power=1.0,
-                bench_share_pred=float(bench_share),
-                core_k_min=int(k_min),
-                core_k_max=int(k_max),
-                fringe_cap_max=float(fringe_cap_max),
-                cap_max=float(cap_max),
-            )
-        team_minutes[out_g] = 0.0
-        minutes_occ[idx] = np.maximum(team_minutes, 0.0)
-        eligible_flags[idx] = eligible_g
-
-        diagnostic_rows.append(
-            {
-                "game_id": game_id,
-                "team_id": team_id,
-                "rows": int(len(idx)),
-                "n_out": int(out_g.sum()),
-                "n_starters": int(starter_g.sum()),
-                "n_eligible": int(eligible_g.sum()),
-                "team_minutes_sum": float(team_minutes.sum()),
-                "bench_share_pred": float(bench_share),
-                "bench_share_actual": float(depth_diag.get("bench_share_actual", 0.0)),
-                "core_k": int(depth_diag.get("core_k", 0)),
-                "fringe_minutes_sum": float(depth_diag.get("fringe_minutes_sum", 0.0)),
-            }
-        )
-
-    scale = max(float(occupancy_scale), 1e-6)
-    play_prob_occ = 1.0 - np.exp(-minutes_occ / scale)
-    play_prob_occ = np.clip(play_prob_occ, 0.0, 1.0)
-    out_arr = out_mask.to_numpy(dtype=bool)
-    starter_arr = starter_mask.to_numpy(dtype=bool)
-    play_prob_occ[out_arr] = 0.0
-    starter_active = starter_arr & (~out_arr) & (minutes_occ > 0.0)
-    play_prob_occ[starter_active] = np.maximum(play_prob_occ[starter_active], float(starter_floor))
-
-    p10_occ = np.maximum(0.0, minutes_occ - lower_width)
-    p90_occ = np.maximum(p10_occ, minutes_occ + upper_width)
-    p10_occ[out_arr] = 0.0
-    p90_occ[out_arr] = 0.0
+    occ_cfg = OccupancySparseConfig(
+        p_cutoff=float(p_cutoff),
+        k_min=int(k_min),
+        k_max=int(k_max),
+        cap_max=float(cap_max),
+        fringe_cap_max=float(fringe_cap_max),
+        occupancy_scale=float(occupancy_scale),
+        starter_floor=float(starter_floor),
+    )
+    occ_df, diagnostics = apply_occupancy_sparse_allocation(canonical, config=occ_cfg)
 
     out = pred_df.copy()
-    out["play_prob"] = play_prob_occ
-    out["pred_p10_minutes"] = p10_occ
-    out["pred_p50_minutes"] = minutes_occ
-    out["pred_p90_minutes"] = p90_occ
-    out["eligible_flag_occ_v0"] = eligible_flags.astype(int)
-    out["bench_share_pred_occ_v0"] = bench_share_pred_arr
-
-    diagnostics = pd.DataFrame(diagnostic_rows)
+    out["play_prob"] = pd.to_numeric(occ_df["play_prob_occ"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    out["pred_p10_minutes"] = pd.to_numeric(occ_df["minutes_p10_occ"], errors="coerce").fillna(0.0)
+    out["pred_p50_minutes"] = pd.to_numeric(occ_df["minutes_occ"], errors="coerce").fillna(0.0)
+    out["pred_p90_minutes"] = pd.to_numeric(occ_df["minutes_p90_occ"], errors="coerce").fillna(0.0)
+    out["eligible_flag_occ_v0"] = pd.to_numeric(occ_df["eligible_flag_occ"], errors="coerce").fillna(0).astype(int)
+    out["bench_share_pred_occ_v0"] = pd.to_numeric(occ_df["bench_share_pred_occ"], errors="coerce").fillna(0.0)
     return out, diagnostics
 
 
