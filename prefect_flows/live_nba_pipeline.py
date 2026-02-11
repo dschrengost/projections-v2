@@ -1330,7 +1330,9 @@ def nba_live_pipeline_flow(
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(tz=UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%S")
+    # Keep sub-second precision so as_of_ts ordering stays consistent with
+    # upstream snapshot timestamps (which are often microsecond-precision).
+    return datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")
 
 
 def _read_minutes_reconcile_mode() -> str:
