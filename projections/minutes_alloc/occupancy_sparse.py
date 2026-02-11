@@ -39,9 +39,23 @@ DEFAULT_OCCUPANCY_DNP_SUPPRESSION_RELAX_IN_INJURY_REGIME = True
 DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_OUT_COUNT_THRESHOLD = 2
 DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_OUT_STARTERS_THRESHOLD = 1
 DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_MIN_BENCH_SHARE_PRED = 0.22
+DEFAULT_OCCUPANCY_ARCHETYPE_SHORTAGE_ENABLED = True
+DEFAULT_OCCUPANCY_ARCHETYPE_SOURCE_COL = "pos_bucket"
+DEFAULT_OCCUPANCY_ARCHETYPE_OUT_COUNT_THRESHOLD = 1
+DEFAULT_OCCUPANCY_ARCHETYPE_OUT_INACTIVE_STREAK_MAX = 10
+DEFAULT_OCCUPANCY_ARCHETYPE_DNP_RATE_RELAX_ADD = 0.10
+DEFAULT_OCCUPANCY_ARCHETYPE_DNP_INACTIVE_RELAX_ADD = 1
+DEFAULT_OCCUPANCY_ARCHETYPE_DNP_CONSECUTIVE_RELAX_ADD = 1
+DEFAULT_OCCUPANCY_ARCHETYPE_PLAY_PROB_FLOOR = 0.08
+DEFAULT_OCCUPANCY_ARCHETYPE_SEED_P90_MIN = 8.0
+DEFAULT_OCCUPANCY_ARCHETYPE_SEED_MINUTES_MIN = 4.0
+DEFAULT_OCCUPANCY_ARCHETYPE_SEED_MINUTES_MAX = 10.0
+DEFAULT_OCCUPANCY_ARCHETYPE_SEED_MINUTES_P90_MULT = 0.50
+DEFAULT_OCCUPANCY_ARCHETYPE_SEED_MAX_PLAYERS = 2
 
 _OUT_STATUS_PREFIXES = ("OUT", "INACTIVE", "DNP")
 _STARTER_ROLE_VALUES = {"PROJECTED_STARTER", "CONFIRMED_STARTER"}
+_ARCHETYPE_KNOWN = ("guard", "wing", "big")
 
 
 @dataclass(frozen=True)
@@ -80,6 +94,19 @@ class OccupancySparseConfig:
     dnp_injury_regime_min_bench_share_pred: float = (
         DEFAULT_OCCUPANCY_DNP_INJURY_REGIME_MIN_BENCH_SHARE_PRED
     )
+    archetype_shortage_enabled: bool = DEFAULT_OCCUPANCY_ARCHETYPE_SHORTAGE_ENABLED
+    archetype_source_col: str = DEFAULT_OCCUPANCY_ARCHETYPE_SOURCE_COL
+    archetype_out_count_threshold: int = DEFAULT_OCCUPANCY_ARCHETYPE_OUT_COUNT_THRESHOLD
+    archetype_out_inactive_streak_max: int = DEFAULT_OCCUPANCY_ARCHETYPE_OUT_INACTIVE_STREAK_MAX
+    archetype_dnp_rate_relax_add: float = DEFAULT_OCCUPANCY_ARCHETYPE_DNP_RATE_RELAX_ADD
+    archetype_dnp_inactive_relax_add: int = DEFAULT_OCCUPANCY_ARCHETYPE_DNP_INACTIVE_RELAX_ADD
+    archetype_dnp_consecutive_relax_add: int = DEFAULT_OCCUPANCY_ARCHETYPE_DNP_CONSECUTIVE_RELAX_ADD
+    archetype_play_prob_floor: float = DEFAULT_OCCUPANCY_ARCHETYPE_PLAY_PROB_FLOOR
+    archetype_seed_p90_min: float = DEFAULT_OCCUPANCY_ARCHETYPE_SEED_P90_MIN
+    archetype_seed_minutes_min: float = DEFAULT_OCCUPANCY_ARCHETYPE_SEED_MINUTES_MIN
+    archetype_seed_minutes_max: float = DEFAULT_OCCUPANCY_ARCHETYPE_SEED_MINUTES_MAX
+    archetype_seed_minutes_p90_mult: float = DEFAULT_OCCUPANCY_ARCHETYPE_SEED_MINUTES_P90_MULT
+    archetype_seed_max_players: int = DEFAULT_OCCUPANCY_ARCHETYPE_SEED_MAX_PLAYERS
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any] | None) -> OccupancySparseConfig:
@@ -197,6 +224,64 @@ class OccupancySparseConfig:
         dnp_injury_regime_min_bench_share_pred = float(
             np.clip(dnp_injury_regime_min_bench_share_pred, 0.0, 1.0)
         )
+        archetype_shortage_enabled = _coerce_bool(
+            raw.get("archetype_shortage_enabled", cls.archetype_shortage_enabled),
+            default=cls.archetype_shortage_enabled,
+        )
+        archetype_source_col = str(raw.get("archetype_source_col", cls.archetype_source_col) or cls.archetype_source_col).strip()
+        if not archetype_source_col:
+            archetype_source_col = cls.archetype_source_col
+        archetype_out_count_threshold = int(
+            raw.get("archetype_out_count_threshold", cls.archetype_out_count_threshold)
+        )
+        if archetype_out_count_threshold <= 0:
+            archetype_out_count_threshold = cls.archetype_out_count_threshold
+        archetype_out_inactive_streak_max = int(
+            raw.get("archetype_out_inactive_streak_max", cls.archetype_out_inactive_streak_max)
+        )
+        if archetype_out_inactive_streak_max < 0:
+            archetype_out_inactive_streak_max = cls.archetype_out_inactive_streak_max
+        archetype_dnp_rate_relax_add = float(
+            raw.get("archetype_dnp_rate_relax_add", cls.archetype_dnp_rate_relax_add)
+        )
+        if not np.isfinite(archetype_dnp_rate_relax_add):
+            archetype_dnp_rate_relax_add = cls.archetype_dnp_rate_relax_add
+        archetype_dnp_rate_relax_add = float(np.clip(archetype_dnp_rate_relax_add, 0.0, 1.0))
+        archetype_dnp_inactive_relax_add = int(
+            raw.get("archetype_dnp_inactive_relax_add", cls.archetype_dnp_inactive_relax_add)
+        )
+        if archetype_dnp_inactive_relax_add < 0:
+            archetype_dnp_inactive_relax_add = cls.archetype_dnp_inactive_relax_add
+        archetype_dnp_consecutive_relax_add = int(
+            raw.get("archetype_dnp_consecutive_relax_add", cls.archetype_dnp_consecutive_relax_add)
+        )
+        if archetype_dnp_consecutive_relax_add < 0:
+            archetype_dnp_consecutive_relax_add = cls.archetype_dnp_consecutive_relax_add
+        archetype_play_prob_floor = float(
+            raw.get("archetype_play_prob_floor", cls.archetype_play_prob_floor)
+        )
+        if not np.isfinite(archetype_play_prob_floor):
+            archetype_play_prob_floor = cls.archetype_play_prob_floor
+        archetype_play_prob_floor = float(np.clip(archetype_play_prob_floor, 0.0, 1.0))
+        archetype_seed_p90_min = float(raw.get("archetype_seed_p90_min", cls.archetype_seed_p90_min))
+        if not np.isfinite(archetype_seed_p90_min) or archetype_seed_p90_min < 0.0:
+            archetype_seed_p90_min = cls.archetype_seed_p90_min
+        archetype_seed_minutes_min = float(raw.get("archetype_seed_minutes_min", cls.archetype_seed_minutes_min))
+        if not np.isfinite(archetype_seed_minutes_min) or archetype_seed_minutes_min < 0.0:
+            archetype_seed_minutes_min = cls.archetype_seed_minutes_min
+        archetype_seed_minutes_max = float(raw.get("archetype_seed_minutes_max", cls.archetype_seed_minutes_max))
+        if not np.isfinite(archetype_seed_minutes_max) or archetype_seed_minutes_max < 0.0:
+            archetype_seed_minutes_max = cls.archetype_seed_minutes_max
+        if archetype_seed_minutes_max < archetype_seed_minutes_min:
+            archetype_seed_minutes_max = archetype_seed_minutes_min
+        archetype_seed_minutes_p90_mult = float(
+            raw.get("archetype_seed_minutes_p90_mult", cls.archetype_seed_minutes_p90_mult)
+        )
+        if not np.isfinite(archetype_seed_minutes_p90_mult) or archetype_seed_minutes_p90_mult < 0.0:
+            archetype_seed_minutes_p90_mult = cls.archetype_seed_minutes_p90_mult
+        archetype_seed_max_players = int(raw.get("archetype_seed_max_players", cls.archetype_seed_max_players))
+        if archetype_seed_max_players <= 0:
+            archetype_seed_max_players = cls.archetype_seed_max_players
         return cls(
             p_cutoff=p_cutoff,
             k_min=k_min,
@@ -222,6 +307,19 @@ class OccupancySparseConfig:
             dnp_injury_regime_out_count_threshold=dnp_injury_regime_out_count_threshold,
             dnp_injury_regime_out_starters_threshold=dnp_injury_regime_out_starters_threshold,
             dnp_injury_regime_min_bench_share_pred=dnp_injury_regime_min_bench_share_pred,
+            archetype_shortage_enabled=archetype_shortage_enabled,
+            archetype_source_col=archetype_source_col,
+            archetype_out_count_threshold=archetype_out_count_threshold,
+            archetype_out_inactive_streak_max=archetype_out_inactive_streak_max,
+            archetype_dnp_rate_relax_add=archetype_dnp_rate_relax_add,
+            archetype_dnp_inactive_relax_add=archetype_dnp_inactive_relax_add,
+            archetype_dnp_consecutive_relax_add=archetype_dnp_consecutive_relax_add,
+            archetype_play_prob_floor=archetype_play_prob_floor,
+            archetype_seed_p90_min=archetype_seed_p90_min,
+            archetype_seed_minutes_min=archetype_seed_minutes_min,
+            archetype_seed_minutes_max=archetype_seed_minutes_max,
+            archetype_seed_minutes_p90_mult=archetype_seed_minutes_p90_mult,
+            archetype_seed_max_players=archetype_seed_max_players,
         )
 
 
@@ -271,6 +369,55 @@ def _coerce_numeric_series(
     return pd.to_numeric(frame[column], errors="coerce")
 
 
+def _normalize_archetype_value(value: Any) -> str:
+    token = str(value).strip().upper()
+    if not token or token in {"NAN", "NONE", "<NA>"}:
+        return "unknown"
+    if "BIG" in token:
+        return "big"
+    if token in {"C", "PF", "FC", "CF", "C-F", "F-C", "PF/C", "C/PF"}:
+        return "big"
+    if "GUARD" in token:
+        return "guard"
+    if token in {"G", "PG", "SG", "G-F", "F-G", "PG/SG", "SG/PG"}:
+        return "guard"
+    if "WING" in token:
+        return "wing"
+    if "FORWARD" in token:
+        return "wing"
+    if token in {"W", "F", "SF", "SF/PF", "PF/SF"}:
+        return "wing"
+    if "/" in token or "-" in token:
+        parts = token.replace("-", "/").split("/")
+        for part in parts:
+            mapped = _normalize_archetype_value(part)
+            if mapped != "unknown":
+                return mapped
+    return "unknown"
+
+
+def _resolve_archetype_series(
+    frame: pd.DataFrame,
+    *,
+    index: pd.Index,
+    source_col: str,
+) -> pd.Series:
+    candidates = [source_col, "pos_bucket", "position", "pos", "position_group"]
+    seen: set[str] = set()
+    selected_col: str | None = None
+    for col in candidates:
+        if not col or col in seen:
+            continue
+        seen.add(col)
+        if col in frame.columns:
+            selected_col = col
+            break
+    if selected_col is None:
+        return pd.Series("unknown", index=index, dtype="string")
+    raw = frame[selected_col].astype("string", copy=False).fillna("")
+    return raw.map(_normalize_archetype_value).astype("string")
+
+
 def apply_occupancy_sparse_allocation(
     frame: pd.DataFrame,
     *,
@@ -303,6 +450,7 @@ def apply_occupancy_sparse_allocation(
 
     lower_width = np.maximum(0.0, p50_base - p10_base).to_numpy(dtype=float)
     upper_width = np.maximum(0.0, p90_base - p50_base).to_numpy(dtype=float)
+    p90_pred = p90_base.to_numpy(dtype=float)
     p_rot = (
         pd.to_numeric(working["play_prob"], errors="coerce")
         .fillna(0.0)
@@ -349,6 +497,11 @@ def apply_occupancy_sparse_allocation(
     prior_play_prob = _coerce_numeric_series(
         working, "prior_play_prob", default=np.nan
     ).to_numpy(dtype=float)
+    archetype_arr = _resolve_archetype_series(
+        working,
+        index=working.index,
+        source_col=config.archetype_source_col,
+    ).to_numpy(dtype=object)
 
     home_flag_series = (
         pd.to_numeric(working.get("home_flag"), errors="coerce").fillna(0.0)
@@ -368,13 +521,66 @@ def apply_occupancy_sparse_allocation(
 
         p_g = p_rot[idx]
         mu_g = mu_pred[idx]
+        p90_g = p90_pred[idx]
         out_g = out_mask.iloc[idx].to_numpy(dtype=bool)
         starter_g = starter_mask.iloc[idx].to_numpy(dtype=bool)
         starter_raw_g = starter_mask_raw.iloc[idx].to_numpy(dtype=bool)
+        archetype_g = archetype_arr[idx]
+        dnp_rate_g = active_but_dnp_rate[idx]
+        consec_dnp_g = consecutive_active_dnp[idx]
+        inactive_streak_g = inactive_streak_len[idx]
+        prior_play_g = prior_play_prob[idx]
+        prior_is_low_or_missing = np.isnan(prior_play_g) | (
+            prior_play_g <= float(config.dnp_prior_play_prob_max)
+        )
 
         dnp_risk_g = np.zeros(len(idx), dtype=bool)
         injury_regime_active = False
         out_starters_count = int((out_g & starter_raw_g).sum())
+        injury_count_trigger = False
+        rate_threshold_used = float(config.dnp_rate_threshold)
+        inactive_threshold_used = int(config.dnp_inactive_streak_threshold)
+        consecutive_threshold_used = int(config.dnp_consecutive_active_dnp_threshold)
+        n_archetype_seeded = 0
+        archetype_seed_mask = np.zeros(len(idx), dtype=bool)
+        archetype_out_counts: dict[str, int] = {k: 0 for k in _ARCHETYPE_KNOWN}
+        archetype_shortage_mask = np.zeros(len(idx), dtype=bool)
+        archetype_shortage_active = False
+
+        out_recent_or_starter = out_g & (
+            starter_raw_g
+            | (
+                inactive_streak_g
+                <= int(config.archetype_out_inactive_streak_max)
+            )
+        )
+        out_count_context = (
+            int(out_recent_or_starter.sum())
+            if bool(config.archetype_shortage_enabled)
+            else int(out_g.sum())
+        )
+        injury_count_trigger = (
+            int(out_count_context) >= int(config.dnp_injury_regime_out_count_threshold)
+        ) or (
+            out_starters_count
+            >= int(config.dnp_injury_regime_out_starters_threshold)
+        )
+        if bool(config.archetype_shortage_enabled):
+            for bucket in _ARCHETYPE_KNOWN:
+                archetype_out_counts[bucket] = int(
+                    np.sum(out_recent_or_starter & (archetype_g == bucket))
+                )
+            shortage_by_archetype = {
+                bucket: count
+                for bucket, count in archetype_out_counts.items()
+                if count >= int(config.archetype_out_count_threshold)
+            }
+            archetype_shortage_active = bool(shortage_by_archetype) and bool(injury_count_trigger)
+            if shortage_by_archetype:
+                archetype_shortage_mask = np.array(
+                    [shortage_by_archetype.get(str(bucket), 0) > 0 for bucket in archetype_g],
+                    dtype=bool,
+                )
 
         spread_val: float | None = None
         if "spread_home" in group.columns:
@@ -393,16 +599,9 @@ def apply_occupancy_sparse_allocation(
             team_bench_share_avg=None,
             spread=spread_val,
             total=total_val,
-            out_count=int(out_g.sum()),
+            out_count=int(out_count_context),
         )
         if config.dnp_suppression_enabled:
-            dnp_rate_g = active_but_dnp_rate[idx]
-            consec_dnp_g = consecutive_active_dnp[idx]
-            inactive_streak_g = inactive_streak_len[idx]
-            prior_play_g = prior_play_prob[idx]
-            prior_is_low_or_missing = np.isnan(prior_play_g) | (
-                prior_play_g <= float(config.dnp_prior_play_prob_max)
-            )
             dnp_risk_base = (
                 (
                     (dnp_rate_g >= float(config.dnp_rate_threshold))
@@ -413,12 +612,6 @@ def apply_occupancy_sparse_allocation(
                     consec_dnp_g
                     >= int(config.dnp_consecutive_active_dnp_threshold)
                 )
-            )
-            injury_count_trigger = (
-                int(out_g.sum()) >= int(config.dnp_injury_regime_out_count_threshold)
-            ) or (
-                out_starters_count
-                >= int(config.dnp_injury_regime_out_starters_threshold)
             )
             injury_regime_active = (
                 injury_count_trigger
@@ -444,6 +637,9 @@ def apply_occupancy_sparse_allocation(
                         int(config.dnp_consecutive_active_dnp_threshold) + 1,
                     )
                 )
+                rate_threshold_used = relaxed_rate_threshold
+                inactive_threshold_used = relaxed_inactive_threshold
+                consecutive_threshold_used = relaxed_consecutive_threshold
                 dnp_risk_g = (
                     (
                         (dnp_rate_g >= relaxed_rate_threshold)
@@ -455,8 +651,70 @@ def apply_occupancy_sparse_allocation(
             else:
                 dnp_risk_g = dnp_risk_base
             dnp_risk_g = dnp_risk_g & (~starter_g) & (~out_g)
+            if bool(config.archetype_shortage_enabled) and archetype_shortage_active:
+                shortage_target = archetype_shortage_mask & (~starter_g) & (~out_g)
+                if shortage_target.any():
+                    archetype_rate_threshold = float(
+                        min(1.0, rate_threshold_used + float(config.archetype_dnp_rate_relax_add))
+                    )
+                    archetype_inactive_threshold = int(
+                        inactive_threshold_used + int(config.archetype_dnp_inactive_relax_add)
+                    )
+                    archetype_consecutive_threshold = int(
+                        consecutive_threshold_used + int(config.archetype_dnp_consecutive_relax_add)
+                    )
+                    archetype_risk = (
+                        (
+                            (dnp_rate_g >= archetype_rate_threshold)
+                            & prior_is_low_or_missing
+                        )
+                        | (inactive_streak_g >= archetype_inactive_threshold)
+                        | (consec_dnp_g >= archetype_consecutive_threshold)
+                    )
+                    dnp_risk_g[shortage_target] = archetype_risk[shortage_target]
 
-        candidate_mask = (~out_g) & np.isfinite(mu_g) & np.isfinite(p_g) & (mu_g > 0.0) & (p_g > 0.0)
+        p_for_mask = p_g.copy()
+        mu_for_mask = mu_g.copy()
+        if bool(config.archetype_shortage_enabled) and archetype_shortage_active:
+            shortage_active = archetype_shortage_mask & (~out_g)
+            if shortage_active.any():
+                p_for_mask[shortage_active] = np.maximum(
+                    p_for_mask[shortage_active],
+                    float(config.archetype_play_prob_floor),
+                )
+            seed_candidates = (
+                shortage_active
+                & (~dnp_risk_g)
+                & (mu_for_mask <= 0.0)
+                & (p90_g >= float(config.archetype_seed_p90_min))
+            )
+            if seed_candidates.any():
+                seed_scores = np.where(seed_candidates, p90_g, -np.inf)
+                order = np.argsort(-seed_scores)
+                take_n = min(int(config.archetype_seed_max_players), int(seed_candidates.sum()))
+                selected = [int(i) for i in order if seed_candidates[int(i)]][:take_n]
+                if selected:
+                    sel_idx = np.asarray(selected, dtype=int)
+                    seed_minutes = np.clip(
+                        p90_g[sel_idx] * float(config.archetype_seed_minutes_p90_mult),
+                        float(config.archetype_seed_minutes_min),
+                        float(config.archetype_seed_minutes_max),
+                    )
+                    mu_for_mask[sel_idx] = np.maximum(mu_for_mask[sel_idx], seed_minutes)
+                    p_for_mask[sel_idx] = np.maximum(
+                        p_for_mask[sel_idx],
+                        float(config.archetype_play_prob_floor),
+                    )
+                    archetype_seed_mask[sel_idx] = True
+                    n_archetype_seeded = int(sel_idx.size)
+
+        candidate_mask = (
+            (~out_g)
+            & np.isfinite(mu_for_mask)
+            & np.isfinite(p_for_mask)
+            & (mu_for_mask > 0.0)
+            & (p_for_mask > 0.0)
+        )
         candidate_mask = candidate_mask & (~dnp_risk_g)
         if not candidate_mask.any():
             starter_candidates = starter_g & (~out_g)
@@ -503,8 +761,8 @@ def apply_occupancy_sparse_allocation(
             k_min_eff = min(k_max_eff, max(1, int(config.k_min)))
 
         eligible_g = build_eligible_mask(
-            p_g,
-            mu_g,
+            p_for_mask,
+            mu_for_mask,
             candidate_mask,
             a=1.0,
             mu_power=1.0,
@@ -514,6 +772,7 @@ def apply_occupancy_sparse_allocation(
             use_expected_k=True,
         )
         eligible_g = eligible_g | (starter_g & (~out_g))
+        eligible_g = eligible_g | (archetype_seed_mask & (~out_g))
         eligible_g = eligible_g & (~dnp_risk_g)
         eligible_g = eligible_g & (~out_g)
         if not eligible_g.any() and (~out_g).any():
@@ -528,8 +787,8 @@ def apply_occupancy_sparse_allocation(
         depth_diag: dict[str, Any] = {}
         if eligible_g.any():
             team_minutes, depth_diag = allocate_adaptive_depth(
-                p_g,
-                mu_g,
+                p_for_mask,
+                mu_for_mask,
                 eligible_g,
                 a=1.0,
                 mu_power=1.0,
@@ -551,12 +810,19 @@ def apply_occupancy_sparse_allocation(
                 "team_id": team_id,
                 "rows": int(len(idx)),
                 "n_out": int(out_g.sum()),
+                "n_out_context": int(out_count_context),
                 "n_starters": int(starter_g.sum()),
                 "n_eligible": int(eligible_g.sum()),
                 "n_dnp_suppressed": int(dnp_risk_g.sum()),
                 "active_count": active_count,
                 "n_out_starters": out_starters_count,
                 "injury_regime_active": bool(injury_regime_active),
+                "archetype_shortage_active": bool(archetype_shortage_active),
+                "archetype_out_guard": int(archetype_out_counts["guard"]),
+                "archetype_out_wing": int(archetype_out_counts["wing"]),
+                "archetype_out_big": int(archetype_out_counts["big"]),
+                "n_archetype_shortage_players": int((archetype_shortage_mask & (~out_g)).sum()),
+                "n_archetype_seeded": int(n_archetype_seeded),
                 "k_min_eff": int(k_min_eff),
                 "k_max_eff": int(k_max_eff),
                 "depth_signal_count": int(depth_signal_count),
