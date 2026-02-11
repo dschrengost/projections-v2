@@ -192,6 +192,101 @@ def test_apply_overrides_ops_depth_role_out_zeroes_minutes(tmp_path: Path) -> No
     assert bool(p100["ops_override_applied"]) is True
 
 
+def test_apply_overrides_ops_depth_role_starter_promotes_signals_and_minutes(tmp_path: Path) -> None:
+    slate_day = date(2026, 1, 18)
+    upsert_overrides(
+        slate_day,
+        [
+            {
+                "game_id": "1",
+                "player_id": "100",
+                "fields": {"ops_depth_role": "starter"},
+            }
+        ],
+        data_root=tmp_path,
+    )
+
+    base = pd.DataFrame(
+        [
+            {
+                "game_id": 1,
+                "team_id": 10,
+                "player_id": 100,
+                "status": "available",
+                "play_prob": 0.0,
+                "rotation_prob": 0.82,
+                "is_projected_starter": 0,
+                "starter_flag": 0,
+                "is_starter": 0,
+                "minutes_p10": 0.0,
+                "minutes_p50": 0.0,
+                "minutes_p90": 12.0,
+            },
+            {"game_id": 1, "team_id": 10, "player_id": 101, "status": "available", "play_prob": 0.95, "rotation_prob": 0.95, "is_projected_starter": 1, "starter_flag": 1, "is_starter": 1, "minutes_p10": 28.0, "minutes_p50": 34.0, "minutes_p90": 40.0},
+            {"game_id": 1, "team_id": 10, "player_id": 102, "status": "available", "play_prob": 0.95, "rotation_prob": 0.95, "is_projected_starter": 1, "starter_flag": 1, "is_starter": 1, "minutes_p10": 27.0, "minutes_p50": 33.0, "minutes_p90": 39.0},
+            {"game_id": 1, "team_id": 10, "player_id": 103, "status": "available", "play_prob": 0.95, "rotation_prob": 0.95, "is_projected_starter": 1, "starter_flag": 1, "is_starter": 1, "minutes_p10": 26.0, "minutes_p50": 32.0, "minutes_p90": 38.0},
+            {"game_id": 1, "team_id": 10, "player_id": 104, "status": "available", "play_prob": 0.90, "rotation_prob": 0.90, "is_projected_starter": 1, "starter_flag": 1, "is_starter": 1, "minutes_p10": 25.0, "minutes_p50": 31.0, "minutes_p90": 37.0},
+            {"game_id": 1, "team_id": 10, "player_id": 105, "status": "available", "play_prob": 0.80, "rotation_prob": 0.80, "is_projected_starter": 0, "starter_flag": 0, "is_starter": 0, "minutes_p10": 8.0, "minutes_p50": 25.0, "minutes_p90": 31.0},
+            {"game_id": 1, "team_id": 10, "player_id": 106, "status": "available", "play_prob": 0.80, "rotation_prob": 0.80, "is_projected_starter": 0, "starter_flag": 0, "is_starter": 0, "minutes_p10": 8.0, "minutes_p50": 25.0, "minutes_p90": 31.0},
+            {"game_id": 1, "team_id": 10, "player_id": 107, "status": "available", "play_prob": 0.80, "rotation_prob": 0.80, "is_projected_starter": 0, "starter_flag": 0, "is_starter": 0, "minutes_p10": 8.0, "minutes_p50": 25.0, "minutes_p90": 31.0},
+        ]
+    )
+    for q in ("minutes_p10", "minutes_p50", "minutes_p90"):
+        base[f"{q}_cond"] = base[q]
+
+    out = apply_overrides_to_minutes_df(base, game_date=slate_day, data_root=tmp_path, force_reconcile=True)
+    team = out[(out["game_id"] == 1) & (out["team_id"] == 10)].copy()
+    team["minutes_final"] = pd.to_numeric(team["minutes_final"], errors="coerce").fillna(0.0)
+    assert float(team["minutes_final"].sum()) == pytest.approx(240.0, abs=1e-3)
+
+    p100 = team[team["player_id"].astype(int) == 100].iloc[0]
+    assert str(p100.get("ops_depth_role") or "").strip().lower() == "starter"
+    assert int(pd.to_numeric(p100["is_projected_starter"], errors="coerce") or 0) == 1
+    assert int(pd.to_numeric(p100["starter_flag"], errors="coerce") or 0) == 1
+    assert int(pd.to_numeric(p100["is_starter"], errors="coerce") or 0) == 1
+    assert float(pd.to_numeric(p100["play_prob"], errors="coerce") or 0.0) >= 0.55
+    assert float(pd.to_numeric(p100["minutes_p50"], errors="coerce") or 0.0) >= 18.0
+    assert float(pd.to_numeric(p100["minutes_p90"], errors="coerce") or 0.0) >= float(
+        pd.to_numeric(p100["minutes_p50"], errors="coerce") or 0.0
+    )
+
+
+def test_apply_overrides_promotes_zero_minute_bench_in_ops_injury_regime(tmp_path: Path) -> None:
+    slate_day = date(2026, 1, 18)
+    upsert_overrides(
+        slate_day,
+        [
+            {"game_id": "1", "player_id": "100", "fields": {"ops_depth_role": "out"}},
+            {"game_id": "1", "player_id": "101", "fields": {"ops_depth_role": "out"}},
+        ],
+        data_root=tmp_path,
+    )
+
+    base = pd.DataFrame(
+        [
+            {"game_id": 1, "team_id": 10, "player_id": 100, "status": "available", "play_prob": 0.90, "rotation_prob": 0.90, "minutes_p10": 20.0, "minutes_p50": 30.0, "minutes_p90": 35.0},
+            {"game_id": 1, "team_id": 10, "player_id": 101, "status": "available", "play_prob": 0.90, "rotation_prob": 0.90, "minutes_p10": 20.0, "minutes_p50": 30.0, "minutes_p90": 35.0},
+            {"game_id": 1, "team_id": 10, "player_id": 102, "status": "available", "play_prob": 0.95, "rotation_prob": 0.95, "minutes_p10": 24.0, "minutes_p50": 34.0, "minutes_p90": 40.0},
+            {"game_id": 1, "team_id": 10, "player_id": 103, "status": "available", "play_prob": 0.95, "rotation_prob": 0.95, "minutes_p10": 23.0, "minutes_p50": 33.0, "minutes_p90": 39.0},
+            {"game_id": 1, "team_id": 10, "player_id": 104, "status": "available", "play_prob": 0.90, "rotation_prob": 0.90, "minutes_p10": 22.0, "minutes_p50": 32.0, "minutes_p90": 38.0},
+            {"game_id": 1, "team_id": 10, "player_id": 105, "status": "available", "play_prob": 0.85, "rotation_prob": 0.85, "minutes_p10": 21.0, "minutes_p50": 31.0, "minutes_p90": 37.0},
+            {"game_id": 1, "team_id": 10, "player_id": 106, "status": "available", "play_prob": 0.75, "rotation_prob": 0.75, "minutes_p10": 8.0, "minutes_p50": 20.0, "minutes_p90": 26.0},
+            {"game_id": 1, "team_id": 10, "player_id": 107, "status": "available", "play_prob": 0.00, "rotation_prob": 0.60, "minutes_p10": 0.0, "minutes_p50": 0.0, "minutes_p90": 14.0},
+            {"game_id": 1, "team_id": 10, "player_id": 108, "status": "available", "play_prob": 0.10, "rotation_prob": 0.20, "minutes_p10": 0.0, "minutes_p50": 0.0, "minutes_p90": 5.0},
+        ]
+    )
+    for q in ("minutes_p10", "minutes_p50", "minutes_p90"):
+        base[f"{q}_cond"] = base[q]
+
+    out = apply_overrides_to_minutes_df(base, game_date=slate_day, data_root=tmp_path, force_reconcile=True)
+    team = out[(out["game_id"] == 1) & (out["team_id"] == 10)].copy()
+    team["minutes_final"] = pd.to_numeric(team["minutes_final"], errors="coerce").fillna(0.0)
+    assert float(team["minutes_final"].sum()) == pytest.approx(240.0, abs=1e-3)
+
+    p107 = team[team["player_id"].astype(int) == 107].iloc[0]
+    assert float(pd.to_numeric(p107["minutes_p50"], errors="coerce") or 0.0) >= 6.0
+    assert float(pd.to_numeric(p107["play_prob"], errors="coerce") or 0.0) >= 0.15
+
 def test_minutes_api_prefers_effective_minutes(tmp_path: Path) -> None:
     from projections.api import minutes_api
     from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME

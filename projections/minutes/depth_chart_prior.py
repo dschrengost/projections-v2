@@ -950,6 +950,9 @@ def _apply_dnp_guardrail(df: pd.DataFrame, cfg: dict[str, Any]) -> tuple[pd.Data
         if col in out.columns:
             v = pd.to_numeric(out[col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
             starter_mask = starter_mask | (v >= 0.5)
+    if "ops_depth_role" in out.columns:
+        ops_role = out["ops_depth_role"].astype(str).str.strip().str.lower().to_numpy(dtype=object)
+        starter_mask = starter_mask | (ops_role == "starter")
     if bool(cfg.get("dnp_require_non_starter", True)):
         gate_by_role = ~starter_mask
     else:
