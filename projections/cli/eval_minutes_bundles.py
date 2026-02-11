@@ -91,6 +91,26 @@ def _git_sha_or_unknown() -> str:
         return "unknown"
 
 
+def _safe_status_upper(series: pd.Series | None, *, index: pd.Index) -> pd.Series:
+    if series is None:
+        return pd.Series("", index=index, dtype="string")
+    return series.astype("string", copy=False).fillna("").str.upper()
+
+
+def _coerce_bool_series(series: pd.Series | None, *, index: pd.Index) -> pd.Series:
+    if series is None:
+        return pd.Series(False, index=index, dtype=bool)
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False).astype(bool)
+
+    numeric = pd.to_numeric(series, errors="coerce")
+    if numeric.notna().any():
+        return numeric.fillna(0.0).astype(float).ne(0.0)
+
+    text = series.astype("string", copy=False).str.strip().str.lower()
+    return text.fillna("").isin({"1", "true", "t", "yes", "y"})
+
+
 def _read_labels(labels_path: Path) -> pd.DataFrame:
     if not labels_path.exists():
         raise FileNotFoundError(f"Missing labels parquet: {labels_path}")
