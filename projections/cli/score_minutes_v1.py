@@ -3225,6 +3225,27 @@ def main(
                     "injury_regime_team_count": int(
                         pd.to_numeric(occ_diag["injury_regime_active"], errors="coerce").fillna(0).astype(int).sum()
                     ) if not occ_diag.empty and "injury_regime_active" in occ_diag.columns else 0,
+                    "archetype_shortage_team_count": int(
+                        pd.to_numeric(occ_diag["archetype_shortage_active"], errors="coerce").fillna(0).astype(int).sum()
+                    ) if not occ_diag.empty and "archetype_shortage_active" in occ_diag.columns else 0,
+                    "archetype_seeded_team_count": int(
+                        (pd.to_numeric(occ_diag["n_archetype_seeded"], errors="coerce").fillna(0) > 0).sum()
+                    ) if not occ_diag.empty and "n_archetype_seeded" in occ_diag.columns else 0,
+                    "archetype_seeded_total": int(
+                        pd.to_numeric(occ_diag["n_archetype_seeded"], errors="coerce").fillna(0).sum()
+                    ) if not occ_diag.empty and "n_archetype_seeded" in occ_diag.columns else 0,
+                    "archetype_shortage_players_total": int(
+                        pd.to_numeric(occ_diag["n_archetype_shortage_players"], errors="coerce").fillna(0).sum()
+                    ) if not occ_diag.empty and "n_archetype_shortage_players" in occ_diag.columns else 0,
+                    "archetype_out_guard_p50": float(
+                        pd.to_numeric(occ_diag["archetype_out_guard"], errors="coerce").fillna(0).quantile(0.5)
+                    ) if not occ_diag.empty and "archetype_out_guard" in occ_diag.columns else float("nan"),
+                    "archetype_out_wing_p50": float(
+                        pd.to_numeric(occ_diag["archetype_out_wing"], errors="coerce").fillna(0).quantile(0.5)
+                    ) if not occ_diag.empty and "archetype_out_wing" in occ_diag.columns else float("nan"),
+                    "archetype_out_big_p50": float(
+                        pd.to_numeric(occ_diag["archetype_out_big"], errors="coerce").fillna(0).quantile(0.5)
+                    ) if not occ_diag.empty and "archetype_out_big" in occ_diag.columns else float("nan"),
                     "bench_share_pred_mean": float(occ_diag["bench_share_pred"].mean()) if not occ_diag.empty else float("nan"),
                     "bench_share_actual_mean": float(occ_diag["bench_share_actual"].mean()) if not occ_diag.empty else float("nan"),
                     "frac_p50_ge_40": float((minutes_occ >= 40.0).sum() / n_total) if n_total > 0 else 0.0,
