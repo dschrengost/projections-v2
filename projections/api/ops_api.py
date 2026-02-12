@@ -604,15 +604,15 @@ def post_overrides_v2_apply(req: OpsV2ApplyRequest) -> dict[str, Any]:
 
     return _to_json_compatible(
         {
-        "date": game_date.isoformat(),
-        "game_id": gid,
-        "applied_at": now_iso,
-        "run_context": {"projections_run_id": ctx.resolved_run_id},
-        "override_infeasible": mode,
-        "resolved_players": resolved_rows,
-        "team_diagnostics": team_diags,
-        "diag": diag,
-        "overrides": sorted(persisted, key=lambda r: str(r.get("player_id", ""))),
+            "date": game_date.isoformat(),
+            "game_id": gid,
+            "applied_at": now_iso,
+            "run_context": {"projections_run_id": ctx.resolved_run_id},
+            "override_infeasible": mode,
+            "resolved_players": resolved_rows,
+            "team_diagnostics": team_diags,
+            "diag": diag,
+            "overrides": sorted(persisted, key=lambda r: str(r.get("player_id", ""))),
         }
     )
 
