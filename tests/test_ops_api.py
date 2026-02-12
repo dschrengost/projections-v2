@@ -4,6 +4,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -167,3 +168,82 @@ def test_ops_game_includes_minutes_and_rates_and_applies_overrides(monkeypatch: 
     player3 = resp3.json()["players"][0]
     assert player3["minutes_effective"]["minutes_p50"] == 0.0
     assert player3["minutes_effective"]["play_prob"] == 0.0
+
+
+@pytest.mark.usefixtures("monkeypatch")
+def test_ops_v2_apply_serializes_numpy_scalars(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PROJECTIONS_DATA_ROOT", str(tmp_path))
+
+    slate_day = date(2025, 1, 3)
+    gid = 222
+    pid = 1234
+    team_id = 10
+    projections_run_id = "PROJ_RUN_V2"
+
+    unified_day = tmp_path / "artifacts" / "projections" / slate_day.isoformat()
+    unified_run = unified_day / f"run={projections_run_id}"
+    unified_run.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "game_date": slate_day.isoformat(),
+                "game_id": gid,
+                "player_id": pid,
+                "team_id": team_id,
+                "player_name": "V2 Player",
+                "minutes_final": 30.0,
+            }
+        ]
+    ).to_parquet(unified_run / "projections.parquet", index=False)
+    _write_json(unified_day / "latest_run.json", {"run_id": projections_run_id})
+
+    def _fake_apply_minutes_overrides_v2(game_df: pd.DataFrame, _payload: dict, **_kwargs: object):
+        resolved = game_df.copy()
+        resolved["b_minutes"] = np.float64(30.0)
+        resolved["mu_minutes"] = np.float64(31.0)
+        resolved["lb_minutes"] = np.float64(0.0)
+        resolved["ub_minutes"] = np.float64(48.0)
+        resolved["eligible"] = np.bool_(True)
+        resolved["force_active"] = np.bool_(False)
+        resolved["force_inactive"] = np.bool_(False)
+        resolved["weight"] = np.float64(1.0)
+        resolved["constraint_kind"] = "none"
+        resolved["override_present"] = np.bool_(False)
+        diag = {
+            "team_diagnostics": [
+                {
+                    "game_id": str(gid),
+                    "team_id": np.int64(team_id),
+                    "sum_lb": np.float64(0.0),
+                    "sum_ub": np.float64(48.0),
+                    "sum_mu": np.float64(31.0),
+                    "locked_minutes_total": np.float64(0.0),
+                    "n_players": np.int64(1),
+                    "n_overrides": np.int64(0),
+                }
+            ]
+        }
+        return resolved, diag
+
+    monkeypatch.setattr("projections.api.ops_api.apply_minutes_overrides_v2", _fake_apply_minutes_overrides_v2)
+
+    app = create_app(daily_root=tmp_path, dashboard_dist=tmp_path, fpts_root=tmp_path, sim_root=tmp_path)
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/ops/overrides-v2/apply",
+        json={
+            "date": slate_day.isoformat(),
+            "game_id": str(gid),
+            "run_id": None,
+            "override_infeasible": "error",
+            "overrides": [],
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["game_id"] == str(gid)
+    assert len(payload["resolved_players"]) == 1
+    assert payload["resolved_players"][0]["player_id"] == str(pid)
+    assert payload["team_diagnostics"][0]["team_id"] == team_id
+    assert payload["team_diagnostics"][0]["n_players"] == 1

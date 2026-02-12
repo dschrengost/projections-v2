@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 from fastapi import BackgroundTasks
@@ -94,6 +96,28 @@ def _resolve_run_dir(base_dir: Path, *, run_id: str | None, parquet_name: str) -
 
 def _utc_now_iso() -> str:
     return datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _to_json_compatible(value: Any) -> Any:
+    """Recursively coerce pandas/numpy scalars into JSON-native Python types."""
+
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return {str(k): _to_json_compatible(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_json_compatible(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return [_to_json_compatible(v) for v in value.tolist()]
+    if isinstance(value, np.generic):
+        return _to_json_compatible(value.item())
+    if isinstance(value, pd.Timestamp):
+        return None if pd.isna(value) else value.isoformat()
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    return value
 
 
 _V2_MODE_VALUES = {
@@ -578,7 +602,8 @@ def post_overrides_v2_apply(req: OpsV2ApplyRequest) -> dict[str, Any]:
 
     _save_overrides_payload(game_date=game_date, records=list(mutable.values()), data_root=data_root)
 
-    return {
+    return _to_json_compatible(
+        {
         "date": game_date.isoformat(),
         "game_id": gid,
         "applied_at": now_iso,
@@ -588,7 +613,8 @@ def post_overrides_v2_apply(req: OpsV2ApplyRequest) -> dict[str, Any]:
         "team_diagnostics": team_diags,
         "diag": diag,
         "overrides": sorted(persisted, key=lambda r: str(r.get("player_id", ""))),
-    }
+        }
+    )
 
 
 class OpsRunWorldsRequest(BaseModel):
