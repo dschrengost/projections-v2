@@ -884,6 +884,8 @@ def run_sim_task(
     data_root: Path,
     sim_worlds: int,
     sim_profile: str,
+    minutes_override_mode: str = "legacy",
+    override_infeasible: str = "error",
 ) -> Path:
     args = [
         "--run-date",
@@ -902,6 +904,10 @@ def run_sim_task(
         run_id,
         "--rates-run-id",
         run_id,
+        "--minutes-override-mode",
+        str(minutes_override_mode),
+        "--override-infeasible",
+        str(override_infeasible),
     ]
     _run_python_module(
         "scripts.sim_v2.run_sim_live", args, data_root=data_root, timeout_s=2400

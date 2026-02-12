@@ -47,6 +47,16 @@ def main(
     ),
     minutes_run_id: str | None = typer.Option(None, "--minutes-run-id", help="Explicit minutes run_id to load."),
     rates_run_id: str | None = typer.Option(None, "--rates-run-id", help="Explicit rates run_id to load."),
+    minutes_override_mode: str = typer.Option(
+        "legacy",
+        "--minutes-override-mode",
+        help="Minutes override mode: legacy (default) or v2.",
+    ),
+    override_infeasible: str = typer.Option(
+        "error",
+        "--override-infeasible",
+        help="Behavior when v2 override constraints are infeasible: error|relax|ignore.",
+    ),
 ) -> None:
     target_date = run_date or date_cls.today().isoformat()
     typer.echo(f"[sim_v2] live sim run date={target_date} profile={profile_name} worlds={num_worlds}")
@@ -90,6 +100,8 @@ def main(
         min_play_prob=None,
         team_factor_sigma=None,
         team_factor_gamma=None,
+        minutes_override_mode=minutes_override_mode,
+        override_infeasible=override_infeasible,
     )
 
     # Write latest_run.json pointer if run_id specified

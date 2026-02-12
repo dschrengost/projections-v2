@@ -252,6 +252,26 @@ Quick Start unit tests live under `tests/test_minutes_v1_*.py`; run them via:
 uv run pytest tests/test_minutes_v1_quickstart.py tests/test_minutes_v1_modeling.py tests/test_minutes_v1_monitoring.py -q
 ```
 
+## Minutes Override v2 (Worlds)
+
+Enable the new constraints-based override path for worlds generation:
+
+```bash
+uv run python -m scripts.sim_v2.run_sim_live \
+  --run-date 2026-01-18 \
+  --profile-name sim_v3 \
+  --num-worlds 2000 \
+  --minutes-override-mode v2 \
+  --override-infeasible error
+```
+
+- Default remains `--minutes-override-mode legacy` (no behavior change).
+- In v2 mode, worlds writes override artifacts under:
+  - `artifacts/sim_v2/worlds_fpts_v2/game_date=<date>/run=<run_id>/overrides_input.json`
+  - `artifacts/sim_v2/worlds_fpts_v2/game_date=<date>/run=<run_id>/overrides_compiled_v2.json`
+  - `artifacts/sim_v2/worlds_fpts_v2/game_date=<date>/run=<run_id>/override_resolved_minutes.parquet`
+  - `artifacts/sim_v2/worlds_fpts_v2/game_date=<date>/run=<run_id>/override_diag.json`
+
 ### FPTS v1 quick reference
 
 - **Train a run** (fills `artifacts/fpts_lgbm/<run_id>`):
