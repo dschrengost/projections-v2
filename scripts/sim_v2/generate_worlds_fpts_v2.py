@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import json
+import shutil
 import time
 import math
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -16,7 +17,12 @@ import typer
 
 from projections.fpts_v2.scoring import compute_dk_fpts
 from projections.minutes import PLAY_THRESHOLD_MINUTES, ROTATION_THRESHOLD_MINUTES
+from projections.ops.overrides import overrides_path
 from projections.paths import data_path, get_project_root
+from projections.overrides.minutes_overrides_v2 import (
+    MinutesOverrideV2Policy,
+    apply_minutes_overrides_v2,
+)
 from projections.sim_v2.bench_zero_mixture import apply_bench_zero_mixture
 from projections.sim_v2.config import DEFAULT_PROFILES_PATH, UsageSharesConfig, load_sim_v2_profile
 from projections.sim_v2.game_factor import apply_game_factor
@@ -493,12 +499,11 @@ def _load_usage_shares_bundle(
             if decision_path.exists():
                 # Create a lightweight bundle for decision runs
                 from dataclasses import dataclass
-                from typing import Any
                 
                 @dataclass
                 class DecisionBundle:
                     run_id: str
-                    meta: dict[str, Any]
+                    meta: dict[str, object]
                     lgbm_models: dict | None = None
                     feature_cols: list[str] | None = None
                 
@@ -1396,6 +1401,87 @@ def _resolve_minutes_column(df: pd.DataFrame) -> str:
     )
 
 
+def _load_overrides_input_payload_for_date(root: Path, game_date: pd.Timestamp) -> tuple[Path, dict[str, Any]]:
+    day = pd.Timestamp(game_date).date()
+    src_path = overrides_path(day, data_root=root)
+    if not src_path.exists():
+        return src_path, {
+            "version": 1,
+            "game_date": day.isoformat(),
+            "updated_at": None,
+            "overrides": [],
+        }
+    try:
+        payload = json.loads(src_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("payload is not a JSON object")
+        if not isinstance(payload.get("overrides"), list):
+            payload["overrides"] = []
+    except Exception as exc:
+        payload = {
+            "version": 1,
+            "game_date": day.isoformat(),
+            "updated_at": None,
+            "overrides": [],
+            "_parse_error": str(exc),
+        }
+    return src_path, payload
+
+
+def _restore_v2_baseline_for_override_rows(minutes_df: pd.DataFrame) -> pd.DataFrame:
+    """Avoid double-apply in v2 mode by restoring model-origin values on override rows.
+
+    `effective_minutes.parquet` may already contain legacy override effects. For v2 worlds we
+    compile constraints from the same override payload, so we revert rows flagged by
+    `ops_override_applied` to corresponding `*_model` columns when available.
+    """
+    if "ops_override_applied" not in minutes_df.columns:
+        return minutes_df
+
+    work = minutes_df.copy()
+    override_mask = (
+        pd.to_numeric(work["ops_override_applied"], errors="coerce")
+        .fillna(0.0)
+        .to_numpy(dtype=float)
+        > 0.5
+    )
+    if not override_mask.any():
+        return work
+
+    for col in (
+        "status",
+        "play_prob",
+        "is_confirmed_starter",
+        "is_projected_starter",
+        "is_starter",
+        "starter_flag",
+        "minutes_p10",
+        "minutes_p50",
+        "minutes_p90",
+        "minutes_p10_cond",
+        "minutes_p50_cond",
+        "minutes_p90_cond",
+        "effective_minutes",
+    ):
+        model_col = f"{col}_model"
+        if col in work.columns and model_col in work.columns:
+            work.loc[override_mask, col] = work.loc[override_mask, model_col]
+
+    # Seed v2 baseline minutes using model-origin columns on override rows.
+    baseline_model_col = None
+    for candidate in ("effective_minutes_model", "minutes_p50_cond_model", "minutes_p50_model"):
+        if candidate in work.columns:
+            baseline_model_col = candidate
+            break
+    if baseline_model_col is not None:
+        baseline_vals = pd.to_numeric(work[baseline_model_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        work.loc[override_mask, "minutes_mean"] = baseline_vals[override_mask]
+        if "minutes_final" in work.columns:
+            work.loc[override_mask, "minutes_final"] = baseline_vals[override_mask]
+
+    return work
+
+
 def _ensure_status_bucket(df: pd.DataFrame) -> pd.DataFrame:
     # Load any status overrides by player name
     from projections.paths import get_project_root
@@ -1755,9 +1841,43 @@ def main(
         "--export-attempt-means",
         help="Export fga2_mean, fga3_mean, fta_mean in projections for diagnostics.",
     ),
+    minutes_override_mode: str = typer.Option(
+        "legacy",
+        "--minutes-override-mode",
+        help="Minutes override path: legacy (default) or v2 constraints compiler/enforcer.",
+    ),
+    override_infeasible: str = typer.Option(
+        "error",
+        "--override-infeasible",
+        help="Behavior when v2 constraints are infeasible: error|relax|ignore.",
+    ),
 ) -> None:
+    # When called as a Python function in tests, Typer may leave OptionInfo defaults
+    # for parameters not explicitly provided. Normalize those to their scalar defaults.
+    if isinstance(minutes_override_mode, typer.models.OptionInfo):
+        minutes_override_mode = minutes_override_mode.default
+    if isinstance(override_infeasible, typer.models.OptionInfo):
+        override_infeasible = override_infeasible.default
+    if isinstance(export_attempt_means, typer.models.OptionInfo):
+        export_attempt_means = bool(export_attempt_means.default)
+
     profile_cfg = load_sim_v2_profile(profile=profile, profiles_path=profiles_path)
     sim_audit = os.environ.get("PROJECTIONS_SIM_AUDIT", "0").strip() == "1"
+
+    minutes_override_mode_eff = str(minutes_override_mode).strip().lower()
+    if minutes_override_mode_eff not in {"legacy", "v2"}:
+        raise typer.BadParameter(
+            f"--minutes-override-mode must be one of legacy|v2, got {minutes_override_mode!r}"
+        )
+    override_infeasible_eff = str(override_infeasible).strip().lower()
+    if override_infeasible_eff not in {"error", "relax", "ignore"}:
+        raise typer.BadParameter(
+            f"--override-infeasible must be one of error|relax|ignore, got {override_infeasible!r}"
+        )
+    typer.echo(
+        f"[sim_v2] minutes_override_mode={minutes_override_mode_eff} "
+        f"override_infeasible={override_infeasible_eff}"
+    )
     dev_asserts = os.environ.get("PROJECTIONS_SIM_DEV_ASSERTS", "0").strip() == "1"
 
     def _resolve(value, override, label):
@@ -1896,6 +2016,8 @@ def main(
                 continue
 
             minutes_df = minutes_df.copy()
+            if minutes_override_mode_eff == "v2":
+                minutes_df = _restore_v2_baseline_for_override_rows(minutes_df)
 
             typer.echo(
                 f"[sim_v2] {pd.Timestamp(game_date).date()} minutes source={minutes_label} "
@@ -1928,8 +2050,11 @@ def main(
                     vacancy_mode=profile_cfg.vacancy_mode,
                 )
             
-            # Now filter by min_play_prob (removes players unlikely to play)
-            minutes_df = minutes_df[minutes_df["play_prob"].fillna(0.0) >= min_play_prob_eff]
+            # Legacy path filters low play_prob rows before worlds.
+            # In v2, overrides are compiled as constraints; filtering here can drop force-active
+            # players before constraints are applied.
+            if minutes_override_mode_eff == "legacy":
+                minutes_df = minutes_df[minutes_df["play_prob"].fillna(0.0) >= min_play_prob_eff]
             if minutes_df.empty:
                 continue
 
@@ -1963,6 +2088,91 @@ def main(
             mu_df = mu_df.reset_index(drop=True)
             mu_df["dk_fpts_mean"] = mu_df["fpts_mean"]
             mu_df["sim_profile"] = profile_cfg.name
+
+            override_input_path: Path | None = None
+            override_input_payload: dict[str, Any] | None = None
+            override_resolved_df: pd.DataFrame | None = None
+            override_diag_payload: dict[str, Any] | None = None
+            v2_force_active_arr: np.ndarray | None = None
+            v2_force_inactive_arr: np.ndarray | None = None
+            v2_lb_arr: np.ndarray | None = None
+            v2_ub_arr: np.ndarray | None = None
+            v2_weight_arr: np.ndarray | None = None
+
+            if minutes_override_mode_eff == "v2":
+                override_input_path, override_input_payload = _load_overrides_input_payload_for_date(root, game_date)
+                v2_policy = MinutesOverrideV2Policy(override_infeasible=override_infeasible_eff)
+                baseline_for_v2 = mu_df.copy()
+                # Ensure compiler sees baseline center from minutes_mean.
+                baseline_for_v2["b_minutes"] = pd.to_numeric(
+                    baseline_for_v2["minutes_mean"], errors="coerce"
+                ).fillna(0.0)
+                override_resolved_df, override_diag_payload = apply_minutes_overrides_v2(
+                    baseline_for_v2,
+                    override_input_payload,
+                    policy=v2_policy,
+                    seed=int(seed_eff),
+                    strict=(override_infeasible_eff == "error"),
+                )
+                merge_cols = [
+                    "game_id",
+                    "team_id",
+                    "player_id",
+                    "b_minutes",
+                    "mu_minutes",
+                    "lb_minutes",
+                    "ub_minutes",
+                    "eligible",
+                    "force_active",
+                    "force_inactive",
+                    "weight",
+                    "constraint_kind",
+                    "override_present",
+                    "override_fields",
+                ]
+                mu_df = mu_df.merge(
+                    override_resolved_df[merge_cols],
+                    on=["game_id", "team_id", "player_id"],
+                    how="left",
+                    suffixes=("", "_ov2"),
+                )
+                mu_df["minutes_mean"] = pd.to_numeric(mu_df["mu_minutes"], errors="coerce").fillna(
+                    pd.to_numeric(mu_df["minutes_mean"], errors="coerce").fillna(0.0)
+                )
+                v2_lb_arr = pd.to_numeric(mu_df["lb_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                v2_ub_arr = pd.to_numeric(mu_df["ub_minutes"], errors="coerce").fillna(48.0).to_numpy(dtype=float)
+                v2_force_active_arr = (
+                    pd.to_numeric(mu_df["force_active"], errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0.5
+                )
+                v2_force_inactive_arr = (
+                    pd.to_numeric(mu_df["force_inactive"], errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0.5
+                )
+                if "eligible" in mu_df.columns:
+                    eligible_arr_v2 = (
+                        pd.to_numeric(mu_df["eligible"], errors="coerce").fillna(1.0).to_numpy(dtype=float) > 0.5
+                    )
+                    v2_force_inactive_arr = v2_force_inactive_arr | (~eligible_arr_v2)
+                v2_force_inactive_arr = v2_force_inactive_arr | (v2_ub_arr <= 1e-9)
+                v2_force_active_arr = (~v2_force_inactive_arr) & (
+                    v2_force_active_arr | (v2_lb_arr > 1e-9)
+                )
+                v2_weight_arr = pd.to_numeric(mu_df["weight"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
+                has_v2_constraints = bool(
+                    pd.to_numeric(mu_df["override_present"], errors="coerce").fillna(0.0).to_numpy(dtype=float).sum()
+                    > 0.0
+                )
+                if not has_v2_constraints:
+                    # Keep artifacts/diagnostics for traceability, but preserve legacy runtime behavior
+                    # when v2 is enabled with an empty override payload.
+                    v2_lb_arr = None
+                    v2_ub_arr = None
+                    v2_force_active_arr = None
+                    v2_force_inactive_arr = None
+                    v2_weight_arr = None
+                mu_df["minutes_override_mode"] = "v2"
+            else:
+                mu_df["minutes_override_mode"] = "legacy"
+
             if "play_prob" in mu_df.columns:
                 play_prob_arr = (
                     pd.to_numeric(mu_df["play_prob"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
@@ -2040,13 +2250,89 @@ def main(
                 out_dir = out_dir / f"run={sim_run_id}"
             out_dir.mkdir(parents=True, exist_ok=True)
 
+            if minutes_override_mode_eff == "v2":
+                try:
+                    if override_input_path is not None and override_input_path.exists():
+                        shutil.copy2(override_input_path, out_dir / "overrides_input.json")
+                    elif override_input_payload is not None:
+                        (out_dir / "overrides_input.json").write_text(
+                            json.dumps(override_input_payload, indent=2, sort_keys=True),
+                            encoding="utf-8",
+                        )
+
+                    if override_resolved_df is not None:
+                        compiled_cols = [
+                            c
+                            for c in (
+                                "game_id",
+                                "team_id",
+                                "player_id",
+                                "b_minutes",
+                                "mu_minutes",
+                                "lb_minutes",
+                                "ub_minutes",
+                                "eligible",
+                                "force_active",
+                                "force_inactive",
+                                "weight",
+                                "constraint_kind",
+                                "override_present",
+                            )
+                            if c in override_resolved_df.columns
+                        ]
+                        compiled_payload = {
+                            "version": 2,
+                            "minutes_override_mode": "v2",
+                            "override_infeasible": override_infeasible_eff,
+                            "game_date": pd.Timestamp(game_date).date().isoformat(),
+                            "constraints": override_resolved_df[compiled_cols].to_dict("records"),
+                        }
+                        (out_dir / "overrides_compiled_v2.json").write_text(
+                            json.dumps(compiled_payload, indent=2, default=str),
+                            encoding="utf-8",
+                        )
+                        override_resolved_df.to_parquet(
+                            out_dir / "override_resolved_minutes.parquet", index=False
+                        )
+
+                    if override_diag_payload is not None:
+                        (out_dir / "override_diag.json").write_text(
+                            json.dumps(override_diag_payload, indent=2, default=str),
+                            encoding="utf-8",
+                        )
+                        for team_diag in override_diag_payload.get("team_diagnostics", []) or []:
+                            typer.echo(
+                                "[override-diag] "
+                                f"game_id={team_diag.get('game_id')} team_id={team_diag.get('team_id')} "
+                                f"sum_lb={float(team_diag.get('sum_lb', 0.0)):.2f} "
+                                f"sum_ub={float(team_diag.get('sum_ub', 0.0)):.2f} "
+                                f"sum_mu={float(team_diag.get('sum_mu', 0.0)):.2f} "
+                                f"locked={float(team_diag.get('locked_minutes_total', 0.0)):.2f} "
+                                f"remaining={float(team_diag.get('remaining_to_fill', 0.0)):.2f} "
+                                f"infeasible_reason={team_diag.get('infeasibility_reason')}"
+                            )
+                except Exception as exc:
+                    typer.echo(f"[sim_v2] warning: failed writing override v2 artifacts ({exc})", err=True)
+
             date_seed = seed_eff + int(pd.Timestamp(game_date).toordinal())
             mu_arr = mu_df["fpts_mean"].to_numpy(dtype=float)
             minutes_sim_base = mu_df["minutes_mean"].to_numpy(dtype=float)
             world_fpts_samples: list[np.ndarray] = []
             minutes_world_samples: list[np.ndarray] = []
             base_cols = ["game_date", "game_id", "team_id", "player_id", "minutes_mean", "dk_fpts_mean", "sim_profile"]
-            for extra in ("minutes_final", "minutes_p50_cond", "minutes_p50", "play_prob", "is_starter"):
+            for extra in (
+                "minutes_final",
+                "minutes_p50_cond",
+                "minutes_p50",
+                "play_prob",
+                "is_starter",
+                "minutes_override_mode",
+                "lb_minutes",
+                "ub_minutes",
+                "force_active",
+                "force_inactive",
+                "constraint_kind",
+            ):
                 if extra in mu_df.columns and extra not in base_cols:
                     base_cols.append(extra)
             base_cols = list(dict.fromkeys(base_cols))
@@ -2119,7 +2405,17 @@ def main(
                     alloc_mode = "legacy"
                 elif env_value in {"rotalloc", "rotalloc_expk", "rotalloc-expk"}:
                     alloc_mode = "rotalloc_expk"
-            minutes_alloc_metrics: dict[str, object] = {"minutes_alloc_mode": alloc_mode}
+            minutes_alloc_metrics: dict[str, object] = {
+                "minutes_alloc_mode": alloc_mode,
+                "minutes_override_mode": minutes_override_mode_eff,
+            }
+            if minutes_override_mode_eff == "v2" and override_diag_payload is not None:
+                minutes_alloc_metrics["minutes_override_v2"] = {
+                    "override_infeasible": override_infeasible_eff,
+                    "n_input_overrides": int(override_diag_payload.get("n_input_overrides", 0)),
+                    "n_unknown_overrides": int(len(override_diag_payload.get("unknown_overrides", []) or [])),
+                    "n_team_diags": int(len(override_diag_payload.get("team_diagnostics", []) or [])),
+                }
             eligible_flag_arr: np.ndarray | None = None
             max_rotation_size_eff: int | None = profile_cfg.max_rotation_size or DEFAULT_MAX_ROTATION_SIZE
             if alloc_mode in {"rotalloc_expk", "rotalloc_fringe_alpha", "share_with_rotalloc_elig"} and "eligible_flag" in mu_df.columns:
@@ -2415,7 +2711,11 @@ def main(
             # Stage 1A ops overrides: hard minutes locks/targets that must persist through team=240 allocation.
             fixed_mask_arr: np.ndarray | None = None
             fixed_minutes_arr: np.ndarray | None = None
-            if "minutes_lock_eff" in mu_df.columns and "minutes_target_eff" in mu_df.columns:
+            if (
+                minutes_override_mode_eff == "legacy"
+                and "minutes_lock_eff" in mu_df.columns
+                and "minutes_target_eff" in mu_df.columns
+            ):
                 fixed_mask_arr = (
                     pd.to_numeric(mu_df["minutes_lock_eff"], errors="coerce")
                     .fillna(0.0)
@@ -2489,6 +2789,15 @@ def main(
                         forced_reasons["ops_lock_target_le_play_threshold"] = int(forced_by_ops_near_zero.sum())
                         forced_inactive_mask |= forced_by_ops_near_zero
 
+            # v2 constraints are authoritative when enabled.
+            if minutes_override_mode_eff == "v2":
+                if v2_force_inactive_arr is not None and v2_force_inactive_arr.any():
+                    forced_reasons["v2_force_inactive"] = int(v2_force_inactive_arr.sum())
+                    forced_inactive_mask |= v2_force_inactive_arr
+                if v2_force_active_arr is not None and v2_force_active_arr.any():
+                    # Force-active rows must not be zeroed by membership/play_prob gates.
+                    forced_inactive_mask &= ~v2_force_active_arr
+
             if forced_inactive_mask.any():
                 play_prob_eff = np.where(forced_inactive_mask, 0.0, play_prob_eff)
                 if rotation_lock_mask is not None:
@@ -2512,6 +2821,12 @@ def main(
                     )
                     fixed_mask_arr |= forced_inactive_mask
                 fixed_minutes_arr[forced_inactive_mask] = 0.0
+
+            if minutes_override_mode_eff == "v2" and v2_force_active_arr is not None and v2_force_active_arr.any():
+                play_prob_eff = np.where(v2_force_active_arr & (~forced_inactive_mask), 1.0, play_prob_eff)
+                if policy_reason_arr is not None:
+                    policy_reason_arr = policy_reason_arr.astype(object, copy=True)
+                    policy_reason_arr[v2_force_active_arr & (~forced_inactive_mask)] = "forced_active_override"
 
             minutes_alloc_metrics["forced_inactive_overrides"] = {
                 "n_players": int(forced_inactive_mask.sum()),
@@ -2570,6 +2885,7 @@ def main(
                 getattr(profile_cfg, "preserve_input_rotation", False)
                 and getattr(profile_cfg, "pre_sim_reconcile", None) is not None
                 and getattr(profile_cfg.pre_sim_reconcile, "enabled", False)
+                and minutes_override_mode_eff == "legacy"
             )
             minutes_reconciled_arr: np.ndarray | None = None
             if use_pre_sim_reconcile:
@@ -2647,7 +2963,10 @@ def main(
                 else:
                     typer.echo(
                         f"[sim_v2] model_space_v1 minutes worlds enabled: "
-                        f"gate_temperature={getattr(minutes_worlds_cfg, 'gate_temperature', 1.0)}"
+                        f"gate_temperature={getattr(minutes_worlds_cfg, 'gate_temperature', 1.0)} "
+                        f"use_share_logits={getattr(minutes_worlds_cfg, 'use_share_logits', True)} "
+                        f"share_noise_std={getattr(minutes_worlds_cfg, 'share_noise_std', 0.0)} "
+                        f"use_bench_zero_mixture={getattr(minutes_worlds_cfg, 'use_bench_zero_mixture', True)}"
                     )
                 # Ensure mutual exclusion with other backends
                 if use_model_space_minutes:
@@ -2714,6 +3033,11 @@ def main(
                     # With preserve_input_rotation=True, the input frame is assumed to already reflect the
                     # desired rotation/eligibility set.
                     active_mask = active_mask & np.broadcast_to(eligible_flag_arr[None, :], active_mask.shape)
+                if minutes_override_mode_eff == "v2":
+                    if v2_force_inactive_arr is not None and v2_force_inactive_arr.any():
+                        active_mask[:, v2_force_inactive_arr] = False
+                    if v2_force_active_arr is not None and v2_force_active_arr.any():
+                        active_mask[:, v2_force_active_arr] = True
 
                 # 1b. Team/world feasibility gate: resample availability draws until constraints are feasible.
                 if (
@@ -2753,6 +3077,11 @@ def main(
                     phys_promoted_players_total += int(gate_diag.promoted_players_total)
                     if forced_inactive_mask.any():
                         active_mask[:, forced_inactive_mask] = False
+                    if minutes_override_mode_eff == "v2":
+                        if v2_force_inactive_arr is not None and v2_force_inactive_arr.any():
+                            active_mask[:, v2_force_inactive_arr] = False
+                        if v2_force_active_arr is not None and v2_force_active_arr.any():
+                            active_mask[:, v2_force_active_arr] = True
                     if sim_audit and chunk_start == 0:
                         frac_infeasible = (
                             float(gate_diag.n_infeasible_pre_resample) / float(gate_diag.n_team_worlds)
@@ -2804,10 +3133,30 @@ def main(
                     # Build model-space config from profile
                     model_space_cfg = ModelSpaceMinutesWorldsConfig(
                         gate_temperature=getattr(minutes_worlds_cfg, "gate_temperature", 1.0),
-                        use_bench_zero_mixture=True,  # Default on per spec
-                        bench_zero_minutes_threshold=8.0,
-                        bench_zero_p_base=0.25,
-                        bench_zero_p_slope=0.5,
+                        use_bench_zero_mixture=bool(
+                            getattr(minutes_worlds_cfg, "use_bench_zero_mixture", True)
+                        ),
+                        bench_zero_minutes_threshold=float(
+                            getattr(minutes_worlds_cfg, "bench_zero_minutes_threshold", 8.0)
+                        ),
+                        bench_zero_p_base=float(
+                            getattr(minutes_worlds_cfg, "bench_zero_p_base", 0.25)
+                        ),
+                        bench_zero_p_slope=float(
+                            getattr(minutes_worlds_cfg, "bench_zero_p_slope", 0.5)
+                        ),
+                        use_share_logits=bool(
+                            getattr(minutes_worlds_cfg, "use_share_logits", True)
+                        ),
+                        share_temperature=float(
+                            getattr(minutes_worlds_cfg, "share_temperature", 1.0)
+                        ),
+                        share_noise_std=float(
+                            getattr(minutes_worlds_cfg, "share_noise_std", 0.0)
+                        ),
+                        share_blend_weight=float(
+                            getattr(minutes_worlds_cfg, "share_blend_weight", 0.5)
+                        ),
                     )
 
                     # Call the PR5 backend (handles active_mask internally)
@@ -2827,6 +3176,12 @@ def main(
                     if forced_inactive_mask.any():
                         active_mask[:, forced_inactive_mask] = False
                         minutes_worlds[:, forced_inactive_mask] = 0.0
+                    if minutes_override_mode_eff == "v2":
+                        if v2_force_inactive_arr is not None and v2_force_inactive_arr.any():
+                            active_mask[:, v2_force_inactive_arr] = False
+                            minutes_worlds[:, v2_force_inactive_arr] = 0.0
+                        if v2_force_active_arr is not None and v2_force_active_arr.any():
+                            active_mask[:, v2_force_active_arr] = True
 
                     # Log diagnostics on first chunk
                     if chunk_start == 0:
@@ -2984,6 +3339,12 @@ def main(
                     # NOTE: team-240 is enforced later via the minutes allocator (after masking/bench-zero).
                 # Defense-in-depth: ensure inactive players are hard-zero before reconciliation.
                 minutes_worlds = minutes_worlds * active_mask.astype(float)
+                if minutes_override_mode_eff == "v2":
+                    if v2_force_inactive_arr is not None and v2_force_inactive_arr.any():
+                        active_mask[:, v2_force_inactive_arr] = False
+                        minutes_worlds[:, v2_force_inactive_arr] = 0.0
+                    if v2_force_active_arr is not None and v2_force_active_arr.any():
+                        active_mask[:, v2_force_active_arr] = True
                 if dev_asserts:
                     _assert_inactive_zero_minutes(
                         stage="pre_reconcile",
@@ -3020,6 +3381,12 @@ def main(
                         min_active_needed_override=min_active_override,
                     )
                     minutes_worlds = minutes_worlds * active_mask.astype(float)
+                    if minutes_override_mode_eff == "v2":
+                        if v2_force_inactive_arr is not None and v2_force_inactive_arr.any():
+                            active_mask[:, v2_force_inactive_arr] = False
+                            minutes_worlds[:, v2_force_inactive_arr] = 0.0
+                        if v2_force_active_arr is not None and v2_force_active_arr.any():
+                            active_mask[:, v2_force_active_arr] = True
                     if sim_audit and chunk_start == 0:
                         typer.echo(
                             f"[sim_v2][audit] bench_zero_mixture: dropped={stats.n_player_worlds_dropped} "
@@ -3052,20 +3419,85 @@ def main(
                         continue
                     idxs_arr = np.asarray(idxs, dtype=int)
                     priority_team = minutes_alloc_priority[idxs_arr]
-                    allocated, stats = allocate_team_minutes_matrix(
-                        minutes_worlds[:, idxs_arr],
-                        active_mask[:, idxs_arr],
-                        priority=priority_team,
-                        cap=hard_cap_minutes,
-                        max_increase=(max_increase_arr[idxs_arr] if max_increase_arr is not None else None),
-                        baseline=(minutes_sim_base[idxs_arr] if max_increase_arr is not None else None),
-                        fixed_mask=(fixed_mask_arr[idxs_arr] if fixed_mask_arr is not None else None),
-                        fixed_minutes=(fixed_minutes_arr[idxs_arr] if fixed_minutes_arr is not None else None),
-                        target_total=TEAM_MINUTES_TARGET,
-                        k=3.0,
-                        eps=1e-6,
-                    )
-                    minutes_worlds[:, idxs_arr] = allocated
+                    if minutes_override_mode_eff == "v2" and v2_lb_arr is not None and v2_ub_arr is not None:
+                        lb_team = np.clip(v2_lb_arr[idxs_arr], 0.0, 48.0)
+                        ub_team = np.clip(v2_ub_arr[idxs_arr], 0.0, 48.0)
+                        cap_team = np.clip(ub_team - lb_team, 0.0, None)
+                        weight_team = (
+                            np.clip(v2_weight_arr[idxs_arr], 0.05, None)
+                            if v2_weight_arr is not None
+                            else np.clip(priority_team, 0.05, None)
+                        )
+                        force_inactive_team = (
+                            v2_force_inactive_arr[idxs_arr]
+                            if v2_force_inactive_arr is not None
+                            else np.zeros(len(idxs_arr), dtype=bool)
+                        )
+                        force_active_team = (
+                            v2_force_active_arr[idxs_arr]
+                            if v2_force_active_arr is not None
+                            else np.zeros(len(idxs_arr), dtype=bool)
+                        )
+                        force_active_team = force_active_team & (~force_inactive_team)
+
+                        active_team = active_mask[:, idxs_arr].copy()
+                        team_worlds = minutes_worlds[:, idxs_arr].copy()
+                        if force_inactive_team.any():
+                            active_team[:, force_inactive_team] = False
+                            team_worlds[:, force_inactive_team] = 0.0
+                        if force_active_team.any():
+                            active_team[:, force_active_team] = True
+                            base_seed = np.clip(minutes_sim_base[idxs_arr][force_active_team], 0.0, None)
+                            if base_seed.size:
+                                team_worlds[:, force_active_team] = np.maximum(
+                                    team_worlds[:, force_active_team],
+                                    base_seed[None, :],
+                                )
+
+                        # v2 semantics:
+                        #   m_raw -> clamp(lb, ub) -> project-to-240 within [lb, ub].
+                        # We solve this as a lower-bound shift:
+                        #   n = m - lb, target' = 240 - sum(lb), 0 <= n <= (ub - lb).
+                        m_clip = np.clip(team_worlds, lb_team[None, :], ub_team[None, :])
+                        shifted_target = float(TEAM_MINUTES_TARGET - lb_team.sum())
+                        if shifted_target < -1e-6:
+                            raise ValueError(
+                                "[sim_v2][override-v2] infeasible team floors exceed 240: "
+                                f"game_id={int(gs_game_ids[idxs_arr[0]])} team_id={int(gs_team_ids[idxs_arr[0]])} "
+                                f"sum_lb={float(lb_team.sum()):.3f}"
+                            )
+                        demand_shifted = np.clip(m_clip - lb_team[None, :], 0.0, cap_team[None, :])
+                        allocated_shifted, stats = allocate_team_minutes_matrix(
+                            demand_shifted,
+                            active_team,
+                            priority=weight_team,
+                            cap=cap_team,
+                            target_total=shifted_target,
+                            k=3.0,
+                            eps=1e-6,
+                        )
+                        allocated = allocated_shifted + lb_team[None, :]
+                        allocated = np.clip(allocated, lb_team[None, :], ub_team[None, :])
+                        allocated = np.where(active_team, allocated, 0.0)
+                        if force_inactive_team.any():
+                            allocated[:, force_inactive_team] = 0.0
+                        minutes_worlds[:, idxs_arr] = allocated
+                        active_mask[:, idxs_arr] = active_team
+                    else:
+                        allocated, stats = allocate_team_minutes_matrix(
+                            minutes_worlds[:, idxs_arr],
+                            active_mask[:, idxs_arr],
+                            priority=priority_team,
+                            cap=hard_cap_minutes,
+                            max_increase=(max_increase_arr[idxs_arr] if max_increase_arr is not None else None),
+                            baseline=(minutes_sim_base[idxs_arr] if max_increase_arr is not None else None),
+                            fixed_mask=(fixed_mask_arr[idxs_arr] if fixed_mask_arr is not None else None),
+                            fixed_minutes=(fixed_minutes_arr[idxs_arr] if fixed_minutes_arr is not None else None),
+                            target_total=TEAM_MINUTES_TARGET,
+                            k=3.0,
+                            eps=1e-6,
+                        )
+                        minutes_worlds[:, idxs_arr] = allocated
                     cap_bind_chunk += int(stats["n_cap_bind_rows"])
                     cap_infeasible_chunk += int(stats["n_cap_infeasible_rows"])
                     all_inactive_chunk += int(stats["n_all_inactive"])
@@ -3971,6 +4403,8 @@ def main(
                         "date": pd.Timestamp(game_date).date().isoformat(),
                         "run_id": sim_run_id or "default",
                         "profile": profile_cfg.name,
+                        "minutes_override_mode": minutes_override_mode_eff,
+                        "override_infeasible": override_infeasible_eff if minutes_override_mode_eff == "v2" else None,
                         "seed": int(seed_eff),
                         "n_worlds": int(n_worlds_eff),
                         "chunk_size": int(worlds_per_chunk),
