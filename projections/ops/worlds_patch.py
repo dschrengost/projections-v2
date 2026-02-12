@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from datetime import UTC, datetime, date as date_cls, timedelta
 from pathlib import Path
@@ -226,16 +227,25 @@ def patch_worlds_matrix_for_game(
                 "Missing draft_group_id in unified projections summary; cannot finalize projections."
             )
 
-        out_path = finalize_projections(
-            game_date=game_date,
-            projections_run_id=new_run_id,
-            draft_group_id=draft_group_id,
-            data_root=root,
-            minutes_run_id=str(minutes_run_id) if minutes_run_id else None,
-            sim_run_id=new_run_id,
-            ownership_run_id=str(ownership_run_id) if ownership_run_id else None,
-            merge_locked_games=True,
-        )
+        # Ops patch runs from API/systemd, not the Prefect entrypoint. Allow pointer
+        # promotion for this controlled maintenance path.
+        prev_unsafe = os.environ.get("PROJECTIONS_ALLOW_UNSAFE_POINTER_WRITES")
+        os.environ["PROJECTIONS_ALLOW_UNSAFE_POINTER_WRITES"] = "1"
+        try:
+            out_path = finalize_projections(
+                game_date=game_date,
+                projections_run_id=new_run_id,
+                draft_group_id=draft_group_id,
+                data_root=root,
+                minutes_run_id=str(minutes_run_id) if minutes_run_id else None,
+                sim_run_id=new_run_id,
+                ownership_run_id=str(ownership_run_id) if ownership_run_id else None,
+            )
+        finally:
+            if prev_unsafe is None:
+                os.environ.pop("PROJECTIONS_ALLOW_UNSAFE_POINTER_WRITES", None)
+            else:
+                os.environ["PROJECTIONS_ALLOW_UNSAFE_POINTER_WRITES"] = prev_unsafe
         if out_path is None:
             raise RuntimeError("Finalize projections failed (no output written).")
 

@@ -1825,6 +1825,11 @@ def main(
     ),
     seed: Optional[int] = typer.Option(None, "--seed", help="Override RNG seed (otherwise profile)."),
     min_play_prob: Optional[float] = typer.Option(None, "--min-play-prob", help="Override minimum play_prob filter."),
+    game_id: Optional[int] = typer.Option(
+        None,
+        "--game-id",
+        help="Optional single game_id filter (used by ops per-game worlds patch).",
+    ),
     team_factor_sigma: Optional[float] = typer.Option(
         None, "--team-factor-sigma", help="Override team latent factor sigma for residual model path."
     ),
@@ -1852,14 +1857,35 @@ def main(
         help="Behavior when v2 constraints are infeasible: error|relax|ignore.",
     ),
 ) -> None:
-    # When called as a Python function in tests, Typer may leave OptionInfo defaults
-    # for parameters not explicitly provided. Normalize those to their scalar defaults.
-    if isinstance(minutes_override_mode, typer.models.OptionInfo):
-        minutes_override_mode = minutes_override_mode.default
-    if isinstance(override_infeasible, typer.models.OptionInfo):
-        override_infeasible = override_infeasible.default
-    if isinstance(export_attempt_means, typer.models.OptionInfo):
-        export_attempt_means = bool(export_attempt_means.default)
+    # When called as a Python function (ops patch/tests), Typer may leave OptionInfo
+    # defaults for parameters not explicitly provided. Normalize to scalar defaults.
+    def _unwrap_option(value: Any) -> Any:
+        return value.default if isinstance(value, typer.models.OptionInfo) else value
+
+    n_worlds = _unwrap_option(n_worlds)
+    profile = _unwrap_option(profile)
+    data_root = _unwrap_option(data_root)
+    profiles_path = _unwrap_option(profiles_path)
+    output_root = _unwrap_option(output_root)
+    sim_run_id = _unwrap_option(sim_run_id)
+    use_rates_noise = _unwrap_option(use_rates_noise)
+    rates_noise_split = _unwrap_option(rates_noise_split)
+    team_sigma_scale = _unwrap_option(team_sigma_scale)
+    player_sigma_scale = _unwrap_option(player_sigma_scale)
+    rates_run_id = _unwrap_option(rates_run_id)
+    minutes_run_id = _unwrap_option(minutes_run_id)
+    use_minutes_noise = _unwrap_option(use_minutes_noise)
+    minutes_noise_run_id = _unwrap_option(minutes_noise_run_id)
+    minutes_sigma_min = _unwrap_option(minutes_sigma_min)
+    seed = _unwrap_option(seed)
+    min_play_prob = _unwrap_option(min_play_prob)
+    game_id = _unwrap_option(game_id)
+    team_factor_sigma = _unwrap_option(team_factor_sigma)
+    team_factor_gamma = _unwrap_option(team_factor_gamma)
+    use_efficiency_scoring = _unwrap_option(use_efficiency_scoring)
+    export_attempt_means = bool(_unwrap_option(export_attempt_means))
+    minutes_override_mode = _unwrap_option(minutes_override_mode)
+    override_infeasible = _unwrap_option(override_infeasible)
 
     profile_cfg = load_sim_v2_profile(profile=profile, profiles_path=profiles_path)
     sim_audit = os.environ.get("PROJECTIONS_SIM_AUDIT", "0").strip() == "1"
@@ -2016,6 +2042,14 @@ def main(
                 continue
 
             minutes_df = minutes_df.copy()
+            if game_id is not None:
+                game_id_series = pd.to_numeric(minutes_df.get("game_id"), errors="coerce")
+                minutes_df = minutes_df.loc[game_id_series == int(game_id)].copy()
+                if minutes_df.empty:
+                    typer.echo(
+                        f"[sim_v2] {pd.Timestamp(game_date).date()} game_id={int(game_id)} missing in minutes source; skipping."
+                    )
+                    continue
             if minutes_override_mode_eff == "v2":
                 minutes_df = _restore_v2_baseline_for_override_rows(minutes_df)
 
@@ -2075,6 +2109,14 @@ def main(
                 f"[sim_v2] {pd.Timestamp(game_date).date()} rates run={rates_run_eff or 'latest'} path={rates_path}"
             )
             rates_df["game_date"] = pd.to_datetime(game_date).normalize()
+            if game_id is not None:
+                rates_game_id = pd.to_numeric(rates_df.get("game_id"), errors="coerce")
+                rates_df = rates_df.loc[rates_game_id == int(game_id)].copy()
+                if rates_df.empty:
+                    typer.echo(
+                        f"[sim_v2] {pd.Timestamp(game_date).date()} game_id={int(game_id)} missing in rates source; skipping."
+                    )
+                    continue
 
             try:
                 mu_df = build_rates_mean_fpts(minutes_df, rates_df)
