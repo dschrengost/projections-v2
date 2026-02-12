@@ -19,13 +19,39 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
     onSelectPlayer,
     onOverrideChange,
 }) => {
+    const starters = rows.filter((row) => row.isConfirmedStarter || row.isProjectedStarter)
+    const bench = rows.filter(
+        (row) => !(row.isConfirmedStarter || row.isProjectedStarter) && row.resolvedMinutes >= 10,
+    )
+    const fringe = rows.filter(
+        (row) => !(row.isConfirmedStarter || row.isProjectedStarter) && row.resolvedMinutes < 10,
+    )
+
+    const sections: Array<{ label: string; rows: PlayerTableRow[] }> = [
+        { label: 'Starters', rows: starters },
+        { label: 'Bench', rows: bench },
+        { label: 'Fringe', rows: fringe },
+    ]
+
     return (
         <section className="gv2-team-panel">
             <header className="gv2-team-header">
                 <h3>{teamName}</h3>
             </header>
             <TeamBudgetBar diagnostics={diagnostics ?? null} />
-            <PlayerTable rows={rows} onSelectPlayer={onSelectPlayer} onOverrideChange={onOverrideChange} />
+            {sections.map((section) => (
+                <div key={section.label} className="gv2-team-section">
+                    <div className="gv2-team-section-title">
+                        {section.label}
+                        <span>{section.rows.length}</span>
+                    </div>
+                    <PlayerTable
+                        rows={section.rows}
+                        onSelectPlayer={onSelectPlayer}
+                        onOverrideChange={onOverrideChange}
+                    />
+                </div>
+            ))}
         </section>
     )
 }

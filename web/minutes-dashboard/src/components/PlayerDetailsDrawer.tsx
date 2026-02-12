@@ -16,6 +16,8 @@ export type PlayerDrawerData = {
     team: string
     pos?: string
     status?: string
+    isProjectedStarter?: boolean
+    isConfirmedStarter?: boolean
     baselineMinutes: number
     resolvedMinutes: number
     override: PlayerOverrideState
@@ -74,7 +76,18 @@ export const PlayerDetailsDrawer: React.FC<PlayerDetailsDrawerProps> = ({
             <aside className="gv2-drawer" role="dialog" aria-label="Player details">
                 <div className="gv2-drawer-header">
                     <div>
-                        <h3>{player.name}</h3>
+                        <h3 className="gv2-drawer-player-title">
+                            {player.name}
+                            {player.isConfirmedStarter ? (
+                                <span className="status-tag badge-confirmed" title="Confirmed Starter">
+                                    Confirmed
+                                </span>
+                            ) : player.isProjectedStarter ? (
+                                <span className="status-tag badge-projected" title="Projected Starter">
+                                    Projected
+                                </span>
+                            ) : null}
+                        </h3>
                         <div className="muted">{player.team} {player.pos ? `· ${player.pos}` : ''} {player.status ? `· ${player.status}` : ''}</div>
                     </div>
                     <button type="button" onClick={onClose}>Close</button>

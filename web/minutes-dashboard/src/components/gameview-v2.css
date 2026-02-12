@@ -92,6 +92,25 @@
   margin: 0 0 0.35rem 0;
 }
 
+.gv2-team-section {
+  margin-top: 0.55rem;
+}
+
+.gv2-team-section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  margin-bottom: 0.3rem;
+}
+
+.gv2-team-section-title span {
+  color: #64748b;
+}
+
 .gv2-budget-wrap {
   border: 1px solid #1e293b;
   border-radius: 6px;
@@ -170,6 +189,12 @@
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
+}
+
+.gv2-player-name-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
 }
 
 .gv2-override-control {
@@ -251,6 +276,12 @@
 
 .gv2-drawer-header h3 {
   margin: 0;
+}
+
+.gv2-drawer-player-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .gv2-drawer-header button {

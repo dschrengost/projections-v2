@@ -9,6 +9,8 @@ export type PlayerTableRow = {
     name: string
     pos?: string
     status?: string
+    isProjectedStarter?: boolean
+    isConfirmedStarter?: boolean
     baselineMinutes: number
     resolvedMinutes: number
     baselineFpts: number | null
@@ -49,7 +51,18 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                         <tr key={`${row.game_id}-${row.player_id}`} onClick={() => onSelectPlayer(row.player_id)}>
                             <td>
                                 <div className="gv2-player-cell">
-                                    <strong>{row.name}</strong>
+                                    <div className="gv2-player-name-row">
+                                        <strong>{row.name}</strong>
+                                        {row.isConfirmedStarter ? (
+                                            <span className="status-tag badge-confirmed" title="Confirmed Starter">
+                                                Confirmed
+                                            </span>
+                                        ) : row.isProjectedStarter ? (
+                                            <span className="status-tag badge-projected" title="Projected Starter">
+                                                Projected
+                                            </span>
+                                        ) : null}
+                                    </div>
                                     {row.pos ? <span className="muted">{row.pos}</span> : null}
                                 </div>
                             </td>
