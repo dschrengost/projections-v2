@@ -789,8 +789,18 @@ function App() {
       <section className="content">
         {selectedGameId ? (
           <GameView
-            rows={filteredRows}
+            rows={rows}
             gameId={selectedGameId}
+            date={selectedDate}
+            runId={runId}
+            onGameChange={setSelectedGameId}
+            onOpenLateSwap={() => setActiveTab('entry-manager')}
+            onRunCompleted={(nextRunId) => {
+              if (nextRunId) {
+                setRunId(nextRunId)
+              }
+              void fetchData(selectedDate, nextRunId ?? runId, modelId)
+            }}
             onOverridesSaved={() => {
               void fetchData(selectedDate, runId, modelId)
             }}

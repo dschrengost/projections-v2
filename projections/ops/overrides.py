@@ -58,7 +58,19 @@ MINUTES_FIELDS: tuple[str, ...] = (
     OPS_DEPTH_ROLE_FIELD,
 )
 
-OPS_OVERRIDE_FIELDS: tuple[str, ...] = tuple(sorted(set(USAGE_RATE_FIELDS + MINUTES_FIELDS)))
+# Minutes override v2 fields (constraint-based patch layer).
+MINUTES_V2_FIELDS: tuple[str, ...] = (
+    "override_mode",
+    "lb_minutes",
+    "ub_minutes",
+    "force_active",
+    "force_inactive",
+    "eligible",
+    "protect_weight",
+    "weight",
+)
+
+OPS_OVERRIDE_FIELDS: tuple[str, ...] = tuple(sorted(set(USAGE_RATE_FIELDS + MINUTES_FIELDS + MINUTES_V2_FIELDS)))
 STICKY_FIELDS_KEY = "sticky_fields"
 
 
@@ -121,7 +133,7 @@ def _coerce_override_field(name: str, value: Any) -> Any:
     if value is None:
         return None
 
-    if name == "minutes_lock":
+    if name in {"minutes_lock", "force_active", "force_inactive", "eligible", "protect_weight"}:
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)) and value in (0, 1):
@@ -146,6 +158,14 @@ def _coerce_override_field(name: str, value: Any) -> Any:
             if lowered in {"false", "0", "no", "n"}:
                 return False
         raise ValueError(f"Invalid boolean for {name}: {value!r}")
+
+    if name == "override_mode":
+        if not isinstance(value, str):
+            raise ValueError(f"Invalid {name}: {value!r}")
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("override_mode cannot be empty")
+        return normalized
 
     if name == "status":
         if not isinstance(value, str):
@@ -175,6 +195,14 @@ def _coerce_override_field(name: str, value: Any) -> Any:
             return float(max(0.0, min(48.0, numeric)))
         if name == "play_prob":
             return float(max(0.0, min(1.0, numeric)))
+        return float(max(0.0, numeric))
+
+    if name in {"lb_minutes", "ub_minutes"}:
+        numeric = float(value)
+        return float(max(0.0, min(48.0, numeric)))
+
+    if name == "weight":
+        numeric = float(value)
         return float(max(0.0, numeric))
 
     return value
