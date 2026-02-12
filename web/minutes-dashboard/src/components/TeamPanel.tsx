@@ -19,11 +19,19 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
     onSelectPlayer,
     onOverrideChange,
 }) => {
-    const starters = rows.filter((row) => row.isConfirmedStarter || row.isProjectedStarter)
-    const bench = rows.filter(
+    const isOutLike = (status?: string) => {
+        const s = (status || '').trim().toLowerCase()
+        return s === 'out' || s === 'inactive' || s === 'dnp' || s === 'suspended'
+    }
+
+    const outPlayers = rows.filter((row) => isOutLike(row.status))
+    const activePlayers = rows.filter((row) => !isOutLike(row.status))
+
+    const starters = activePlayers.filter((row) => row.isConfirmedStarter || row.isProjectedStarter)
+    const bench = activePlayers.filter(
         (row) => !(row.isConfirmedStarter || row.isProjectedStarter) && row.resolvedMinutes >= 10,
     )
-    const fringe = rows.filter(
+    const fringe = activePlayers.filter(
         (row) => !(row.isConfirmedStarter || row.isProjectedStarter) && row.resolvedMinutes < 10,
     )
 
@@ -31,6 +39,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
         { label: 'Starters', rows: starters },
         { label: 'Bench', rows: bench },
         { label: 'Fringe', rows: fringe },
+        { label: 'Out', rows: outPlayers },
     ]
 
     return (
@@ -39,7 +48,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
                 <h3>{teamName}</h3>
             </header>
             <TeamBudgetBar diagnostics={diagnostics ?? null} />
-            {sections.map((section) => (
+            {sections.filter((section) => section.rows.length > 0).map((section) => (
                 <div key={section.label} className="gv2-team-section">
                     <div className="gv2-team-section-title">
                         {section.label}
