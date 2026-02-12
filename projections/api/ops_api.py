@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,8 @@ from pydantic import BaseModel
 from projections import paths
 from projections.artifacts.unified_projections import load_projections_df, load_summary, resolve_unified_run_dir
 from projections.ops.overrides import (
+    OPS_OVERRIDES_VERSION,
+    OverrideKey,
     USAGE_RATE_FIELDS,
     apply_overrides_to_minutes_df,
     apply_overrides_to_rates_df,
@@ -22,6 +24,7 @@ from projections.ops.overrides import (
     overrides_path,
     upsert_overrides,
 )
+from projections.overrides import MinutesOverrideV2Policy, apply_minutes_overrides_v2
 from projections.ops.worlds_patch import patch_worlds_matrix_for_game
 from projections.pipeline.effective_inputs import write_effective_minutes_layer
 
@@ -89,6 +92,75 @@ def _resolve_run_dir(base_dir: Path, *, run_id: str | None, parquet_name: str) -
     raise HTTPException(status_code=404, detail=f"No artifact found under {base_dir}.")
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+_V2_MODE_VALUES = {
+    "none",
+    "lock",
+    "band",
+    "cap",
+    "floor",
+    "zero",
+    "force_active",
+    "force_inactive",
+}
+_LEGACY_MINUTES_FIELDS = {
+    "minutes_target",
+    "minutes_lock",
+    "minutes_delta",
+    "minutes_p10",
+    "minutes_p50",
+    "minutes_p90",
+    "minutes_p10_cond",
+    "minutes_p50_cond",
+    "minutes_p90_cond",
+    "ops_depth_role",
+    "status",
+}
+_V2_FIELDS = {
+    "override_mode",
+    "lb_minutes",
+    "ub_minutes",
+    "force_active",
+    "force_inactive",
+    "eligible",
+    "protect_weight",
+    "weight",
+}
+_V2_CONFLICT_FIELDS = _LEGACY_MINUTES_FIELDS | _V2_FIELDS
+
+
+def _save_overrides_payload(
+    *,
+    game_date: date,
+    records: list[dict[str, Any]],
+    data_root: Path,
+) -> None:
+    payload = {
+        "version": OPS_OVERRIDES_VERSION,
+        "game_date": game_date.isoformat(),
+        "updated_at": _utc_now_iso(),
+        "overrides": sorted(records, key=lambda r: (str(r.get("game_id", "")), str(r.get("player_id", "")))),
+    }
+    path = overrides_path(game_date, data_root=data_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp.v2.json")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _baseline_minutes_column(df: pd.DataFrame) -> str:
+    for col in ("minutes_final", "minutes_p50_cond", "minutes_p50", "minutes_sim_uncond_mean", "minutes_mean"):
+        if col in df.columns:
+            return col
+    raise HTTPException(
+        status_code=400,
+        detail="No baseline minutes column found for v2 compile.",
+    )
+
+
 class OpsPlayerOverrideUpdate(BaseModel):
     game_id: str
     player_id: str
@@ -130,6 +202,25 @@ class OpsUpsertOverridesRequest(BaseModel):
     date: str
     updates: list[OpsPlayerOverrideUpdate]
     note: str | None = None
+
+
+class OpsV2PlayerOverride(BaseModel):
+    player_id: str
+    mode: str = "none"
+    lock_value: float | None = None
+    min_value: float | None = None
+    max_value: float | None = None
+    cap_value: float | None = None
+    floor_value: float | None = None
+    protect_weight: bool | None = None
+
+
+class OpsV2ApplyRequest(BaseModel):
+    date: str
+    game_id: str
+    run_id: str | None = None
+    override_infeasible: str = "error"
+    overrides: list[OpsV2PlayerOverride]
 
 
 @router.get("/overrides")
@@ -205,6 +296,79 @@ def post_overrides(req: OpsUpsertOverridesRequest) -> dict[str, Any]:
     return {"date": game_date.isoformat(), "overrides": merged}
 
 
+def _infer_v2_mode(fields: dict[str, Any]) -> str:
+    if not fields:
+        return "none"
+    lb = pd.to_numeric(pd.Series([fields.get("lb_minutes")]), errors="coerce").fillna(0.0).iloc[0]
+    ub = pd.to_numeric(pd.Series([fields.get("ub_minutes")]), errors="coerce").fillna(48.0).iloc[0]
+    force_active = bool(fields.get("force_active"))
+    force_inactive = bool(fields.get("force_inactive"))
+    eligible = fields.get("eligible")
+    if force_inactive and lb <= 0.0 and ub <= 0.0 and eligible is False:
+        return "zero"
+    if force_inactive:
+        return "force_inactive"
+    if force_active and lb <= 0.0 and ub >= 48.0:
+        return "force_active"
+    if lb > 0.0 and ub < 48.0:
+        return "lock" if abs(lb - ub) <= 1e-6 else "band"
+    if lb > 0.0:
+        return "floor"
+    if ub < 48.0:
+        return "cap"
+    return "none"
+
+
+def _compile_v2_fields(ovr: OpsV2PlayerOverride) -> dict[str, Any]:
+    mode = str(ovr.mode or "none").strip().lower()
+    if mode not in _V2_MODE_VALUES:
+        raise HTTPException(status_code=400, detail=f"Unsupported v2 override mode: {ovr.mode!r}")
+
+    fields: dict[str, Any] = {}
+    if mode == "lock":
+        if ovr.lock_value is None:
+            raise HTTPException(status_code=400, detail="lock mode requires lock_value")
+        val = float(max(0.0, min(48.0, ovr.lock_value)))
+        fields["lb_minutes"] = val
+        fields["ub_minutes"] = val
+    elif mode == "band":
+        if ovr.min_value is None or ovr.max_value is None:
+            raise HTTPException(status_code=400, detail="band mode requires min_value and max_value")
+        lb = float(max(0.0, min(48.0, ovr.min_value)))
+        ub = float(max(0.0, min(48.0, ovr.max_value)))
+        if lb > ub:
+            raise HTTPException(status_code=400, detail="band mode requires min_value <= max_value")
+        fields["lb_minutes"] = lb
+        fields["ub_minutes"] = ub
+    elif mode == "cap":
+        if ovr.cap_value is None:
+            raise HTTPException(status_code=400, detail="cap mode requires cap_value")
+        fields["ub_minutes"] = float(max(0.0, min(48.0, ovr.cap_value)))
+    elif mode == "floor":
+        if ovr.floor_value is None:
+            raise HTTPException(status_code=400, detail="floor mode requires floor_value")
+        fields["lb_minutes"] = float(max(0.0, min(48.0, ovr.floor_value)))
+    elif mode == "zero":
+        fields["lb_minutes"] = 0.0
+        fields["ub_minutes"] = 0.0
+        fields["force_inactive"] = True
+        fields["eligible"] = False
+    elif mode == "force_active":
+        fields["force_active"] = True
+    elif mode == "force_inactive":
+        fields["lb_minutes"] = 0.0
+        fields["ub_minutes"] = 0.0
+        fields["force_inactive"] = True
+    elif mode == "none":
+        fields = {}
+
+    if fields:
+        fields["override_mode"] = mode
+        if ovr.protect_weight is not None:
+            fields["protect_weight"] = bool(ovr.protect_weight)
+    return fields
+
+
 @router.delete("/overrides")
 def delete_overrides(
     date: str = Query(...),
@@ -265,17 +429,188 @@ def delete_overrides(
     return {"date": game_date.isoformat(), "overrides": remaining}
 
 
+@router.get("/overrides-v2")
+def get_overrides_v2(
+    date: str = Query(...),
+    game_id: str | None = Query(None),
+) -> dict[str, Any]:
+    game_date = _parse_date(date)
+    gid = str(game_id) if game_id is not None else None
+    overrides_map = load_overrides_map(game_date, data_root=paths.data_path())
+
+    items: list[dict[str, Any]] = []
+    for key, record in overrides_map.items():
+        if gid is not None and key.game_id != gid:
+            continue
+        fields = record.get("fields", {}) if isinstance(record.get("fields"), dict) else {}
+        v2_fields = {k: v for k, v in fields.items() if k in _V2_FIELDS}
+        legacy_fields = sorted(k for k in fields.keys() if k in _LEGACY_MINUTES_FIELDS)
+        if not v2_fields and not legacy_fields:
+            continue
+        items.append(
+            {
+                "game_id": key.game_id,
+                "player_id": key.player_id,
+                "mode": _infer_v2_mode(v2_fields),
+                "fields": v2_fields,
+                "legacy_fields_present": legacy_fields,
+                "updated_at": record.get("updated_at"),
+                "note": record.get("note"),
+            }
+        )
+
+    items.sort(key=lambda r: (str(r.get("game_id", "")), str(r.get("player_id", ""))))
+    return {"date": game_date.isoformat(), "game_id": gid, "overrides": items}
+
+
+@router.post("/overrides-v2/apply")
+def post_overrides_v2_apply(req: OpsV2ApplyRequest) -> dict[str, Any]:
+    game_date = _parse_date(req.date)
+    gid = str(req.game_id)
+    data_root = paths.data_path()
+    now_iso = _utc_now_iso()
+
+    mode = str(req.override_infeasible or "error").strip().lower()
+    if mode not in {"error", "relax", "ignore"}:
+        raise HTTPException(status_code=400, detail="override_infeasible must be one of error|relax|ignore")
+
+    overrides_map = load_overrides_map(game_date, data_root=data_root)
+    mutable: dict[OverrideKey, dict[str, Any]] = {k: dict(v) for k, v in overrides_map.items()}
+
+    for item in req.overrides:
+        key = OverrideKey.from_values(gid, item.player_id)
+        compiled = _compile_v2_fields(item)
+        existing = mutable.get(
+            key,
+            {
+                "game_id": gid,
+                "player_id": str(item.player_id),
+                "fields": {},
+                "updated_at": now_iso,
+                "note": None,
+                "sticky_fields": [],
+            },
+        )
+        existing_fields = existing.get("fields", {}) if isinstance(existing.get("fields"), dict) else {}
+        retained = {k: v for k, v in existing_fields.items() if k not in _V2_CONFLICT_FIELDS}
+        merged = {**retained, **compiled}
+
+        if merged:
+            existing["game_id"] = gid
+            existing["player_id"] = str(item.player_id)
+            existing["fields"] = merged
+            existing["updated_at"] = now_iso
+            mutable[key] = existing
+        else:
+            mutable.pop(key, None)
+
+    projections_run_dir, ctx = resolve_unified_run_dir(data_root, game_date, run_id=req.run_id)
+    if projections_run_dir is None:
+        raise HTTPException(status_code=404, detail=f"No unified projections found for {game_date.isoformat()}.")
+    unified_df = load_projections_df(projections_run_dir)
+    if unified_df.empty:
+        raise HTTPException(status_code=404, detail=f"Unified projections empty for {game_date.isoformat()}.")
+
+    work = unified_df.copy()
+    work["game_id"] = _normalize_id_str_series(work["game_id"])
+    work["player_id"] = _normalize_id_str_series(work["player_id"])
+    game_df = work.loc[work["game_id"] == gid].copy()
+    if game_df.empty:
+        raise HTTPException(status_code=404, detail=f"Game {gid} not found in unified projections.")
+    baseline_col = _baseline_minutes_column(game_df)
+    game_df["minutes_mean"] = pd.to_numeric(game_df[baseline_col], errors="coerce").fillna(0.0).clip(0.0, 48.0)
+
+    payload_overrides = []
+    for record in mutable.values():
+        if str(record.get("game_id")) != gid:
+            continue
+        fields = record.get("fields", {}) if isinstance(record.get("fields"), dict) else {}
+        if not fields:
+            continue
+        payload_overrides.append(
+            {
+                "game_id": gid,
+                "player_id": str(record.get("player_id")),
+                "fields": fields,
+            }
+        )
+
+    try:
+        resolved_df, diag = apply_minutes_overrides_v2(
+            game_df,
+            {"overrides": payload_overrides},
+            policy=MinutesOverrideV2Policy(override_infeasible=mode),
+            seed=None,
+            strict=(mode == "error"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    resolved_df = resolved_df.copy()
+    resolved_df["game_id"] = _normalize_id_str_series(resolved_df["game_id"])
+    resolved_df["player_id"] = _normalize_id_str_series(resolved_df["player_id"])
+    resolved_rows = resolved_df.loc[resolved_df["game_id"] == gid].to_dict(orient="records")
+
+    team_diags = []
+    for td in diag.get("team_diagnostics", []) or []:
+        if str(td.get("game_id")) == gid:
+            team_diags.append(td)
+
+    persisted = []
+    for record in mutable.values():
+        if str(record.get("game_id")) != gid:
+            continue
+        fields = record.get("fields", {}) if isinstance(record.get("fields"), dict) else {}
+        v2_fields = {k: v for k, v in fields.items() if k in _V2_FIELDS}
+        legacy_fields = sorted(k for k in fields.keys() if k in _LEGACY_MINUTES_FIELDS)
+        if not v2_fields and not legacy_fields:
+            continue
+        persisted.append(
+            {
+                "game_id": gid,
+                "player_id": str(record.get("player_id")),
+                "mode": _infer_v2_mode(v2_fields),
+                "fields": v2_fields,
+                "legacy_fields_present": legacy_fields,
+                "updated_at": record.get("updated_at"),
+            }
+        )
+
+    _save_overrides_payload(game_date=game_date, records=list(mutable.values()), data_root=data_root)
+
+    return {
+        "date": game_date.isoformat(),
+        "game_id": gid,
+        "applied_at": now_iso,
+        "run_context": {"projections_run_id": ctx.resolved_run_id},
+        "override_infeasible": mode,
+        "resolved_players": resolved_rows,
+        "team_diagnostics": team_diags,
+        "diag": diag,
+        "overrides": sorted(persisted, key=lambda r: str(r.get("player_id", ""))),
+    }
+
+
 class OpsRunWorldsRequest(BaseModel):
     date: str
     game_id: int
     base_run_id: str | None = None
     pin: bool = False
     background: bool = True
+    minutes_override_mode: str = "legacy"
+    override_infeasible: str = "error"
 
 
 @router.post("/run-worlds")
 def post_run_worlds(req: OpsRunWorldsRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
     game_date = _parse_date(req.date)
+    mode = str(req.minutes_override_mode or "legacy").strip().lower()
+    if mode not in {"legacy", "v2"}:
+        raise HTTPException(status_code=400, detail="minutes_override_mode must be one of legacy|v2")
+    infeasible = str(req.override_infeasible or "error").strip().lower()
+    if infeasible not in {"error", "relax", "ignore"}:
+        raise HTTPException(status_code=400, detail="override_infeasible must be one of error|relax|ignore")
+    run_ts = _utc_now_iso()
     if req.background:
         background_tasks.add_task(
             patch_worlds_matrix_for_game,
@@ -284,11 +619,17 @@ def post_run_worlds(req: OpsRunWorldsRequest, background_tasks: BackgroundTasks)
             base_projections_run_id=req.base_run_id,
             data_root=paths.data_path(),
             pin_projections_run=bool(req.pin),
+            minutes_override_mode=mode,
+            override_infeasible=infeasible,
+            status_run_ts=run_ts,
         )
         return {
             "status": "triggered",
             "date": game_date.isoformat(),
             "game_id": int(req.game_id),
+            "run_ts": run_ts,
+            "minutes_override_mode": mode,
+            "override_infeasible": infeasible,
             "message": "Worlds patch started in background; poll /api/pipeline/status?stage=ops",
         }
     return patch_worlds_matrix_for_game(
@@ -297,6 +638,9 @@ def post_run_worlds(req: OpsRunWorldsRequest, background_tasks: BackgroundTasks)
         base_projections_run_id=req.base_run_id,
         data_root=paths.data_path(),
         pin_projections_run=bool(req.pin),
+        minutes_override_mode=mode,
+        override_infeasible=infeasible,
+        status_run_ts=run_ts,
     )
 
 

@@ -49,3 +49,33 @@ For each worlds run in v2 mode, under:
 - `override_diag.json`
 
 Logs include per-team lines prefixed with `[override-diag]`.
+
+## Next Agent Handoff: GameView Redesign
+
+The next agent should redesign the GameView manual override UX to match v2 semantics.
+
+Primary target files:
+
+- `web/minutes-dashboard/src/components/GameView.tsx`
+- `web/minutes-dashboard/src/components/PlayerOpsPanel.tsx`
+
+Goals:
+
+1. Move UI away from delta-only mental model toward explicit constraints:
+   - lock (exact minutes)
+   - floor
+   - cap
+   - zero-lock / force inactive
+   - force active
+2. Keep backward compatibility with existing payload shape accepted by `/api/ops/overrides`.
+3. Show team-level feasibility and projected redistribution preview before save.
+4. Surface solver/compile diagnostics (caps hit, floors hit, infeasible reason) from v2 artifacts where available.
+5. Make mode explicit in UI copy:
+   - legacy (current default)
+   - v2 constraints mode (when enabled by operator/runtime)
+
+Design constraints:
+
+- Do not break current production default behavior.
+- Avoid double-apply semantics in UI messaging.
+- Keep save path compatible with current backend endpoint contracts.

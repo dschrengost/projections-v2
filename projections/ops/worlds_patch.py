@@ -102,10 +102,23 @@ def patch_worlds_matrix_for_game(
     base_projections_run_id: str | None = None,
     data_root: Path | None = None,
     pin_projections_run: bool = False,
+    minutes_override_mode: str = "legacy",
+    override_infeasible: str = "error",
+    status_run_ts: str | None = None,
 ) -> dict[str, Any]:
     """Re-run sim for a single game and patch the slate worlds matrix + projections."""
     root = data_root or paths.data_path()
-    run_ts = _utc_now_iso()
+    run_ts = status_run_ts or _utc_now_iso()
+    minutes_override_mode_eff = str(minutes_override_mode).strip().lower()
+    if minutes_override_mode_eff not in {"legacy", "v2"}:
+        raise ValueError(
+            f"minutes_override_mode must be one of legacy|v2, got {minutes_override_mode!r}"
+        )
+    override_infeasible_eff = str(override_infeasible).strip().lower()
+    if override_infeasible_eff not in {"error", "relax", "ignore"}:
+        raise ValueError(
+            f"override_infeasible must be one of error|relax|ignore, got {override_infeasible!r}"
+        )
 
     write_status(
         JobStatus(
@@ -167,6 +180,8 @@ def patch_worlds_matrix_for_game(
                 seed=None,
                 min_play_prob=None,
                 game_id=int(game_id),
+                minutes_override_mode=minutes_override_mode_eff,
+                override_infeasible=override_infeasible_eff,
             )
 
             partial_dir = tmp_root / f"game_date={game_date.isoformat()}" / f"run={tmp_run_id}"
@@ -245,11 +260,14 @@ def patch_worlds_matrix_for_game(
             "status": "success",
             "date": game_date.isoformat(),
             "game_id": int(game_id),
+            "run_ts": run_ts,
             "projections_run_id": new_run_id,
             "sim_run_id": new_run_id,
             "sim_profile": sim_profile,
             "n_worlds": n_worlds,
             "output_path": str(out_path),
+            "minutes_override_mode": minutes_override_mode_eff,
+            "override_infeasible": override_infeasible_eff,
         }
     except Exception as exc:  # noqa: BLE001
         write_status(
