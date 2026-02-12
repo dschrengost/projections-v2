@@ -16,8 +16,8 @@ export type PlayerTableRow = {
     baselineFpts: number | null
     resolvedFpts: number | null
     override: PlayerOverrideState
-    minBound: number
-    maxBound: number
+    minutesP10: number | null
+    minutesP90: number | null
 }
 
 type PlayerTableProps = {
@@ -30,6 +30,7 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
     if (!rows.length) {
         return <div className="muted">No players found.</div>
     }
+    const fmt = (value: number | null) => (value == null ? '-' : value.toFixed(1))
 
     return (
         <div className="gv2-player-table-wrap">
@@ -40,9 +41,9 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                         <th>Status</th>
                         <th>Baseline Min</th>
                         <th>Resolved μ</th>
+                        <th>P10</th>
+                        <th>P90</th>
                         <th>Override Control</th>
-                        <th>Min</th>
-                        <th>Max</th>
                         <th>FPTS</th>
                     </tr>
                 </thead>
@@ -69,6 +70,8 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                             <td>{row.status || '-'}</td>
                             <td>{row.baselineMinutes.toFixed(1)}</td>
                             <td>{row.resolvedMinutes.toFixed(1)}</td>
+                            <td>{fmt(row.minutesP10)}</td>
+                            <td>{fmt(row.minutesP90)}</td>
                             <td>
                                 <OverrideControl
                                     compact
@@ -78,8 +81,6 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                                     onChange={(next) => onOverrideChange(row.player_id, next)}
                                 />
                             </td>
-                            <td>{row.minBound.toFixed(1)}</td>
-                            <td>{row.maxBound.toFixed(1)}</td>
                             <td>{row.resolvedFpts == null ? '-' : row.resolvedFpts.toFixed(1)}</td>
                         </tr>
                     ))}

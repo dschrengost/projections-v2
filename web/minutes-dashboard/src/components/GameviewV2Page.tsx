@@ -151,26 +151,6 @@ const scaleByMinutes = (stat: number | null, baselineMinutes: number, resolvedMi
     return stat * (resolvedMinutes / baselineMinutes)
 }
 
-const boundsFromOverride = (override: PlayerOverrideState): { min: number; max: number } => {
-    switch (override.mode) {
-        case 'lock': {
-            const v = toNum(override.lock_value)
-            return { min: v, max: v }
-        }
-        case 'band':
-            return { min: toNum(override.min_value), max: toNum(override.max_value, 48) }
-        case 'cap':
-            return { min: 0, max: toNum(override.cap_value, 48) }
-        case 'floor':
-            return { min: toNum(override.floor_value), max: 48 }
-        case 'zero':
-        case 'force_inactive':
-            return { min: 0, max: 0 }
-        default:
-            return { min: 0, max: 48 }
-    }
-}
-
 export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
     rows,
     date,
@@ -419,11 +399,14 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
             const resolvedMinutes = toNum(resolvedInfo?.mu_minutes, baselineMinutes)
             const baselineFpts = toMaybeNum(player.fpts_sim_uncond_mean ?? player.sim_dk_fpts_mean ?? player.proj_fpts)
             const resolvedFpts = scaleByMinutes(baselineFpts, baselineMinutes, resolvedMinutes)
+            const minutesP10 = toMaybeNum(
+                player.sim_minutes_sim_p10_uncond ?? player.sim_minutes_sim_p10 ?? player.minutes_p10_cond ?? player.minutes_p10,
+            )
+            const minutesP90 = toMaybeNum(
+                player.sim_minutes_sim_p90_uncond ?? player.sim_minutes_sim_p90 ?? player.minutes_p90_cond ?? player.minutes_p90,
+            )
 
             const override = overrideMap[playerId] || defaultOverride()
-            const bounds = boundsFromOverride(override)
-            const minBound = toNum(resolvedInfo?.lb_minutes, bounds.min)
-            const maxBound = toNum(resolvedInfo?.ub_minutes, bounds.max)
 
             return {
                 game_id: gameId,
@@ -438,9 +421,9 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                 resolvedMinutes,
                 baselineFpts,
                 resolvedFpts,
+                minutesP10,
+                minutesP90,
                 override,
-                minBound,
-                maxBound,
             }
         })
 
