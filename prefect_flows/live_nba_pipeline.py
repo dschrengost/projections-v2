@@ -1029,6 +1029,8 @@ def nba_live_pipeline_flow(
     sim_worlds: int = 25000,
     run_id_override: str | None = None,
     promote_pointers: bool = True,
+    minutes_override_mode: str = "v2",
+    override_infeasible: str = "error",
     # Minutes model overrides (shadow runs).
     minutes_bundle_dir: str | None = None,
     rotshare_quantiles_mode: str | None = None,
@@ -1040,6 +1042,24 @@ def nba_live_pipeline_flow(
 ) -> dict[str, str]:
     logger = get_run_logger()
     data_root = paths.get_data_root()
+
+    minutes_override_mode_eff = str(minutes_override_mode).strip().lower()
+    if minutes_override_mode_eff not in {"legacy", "v2"}:
+        raise ValueError(
+            f"minutes_override_mode must be one of legacy|v2, got {minutes_override_mode!r}"
+        )
+    override_infeasible_eff = str(override_infeasible).strip().lower()
+    if override_infeasible_eff not in {"error", "relax", "ignore"}:
+        raise ValueError(
+            f"override_infeasible must be one of error|relax|ignore, got {override_infeasible!r}"
+        )
+
+    logger.info(
+        "[sim] minutes_override_mode=%s override_infeasible=%s",
+        minutes_override_mode_eff,
+        override_infeasible_eff,
+    )
+
     minutes_selector_path = model_selectors.active_minutes_selector_path(
         data_root=data_root,
         project_root=PROJECT_ROOT,
@@ -1208,6 +1228,8 @@ def nba_live_pipeline_flow(
             data_root=data_root,
             sim_worlds=sim_worlds,
             sim_profile="sim_v3",
+            minutes_override_mode=minutes_override_mode_eff,
+            override_infeasible=override_infeasible_eff,
         )
         control_plane.copy_manifest_to_dir(manifest_path, sim_dir)
 
