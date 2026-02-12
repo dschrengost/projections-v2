@@ -85,6 +85,38 @@ uv run python scripts/check_minutes_daily.py --date YYYY-MM-DD
 
 Prints row counts and per-team `minutes_p50` totals for a daily artifact.
 
+## Minutes Override v2 (worlds)
+
+World generation now supports a feature-flagged constraint-based override mode.
+
+- Default remains legacy behavior:
+  - `--minutes-override-mode legacy`
+- Enable v2 explicitly:
+
+```bash
+uv run python -m scripts.sim_v2.run_sim_live \
+  --run-date YYYY-MM-DD \
+  --profile-name sim_v3 \
+  --num-worlds 2000 \
+  --minutes-override-mode v2 \
+  --override-infeasible error
+```
+
+`--override-infeasible` options:
+
+- `error`: fail fast when constraints are infeasible.
+- `relax`: relax non-locked bounds and retry (never violates locks).
+- `ignore`: fallback to baseline minutes for infeasible teams.
+
+When `v2` is enabled, worlds artifacts include:
+
+- `artifacts/sim_v2/worlds_fpts_v2/game_date=.../run=.../overrides_input.json`
+- `artifacts/sim_v2/worlds_fpts_v2/game_date=.../run=.../overrides_compiled_v2.json`
+- `artifacts/sim_v2/worlds_fpts_v2/game_date=.../run=.../override_resolved_minutes.parquet`
+- `artifacts/sim_v2/worlds_fpts_v2/game_date=.../run=.../override_diag.json`
+
+Logs also emit per-team override diagnostics with prefix `[override-diag]`.
+
 ## Minutes labels + eval inputs
 
 - Gold minutes labels live under `<DATA_ROOT>/gold/labels_minutes_v1/season=YYYY/game_date=YYYY-MM-DD/labels.parquet`.
