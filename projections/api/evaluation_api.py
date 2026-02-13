@@ -32,6 +32,15 @@ def _compute_summary(data: list[dict[str, Any]]) -> dict[str, Any]:
         values = [d[key] for d in data if d.get(key) is not None]
         return round(sum(values), 3) if values else 0.0
 
+    def safe_mode(key: str) -> str | None:
+        values = [str(d[key]) for d in data if d.get(key)]
+        if not values:
+            return None
+        counts: dict[str, int] = {}
+        for value in values:
+            counts[value] = counts.get(value, 0) + 1
+        return max(counts.items(), key=lambda item: item[1])[0]
+
     return {
         # Core FPTS metrics
         "avg_fpts_mae": safe_avg("fpts_mae"),
@@ -76,6 +85,16 @@ def _compute_summary(data: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_chalk_top5_acc": safe_avg("chalk_top5_acc"),
         "avg_own_bias": safe_avg("own_bias"),
         "avg_high_own_mae": safe_avg("high_own_mae"),
+
+        # Snapshot selection diagnostics
+        "total_games_with_tip": safe_sum("games_with_tip"),
+        "total_games_with_pre_tip_snapshot": safe_sum("games_with_pre_tip_snapshot"),
+        "total_games_missing_pre_tip_snapshot": safe_sum("games_missing_pre_tip_snapshot"),
+        "avg_pretip_snapshot_coverage": safe_avg("pretip_snapshot_coverage"),
+        "total_selected_runs": safe_sum("selected_runs_count"),
+        "snapshot_selection_mode": safe_mode("snapshot_selection_mode"),
+        "fpts_point_source": safe_mode("fpts_point_source"),
+        "minutes_point_source": safe_mode("minutes_point_source"),
         
         # Counts
         "dates_evaluated": len(data),

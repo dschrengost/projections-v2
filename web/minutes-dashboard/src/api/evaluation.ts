@@ -15,6 +15,14 @@ export type EvaluationDayMetrics = {
   players_matched: number
   total_players_actual?: number
   total_players_pred?: number
+  snapshot_selection_mode?: string | null
+  games_with_tip?: number
+  games_with_pre_tip_snapshot?: number
+  games_missing_pre_tip_snapshot?: number
+  pretip_snapshot_coverage?: number | null
+  selected_runs_count?: number
+  fpts_point_source?: string | null
+  minutes_point_source?: string | null
   // FPTS metrics
   fpts_mae: number | null
   minutes_mae: number | null
@@ -83,6 +91,16 @@ export type EvaluationSummary = {
   avg_chalk_top5_acc?: number | null
   avg_own_bias?: number | null
   avg_high_own_mae?: number | null
+
+  // Snapshot diagnostics
+  total_games_with_tip?: number
+  total_games_with_pre_tip_snapshot?: number
+  total_games_missing_pre_tip_snapshot?: number
+  avg_pretip_snapshot_coverage?: number | null
+  total_selected_runs?: number
+  snapshot_selection_mode?: string | null
+  fpts_point_source?: string | null
+  minutes_point_source?: string | null
 
   // Counts
   dates_evaluated: number

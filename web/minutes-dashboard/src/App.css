@@ -924,6 +924,12 @@ tbody tr:hover {
   color: #f8fafc;
 }
 
+.evaluation-summary .value.value-small {
+  font-size: 0.85rem;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
 .evaluation-section {
   background: #1e293b;
   border: 1px solid #334155;

@@ -91,7 +91,9 @@ export function EvaluationPage() {
       <div className="evaluation-header">
         <div>
           <h1>Prediction Accuracy</h1>
-          <p className="subtitle">Rolling evaluation of FPTS and ownership predictions.</p>
+          <p className="subtitle">
+            Rolling evaluation using closest pre-tip snapshots and world-derived outputs.
+          </p>
         </div>
         <label className="evaluation-days">
           Days
@@ -136,6 +138,26 @@ export function EvaluationPage() {
             {loading ? '…' : formatNumber(summary?.avg_bias)}
           </div>
         </div>
+        {summary?.avg_pretip_snapshot_coverage != null && (
+          <div className="card">
+            <div className="label">Pre-Tip Coverage</div>
+            <div
+              className={`value ${getMetricClass(summary?.avg_pretip_snapshot_coverage, { good: 0.95, warn: 0.85 }, true)}`}
+            >
+              {loading ? '…' : formatPercent(summary?.avg_pretip_snapshot_coverage)}
+            </div>
+          </div>
+        )}
+        {(summary?.fpts_point_source || summary?.minutes_point_source) && (
+          <div className="card">
+            <div className="label">MAE Sources</div>
+            <div className="value value-small">
+              {loading
+                ? '…'
+                : `${summary?.fpts_point_source ?? '—'} / ${summary?.minutes_point_source ?? '—'}`}
+            </div>
+          </div>
+        )}
         {hasOwnership && (
           <>
             <div className="card">
@@ -173,6 +195,15 @@ export function EvaluationPage() {
           </>
         )}
       </div>
+
+      {!loading && summary?.snapshot_selection_mode && summary?.total_games_with_tip != null && (
+        <div className="evaluation-alert muted">
+          Snapshot mode: {summary.snapshot_selection_mode} · Pre-tip snapshots:{' '}
+          {summary.total_games_with_pre_tip_snapshot ?? 0}/{summary.total_games_with_tip}
+          {summary.total_games_missing_pre_tip_snapshot != null &&
+            ` (missing ${summary.total_games_missing_pre_tip_snapshot})`}
+        </div>
+      )}
 
       {/* Salary Tier Accuracy */}
       {!loading && summary?.avg_fpts_mae_elite != null && (
