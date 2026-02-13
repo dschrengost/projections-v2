@@ -209,8 +209,10 @@ export const PlayerOpsPanel: React.FC<PlayerOpsPanelProps> = ({
                 body: JSON.stringify({
                     date,
                     game_id: numericGameId,
-                    pin: true,
+                    pin: false,
                     background: true,
+                    minutes_override_mode: 'v2',
+                    override_infeasible: 'error',
                 }),
             })
 

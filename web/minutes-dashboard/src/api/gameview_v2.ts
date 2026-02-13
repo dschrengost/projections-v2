@@ -245,7 +245,7 @@ export async function runWorldsWithOverrides(params: {
             date: params.date,
             game_id: Number(params.gameId),
             base_run_id: params.baseRunId ?? null,
-            pin: params.pin ?? true,
+            pin: params.pin ?? false,
             background: params.background ?? true,
             minutes_override_mode: params.minutesOverrideMode ?? 'v2',
             override_infeasible: params.overrideInfeasible ?? 'error',

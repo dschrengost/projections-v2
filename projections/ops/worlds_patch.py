@@ -41,6 +41,33 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _clear_stale_ops_pin(*, root: Path, game_date: date_cls, keep_run_id: str) -> None:
+    """Clear stale ops-created pinned pointer so canonical latest/blessed can flow.
+
+    We only clear pins authored by `ops_patch_game` and only when they point to a
+    different run than `keep_run_id`. This preserves intentional non-ops pin sources.
+    """
+    pinned_path = root / "artifacts" / "projections" / game_date.isoformat() / "pinned_run.json"
+    if not pinned_path.exists():
+        return
+    try:
+        payload = json.loads(pinned_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+    source = str(payload.get("source") or "").strip().lower()
+    pinned_run_id = str(payload.get("run_id") or "").strip()
+    if source != "ops_patch_game":
+        return
+    if not pinned_run_id or pinned_run_id == str(keep_run_id):
+        return
+    try:
+        pinned_path.unlink(missing_ok=True)
+    except Exception:
+        return
+
+
 def _patch_sim_projections(
     base: pd.DataFrame,
     patch: pd.DataFrame,
@@ -252,6 +279,8 @@ def patch_worlds_matrix_for_game(
         if pin_projections_run:
             pinned_path = root / "artifacts" / "projections" / game_date.isoformat() / "pinned_run.json"
             _atomic_write_json(pinned_path, {"run_id": new_run_id, "updated_at": _utc_now_iso(), "source": "ops_patch_game"})
+        else:
+            _clear_stale_ops_pin(root=root, game_date=game_date, keep_run_id=new_run_id)
 
         write_status(
             JobStatus(

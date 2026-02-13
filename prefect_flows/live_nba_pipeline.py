@@ -1321,6 +1321,15 @@ def nba_live_pipeline_flow(
                 manifest_path=manifest_path,
                 extra={"entrypoint": "prefect", "stage": "unified_projections"},
             )
+            if _clear_stale_ops_pin_pointer(
+                data_root=data_root,
+                game_date=game_date,
+                keep_run_id=run_id,
+            ):
+                logger.info(
+                    "[projections] cleared stale ops pinned_run.json after promoting run=%s",
+                    run_id,
+                )
             if rmh_minutes_path is not None:
                 try:
                     control_plane.promote_run_pointer(
@@ -1371,3 +1380,27 @@ def _read_minutes_reconcile_mode() -> str:
         return "none"
     mode = payload.get("reconcile_team_minutes")
     return str(mode) if mode else "none"
+
+
+def _clear_stale_ops_pin_pointer(*, data_root: Path, game_date: str, keep_run_id: str) -> bool:
+    """Clear stale ops-created pinned run pointer after canonical scheduled publish."""
+    pinned_path = data_root / "artifacts" / "projections" / game_date / "pinned_run.json"
+    if not pinned_path.exists():
+        return False
+    try:
+        payload = json.loads(pinned_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    source = str(payload.get("source") or "").strip().lower()
+    pinned_run_id = str(payload.get("run_id") or "").strip()
+    if source != "ops_patch_game":
+        return False
+    if not pinned_run_id or pinned_run_id == str(keep_run_id):
+        return False
+    try:
+        pinned_path.unlink(missing_ok=True)
+    except Exception:
+        return False
+    return True
