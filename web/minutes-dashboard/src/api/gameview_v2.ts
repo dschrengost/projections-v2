@@ -248,7 +248,11 @@ export async function fetchPlayerLastGames(
         const body = await res.json().catch(() => ({}))
         throw new Error((body as { detail?: string }).detail || `Failed to fetch player game log: ${res.status}`)
     }
-    return (await res.json()) as PlayerLastGamesResponse
+    try {
+        return (await res.json()) as PlayerLastGamesResponse
+    } catch {
+        throw new Error('Failed to fetch player game log: unexpected non-JSON response from API')
+    }
 }
 
 export async function applyOverrides(params: {

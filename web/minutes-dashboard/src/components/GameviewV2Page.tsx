@@ -236,6 +236,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
     const [lastGamesByKey, setLastGamesByKey] = useState<Record<string, PlayerLastGameStat[]>>({})
     const [lastGamesLoadingByKey, setLastGamesLoadingByKey] = useState<Record<string, boolean>>({})
     const [lastGamesErrorByKey, setLastGamesErrorByKey] = useState<Record<string, string | null>>({})
+    const lastGamesInFlight = useRef<Set<string>>(new Set())
 
     const hydratedGames = useRef<Set<string>>(new Set())
     const [clockNow, setClockNow] = useState(Date.now())
@@ -301,32 +302,27 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
     useEffect(() => {
         if (!selectedPlayerId) return
         const cacheKey = `${date}:${selectedPlayerId}`
-        if (Object.prototype.hasOwnProperty.call(lastGamesByKey, cacheKey) || lastGamesLoadingByKey[cacheKey]) return
+        if (Object.prototype.hasOwnProperty.call(lastGamesByKey, cacheKey)) return
+        if (lastGamesInFlight.current.has(cacheKey)) return
 
-        let cancelled = false
+        lastGamesInFlight.current.add(cacheKey)
         setLastGamesLoadingByKey((prev) => ({ ...prev, [cacheKey]: true }))
         setLastGamesErrorByKey((prev) => ({ ...prev, [cacheKey]: null }))
 
         const load = async () => {
             try {
                 const response = await fetchPlayerLastGames(date, selectedPlayerId, 5)
-                if (cancelled) return
                 setLastGamesByKey((prev) => ({ ...prev, [cacheKey]: response.games || [] }))
             } catch (err) {
-                if (cancelled) return
                 setLastGamesErrorByKey((prev) => ({ ...prev, [cacheKey]: (err as Error).message }))
             } finally {
-                if (!cancelled) {
-                    setLastGamesLoadingByKey((prev) => ({ ...prev, [cacheKey]: false }))
-                }
+                lastGamesInFlight.current.delete(cacheKey)
+                setLastGamesLoadingByKey((prev) => ({ ...prev, [cacheKey]: false }))
             }
         }
 
         void load()
-        return () => {
-            cancelled = true
-        }
-    }, [selectedPlayerId, date, lastGamesByKey, lastGamesLoadingByKey])
+    }, [selectedPlayerId, date, lastGamesByKey])
 
     const activeGame = useMemo(() => games.find((game) => game.gameId === activeGameId) || null, [games, activeGameId])
 
