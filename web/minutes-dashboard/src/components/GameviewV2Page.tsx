@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
     ApplyOverridesResponse,
     OverrideMode,
+    PlayerLastGameStat,
     PlayerOverrideState,
     TeamDiagnostics,
     applyOverrides,
+    fetchPlayerLastGames,
     fetchOverrideState,
     pollRun,
     runWorldsWithOverrides,
@@ -231,6 +233,9 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
     const [error, setError] = useState<string | null>(null)
     const [lastAppliedAt, setLastAppliedAt] = useState<string | null>(null)
     const [lastRunId, setLastRunId] = useState<string | null>(null)
+    const [lastGamesByKey, setLastGamesByKey] = useState<Record<string, PlayerLastGameStat[]>>({})
+    const [lastGamesLoadingByKey, setLastGamesLoadingByKey] = useState<Record<string, boolean>>({})
+    const [lastGamesErrorByKey, setLastGamesErrorByKey] = useState<Record<string, string | null>>({})
 
     const hydratedGames = useRef<Set<string>>(new Set())
     const [clockNow, setClockNow] = useState(Date.now())
@@ -292,6 +297,36 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
             cancelled = true
         }
     }, [activeGameId, date])
+
+    useEffect(() => {
+        if (!selectedPlayerId) return
+        const cacheKey = `${date}:${selectedPlayerId}`
+        if (Object.prototype.hasOwnProperty.call(lastGamesByKey, cacheKey) || lastGamesLoadingByKey[cacheKey]) return
+
+        let cancelled = false
+        setLastGamesLoadingByKey((prev) => ({ ...prev, [cacheKey]: true }))
+        setLastGamesErrorByKey((prev) => ({ ...prev, [cacheKey]: null }))
+
+        const load = async () => {
+            try {
+                const response = await fetchPlayerLastGames(date, selectedPlayerId, 5)
+                if (cancelled) return
+                setLastGamesByKey((prev) => ({ ...prev, [cacheKey]: response.games || [] }))
+            } catch (err) {
+                if (cancelled) return
+                setLastGamesErrorByKey((prev) => ({ ...prev, [cacheKey]: (err as Error).message }))
+            } finally {
+                if (!cancelled) {
+                    setLastGamesLoadingByKey((prev) => ({ ...prev, [cacheKey]: false }))
+                }
+            }
+        }
+
+        void load()
+        return () => {
+            cancelled = true
+        }
+    }, [selectedPlayerId, date, lastGamesByKey, lastGamesLoadingByKey])
 
     const activeGame = useMemo(() => games.find((game) => game.gameId === activeGameId) || null, [games, activeGameId])
 
@@ -532,6 +567,10 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         if (teamDiag?.hit_cap_player_ids?.includes(selectedPlayerId)) reasons.push('binding cap')
         if (override.mode !== 'none') reasons.push('minutes band active')
         if (teamDiag?.infeasibility_reason) reasons.push(`team infeasible: ${teamDiag.infeasibility_reason}`)
+        const historyKey = `${date}:${selectedPlayerId}`
+        const lastGames = lastGamesByKey[historyKey] || []
+        const lastGamesLoading = Boolean(lastGamesLoadingByKey[historyKey])
+        const lastGamesError = lastGamesErrorByKey[historyKey] ?? null
 
         return {
             player_id: selectedPlayerId,
@@ -566,8 +605,22 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                 blk: { baseline: baselineBlk, resolved: ratioScaled(baselineBlk) },
                 to: { baseline: baselineTo, resolved: ratioScaled(baselineTo) },
             },
+            lastGames,
+            lastGamesLoading,
+            lastGamesError,
         }
-    }, [activeGame, selectedPlayerId, localOverrides, activeGameId, resolvedByGame, teamDiagByGame])
+    }, [
+        activeGame,
+        selectedPlayerId,
+        localOverrides,
+        activeGameId,
+        resolvedByGame,
+        teamDiagByGame,
+        date,
+        lastGamesByKey,
+        lastGamesLoadingByKey,
+        lastGamesErrorByKey,
+    ])
 
     if (!games.length) {
         return <div className="muted">No games available for {date}.</div>

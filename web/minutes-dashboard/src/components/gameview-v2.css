@@ -356,6 +356,29 @@
   color: #cbd5e1;
 }
 
+.gv2-last-games-wrap {
+  overflow-x: auto;
+}
+
+.gv2-last-games-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.74rem;
+}
+
+.gv2-last-games-table th,
+.gv2-last-games-table td {
+  border-bottom: 1px solid #1f2937;
+  padding: 0.3rem 0.35rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.gv2-last-games-table th {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
 @media (max-width: 1024px) {
   .gv2-teams-grid {
     grid-template-columns: 1fr;

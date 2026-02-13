@@ -115,6 +115,28 @@ export type V2OverrideStateResponse = {
     overrides: V2OverrideStateItem[]
 }
 
+export type PlayerLastGameStat = {
+    game_date: string
+    game_id: string
+    team_tricode?: string | null
+    opponent_tricode?: string | null
+    minutes: number
+    pts: number
+    reb: number
+    ast: number
+    stl?: number
+    blk?: number
+    to?: number
+    fpts: number
+}
+
+export type PlayerLastGamesResponse = {
+    date: string
+    player_id: string
+    limit: number
+    games: PlayerLastGameStat[]
+}
+
 export type ApplyOverridesResponse = {
     date: string
     game_id: string
@@ -210,6 +232,23 @@ export async function fetchOverrideState(date: string, gameId: string): Promise<
         throw new Error((body as { detail?: string }).detail || `Failed to fetch v2 overrides: ${res.status}`)
     }
     return (await res.json()) as V2OverrideStateResponse
+}
+
+export async function fetchPlayerLastGames(
+    date: string,
+    playerId: string,
+    limit = 5,
+): Promise<PlayerLastGamesResponse> {
+    const res = await fetch(
+        apiUrl(
+            `/api/ops/player-last-games?date=${encodeURIComponent(date)}&player_id=${encodeURIComponent(playerId)}&limit=${encodeURIComponent(String(limit))}`,
+        ),
+    )
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error((body as { detail?: string }).detail || `Failed to fetch player game log: ${res.status}`)
+    }
+    return (await res.json()) as PlayerLastGamesResponse
 }
 
 export async function applyOverrides(params: {

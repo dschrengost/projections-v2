@@ -120,6 +120,178 @@ def _to_json_compatible(value: Any) -> Any:
     return value
 
 
+def _parse_iso_minutes(value: Any) -> float:
+    """Parse NBA API minute strings like PT31M27.00S into float minutes."""
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else 0.0
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    if text.startswith("PT"):
+        mins = 0.0
+        try:
+            body = text[2:]
+            if "M" in body:
+                mins_part, rest = body.split("M", 1)
+                mins += float(mins_part or 0)
+            else:
+                rest = body
+            if "S" in rest:
+                secs_part = rest.replace("S", "")
+                if secs_part:
+                    mins += float(secs_part) / 60.0
+            return mins
+        except ValueError:
+            return 0.0
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def _dk_fpts_from_stats(
+    *,
+    pts: float,
+    reb: float,
+    ast: float,
+    stl: float,
+    blk: float,
+    tov: float,
+) -> float:
+    base = pts + 1.25 * reb + 1.5 * ast + 2.0 * stl + 2.0 * blk - 0.5 * tov
+    stats_10 = sum(1 for x in (pts, reb, ast, stl, blk) if x >= 10)
+    if stats_10 >= 3:
+        return base + 3.0
+    if stats_10 >= 2:
+        return base + 1.5
+    return base
+
+
+def _iter_boxscore_partitions_desc(data_root: Path, *, before_date: date) -> list[tuple[date, Path]]:
+    """Return available boxscore day partitions before a date, newest first."""
+    root = data_root / "bronze" / "boxscores_raw"
+    if not root.exists():
+        return []
+    out: list[tuple[date, Path]] = []
+    for season_dir in root.glob("season=*"):
+        if not season_dir.is_dir():
+            continue
+        for day_dir in season_dir.glob("date=*"):
+            if not day_dir.is_dir():
+                continue
+            day_str = day_dir.name.split("=", 1)[1] if "=" in day_dir.name else day_dir.name
+            try:
+                day = date.fromisoformat(day_str)
+            except ValueError:
+                continue
+            if day >= before_date:
+                continue
+            box_path = day_dir / "boxscores_raw.parquet"
+            if box_path.exists():
+                out.append((day, box_path))
+    out.sort(key=lambda item: item[0], reverse=True)
+    return out
+
+
+def _extract_player_line_from_payload(
+    *,
+    payload: dict[str, Any],
+    game_date: date,
+    player_id: str,
+) -> dict[str, Any] | None:
+    target_pid = str(player_id).strip()
+    if not target_pid:
+        return None
+    game_id = str(payload.get("game_id") or "").strip()
+    if not game_id:
+        return None
+
+    for side in ("away", "home"):
+        team_data = payload.get(side, {}) or {}
+        opp_data = payload.get("home" if side == "away" else "away", {}) or {}
+        players = team_data.get("players", [])
+        for player in players:
+            pid = str(player.get("person_id") or player.get("player_id") or "").strip()
+            if pid != target_pid:
+                continue
+
+            status = str(player.get("status") or "").upper()
+            stats = player.get("statistics", {}) or {}
+            minutes = _parse_iso_minutes(stats.get("minutes"))
+
+            # Skip inactive-with-zero rows to keep this aligned with meaningful game logs.
+            if status and status != "ACTIVE" and minutes <= 0:
+                return None
+
+            pts = float(pd.to_numeric(stats.get("points", 0), errors="coerce") or 0.0)
+            reb = float(pd.to_numeric(stats.get("reboundsTotal", 0), errors="coerce") or 0.0)
+            ast = float(pd.to_numeric(stats.get("assists", 0), errors="coerce") or 0.0)
+            stl = float(pd.to_numeric(stats.get("steals", 0), errors="coerce") or 0.0)
+            blk = float(pd.to_numeric(stats.get("blocks", 0), errors="coerce") or 0.0)
+            tov = float(pd.to_numeric(stats.get("turnovers", 0), errors="coerce") or 0.0)
+
+            return {
+                "game_date": game_date.isoformat(),
+                "game_id": game_id,
+                "team_tricode": team_data.get("team_tricode"),
+                "opponent_tricode": opp_data.get("team_tricode"),
+                "minutes": round(minutes, 2),
+                "pts": round(pts, 1),
+                "reb": round(reb, 1),
+                "ast": round(ast, 1),
+                "stl": round(stl, 1),
+                "blk": round(blk, 1),
+                "to": round(tov, 1),
+                "fpts": round(
+                    _dk_fpts_from_stats(pts=pts, reb=reb, ast=ast, stl=stl, blk=blk, tov=tov),
+                    2,
+                ),
+            }
+    return None
+
+
+def _load_player_last_games(
+    *,
+    data_root: Path,
+    player_id: str,
+    before_date: date,
+    limit: int,
+) -> list[dict[str, Any]]:
+    games: list[dict[str, Any]] = []
+    for game_day, box_path in _iter_boxscore_partitions_desc(data_root, before_date=before_date):
+        if len(games) >= limit:
+            break
+        try:
+            raw_df = pd.read_parquet(box_path)
+        except Exception:
+            continue
+        if raw_df.empty or "payload" not in raw_df.columns:
+            continue
+
+        for _, row in raw_df.iterrows():
+            payload_raw = row.get("payload")
+            if payload_raw is None:
+                continue
+            try:
+                payload = json.loads(payload_raw) if isinstance(payload_raw, str) else payload_raw
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            record = _extract_player_line_from_payload(
+                payload=payload,
+                game_date=game_day,
+                player_id=player_id,
+            )
+            if record is not None:
+                games.append(record)
+                break
+    return games[:limit]
+
+
 _V2_MODE_VALUES = {
     "none",
     "lock",
@@ -517,6 +689,32 @@ def get_overrides_v2(
 
     items.sort(key=lambda r: (str(r.get("game_id", "")), str(r.get("player_id", ""))))
     return {"date": game_date.isoformat(), "game_id": gid, "overrides": items}
+
+
+@router.get("/player-last-games")
+def get_player_last_games(
+    date: str = Query(..., description="Slate date (YYYY-MM-DD). Returns games strictly before this date."),
+    player_id: str = Query(..., description="NBA player_id"),
+    limit: int = Query(5, ge=1, le=20, description="Number of recent games to return"),
+) -> dict[str, Any]:
+    slate_day = _parse_date(date)
+    pid = str(player_id).strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="player_id is required.")
+
+    data_root = paths.data_path()
+    games = _load_player_last_games(
+        data_root=data_root,
+        player_id=pid,
+        before_date=slate_day,
+        limit=limit,
+    )
+    return {
+        "date": slate_day.isoformat(),
+        "player_id": pid,
+        "limit": limit,
+        "games": games,
+    }
 
 
 @router.post("/overrides-v2/apply")

@@ -1,5 +1,5 @@
 import React from 'react'
-import { PlayerOverrideState } from '../api/gameview_v2'
+import { PlayerLastGameStat, PlayerOverrideState } from '../api/gameview_v2'
 import { OverrideControl } from './OverrideControl'
 
 export type DrawerMetric = {
@@ -32,6 +32,9 @@ export type PlayerDrawerData = {
         blk: DrawerMetric
         to: DrawerMetric
     }
+    lastGames: PlayerLastGameStat[]
+    lastGamesLoading: boolean
+    lastGamesError?: string | null
 }
 
 type PlayerDetailsDrawerProps = {
@@ -123,6 +126,50 @@ export const PlayerDetailsDrawer: React.FC<PlayerDetailsDrawerProps> = ({
                         <div className="gv2-why-changed">{player.whyChanged}</div>
                     </section>
                 ) : null}
+
+                <section className="gv2-drawer-section">
+                    <h4>Last 5 Games (Actuals)</h4>
+                    {player.lastGamesLoading ? (
+                        <div className="muted">Loading game log...</div>
+                    ) : player.lastGamesError ? (
+                        <div className="gv2-why-changed">{player.lastGamesError}</div>
+                    ) : player.lastGames.length === 0 ? (
+                        <div className="muted">No recent games found.</div>
+                    ) : (
+                        <div className="gv2-last-games-wrap">
+                            <table className="gv2-last-games-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Opp</th>
+                                        <th>MIN</th>
+                                        <th>PTS</th>
+                                        <th>REB</th>
+                                        <th>AST</th>
+                                        <th>FPTS</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {player.lastGames.map((game) => (
+                                        <tr key={`${game.game_id}-${game.game_date}`}>
+                                            <td>{game.game_date}</td>
+                                            <td>
+                                                {game.team_tricode && game.opponent_tricode
+                                                    ? `${game.team_tricode} vs ${game.opponent_tricode}`
+                                                    : game.opponent_tricode || '-'}
+                                            </td>
+                                            <td>{game.minutes.toFixed(1)}</td>
+                                            <td>{game.pts.toFixed(0)}</td>
+                                            <td>{game.reb.toFixed(0)}</td>
+                                            <td>{game.ast.toFixed(0)}</td>
+                                            <td>{game.fpts.toFixed(1)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </section>
             </aside>
         </>
     )
