@@ -171,14 +171,19 @@ def _dk_fpts_from_stats(
 
 
 def _iter_boxscore_partitions_desc(data_root: Path, *, before_date: date) -> list[tuple[date, Path]]:
-    """Return available boxscore day partitions before a date, newest first."""
+    """Return unique boxscore day partitions before a date, newest first."""
     root = data_root / "bronze" / "boxscores_raw"
     if not root.exists():
         return []
-    out: list[tuple[date, Path]] = []
+    by_day: dict[date, tuple[int, Path]] = {}
     for season_dir in root.glob("season=*"):
         if not season_dir.is_dir():
             continue
+        season_name = season_dir.name.split("=", 1)[1] if "=" in season_dir.name else ""
+        try:
+            season_rank = int(season_name)
+        except ValueError:
+            season_rank = -1
         for day_dir in season_dir.glob("date=*"):
             if not day_dir.is_dir():
                 continue
@@ -191,9 +196,11 @@ def _iter_boxscore_partitions_desc(data_root: Path, *, before_date: date) -> lis
                 continue
             box_path = day_dir / "boxscores_raw.parquet"
             if box_path.exists():
-                out.append((day, box_path))
-    out.sort(key=lambda item: item[0], reverse=True)
-    return out
+                prev = by_day.get(day)
+                if prev is None or season_rank >= prev[0]:
+                    by_day[day] = (season_rank, box_path)
+    out = [(day, item[1]) for day, item in by_day.items()]
+    return sorted(out, key=lambda item: item[0], reverse=True)
 
 
 def _extract_player_line_from_payload(
@@ -261,6 +268,7 @@ def _load_player_last_games(
     limit: int,
 ) -> list[dict[str, Any]]:
     games: list[dict[str, Any]] = []
+    seen_game_ids: set[str] = set()
     for game_day, box_path in _iter_boxscore_partitions_desc(data_root, before_date=before_date):
         if len(games) >= limit:
             break
@@ -287,6 +295,11 @@ def _load_player_last_games(
                 player_id=player_id,
             )
             if record is not None:
+                game_id = str(record.get("game_id") or "").strip()
+                if game_id and game_id in seen_game_ids:
+                    continue
+                if game_id:
+                    seen_game_ids.add(game_id)
                 games.append(record)
                 break
     return games[:limit]
