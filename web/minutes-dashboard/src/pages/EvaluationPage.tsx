@@ -75,6 +75,16 @@ export function EvaluationPage() {
 
   const summary = data?.summary
   const metrics = data?.metrics ?? []
+  const latestMetric = metrics.length > 0 ? metrics[metrics.length - 1] : null
+  const preTipCoverage = summary?.avg_pretip_snapshot_coverage ?? latestMetric?.pretip_snapshot_coverage
+  const fptsPointSource = summary?.fpts_point_source ?? latestMetric?.fpts_point_source
+  const minutesPointSource = summary?.minutes_point_source ?? latestMetric?.minutes_point_source
+  const snapshotMode = summary?.snapshot_selection_mode ?? latestMetric?.snapshot_selection_mode
+  const totalGamesWithTip = summary?.total_games_with_tip ?? latestMetric?.games_with_tip
+  const totalGamesWithPreTip =
+    summary?.total_games_with_pre_tip_snapshot ?? latestMetric?.games_with_pre_tip_snapshot
+  const totalGamesMissingPreTip =
+    summary?.total_games_missing_pre_tip_snapshot ?? latestMetric?.games_missing_pre_tip_snapshot
 
   // Chart data - ensure ascending date order
   const chartData = useMemo(() => {
@@ -138,23 +148,23 @@ export function EvaluationPage() {
             {loading ? '…' : formatNumber(summary?.avg_bias)}
           </div>
         </div>
-        {summary?.avg_pretip_snapshot_coverage != null && (
+        {preTipCoverage != null && (
           <div className="card">
             <div className="label">Pre-Tip Coverage</div>
             <div
-              className={`value ${getMetricClass(summary?.avg_pretip_snapshot_coverage, { good: 0.95, warn: 0.85 }, true)}`}
+              className={`value ${getMetricClass(preTipCoverage, { good: 0.95, warn: 0.85 }, true)}`}
             >
-              {loading ? '…' : formatPercent(summary?.avg_pretip_snapshot_coverage)}
+              {loading ? '…' : formatPercent(preTipCoverage)}
             </div>
           </div>
         )}
-        {(summary?.fpts_point_source || summary?.minutes_point_source) && (
+        {(fptsPointSource || minutesPointSource) && (
           <div className="card">
             <div className="label">MAE Sources</div>
             <div className="value value-small">
               {loading
                 ? '…'
-                : `${summary?.fpts_point_source ?? '—'} / ${summary?.minutes_point_source ?? '—'}`}
+                : `${fptsPointSource ?? '—'} / ${minutesPointSource ?? '—'}`}
             </div>
           </div>
         )}
@@ -196,12 +206,11 @@ export function EvaluationPage() {
         )}
       </div>
 
-      {!loading && summary?.snapshot_selection_mode && summary?.total_games_with_tip != null && (
+      {!loading && snapshotMode && totalGamesWithTip != null && (
         <div className="evaluation-alert muted">
-          Snapshot mode: {summary.snapshot_selection_mode} · Pre-tip snapshots:{' '}
-          {summary.total_games_with_pre_tip_snapshot ?? 0}/{summary.total_games_with_tip}
-          {summary.total_games_missing_pre_tip_snapshot != null &&
-            ` (missing ${summary.total_games_missing_pre_tip_snapshot})`}
+          Snapshot mode: {snapshotMode} · Pre-tip snapshots: {totalGamesWithPreTip ?? 0}/
+          {totalGamesWithTip}
+          {totalGamesMissingPreTip != null && ` (missing ${totalGamesMissingPreTip})`}
         </div>
       )}
 
