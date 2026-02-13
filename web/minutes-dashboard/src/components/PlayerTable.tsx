@@ -43,7 +43,7 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                         <th>Resolved μ</th>
                         <th>P10</th>
                         <th>P90</th>
-                        <th>Override Control</th>
+                        <th>Minutes Band</th>
                         <th>FPTS</th>
                     </tr>
                 </thead>

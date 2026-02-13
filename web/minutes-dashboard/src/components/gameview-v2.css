@@ -210,6 +210,7 @@
 .gv2-override-row {
   display: flex;
   gap: 0.3rem;
+  align-items: center;
 }
 
 .gv2-select,
@@ -229,6 +230,31 @@
 
 .gv2-input {
   width: 4.2rem;
+}
+
+.gv2-band-label {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  min-width: 2.2rem;
+}
+
+.gv2-band-sep {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.gv2-band-clear {
+  border: 1px solid #334155;
+  background: #111827;
+  color: #cbd5e1;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  padding: 0.08rem 0.38rem;
+  cursor: pointer;
+}
+
+.gv2-band-note {
+  font-size: 0.67rem;
 }
 
 .gv2-quick-actions {

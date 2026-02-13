@@ -132,6 +132,56 @@ const deriveGames = (rows: PlayerRow[]): GameData[] => {
 
 const defaultOverride = (): PlayerOverrideState => ({ mode: 'none' })
 
+const toBandOnlyOverride = (override: PlayerOverrideState): PlayerOverrideState => {
+    const mode = override.mode
+    if (mode === 'none') return { mode: 'none', protect_weight: override.protect_weight }
+
+    const asNum = (value: unknown): number | null => {
+        if (value == null) return null
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? Math.max(0, Math.min(48, parsed)) : null
+    }
+
+    let min = asNum(override.min_value)
+    let max = asNum(override.max_value)
+
+    if (mode === 'lock') {
+        const lock = asNum(override.lock_value)
+        if (lock != null) {
+            min = lock
+            max = lock
+        }
+    } else if (mode === 'cap') {
+        const cap = asNum(override.cap_value)
+        min = 0
+        max = cap ?? 48
+    } else if (mode === 'floor') {
+        const floor = asNum(override.floor_value)
+        min = floor ?? 0
+        max = 48
+    } else if (mode === 'zero' || mode === 'force_inactive') {
+        min = 0
+        max = 0
+    } else if (mode === 'force_active') {
+        return { mode: 'none', protect_weight: override.protect_weight }
+    }
+
+    if (min == null && max == null) {
+        return { mode: 'none', protect_weight: override.protect_weight }
+    }
+    if (min == null) min = Math.max(0, Math.min(48, max ?? 48))
+    if (max == null) max = Math.max(0, Math.min(48, min))
+
+    const lb = Math.min(min, max)
+    const ub = Math.max(min, max)
+    return {
+        mode: 'band',
+        min_value: Number(lb.toFixed(1)),
+        max_value: Number(ub.toFixed(1)),
+        protect_weight: override.protect_weight,
+    }
+}
+
 const overrideFromServer = (item: { mode: OverrideMode; fields: Record<string, unknown> }): PlayerOverrideState => {
     const fields = item.fields || {}
     const meanLb = toMaybeNum(fields['mean_lb_minutes'] ?? fields['lb_minutes'])
@@ -259,7 +309,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         const overrides = localOverrides[targetGameId] || {}
         const payload = Object.entries(overrides).map(([playerId, override]) => ({
             player_id: playerId,
-            ...override,
+            ...toBandOnlyOverride(override),
         }))
 
         const response = await applyOverrides({
@@ -473,7 +523,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         const reasons: string[] = []
         if (teamDiag?.hit_floor_player_ids?.includes(selectedPlayerId)) reasons.push('binding floor')
         if (teamDiag?.hit_cap_player_ids?.includes(selectedPlayerId)) reasons.push('binding cap')
-        if (override.mode !== 'none') reasons.push(`override mode: ${override.mode}`)
+        if (override.mode !== 'none') reasons.push('minutes band active')
         if (teamDiag?.infeasibility_reason) reasons.push(`team infeasible: ${teamDiag.infeasibility_reason}`)
 
         return {
