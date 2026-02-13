@@ -106,6 +106,7 @@ export const PlayerDetailsDrawer: React.FC<PlayerDetailsDrawerProps> = ({
 
                 <section className="gv2-drawer-section">
                     <h4>Projections</h4>
+                    <div className="muted gv2-band-note">Minutes p10/p50/p90 are from simulated worlds.</div>
                     <MetricRow label="Minutes" metric={player.metrics.minutes} />
                     <MetricRow label="FPTS" metric={player.metrics.fpts} />
                     <MetricRow label="PTS" metric={player.metrics.pts} />

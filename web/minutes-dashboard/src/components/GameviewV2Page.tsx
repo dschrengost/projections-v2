@@ -455,6 +455,9 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
             const minutesP10 = toMaybeNum(
                 player.sim_minutes_sim_p10_uncond ?? player.sim_minutes_sim_p10 ?? player.minutes_p10_cond ?? player.minutes_p10,
             )
+            const minutesP50 = toMaybeNum(
+                player.sim_minutes_sim_p50_uncond ?? player.sim_minutes_sim_p50 ?? player.minutes_p50,
+            )
             const minutesP90 = toMaybeNum(
                 player.sim_minutes_sim_p90_uncond ?? player.sim_minutes_sim_p90 ?? player.minutes_p90_cond ?? player.minutes_p90,
             )
@@ -475,6 +478,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                 baselineFpts,
                 resolvedFpts,
                 minutesP10,
+                minutesP50,
                 minutesP90,
                 override,
             }
@@ -502,6 +506,9 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         const resolvedMinutes = toNum(resolvedInfo?.mu_minutes, baselineMinutes)
         const minutesP10 = toMaybeNum(
             player.sim_minutes_sim_p10_uncond ?? player.sim_minutes_sim_p10 ?? player.minutes_p10_cond ?? player.minutes_p10,
+        )
+        const minutesP50 = toMaybeNum(
+            player.sim_minutes_sim_p50_uncond ?? player.sim_minutes_sim_p50 ?? player.minutes_p50,
         )
         const minutesP90 = toMaybeNum(
             player.sim_minutes_sim_p90_uncond ?? player.sim_minutes_sim_p90 ?? player.minutes_p90_cond ?? player.minutes_p90,
@@ -542,7 +549,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                     baseline: baselineMinutes,
                     resolved: resolvedMinutes,
                     p10: minutesP10,
-                    p50: resolvedMinutes,
+                    p50: minutesP50 ?? resolvedMinutes,
                     p90: minutesP90,
                 },
                 fpts: {

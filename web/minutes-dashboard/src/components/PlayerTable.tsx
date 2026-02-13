@@ -17,6 +17,7 @@ export type PlayerTableRow = {
     resolvedFpts: number | null
     override: PlayerOverrideState
     minutesP10: number | null
+    minutesP50: number | null
     minutesP90: number | null
 }
 
@@ -41,8 +42,9 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                         <th>Status</th>
                         <th>Baseline Min</th>
                         <th>Resolved μ</th>
-                        <th>P10</th>
-                        <th>P90</th>
+                        <th>W P10</th>
+                        <th>W P50</th>
+                        <th>W P90</th>
                         <th>Minutes Band</th>
                         <th>FPTS</th>
                     </tr>
@@ -71,6 +73,7 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                             <td>{row.baselineMinutes.toFixed(1)}</td>
                             <td>{row.resolvedMinutes.toFixed(1)}</td>
                             <td>{fmt(row.minutesP10)}</td>
+                            <td>{fmt(row.minutesP50)}</td>
                             <td>{fmt(row.minutesP90)}</td>
                             <td>
                                 <OverrideControl
