@@ -623,14 +623,14 @@ class OpsRunWorldsRequest(BaseModel):
     base_run_id: str | None = None
     pin: bool = False
     background: bool = True
-    minutes_override_mode: str = "legacy"
+    minutes_override_mode: str = "v2"
     override_infeasible: str = "error"
 
 
 @router.post("/run-worlds")
 def post_run_worlds(req: OpsRunWorldsRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
     game_date = _parse_date(req.date)
-    mode = str(req.minutes_override_mode or "legacy").strip().lower()
+    mode = str(req.minutes_override_mode or "v2").strip().lower()
     if mode not in {"legacy", "v2"}:
         raise HTTPException(status_code=400, detail="minutes_override_mode must be one of legacy|v2")
     infeasible = str(req.override_infeasible or "error").strip().lower()
