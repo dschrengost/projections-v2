@@ -884,7 +884,7 @@ def run_sim_task(
     data_root: Path,
     sim_worlds: int,
     sim_profile: str,
-    minutes_override_mode: str = "legacy",
+    minutes_override_mode: str = "v2",
     override_infeasible: str = "error",
 ) -> Path:
     args = [

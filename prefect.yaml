@@ -27,7 +27,9 @@ deployments:
     collision_strategy: CANCEL_NEW
   description: Canonical end-to-end NBA live pipeline (Prefect-only control plane).
   entrypoint: prefect_flows/live_nba_pipeline.py:nba_live_pipeline_flow
-  parameters: {}
+  parameters:
+    minutes_override_mode: v2
+    override_infeasible: error
   work_pool:
     name: projections-local
     work_queue_name: null
