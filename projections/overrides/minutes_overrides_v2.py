@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,39 @@ from projections.alloc.bounded_projection import ProjectionInfeasibleError, proj
 # Explicit v2 fields (new schema) accepted in per-player override `fields`.
 _EXPLICIT_FLOOR_FIELDS = {"lb_minutes", "minutes_lb", "minutes_min", "minutes_floor", "min_minutes", "floor"}
 _EXPLICIT_CAP_FIELDS = {"ub_minutes", "minutes_ub", "minutes_max", "minutes_cap", "max_minutes", "cap"}
+_EXPLICIT_MEAN_LB_FIELDS = (
+    "mean_lb_minutes",
+    "minutes_mean_lb",
+    "mean_min_minutes",
+    "mean_floor_minutes",
+    "lb_minutes",
+    "minutes_lb",
+    "minutes_min",
+    "minutes_floor",
+    "min_minutes",
+    "floor",
+)
+_EXPLICIT_MEAN_UB_FIELDS = (
+    "mean_ub_minutes",
+    "minutes_mean_ub",
+    "mean_max_minutes",
+    "mean_cap_minutes",
+    "ub_minutes",
+    "minutes_ub",
+    "minutes_max",
+    "minutes_cap",
+    "max_minutes",
+    "cap",
+)
+_EXPLICIT_WORLD_LB_FIELDS = ("world_lb_minutes", "minutes_world_lb", "world_floor_minutes")
+_EXPLICIT_WORLD_UB_FIELDS = (
+    "world_ub_minutes",
+    "minutes_world_ub",
+    "world_cap_minutes",
+    "hard_cap_minutes",
+    "hard_ub_minutes",
+)
+_OVERRIDE_MODE_FIELDS = ("override_mode", "mode")
 _EXPLICIT_TARGET_FIELDS = {"mu_minutes", "minutes_target", "target_minutes", "target", "minutes"}
 _EXPLICIT_DELTA_FIELDS = {"minutes_delta", "delta"}
 _EXPLICIT_LOCK_FIELDS = {"minutes_lock", "lock", "exact_lock", "hard_lock", "exact"}
@@ -65,8 +98,10 @@ class _OverrideKey:
 
 @dataclass(frozen=True)
 class _CompiledConstraint:
-    lb_minutes: float
-    ub_minutes: float
+    mean_lb_minutes: float
+    mean_ub_minutes: float
+    world_lb_minutes: float
+    world_ub_minutes: float
     force_active: bool
     force_inactive: bool
     eligible: bool
@@ -245,8 +280,10 @@ def _compile_constraint_for_row(
     policy: MinutesOverrideV2Policy,
     strict: bool,
 ) -> _CompiledConstraint:
-    lb = float(policy.default_lb_minutes)
-    ub = float(policy.default_ub_minutes)
+    mean_lb = float(policy.default_lb_minutes)
+    mean_ub = float(policy.default_ub_minutes)
+    world_lb = float(policy.default_lb_minutes)
+    world_ub = float(policy.default_ub_minutes)
 
     eligible = True
     if "eligible_flag" in row.index:
@@ -257,6 +294,12 @@ def _compile_constraint_for_row(
     force_active = False
     force_inactive = False
     constraint_kind = "none"
+    override_mode: str | None = None
+    for key in _OVERRIDE_MODE_FIELDS:
+        raw_mode = override_fields.get(key)
+        if isinstance(raw_mode, str) and raw_mode.strip():
+            override_mode = raw_mode.strip().lower()
+            break
 
     # Parse explicit booleans.
     for key in _EXPLICIT_ELIGIBLE_FIELDS:
@@ -302,19 +345,14 @@ def _compile_constraint_for_row(
         eligible = False
         constraint_kind = "zero_lock"
 
-    # Numeric floors/caps.
-    for key in _EXPLICIT_FLOOR_FIELDS:
-        if key in override_fields:
-            val = _to_float(override_fields.get(key))
+    def _first_numeric(fields: dict[str, Any], keys: Iterable[str]) -> tuple[str | None, float | None]:
+        for key in keys:
+            if key not in fields:
+                continue
+            val = _to_float(fields.get(key))
             if val is not None:
-                lb = max(lb, float(val))
-                constraint_kind = "floor"
-    for key in _EXPLICIT_CAP_FIELDS:
-        if key in override_fields:
-            val = _to_float(override_fields.get(key))
-            if val is not None:
-                ub = min(ub, float(val))
-                constraint_kind = "cap"
+                return key, float(val)
+        return None, None
 
     # Target and delta semantics.
     target_val: float | None = None
@@ -343,52 +381,167 @@ def _compile_constraint_for_row(
         lock_exact = True
         target_val = 0.0
 
+    explicit_mean_lb_key, explicit_mean_lb = _first_numeric(override_fields, _EXPLICIT_MEAN_LB_FIELDS)
+    explicit_mean_ub_key, explicit_mean_ub = _first_numeric(override_fields, _EXPLICIT_MEAN_UB_FIELDS)
+    _, explicit_world_lb = _first_numeric(override_fields, _EXPLICIT_WORLD_LB_FIELDS)
+    _, explicit_world_ub = _first_numeric(override_fields, _EXPLICIT_WORLD_UB_FIELDS)
+
+    if explicit_world_lb is not None:
+        world_lb = max(world_lb, explicit_world_lb)
+    if explicit_world_ub is not None:
+        world_ub = min(world_ub, explicit_world_ub)
+
+    if override_mode == "zero":
+        out_like = True
+        lock_exact = True
+        target_val = 0.0
+        force_inactive = True
+        eligible = False
+        constraint_kind = "zero_lock"
+    elif override_mode == "force_inactive":
+        force_inactive = True
+        constraint_kind = "force_inactive"
+    elif override_mode == "force_active":
+        force_active = True
+        constraint_kind = "force_active"
+
+    # Inference path for payloads that only send bound values.
+    inferred_lock = False
+    inferred_band = False
+    if override_mode in {"lock", "band"}:
+        inferred_lock = override_mode == "lock"
+        inferred_band = override_mode == "band"
+    elif target_val is None and lock_exact:
+        inferred_lock = True
+    elif target_val is None and explicit_mean_lb is not None and explicit_mean_ub is not None:
+        # Legacy payloads with lb/ub values can represent lock/band.
+        if abs(float(explicit_mean_lb) - float(explicit_mean_ub)) <= 1e-8:
+            inferred_lock = True
+        else:
+            inferred_band = True
+    elif target_val is None and explicit_mean_ub is not None and explicit_mean_lb is None and override_mode == "cap":
+        world_ub = min(world_ub, float(explicit_mean_ub))
+        constraint_kind = "cap"
+    elif target_val is None and explicit_mean_lb is not None and explicit_mean_ub is None and override_mode == "floor":
+        # Legacy floor mode -> mean floor only (no world floor).
+        mean_lb = max(mean_lb, float(explicit_mean_lb))
+        constraint_kind = "band"
+
     if target_val is not None:
         t = float(np.clip(target_val, 0.0, policy.default_ub_minutes))
-        if lock_exact:
-            lb = max(lb, t)
-            ub = min(ub, t)
+        if lock_exact or inferred_lock:
+            mean_lb = max(mean_lb, t)
+            mean_ub = min(mean_ub, t)
             constraint_kind = "lock"
         else:
             band_eps = _to_float(override_fields.get("minutes_band_eps"))
             if band_eps is None:
                 band_eps = float(policy.legacy_target_band_eps)
             band_eps = max(0.0, float(band_eps))
-            lb = max(lb, t - band_eps)
-            ub = min(ub, t + band_eps)
+            mean_lb = max(mean_lb, t - band_eps)
+            mean_ub = min(mean_ub, t + band_eps)
+            constraint_kind = "band"
+    elif inferred_lock:
+        if explicit_mean_lb is None and explicit_mean_ub is None:
+            lock_target = float(np.clip(b_minutes, 0.0, policy.default_ub_minutes))
+        elif explicit_mean_lb is None:
+            lock_target = float(np.clip(explicit_mean_ub, 0.0, policy.default_ub_minutes))
+        else:
+            lock_target = float(np.clip(explicit_mean_lb, 0.0, policy.default_ub_minutes))
+        mean_lb = max(mean_lb, lock_target)
+        mean_ub = min(mean_ub, lock_target)
+        constraint_kind = "lock"
+    elif inferred_band:
+        if explicit_mean_lb is not None:
+            mean_lb = max(mean_lb, float(explicit_mean_lb))
+        if explicit_mean_ub is not None:
+            mean_ub = min(mean_ub, float(explicit_mean_ub))
+        constraint_kind = "band"
+    else:
+        # Fallback compatibility behavior.
+        if explicit_mean_lb is not None and explicit_mean_ub is not None:
+            mean_lb = max(mean_lb, float(explicit_mean_lb))
+            mean_ub = min(mean_ub, float(explicit_mean_ub))
+            if abs(mean_lb - mean_ub) <= 1e-8:
+                constraint_kind = "lock"
+            else:
+                constraint_kind = "band"
+        elif explicit_mean_ub is not None:
+            world_ub = min(world_ub, float(explicit_mean_ub))
+            constraint_kind = "cap"
+        elif explicit_mean_lb is not None:
+            mean_lb = max(mean_lb, float(explicit_mean_lb))
             constraint_kind = "band"
 
-    lb = float(np.clip(lb, 0.0, policy.default_ub_minutes))
-    ub = float(np.clip(ub, 0.0, policy.default_ub_minutes))
+    if override_mode == "cap":
+        cap_val = _to_float(override_fields.get("cap_value"))
+        if cap_val is None:
+            if explicit_mean_ub is not None:
+                cap_val = explicit_mean_ub
+            else:
+                _, cap_val = _first_numeric(override_fields, _EXPLICIT_CAP_FIELDS)
+        if cap_val is not None:
+            world_ub = min(world_ub, float(cap_val))
+            constraint_kind = "cap"
+    elif override_mode is None:
+        # Legacy payload path where a lone cap field should remain a world cap.
+        if explicit_mean_lb_key in _EXPLICIT_FLOOR_FIELDS and explicit_mean_ub_key is None and explicit_mean_lb is not None:
+            mean_lb = max(mean_lb, float(explicit_mean_lb))
+            if constraint_kind == "none":
+                constraint_kind = "band"
+        if explicit_mean_ub_key in _EXPLICIT_CAP_FIELDS and explicit_mean_lb_key is None and explicit_mean_ub is not None:
+            world_ub = min(world_ub, float(explicit_mean_ub))
+            constraint_kind = "cap"
 
-    if not eligible or force_inactive or ub <= 1e-12:
+    mean_lb = float(np.clip(mean_lb, 0.0, policy.default_ub_minutes))
+    mean_ub = float(np.clip(mean_ub, 0.0, policy.default_ub_minutes))
+    world_lb = float(np.clip(world_lb, 0.0, policy.default_ub_minutes))
+    world_ub = float(np.clip(world_ub, 0.0, policy.default_ub_minutes))
+
+    if not eligible or force_inactive or world_ub <= 1e-12:
         eligible = False
         force_inactive = True
         force_active = False
-        lb = 0.0
-        ub = 0.0
+        mean_lb = 0.0
+        mean_ub = 0.0
+        world_lb = 0.0
+        world_ub = 0.0
         constraint_kind = "zero_lock"
 
-    if lb > 0.0:
+    if mean_lb > 0.0:
         force_active = True
         if constraint_kind == "none":
-            constraint_kind = "floor"
+            constraint_kind = "band"
 
-    if lb > ub + 1e-8:
+    if mean_lb > mean_ub + 1e-8:
         if strict:
             raise ValueError(
-                "Override bounds invalid after compile: "
-                f"game_id={row_key.game_id} player_id={row_key.player_id} lb={lb:.3f} ub={ub:.3f}"
+                "Override mean bounds invalid after compile: "
+                f"game_id={row_key.game_id} player_id={row_key.player_id} "
+                f"mean_lb={mean_lb:.3f} mean_ub={mean_ub:.3f}"
             )
         # Non-strict fallback: collapse to midpoint clipped to legal range.
-        mid = float(np.clip(0.5 * (lb + ub), 0.0, policy.default_ub_minutes))
-        lb = mid
-        ub = mid
+        mid = float(np.clip(0.5 * (mean_lb + mean_ub), 0.0, policy.default_ub_minutes))
+        mean_lb = mid
+        mean_ub = mid
         constraint_kind = "lock"
 
+    if world_lb > world_ub + 1e-8:
+        if strict:
+            raise ValueError(
+                "Override world bounds invalid after compile: "
+                f"game_id={row_key.game_id} player_id={row_key.player_id} "
+                f"world_lb={world_lb:.3f} world_ub={world_ub:.3f}"
+            )
+        world_mid = float(np.clip(0.5 * (world_lb + world_ub), 0.0, policy.default_ub_minutes))
+        world_lb = world_mid
+        world_ub = world_mid
+
     return _CompiledConstraint(
-        lb_minutes=float(lb),
-        ub_minutes=float(ub),
+        mean_lb_minutes=float(mean_lb),
+        mean_ub_minutes=float(mean_ub),
+        world_lb_minutes=float(world_lb),
+        world_ub_minutes=float(world_ub),
         force_active=bool(force_active),
         force_inactive=bool(force_inactive),
         eligible=bool(eligible),
@@ -409,9 +562,13 @@ def _has_team_override(group: pd.DataFrame, policy: MinutesOverrideV2Policy) -> 
         return True
     default_lb = float(policy.default_lb_minutes)
     default_ub = float(policy.default_ub_minutes)
-    if bool((group["lb_minutes"] > default_lb + 1e-9).any()):
+    if bool((group["mean_lb_minutes"] > default_lb + 1e-9).any()):
         return True
-    if bool((group["ub_minutes"] < default_ub - 1e-9).any()):
+    if bool((group["mean_ub_minutes"] < default_ub - 1e-9).any()):
+        return True
+    if bool((group["world_lb_minutes"] > default_lb + 1e-9).any()):
+        return True
+    if bool((group["world_ub_minutes"] < default_ub - 1e-9).any()):
         return True
     return False
 
@@ -481,11 +638,14 @@ def apply_minutes_overrides_v2(
     seed: int | None = None,
     strict: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Compile and apply minutes overrides as deterministic constraints.
+    """Compile and apply minutes overrides as deterministic mean constraints.
 
     The output is a resolved per-player minutes constraint frame containing:
-    `game_id, team_id, player_id, b_minutes, mu_minutes, lb_minutes, ub_minutes,
-    eligible, force_active, force_inactive, weight`.
+    `game_id, team_id, player_id, b_minutes, mu_minutes, mean_lb_minutes, mean_ub_minutes,
+    world_lb_minutes, world_ub_minutes, eligible, force_active, force_inactive, weight`.
+    Compatibility aliases are kept as:
+    - `lb_minutes = mean_lb_minutes`
+    - `ub_minutes = mean_ub_minutes`
 
     Legacy payload compatibility:
     - `minutes_delta` / `minutes_target` are compiled into lock or band constraints.
@@ -497,6 +657,10 @@ def apply_minutes_overrides_v2(
         for col in (
             "b_minutes",
             "mu_minutes",
+            "mean_lb_minutes",
+            "mean_ub_minutes",
+            "world_lb_minutes",
+            "world_ub_minutes",
             "lb_minutes",
             "ub_minutes",
             "eligible",
@@ -558,8 +722,13 @@ def apply_minutes_overrides_v2(
         )
         compiled_rows.append(
             {
-                "lb_minutes": compiled.lb_minutes,
-                "ub_minutes": compiled.ub_minutes,
+                "mean_lb_minutes": compiled.mean_lb_minutes,
+                "mean_ub_minutes": compiled.mean_ub_minutes,
+                "world_lb_minutes": compiled.world_lb_minutes,
+                "world_ub_minutes": compiled.world_ub_minutes,
+                # Backward compatibility aliases.
+                "lb_minutes": compiled.mean_lb_minutes,
+                "ub_minutes": compiled.mean_ub_minutes,
                 "force_active": compiled.force_active,
                 "force_inactive": compiled.force_inactive,
                 "eligible": compiled.eligible,
@@ -584,8 +753,10 @@ def apply_minutes_overrides_v2(
         group_idx = pd.Index(idx)
         g = work.loc[group_idx]
         b = g["b_minutes"].to_numpy(dtype=float)
-        lb = g["lb_minutes"].to_numpy(dtype=float)
-        ub = g["ub_minutes"].to_numpy(dtype=float)
+        mean_lb = g["mean_lb_minutes"].to_numpy(dtype=float)
+        mean_ub = g["mean_ub_minutes"].to_numpy(dtype=float)
+        world_lb = g["world_lb_minutes"].to_numpy(dtype=float)
+        world_ub = g["world_ub_minutes"].to_numpy(dtype=float)
         w = g["weight"].to_numpy(dtype=float)
 
         has_override = _has_team_override(g, cfg)
@@ -598,8 +769,8 @@ def apply_minutes_overrides_v2(
                 mu = project_sum_with_bounds(
                     b,
                     float(cfg.target_team_minutes),
-                    lb,
-                    ub,
+                    mean_lb,
+                    mean_ub,
                     w,
                 )
                 action = "project"
@@ -611,16 +782,22 @@ def apply_minutes_overrides_v2(
                     mu = b.copy()
                     action = "ignore_to_baseline"
                     # Fully drop compiled bounds/forces for this team in ignore mode.
+                    work.loc[group_idx, "mean_lb_minutes"] = float(cfg.default_lb_minutes)
+                    work.loc[group_idx, "mean_ub_minutes"] = float(cfg.default_ub_minutes)
+                    work.loc[group_idx, "world_lb_minutes"] = float(cfg.default_lb_minutes)
+                    work.loc[group_idx, "world_ub_minutes"] = float(cfg.default_ub_minutes)
                     work.loc[group_idx, "lb_minutes"] = float(cfg.default_lb_minutes)
                     work.loc[group_idx, "ub_minutes"] = float(cfg.default_ub_minutes)
                     work.loc[group_idx, "force_active"] = False
                     work.loc[group_idx, "force_inactive"] = False
                     work.loc[group_idx, "eligible"] = True
                     work.loc[group_idx, "constraint_kind"] = "none"
-                    lb = np.full_like(b, float(cfg.default_lb_minutes), dtype=float)
-                    ub = np.full_like(b, float(cfg.default_ub_minutes), dtype=float)
+                    mean_lb = np.full_like(b, float(cfg.default_lb_minutes), dtype=float)
+                    mean_ub = np.full_like(b, float(cfg.default_ub_minutes), dtype=float)
+                    world_lb = np.full_like(b, float(cfg.default_lb_minutes), dtype=float)
+                    world_ub = np.full_like(b, float(cfg.default_ub_minutes), dtype=float)
                 else:
-                    mu, relax_meta = _relax_and_project(b, lb, ub, w, policy=cfg)
+                    mu, relax_meta = _relax_and_project(b, mean_lb, mean_ub, w, policy=cfg)
                     action = "relax_and_project"
         else:
             mu = b.copy()
@@ -628,21 +805,34 @@ def apply_minutes_overrides_v2(
 
         work.loc[group_idx, "mu_minutes"] = mu
 
-        lock_mask = np.abs(lb - ub) <= 1e-8
-        hit_floor = np.flatnonzero(np.isclose(mu, lb, atol=1e-6) | (mu < lb + 1e-6))
-        hit_cap = np.flatnonzero(np.isclose(mu, ub, atol=1e-6) | (mu > ub - 1e-6))
+        lock_mask = np.abs(mean_lb - mean_ub) <= 1e-8
+        hit_floor = np.flatnonzero(np.isclose(mu, mean_lb, atol=1e-6) | (mu < mean_lb + 1e-6))
+        hit_cap = np.flatnonzero(np.isclose(mu, mean_ub, atol=1e-6) | (mu > mean_ub - 1e-6))
+        bounds_diff_mask = (np.abs(mean_lb - world_lb) > 1e-8) | (np.abs(mean_ub - world_ub) > 1e-8)
         player_ids = g["player_id"].astype(str).to_numpy(dtype=str)
 
         diag_row: dict[str, Any] = {
             "game_id": g["game_id"].iloc[0],
             "team_id": g["team_id"].iloc[0],
-            "sum_lb": float(lb.sum()),
-            "sum_ub": float(ub.sum()),
+            "sum_mean_lb": float(mean_lb.sum()),
+            "sum_mean_ub": float(mean_ub.sum()),
+            "sum_world_lb": float(world_lb.sum()),
+            "sum_world_ub": float(world_ub.sum()),
+            # Backward-compatible aliases for existing dashboards/log parsing.
+            "sum_lb": float(mean_lb.sum()),
+            "sum_ub": float(mean_ub.sum()),
             "sum_mu": float(mu.sum()),
             "locked_minutes_total": float(mu[lock_mask].sum()),
             "remaining_to_fill": float(cfg.target_team_minutes - mu[lock_mask].sum()),
             "hit_floor_player_ids": [player_ids[j] for j in hit_floor.tolist()],
             "hit_cap_player_ids": [player_ids[j] for j in hit_cap.tolist()],
+            "mean_world_bounds_differ": bool(bounds_diff_mask.any()),
+            "mean_world_bounds_differ_player_ids": [player_ids[j] for j in np.flatnonzero(bounds_diff_mask).tolist()],
+            "mean_world_bounds_note": (
+                "mean bounds apply to mu projection only; world bounds apply per-world clamp/project"
+                if bool(bounds_diff_mask.any())
+                else None
+            ),
             "n_players": int(len(g)),
             "n_overrides": int(g["override_present"].sum()),
             "infeasibility_reason": infeasible_reason,
@@ -658,6 +848,10 @@ def apply_minutes_overrides_v2(
         "player_id",
         "b_minutes",
         "mu_minutes",
+        "mean_lb_minutes",
+        "mean_ub_minutes",
+        "world_lb_minutes",
+        "world_ub_minutes",
         "lb_minutes",
         "ub_minutes",
         "eligible",

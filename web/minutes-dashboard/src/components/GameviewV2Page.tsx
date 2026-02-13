@@ -134,13 +134,16 @@ const defaultOverride = (): PlayerOverrideState => ({ mode: 'none' })
 
 const overrideFromServer = (item: { mode: OverrideMode; fields: Record<string, unknown> }): PlayerOverrideState => {
     const fields = item.fields || {}
+    const meanLb = toMaybeNum(fields['mean_lb_minutes'] ?? fields['lb_minutes'])
+    const meanUb = toMaybeNum(fields['mean_ub_minutes'] ?? fields['ub_minutes'])
+    const worldUb = toMaybeNum(fields['world_ub_minutes'] ?? fields['ub_minutes'])
     return {
         mode: item.mode,
-        lock_value: toMaybeNum(fields['lb_minutes']),
-        min_value: toMaybeNum(fields['lb_minutes']),
-        max_value: toMaybeNum(fields['ub_minutes']),
-        cap_value: toMaybeNum(fields['ub_minutes']),
-        floor_value: toMaybeNum(fields['lb_minutes']),
+        lock_value: meanLb,
+        min_value: meanLb,
+        max_value: meanUb,
+        cap_value: worldUb,
+        floor_value: meanLb,
         protect_weight: Boolean(fields['protect_weight']),
     }
 }
@@ -447,6 +450,12 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
 
         const baselineMinutes = toNum(player.minutes_final ?? player.minutes_p50 ?? player.minutes_sim_uncond_mean)
         const resolvedMinutes = toNum(resolvedInfo?.mu_minutes, baselineMinutes)
+        const minutesP10 = toMaybeNum(
+            player.sim_minutes_sim_p10_uncond ?? player.sim_minutes_sim_p10 ?? player.minutes_p10_cond ?? player.minutes_p10,
+        )
+        const minutesP90 = toMaybeNum(
+            player.sim_minutes_sim_p90_uncond ?? player.sim_minutes_sim_p90 ?? player.minutes_p90_cond ?? player.minutes_p90,
+        )
 
         const baselineFpts = toMaybeNum(player.fpts_sim_uncond_mean ?? player.sim_dk_fpts_mean ?? player.proj_fpts)
         const resolvedFpts = scaleByMinutes(baselineFpts, baselineMinutes, resolvedMinutes)
@@ -482,9 +491,9 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                 minutes: {
                     baseline: baselineMinutes,
                     resolved: resolvedMinutes,
-                    p10: toMaybeNum(resolvedInfo?.lb_minutes ?? player.minutes_p10),
+                    p10: minutesP10,
                     p50: resolvedMinutes,
-                    p90: toMaybeNum(resolvedInfo?.ub_minutes ?? player.minutes_p90),
+                    p90: minutesP90,
                 },
                 fpts: {
                     baseline: baselineFpts,

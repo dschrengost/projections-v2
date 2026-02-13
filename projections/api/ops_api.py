@@ -145,6 +145,10 @@ _LEGACY_MINUTES_FIELDS = {
 }
 _V2_FIELDS = {
     "override_mode",
+    "mean_lb_minutes",
+    "mean_ub_minutes",
+    "world_lb_minutes",
+    "world_ub_minutes",
     "lb_minutes",
     "ub_minutes",
     "force_active",
@@ -323,23 +327,31 @@ def post_overrides(req: OpsUpsertOverridesRequest) -> dict[str, Any]:
 def _infer_v2_mode(fields: dict[str, Any]) -> str:
     if not fields:
         return "none"
-    lb = pd.to_numeric(pd.Series([fields.get("lb_minutes")]), errors="coerce").fillna(0.0).iloc[0]
-    ub = pd.to_numeric(pd.Series([fields.get("ub_minutes")]), errors="coerce").fillna(48.0).iloc[0]
+    mean_lb = pd.to_numeric(
+        pd.Series([fields.get("mean_lb_minutes", fields.get("lb_minutes"))]), errors="coerce"
+    ).fillna(0.0).iloc[0]
+    mean_ub = pd.to_numeric(
+        pd.Series([fields.get("mean_ub_minutes", fields.get("ub_minutes"))]), errors="coerce"
+    ).fillna(48.0).iloc[0]
+    world_ub = pd.to_numeric(
+        pd.Series([fields.get("world_ub_minutes", fields.get("ub_minutes"))]), errors="coerce"
+    ).fillna(48.0).iloc[0]
     force_active = bool(fields.get("force_active"))
     force_inactive = bool(fields.get("force_inactive"))
     eligible = fields.get("eligible")
-    if force_inactive and lb <= 0.0 and ub <= 0.0 and eligible is False:
+    if force_inactive and mean_ub <= 0.0 and world_ub <= 0.0 and eligible is False:
         return "zero"
     if force_inactive:
         return "force_inactive"
-    if force_active and lb <= 0.0 and ub >= 48.0:
+    if force_active and mean_lb <= 0.0 and mean_ub >= 48.0 and world_ub >= 48.0:
         return "force_active"
-    if lb > 0.0 and ub < 48.0:
-        return "lock" if abs(lb - ub) <= 1e-6 else "band"
-    if lb > 0.0:
-        return "floor"
-    if ub < 48.0:
+    if mean_lb > 0.0 and mean_ub < 48.0:
+        return "lock" if abs(mean_lb - mean_ub) <= 1e-6 else "band"
+    if world_ub < 48.0 and mean_lb <= 0.0 and mean_ub >= 48.0:
         return "cap"
+    if mean_lb > 0.0:
+        # Legacy floor is represented as a lower-bound mean band.
+        return "band"
     return "none"
 
 
@@ -353,6 +365,9 @@ def _compile_v2_fields(ovr: OpsV2PlayerOverride) -> dict[str, Any]:
         if ovr.lock_value is None:
             raise HTTPException(status_code=400, detail="lock mode requires lock_value")
         val = float(max(0.0, min(48.0, ovr.lock_value)))
+        fields["mean_lb_minutes"] = val
+        fields["mean_ub_minutes"] = val
+        # Compatibility aliases consumed by older readers.
         fields["lb_minutes"] = val
         fields["ub_minutes"] = val
     elif mode == "band":
@@ -362,17 +377,30 @@ def _compile_v2_fields(ovr: OpsV2PlayerOverride) -> dict[str, Any]:
         ub = float(max(0.0, min(48.0, ovr.max_value)))
         if lb > ub:
             raise HTTPException(status_code=400, detail="band mode requires min_value <= max_value")
+        fields["mean_lb_minutes"] = lb
+        fields["mean_ub_minutes"] = ub
+        # Compatibility aliases consumed by older readers.
         fields["lb_minutes"] = lb
         fields["ub_minutes"] = ub
     elif mode == "cap":
         if ovr.cap_value is None:
             raise HTTPException(status_code=400, detail="cap mode requires cap_value")
-        fields["ub_minutes"] = float(max(0.0, min(48.0, ovr.cap_value)))
+        cap = float(max(0.0, min(48.0, ovr.cap_value)))
+        fields["world_ub_minutes"] = cap
+        # Compatibility alias consumed by older readers.
+        fields["ub_minutes"] = cap
     elif mode == "floor":
         if ovr.floor_value is None:
             raise HTTPException(status_code=400, detail="floor mode requires floor_value")
-        fields["lb_minutes"] = float(max(0.0, min(48.0, ovr.floor_value)))
+        floor = float(max(0.0, min(48.0, ovr.floor_value)))
+        fields["mean_lb_minutes"] = floor
+        # Compatibility alias consumed by older readers.
+        fields["lb_minutes"] = floor
     elif mode == "zero":
+        fields["mean_lb_minutes"] = 0.0
+        fields["mean_ub_minutes"] = 0.0
+        fields["world_lb_minutes"] = 0.0
+        fields["world_ub_minutes"] = 0.0
         fields["lb_minutes"] = 0.0
         fields["ub_minutes"] = 0.0
         fields["force_inactive"] = True
@@ -380,6 +408,10 @@ def _compile_v2_fields(ovr: OpsV2PlayerOverride) -> dict[str, Any]:
     elif mode == "force_active":
         fields["force_active"] = True
     elif mode == "force_inactive":
+        fields["mean_lb_minutes"] = 0.0
+        fields["mean_ub_minutes"] = 0.0
+        fields["world_lb_minutes"] = 0.0
+        fields["world_ub_minutes"] = 0.0
         fields["lb_minutes"] = 0.0
         fields["ub_minutes"] = 0.0
         fields["force_inactive"] = True

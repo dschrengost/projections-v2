@@ -61,6 +61,10 @@ MINUTES_FIELDS: tuple[str, ...] = (
 # Minutes override v2 fields (constraint-based patch layer).
 MINUTES_V2_FIELDS: tuple[str, ...] = (
     "override_mode",
+    "mean_lb_minutes",
+    "mean_ub_minutes",
+    "world_lb_minutes",
+    "world_ub_minutes",
     "lb_minutes",
     "ub_minutes",
     "force_active",
@@ -197,7 +201,7 @@ def _coerce_override_field(name: str, value: Any) -> Any:
             return float(max(0.0, min(1.0, numeric)))
         return float(max(0.0, numeric))
 
-    if name in {"lb_minutes", "ub_minutes"}:
+    if name in {"mean_lb_minutes", "mean_ub_minutes", "world_lb_minutes", "world_ub_minutes", "lb_minutes", "ub_minutes"}:
         numeric = float(value)
         return float(max(0.0, min(48.0, numeric)))
 

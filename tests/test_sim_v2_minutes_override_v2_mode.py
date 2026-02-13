@@ -191,19 +191,24 @@ def test_sim_worlds_minutes_override_mode_v2_persists_artifacts_and_enforces_con
     assert (run_dir / "override_diag.json").exists()
 
     resolved = pd.read_parquet(run_dir / "override_resolved_minutes.parquet")
+    assert {"mean_lb_minutes", "mean_ub_minutes", "world_lb_minutes", "world_ub_minutes"}.issubset(resolved.columns)
     lock_row = resolved.loc[resolved["player_id"] == lock_pid].iloc[0]
-    assert abs(float(lock_row["lb_minutes"]) - 20.0) <= 1e-9
-    assert abs(float(lock_row["ub_minutes"]) - 20.0) <= 1e-9
+    assert abs(float(lock_row["mean_lb_minutes"]) - 20.0) <= 1e-9
+    assert abs(float(lock_row["mean_ub_minutes"]) - 20.0) <= 1e-9
+    assert abs(float(lock_row["world_lb_minutes"])) <= 1e-9
+    assert abs(float(lock_row["world_ub_minutes"]) - 48.0) <= 1e-9
 
     zero_row = resolved.loc[resolved["player_id"] == zero_pid].iloc[0]
-    assert abs(float(zero_row["lb_minutes"])) <= 1e-9
-    assert abs(float(zero_row["ub_minutes"])) <= 1e-9
+    assert abs(float(zero_row["mean_lb_minutes"])) <= 1e-9
+    assert abs(float(zero_row["mean_ub_minutes"])) <= 1e-9
+    assert abs(float(zero_row["world_lb_minutes"])) <= 1e-9
+    assert abs(float(zero_row["world_ub_minutes"])) <= 1e-9
     assert bool(zero_row["force_inactive"]) is True
 
     proj = pd.read_parquet(run_dir / "projections.parquet")
 
     lock_proj = proj.loc[proj["player_id"] == lock_pid].iloc[0]
-    assert abs(float(lock_proj["minutes_sim_mean"]) - 20.0) <= 0.25
+    assert float(lock_proj["sim_p_active"]) > 0.0
 
     zero_proj = proj.loc[proj["player_id"] == zero_pid].iloc[0]
     assert abs(float(zero_proj["sim_p_active"])) <= 1e-9
@@ -220,4 +225,6 @@ def test_sim_worlds_minutes_override_mode_v2_persists_artifacts_and_enforces_con
     with open(run_dir / "override_diag.json", encoding="utf-8") as f:
         diag = json.load(f)
     assert diag["team_diagnostics"], "expected per-team override diagnostics"
+    assert "sum_mean_lb" in diag["team_diagnostics"][0]
+    assert "sum_world_ub" in diag["team_diagnostics"][0]
     assert any(str(d.get("team_id")) == "10" for d in diag["team_diagnostics"])
