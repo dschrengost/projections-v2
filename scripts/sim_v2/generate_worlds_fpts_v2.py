@@ -2137,8 +2137,8 @@ def main(
             override_diag_payload: dict[str, Any] | None = None
             v2_force_active_arr: np.ndarray | None = None
             v2_force_inactive_arr: np.ndarray | None = None
-            v2_lb_arr: np.ndarray | None = None
-            v2_ub_arr: np.ndarray | None = None
+            v2_world_lb_arr: np.ndarray | None = None
+            v2_world_ub_arr: np.ndarray | None = None
             v2_weight_arr: np.ndarray | None = None
 
             if minutes_override_mode_eff == "v2":
@@ -2162,6 +2162,10 @@ def main(
                     "player_id",
                     "b_minutes",
                     "mu_minutes",
+                    "mean_lb_minutes",
+                    "mean_ub_minutes",
+                    "world_lb_minutes",
+                    "world_ub_minutes",
                     "lb_minutes",
                     "ub_minutes",
                     "eligible",
@@ -2181,8 +2185,30 @@ def main(
                 mu_df["minutes_mean"] = pd.to_numeric(mu_df["mu_minutes"], errors="coerce").fillna(
                     pd.to_numeric(mu_df["minutes_mean"], errors="coerce").fillna(0.0)
                 )
-                v2_lb_arr = pd.to_numeric(mu_df["lb_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-                v2_ub_arr = pd.to_numeric(mu_df["ub_minutes"], errors="coerce").fillna(48.0).to_numpy(dtype=float)
+                if "world_lb_minutes" in mu_df.columns:
+                    v2_world_lb_arr = (
+                        pd.to_numeric(mu_df["world_lb_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                    )
+                else:
+                    v2_world_lb_arr = (
+                        pd.to_numeric(mu_df["lb_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                    )
+                if "world_ub_minutes" in mu_df.columns:
+                    v2_world_ub_arr = (
+                        pd.to_numeric(mu_df["world_ub_minutes"], errors="coerce").fillna(48.0).to_numpy(dtype=float)
+                    )
+                else:
+                    v2_world_ub_arr = (
+                        pd.to_numeric(mu_df["ub_minutes"], errors="coerce").fillna(48.0).to_numpy(dtype=float)
+                    )
+                mean_lb_for_gate = (
+                    pd.to_numeric(
+                        mu_df["mean_lb_minutes"] if "mean_lb_minutes" in mu_df.columns else mu_df["lb_minutes"],
+                        errors="coerce",
+                    )
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                )
                 v2_force_active_arr = (
                     pd.to_numeric(mu_df["force_active"], errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0.5
                 )
@@ -2194,9 +2220,9 @@ def main(
                         pd.to_numeric(mu_df["eligible"], errors="coerce").fillna(1.0).to_numpy(dtype=float) > 0.5
                     )
                     v2_force_inactive_arr = v2_force_inactive_arr | (~eligible_arr_v2)
-                v2_force_inactive_arr = v2_force_inactive_arr | (v2_ub_arr <= 1e-9)
+                v2_force_inactive_arr = v2_force_inactive_arr | (v2_world_ub_arr <= 1e-9)
                 v2_force_active_arr = (~v2_force_inactive_arr) & (
-                    v2_force_active_arr | (v2_lb_arr > 1e-9)
+                    v2_force_active_arr | (mean_lb_for_gate > 1e-9)
                 )
                 v2_weight_arr = pd.to_numeric(mu_df["weight"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
                 has_v2_constraints = bool(
@@ -2206,8 +2232,8 @@ def main(
                 if not has_v2_constraints:
                     # Keep artifacts/diagnostics for traceability, but preserve legacy runtime behavior
                     # when v2 is enabled with an empty override payload.
-                    v2_lb_arr = None
-                    v2_ub_arr = None
+                    v2_world_lb_arr = None
+                    v2_world_ub_arr = None
                     v2_force_active_arr = None
                     v2_force_inactive_arr = None
                     v2_weight_arr = None
@@ -2311,6 +2337,10 @@ def main(
                                 "player_id",
                                 "b_minutes",
                                 "mu_minutes",
+                                "mean_lb_minutes",
+                                "mean_ub_minutes",
+                                "world_lb_minutes",
+                                "world_ub_minutes",
                                 "lb_minutes",
                                 "ub_minutes",
                                 "eligible",
@@ -2346,6 +2376,10 @@ def main(
                             typer.echo(
                                 "[override-diag] "
                                 f"game_id={team_diag.get('game_id')} team_id={team_diag.get('team_id')} "
+                                f"sum_mean_lb={float(team_diag.get('sum_mean_lb', team_diag.get('sum_lb', 0.0))):.2f} "
+                                f"sum_mean_ub={float(team_diag.get('sum_mean_ub', team_diag.get('sum_ub', 0.0))):.2f} "
+                                f"sum_world_lb={float(team_diag.get('sum_world_lb', 0.0)):.2f} "
+                                f"sum_world_ub={float(team_diag.get('sum_world_ub', 0.0)):.2f} "
                                 f"sum_lb={float(team_diag.get('sum_lb', 0.0)):.2f} "
                                 f"sum_ub={float(team_diag.get('sum_ub', 0.0)):.2f} "
                                 f"sum_mu={float(team_diag.get('sum_mu', 0.0)):.2f} "
@@ -2353,6 +2387,13 @@ def main(
                                 f"remaining={float(team_diag.get('remaining_to_fill', 0.0)):.2f} "
                                 f"infeasible_reason={team_diag.get('infeasibility_reason')}"
                             )
+                            if bool(team_diag.get("mean_world_bounds_differ")):
+                                typer.echo(
+                                    "[override-diag] "
+                                    f"game_id={team_diag.get('game_id')} team_id={team_diag.get('team_id')} "
+                                    "mean_bounds differ from world_bounds "
+                                    f"players={team_diag.get('mean_world_bounds_differ_player_ids', [])}"
+                                )
                 except Exception as exc:
                     typer.echo(f"[sim_v2] warning: failed writing override v2 artifacts ({exc})", err=True)
 
@@ -2369,6 +2410,10 @@ def main(
                 "play_prob",
                 "is_starter",
                 "minutes_override_mode",
+                "mean_lb_minutes",
+                "mean_ub_minutes",
+                "world_lb_minutes",
+                "world_ub_minutes",
                 "lb_minutes",
                 "ub_minutes",
                 "force_active",
@@ -3461,9 +3506,9 @@ def main(
                         continue
                     idxs_arr = np.asarray(idxs, dtype=int)
                     priority_team = minutes_alloc_priority[idxs_arr]
-                    if minutes_override_mode_eff == "v2" and v2_lb_arr is not None and v2_ub_arr is not None:
-                        lb_team = np.clip(v2_lb_arr[idxs_arr], 0.0, 48.0)
-                        ub_team = np.clip(v2_ub_arr[idxs_arr], 0.0, 48.0)
+                    if minutes_override_mode_eff == "v2" and v2_world_lb_arr is not None and v2_world_ub_arr is not None:
+                        lb_team = np.clip(v2_world_lb_arr[idxs_arr], 0.0, 48.0)
+                        ub_team = np.clip(v2_world_ub_arr[idxs_arr], 0.0, 48.0)
                         cap_team = np.clip(ub_team - lb_team, 0.0, None)
                         weight_team = (
                             np.clip(v2_weight_arr[idxs_arr], 0.05, None)
@@ -3489,15 +3534,10 @@ def main(
                             team_worlds[:, force_inactive_team] = 0.0
                         if force_active_team.any():
                             active_team[:, force_active_team] = True
-                            base_seed = np.clip(minutes_sim_base[idxs_arr][force_active_team], 0.0, None)
-                            if base_seed.size:
-                                team_worlds[:, force_active_team] = np.maximum(
-                                    team_worlds[:, force_active_team],
-                                    base_seed[None, :],
-                                )
 
                         # v2 semantics:
-                        #   m_raw -> clamp(lb, ub) -> project-to-240 within [lb, ub].
+                        #   m_raw -> clamp(world_lb, world_ub) -> project-to-240 within [world_lb, world_ub].
+                        # Mean lock/band is applied upstream to mu only; it must not clamp per-world tails.
                         # We solve this as a lower-bound shift:
                         #   n = m - lb, target' = 240 - sum(lb), 0 <= n <= (ub - lb).
                         m_clip = np.clip(team_worlds, lb_team[None, :], ub_team[None, :])

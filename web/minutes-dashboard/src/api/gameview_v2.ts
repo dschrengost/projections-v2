@@ -61,6 +61,10 @@ export type TeamDiagnostics = {
     team_id: string
     sum_lb: number
     sum_ub: number
+    sum_mean_lb?: number
+    sum_mean_ub?: number
+    sum_world_lb?: number
+    sum_world_ub?: number
     sum_mu: number
     locked_minutes_total: number
     infeasibility_reason?: string | null
@@ -125,6 +129,10 @@ export type ApplyOverridesResponse = {
         player_id: string
         b_minutes: number
         mu_minutes: number
+        mean_lb_minutes?: number
+        mean_ub_minutes?: number
+        world_lb_minutes?: number
+        world_ub_minutes?: number
         lb_minutes: number
         ub_minutes: number
         eligible: boolean
