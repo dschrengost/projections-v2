@@ -43,7 +43,9 @@ from projections.paths import data_path
 from projections.rates_v1.features import get_rates_feature_sets
 from projections.rates_v1.preprocess import (
     TRACKING_FILL_FEATURES,
+    apply_odds_fill_values,
     apply_tracking_fill_values,
+    fit_odds_fill_values,
     fit_tracking_fill_values,
 )
 from projections.rates_v1.schemas import EFFICIENCY_TARGETS
@@ -99,6 +101,7 @@ CONTEXT_FEATURES = [c for c in _FEATURE_SETS["stage3_context"] if c not in FEATU
 FEATURES_STAGE3_CONTEXT = _FEATURE_SETS["stage3_context"]
 FEATURES_STAGE4_RECENCY = _FEATURE_SETS["stage4_recency"]
 FEATURES_STAGE5_FTA_TRACKING = _FEATURE_SETS["stage5_fta_tracking"]
+FEATURES_STAGE6_ACTION_PROPS = _FEATURE_SETS["stage6_action_props"]
 
 BASE_PARAMS: dict[str, object] = {
     "objective": "regression",
@@ -256,19 +259,17 @@ def _split_by_date(
     return train_df, cal_df, val_df
 
 
-def _impute_odds(train_df: pd.DataFrame, *others: pd.DataFrame) -> tuple[pd.DataFrame, ...]:
-    odds_cols = ["spread_close", "total_close", "team_itt", "opp_itt"]
-    medians = {}
-    for col in odds_cols:
-        med = train_df[col].median(skipna=True)
-        medians[col] = 0.0 if pd.isna(med) else med
-    def _apply(frame: pd.DataFrame) -> pd.DataFrame:
-        for col in odds_cols:
-            frame[col] = frame[col].fillna(medians[col])
-        frame["has_odds"] = frame["has_odds"].fillna(0).astype(int)
-        return frame
-    out_frames = [_apply(train_df)] + [_apply(df) for df in others]
-    return tuple(out_frames)
+def _impute_odds(
+    train_df: pd.DataFrame,
+    *others: pd.DataFrame,
+    feature_cols: list[str],
+) -> tuple[tuple[pd.DataFrame, ...], dict[str, float]]:
+    fill_values = fit_odds_fill_values(train_df, feature_cols)
+    out_frames = tuple(
+        apply_odds_fill_values(frame, fill_values)
+        for frame in (train_df, *others)
+    )
+    return out_frames, fill_values
 
 
 def _clean_frame(df: pd.DataFrame, label_map: dict[str, str], features: list[str]) -> pd.DataFrame:
@@ -366,7 +367,7 @@ def main(
     ),
     feature_set: str = typer.Option(
         "stage1",
-        help="Feature set to use: stage0, stage1 (minutes_pred), stage2_tracking (+tracking), stage3_context (+vacancy/pace), stage4_recency (+last1/3/5/10 rolling), stage5_fta_tracking (+extended FTA/3PA tracking).",
+        help="Feature set to use: stage0, stage1 (minutes_pred), stage2_tracking (+tracking), stage3_context (+vacancy/pace), stage4_recency (+last1/3/5/10 rolling), stage5_fta_tracking (+extended FTA/3PA tracking), stage6_action_props (+Action market features).",
         case_sensitive=False,
     ),
     allow_minutes_actual_fallback: bool = typer.Option(
@@ -406,13 +407,27 @@ def main(
         "stage3_context": FEATURES_STAGE3_CONTEXT,
         "stage4_recency": FEATURES_STAGE4_RECENCY,
         "stage5_fta_tracking": FEATURES_STAGE5_FTA_TRACKING,
+        "stage6_action_props": FEATURES_STAGE6_ACTION_PROPS,
     }
     if feature_set_key not in feature_map:
         raise typer.BadParameter(f"feature_set must be one of {list(feature_map.keys())}")
     feature_cols = feature_map[feature_set_key]
-    use_predicted_minutes = feature_set_key in {"stage1", "stage2_tracking", "stage3_context", "stage4_recency", "stage5_fta_tracking"}
+    use_predicted_minutes = feature_set_key in {
+        "stage1",
+        "stage2_tracking",
+        "stage3_context",
+        "stage4_recency",
+        "stage5_fta_tracking",
+        "stage6_action_props",
+    }
     fallback_minutes = use_predicted_minutes and allow_minutes_actual_fallback
-    use_tracking_features = feature_set_key in {"stage2_tracking", "stage3_context", "stage4_recency", "stage5_fta_tracking"}
+    use_tracking_features = feature_set_key in {
+        "stage2_tracking",
+        "stage3_context",
+        "stage4_recency",
+        "stage5_fta_tracking",
+        "stage6_action_props",
+    }
 
     typer.echo(
         f"[train] run_id={resolved_run_id} data_root={root} "
@@ -452,7 +467,17 @@ def main(
         typer.echo(
             f"[train] warning: split sizes train={len(train_df)}, cal={len(cal_df)}, val={len(val_df)}"
         )
-    train_df, cal_df, val_df = _impute_odds(train_df, cal_df, val_df)
+    (train_df, cal_df, val_df), odds_fill_values = _impute_odds(
+        train_df,
+        cal_df,
+        val_df,
+        feature_cols=feature_cols,
+    )
+    if odds_fill_values:
+        typer.echo(
+            "[train] odds fill values fitted on TRAIN split: "
+            + ", ".join(f"{k}={v:.6g}" for k, v in sorted(odds_fill_values.items()))
+        )
 
     tracking_fill_values: dict[str, float] = {}
     if use_tracking_features:
@@ -555,6 +580,7 @@ def main(
         "preprocess": {
             "tracking_fill_strategy": "train_split_median_numeric_mode_role",
             "tracking_fill_values": tracking_fill_values,
+            "odds_fill_values": odds_fill_values,
         },
     })
     _write_json(run_dir / "meta.json", meta)

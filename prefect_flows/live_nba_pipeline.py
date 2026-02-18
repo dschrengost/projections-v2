@@ -45,6 +45,10 @@ from zoneinfo import ZoneInfo
 from projections import paths
 from projections.builders import build_shared_features
 from projections.cli import build_minutes_live as live_minutes_builder
+from projections.features.action_props import (
+    attach_action_props_features,
+    load_action_props_feature_snapshots_for_date,
+)
 from projections import model_selectors
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.pipeline import control_plane, writer_guard
@@ -189,11 +193,12 @@ def dk_salaries_task(*, game_date: str, data_root: Path) -> None:
 
 @task(name="scrape-props", retries=1, retry_delay_seconds=60)
 def scrape_props_task(*, game_date: str, data_root: Path) -> None:
-    """Scrape player props from RotoWire for the props analysis tab.
+    """Scrape player props for sidecar consumers and Action feature inputs.
 
     This is a non-blocking task - props failures should not fail the pipeline.
     Props may be unavailable early in the day or during off-season.
     """
+    logger = get_run_logger()
     try:
         _run_python_module(
             "projections.cli.scrape_props",
@@ -202,8 +207,16 @@ def scrape_props_task(*, game_date: str, data_root: Path) -> None:
             timeout_s=300,
         )
     except Exception as e:
-        logger = get_run_logger()
         logger.warning(f"Props scrape failed (continuing): {e}")
+    try:
+        _run_python_module(
+            "scrapers.action_network.props_backfill",
+            ["--start-date", game_date, "--end-date", game_date, "--workers", "40"],
+            data_root=data_root,
+            timeout_s=1200,
+        )
+    except Exception as e:
+        logger.warning(f"Action Network props scrape failed (continuing): {e}")
 
 
 @task(name="build-minutes-features", retries=1, retry_delay_seconds=60)
@@ -305,6 +318,41 @@ def build_minutes_features_task(
             order_cols=["feature_as_of_ts"],
         )
         live_slice = live_slice.drop_duplicates(subset=list(KEY_COLUMNS), keep="last")
+
+    action_props_dir = data_root / "bronze" / "action_network" / "props"
+    action_props_snapshot_rows = 0
+    action_props_matched_rows = 0
+    action_props_snapshots = pd.DataFrame()
+    if action_props_dir.exists():
+        try:
+            action_props_snapshots = load_action_props_feature_snapshots_for_date(
+                props_dir=action_props_dir,
+                game_date=target_day,
+            )
+            action_props_snapshot_rows = int(len(action_props_snapshots))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Action props load failed: {exc}")
+
+    live_slice = attach_action_props_features(
+        live_slice,
+        action_props_snapshots,
+        strict_asof=False,
+        as_of_col="feature_as_of_ts",
+        tip_col="tip_ts",
+    )
+    if "an_has_any_props" in live_slice.columns:
+        action_props_matched_rows = int(
+            pd.to_numeric(live_slice["an_has_any_props"], errors="coerce")
+            .fillna(0.0)
+            .gt(0.0)
+            .sum()
+        )
+    logger.info(
+        "[minutes-features] Action props: snapshots=%s matched_rows=%s total_rows=%s",
+        action_props_snapshot_rows,
+        action_props_matched_rows,
+        len(live_slice),
+    )
 
     run_dir = data_root / "live" / "features_minutes_v1" / game_date / f"run={run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)

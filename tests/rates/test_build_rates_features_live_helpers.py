@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import date
 
 from projections.cli.build_rates_features_live import (
+    _count_action_props_matches,
     _compute_player_priors,
     _compute_team_context,
     _compute_vacancy_features,
@@ -26,6 +27,17 @@ def test_status_to_out_probability_masks_avail_and_unknown() -> None:
     assert out_prob[7] == pytest.approx(0.45)
     assert out_prob[8] == pytest.approx(1.0)
     assert out_prob[9] == pytest.approx(1.0)
+
+
+def test_count_action_props_matches_handles_missing_and_non_numeric() -> None:
+    assert _count_action_props_matches(pd.DataFrame({"x": [1, 2]})) == 0
+
+    df = pd.DataFrame(
+        {
+            "an_has_any_props": [1, 0, "1", "0", None, "foo", 0.8, -1, 2],
+        }
+    )
+    assert _count_action_props_matches(df) == 4
 
 
 def test_compute_player_priors_season_and_recency_rates() -> None:

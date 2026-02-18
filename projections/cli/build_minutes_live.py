@@ -46,6 +46,11 @@ from projections.minutes_v1.starter_flags import (
 from projections.labels import derive_starter_flag_labels
 from projections.etl import storage as bronze_storage
 from projections.pipeline.status import JobStatus, write_status
+from projections.features.action_props import (
+    ACTION_MARKET_FEATURE_COLUMNS,
+    attach_action_props_features,
+    load_action_props_feature_snapshots_for_date,
+)
 from scrapers.nba_players import NbaPlayersScraper, PlayerProfile
 
 UTC = timezone.utc
@@ -1810,6 +1815,55 @@ def _build_minutes_live_logic(
         mean_val = float(values.mean(skipna=True)) if not values.dropna().empty else 100.0
         live_slice[col] = values.fillna(mean_val).astype(float)
 
+    action_props_dir = data_root / "bronze" / "action_network" / "props"
+    action_props_snapshot_rows = 0
+    action_props_matched_rows = 0
+    action_props_snapshots = pd.DataFrame()
+    if action_props_dir.exists():
+        try:
+            snapshot_frames: list[pd.DataFrame] = []
+            action_props_snapshots = load_action_props_feature_snapshots_for_date(
+                props_dir=action_props_dir,
+                game_date=target_day,
+            )
+            if not action_props_snapshots.empty:
+                snapshot_frames.append(action_props_snapshots)
+            next_day_snapshots = load_action_props_feature_snapshots_for_date(
+                props_dir=action_props_dir,
+                game_date=target_day + pd.Timedelta(days=1),
+            )
+            if not next_day_snapshots.empty:
+                snapshot_frames.append(next_day_snapshots)
+            action_props_snapshots = (
+                pd.concat(snapshot_frames, ignore_index=True)
+                if snapshot_frames
+                else pd.DataFrame()
+            )
+            action_props_snapshot_rows = int(len(action_props_snapshots))
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"Action props load failed: {exc}")
+
+    live_slice = attach_action_props_features(
+        live_slice,
+        action_props_snapshots,
+        strict_asof=True,
+        as_of_col="feature_as_of_ts",
+        tip_col="tip_ts",
+        game_date_offsets=(0, -1),
+        clamp_late_asof_to_game_date=True,
+    )
+    if "an_has_any_props" in live_slice.columns:
+        action_props_matched_rows = int(
+            pd.to_numeric(live_slice["an_has_any_props"], errors="coerce")
+            .fillna(0.0)
+            .gt(0.0)
+            .sum()
+        )
+    typer.echo(
+        f"[minutes-live] Action props: snapshots={action_props_snapshot_rows}, "
+        f"matched_rows={action_props_matched_rows}, total_rows={len(live_slice)}"
+    )
+
     active_validation: dict | None = None
     if active_roster_df is not None and not active_roster_df.empty and active_pairs_set:
         team_series = pd.to_numeric(live_slice["team_id"], errors="coerce")
@@ -1864,6 +1918,19 @@ def _build_minutes_live_logic(
         "injuries_filtered_rows": len(injuries_slice),
         "odds": _snapshot_stats(odds_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
         "roster": _snapshot_stats(roster_builder_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
+        "action_props": {
+            "source_dir": str(action_props_dir),
+            "snapshot_rows": action_props_snapshot_rows,
+            "matched_rows": action_props_matched_rows,
+            "coverage_rate": (
+                round(float(action_props_matched_rows) / float(len(live_slice)), 4)
+                if len(live_slice) > 0
+                else 0.0
+            ),
+            "feature_columns_present": [
+                col for col in ACTION_MARKET_FEATURE_COLUMNS if col in live_slice.columns
+            ],
+        },
     }
 
     summary_path = run_dir / SUMMARY_FILENAME

@@ -53,9 +53,14 @@ import numpy as np
 import pandas as pd
 import typer
 
+from projections.features.action_props import (
+    ACTION_MARKET_FEATURE_COLUMNS,
+    attach_action_props_features,
+    load_action_props_feature_snapshots_for_date,
+)
+from projections.minutes_v1.pos import canonical_pos_bucket
 from projections.paths import data_path
 from projections.rates_v1.preprocess import TRACKING_FILL_FEATURES
-from projections.minutes_v1.pos import canonical_pos_bucket
 from typing import Iterable as _Iterable
 
 
@@ -129,6 +134,122 @@ class OddsSnapshot:
     spread_home: float | None
     total: float | None
     as_of_ts: pd.Timestamp | None
+
+
+def _discover_action_props_days(props_dir: Path) -> set[str]:
+    if not props_dir.exists():
+        return set()
+    days: set[str] = set()
+    for path in props_dir.glob("*.json"):
+        prefix = path.name.split("_", 1)[0]
+        if len(prefix) != 10:
+            continue
+        try:
+            day = pd.Timestamp(prefix).date().isoformat()
+        except Exception:
+            continue
+        days.add(day)
+    return days
+
+
+def _attach_action_props_training_features(
+    df: pd.DataFrame,
+    *,
+    data_root: Path,
+    enabled: bool,
+    props_dir: Path | None = None,
+) -> tuple[dict[str, object], pd.DataFrame]:
+    out = df.copy()
+    existing_prop_cols = [col for col in ACTION_MARKET_FEATURE_COLUMNS if col in out.columns]
+    if existing_prop_cols:
+        out = out.drop(columns=existing_prop_cols)
+    resolved_props_dir = (
+        props_dir.expanduser().resolve()
+        if props_dir is not None
+        else (data_root / "bronze" / "action_network" / "props").resolve()
+    )
+    meta: dict[str, object] = {
+        "enabled": bool(enabled),
+        "source_dir": str(resolved_props_dir),
+        "rows": int(len(out)),
+    }
+
+    if not enabled:
+        out = attach_action_props_features(
+            out,
+            pd.DataFrame(),
+            strict_asof=True,
+            as_of_col="feature_as_of_ts",
+            tip_col="tip_ts",
+            game_date_offsets=(0, -1),
+            clamp_late_asof_to_game_date=True,
+        )
+        meta["reason"] = "disabled_by_flag"
+        return meta, out
+
+    available_days = _discover_action_props_days(resolved_props_dir)
+    game_days: list[str] = []
+    if "game_date" in out.columns:
+        game_days = sorted(
+            {
+                d.date().isoformat()
+                for d in pd.to_datetime(out["game_date"], errors="coerce").dropna()
+            }
+        )
+    target_days: set[str] = {d for d in game_days if d in available_days}
+    for d in game_days:
+        next_day = (pd.Timestamp(d) + pd.Timedelta(days=1)).date().isoformat()
+        if next_day in available_days:
+            target_days.add(next_day)
+    target_days_sorted = sorted(target_days)
+
+    snapshots: list[pd.DataFrame] = []
+    failed_days: list[str] = []
+    for day in target_days_sorted:
+        try:
+            snap = load_action_props_feature_snapshots_for_date(
+                props_dir=resolved_props_dir,
+                game_date=pd.Timestamp(day),
+            )
+        except Exception:
+            failed_days.append(day)
+            continue
+        if not snap.empty:
+            snapshots.append(snap)
+
+    action_snaps = pd.concat(snapshots, ignore_index=True) if snapshots else pd.DataFrame()
+    out = attach_action_props_features(
+        out,
+        action_snaps,
+        strict_asof=True,
+        as_of_col="feature_as_of_ts",
+        tip_col="tip_ts",
+        game_date_offsets=(0, -1),
+        clamp_late_asof_to_game_date=True,
+    )
+    matched_rows = int(
+        pd.to_numeric(out.get("an_has_any_props"), errors="coerce")
+        .fillna(0.0)
+        .gt(0.0)
+        .sum()
+    )
+    meta.update(
+        {
+            "game_days": int(len(game_days)),
+            "available_days": int(len(available_days)),
+            "target_days": int(len(target_days_sorted)),
+            "failed_days": failed_days[:25],
+            "snapshot_rows": int(len(action_snaps)),
+            "matched_rows": matched_rows,
+            "coverage_rate": (
+                round(float(matched_rows) / float(len(out)), 4) if len(out) > 0 else 0.0
+            ),
+            "feature_columns_present": [
+                col for col in ACTION_MARKET_FEATURE_COLUMNS if col in out.columns
+            ],
+        }
+    )
+    return meta, out
 
 
 def _season_start_from_day(day: pd.Timestamp) -> int:
@@ -216,6 +337,7 @@ def load_boxscores(data_root: Path, start: pd.Timestamp, end: pd.Timestamp) -> p
             for side, team_payload, opp_payload in (("home", home, away), ("away", away, home)):
                 team_id = int(team_payload.get("team_id") or team_payload.get("teamId") or 0)
                 opponent_id = int(opp_payload.get("team_id") or opp_payload.get("teamId") or 0)
+                team_tricode = str(team_payload.get("team_tricode") or "").strip().upper()
                 home_flag = 1 if side == "home" else 0
                 for player in team_payload.get("players", []):
                     stats = player.get("statistics") or {}
@@ -233,13 +355,26 @@ def load_boxscores(data_root: Path, start: pd.Timestamp, end: pd.Timestamp) -> p
                     dreb = float(stats.get("reboundsDefensive") or 0.0)
                     steals = float(stats.get("steals") or 0.0)
                     blocks = float(stats.get("blocks") or 0.0)
+                    player_name = (
+                        str(player.get("name") or "").strip()
+                        or " ".join(
+                            part
+                            for part in [
+                                str(player.get("first_name") or "").strip(),
+                                str(player.get("family_name") or "").strip(),
+                            ]
+                            if part
+                        ).strip()
+                    )
                     records.append(
                         {
                             "game_id": game_id,
                             "player_id": int(
                                 player.get("person_id") or player.get("personId") or 0
                             ),
+                            "player_name": player_name,
                             "team_id": team_id,
+                            "team_tricode": team_tricode,
                             "opponent_id": opponent_id,
                             "home_flag": home_flag,
                             "game_date": game_date,
@@ -1258,10 +1393,14 @@ def build_features(
         "season",
         "game_id",
         "game_date",
+        "tip_ts",
+        "feature_as_of_ts",
         "team_id",
+        "team_tricode",
         "opponent_id",
         "home_flag",
         "player_id",
+        "player_name",
         "minutes_actual",
         "fga2_per_min",
         "fga3_per_min",
@@ -1374,6 +1513,11 @@ def build_features(
         "last10_stl_per_min",
         "last10_blk_per_min",
     ]
+    if "feature_as_of_ts" not in df.columns:
+        df["feature_as_of_ts"] = pd.to_datetime(df.get("tip_ts"), utc=True, errors="coerce")
+    for col in columns:
+        if col not in df.columns:
+            df[col] = pd.NA
     return df[columns]
 
 
@@ -1452,6 +1596,16 @@ def main(
         "--drop-missing-minutes-pred/--keep-missing-minutes-pred",
         help="Drop rows with missing minutes_pred_* after the join (before require-minutes-pred check).",
     ),
+    action_props: bool = typer.Option(
+        True,
+        "--action-props/--no-action-props",
+        help="Attach Action Network prop features (an_*) from bronze/action_network/props.",
+    ),
+    action_props_dir: Optional[Path] = typer.Option(
+        None,
+        "--action-props-dir",
+        help="Optional override for Action props JSON root (defaults to <data_root>/bronze/action_network/props).",
+    ),
 ) -> None:
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
@@ -1493,6 +1647,19 @@ def main(
     features = build_features(labels, stats, roster, odds, minutes_preds, injuries)
     features["game_date"] = pd.to_datetime(features["game_date"]).dt.normalize()
     features = features[(features["game_date"] >= start) & (features["game_date"] <= end)].copy()
+    action_props_meta, features = _attach_action_props_training_features(
+        features,
+        data_root=root,
+        enabled=bool(action_props),
+        props_dir=action_props_dir,
+    )
+    typer.echo(
+        "[rates_base] action props: "
+        f"enabled={action_props_meta.get('enabled')} "
+        f"snapshot_rows={action_props_meta.get('snapshot_rows', 0)} "
+        f"matched_rows={action_props_meta.get('matched_rows', 0)} "
+        f"coverage={action_props_meta.get('coverage_rate', 0.0)}"
+    )
     if desert_csv:
         desert_df = pd.read_csv(desert_csv)
         if "game_date" in desert_df.columns:

@@ -36,6 +36,11 @@ from projections.features.dnp_history import (
     DNPHistoryConfig,
     compute_dnp_history_features,
 )
+from projections.features.action_props import (
+    ACTION_MARKET_FEATURE_COLUMNS,
+    attach_action_props_features,
+    load_action_props_feature_snapshots_for_date,
+)
 from projections.rotation.rotation_set_minutes_features_v1 import join_rotation_priors
 
 
@@ -708,6 +713,121 @@ def _apply_odds_missing_flags(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _discover_action_props_days(props_dir: Path) -> set[str]:
+    if not props_dir.exists():
+        return set()
+    days: set[str] = set()
+    for path in props_dir.glob("*.json"):
+        prefix = path.name.split("_", 1)[0]
+        if len(prefix) != 10:
+            continue
+        try:
+            day = pd.Timestamp(prefix).date().isoformat()
+        except Exception:
+            continue
+        days.add(day)
+    return days
+
+
+def _attach_action_props_training_features(
+    df: pd.DataFrame,
+    *,
+    data_root: Path,
+    enabled: bool,
+    props_dir: Path | None = None,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    out = df.copy()
+    existing_prop_cols = [col for col in ACTION_MARKET_FEATURE_COLUMNS if col in out.columns]
+    if existing_prop_cols:
+        out = out.drop(columns=existing_prop_cols)
+    resolved_props_dir = (
+        props_dir.expanduser().resolve()
+        if props_dir is not None
+        else (data_root / "bronze" / "action_network" / "props").resolve()
+    )
+    meta: dict[str, Any] = {
+        "enabled": bool(enabled),
+        "source_dir": str(resolved_props_dir),
+        "rows": int(len(out)),
+    }
+    if not enabled:
+        out = attach_action_props_features(
+            out,
+            pd.DataFrame(),
+            strict_asof=True,
+            as_of_col="feature_as_of_ts",
+            tip_col="tip_ts",
+            game_date_offsets=(0, -1),
+            clamp_late_asof_to_game_date=True,
+        )
+        meta["reason"] = "disabled_by_flag"
+        return meta, out
+
+    available_days = _discover_action_props_days(resolved_props_dir)
+    game_days: list[str] = []
+    if "game_date" in out.columns:
+        game_days = sorted(
+            {
+                d.date().isoformat()
+                for d in pd.to_datetime(out["game_date"], errors="coerce").dropna()
+            }
+        )
+    target_days: set[str] = {d for d in game_days if d in available_days}
+    for d in game_days:
+        next_day = (pd.Timestamp(d) + pd.Timedelta(days=1)).date().isoformat()
+        if next_day in available_days:
+            target_days.add(next_day)
+    target_days_sorted = sorted(target_days)
+
+    snapshots: list[pd.DataFrame] = []
+    failed_days: list[str] = []
+    for day in target_days_sorted:
+        try:
+            snap = load_action_props_feature_snapshots_for_date(
+                props_dir=resolved_props_dir,
+                game_date=pd.Timestamp(day),
+            )
+        except Exception:
+            failed_days.append(day)
+            continue
+        if not snap.empty:
+            snapshots.append(snap)
+
+    action_snaps = pd.concat(snapshots, ignore_index=True) if snapshots else pd.DataFrame()
+    out = attach_action_props_features(
+        out,
+        action_snaps,
+        strict_asof=True,
+        as_of_col="feature_as_of_ts",
+        tip_col="tip_ts",
+        game_date_offsets=(0, -1),
+        clamp_late_asof_to_game_date=True,
+    )
+    matched_rows = int(
+        pd.to_numeric(out.get("an_has_any_props"), errors="coerce")
+        .fillna(0.0)
+        .gt(0.0)
+        .sum()
+    )
+    meta.update(
+        {
+            "game_days": int(len(game_days)),
+            "available_days": int(len(available_days)),
+            "target_days": int(len(target_days_sorted)),
+            "failed_days": failed_days[:25],
+            "snapshot_rows": int(len(action_snaps)),
+            "matched_rows": matched_rows,
+            "coverage_rate": (
+                round(float(matched_rows) / float(len(out)), 4) if len(out) > 0 else 0.0
+            ),
+            "feature_columns_present": [
+                col for col in ACTION_MARKET_FEATURE_COLUMNS if col in out.columns
+            ],
+        }
+    )
+    return meta, out
+
+
 def _join_rotation(
     df: pd.DataFrame,
     *,
@@ -927,6 +1047,7 @@ def _write_manifest(
     max_rows: int | None,
     date_window: dict[str, Any] | None = None,
     odds_backfill: dict[str, Any] | None = None,
+    action_props: dict[str, Any] | None = None,
     team_game_validation: dict[str, Any] | None = None,
     dnp_history_config: DNPHistoryConfig | None = None,
     rotation_priors_v1: dict[str, object] | None = None,
@@ -962,6 +1083,8 @@ def _write_manifest(
         payload["options"]["date_window"] = date_window
     if odds_backfill is not None:
         payload["odds_backfill"] = odds_backfill
+    if action_props is not None:
+        payload["action_props"] = action_props
     if team_game_validation is not None:
         payload["team_game_validation"] = team_game_validation
     if dnp_history_config is not None:
@@ -1053,6 +1176,25 @@ def main() -> None:
         help="Disable odds backfill from silver/odds_snapshot.",
     )
     parser.set_defaults(backfill_odds_from_silver=True)
+    parser.add_argument(
+        "--action-props",
+        dest="action_props",
+        action="store_true",
+        help="Attach Action Network player prop features from bronze snapshots.",
+    )
+    parser.add_argument(
+        "--no-action-props",
+        dest="action_props",
+        action="store_false",
+        help="Disable Action Network player prop feature joins.",
+    )
+    parser.set_defaults(action_props=True)
+    parser.add_argument(
+        "--action-props-dir",
+        type=str,
+        default=None,
+        help="Optional override for bronze Action props directory.",
+    )
     args = parser.parse_args()
 
     data_root = paths.get_data_root()
@@ -1096,6 +1238,20 @@ def main() -> None:
     else:
         odds_backfill_meta = {"enabled": False}
     pruned_df = _apply_odds_missing_flags(pruned_df)
+    action_props_dir = Path(args.action_props_dir) if args.action_props_dir else None
+    action_props_meta, pruned_df = _attach_action_props_training_features(
+        pruned_df,
+        data_root=data_root,
+        enabled=bool(args.action_props),
+        props_dir=action_props_dir,
+    )
+    print(
+        "[rotation_train_v1] Action props:",
+        f"enabled={action_props_meta.get('enabled')}",
+        f"snapshot_rows={action_props_meta.get('snapshot_rows', 0)}",
+        f"matched_rows={action_props_meta.get('matched_rows', 0)}",
+        f"coverage={action_props_meta.get('coverage_rate', 0.0)}",
+    )
 
     player_rotation = _load_rotation_player_labels(data_root)
     team_rotation = _load_rotation_team_shape(data_root)
@@ -1232,6 +1388,7 @@ def main() -> None:
         max_rows=args.max_rows,
         date_window=date_window_meta,
         odds_backfill=odds_backfill_meta,
+        action_props=action_props_meta,
         team_game_validation=team_game_validation,
         dnp_history_config=dnp_config,
         rotation_priors_v1=priors_meta,

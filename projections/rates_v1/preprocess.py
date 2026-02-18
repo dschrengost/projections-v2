@@ -31,6 +31,20 @@ DEFAULT_TRACKING_FILL_VALUES: dict[str, float] = {
     "track_role_is_low_minutes": 0.0,
 }
 
+ODDS_NUMERIC_FEATURES: tuple[str, ...] = (
+    "spread_close",
+    "total_close",
+    "team_itt",
+    "opp_itt",
+)
+ODDS_FLAG_FEATURES: tuple[str, ...] = ("has_odds",)
+ODDS_FILL_FEATURES: tuple[str, ...] = ODDS_NUMERIC_FEATURES + ODDS_FLAG_FEATURES
+
+DEFAULT_ODDS_FILL_VALUES: dict[str, float] = {
+    **{col: 0.0 for col in ODDS_NUMERIC_FEATURES},
+    "has_odds": 0.0,
+}
+
 
 def fit_tracking_fill_values(train_df: pd.DataFrame, feature_cols: list[str]) -> dict[str, float]:
     fill_values: dict[str, float] = {}
@@ -80,3 +94,44 @@ def resolve_tracking_fill_values(meta: dict[str, Any], feature_cols: list[str]) 
         if col in feature_cols
     }
 
+
+def fit_odds_fill_values(train_df: pd.DataFrame, feature_cols: list[str]) -> dict[str, float]:
+    fill_values: dict[str, float] = {}
+    active_cols = [col for col in ODDS_FILL_FEATURES if col in feature_cols]
+    for col in active_cols:
+        if col not in train_df.columns:
+            fill_values[col] = DEFAULT_ODDS_FILL_VALUES[col]
+            continue
+        series = pd.to_numeric(train_df[col], errors="coerce")
+        if col in ODDS_FLAG_FEATURES:
+            mode = series.mode(dropna=True)
+            fill_values[col] = float(mode.iloc[0]) if not mode.empty else DEFAULT_ODDS_FILL_VALUES[col]
+        else:
+            median = series.median(skipna=True)
+            fill_values[col] = float(median) if pd.notna(median) else DEFAULT_ODDS_FILL_VALUES[col]
+    return fill_values
+
+
+def apply_odds_fill_values(df: pd.DataFrame, fill_values: dict[str, float]) -> pd.DataFrame:
+    if not fill_values:
+        return df
+    out = df.copy()
+    for col, fill_val in fill_values.items():
+        if col not in out.columns:
+            out[col] = np.nan
+        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(float(fill_val))
+        if col in ODDS_FLAG_FEATURES:
+            out[col] = out[col].astype(int)
+    return out
+
+
+def resolve_odds_fill_values(meta: dict[str, Any], feature_cols: list[str]) -> dict[str, float]:
+    preprocess = meta.get("preprocess") if isinstance(meta, dict) else None
+    explicit = preprocess.get("odds_fill_values") if isinstance(preprocess, dict) else None
+    if isinstance(explicit, dict) and explicit:
+        return {k: float(v) for k, v in explicit.items() if k in feature_cols}
+    return {
+        col: DEFAULT_ODDS_FILL_VALUES[col]
+        for col in ODDS_FILL_FEATURES
+        if col in feature_cols
+    }

@@ -5,7 +5,12 @@ from typing import Dict
 import pandas as pd
 
 from projections.rates_v1.loader import RatesBundle
-from projections.rates_v1.preprocess import apply_tracking_fill_values, resolve_tracking_fill_values
+from projections.rates_v1.preprocess import (
+    apply_odds_fill_values,
+    apply_tracking_fill_values,
+    resolve_odds_fill_values,
+    resolve_tracking_fill_values,
+)
 
 
 def predict_rates(features: pd.DataFrame, bundle: RatesBundle) -> pd.DataFrame:
@@ -15,6 +20,9 @@ def predict_rates(features: pd.DataFrame, bundle: RatesBundle) -> pd.DataFrame:
     Returns a DataFrame with one column per target (same index as input).
     """
     features_prepped = features.copy()
+    odds_fill_values = resolve_odds_fill_values(bundle.meta, bundle.feature_cols)
+    if odds_fill_values:
+        features_prepped = apply_odds_fill_values(features_prepped, odds_fill_values)
     tracking_fill_values = resolve_tracking_fill_values(bundle.meta, bundle.feature_cols)
     if tracking_fill_values:
         features_prepped = apply_tracking_fill_values(features_prepped, tracking_fill_values)

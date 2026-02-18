@@ -59,6 +59,7 @@ from projections.minutes_v1.starter_flags import (
     derive_starter_flag_label,
     normalize_starter_signals,
 )
+from projections.minutes_v1.schemas import FEATURES_MINUTES_V1_SCHEMA
 from projections.minutes_alloc.rotalloc_production import (
     resolve_minutes_alloc_mode,
     resolve_rotalloc_bundle_dir,
@@ -1357,6 +1358,7 @@ def _score_rows(
     rotshare_seed: int = 42,
     rotshare_min_active_players: int = 5,
     rotshare_mc_center: RotshareQuantilesCenter = "mean",
+    allow_missing_feature_defaults: bool = False,
 ) -> pd.DataFrame:
     if df.empty:
         return df
@@ -1396,7 +1398,24 @@ def _score_rows(
 
     missing = [col for col in feature_columns if col not in df.columns]
     if missing:
-        raise RuntimeError(f"Feature frame missing required columns: {', '.join(sorted(missing))}")
+        if not allow_missing_feature_defaults:
+            raise RuntimeError(f"Feature frame missing required columns: {', '.join(sorted(missing))}")
+
+        defaults = FEATURES_MINUTES_V1_SCHEMA.defaults
+        working = df.copy()
+        for col in missing:
+            if col in defaults:
+                working[col] = pd.Series(defaults[col], index=working.index)
+            else:
+                # Historical backfills can point at older feature snapshots that predate
+                # newer engineered signals. Use neutral zero defaults for scorer parity.
+                working[col] = pd.Series(0.0, index=working.index)
+        typer.echo(
+            "[minutes] historical fallback: filled missing feature defaults for "
+            f"{len(missing)} columns ({', '.join(sorted(missing))})",
+            err=True,
+        )
+        df = working
 
     feature_matrix = df[feature_columns]
     preds = modeling.predict_quantiles(quantiles, feature_matrix)
@@ -1550,6 +1569,7 @@ def _score_rows_dual(
     promotion_ctx: PromotionPriorContext | None = None,
     promotion_debug: bool = False,
     espn_out_players: set[str] | None = None,
+    allow_missing_feature_defaults: bool = False,
 ) -> pd.DataFrame:
     if df.empty:
         return df
@@ -1572,6 +1592,7 @@ def _score_rows_dual(
         promotion_ctx=promotion_ctx,
         promotion_debug=promotion_debug,
         espn_out_players=espn_out_players,
+        allow_missing_feature_defaults=allow_missing_feature_defaults,
     )
     late_scored = _score_rows(
         df,
@@ -1582,6 +1603,7 @@ def _score_rows_dual(
         promotion_ctx=promotion_ctx,
         promotion_debug=promotion_debug,
         espn_out_players=espn_out_players,
+        allow_missing_feature_defaults=allow_missing_feature_defaults,
     )
 
     result = early_scored.copy()
@@ -1930,6 +1952,7 @@ def score_minutes_range_to_parquet(
     rotshare_seed: int = 42,
     rotshare_min_active_players: int = 5,
     rotshare_mc_center: RotshareQuantilesCenter = "mean",
+    allow_missing_feature_defaults: bool = False,
 ) -> pd.DataFrame:
     """Programmatic wrapper around the scoring flow used by the CLI.
 
@@ -2001,6 +2024,7 @@ def score_minutes_range_to_parquet(
             play_prob_calibration=play_prob_calibration,
             promotion_ctx=promotion_ctx,
             promotion_debug=promotion_prior_debug,
+            allow_missing_feature_defaults=allow_missing_feature_defaults,
         )
         resolved_bundle_dir = Path(model["late_bundle_dir"])
     else:
@@ -2019,6 +2043,7 @@ def score_minutes_range_to_parquet(
             rotshare_seed=rotshare_seed,
             rotshare_min_active_players=rotshare_min_active_players,
             rotshare_mc_center=rotshare_mc_center,
+            allow_missing_feature_defaults=allow_missing_feature_defaults,
         )
         resolved_bundle_dir = Path(model["bundle_dir"])
     model_meta = model["model_meta"]
