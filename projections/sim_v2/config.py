@@ -201,6 +201,19 @@ class MinutesWorldsConfig:
     gate_temperature: float = 1.0
     # Minimum odds coverage ratio to use odds-dependent calibration
     min_odds_coverage: float = 0.8
+    # Whether model-space worlds should use share_logit for per-world demand variation
+    use_share_logits: bool = True
+    # Temperature applied to share logits before softmax
+    share_temperature: float = 1.0
+    # Per-world Gaussian noise std added to share logits
+    share_noise_std: float = 0.0
+    # Blend between share-derived demand and baseline minutes_mean demand (0..1)
+    share_blend_weight: float = 0.5
+    # Bench-zero mixture knobs used by model-space backend
+    use_bench_zero_mixture: bool = True
+    bench_zero_minutes_threshold: float = 8.0
+    bench_zero_p_base: float = 0.25
+    bench_zero_p_slope: float = 0.5
 
 
 @dataclass
@@ -543,6 +556,14 @@ def load_sim_v2_profile(
         calibration_policy=str(minutes_worlds_cfg_raw.get("calibration_policy", "none")),
         gate_temperature=float(minutes_worlds_cfg_raw.get("gate_temperature", 1.0)),
         min_odds_coverage=float(minutes_worlds_cfg_raw.get("min_odds_coverage", 0.8)),
+        use_share_logits=bool(minutes_worlds_cfg_raw.get("use_share_logits", True)),
+        share_temperature=float(minutes_worlds_cfg_raw.get("share_temperature", 1.0)),
+        share_noise_std=float(minutes_worlds_cfg_raw.get("share_noise_std", 0.0)),
+        share_blend_weight=float(minutes_worlds_cfg_raw.get("share_blend_weight", 0.5)),
+        use_bench_zero_mixture=bool(minutes_worlds_cfg_raw.get("use_bench_zero_mixture", True)),
+        bench_zero_minutes_threshold=float(minutes_worlds_cfg_raw.get("bench_zero_minutes_threshold", 8.0)),
+        bench_zero_p_base=float(minutes_worlds_cfg_raw.get("bench_zero_p_base", 0.25)),
+        bench_zero_p_slope=float(minutes_worlds_cfg_raw.get("bench_zero_p_slope", 0.5)),
     )
 
     # Game script config

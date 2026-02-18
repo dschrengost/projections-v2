@@ -265,7 +265,7 @@ uv run python -m scripts.sim_v2.run_sim_live \
   --override-infeasible error
 ```
 
-- Default remains `--minutes-override-mode legacy` (no behavior change).
+- Default is `--minutes-override-mode v2` (pass `legacy` only for compatibility/debug).
 - In v2 mode, worlds writes override artifacts under:
   - `artifacts/sim_v2/worlds_fpts_v2/game_date=<date>/run=<run_id>/overrides_input.json`
   - `artifacts/sim_v2/worlds_fpts_v2/game_date=<date>/run=<run_id>/overrides_compiled_v2.json`

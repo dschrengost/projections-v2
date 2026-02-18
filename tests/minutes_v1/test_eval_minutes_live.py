@@ -4,7 +4,6 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from projections.minutes_v1.eval_live import (
     MinutesLiveEvalDatasetBuilder,
@@ -311,3 +310,74 @@ def test_build_dataset_and_metrics(tmp_path: Path) -> None:
     assert injury_slices["injury_return"]["rows"] == 1
     assert injury_slices["non_injury_return"]["rows"] == 2
     assert "coverage_p10_p90_cond" in injury_slices["injury_return"]
+
+
+def test_prediction_logs_partition_uses_season_start_year(tmp_path: Path) -> None:
+    """Jan games belong to the previous season partition (e.g. Jan 2025 -> season=2024)."""
+
+    data_root = tmp_path / "data"
+
+    schedule_dir = data_root / "silver" / "schedule" / "season=2024" / "month=01"
+    schedule_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "game_id": 6001,
+                "game_date": pd.Timestamp("2025-01-05"),
+                "tip_ts": pd.Timestamp("2025-01-06T01:00:00Z"),
+                "home_team_id": 100,
+                "away_team_id": 101,
+            }
+        ]
+    ).to_parquet(schedule_dir / "schedule.parquet", index=False)
+
+    logs_dir = data_root / "gold" / "prediction_logs_minutes" / "season=2024" / "month=01"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "game_date": pd.Timestamp("2025-01-05"),
+                "game_id": 6001,
+                "player_id": 1201,
+                "team_id": 10,
+                "status": "available",
+                "starter_flag": 1,
+                "minutes_p10": 28.0,
+                "minutes_p50": 32.0,
+                "minutes_p90": 36.0,
+                "play_prob": 0.95,
+                "run_as_of_ts": pd.Timestamp("2025-01-06T00:30:00Z"),
+                "log_timestamp": pd.Timestamp("2025-01-06T00:31:00Z"),
+            }
+        ]
+    ).to_parquet(logs_dir / "logs.parquet", index=False)
+
+    labels_dir = (
+        data_root
+        / "gold"
+        / "labels_minutes_v1"
+        / "season=2024"
+        / "game_date=2025-01-05"
+    )
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "game_id": 6001,
+                "player_id": 1201,
+                "game_date": pd.Timestamp("2025-01-05"),
+                "actual_minutes": 34.0,
+                "team_id": 10,
+            }
+        ]
+    ).to_parquet(labels_dir / "labels.parquet", index=False)
+
+    builder = MinutesLiveEvalDatasetBuilder(
+        data_root=data_root,
+        labels_root=data_root / "gold" / "labels_minutes_v1",
+        schedule_root=data_root / "silver" / "schedule",
+    )
+    frame = builder.build(date(2025, 1, 5), date(2025, 1, 5))
+    assert not frame.empty
+    assert set(frame["game_id"]) == {6001}
+    assert set(frame["player_id"]) == {1201}

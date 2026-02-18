@@ -33,6 +33,58 @@ class BuildInputs:
     clean: bool
 
 
+PLAYER_PRIOR_BASE_COLS: tuple[str, ...] = (
+    "minutes_from_stints",
+    "num_stints",
+    "started_proxy",
+    # Timing/shape priors (converted to minutes to avoid unit drift).
+    "first_in_minute",
+    "last_out_minute",
+    "max_stint_minutes",
+)
+
+TEAM_PRIOR_BASE_COLS: tuple[str, ...] = (
+    "depth_6",
+    "depth_10",
+    "depth_14",
+    "effective_n",
+    "bench_conc_top1",
+    "bench_conc_top2",
+    "starter_pool_minutes",
+    "bench_pool_minutes",
+    "team_total_minutes_from_stints",
+    "team_ot_flag",
+    # Cadence/stability proxies.
+    "bench_share",
+    "starter_share",
+    "depth_gap_10_6",
+)
+
+# Columns for rolling volatility priors (std across trailing games, shifted).
+PLAYER_VOLATILITY_COLS: tuple[str, ...] = (
+    "minutes_from_stints",
+    "num_stints",
+    "first_in_minute",
+    "last_out_minute",
+    "max_stint_minutes",
+)
+
+TEAM_VOLATILITY_COLS: tuple[str, ...] = (
+    "depth_6",
+    "depth_10",
+    "depth_14",
+    "effective_n",
+    "bench_conc_top1",
+    "bench_conc_top2",
+    "starter_pool_minutes",
+    "bench_pool_minutes",
+    "team_total_minutes_from_stints",
+    "bench_share",
+    "starter_share",
+    "depth_gap_10_6",
+)
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -91,6 +143,10 @@ def _load_rotation_player_labels(data_root: Path) -> pd.DataFrame:
                     "minutes_from_stints",
                     "num_stints",
                     "started_proxy",
+                    "first_in_time_real",
+                    "last_out_time_real",
+                    "max_stint_len_real",
+                    "seconds_per_unit",
                 ],
             )
         except Exception:
@@ -113,6 +169,27 @@ def _load_rotation_player_labels(data_root: Path) -> pd.DataFrame:
         pd.to_numeric(out["num_stints"], errors="coerce").fillna(0).astype("float64")
     )
     out["started_proxy"] = out["started_proxy"].fillna(False).astype("int8")
+    out["first_in_time_real"] = pd.to_numeric(
+        out.get("first_in_time_real"), errors="coerce"
+    ).fillna(0.0).astype("float64")
+    out["last_out_time_real"] = pd.to_numeric(
+        out.get("last_out_time_real"), errors="coerce"
+    ).fillna(0.0).astype("float64")
+    out["max_stint_len_real"] = pd.to_numeric(
+        out.get("max_stint_len_real"), errors="coerce"
+    ).fillna(0.0).astype("float64")
+    out["seconds_per_unit"] = pd.to_numeric(
+        out.get("seconds_per_unit"), errors="coerce"
+    ).replace(0.0, pd.NA).fillna(1.0).astype("float64")
+    out["first_in_minute"] = (
+        (out["first_in_time_real"] * out["seconds_per_unit"]) / 60.0
+    ).clip(lower=0.0)
+    out["last_out_minute"] = (
+        (out["last_out_time_real"] * out["seconds_per_unit"]) / 60.0
+    ).clip(lower=0.0)
+    out["max_stint_minutes"] = (
+        (out["max_stint_len_real"] * out["seconds_per_unit"]) / 60.0
+    ).clip(lower=0.0)
     return out
 
 
@@ -136,6 +213,7 @@ def _load_rotation_team_shape(data_root: Path) -> pd.DataFrame:
                     "bench_conc_top2",
                     "starter_pool_minutes",
                     "bench_pool_minutes",
+                    "team_total_minutes_from_stints",
                 ],
             )
         except Exception:
@@ -160,31 +238,22 @@ def _load_rotation_team_shape(data_root: Path) -> pd.DataFrame:
         "bench_conc_top2",
         "starter_pool_minutes",
         "bench_pool_minutes",
+        "team_total_minutes_from_stints",
     ]:
         out[col] = pd.to_numeric(out[col], errors="coerce").astype("float64")
+    denom = out["team_total_minutes_from_stints"].replace(0.0, pd.NA)
+    out["bench_share"] = (out["bench_pool_minutes"] / denom).fillna(0.0).astype("float64")
+    out["starter_share"] = (out["starter_pool_minutes"] / denom).fillna(0.0).astype("float64")
+    out["depth_gap_10_6"] = (out["depth_10"] - out["depth_6"]).fillna(0.0).astype("float64")
     return out
 
 
 def _prior_columns_player() -> list[str]:
-    return [
-        "minutes_from_stints",
-        "num_stints",
-        "started_proxy",
-    ]
+    return list(PLAYER_PRIOR_BASE_COLS)
 
 
 def _prior_columns_team() -> list[str]:
-    return [
-        "depth_6",
-        "depth_10",
-        "depth_14",
-        "effective_n",
-        "bench_conc_top1",
-        "bench_conc_top2",
-        "starter_pool_minutes",
-        "bench_pool_minutes",
-        "team_ot_flag",
-    ]
+    return list(TEAM_PRIOR_BASE_COLS)
 
 
 def _compute_group_priors(
@@ -195,12 +264,14 @@ def _compute_group_priors(
     windows: list[int],
     value_cols: list[str],
     prefix: str,
+    std_value_cols: list[str] | None = None,
 ) -> pd.DataFrame:
     work = df.copy()
     work[date_col] = pd.to_datetime(work[date_col], errors="coerce").dt.normalize()
     work = work.sort_values(
         [*group_cols, date_col, "game_id_norm"], kind="mergesort"
     ).reset_index(drop=True)
+    std_cols = list(std_value_cols or [])
 
     for window in windows:
         n_col = f"{prefix}_prior_n_games_{window}"
@@ -244,6 +315,23 @@ def _compute_group_priors(
             work[out_col] = (
                 work.groupby(group_cols, sort=False)[base_col]
                 .apply(_roll_mean)
+                .reset_index(level=group_cols, drop=True)
+                .fillna(0.0)
+                .astype("float64")
+            )
+            work[miss_col] = (work[n_col] == 0).astype("int8")
+
+        for base_col in std_cols:
+            out_col = f"{base_col}_std_prior_{window}"
+            miss_col = f"{out_col}_missing"
+
+            def _roll_std(s: pd.Series) -> pd.Series:
+                shifted = s.shift(1)
+                return shifted.rolling(window, min_periods=1).std(ddof=0)
+
+            work[out_col] = (
+                work.groupby(group_cols, sort=False)[base_col]
+                .apply(_roll_std)
                 .reset_index(level=group_cols, drop=True)
                 .fillna(0.0)
                 .astype("float64")
@@ -367,6 +455,7 @@ def main() -> None:
         windows=inputs.windows,
         value_cols=_prior_columns_player(),
         prefix="player",
+        std_value_cols=list(PLAYER_VOLATILITY_COLS),
     )
 
     # Convert started_proxy rolling mean to a "rate" name to match downstream expectations.
@@ -411,6 +500,7 @@ def main() -> None:
         windows=inputs.windows,
         value_cols=_prior_columns_team(),
         prefix="team",
+        std_value_cols=list(TEAM_VOLATILITY_COLS),
     )
 
     for window in inputs.windows:
@@ -465,26 +555,20 @@ def main() -> None:
     # Missing summary for debugging/health.
     missing_summary: dict[str, float] = {}
     for window in inputs.windows:
-        for col in [
-            f"minutes_from_stints_prior_{window}_missing",
-            f"num_stints_prior_{window}_missing",
-            f"started_proxy_rate_prior_{window}_missing",
-        ]:
+        for col in sorted(
+            c
+            for c in player_work.columns
+            if c.endswith(f"_prior_{window}_missing")
+        ):
             if col in player_work.columns:
                 missing_summary[col] = float(
                     pd.to_numeric(player_work[col], errors="coerce").fillna(1).mean()
                 )
-        for col in [
-            f"depth_6_prior_{window}_missing",
-            f"depth_10_prior_{window}_missing",
-            f"depth_14_prior_{window}_missing",
-            f"effective_n_prior_{window}_missing",
-            f"bench_conc_top1_prior_{window}_missing",
-            f"bench_conc_top2_prior_{window}_missing",
-            f"starter_pool_minutes_prior_{window}_missing",
-            f"bench_pool_minutes_prior_{window}_missing",
-            f"team_ot_rate_prior_{window}_missing",
-        ]:
+        for col in sorted(
+            c
+            for c in team_work.columns
+            if c.endswith(f"_prior_{window}_missing")
+        ):
             if col in team_work.columns:
                 missing_summary[col] = float(
                     pd.to_numeric(team_work[col], errors="coerce").fillna(1).mean()

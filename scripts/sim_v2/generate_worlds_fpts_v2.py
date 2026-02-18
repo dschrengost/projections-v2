@@ -1527,7 +1527,8 @@ def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> p
     Returns a DataFrame keyed by (game_date, game_id, team_id, player_id) with:
       - minutes_mean
       - fpts_mean
-      - optional passthrough columns (minutes_p50_cond, minutes_p50, play_prob, is_starter, eligible_flag, minutes_alloc_mode)
+      - optional passthrough columns (minutes_p50_cond, minutes_p50, play_prob, is_starter,
+        eligible_flag, minutes_alloc_mode, gate_prob/gate_logit/share_logit)
     """
 
     minutes_df = minutes_df.copy()
@@ -1620,6 +1621,9 @@ def build_rates_mean_fpts(minutes_df: pd.DataFrame, rates_df: pd.DataFrame) -> p
         "inactive_streak_len",
         "eligible_flag",
         "minutes_alloc_mode",
+        "gate_prob",
+        "gate_logit",
+        "share_logit",
         "p_rot",
         "mu_cond",
         "team_minutes_sum",
@@ -1847,9 +1851,9 @@ def main(
         help="Export fga2_mean, fga3_mean, fta_mean in projections for diagnostics.",
     ),
     minutes_override_mode: str = typer.Option(
-        "legacy",
+        "v2",
         "--minutes-override-mode",
-        help="Minutes override path: legacy (default) or v2 constraints compiler/enforcer.",
+        help="Minutes override path: v2 (default) or legacy compatibility mode.",
     ),
     override_infeasible: str = typer.Option(
         "error",
@@ -2363,7 +2367,24 @@ def main(
                             json.dumps(compiled_payload, indent=2, default=str),
                             encoding="utf-8",
                         )
-                        override_resolved_df.to_parquet(
+                        override_resolved_write_df = override_resolved_df.copy()
+                        if "override_fields" in override_resolved_write_df.columns:
+                            def _encode_override_fields(value: object) -> str | None:
+                                if isinstance(value, dict):
+                                    return json.dumps(value, sort_keys=True)
+                                if value is None:
+                                    return None
+                                try:
+                                    if pd.isna(value):
+                                        return None
+                                except Exception:
+                                    pass
+                                return str(value)
+
+                            override_resolved_write_df["override_fields"] = (
+                                override_resolved_write_df["override_fields"].map(_encode_override_fields)
+                            )
+                        override_resolved_write_df.to_parquet(
                             out_dir / "override_resolved_minutes.parquet", index=False
                         )
 
@@ -3083,13 +3104,31 @@ def main(
             phys_promoted_team_worlds = 0
             phys_promoted_players_total = 0
 
-            # Bench-zero mixture per-player drop probability (deterministic, pre world sampling).
-            # This is a second regime on top of play_prob_eff: availability draws happen first, then
-            # low-minute players can be dropped to 0 minutes with this probability.
+            # Bench-zero drop probabilities for diagnostics and optional outer application.
+            # In model_space_v1, bench-zero is handled inside the model-space backend; the outer
+            # bench-zero layer is skipped to avoid double-application.
             bz_cfg = getattr(profile_cfg, "bench_zero_mixture", None)
+            outer_bench_zero_enabled = bool(bz_cfg is not None and getattr(bz_cfg, "enabled", False))
+            model_space_bench_zero_enabled = bool(
+                use_model_space_minutes
+                and minutes_worlds_cfg is not None
+                and bool(getattr(minutes_worlds_cfg, "use_bench_zero_mixture", True))
+            )
+            apply_outer_bench_zero = bool(
+                outer_bench_zero_enabled and group_map and not model_space_bench_zero_enabled
+            )
             bench_zero_p_zero = np.zeros(len(mu_df), dtype=float)
             bench_zero_threshold: float | None = None
-            if bz_cfg is not None and getattr(bz_cfg, "enabled", False):
+            if model_space_bench_zero_enabled and minutes_worlds_cfg is not None:
+                bench_zero_threshold = float(getattr(minutes_worlds_cfg, "bench_zero_minutes_threshold", 8.0))
+                p_zero_base = float(getattr(minutes_worlds_cfg, "bench_zero_p_base", 0.25))
+                p_zero_slope = float(getattr(minutes_worlds_cfg, "bench_zero_p_slope", 0.5))
+                if bench_zero_threshold > 0.0 and p_zero_base >= 0.0:
+                    in_bucket = minutes_sim_base < bench_zero_threshold
+                    x = np.clip((bench_zero_threshold - minutes_sim_base) / bench_zero_threshold, 0.0, 1.0)
+                    p_zero = np.clip(p_zero_base + p_zero_slope * x, 0.0, 0.95)
+                    bench_zero_p_zero = np.where(in_bucket, p_zero, 0.0).astype(float)
+            elif apply_outer_bench_zero and bz_cfg is not None:
                 bench_zero_threshold = float(getattr(bz_cfg, "minutes_threshold", 0.0))
                 p_zero_base = float(getattr(bz_cfg, "p_zero_base", 0.0))
                 p_zero_slope = float(getattr(bz_cfg, "p_zero_slope", 0.0))
@@ -3098,6 +3137,12 @@ def main(
                     x = np.clip((bench_zero_threshold - minutes_sim_base) / bench_zero_threshold, 0.0, 1.0)
                     p_zero = np.clip(p_zero_base + p_zero_slope * x, 0.0, 0.95)
                     bench_zero_p_zero = np.where(in_bucket, p_zero, 0.0).astype(float)
+            if outer_bench_zero_enabled and model_space_bench_zero_enabled:
+                typer.echo(
+                    "[sim_v2] bench_zero: skipping outer bench_zero_mixture because model_space_v1 bench_zero is enabled"
+                )
+            minutes_alloc_metrics["bench_zero_model_space_enabled"] = bool(model_space_bench_zero_enabled)
+            minutes_alloc_metrics["bench_zero_outer_enabled"] = bool(apply_outer_bench_zero)
 
             for chunk_start in range(0, n_worlds_eff, worlds_per_chunk):
                 chunk_size = min(worlds_per_chunk, n_worlds_eff - chunk_start)
@@ -3246,13 +3291,15 @@ def main(
                         ),
                     )
 
-                    # Call the PR5 backend (handles active_mask internally)
+                    # Call the PR5 backend using the precomputed active_mask so feasibility/policy
+                    # adjustments are preserved.
                     pr5_result = sample_minutes_worlds_model_space_v1(
                         minutes_mean=gs_minutes_p50,
                         gate_logit=gate_logit_arr,
                         gate_prob=gate_prob_arr,
                         share_logit=share_logit_arr,
                         play_prob=play_prob_eff,
+                        active_mask=active_mask,
                         team_indices=team_indices,
                         n_worlds=chunk_size,
                         rng=rng,
@@ -3445,10 +3492,9 @@ def main(
                         world_offset=chunk_start,
                     )
 
-                # Optional bench/DNP mass-at-zero mixture: drop low-minute players to 0 with p_zero,
-                # then let reconciliation redistribute minutes among remaining active players.
-                bz_cfg = getattr(profile_cfg, "bench_zero_mixture", None)
-                if bz_cfg is not None and getattr(bz_cfg, "enabled", False) and group_map:
+                # Optional outer bench/DNP mass-at-zero mixture: only applied when model-space
+                # backend is not already owning bench-zero behavior.
+                if apply_outer_bench_zero and bz_cfg is not None:
                     min_active_override = (
                         int(getattr(feasibility_cfg, "min_active_players", 0))
                         if (feasibility_cfg is not None and getattr(feasibility_cfg, "enabled", False))
@@ -4295,7 +4341,12 @@ def main(
                         else 0.0,
                     },
                     "bench_zero": {
-                        "enabled": bool(bz_cfg is not None and getattr(bz_cfg, "enabled", False)),
+                        "enabled": bool(apply_outer_bench_zero or model_space_bench_zero_enabled),
+                        "source": (
+                            "model_space_v1"
+                            if model_space_bench_zero_enabled
+                            else ("outer_mixture" if apply_outer_bench_zero else "disabled")
+                        ),
                         "minutes_threshold": float(bench_zero_threshold) if bench_zero_threshold is not None else None,
                         "p_zero_mean": float(np.mean(bench_zero_p_zero)) if bench_zero_p_zero.size else 0.0,
                         "p_zero_p90": float(np.percentile(bench_zero_p_zero, 90)) if bench_zero_p_zero.size else 0.0,
@@ -4421,7 +4472,14 @@ def main(
                             proj_df[f"{stat_name}_mean"] = stat_mean
                 
                 # Add optional columns
-                for extra in ("is_starter", "play_prob"):
+                for extra in (
+                    "is_starter",
+                    "play_prob",
+                    "rotation_prob",
+                    "gate_prob",
+                    "gate_logit",
+                    "share_logit",
+                ):
                     if extra in mu_df.columns:
                         proj_df[extra] = mu_df[extra]
                 

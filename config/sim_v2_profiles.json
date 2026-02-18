@@ -248,7 +248,22 @@
       },
       "vacancy_mode": "game",
       "preserve_input_rotation": true,
-      "note": "sim_v3: game_script uses margin surprise (deviation from spread) with empirically calibrated shift factors. margin_std=14 matches historical data."
+      "minutes_worlds": {
+        "mode": "model_space_v1",
+        "fail_on_missing_play_prob": true,
+        "calibration_policy": "none",
+        "gate_temperature": 1.0,
+        "min_odds_coverage": 0.8,
+        "use_share_logits": true,
+        "share_temperature": 1.0,
+        "share_noise_std": 0.0,
+        "share_blend_weight": 0.5,
+        "use_bench_zero_mixture": true,
+        "bench_zero_minutes_threshold": 8.0,
+        "bench_zero_p_base": 0.25,
+        "bench_zero_p_slope": 0.5
+      },
+      "note": "sim_v3: model_space_v1 minutes worlds + game_script margin surprise (deviation from spread); margin_std=14 matches historical data."
     },
     "sim_v3_rates_noise": {
       "mean_source": "rates",

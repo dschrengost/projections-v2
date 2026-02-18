@@ -48,6 +48,18 @@ uv run prefect deployment ls
 | `rates-retrain-pipeline` | Weekly trigger (Tue 10 AM ET, biweekly gate in flow) | Rates recency retrain + calibration diagnostics + head-to-head guardrails + auto-promotion |
 | `rates-calibration-monitor` | Weekly (Tue 9 AM ET) | Calibration diagnostics (decile curves / efficiency heads) for current production rates run |
 
+### PBP Vendor Daily Refresh
+
+`rotation-priors-update` is the canonical daily integration point for vendor PBP refresh.
+
+- Fetch task: `projections/cli/pbp_vendor_fetch_daily_zip.py`
+- Ingest task: `projections/cli/pbp_vendor_ingest.py`
+- Required env: `PBP_VENDOR_DAILY_URL`
+- Default deployment behavior:
+  - `run_pbp_ingest: true`
+  - `pbp_fetch_daily_zip: true`
+  - `pbp_allow_qa_failures: true` (writes QA artifacts and permits publish on known outliers)
+
 ## Systemd Services
 
 Services live in `infra/systemd/` and are installed to `~/.config/systemd/user/`.

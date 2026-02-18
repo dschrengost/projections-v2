@@ -187,6 +187,39 @@ class TestSampleMinutesWorldsModelSpaceV1:
         assert np.all(result.minutes_worlds[:, 4] == 0.0)
         assert np.all(~result.active_mask[:, 4])
 
+    def test_uses_provided_active_mask_when_supplied(self) -> None:
+        """Provided active mask should be preserved (no internal availability resample)."""
+        n_players = 4
+        n_worlds = 6
+        provided_active = np.array(
+            [
+                [True, False, True, False],
+                [False, True, True, False],
+                [True, True, False, False],
+                [False, False, True, True],
+                [True, False, False, True],
+                [False, True, False, True],
+            ],
+            dtype=bool,
+        )
+
+        result = sample_minutes_worlds_model_space_v1(
+            minutes_mean=np.array([30.0, 25.0, 20.0, 15.0]),
+            gate_logit=None,
+            gate_prob=np.ones(n_players),
+            share_logit=np.zeros(n_players),
+            play_prob=np.zeros(n_players),  # Would force all-inactive if sampler ignored provided_active
+            active_mask=provided_active,
+            team_indices=np.zeros(n_players, dtype=int),
+            n_worlds=n_worlds,
+            rng=np.random.default_rng(42),
+            config=MinutesWorldsConfig(use_bench_zero_mixture=False),
+        )
+
+        np.testing.assert_array_equal(result.active_mask, provided_active)
+        assert result.diagnostics.get("active_mask_source") == "provided"
+        assert np.all(result.minutes_worlds[~provided_active] == 0.0)
+
     def test_play_prob_nan_raises_error(self) -> None:
         """play_prob with NaN should raise ValueError."""
         n_players = 5
@@ -285,15 +318,60 @@ class TestSampleMinutesWorldsModelSpaceV1:
         # Higher temp should result in less variance
         assert rot_rates_t1.std() > rot_rates_t2.std() * 0.8  # Allow some tolerance
 
+    def test_share_logits_change_world_allocation_when_enabled(self) -> None:
+        """Share logits should affect world minutes when share mode is enabled."""
+        n_players = 8
+        n_worlds = 10
+
+        minutes_mean = np.ones(n_players) * 20.0
+        gate_prob = np.ones(n_players)  # everyone in rotation
+        play_prob = np.ones(n_players)  # everyone active
+        team_indices = np.zeros(n_players, dtype=int)
+        share_logit = np.array([4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -2.0, -3.0], dtype=float)
+
+        result_disabled = sample_minutes_worlds_model_space_v1(
+            minutes_mean=minutes_mean,
+            gate_logit=None,
+            gate_prob=gate_prob,
+            share_logit=share_logit,
+            play_prob=play_prob,
+            team_indices=team_indices,
+            n_worlds=n_worlds,
+            rng=np.random.default_rng(7),
+            config=MinutesWorldsConfig(
+                use_bench_zero_mixture=False,
+                use_share_logits=False,
+            ),
+        )
+
+        result_enabled = sample_minutes_worlds_model_space_v1(
+            minutes_mean=minutes_mean,
+            gate_logit=None,
+            gate_prob=gate_prob,
+            share_logit=share_logit,
+            play_prob=play_prob,
+            team_indices=team_indices,
+            n_worlds=n_worlds,
+            rng=np.random.default_rng(7),
+            config=MinutesWorldsConfig(
+                use_bench_zero_mixture=False,
+                use_share_logits=True,
+                share_temperature=1.0,
+                share_noise_std=0.0,
+                share_blend_weight=1.0,
+            ),
+        )
+
+        # Disabled path keeps a flatter distribution than share-logit path.
+        assert result_enabled.minutes_worlds[:, 0].mean() > result_disabled.minutes_worlds[:, 0].mean()
+        assert result_enabled.minutes_worlds[:, 0].mean() > result_enabled.minutes_worlds[:, -1].mean()
+
 
 class TestComputeMinutesQuantiles:
     """Tests for compute_minutes_quantiles."""
 
     def test_unconditional_includes_zeros(self) -> None:
         """Unconditional quantiles should include zero-minute worlds."""
-        n_worlds = 100
-        n_players = 3
-
         # Create minutes with some zeros (DNP)
         minutes_worlds = np.array([
             [20.0, 0.0, 15.0],  # Player 1 DNP
@@ -343,9 +421,6 @@ class TestComputeMinutesQuantiles:
     def test_contract_exact_quantiles_synthetic(self) -> None:
         """Contract test: verify exact quantiles on known synthetic data."""
         # Create a simple case where we know exact quantiles
-        n_worlds = 10
-        n_players = 2
-
         # Player 0: minutes = [0, 10, 20, 20, 20, 30, 30, 30, 40, 50]
         # Player 1: always 25
         minutes_worlds = np.array([

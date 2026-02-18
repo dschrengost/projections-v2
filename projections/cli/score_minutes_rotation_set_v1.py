@@ -51,8 +51,10 @@ from projections.rotation.set_model import (
 
 # ESPN OUT override - import from baseline scorer to ensure consistency
 from projections.cli.score_minutes_v1 import (
+    _espn_override_allowed,
     _load_espn_out_players,
     _normalize_name_for_matching,
+    _read_live_run_as_of_ts,
     _select_minutes_columns,
 )
 
@@ -72,6 +74,7 @@ DEFAULT_RECONCILE_CONFIG = Path("config/minutes_l2_reconcile.yaml")
 PRIMARY_PASSTHROUGH_COLS: tuple[str, ...] = (
     "player_name",
     "status",
+    "injury_row_present",
     "pos_bucket",
     "starter_flag",
     "is_projected_starter",
@@ -891,6 +894,26 @@ def main(
     batch_size: int = typer.Option(
         64, "--batch-size", help="Batch size (team-games) for rotation model."
     ),
+    alloc_mask_mode: str = typer.Option(
+        "strict",
+        "--alloc-mask-mode",
+        help="Inference allocation mask: strict (heuristic eligibility) or not_out (all non-OUT players).",
+    ),
+    alloc_min_eligible: int = typer.Option(
+        9,
+        "--alloc-min-eligible",
+        help="Minimum eligible players per team-game for strict allocation mask mode.",
+    ),
+    alloc_prior_play_prob_threshold: float = typer.Option(
+        0.20,
+        "--alloc-prior-play-prob-threshold",
+        help="Strict alloc-mask threshold on prior_play_prob eligibility.",
+    ),
+    alloc_baseline_minutes_threshold: float = typer.Option(
+        4.0,
+        "--alloc-baseline-minutes-threshold",
+        help="Strict alloc-mask threshold on baseline minutes eligibility.",
+    ),
 ) -> None:
     day = _normalize_day(date)
     season = _season_for_day(day)
@@ -1082,6 +1105,8 @@ def main(
         )
         return
     minutes_feat = pd.read_parquet(minutes_features_path)
+    run_as_of_ts_value = _read_live_run_as_of_ts(minutes_features_path.parent)
+    run_as_of_datetime = run_as_of_ts_value.to_pydatetime() if run_as_of_ts_value is not None else None
 
     # 3) Build rotation model features + write them to the live features root.
     out_day_dir = Path(rotation_features_root) / day.strftime("%Y-%m-%d")
@@ -1276,6 +1301,10 @@ def main(
             device=str(device),
             batch_size=int(batch_size),
             return_aux=True,
+            alloc_mask_mode=str(alloc_mask_mode),
+            alloc_min_eligible=int(alloc_min_eligible),
+            alloc_prior_play_prob_threshold=float(alloc_prior_play_prob_threshold),
+            alloc_baseline_minutes_threshold=float(alloc_baseline_minutes_threshold),
         )
         # Handle both DataFrame and RotationSetAuxOutputs return types
         if isinstance(rot_result, RotationSetAuxOutputs):
@@ -1329,6 +1358,9 @@ def main(
     rot_pred_cols = ["game_id", "team_id", "player_id", "pred_minutes"]
     if gate_prob_present:
         rot_pred_cols.append("gate_prob")
+    for aux_col in ("gate_logit", "share_logit"):
+        if aux_col in rot_scored.columns:
+            rot_pred_cols.append(aux_col)
     rot_pred = rot_scored.loc[:, rot_pred_cols].rename(
         columns={"pred_minutes": "rotation_minutes_p50"}
     )
@@ -1343,6 +1375,36 @@ def main(
             .fillna(0.0)
             .astype(float)
         )
+    for aux_col in ("gate_logit", "share_logit"):
+        if aux_col in rot_pred.columns:
+            rot_pred[aux_col] = (
+                pd.to_numeric(rot_pred[aux_col], errors="coerce")
+                .fillna(0.0)
+                .astype(float)
+            )
+    if gate_prob_present:
+        rot_pred["rotation_size_hat_team"] = (
+            rot_pred.groupby(["game_id", "team_id"], sort=False)["gate_prob"]
+            .transform("sum")
+            .astype(float)
+        )
+        rot_pred["rotation_size_hat_source"] = "gate_prob_sum"
+    else:
+        rot_pred["rotation_size_hat_team"] = (
+            (rot_pred["rotation_minutes_p50"] >= float(ROTATION_THRESHOLD_MINUTES))
+            .groupby([rot_pred["game_id"], rot_pred["team_id"]], sort=False)
+            .transform("sum")
+            .astype(float)
+        )
+        rot_pred["rotation_size_hat_source"] = f"minutes_ge_{float(ROTATION_THRESHOLD_MINUTES):g}"
+
+    rotation_size_hat_mean = (
+        float(
+            rot_pred.drop_duplicates(subset=["game_id", "team_id"])["rotation_size_hat_team"].mean()
+        )
+        if not rot_pred.empty
+        else None
+    )
 
     if primary_mode:
         out_df = _build_primary_minutes_frame(minutes_feat, day=day)
@@ -1402,25 +1464,34 @@ def main(
             espn_out_players = _load_espn_out_players(
                 day.date() if hasattr(day, "date") else day,
                 data_root=data_root,
-                run_as_of_ts=None,
+                run_as_of_ts=run_as_of_datetime,
             )
             espn_out_count = len(espn_out_players) if espn_out_players else 0
             if espn_out_players and "player_name" in out_df.columns:
                 normalized_names = out_df["player_name"].astype(str).map(_normalize_name_for_matching)
-                espn_mask = normalized_names.isin(espn_out_players)
-                espn_matched_count = int(espn_mask.sum())
-                if espn_matched_count > 0:
+                espn_raw_mask = normalized_names.isin(espn_out_players)
+                espn_matched_count = int(espn_raw_mask.sum())
+                allow_override = _espn_override_allowed(out_df)
+                espn_mask = espn_raw_mask & allow_override
+                espn_applied_count = int(espn_mask.sum())
+                if espn_applied_count > 0:
                     out_df.loc[espn_mask, "is_out"] = 1
                     out_df.loc[espn_mask, "status"] = "OUT"
                     typer.echo(
-                        f"[rotation_minutes] ESPN OUT override: loaded={espn_out_count} matched={espn_matched_count}",
+                        f"[rotation_minutes] ESPN OUT override: loaded={espn_out_count} matched={espn_matched_count} applied={espn_applied_count}",
                         err=True,
                     )
                 else:
-                    typer.echo(
-                        f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} matched=0 (no overlap with slate)",
-                        err=True,
-                    )
+                    if espn_matched_count > 0:
+                        typer.echo(
+                            f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} matched={espn_matched_count} applied=0 (override not allowed)",
+                            err=True,
+                        )
+                    else:
+                        typer.echo(
+                            f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} matched=0 (no overlap with slate)",
+                            err=True,
+                        )
             elif espn_out_count > 0:
                 typer.echo(
                     f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} but player_name column missing",
@@ -1528,6 +1599,8 @@ def main(
                     "espn_out_count": espn_out_count,
                     "espn_matched_count": espn_matched_count,
                     "guardrails": guardrail_stats,
+                    "rotation_size_hat_source": str(rot_pred["rotation_size_hat_source"].iloc[0]) if not rot_pred.empty else None,
+                    "rotation_size_hat_mean": rotation_size_hat_mean,
                     "baseline_stats": {
                         "source_col": baseline_source_col,
                         "gt0_count": baseline_gt0_count,
@@ -1605,7 +1678,7 @@ def main(
         on=["game_id", "team_id", "player_id"],
         how="left",
     )
-    injury_cols = [c for c in ["is_out", "status"] if c in minutes_feat.columns]
+    injury_cols = [c for c in ["is_out", "status", "injury_row_present"] if c in minutes_feat.columns]
     if injury_cols:
         guard = guard.merge(
             minutes_feat.loc[:, ["game_id", "team_id", "player_id", *injury_cols]],
@@ -1618,34 +1691,42 @@ def main(
 
     # 4b) ESPN OUT override: Load ESPN injuries and apply same override as baseline scorer.
     # ESPN updates faster than NBA injury reports; this catches late scratches.
-    # NOTE: For live scoring, we use current ESPN data (no timestamp filtering).
     espn_out_count = 0
     espn_matched_count = 0
     try:
         espn_out_players = _load_espn_out_players(
             day.date() if hasattr(day, "date") else day,
             data_root=data_root,
-            run_as_of_ts=None,  # Use current ESPN data for live scoring
+            run_as_of_ts=run_as_of_datetime,
         )
         espn_out_count = len(espn_out_players) if espn_out_players else 0
         if espn_out_players and "player_name" in guard.columns:
             normalized_names = guard["player_name"].astype(str).map(_normalize_name_for_matching)
-            espn_mask = normalized_names.isin(espn_out_players)
-            espn_matched_count = int(espn_mask.sum())
-            if espn_matched_count > 0:
+            espn_raw_mask = normalized_names.isin(espn_out_players)
+            espn_matched_count = int(espn_raw_mask.sum())
+            allow_override = _espn_override_allowed(guard)
+            espn_mask = espn_raw_mask & allow_override
+            espn_applied_count = int(espn_mask.sum())
+            if espn_applied_count > 0:
                 guard.loc[espn_mask, "is_out"] = 1
                 guard.loc[espn_mask, "status"] = "OUT"
                 espn_names = guard.loc[espn_mask, "player_name"].tolist()
                 typer.echo(
-                    f"[rotation_minutes] ESPN OUT override: loaded={espn_out_count} matched={espn_matched_count} "
+                    f"[rotation_minutes] ESPN OUT override: loaded={espn_out_count} matched={espn_matched_count} applied={espn_applied_count} "
                     f"marked OUT: {espn_names[:10]}",
                     err=True,
                 )
             else:
-                typer.echo(
-                    f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} matched=0 (no overlap with slate)",
-                    err=True,
-                )
+                if espn_matched_count > 0:
+                    typer.echo(
+                        f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} matched={espn_matched_count} applied=0 (override not allowed)",
+                        err=True,
+                    )
+                else:
+                    typer.echo(
+                        f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} matched=0 (no overlap with slate)",
+                        err=True,
+                    )
         elif espn_out_count > 0:
             typer.echo(
                 f"[rotation_minutes] ESPN OUT: loaded={espn_out_count} but player_name column missing",
@@ -1752,6 +1833,12 @@ def main(
 
     # 5) Map rotation p50 to minutes quantiles using baseline tail deltas.
     out_df = base_df.copy()
+    if "rotation_size_hat_team" in rot_pred.columns:
+        team_hat = (
+            rot_pred[["game_id", "team_id", "rotation_size_hat_team", "rotation_size_hat_source"]]
+            .drop_duplicates(subset=["game_id", "team_id"], keep="last")
+        )
+        out_df = out_df.merge(team_hat, on=["game_id", "team_id"], how="left")
     out_df[baseline_p50_col] = new_p50.to_numpy(dtype=float)
     if "minutes_p50" in out_df.columns:
         out_df["minutes_p50"] = out_df[baseline_p50_col]
@@ -1886,6 +1973,8 @@ def main(
                 "blend_weight": w,
                 "injury_coverage_threshold": inj_thr,
                 "dnp_tail_minutes_threshold": dnp_thr,
+                "rotation_size_hat_source": str(rot_pred["rotation_size_hat_source"].iloc[0]) if not rot_pred.empty else None,
+                "rotation_size_hat_mean": rotation_size_hat_mean,
                 "guardrails": guardrail.summary,
                 "tail_minutes_team_games_top": (
                     guardrail.tail_minutes_top.head(20).to_dict(orient="records")

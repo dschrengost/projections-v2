@@ -254,6 +254,9 @@ deployments:
   description: Build rotation_v1 + rotation_priors_v1 after gamerotation scrape.
   entrypoint: prefect_flows/rotation_priors_update.py:rotation_priors_update_flow
   parameters:
+    run_pbp_ingest: true
+    pbp_fetch_daily_zip: true
+    pbp_allow_qa_failures: true
     overwrite_rotation_v1: false
     retry_quarantined: true
     clean_priors: false

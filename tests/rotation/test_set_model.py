@@ -44,6 +44,37 @@ def _write_toy_model_dir(tmp_path: Path, *, model_type: str) -> Path:
     return model_dir
 
 
+def _write_toy_model_dir_with_player_embeddings(tmp_path: Path, *, model_type: str) -> Path:
+    feature_cols = ["f1", "f2", "f3"]
+    config = RotationSetModelConfig(
+        model=model_type,  # type: ignore[arg-type]
+        feature_columns=feature_cols,
+        feature_mean=[0.0, 0.0, 0.0],
+        feature_std=[1.0, 1.0, 1.0],
+        use_team_embeddings=False,
+        use_player_embeddings=True,
+        player_id_vocab=[101, 102, 103, 201, 202, 203, 204],
+        player_embedding_dim=4,
+        use_player_team_embeddings=True,
+        player_team_hash_buckets=257,
+        player_team_embedding_dim=3,
+        embed_dim=8,
+        hidden_dim=16,
+        dropout=0.0,
+        num_transformer_layers=1,
+        num_attention_heads=2,
+    )
+    model = build_model(config)
+    for param in model.parameters():
+        torch.nn.init.constant_(param, 0.0)
+
+    model_dir = tmp_path / "model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), model_dir / "model.pt")
+    config.save(model_dir / "config.json")
+    return model_dir
+
+
 def _toy_features_df() -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -61,6 +92,22 @@ def _toy_features_df() -> pd.DataFrame:
 def test_team_sums_equal_240(tmp_path: Path, model_type: str) -> None:
     model_dir = _write_toy_model_dir(tmp_path / model_type, model_type=model_type)
     df = _toy_features_df()
+
+    scored = predict_minutes(df, model_dir=model_dir, device="cpu", batch_size=2)
+    assert len(scored) == len(df)
+    assert scored["pred_minutes"].notna().all()
+
+    scored_norm = scored.assign(game_id_norm=zfill_game_id_series(scored["game_id"]))
+    sums = scored_norm.groupby(["game_id_norm", "team_id"])["pred_minutes"].sum()
+    np.testing.assert_allclose(sums.to_numpy(), np.full(len(sums), 240.0), rtol=0.0, atol=1e-4)
+
+
+@pytest.mark.parametrize("model_type", ["deepsets", "settransformer"])
+def test_player_embeddings_handle_unknown_players(tmp_path: Path, model_type: str) -> None:
+    model_dir = _write_toy_model_dir_with_player_embeddings(tmp_path / model_type, model_type=model_type)
+    df = _toy_features_df().copy()
+    # Unknown player_id should map to embedding index 0 and still score successfully.
+    df.loc[df.index[-1], "player_id"] = 999999
 
     scored = predict_minutes(df, model_dir=model_dir, device="cpu", batch_size=2)
     assert len(scored) == len(df)
@@ -96,6 +143,52 @@ def test_is_out_rows_receive_zero_minutes(tmp_path: Path, model_type: str) -> No
     scored_norm = scored.assign(game_id_norm=zfill_game_id_series(scored["game_id"]))
     sums = scored_norm.groupby(["game_id_norm", "team_id"])["pred_minutes"].sum()
     np.testing.assert_allclose(sums.to_numpy(), np.full(len(sums), 240.0), rtol=0.0, atol=1e-4)
+
+
+def test_alloc_mask_mode_not_out_keeps_all_non_out_players(tmp_path: Path) -> None:
+    model_dir = _write_toy_model_dir(tmp_path, model_type="deepsets")
+    df = _toy_features_df().copy()
+    # Force strict mode to keep only one player by setting very strict eligibility
+    # thresholds and a low min_eligible.
+    df["is_out"] = 0
+    df["is_confirmed_starter"] = 0
+    df["is_projected_starter"] = 0
+    df["prior_play_prob"] = 0.0
+    df["minutes_p50"] = 0.0
+
+    strict = predict_minutes(
+        df,
+        model_dir=model_dir,
+        device="cpu",
+        batch_size=2,
+        alloc_mask_mode="strict",
+        alloc_min_eligible=1,
+        alloc_prior_play_prob_threshold=0.95,
+        alloc_baseline_minutes_threshold=99.0,
+    )
+    not_out = predict_minutes(
+        df,
+        model_dir=model_dir,
+        device="cpu",
+        batch_size=2,
+        alloc_mask_mode="not_out",
+        alloc_min_eligible=1,
+        alloc_prior_play_prob_threshold=0.95,
+        alloc_baseline_minutes_threshold=99.0,
+    )
+
+    strict_pos = strict.assign(pos=strict["pred_minutes"] > 0).groupby(["game_id", "team_id"])["pos"].sum()
+    not_out_pos = not_out.assign(pos=not_out["pred_minutes"] > 0).groupby(["game_id", "team_id"])["pos"].sum()
+
+    assert strict_pos.min() == 1
+    assert not_out_pos.min() >= 3
+
+
+def test_alloc_mask_mode_validation(tmp_path: Path) -> None:
+    model_dir = _write_toy_model_dir(tmp_path, model_type="deepsets")
+    df = _toy_features_df()
+    with pytest.raises(ValueError, match="alloc_mask_mode must be one of"):
+        predict_minutes(df, model_dir=model_dir, alloc_mask_mode="invalid_mode")
 
 
 def test_minutes_from_logits_softplus_matches_legacy_mapping() -> None:

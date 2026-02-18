@@ -203,6 +203,34 @@ def _load_table(default_dir: Path, override: Path | None) -> pd.DataFrame:
     return _read_parquet_tree(target)
 
 
+def _load_injuries_bronze_window(
+    *,
+    data_root: Path,
+    season_value: int,
+    target_day: pd.Timestamp,
+    days_before: int = 1,
+    days_after: int = 1,
+) -> pd.DataFrame:
+    """Load bronze injuries_raw across a small day window around the target slate date."""
+    frames: list[pd.DataFrame] = []
+    for offset in range(-days_before, days_after + 1):
+        day = (target_day + pd.Timedelta(days=offset)).date()
+        day_frame = bronze_storage.read_bronze_day(
+            "injuries_raw",
+            data_root,
+            season_value,
+            day,
+            include_runs=False,
+            prefer_history=True,
+        )
+        if day_frame.empty:
+            continue
+        frames.append(day_frame)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
 def _filter_by_game_ids(df: pd.DataFrame, game_ids: Iterable[int]) -> pd.DataFrame:
     if df.empty or "game_id" not in df.columns:
         return df.copy()
@@ -360,57 +388,78 @@ def _load_team_context_from_rates_training_base(
     if not team_ids:
         return pd.DataFrame(columns=["team_id", *TEAM_CONTEXT_COLUMNS])
 
-    root = data_root / "gold" / "rates_training_base" / f"season={season_value}"
-    if not root.exists():
-        warnings.append(f"team-context: missing rates_training_base root at {root}")
-        return pd.DataFrame(columns=["team_id", *TEAM_CONTEXT_COLUMNS])
-
-    candidates: list[tuple[pd.Timestamp, Path]] = []
-    for day_dir in root.glob("game_date=*"):
-        try:
-            day_value = pd.Timestamp(day_dir.name.split("=", 1)[1]).normalize()
-        except Exception:  # noqa: BLE001
-            continue
-        if day_value >= target_day:
-            continue
-        pq_path = day_dir / RATES_TRAINING_BASE_FILENAME
-        if pq_path.exists():
-            candidates.append((day_value, pq_path))
-
-    if not candidates:
-        warnings.append("team-context: no prior rates_training_base partitions available")
-        return pd.DataFrame(columns=["team_id", *TEAM_CONTEXT_COLUMNS])
-
-    candidates.sort(key=lambda pair: pair[0], reverse=True)
     remaining = set(team_ids)
     frames: list[pd.DataFrame] = []
+    any_candidates = False
 
-    for idx, (_day, pq_path) in enumerate(candidates):
-        if not remaining or idx >= max_days_back:
-            break
-        try:
-            df = pd.read_parquet(pq_path, columns=["team_id", *TEAM_CONTEXT_COLUMNS])
-        except Exception:  # noqa: BLE001
-            continue
+    def _scan_season(season: int, horizon_days: int) -> None:
+        nonlocal any_candidates, remaining, frames
+        if not remaining:
+            return
+        root = data_root / "gold" / "rates_training_base" / f"season={season}"
+        if not root.exists():
+            return
 
-        if df.empty:
-            continue
-        df["team_id"] = pd.to_numeric(df["team_id"], errors="coerce").astype("Int64")
-        df = df.dropna(subset=["team_id"])
-        if df.empty:
-            continue
-        df = df.loc[df["team_id"].astype(int).isin(remaining)].copy()
-        if df.empty:
-            continue
+        candidates: list[tuple[pd.Timestamp, Path]] = []
+        for day_dir in root.glob("game_date=*"):
+            try:
+                day_value = pd.Timestamp(day_dir.name.split("=", 1)[1]).normalize()
+            except Exception:  # noqa: BLE001
+                continue
+            if day_value >= target_day:
+                continue
+            pq_path = day_dir / RATES_TRAINING_BASE_FILENAME
+            if pq_path.exists():
+                candidates.append((day_value, pq_path))
 
-        grouped = df.groupby("team_id", as_index=False)[list(TEAM_CONTEXT_COLUMNS)].mean()
-        frames.append(grouped)
-        found = set(grouped["team_id"].dropna().astype(int).tolist())
-        remaining -= found
+        if not candidates:
+            return
+        any_candidates = True
+        candidates.sort(key=lambda pair: pair[0], reverse=True)
+
+        for idx, (_day, pq_path) in enumerate(candidates):
+            if not remaining:
+                break
+            if horizon_days > 0 and idx >= int(horizon_days):
+                break
+            try:
+                df = pd.read_parquet(pq_path, columns=["team_id", *TEAM_CONTEXT_COLUMNS])
+            except Exception:  # noqa: BLE001
+                continue
+
+            if df.empty:
+                continue
+            df["team_id"] = pd.to_numeric(df["team_id"], errors="coerce").astype("Int64")
+            df = df.dropna(subset=["team_id"])
+            if df.empty:
+                continue
+            df = df.loc[df["team_id"].astype(int).isin(remaining)].copy()
+            if df.empty:
+                continue
+
+            grouped = df.groupby("team_id", as_index=False)[list(TEAM_CONTEXT_COLUMNS)].mean()
+            frames.append(grouped)
+            found = set(grouped["team_id"].dropna().astype(int).tolist())
+            remaining -= found
+
+    # Primary scan: current season, bounded by max_days_back.
+    _scan_season(int(season_value), int(max_days_back))
+    # Fallback scan: prior season for still-missing teams (use full history).
+    if remaining:
+        _scan_season(int(season_value) - 1, 0)
+
+    if not any_candidates:
+        warnings.append("team-context: no prior rates_training_base partitions available")
+        return pd.DataFrame(columns=["team_id", *TEAM_CONTEXT_COLUMNS])
 
     if not frames:
         warnings.append("team-context: failed to load any usable rates_training_base partitions")
         return pd.DataFrame(columns=["team_id", *TEAM_CONTEXT_COLUMNS])
+
+    if remaining:
+        warnings.append(
+            f"team-context: partial coverage; missing {len(remaining)} team(s) after lookback/fallback."
+        )
 
     combined = pd.concat(frames, ignore_index=True)
     combined = combined.dropna(subset=["team_id"]).drop_duplicates(subset=["team_id"], keep="first")
@@ -599,8 +648,20 @@ def _load_label_history(
             "using starter flags from the label source as-is.",
             err=True,
         )
-    # If history still empty, bail explicitly to avoid silent flat features.
+    # If history is empty, this can legitimately happen on the first slate date of a season.
+    # In that case, continue with an empty history so live features can still be built.
+    #
+    # We still fail closed when labels exist prior to target_day but filtering removed them,
+    # to avoid silently flattening history-driven features mid-season.
     if history.empty:
+        min_day = labels["game_date"].min() if "game_date" in labels.columns else None
+        if min_day is None or pd.isna(min_day) or pd.Timestamp(min_day) >= target_day:
+            typer.echo(
+                f"[minutes-live] warning: no historical label rows found before {target_day.date()} "
+                f"(labels={label_source}); continuing with empty history.",
+                err=True,
+            )
+            return history
         raise RuntimeError(
             f"No historical label rows found before {target_day.date()} (labels={label_source})."
         )
@@ -635,11 +696,13 @@ def _build_live_labels(
         group_cols=("game_id", "team_id"),
     )
     if starter_result.overflow:
-        for game_id, team_id, count in starter_result.overflow:
-            typer.echo(
-                f"[live] warning: derived {count} starters for game {game_id} team {team_id}; expected <=5.",
-                err=True,
-            )
+        sample = starter_result.overflow[:10]
+        warnings_msg = (
+            "Starter overflow detected while building live labels "
+            f"(game/team requested starters > 5). sample={sample}. "
+            "Applying capped top-5 selection."
+        )
+        typer.echo(f"[minutes-live] WARNING: {warnings_msg}", err=True)
     starter_series = starter_result.values.reindex(working.index).fillna(0).astype("Int64")
     timestamp = pd.Timestamp.now(tz=UTC)
 
@@ -730,15 +793,24 @@ def _filter_snapshot_by_asof(
     working["game_id"] = pd.to_numeric(working["game_id"], errors="coerce").astype("Int64")
     working[time_col] = pd.to_datetime(working[time_col], utc=True, errors="coerce")
 
-    # Backfill mode: skip timestamp filtering entirely, just use latest snapshot per game/player
+    # Backfill mode: ignore run_as_of ceiling, but still enforce anti-leak via tip_ts cutoff.
     if backfill_mode:
+        tip_ts = working["game_id"].map(tip_lookup)
+        limit_ts = tip_ts.fillna(run_as_of_ts)
+        allowed = working[time_col].isna() | (working[time_col] <= limit_ts)
+        filtered = working.loc[allowed].copy()
+        dropped = len(working) - len(filtered)
+        if dropped > 0:
+            warnings.append(
+                f"[backfill-mode] {dataset_name}: dropped {dropped} rows with snapshot_ts after tip_ts."
+            )
         group_cols = ["game_id", "player_id"] if "player_id" in working.columns else ["game_id"]
         latest = (
-            working.sort_values(time_col)
+            filtered.sort_values(time_col)
             .groupby(group_cols, as_index=False)
             .tail(1)
         )
-        warnings.append(f"[backfill-mode] {dataset_name}: using latest snapshot per game (no timestamp filtering).")
+        warnings.append(f"[backfill-mode] {dataset_name}: using tip-relative latest snapshot per game.")
         return latest
 
     # For roster, keep the latest snapshot per player/game, but respect run/tip cutoffs.
@@ -1054,21 +1126,24 @@ def _build_minutes_live_logic(
     schedule_df = _load_table(schedule_default, schedule_path)
     
     # Prefer bronze injuries_raw for live builds as well so we retain multiple snapshots per day.
-    # This prevents situations where the silver injuries_snapshot only contains a late refresh
-    # (after tip) and gets fully filtered out by the anti-leak guard for early games.
+    # Read a small day window to capture the latest pre-tip update per game/player even when
+    # ingestion/report dates and game tips cross midnight/timezone boundaries.
     if injuries_path is None:
-        injuries_df = bronze_storage.read_bronze_day(
-            "injuries_raw",
-            data_root,
-            season_value,
-            target_day.date(),
-            include_runs=False,
-            prefer_history=True,
+        injuries_df = _load_injuries_bronze_window(
+            data_root=data_root,
+            season_value=season_value,
+            target_day=target_day,
+            days_before=1,
+            days_after=1,
         )
         injuries_source = "bronze"
         if not injuries_df.empty:
             tag = "[backfill-mode]" if backfill_mode else "[live]"
-            warnings.append(f"{tag} Loaded injuries_raw from bronze day={target_day.date().isoformat()}.")
+            warnings.append(
+                f"{tag} Loaded injuries_raw from bronze day-window "
+                f"{(target_day - pd.Timedelta(days=1)).date().isoformat()}.."
+                f"{(target_day + pd.Timedelta(days=1)).date().isoformat()}."
+            )
         else:
             # Fall back to silver if bronze partitions are missing (keeps pipeline unblocked).
             injuries_df = _load_table(injuries_default, injuries_path)
@@ -1083,75 +1158,35 @@ def _build_minutes_live_logic(
 
     odds_df = _load_table(odds_default, odds_path)
     roster_df = _load_table(roster_default, roster_path)
-    
-    # Load ESPN injuries (partitioned by date) and merge
-    if injuries_path is None:  # Optional: only merge ESPN if not overriding injuries path? Or always? Always is safer for live.
-        espn_injuries_path = data_root / "silver" / "espn_injuries" / f"date={target_day.date()}" / "injuries.parquet"
-        if espn_injuries_path.exists():
-            espn_df = pd.read_parquet(espn_injuries_path)
-            if not espn_df.empty:
-                typer.echo(f"[minutes-live] Loaded {len(espn_df)} rows from ESPN injuries.")
-                
-                if "nba_team_id" in espn_df.columns:
-                    espn_df.rename(columns={"nba_team_id": "team_id"}, inplace=True)
-                
-                if not roster_df.empty and "player_id" not in espn_df.columns:
-                     roster_map = roster_df[["player_name", "team_id", "player_id", "game_id"]].drop_duplicates()
-                     espn_df["team_id"] = pd.to_numeric(espn_df["team_id"], errors="coerce").astype("Int64")
-                     roster_map["team_id"] = pd.to_numeric(roster_map["team_id"], errors="coerce").astype("Int64")
-                     
-                     espn_mapped = espn_df.merge(roster_map, on=["player_name", "team_id"], how="inner", suffixes=("", "_roster"))
-                     
-                     if not espn_mapped.empty:
-                         espn_mapped["player_id"] = espn_mapped["player_id"].astype("Int64")
-                         espn_mapped["game_id"] = espn_mapped["game_id"].astype("Int64")
-                         espn_mapped["as_of_ts"] = pd.to_datetime(espn_mapped["as_of_ts"], utc=True)
 
-                         # Prefer NBA.com injury rows when both sources report the same player/game.
-                         existing_keys = None
-                         if not injuries_df.empty and {"game_id", "player_id"}.issubset(injuries_df.columns):
-                             existing = injuries_df.copy()
-                             if "source" in existing.columns:
-                                 existing = existing[
-                                     existing["source"].astype(str).str.lower() != "espn"
-                                 ]
-                             existing = existing.dropna(subset=["game_id", "player_id"])
-                             if not existing.empty:
-                                 existing_keys = existing[["game_id", "player_id"]].drop_duplicates()
-                         if existing_keys is not None and not existing_keys.empty:
-                             before = len(espn_mapped)
-                             espn_mapped = espn_mapped.merge(
-                                 existing_keys.assign(_has_nba=1),
-                                 on=["game_id", "player_id"],
-                                 how="left",
-                             )
-                             espn_mapped = espn_mapped[espn_mapped["_has_nba"].isna()].drop(columns=["_has_nba"])
-                             dropped = before - len(espn_mapped)
-                             if dropped > 0:
-                                 typer.echo(
-                                     f"[minutes-live] Skipping {dropped} ESPN injuries already present in NBA.com reports."
-                                 )
-                         
-                         cols_to_keep = ["game_id", "player_id", "team_id", "status", "as_of_ts"]
-                         subset = espn_mapped[cols_to_keep].copy()
-                         
-                         injuries_df = pd.concat([injuries_df, subset], ignore_index=True)
-                         typer.echo(f"[minutes-live] Successfully mapped and merged {len(subset)} ESPN injury rows.")
-                     else:
-                         typer.echo("[minutes-live] Warning: ESPN rows loaded but failed to map to roster (name/team mismatch).")
+    slate_game_ids: set[int] = set()
+    if {"game_id", "game_date"}.issubset(schedule_df.columns):
+        schedule_days = pd.to_datetime(schedule_df["game_date"], errors="coerce").dt.normalize()
+        slate_rows = schedule_df.loc[schedule_days == target_day, ["game_id"]].copy()
+        if not slate_rows.empty:
+            slate_game_ids = set(
+                pd.to_numeric(slate_rows["game_id"], errors="coerce").dropna().astype(int).tolist()
+            )
 
-    # Drop NBA.com lineup signals; Rotowire is the single source of truth for starters.
+    # Live mode: drop NBA.com lineup signals and let Rotowire provide starter truth.
+    # Backfill mode: preserve historical lineup fields from roster_nightly as fallback,
+    # because Rotowire partitions are often unavailable historically.
     if not roster_df.empty:
         roster_df = roster_df.copy()
-        for column in ("lineup_role", "lineup_status", "lineup_roster_status"):
-            if column in roster_df.columns:
-                roster_df[column] = pd.NA
-        if "lineup_timestamp" in roster_df.columns:
-            roster_df["lineup_timestamp"] = pd.NaT
-        if "is_projected_starter" in roster_df.columns:
-            roster_df["is_projected_starter"] = False
-        if "is_confirmed_starter" in roster_df.columns:
-            roster_df["is_confirmed_starter"] = False
+        if not backfill_mode:
+            for column in ("lineup_role", "lineup_status", "lineup_roster_status"):
+                if column in roster_df.columns:
+                    roster_df[column] = pd.NA
+            if "lineup_timestamp" in roster_df.columns:
+                roster_df["lineup_timestamp"] = pd.NaT
+            if "is_projected_starter" in roster_df.columns:
+                roster_df["is_projected_starter"] = False
+            if "is_confirmed_starter" in roster_df.columns:
+                roster_df["is_confirmed_starter"] = False
+        else:
+            typer.echo(
+                "[minutes-live] Backfill mode: preserving roster_nightly lineup/starter fields when Rotowire is missing."
+            )
 
     # Load Rotowire lineups for starter updates (both projected and confirmed)
     # Rotowire is prioritized over NBA.com because it typically updates faster
@@ -1192,10 +1227,17 @@ def _build_minutes_live_logic(
                         name_normalized = roster_df["player_name"].map(_normalize_name_for_matching)
                         all_starter_names = rotowire_confirmed_names | rotowire_projected_names
                         rotowire_match = name_normalized.isin(all_starter_names)
+                        slate_mask = pd.Series(True, index=roster_df.index, dtype=bool)
+                        if slate_game_ids and "game_id" in roster_df.columns:
+                            roster_game_ids = pd.to_numeric(roster_df["game_id"], errors="coerce").astype("Int64")
+                            slate_mask = roster_game_ids.isin(list(slate_game_ids)).fillna(False)
+                        elif "game_date" in roster_df.columns:
+                            roster_days = pd.to_datetime(roster_df["game_date"], errors="coerce").dt.normalize()
+                            slate_mask = (roster_days == target_day).fillna(False)
 
                         # Avoid conflicts: do not mark players as starters if our other feeds already
                         # consider them inactive/out for the slate.
-                        eligible = rotowire_match.copy()
+                        eligible = rotowire_match & slate_mask
                         if "active_flag" in roster_df.columns:
                             eligible = eligible & roster_df["active_flag"].fillna(False).astype(bool)
                         if "lineup_role" in roster_df.columns:
@@ -1237,6 +1279,61 @@ def _build_minutes_live_logic(
         except Exception as exc:
             warnings.append(f"Failed to load Rotowire lineups: {exc}")
             typer.echo(f"[minutes-live] Warning: Failed to load Rotowire lineups: {exc}")
+
+    # Enforce <=5 starters per game/team in roster rows used for the current slate.
+    if not roster_df.empty and {"game_id", "team_id", "is_projected_starter", "is_confirmed_starter"}.issubset(roster_df.columns):
+        roster_df = roster_df.copy()
+        roster_game_ids = pd.to_numeric(roster_df["game_id"], errors="coerce").astype("Int64")
+        if slate_game_ids:
+            starter_scope = roster_game_ids.isin(list(slate_game_ids)).fillna(False)
+        elif "game_date" in roster_df.columns:
+            roster_days = pd.to_datetime(roster_df["game_date"], errors="coerce").dt.normalize()
+            starter_scope = (roster_days == target_day).fillna(False)
+        else:
+            starter_scope = pd.Series(False, index=roster_df.index, dtype=bool)
+
+        scoped = roster_df.loc[starter_scope].copy()
+        if not scoped.empty:
+            # Deduplicate roster snapshots so overflow diagnostics reflect player counts,
+            # not raw polling rows.
+            if "as_of_ts" in scoped.columns:
+                scoped["as_of_ts"] = pd.to_datetime(scoped["as_of_ts"], utc=True, errors="coerce")
+                scoped = scoped.sort_values(["game_id", "team_id", "player_id", "as_of_ts"], kind="mergesort")
+            else:
+                scoped = scoped.sort_values(["game_id", "team_id", "player_id"], kind="mergesort")
+            scoped = scoped.drop_duplicates(subset=["game_id", "team_id", "player_id"], keep="last")
+
+            scoped = normalize_starter_signals(scoped)
+            cap_result = derive_starter_flag_label(
+                scoped,
+                prefer_sources=("is_confirmed_starter", "is_projected_starter"),
+                group_cols=("game_id", "team_id"),
+                max_starters=5,
+            )
+            keep = cap_result.values.reindex(scoped.index).fillna(0).astype("Int64").eq(1)
+            confirmed_prev = scoped["is_confirmed_starter"].astype("boolean", copy=False).fillna(False)
+            projected_new = keep.astype(bool)
+            confirmed_new = (keep & confirmed_prev).astype(bool)
+
+            roster_df.loc[scoped.index, "is_projected_starter"] = projected_new.values
+            roster_df.loc[scoped.index, "is_confirmed_starter"] = confirmed_new.values
+            if "lineup_role" in roster_df.columns:
+                role = pd.Series(pd.NA, index=scoped.index, dtype="object")
+                role.loc[projected_new] = "projected_starter"
+                role.loc[confirmed_new] = "confirmed_starter"
+                roster_df.loc[scoped.index, "lineup_role"] = role.values
+
+            if cap_result.overflow:
+                sample = cap_result.overflow[:10]
+                warnings.append(
+                    "Starter overflow detected before live-label creation "
+                    f"(requested starters > 5). sample={sample}. Applying capped top-5 selection."
+                )
+                typer.echo(
+                    "[minutes-live] WARNING: Starter overflow detected before live-label creation "
+                    f"(requested starters > 5). sample={sample}. Applying capped top-5 selection.",
+                    err=True,
+                )
 
     roster_slice, roster_source_day, roster_snapshot_ts = _select_roster_slice(
         roster_df,
@@ -1308,9 +1405,7 @@ def _build_minutes_live_logic(
     if injuries_slice.empty:
         latest_inj_ts = pd.to_datetime(injuries_df.get("as_of_ts"), utc=True, errors="coerce")
         latest_ts_str = latest_inj_ts.max().isoformat() if not latest_inj_ts.dropna().empty else "NA"
-        # For live mode, score_minutes_v1 uses ESPN injuries directly, so we can continue
-        # with a warning instead of failing. Vacancy features will be impacted but basic
-        # scoring will work.
+        # Continue with warning (vacancy-sensitive features may degrade for this slate).
         warn_msg = (
             f"Injury snapshot is empty after as-of filtering. "
             f"run_as_of_ts={run_ts.isoformat()} latest_injury_as_of_ts={latest_ts_str}. "
@@ -1659,12 +1754,16 @@ def _build_minutes_live_logic(
         pd.to_numeric(live_slice["opponent_team_id"], errors="coerce").dropna().astype(int).tolist()
     )
     context_team_ids = team_ids | opponent_ids
+    # Backfills can hit sparse rates_training_base coverage for late-season slates.
+    # Use a longer lookback horizon there to avoid collapsing context to means.
+    team_context_max_days_back = 180 if backfill_mode else 14
     team_context = _load_team_context_from_rates_training_base(
         data_root=data_root,
         season_value=season_value,
         target_day=target_day,
         team_ids=context_team_ids,
         warnings=warnings,
+        max_days_back=team_context_max_days_back,
     )
     if not team_context.empty:
         live_slice = live_slice.merge(

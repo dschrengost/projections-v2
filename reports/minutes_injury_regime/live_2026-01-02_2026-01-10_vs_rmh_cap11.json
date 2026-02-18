@@ -1,0 +1,4166 @@
+{
+  "candidate_coverage": {
+    "found_date_runs": 44,
+    "missing_date_runs": [],
+    "required_date_runs": 44
+  },
+  "catastrophic": {
+    "ghost_actual_max": 0.0,
+    "ghost_pred_min": 15.0,
+    "missed_actual_min": 15.0,
+    "missed_pred_max": 5.0,
+    "top_n": 25
+  },
+  "injury_regime": {
+    "lookback_days": 30,
+    "min_starters_out": 1,
+    "min_team_out": 2
+  },
+  "models": {
+    "baseline_top8": {
+      "all_games": {
+        "bench_core_bias": -0.7564064278972873,
+        "bench_core_mae": 9.545018639939936,
+        "bench_core_player_rows": 329,
+        "bench_core_team_games": 140,
+        "bench_gini_mae": 0.1202802461527602,
+        "bench_hhi_mae": 0.12489616241092925,
+        "bench_max_bias": -0.025257161515134324,
+        "bench_max_mae": 9.237509343151535,
+        "catastrophic": {
+          "config": {
+            "actual_col": "minutes",
+            "ghost_actual_max": 0.0,
+            "ghost_pred_min": 15.0,
+            "missed_actual_min": 15.0,
+            "missed_pred_max": 5.0,
+            "pred_col": "_pred_baseline",
+            "top_n": 25
+          },
+          "ghost_dnp": {
+            "n_ghost": 15,
+            "n_pred_ge": 1053,
+            "rate": 0.014245014245014245,
+            "top": [
+              {
+                "_pred_baseline": 42.74233028807638,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 0.0,
+                "player_id": 1626157,
+                "player_name": "Karl-Anthony Towns",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_baseline": 38.68396743264619,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500523,
+                "minutes": 0.0,
+                "player_id": 2544,
+                "player_name": "LeBron James",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612747,
+                "team_tricode": "LAL"
+              },
+              {
+                "_pred_baseline": 32.54575043940817,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500535,
+                "minutes": 0.0,
+                "player_id": 1630533,
+                "player_name": "Ziaire Williams",
+                "run_id": "20260110T002459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_baseline": 27.629434371743816,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 0.0,
+                "player_id": 1629004,
+                "player_name": "Svi Mykhailiuk",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 24.329134958039713,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500531,
+                "minutes": 0.0,
+                "player_id": 1629004,
+                "player_name": "Svi Mykhailiuk",
+                "run_id": "20260109T015500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 21.751398745001552,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 0.0,
+                "player_id": 1629611,
+                "player_name": "Terance Mann",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_baseline": 20.65190285148386,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500526,
+                "minutes": 0.0,
+                "player_id": 1630311,
+                "player_name": "Pat Spencer",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_baseline": 20.155092998745605,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 0.0,
+                "player_id": 1630311,
+                "player_name": "Pat Spencer",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_baseline": 19.654643170263316,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500532,
+                "minutes": 0.0,
+                "player_id": 1630534,
+                "player_name": "Ochai Agbaji",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612761,
+                "team_tricode": "TOR"
+              },
+              {
+                "_pred_baseline": 19.63362670591151,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500539,
+                "minutes": 0.0,
+                "player_id": 1629234,
+                "player_name": "Drew Eubanks",
+                "run_id": "20260110T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_baseline": 18.646807021859768,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500489,
+                "minutes": 0.0,
+                "player_id": 1630544,
+                "player_name": "Tre Mann",
+                "run_id": "20260104T005500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_baseline": 18.410758597086257,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 0.0,
+                "player_id": 1642859,
+                "player_name": "Jase Richardson",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_baseline": 17.48093636314812,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500509,
+                "minutes": 0.0,
+                "player_id": 203937,
+                "player_name": "Kyle Anderson",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 17.086459219622128,
+                "game_date": "2026-01-06T00:00:00",
+                "game_id": 22500514,
+                "minutes": 0.0,
+                "player_id": 1626172,
+                "player_name": "Kevon Looney",
+                "run_id": "20260107T005000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_baseline": 15.511655938555446,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500544,
+                "minutes": 0.0,
+                "player_id": 1642404,
+                "player_name": "Chaz Lanier",
+                "run_id": "20260111T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612765,
+                "team_tricode": "DET"
+              }
+            ]
+          },
+          "missed_run": {
+            "n_actual_ge": 1153,
+            "n_missed": 146,
+            "rate": 0.1266261925411969,
+            "top": [
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500477,
+                "minutes": 35.15,
+                "player_id": 1642874,
+                "player_name": "Danny Wolf",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 31.305,
+                "player_id": 1642869,
+                "player_name": "Noah Penda",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500543,
+                "minutes": 29.85,
+                "player_id": 1641716,
+                "player_name": "Jarace Walker",
+                "run_id": "20260110T235500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500519,
+                "minutes": 29.476666666666667,
+                "player_id": 1642877,
+                "player_name": "Micah Peavy",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500476,
+                "minutes": 29.116666666666667,
+                "player_id": 1642844,
+                "player_name": "Dylan Harper",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612759,
+                "team_tricode": "SAS"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500536,
+                "minutes": 28.9,
+                "player_id": 1629026,
+                "player_name": "Kenrich Williams",
+                "run_id": "20260110T005459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612760,
+                "team_tricode": "OKC"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 28.85,
+                "player_id": 1641707,
+                "player_name": "Taylor Hendricks",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 28.366666666666667,
+                "player_id": 1630574,
+                "player_name": "Ariel Hukporti",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500528,
+                "minutes": 27.783333333333335,
+                "player_id": 204456,
+                "player_name": "T.J. McConnell",
+                "run_id": "20260108T235500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500544,
+                "minutes": 27.666666666666668,
+                "player_id": 1641757,
+                "player_name": "Jordan Miller",
+                "run_id": "20260111T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612746,
+                "team_tricode": "LAC"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500498,
+                "minutes": 27.65,
+                "player_id": 1641740,
+                "player_name": "Jaylen Clark",
+                "run_id": "20260104T225501Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612750,
+                "team_tricode": "MIN"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500481,
+                "minutes": 27.21,
+                "player_id": 1642883,
+                "player_name": "Sion James",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500535,
+                "minutes": 27.15,
+                "player_id": 1641757,
+                "player_name": "Jordan Miller",
+                "run_id": "20260110T002459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612746,
+                "team_tricode": "LAC"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-06T00:00:00",
+                "game_id": 22500511,
+                "minutes": 26.9,
+                "player_id": 1642869,
+                "player_name": "Noah Penda",
+                "run_id": "20260106T234500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500491,
+                "minutes": 26.818333333333335,
+                "player_id": 203991,
+                "player_name": "Clint Capela",
+                "run_id": "20260104T012501Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612745,
+                "team_tricode": "HOU"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500525,
+                "minutes": 26.666666666666668,
+                "player_id": 1642383,
+                "player_name": "Walter Clayton Jr.",
+                "run_id": "20260108T005459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500476,
+                "minutes": 26.35,
+                "player_id": 1629640,
+                "player_name": "Keldon Johnson",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612759,
+                "team_tricode": "SAS"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500524,
+                "minutes": 26.27166666666667,
+                "player_id": 1641765,
+                "player_name": "Olivier-Maxence Prosper",
+                "run_id": "20260108T005459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612763,
+                "team_tricode": "MEM"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500477,
+                "minutes": 26.266666666666666,
+                "player_id": 1642267,
+                "player_name": "Bub Carrington",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612764,
+                "team_tricode": "WAS"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500544,
+                "minutes": 26.115,
+                "player_id": 1642449,
+                "player_name": "Tolu Smith",
+                "run_id": "20260111T002500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612765,
+                "team_tricode": "DET"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500531,
+                "minutes": 26.1,
+                "player_id": 203937,
+                "player_name": "Kyle Anderson",
+                "run_id": "20260109T015500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500477,
+                "minutes": 25.716666666666665,
+                "player_id": 1642849,
+                "player_name": "Nolan Traore",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500494,
+                "minutes": 25.466666666666665,
+                "player_id": 1642450,
+                "player_name": "Daniss Jenkins",
+                "run_id": "20260104T185500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612765,
+                "team_tricode": "DET"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 25.366666666666667,
+                "player_id": 1630182,
+                "player_name": "Josh Green",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500480,
+                "minutes": 25.233333333333334,
+                "player_id": 1641783,
+                "player_name": "Tristan da Silva",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              }
+            ]
+          }
+        },
+        "n_player_rows": 2489,
+        "n_team_games": 142,
+        "player_bias": -0.051566894335074304,
+        "player_error_by_actual_minutes": {
+          "0-5": {
+            "bias": 0.3588993307278897,
+            "mae": 0.926143856275335,
+            "n": 1096
+          },
+          "15-25": {
+            "bias": -1.5319443147227751,
+            "mae": 10.204370945314405,
+            "n": 469
+          },
+          "25-38": {
+            "bias": 1.787153782859623,
+            "mae": 6.156733985695476,
+            "n": 622
+          },
+          "38+": {
+            "bias": -1.7558237519606519,
+            "mae": 3.070183573711303,
+            "n": 61
+          },
+          "5-15": {
+            "bias": -3.3515609416675156,
+            "mae": 9.983943998415615,
+            "n": 241
+          }
+        },
+        "player_error_by_starters_out": {
+          "0": {
+            "bias": -0.05232911392405058,
+            "mae": 4.857359838218635,
+            "n": 1975
+          },
+          "1": {
+            "bias": -8.198570028001156e-17,
+            "mae": 4.927424025036589,
+            "n": 390
+          },
+          "2": {
+            "bias": -2.5376526277146434e-16,
+            "mae": 4.357004420498972,
+            "n": 35
+          },
+          "3+": {
+            "bias": -0.2808988764044943,
+            "mae": 6.250872759368807,
+            "n": 89
+          }
+        },
+        "player_mae": 4.911130526535702,
+        "player_mae_by_role": {
+          "bench": 10.204808788619813,
+          "deep": 6.011296158296456,
+          "dnp": 0.5542876532448676,
+          "starter": 6.162412402056631
+        },
+        "rotation_depth_mae": 1.4507042253521127,
+        "tail_minutes_actual_mean": 9.8824882629108,
+        "tail_minutes_actual_mean_team240": 9.8824882629108,
+        "tail_minutes_bias": -0.8306803322156779,
+        "tail_minutes_bias_team240": -0.8306803322156776,
+        "tail_minutes_mae": 12.440192812893157,
+        "tail_minutes_mae_team240": 12.440192812893159,
+        "tail_minutes_pred_mean": 9.051807930695121,
+        "tail_minutes_pred_mean_team240": 9.051807930695121,
+        "team_total_minutes_actual_dev_max_abs": 25.0,
+        "team_total_minutes_actual_mean": 240.90387323943662,
+        "team_total_minutes_pred_dev_max_abs": 5.684341886080802e-14,
+        "team_total_minutes_pred_dev_mean_abs": 1.4811313365140116e-14,
+        "top2_bench_bias": -0.42298917018627347,
+        "top2_bench_mae": 9.54239262600947,
+        "top7_sum_abs_err_quantiles": {
+          "p50": 21.980372991466297,
+          "p90": 43.335483534769836
+        },
+        "top7_sum_actual_mean": 199.8850821596244,
+        "top7_sum_bias": 23.465576355712418,
+        "top7_sum_err_quantiles": {
+          "p50": 21.980372991466297,
+          "p90": 43.335483534769836
+        },
+        "top7_sum_mae": 24.23484242044764,
+        "top7_sum_pred_mean": 223.35065851533685,
+        "top9_player_mae": 7.7971514983710835,
+        "top9_player_mae_team240": 7.7971514983710835,
+        "top9_sum_actual_mean": 230.11751173708922,
+        "top9_sum_bias": 0.8306803322156779,
+        "top9_sum_bias_team240": 0.8306803322156776,
+        "top9_sum_mae": 12.440192812893157,
+        "top9_sum_mae_team240": 12.440192812893159,
+        "top9_sum_pred_mean": 230.94819206930487,
+        "top9_sum_pred_mean_team240": 230.94819206930487
+      },
+      "injury_regime": {
+        "bench_core_bias": -0.7798722709713647,
+        "bench_core_mae": 9.573335045321084,
+        "bench_core_player_rows": 326,
+        "bench_core_team_games": 139,
+        "bench_gini_mae": 0.12017529929963743,
+        "bench_hhi_mae": 0.12475633138943974,
+        "bench_max_bias": 0.007109591198930377,
+        "bench_max_mae": 9.270477712293047,
+        "catastrophic": {
+          "config": {
+            "actual_col": "minutes",
+            "ghost_actual_max": 0.0,
+            "ghost_pred_min": 15.0,
+            "missed_actual_min": 15.0,
+            "missed_pred_max": 5.0,
+            "pred_col": "_pred_baseline",
+            "top_n": 25
+          },
+          "ghost_dnp": {
+            "n_ghost": 15,
+            "n_pred_ge": 1045,
+            "rate": 0.014354066985645933,
+            "top": [
+              {
+                "_pred_baseline": 42.74233028807638,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 0.0,
+                "player_id": 1626157,
+                "player_name": "Karl-Anthony Towns",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_baseline": 38.68396743264619,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500523,
+                "minutes": 0.0,
+                "player_id": 2544,
+                "player_name": "LeBron James",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612747,
+                "team_tricode": "LAL"
+              },
+              {
+                "_pred_baseline": 32.54575043940817,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500535,
+                "minutes": 0.0,
+                "player_id": 1630533,
+                "player_name": "Ziaire Williams",
+                "run_id": "20260110T002459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_baseline": 27.629434371743816,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 0.0,
+                "player_id": 1629004,
+                "player_name": "Svi Mykhailiuk",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 24.329134958039713,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500531,
+                "minutes": 0.0,
+                "player_id": 1629004,
+                "player_name": "Svi Mykhailiuk",
+                "run_id": "20260109T015500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 21.751398745001552,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 0.0,
+                "player_id": 1629611,
+                "player_name": "Terance Mann",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_baseline": 20.65190285148386,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500526,
+                "minutes": 0.0,
+                "player_id": 1630311,
+                "player_name": "Pat Spencer",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_baseline": 20.155092998745605,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 0.0,
+                "player_id": 1630311,
+                "player_name": "Pat Spencer",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_baseline": 19.654643170263316,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500532,
+                "minutes": 0.0,
+                "player_id": 1630534,
+                "player_name": "Ochai Agbaji",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612761,
+                "team_tricode": "TOR"
+              },
+              {
+                "_pred_baseline": 19.63362670591151,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500539,
+                "minutes": 0.0,
+                "player_id": 1629234,
+                "player_name": "Drew Eubanks",
+                "run_id": "20260110T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_baseline": 18.646807021859768,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500489,
+                "minutes": 0.0,
+                "player_id": 1630544,
+                "player_name": "Tre Mann",
+                "run_id": "20260104T005500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_baseline": 18.410758597086257,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 0.0,
+                "player_id": 1642859,
+                "player_name": "Jase Richardson",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_baseline": 17.48093636314812,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500509,
+                "minutes": 0.0,
+                "player_id": 203937,
+                "player_name": "Kyle Anderson",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 17.086459219622128,
+                "game_date": "2026-01-06T00:00:00",
+                "game_id": 22500514,
+                "minutes": 0.0,
+                "player_id": 1626172,
+                "player_name": "Kevon Looney",
+                "run_id": "20260107T005000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_baseline": 15.511655938555446,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500544,
+                "minutes": 0.0,
+                "player_id": 1642404,
+                "player_name": "Chaz Lanier",
+                "run_id": "20260111T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612765,
+                "team_tricode": "DET"
+              }
+            ]
+          },
+          "missed_run": {
+            "n_actual_ge": 1145,
+            "n_missed": 146,
+            "rate": 0.1275109170305677,
+            "top": [
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500477,
+                "minutes": 35.15,
+                "player_id": 1642874,
+                "player_name": "Danny Wolf",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 31.305,
+                "player_id": 1642869,
+                "player_name": "Noah Penda",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500543,
+                "minutes": 29.85,
+                "player_id": 1641716,
+                "player_name": "Jarace Walker",
+                "run_id": "20260110T235500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500519,
+                "minutes": 29.476666666666667,
+                "player_id": 1642877,
+                "player_name": "Micah Peavy",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500476,
+                "minutes": 29.116666666666667,
+                "player_id": 1642844,
+                "player_name": "Dylan Harper",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612759,
+                "team_tricode": "SAS"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500536,
+                "minutes": 28.9,
+                "player_id": 1629026,
+                "player_name": "Kenrich Williams",
+                "run_id": "20260110T005459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612760,
+                "team_tricode": "OKC"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 28.85,
+                "player_id": 1641707,
+                "player_name": "Taylor Hendricks",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 28.366666666666667,
+                "player_id": 1630574,
+                "player_name": "Ariel Hukporti",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500528,
+                "minutes": 27.783333333333335,
+                "player_id": 204456,
+                "player_name": "T.J. McConnell",
+                "run_id": "20260108T235500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500544,
+                "minutes": 27.666666666666668,
+                "player_id": 1641757,
+                "player_name": "Jordan Miller",
+                "run_id": "20260111T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612746,
+                "team_tricode": "LAC"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500498,
+                "minutes": 27.65,
+                "player_id": 1641740,
+                "player_name": "Jaylen Clark",
+                "run_id": "20260104T225501Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612750,
+                "team_tricode": "MIN"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500481,
+                "minutes": 27.21,
+                "player_id": 1642883,
+                "player_name": "Sion James",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500535,
+                "minutes": 27.15,
+                "player_id": 1641757,
+                "player_name": "Jordan Miller",
+                "run_id": "20260110T002459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612746,
+                "team_tricode": "LAC"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-06T00:00:00",
+                "game_id": 22500511,
+                "minutes": 26.9,
+                "player_id": 1642869,
+                "player_name": "Noah Penda",
+                "run_id": "20260106T234500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500491,
+                "minutes": 26.818333333333335,
+                "player_id": 203991,
+                "player_name": "Clint Capela",
+                "run_id": "20260104T012501Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612745,
+                "team_tricode": "HOU"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500525,
+                "minutes": 26.666666666666668,
+                "player_id": 1642383,
+                "player_name": "Walter Clayton Jr.",
+                "run_id": "20260108T005459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500476,
+                "minutes": 26.35,
+                "player_id": 1629640,
+                "player_name": "Keldon Johnson",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612759,
+                "team_tricode": "SAS"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500524,
+                "minutes": 26.27166666666667,
+                "player_id": 1641765,
+                "player_name": "Olivier-Maxence Prosper",
+                "run_id": "20260108T005459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612763,
+                "team_tricode": "MEM"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500477,
+                "minutes": 26.266666666666666,
+                "player_id": 1642267,
+                "player_name": "Bub Carrington",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612764,
+                "team_tricode": "WAS"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500544,
+                "minutes": 26.115,
+                "player_id": 1642449,
+                "player_name": "Tolu Smith",
+                "run_id": "20260111T002500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612765,
+                "team_tricode": "DET"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500531,
+                "minutes": 26.1,
+                "player_id": 203937,
+                "player_name": "Kyle Anderson",
+                "run_id": "20260109T015500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500477,
+                "minutes": 25.716666666666665,
+                "player_id": 1642849,
+                "player_name": "Nolan Traore",
+                "run_id": "20260102T235500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500494,
+                "minutes": 25.466666666666665,
+                "player_id": 1642450,
+                "player_name": "Daniss Jenkins",
+                "run_id": "20260104T185500Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612765,
+                "team_tricode": "DET"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 25.366666666666667,
+                "player_id": 1630182,
+                "player_name": "Josh Green",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_baseline": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500480,
+                "minutes": 25.233333333333334,
+                "player_id": 1641783,
+                "player_name": "Tristan da Silva",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              }
+            ]
+          }
+        },
+        "n_player_rows": 2472,
+        "n_team_games": 141,
+        "player_bias": -0.05192152103559868,
+        "player_error_by_actual_minutes": {
+          "0-5": {
+            "bias": 0.3612063053055713,
+            "mae": 0.9320970307417513,
+            "n": 1089
+          },
+          "15-25": {
+            "bias": -1.5765223147791179,
+            "mae": 10.240726673091322,
+            "n": 465
+          },
+          "25-38": {
+            "bias": 1.7851871289741001,
+            "mae": 6.168833009148687,
+            "n": 618
+          },
+          "38+": {
+            "bias": -1.7558237519606519,
+            "mae": 3.070183573711303,
+            "n": 61
+          },
+          "5-15": {
+            "bias": -3.283519610635445,
+            "mae": 9.971403780829135,
+            "n": 239
+          }
+        },
+        "player_error_by_starters_out": {
+          "0": {
+            "bias": -0.05278345250255358,
+            "mae": 4.866832926796791,
+            "n": 1958
+          },
+          "1": {
+            "bias": -8.198570028001156e-17,
+            "mae": 4.927424025036589,
+            "n": 390
+          },
+          "2": {
+            "bias": -2.5376526277146434e-16,
+            "mae": 4.357004420498972,
+            "n": 35
+          },
+          "3+": {
+            "bias": -0.2808988764044943,
+            "mae": 6.250872759368807,
+            "n": 89
+          }
+        },
+        "player_mae": 4.919003669390645,
+        "player_mae_by_role": {
+          "bench": 10.22374964708055,
+          "deep": 6.011296158296456,
+          "dnp": 0.5582712400751695,
+          "starter": 6.171742000740995
+        },
+        "rotation_depth_mae": 1.446808510638298,
+        "tail_minutes_actual_mean": 9.877056737588653,
+        "tail_minutes_actual_mean_team240": 9.877056737588653,
+        "tail_minutes_bias": -0.7610515875269004,
+        "tail_minutes_bias_team240": -0.7610515875269,
+        "tail_minutes_mae": 12.452901036152445,
+        "tail_minutes_mae_team240": 12.452901036152447,
+        "tail_minutes_pred_mean": 9.116005150061754,
+        "tail_minutes_pred_mean_team240": 9.116005150061753,
+        "team_total_minutes_actual_dev_max_abs": 25.0,
+        "team_total_minutes_actual_mean": 240.91028368794326,
+        "team_total_minutes_pred_dev_max_abs": 5.684341886080802e-14,
+        "team_total_minutes_pred_dev_mean_abs": 1.4916358140779408e-14,
+        "top2_bench_bias": -0.45287776991398315,
+        "top2_bench_mae": 9.55063461140231,
+        "top7_sum_abs_err_quantiles": {
+          "p50": 21.909499100336916,
+          "p90": 43.55160570321979
+        },
+        "top7_sum_actual_mean": 199.89390070921988,
+        "top7_sum_bias": 23.468654418485954,
+        "top7_sum_err_quantiles": {
+          "p50": 21.909499100336916,
+          "p90": 43.55160570321979
+        },
+        "top7_sum_mae": 24.24337627091434,
+        "top7_sum_pred_mean": 223.36255512770583,
+        "top9_player_mae": 7.810387027925839,
+        "top9_player_mae_team240": 7.810387027925841,
+        "top9_sum_actual_mean": 230.12294326241135,
+        "top9_sum_bias": 0.7610515875269004,
+        "top9_sum_bias_team240": 0.7610515875269,
+        "top9_sum_mae": 12.452901036152445,
+        "top9_sum_mae_team240": 12.452901036152447,
+        "top9_sum_pred_mean": 230.8839948499383,
+        "top9_sum_pred_mean_team240": 230.88399484993823
+      },
+      "non_injury": {
+        "bench_core_bias": NaN,
+        "bench_core_mae": NaN,
+        "bench_core_player_rows": 0,
+        "bench_core_team_games": 0,
+        "bench_gini_mae": NaN,
+        "bench_hhi_mae": NaN,
+        "bench_max_bias": NaN,
+        "bench_max_mae": NaN,
+        "catastrophic": {
+          "ghost_dnp": {
+            "n_ghost": 0,
+            "n_pred_ge": 0,
+            "rate": null,
+            "top": []
+          },
+          "missed_run": {
+            "n_actual_ge": 0,
+            "n_missed": 0,
+            "rate": null,
+            "top": []
+          }
+        },
+        "n_player_rows": 0,
+        "n_team_games": 0,
+        "player_bias": NaN,
+        "player_error_by_actual_minutes": {
+          "0-5": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "15-25": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "25-38": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "38+": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "5-15": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          }
+        },
+        "player_error_by_starters_out": {
+          "0": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "1": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "2": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "3+": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          }
+        },
+        "player_mae": NaN,
+        "player_mae_by_role": {},
+        "rotation_depth_mae": NaN,
+        "tail_minutes_actual_mean": NaN,
+        "tail_minutes_actual_mean_team240": NaN,
+        "tail_minutes_bias": NaN,
+        "tail_minutes_bias_team240": NaN,
+        "tail_minutes_mae": NaN,
+        "tail_minutes_mae_team240": NaN,
+        "tail_minutes_pred_mean": NaN,
+        "tail_minutes_pred_mean_team240": NaN,
+        "team_total_minutes_actual_dev_max_abs": NaN,
+        "team_total_minutes_actual_mean": NaN,
+        "team_total_minutes_pred_dev_max_abs": NaN,
+        "team_total_minutes_pred_dev_mean_abs": NaN,
+        "top2_bench_bias": NaN,
+        "top2_bench_mae": NaN,
+        "top7_sum_abs_err_quantiles": {
+          "p50": NaN,
+          "p90": NaN
+        },
+        "top7_sum_actual_mean": NaN,
+        "top7_sum_bias": NaN,
+        "top7_sum_err_quantiles": {
+          "p50": NaN,
+          "p90": NaN
+        },
+        "top7_sum_mae": NaN,
+        "top7_sum_pred_mean": NaN,
+        "top9_player_mae": NaN,
+        "top9_player_mae_team240": NaN,
+        "top9_sum_actual_mean": NaN,
+        "top9_sum_bias": NaN,
+        "top9_sum_bias_team240": NaN,
+        "top9_sum_mae": NaN,
+        "top9_sum_mae_team240": NaN,
+        "top9_sum_pred_mean": NaN,
+        "top9_sum_pred_mean_team240": NaN
+      }
+    },
+    "candidate": {
+      "all_games": {
+        "bench_core_bias": -1.068449306337803,
+        "bench_core_mae": 4.556639437074338,
+        "bench_core_player_rows": 329,
+        "bench_core_team_games": 140,
+        "bench_gini_mae": 0.0719655636701725,
+        "bench_hhi_mae": 0.04242679382429183,
+        "bench_max_bias": -0.897730449152904,
+        "bench_max_mae": 4.470139743101295,
+        "catastrophic": {
+          "config": {
+            "actual_col": "minutes",
+            "ghost_actual_max": 0.0,
+            "ghost_pred_min": 15.0,
+            "missed_actual_min": 15.0,
+            "missed_pred_max": 5.0,
+            "pred_col": "_pred_minutes",
+            "top_n": 25
+          },
+          "ghost_dnp": {
+            "n_ghost": 54,
+            "n_pred_ge": 1213,
+            "rate": 0.04451772464962902,
+            "top": [
+              {
+                "_pred_minutes": 34.487065422293405,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500523,
+                "minutes": 0.0,
+                "player_id": 2544,
+                "player_name": "LeBron James",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612747,
+                "team_tricode": "LAL"
+              },
+              {
+                "_pred_minutes": 34.3386613755674,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500484,
+                "minutes": 0.0,
+                "player_id": 201939,
+                "player_name": "Stephen Curry",
+                "run_id": "20260103T025500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 32.64874546341848,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 0.0,
+                "player_id": 1626157,
+                "player_name": "Karl-Anthony Towns",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_minutes": 32.6167723389635,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500481,
+                "minutes": 0.0,
+                "player_id": 1631217,
+                "player_name": "Moussa Diabat\u00e9",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_minutes": 30.7881329549835,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500482,
+                "minutes": 0.0,
+                "player_id": 1630530,
+                "player_name": "Trey Murphy III",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_minutes": 29.731637471570206,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500501,
+                "minutes": 0.0,
+                "player_id": 1629630,
+                "player_name": "Ja Morant",
+                "run_id": "20260105T022501Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612763,
+                "team_tricode": "MEM"
+              },
+              {
+                "_pred_minutes": 28.4316254557725,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500483,
+                "minutes": 0.0,
+                "player_id": 1628960,
+                "player_name": "Grayson Allen",
+                "run_id": "20260103T015500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612756,
+                "team_tricode": "PHX"
+              },
+              {
+                "_pred_minutes": 27.51317048039768,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500516,
+                "minutes": 0.0,
+                "player_id": 1641706,
+                "player_name": "Brandon Miller",
+                "run_id": "20260107T235459Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_minutes": 27.045721454295844,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 0.0,
+                "player_id": 201935,
+                "player_name": "James Harden",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612746,
+                "team_tricode": "LAC"
+              },
+              {
+                "_pred_minutes": 26.844689557853275,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500517,
+                "minutes": 0.0,
+                "player_id": 1630595,
+                "player_name": "Cade Cunningham",
+                "run_id": "20260107T235459Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612765,
+                "team_tricode": "DET"
+              },
+              {
+                "_pred_minutes": 26.83059915826857,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500494,
+                "minutes": 0.0,
+                "player_id": 1628386,
+                "player_name": "Jarrett Allen",
+                "run_id": "20260104T185500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 25.155618764622574,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500494,
+                "minutes": 0.0,
+                "player_id": 1629731,
+                "player_name": "Dean Wade",
+                "run_id": "20260104T185500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 24.991982313102696,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500478,
+                "minutes": 0.0,
+                "player_id": 1630241,
+                "player_name": "Sam Merrill",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 23.944635719460788,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500497,
+                "minutes": 0.0,
+                "player_id": 1631170,
+                "player_name": "Jaime Jaquez Jr.",
+                "run_id": "20260104T225501Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612748,
+                "team_tricode": "MIA"
+              },
+              {
+                "_pred_minutes": 23.29495460120989,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500489,
+                "minutes": 0.0,
+                "player_id": 1642275,
+                "player_name": "Tidjane Sala\u00fcn",
+                "run_id": "20260104T005500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_minutes": 23.246816417815886,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500528,
+                "minutes": 0.0,
+                "player_id": 1629614,
+                "player_name": "Andrew Nembhard",
+                "run_id": "20260108T235500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              },
+              {
+                "_pred_minutes": 22.88027703634536,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 0.0,
+                "player_id": 1629027,
+                "player_name": "Trae Young",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612737,
+                "team_tricode": "ATL"
+              },
+              {
+                "_pred_minutes": 22.630249921749158,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500535,
+                "minutes": 0.0,
+                "player_id": 1630533,
+                "player_name": "Ziaire Williams",
+                "run_id": "20260110T002459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 22.451964278509003,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500482,
+                "minutes": 0.0,
+                "player_id": 1630180,
+                "player_name": "Saddiq Bey",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_minutes": 22.06450744216076,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500491,
+                "minutes": 0.0,
+                "player_id": 203500,
+                "player_name": "Steven Adams",
+                "run_id": "20260104T012501Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612745,
+                "team_tricode": "HOU"
+              },
+              {
+                "_pred_minutes": 21.625321846685175,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500496,
+                "minutes": 0.0,
+                "player_id": 1630592,
+                "player_name": "Jalen Wilson",
+                "run_id": "20260104T202500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 21.46092934703513,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500483,
+                "minutes": 0.0,
+                "player_id": 1628370,
+                "player_name": "Malik Monk",
+                "run_id": "20260103T015500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_minutes": 21.38261247863295,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 0.0,
+                "player_id": 203994,
+                "player_name": "Jusuf Nurki\u0107",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_minutes": 21.266291463658096,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500486,
+                "minutes": 0.0,
+                "player_id": 1641796,
+                "player_name": "Pelle Larsson",
+                "run_id": "20260103T215500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612748,
+                "team_tricode": "MIA"
+              },
+              {
+                "_pred_minutes": 20.78686566049611,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500527,
+                "minutes": 0.0,
+                "player_id": 1631200,
+                "player_name": "Kris Murray",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612757,
+                "team_tricode": "POR"
+              }
+            ]
+          },
+          "missed_run": {
+            "n_actual_ge": 1153,
+            "n_missed": 17,
+            "rate": 0.014744145706851692,
+            "top": [
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500501,
+                "minutes": 24.77,
+                "player_id": 203484,
+                "player_name": "Kentavious Caldwell-Pope",
+                "run_id": "20260105T022501Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612763,
+                "team_tricode": "MEM"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500500,
+                "minutes": 20.918333333333333,
+                "player_id": 1629234,
+                "player_name": "Drew Eubanks",
+                "run_id": "20260105T015459Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500482,
+                "minutes": 20.016666666666666,
+                "player_id": 1631255,
+                "player_name": "Karlo Matkovi\u0107",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500504,
+                "minutes": 19.97,
+                "player_id": 204001,
+                "player_name": "Kristaps Porzi\u0146\u0123is",
+                "run_id": "20260106T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612737,
+                "team_tricode": "ATL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500496,
+                "minutes": 19.473333333333333,
+                "player_id": 1630533,
+                "player_name": "Ziaire Williams",
+                "run_id": "20260104T202500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500498,
+                "minutes": 18.316666666666666,
+                "player_id": 1630557,
+                "player_name": "Corey Kispert",
+                "run_id": "20260104T225501Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612764,
+                "team_tricode": "WAS"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500523,
+                "minutes": 18.133333333333333,
+                "player_id": 1629216,
+                "player_name": "Gabe Vincent",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612747,
+                "team_tricode": "LAL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 17.266666666666666,
+                "player_id": 204001,
+                "player_name": "Kristaps Porzi\u0146\u0123is",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612737,
+                "team_tricode": "ATL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500492,
+                "minutes": 16.871666666666666,
+                "player_id": 1631218,
+                "player_name": "Trayce Jackson-Davis",
+                "run_id": "20260104T025459Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500517,
+                "minutes": 15.883333333333333,
+                "player_id": 1642950,
+                "player_name": "Lachlan Olbrich",
+                "run_id": "20260107T235459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612741,
+                "team_tricode": "CHI"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 15.688333333333333,
+                "player_id": 201143,
+                "player_name": "Al Horford",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500497,
+                "minutes": 15.565,
+                "player_id": 1631121,
+                "player_name": "Bryce McGowens",
+                "run_id": "20260104T225501Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500480,
+                "minutes": 15.471666666666668,
+                "player_id": 1631288,
+                "player_name": "Jamal Cain",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500532,
+                "minutes": 15.383333333333333,
+                "player_id": 1642918,
+                "player_name": "Alijah Martin",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612761,
+                "team_tricode": "TOR"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500494,
+                "minutes": 15.25,
+                "player_id": 1628418,
+                "player_name": "Thomas Bryant",
+                "run_id": "20260104T185500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 15.016666666666667,
+                "player_id": 1627824,
+                "player_name": "Guerschon Yabusele",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500528,
+                "minutes": 15.0,
+                "player_id": 1628396,
+                "player_name": "Tony Bradley",
+                "run_id": "20260108T235500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              }
+            ]
+          }
+        },
+        "n_player_rows": 2489,
+        "n_team_games": 142,
+        "player_bias": -0.05156689433507447,
+        "player_error_by_actual_minutes": {
+          "0-5": {
+            "bias": 2.3122580711735314,
+            "mae": 2.6338426210518766,
+            "n": 1096
+          },
+          "15-25": {
+            "bias": -0.8251289968680786,
+            "mae": 4.635110735057878,
+            "n": 469
+          },
+          "25-38": {
+            "bias": -3.666029981991682,
+            "mae": 4.71786115882648,
+            "n": 622
+          },
+          "38+": {
+            "bias": -8.558370526565437,
+            "mae": 8.558370526565437,
+            "n": 61
+          },
+          "5-15": {
+            "bias": 2.1856095620093616,
+            "mae": 6.170569570991547,
+            "n": 241
+          }
+        },
+        "player_error_by_starters_out": {
+          "0": {
+            "bias": -0.05232911392405083,
+            "mae": 3.854744845551209,
+            "n": 1975
+          },
+          "1": {
+            "bias": 8.654046140667887e-17,
+            "mae": 4.506153325424553,
+            "n": 390
+          },
+          "2": {
+            "bias": 1.5225915766287861e-16,
+            "mae": 5.532509807024542,
+            "n": 35
+          },
+          "3+": {
+            "bias": -0.2808988764044947,
+            "mae": 4.944688166398349,
+            "n": 89
+          }
+        },
+        "player_mae": 4.0193796532481025,
+        "player_mae_by_role": {
+          "bench": 4.929761117723194,
+          "deep": 6.440009105455787,
+          "dnp": 2.2305397677733687,
+          "starter": 5.042362641210175
+        },
+        "rotation_depth_mae": 1.2112676056338028,
+        "tail_minutes_actual_mean": 9.8824882629108,
+        "tail_minutes_actual_mean_team240": 9.8824882629108,
+        "tail_minutes_bias": 19.82421227341199,
+        "tail_minutes_bias_team240": 19.824212273411984,
+        "tail_minutes_mae": 21.234911530264068,
+        "tail_minutes_mae_team240": 21.234911530264064,
+        "tail_minutes_pred_mean": 29.706700536322792,
+        "tail_minutes_pred_mean_team240": 29.706700536322785,
+        "team_total_minutes_actual_dev_max_abs": 25.0,
+        "team_total_minutes_actual_mean": 240.90387323943662,
+        "team_total_minutes_pred_dev_max_abs": 8.526512829121202e-14,
+        "team_total_minutes_pred_dev_mean_abs": 1.8614218148081498e-14,
+        "top2_bench_bias": -0.9040821038214248,
+        "top2_bench_mae": 4.55851447881184,
+        "top7_sum_abs_err_quantiles": {
+          "p50": 16.457936285077565,
+          "p90": 30.90589974962703
+        },
+        "top7_sum_actual_mean": 199.8850821596244,
+        "top7_sum_bias": -13.8163154257592,
+        "top7_sum_err_quantiles": {
+          "p50": -15.559832748940309,
+          "p90": 6.866355751222585
+        },
+        "top7_sum_mae": 17.173375903370438,
+        "top7_sum_pred_mean": 186.0687667338652,
+        "top9_player_mae": 4.999986473773927,
+        "top9_player_mae_team240": 4.999986473773926,
+        "top9_sum_actual_mean": 230.11751173708922,
+        "top9_sum_bias": -19.82421227341199,
+        "top9_sum_bias_team240": -19.824212273411984,
+        "top9_sum_mae": 21.234911530264068,
+        "top9_sum_mae_team240": 21.234911530264064,
+        "top9_sum_pred_mean": 210.2932994636772,
+        "top9_sum_pred_mean_team240": 210.29329946367722
+      },
+      "injury_regime": {
+        "bench_core_bias": -1.0575929021772035,
+        "bench_core_mae": 4.527422707745037,
+        "bench_core_player_rows": 326,
+        "bench_core_team_games": 139,
+        "bench_gini_mae": 0.07222477009181898,
+        "bench_hhi_mae": 0.04265648642120755,
+        "bench_max_bias": -0.8442614504031339,
+        "bench_max_mae": 4.442006980478818,
+        "catastrophic": {
+          "config": {
+            "actual_col": "minutes",
+            "ghost_actual_max": 0.0,
+            "ghost_pred_min": 15.0,
+            "missed_actual_min": 15.0,
+            "missed_pred_max": 5.0,
+            "pred_col": "_pred_minutes",
+            "top_n": 25
+          },
+          "ghost_dnp": {
+            "n_ghost": 54,
+            "n_pred_ge": 1207,
+            "rate": 0.04473902236951118,
+            "top": [
+              {
+                "_pred_minutes": 34.487065422293405,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500523,
+                "minutes": 0.0,
+                "player_id": 2544,
+                "player_name": "LeBron James",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612747,
+                "team_tricode": "LAL"
+              },
+              {
+                "_pred_minutes": 34.3386613755674,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500484,
+                "minutes": 0.0,
+                "player_id": 201939,
+                "player_name": "Stephen Curry",
+                "run_id": "20260103T025500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 32.64874546341848,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 0.0,
+                "player_id": 1626157,
+                "player_name": "Karl-Anthony Towns",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_minutes": 32.6167723389635,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500481,
+                "minutes": 0.0,
+                "player_id": 1631217,
+                "player_name": "Moussa Diabat\u00e9",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_minutes": 30.7881329549835,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500482,
+                "minutes": 0.0,
+                "player_id": 1630530,
+                "player_name": "Trey Murphy III",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_minutes": 29.731637471570206,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500501,
+                "minutes": 0.0,
+                "player_id": 1629630,
+                "player_name": "Ja Morant",
+                "run_id": "20260105T022501Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612763,
+                "team_tricode": "MEM"
+              },
+              {
+                "_pred_minutes": 28.4316254557725,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500483,
+                "minutes": 0.0,
+                "player_id": 1628960,
+                "player_name": "Grayson Allen",
+                "run_id": "20260103T015500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612756,
+                "team_tricode": "PHX"
+              },
+              {
+                "_pred_minutes": 27.51317048039768,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500516,
+                "minutes": 0.0,
+                "player_id": 1641706,
+                "player_name": "Brandon Miller",
+                "run_id": "20260107T235459Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_minutes": 27.045721454295844,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 0.0,
+                "player_id": 201935,
+                "player_name": "James Harden",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612746,
+                "team_tricode": "LAC"
+              },
+              {
+                "_pred_minutes": 26.844689557853275,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500517,
+                "minutes": 0.0,
+                "player_id": 1630595,
+                "player_name": "Cade Cunningham",
+                "run_id": "20260107T235459Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612765,
+                "team_tricode": "DET"
+              },
+              {
+                "_pred_minutes": 26.83059915826857,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500494,
+                "minutes": 0.0,
+                "player_id": 1628386,
+                "player_name": "Jarrett Allen",
+                "run_id": "20260104T185500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 25.155618764622574,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500494,
+                "minutes": 0.0,
+                "player_id": 1629731,
+                "player_name": "Dean Wade",
+                "run_id": "20260104T185500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 24.991982313102696,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500478,
+                "minutes": 0.0,
+                "player_id": 1630241,
+                "player_name": "Sam Merrill",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 23.944635719460788,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500497,
+                "minutes": 0.0,
+                "player_id": 1631170,
+                "player_name": "Jaime Jaquez Jr.",
+                "run_id": "20260104T225501Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612748,
+                "team_tricode": "MIA"
+              },
+              {
+                "_pred_minutes": 23.29495460120989,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500489,
+                "minutes": 0.0,
+                "player_id": 1642275,
+                "player_name": "Tidjane Sala\u00fcn",
+                "run_id": "20260104T005500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_minutes": 23.246816417815886,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500528,
+                "minutes": 0.0,
+                "player_id": 1629614,
+                "player_name": "Andrew Nembhard",
+                "run_id": "20260108T235500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              },
+              {
+                "_pred_minutes": 22.88027703634536,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 0.0,
+                "player_id": 1629027,
+                "player_name": "Trae Young",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612737,
+                "team_tricode": "ATL"
+              },
+              {
+                "_pred_minutes": 22.630249921749158,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500535,
+                "minutes": 0.0,
+                "player_id": 1630533,
+                "player_name": "Ziaire Williams",
+                "run_id": "20260110T002459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 22.451964278509003,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500482,
+                "minutes": 0.0,
+                "player_id": 1630180,
+                "player_name": "Saddiq Bey",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_minutes": 22.06450744216076,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500491,
+                "minutes": 0.0,
+                "player_id": 203500,
+                "player_name": "Steven Adams",
+                "run_id": "20260104T012501Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612745,
+                "team_tricode": "HOU"
+              },
+              {
+                "_pred_minutes": 21.625321846685175,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500496,
+                "minutes": 0.0,
+                "player_id": 1630592,
+                "player_name": "Jalen Wilson",
+                "run_id": "20260104T202500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 21.46092934703513,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500483,
+                "minutes": 0.0,
+                "player_id": 1628370,
+                "player_name": "Malik Monk",
+                "run_id": "20260103T015500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_minutes": 21.38261247863295,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 0.0,
+                "player_id": 203994,
+                "player_name": "Jusuf Nurki\u0107",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_minutes": 21.266291463658096,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500486,
+                "minutes": 0.0,
+                "player_id": 1641796,
+                "player_name": "Pelle Larsson",
+                "run_id": "20260103T215500Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612748,
+                "team_tricode": "MIA"
+              },
+              {
+                "_pred_minutes": 20.78686566049611,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500527,
+                "minutes": 0.0,
+                "player_id": 1631200,
+                "player_name": "Kris Murray",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612757,
+                "team_tricode": "POR"
+              }
+            ]
+          },
+          "missed_run": {
+            "n_actual_ge": 1145,
+            "n_missed": 17,
+            "rate": 0.014847161572052401,
+            "top": [
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500501,
+                "minutes": 24.77,
+                "player_id": 203484,
+                "player_name": "Kentavious Caldwell-Pope",
+                "run_id": "20260105T022501Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612763,
+                "team_tricode": "MEM"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500500,
+                "minutes": 20.918333333333333,
+                "player_id": 1629234,
+                "player_name": "Drew Eubanks",
+                "run_id": "20260105T015459Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500482,
+                "minutes": 20.016666666666666,
+                "player_id": 1631255,
+                "player_name": "Karlo Matkovi\u0107",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500504,
+                "minutes": 19.97,
+                "player_id": 204001,
+                "player_name": "Kristaps Porzi\u0146\u0123is",
+                "run_id": "20260106T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612737,
+                "team_tricode": "ATL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500496,
+                "minutes": 19.473333333333333,
+                "player_id": 1630533,
+                "player_name": "Ziaire Williams",
+                "run_id": "20260104T202500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500498,
+                "minutes": 18.316666666666666,
+                "player_id": 1630557,
+                "player_name": "Corey Kispert",
+                "run_id": "20260104T225501Z",
+                "starter_flag_label": 1,
+                "status": "Ava",
+                "team_id": 1610612764,
+                "team_tricode": "WAS"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500523,
+                "minutes": 18.133333333333333,
+                "player_id": 1629216,
+                "player_name": "Gabe Vincent",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612747,
+                "team_tricode": "LAL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 17.266666666666666,
+                "player_id": 204001,
+                "player_name": "Kristaps Porzi\u0146\u0123is",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612737,
+                "team_tricode": "ATL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500492,
+                "minutes": 16.871666666666666,
+                "player_id": 1631218,
+                "player_name": "Trayce Jackson-Davis",
+                "run_id": "20260104T025459Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500517,
+                "minutes": 15.883333333333333,
+                "player_id": 1642950,
+                "player_name": "Lachlan Olbrich",
+                "run_id": "20260107T235459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612741,
+                "team_tricode": "CHI"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 15.688333333333333,
+                "player_id": 201143,
+                "player_name": "Al Horford",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500497,
+                "minutes": 15.565,
+                "player_id": 1631121,
+                "player_name": "Bryce McGowens",
+                "run_id": "20260104T225501Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612740,
+                "team_tricode": "NOP"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500480,
+                "minutes": 15.471666666666668,
+                "player_id": 1631288,
+                "player_name": "Jamal Cain",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500532,
+                "minutes": 15.383333333333333,
+                "player_id": 1642918,
+                "player_name": "Alijah Martin",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612761,
+                "team_tricode": "TOR"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500494,
+                "minutes": 15.25,
+                "player_id": 1628418,
+                "player_name": "Thomas Bryant",
+                "run_id": "20260104T185500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 15.016666666666667,
+                "player_id": 1627824,
+                "player_name": "Guerschon Yabusele",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500528,
+                "minutes": 15.0,
+                "player_id": 1628396,
+                "player_name": "Tony Bradley",
+                "run_id": "20260108T235500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              }
+            ]
+          }
+        },
+        "n_player_rows": 2472,
+        "n_team_games": 141,
+        "player_bias": -0.05192152103559886,
+        "player_error_by_actual_minutes": {
+          "0-5": {
+            "bias": 2.3178394416830694,
+            "mae": 2.6414911098801928,
+            "n": 1089
+          },
+          "15-25": {
+            "bias": -0.8202408317364336,
+            "mae": 4.614741257247971,
+            "n": 465
+          },
+          "25-38": {
+            "bias": -3.6837684138442617,
+            "mae": 4.7277459260037995,
+            "n": 618
+          },
+          "38+": {
+            "bias": -8.558370526565437,
+            "mae": 8.558370526565437,
+            "n": 61
+          },
+          "5-15": {
+            "bias": 2.2073820779950784,
+            "mae": 6.2151468120252185,
+            "n": 239
+          }
+        },
+        "player_error_by_starters_out": {
+          "0": {
+            "bias": -0.052783452502553826,
+            "mae": 3.8613642945729394,
+            "n": 1958
+          },
+          "1": {
+            "bias": 8.654046140667887e-17,
+            "mae": 4.506153325424553,
+            "n": 390
+          },
+          "2": {
+            "bias": 1.5225915766287861e-16,
+            "mae": 5.532509807024542,
+            "n": 35
+          },
+          "3+": {
+            "bias": -0.2808988764044947,
+            "mae": 4.944688166398349,
+            "n": 89
+          }
+        },
+        "player_mae": 4.025754925463068,
+        "player_mae_by_role": {
+          "bench": 4.92488478148734,
+          "deep": 6.440009105455787,
+          "dnp": 2.2361928317991246,
+          "starter": 5.056958668169086
+        },
+        "rotation_depth_mae": 1.2198581560283688,
+        "tail_minutes_actual_mean": 9.877056737588653,
+        "tail_minutes_actual_mean_team240": 9.877056737588653,
+        "tail_minutes_bias": 19.90205846933991,
+        "tail_minutes_bias_team240": 19.902058469339902,
+        "tail_minutes_mae": 21.322762685460436,
+        "tail_minutes_mae_team240": 21.322762685460432,
+        "tail_minutes_pred_mean": 29.779115206928562,
+        "tail_minutes_pred_mean_team240": 29.779115206928555,
+        "team_total_minutes_actual_dev_max_abs": 25.0,
+        "team_total_minutes_actual_mean": 240.91028368794326,
+        "team_total_minutes_pred_dev_max_abs": 8.526512829121202e-14,
+        "team_total_minutes_pred_dev_mean_abs": 1.8746233879628174e-14,
+        "top2_bench_bias": -0.9127052170432386,
+        "top2_bench_mae": 4.5287973039571385,
+        "top7_sum_abs_err_quantiles": {
+          "p50": 16.561311380181706,
+          "p90": 30.927704324025484
+        },
+        "top7_sum_actual_mean": 199.89390070921988,
+        "top7_sum_bias": -13.907783906496018,
+        "top7_sum_err_quantiles": {
+          "p50": -15.580824325351784,
+          "p90": 6.916801346861604
+        },
+        "top7_sum_mae": 17.288653323664782,
+        "top7_sum_pred_mean": 185.98611680272384,
+        "top9_player_mae": 5.002979055691358,
+        "top9_player_mae_team240": 5.002979055691358,
+        "top9_sum_actual_mean": 230.12294326241135,
+        "top9_sum_bias": -19.90205846933991,
+        "top9_sum_bias_team240": -19.902058469339902,
+        "top9_sum_mae": 21.322762685460436,
+        "top9_sum_mae_team240": 21.322762685460432,
+        "top9_sum_pred_mean": 210.2208847930714,
+        "top9_sum_pred_mean_team240": 210.22088479307143
+      },
+      "non_injury": {
+        "bench_core_bias": NaN,
+        "bench_core_mae": NaN,
+        "bench_core_player_rows": 0,
+        "bench_core_team_games": 0,
+        "bench_gini_mae": NaN,
+        "bench_hhi_mae": NaN,
+        "bench_max_bias": NaN,
+        "bench_max_mae": NaN,
+        "catastrophic": {
+          "ghost_dnp": {
+            "n_ghost": 0,
+            "n_pred_ge": 0,
+            "rate": null,
+            "top": []
+          },
+          "missed_run": {
+            "n_actual_ge": 0,
+            "n_missed": 0,
+            "rate": null,
+            "top": []
+          }
+        },
+        "n_player_rows": 0,
+        "n_team_games": 0,
+        "player_bias": NaN,
+        "player_error_by_actual_minutes": {
+          "0-5": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "15-25": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "25-38": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "38+": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "5-15": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          }
+        },
+        "player_error_by_starters_out": {
+          "0": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "1": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "2": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "3+": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          }
+        },
+        "player_mae": NaN,
+        "player_mae_by_role": {},
+        "rotation_depth_mae": NaN,
+        "tail_minutes_actual_mean": NaN,
+        "tail_minutes_actual_mean_team240": NaN,
+        "tail_minutes_bias": NaN,
+        "tail_minutes_bias_team240": NaN,
+        "tail_minutes_mae": NaN,
+        "tail_minutes_mae_team240": NaN,
+        "tail_minutes_pred_mean": NaN,
+        "tail_minutes_pred_mean_team240": NaN,
+        "team_total_minutes_actual_dev_max_abs": NaN,
+        "team_total_minutes_actual_mean": NaN,
+        "team_total_minutes_pred_dev_max_abs": NaN,
+        "team_total_minutes_pred_dev_mean_abs": NaN,
+        "top2_bench_bias": NaN,
+        "top2_bench_mae": NaN,
+        "top7_sum_abs_err_quantiles": {
+          "p50": NaN,
+          "p90": NaN
+        },
+        "top7_sum_actual_mean": NaN,
+        "top7_sum_bias": NaN,
+        "top7_sum_err_quantiles": {
+          "p50": NaN,
+          "p90": NaN
+        },
+        "top7_sum_mae": NaN,
+        "top7_sum_pred_mean": NaN,
+        "top9_player_mae": NaN,
+        "top9_player_mae_team240": NaN,
+        "top9_sum_actual_mean": NaN,
+        "top9_sum_bias": NaN,
+        "top9_sum_bias_team240": NaN,
+        "top9_sum_mae": NaN,
+        "top9_sum_mae_team240": NaN,
+        "top9_sum_pred_mean": NaN,
+        "top9_sum_pred_mean_team240": NaN
+      }
+    },
+    "current": {
+      "all_games": {
+        "bench_core_bias": -2.30125585803015,
+        "bench_core_mae": 6.070539901001549,
+        "bench_core_player_rows": 329,
+        "bench_core_team_games": 140,
+        "bench_gini_mae": 0.09717807741814523,
+        "bench_hhi_mae": 0.049359173805285275,
+        "bench_max_bias": -2.243079963591975,
+        "bench_max_mae": 6.088797474964788,
+        "catastrophic": {
+          "config": {
+            "actual_col": "minutes",
+            "ghost_actual_max": 0.0,
+            "ghost_pred_min": 15.0,
+            "missed_actual_min": 15.0,
+            "missed_pred_max": 5.0,
+            "pred_col": "_pred_minutes",
+            "top_n": 25
+          },
+          "ghost_dnp": {
+            "n_ghost": 13,
+            "n_pred_ge": 1020,
+            "rate": 0.012745098039215686,
+            "top": [
+              {
+                "_pred_minutes": 32.97675947054234,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500523,
+                "minutes": 0.0,
+                "player_id": 2544,
+                "player_name": "LeBron James",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612747,
+                "team_tricode": "LAL"
+              },
+              {
+                "_pred_minutes": 32.21993627321306,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 0.0,
+                "player_id": 1626157,
+                "player_name": "Karl-Anthony Towns",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_minutes": 27.100849616880733,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500535,
+                "minutes": 0.0,
+                "player_id": 1630533,
+                "player_name": "Ziaire Williams",
+                "run_id": "20260110T002459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 23.63728775254761,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 0.0,
+                "player_id": 1629004,
+                "player_name": "Svi Mykhailiuk",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_minutes": 20.547276950037787,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500531,
+                "minutes": 0.0,
+                "player_id": 1629004,
+                "player_name": "Svi Mykhailiuk",
+                "run_id": "20260109T015500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_minutes": 17.244585877528337,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 0.0,
+                "player_id": 1629611,
+                "player_name": "Terance Mann",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 16.914257665777868,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500532,
+                "minutes": 0.0,
+                "player_id": 1630534,
+                "player_name": "Ochai Agbaji",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612761,
+                "team_tricode": "TOR"
+              },
+              {
+                "_pred_minutes": 16.52022595124059,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500526,
+                "minutes": 0.0,
+                "player_id": 1630311,
+                "player_name": "Pat Spencer",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 16.4479944870919,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 0.0,
+                "player_id": 1642859,
+                "player_name": "Jase Richardson",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_minutes": 15.941525636472603,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 0.0,
+                "player_id": 1630311,
+                "player_name": "Pat Spencer",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 15.487029143486554,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500489,
+                "minutes": 0.0,
+                "player_id": 1630544,
+                "player_name": "Tre Mann",
+                "run_id": "20260104T005500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_minutes": 15.350499273630433,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500539,
+                "minutes": 0.0,
+                "player_id": 1629234,
+                "player_name": "Drew Eubanks",
+                "run_id": "20260110T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_minutes": 15.18322713107883,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500509,
+                "minutes": 0.0,
+                "player_id": 203937,
+                "player_name": "Kyle Anderson",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              }
+            ]
+          },
+          "missed_run": {
+            "n_actual_ge": 1153,
+            "n_missed": 12,
+            "rate": 0.010407632263660017,
+            "top": [
+              {
+                "_pred_minutes": 0.2907359985506317,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500543,
+                "minutes": 29.85,
+                "player_id": 1641716,
+                "player_name": "Jarace Walker",
+                "run_id": "20260110T235500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              },
+              {
+                "_pred_minutes": 4.1992508985079215,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500525,
+                "minutes": 26.666666666666668,
+                "player_id": 1642383,
+                "player_name": "Walter Clayton Jr.",
+                "run_id": "20260108T005459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500500,
+                "minutes": 20.918333333333333,
+                "player_id": 1629234,
+                "player_name": "Drew Eubanks",
+                "run_id": "20260105T015459Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500492,
+                "minutes": 20.9,
+                "player_id": 1627780,
+                "player_name": "Gary Payton II",
+                "run_id": "20260104T025459Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 4.161675032066976,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500546,
+                "minutes": 20.366666666666667,
+                "player_id": 1630172,
+                "player_name": "Patrick Williams",
+                "run_id": "20260111T005502Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612741,
+                "team_tricode": "CHI"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500533,
+                "minutes": 18.545,
+                "player_id": 1642859,
+                "player_name": "Jase Richardson",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500539,
+                "minutes": 17.933333333333334,
+                "player_id": 1627780,
+                "player_name": "Gary Payton II",
+                "run_id": "20260110T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 4.351242803871528,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500533,
+                "minutes": 16.611666666666668,
+                "player_id": 203083,
+                "player_name": "Andre Drummond",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612755,
+                "team_tricode": "PHI"
+              },
+              {
+                "_pred_minutes": 3.0138973338320034,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500542,
+                "minutes": 16.133333333333333,
+                "player_id": 1641772,
+                "player_name": "Nae'Qwan Tomlin",
+                "run_id": "20260110T175500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 15.688333333333333,
+                "player_id": 201143,
+                "player_name": "Al Horford",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500532,
+                "minutes": 15.383333333333333,
+                "player_id": 1642918,
+                "player_name": "Alijah Martin",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612761,
+                "team_tricode": "TOR"
+              },
+              {
+                "_pred_minutes": 4.719790588849189,
+                "game_date": "2026-01-06T00:00:00",
+                "game_id": 22500513,
+                "minutes": 15.316666666666666,
+                "player_id": 201144,
+                "player_name": "Mike Conley",
+                "run_id": "20260107T005000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612750,
+                "team_tricode": "MIN"
+              }
+            ]
+          }
+        },
+        "n_player_rows": 2489,
+        "n_team_games": 142,
+        "player_bias": -0.28632521791768284,
+        "player_error_by_actual_minutes": {
+          "0-5": {
+            "bias": 2.2574036092405816,
+            "mae": 2.3824800417354566,
+            "n": 1096
+          },
+          "15-25": {
+            "bias": -2.0717568730607865,
+            "mae": 6.149058955883251,
+            "n": 469
+          },
+          "25-38": {
+            "bias": -3.2297070092968894,
+            "mae": 4.615975970279073,
+            "n": 622
+          },
+          "38+": {
+            "bias": -7.488426757195324,
+            "mae": 7.488426757195324,
+            "n": 61
+          },
+          "5-15": {
+            "bias": 1.0396180178933567,
+            "mae": 4.839398664072924,
+            "n": 241
+          }
+        },
+        "player_error_by_starters_out": {
+          "0": {
+            "bias": -0.28903633832664827,
+            "mae": 4.054341597055709,
+            "n": 1975
+          },
+          "1": {
+            "bias": -0.1394765982473289,
+            "mae": 3.6330560295196856,
+            "n": 390
+          },
+          "2": {
+            "bias": 5.075305255429287e-17,
+            "mae": 4.055945391188736,
+            "n": 35
+          },
+          "3+": {
+            "bias": -0.9822564706238641,
+            "mae": 4.754588150629994,
+            "n": 89
+          }
+        },
+        "player_mae": 4.013392101163269,
+        "player_mae_by_role": {
+          "bench": 5.775358560609809,
+          "deep": 5.187814356740261,
+          "dnp": 2.0362414110807197,
+          "starter": 4.930356091454188
+        },
+        "rotation_depth_mae": 1.2816901408450705,
+        "tail_minutes_actual_mean": 9.8824882629108,
+        "tail_minutes_actual_mean_team240": 9.8824882629108,
+        "tail_minutes_bias": 22.856268946053735,
+        "tail_minutes_bias_team240": 19.2316365592825,
+        "tail_minutes_mae": 24.4038910371567,
+        "tail_minutes_mae_team240": 20.77925865038546,
+        "tail_minutes_pred_mean": 32.73875720896453,
+        "tail_minutes_pred_mean_team240": 29.114124822193293,
+        "team_total_minutes_actual_dev_max_abs": 25.0,
+        "team_total_minutes_actual_mean": 240.90387323943662,
+        "team_total_minutes_pred_dev_max_abs": 73.24801144978198,
+        "team_total_minutes_pred_dev_mean_abs": 4.114883573219119,
+        "top2_bench_bias": -2.1123790579119937,
+        "top2_bench_mae": 6.09739350223975,
+        "top7_sum_abs_err_quantiles": {
+          "p50": 15.809676485801461,
+          "p90": 32.729630479955574
+        },
+        "top7_sum_actual_mean": 199.8850821596244,
+        "top7_sum_bias": -13.268441343272372,
+        "top7_sum_err_quantiles": {
+          "p50": -13.861881395970002,
+          "p90": 9.407190770972475
+        },
+        "top7_sum_mae": 17.615260758167082,
+        "top7_sum_pred_mean": 186.61664081635203,
+        "top9_player_mae": 5.321018898718904,
+        "top9_player_mae_team240": 5.450523701187978,
+        "top9_sum_actual_mean": 230.11751173708922,
+        "top9_sum_bias": -22.856268946053735,
+        "top9_sum_bias_team240": -19.2316365592825,
+        "top9_sum_mae": 24.4038910371567,
+        "top9_sum_mae_team240": 20.77925865038546,
+        "top9_sum_pred_mean": 207.26124279103547,
+        "top9_sum_pred_mean_team240": 210.8858751778067
+      },
+      "injury_regime": {
+        "bench_core_bias": -2.309404998257172,
+        "bench_core_mae": 6.072206085843225,
+        "bench_core_player_rows": 326,
+        "bench_core_team_games": 139,
+        "bench_gini_mae": 0.09705863442627571,
+        "bench_hhi_mae": 0.04935773039013611,
+        "bench_max_bias": -2.2053977404678653,
+        "bench_max_mae": 6.0783898441199185,
+        "catastrophic": {
+          "config": {
+            "actual_col": "minutes",
+            "ghost_actual_max": 0.0,
+            "ghost_pred_min": 15.0,
+            "missed_actual_min": 15.0,
+            "missed_pred_max": 5.0,
+            "pred_col": "_pred_minutes",
+            "top_n": 25
+          },
+          "ghost_dnp": {
+            "n_ghost": 13,
+            "n_pred_ge": 1012,
+            "rate": 0.012845849802371542,
+            "top": [
+              {
+                "_pred_minutes": 32.97675947054234,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500523,
+                "minutes": 0.0,
+                "player_id": 2544,
+                "player_name": "LeBron James",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612747,
+                "team_tricode": "LAL"
+              },
+              {
+                "_pred_minutes": 32.21993627321306,
+                "game_date": "2026-01-02T00:00:00",
+                "game_id": 22500479,
+                "minutes": 0.0,
+                "player_id": 1626157,
+                "player_name": "Karl-Anthony Towns",
+                "run_id": "20260102T235959Z",
+                "starter_flag_label": 0,
+                "status": "Q",
+                "team_id": 1610612752,
+                "team_tricode": "NYK"
+              },
+              {
+                "_pred_minutes": 27.100849616880733,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500535,
+                "minutes": 0.0,
+                "player_id": 1630533,
+                "player_name": "Ziaire Williams",
+                "run_id": "20260110T002459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 23.63728775254761,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500547,
+                "minutes": 0.0,
+                "player_id": 1629004,
+                "player_name": "Svi Mykhailiuk",
+                "run_id": "20260111T022459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_minutes": 20.547276950037787,
+                "game_date": "2026-01-08T00:00:00",
+                "game_id": 22500531,
+                "minutes": 0.0,
+                "player_id": 1629004,
+                "player_name": "Svi Mykhailiuk",
+                "run_id": "20260109T015500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_minutes": 17.244585877528337,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 0.0,
+                "player_id": 1629611,
+                "player_name": "Terance Mann",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612751,
+                "team_tricode": "BKN"
+              },
+              {
+                "_pred_minutes": 16.914257665777868,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500532,
+                "minutes": 0.0,
+                "player_id": 1630534,
+                "player_name": "Ochai Agbaji",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612761,
+                "team_tricode": "TOR"
+              },
+              {
+                "_pred_minutes": 16.52022595124059,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500526,
+                "minutes": 0.0,
+                "player_id": 1630311,
+                "player_name": "Pat Spencer",
+                "run_id": "20260108T010000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 16.4479944870919,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500521,
+                "minutes": 0.0,
+                "player_id": 1642859,
+                "player_name": "Jase Richardson",
+                "run_id": "20260108T002500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_minutes": 15.941525636472603,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 0.0,
+                "player_id": 1630311,
+                "player_name": "Pat Spencer",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 15.487029143486554,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500489,
+                "minutes": 0.0,
+                "player_id": 1630544,
+                "player_name": "Tre Mann",
+                "run_id": "20260104T005500Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612766,
+                "team_tricode": "CHA"
+              },
+              {
+                "_pred_minutes": 15.350499273630433,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500539,
+                "minutes": 0.0,
+                "player_id": 1629234,
+                "player_name": "Drew Eubanks",
+                "run_id": "20260110T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_minutes": 15.18322713107883,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500509,
+                "minutes": 0.0,
+                "player_id": 203937,
+                "player_name": "Kyle Anderson",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              }
+            ]
+          },
+          "missed_run": {
+            "n_actual_ge": 1145,
+            "n_missed": 12,
+            "rate": 0.010480349344978166,
+            "top": [
+              {
+                "_pred_minutes": 0.2907359985506317,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500543,
+                "minutes": 29.85,
+                "player_id": 1641716,
+                "player_name": "Jarace Walker",
+                "run_id": "20260110T235500Z",
+                "starter_flag_label": 1,
+                "status": "AVAIL",
+                "team_id": 1610612754,
+                "team_tricode": "IND"
+              },
+              {
+                "_pred_minutes": 4.1992508985079215,
+                "game_date": "2026-01-07T00:00:00",
+                "game_id": 22500525,
+                "minutes": 26.666666666666668,
+                "player_id": 1642383,
+                "player_name": "Walter Clayton Jr.",
+                "run_id": "20260108T005459Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612762,
+                "team_tricode": "UTA"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-04T00:00:00",
+                "game_id": 22500500,
+                "minutes": 20.918333333333333,
+                "player_id": 1629234,
+                "player_name": "Drew Eubanks",
+                "run_id": "20260105T015459Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612758,
+                "team_tricode": "SAC"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-03T00:00:00",
+                "game_id": 22500492,
+                "minutes": 20.9,
+                "player_id": 1627780,
+                "player_name": "Gary Payton II",
+                "run_id": "20260104T025459Z",
+                "starter_flag_label": 0,
+                "status": "Ava",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 4.161675032066976,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500546,
+                "minutes": 20.366666666666667,
+                "player_id": 1630172,
+                "player_name": "Patrick Williams",
+                "run_id": "20260111T005502Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612741,
+                "team_tricode": "CHI"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500533,
+                "minutes": 18.545,
+                "player_id": 1642859,
+                "player_name": "Jase Richardson",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "OUT",
+                "team_id": 1610612753,
+                "team_tricode": "ORL"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500539,
+                "minutes": 17.933333333333334,
+                "player_id": 1627780,
+                "player_name": "Gary Payton II",
+                "run_id": "20260110T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 4.351242803871528,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500533,
+                "minutes": 16.611666666666668,
+                "player_id": 203083,
+                "player_name": "Andre Drummond",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612755,
+                "team_tricode": "PHI"
+              },
+              {
+                "_pred_minutes": 3.0138973338320034,
+                "game_date": "2026-01-10T00:00:00",
+                "game_id": 22500542,
+                "minutes": 16.133333333333333,
+                "player_id": 1641772,
+                "player_name": "Nae'Qwan Tomlin",
+                "run_id": "20260110T175500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612739,
+                "team_tricode": "CLE"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-05T00:00:00",
+                "game_id": 22500508,
+                "minutes": 15.688333333333333,
+                "player_id": 201143,
+                "player_name": "Al Horford",
+                "run_id": "20260106T025500Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612744,
+                "team_tricode": "GSW"
+              },
+              {
+                "_pred_minutes": 0.0,
+                "game_date": "2026-01-09T00:00:00",
+                "game_id": 22500532,
+                "minutes": 15.383333333333333,
+                "player_id": 1642918,
+                "player_name": "Alijah Martin",
+                "run_id": "20260109T235501Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612761,
+                "team_tricode": "TOR"
+              },
+              {
+                "_pred_minutes": 4.719790588849189,
+                "game_date": "2026-01-06T00:00:00",
+                "game_id": 22500513,
+                "minutes": 15.316666666666666,
+                "player_id": 201144,
+                "player_name": "Mike Conley",
+                "run_id": "20260107T005000Z",
+                "starter_flag_label": 0,
+                "status": "AVAIL",
+                "team_id": 1610612750,
+                "team_tricode": "MIN"
+              }
+            ]
+          }
+        },
+        "n_player_rows": 2472,
+        "n_team_games": 141,
+        "player_bias": -0.28829428292763454,
+        "player_error_by_actual_minutes": {
+          "0-5": {
+            "bias": 2.2537976353273788,
+            "mae": 2.379678048563727,
+            "n": 1089
+          },
+          "15-25": {
+            "bias": -2.0865426478668927,
+            "mae": 6.159780421060646,
+            "n": 465
+          },
+          "25-38": {
+            "bias": -3.228850565697031,
+            "mae": 4.619498203637941,
+            "n": 618
+          },
+          "38+": {
+            "bias": -7.488426757195324,
+            "mae": 7.488426757195324,
+            "n": 61
+          },
+          "5-15": {
+            "bias": 1.068690045101076,
+            "mae": 4.859523429182914,
+            "n": 239
+          }
+        },
+        "player_error_by_starters_out": {
+          "0": {
+            "bias": -0.29154584688208907,
+            "mae": 4.058646081042198,
+            "n": 1958
+          },
+          "1": {
+            "bias": -0.1394765982473289,
+            "mae": 3.6330560295196856,
+            "n": 390
+          },
+          "2": {
+            "bias": 5.075305255429287e-17,
+            "mae": 4.055945391188736,
+            "n": 35
+          },
+          "3+": {
+            "bias": -0.9822564706238641,
+            "mae": 4.754588150629994,
+            "n": 89
+          }
+        },
+        "player_mae": 4.016519948337774,
+        "player_mae_by_role": {
+          "bench": 5.786304587105872,
+          "deep": 5.187814356740261,
+          "dnp": 2.030620219110908,
+          "starter": 4.939250677127829
+        },
+        "rotation_depth_mae": 1.2836879432624113,
+        "tail_minutes_actual_mean": 9.877056737588653,
+        "tail_minutes_actual_mean_team240": 9.877056737588653,
+        "tail_minutes_bias": 22.89871223091943,
+        "tail_minutes_bias_team240": 19.24837323147606,
+        "tail_minutes_mae": 24.457310365221705,
+        "tail_minutes_mae_team240": 20.806971365778335,
+        "tail_minutes_pred_mean": 32.775768968508075,
+        "tail_minutes_pred_mean_team240": 29.125429969064704,
+        "team_total_minutes_actual_dev_max_abs": 25.0,
+        "team_total_minutes_actual_mean": 240.91028368794326,
+        "team_total_minutes_pred_dev_max_abs": 73.24801144978198,
+        "team_total_minutes_pred_dev_mean_abs": 4.14406714466039,
+        "top2_bench_bias": -2.1254078059759443,
+        "top2_bench_mae": 6.088999499821616,
+        "top7_sum_abs_err_quantiles": {
+          "p50": 15.869722301866204,
+          "p90": 32.746855520185704
+        },
+        "top7_sum_actual_mean": 199.89390070921988,
+        "top7_sum_bias": -13.278112363780181,
+        "top7_sum_err_quantiles": {
+          "p50": -13.972371571114536,
+          "p90": 9.512507618662852
+        },
+        "top7_sum_mae": 17.655760285163517,
+        "top7_sum_pred_mean": 186.61578834543965,
+        "top9_player_mae": 5.328882758857914,
+        "top9_player_mae_team240": 5.459306035103364,
+        "top9_sum_actual_mean": 230.12294326241135,
+        "top9_sum_bias": -22.89871223091943,
+        "top9_sum_bias_team240": -19.24837323147606,
+        "top9_sum_mae": 24.457310365221705,
+        "top9_sum_mae_team240": 20.806971365778335,
+        "top9_sum_pred_mean": 207.2242310314919,
+        "top9_sum_pred_mean_team240": 210.87457003093527
+      },
+      "non_injury": {
+        "bench_core_bias": NaN,
+        "bench_core_mae": NaN,
+        "bench_core_player_rows": 0,
+        "bench_core_team_games": 0,
+        "bench_gini_mae": NaN,
+        "bench_hhi_mae": NaN,
+        "bench_max_bias": NaN,
+        "bench_max_mae": NaN,
+        "catastrophic": {
+          "ghost_dnp": {
+            "n_ghost": 0,
+            "n_pred_ge": 0,
+            "rate": null,
+            "top": []
+          },
+          "missed_run": {
+            "n_actual_ge": 0,
+            "n_missed": 0,
+            "rate": null,
+            "top": []
+          }
+        },
+        "n_player_rows": 0,
+        "n_team_games": 0,
+        "player_bias": NaN,
+        "player_error_by_actual_minutes": {
+          "0-5": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "15-25": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "25-38": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "38+": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "5-15": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          }
+        },
+        "player_error_by_starters_out": {
+          "0": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "1": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "2": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          },
+          "3+": {
+            "bias": NaN,
+            "mae": NaN,
+            "n": 0
+          }
+        },
+        "player_mae": NaN,
+        "player_mae_by_role": {},
+        "rotation_depth_mae": NaN,
+        "tail_minutes_actual_mean": NaN,
+        "tail_minutes_actual_mean_team240": NaN,
+        "tail_minutes_bias": NaN,
+        "tail_minutes_bias_team240": NaN,
+        "tail_minutes_mae": NaN,
+        "tail_minutes_mae_team240": NaN,
+        "tail_minutes_pred_mean": NaN,
+        "tail_minutes_pred_mean_team240": NaN,
+        "team_total_minutes_actual_dev_max_abs": NaN,
+        "team_total_minutes_actual_mean": NaN,
+        "team_total_minutes_pred_dev_max_abs": NaN,
+        "team_total_minutes_pred_dev_mean_abs": NaN,
+        "top2_bench_bias": NaN,
+        "top2_bench_mae": NaN,
+        "top7_sum_abs_err_quantiles": {
+          "p50": NaN,
+          "p90": NaN
+        },
+        "top7_sum_actual_mean": NaN,
+        "top7_sum_bias": NaN,
+        "top7_sum_err_quantiles": {
+          "p50": NaN,
+          "p90": NaN
+        },
+        "top7_sum_mae": NaN,
+        "top7_sum_pred_mean": NaN,
+        "top9_player_mae": NaN,
+        "top9_player_mae_team240": NaN,
+        "top9_sum_actual_mean": NaN,
+        "top9_sum_bias": NaN,
+        "top9_sum_bias_team240": NaN,
+        "top9_sum_mae": NaN,
+        "top9_sum_mae_team240": NaN,
+        "top9_sum_pred_mean": NaN,
+        "top9_sum_pred_mean_team240": NaN
+      }
+    }
+  },
+  "slices": {
+    "all_games": {
+      "player_rows": 2489,
+      "team_games": 142,
+      "worst_teams_by_bench_core_mae": [
+        {
+          "bench_core_bias_candidate": 1.24903343993363,
+          "bench_core_bias_current": -2.756416953491154,
+          "bench_core_mae_candidate": 7.944203280224793,
+          "bench_core_mae_current": 11.214817544694421,
+          "bench_core_mae_delta_candidate_minus_current": -3.2706142644696286,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612753
+        },
+        {
+          "bench_core_bias_candidate": -1.0267395337776772,
+          "bench_core_bias_current": -2.494051574933113,
+          "bench_core_mae_candidate": 6.867737781087581,
+          "bench_core_mae_current": 5.958219569903093,
+          "bench_core_mae_delta_candidate_minus_current": 0.909518211184488,
+          "bench_core_team_games_candidate": 4,
+          "bench_core_team_games_current": 4,
+          "team_id": 1610612757
+        },
+        {
+          "bench_core_bias_candidate": -1.4121614578690678,
+          "bench_core_bias_current": -4.014518636495256,
+          "bench_core_mae_candidate": 6.810830835818237,
+          "bench_core_mae_current": 8.607033435066121,
+          "bench_core_mae_delta_candidate_minus_current": -1.7962025992478843,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612740
+        },
+        {
+          "bench_core_bias_candidate": -3.1456643660246955,
+          "bench_core_bias_current": -1.3320286005146058,
+          "bench_core_mae_candidate": 6.1289900682857095,
+          "bench_core_mae_current": 5.1801354784212075,
+          "bench_core_mae_delta_candidate_minus_current": 0.948854589864502,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612737
+        },
+        {
+          "bench_core_bias_candidate": -5.072092244144105,
+          "bench_core_bias_current": -3.6582137010007174,
+          "bench_core_mae_candidate": 5.904036940353043,
+          "bench_core_mae_current": 5.531885297474635,
+          "bench_core_mae_delta_candidate_minus_current": 0.37215164287840796,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612747
+        },
+        {
+          "bench_core_bias_candidate": 0.913943272590441,
+          "bench_core_bias_current": 1.685332968431254,
+          "bench_core_mae_candidate": 5.784719961707459,
+          "bench_core_mae_current": 4.984513545094791,
+          "bench_core_mae_delta_candidate_minus_current": 0.8002064166126681,
+          "bench_core_team_games_candidate": 4,
+          "bench_core_team_games_current": 4,
+          "team_id": 1610612765
+        },
+        {
+          "bench_core_bias_candidate": 0.44064908516432943,
+          "bench_core_bias_current": -1.289291410419008,
+          "bench_core_mae_candidate": 5.320124993067735,
+          "bench_core_mae_current": 6.527964926763518,
+          "bench_core_mae_delta_candidate_minus_current": -1.2078399336957837,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612764
+        },
+        {
+          "bench_core_bias_candidate": -4.0999370514938605,
+          "bench_core_bias_current": -3.7841949565261292,
+          "bench_core_mae_candidate": 5.28222651685441,
+          "bench_core_mae_current": 5.128391067975541,
+          "bench_core_mae_delta_candidate_minus_current": 0.15383544887886824,
+          "bench_core_team_games_candidate": 4,
+          "bench_core_team_games_current": 4,
+          "team_id": 1610612761
+        },
+        {
+          "bench_core_bias_candidate": -2.7534629843048712,
+          "bench_core_bias_current": -6.372388449505374,
+          "bench_core_mae_candidate": 5.141703927595998,
+          "bench_core_mae_current": 8.209264230980821,
+          "bench_core_mae_delta_candidate_minus_current": -3.0675603033848233,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612762
+        },
+        {
+          "bench_core_bias_candidate": -1.7942643448158677,
+          "bench_core_bias_current": -0.848269761575765,
+          "bench_core_mae_candidate": 5.043079143101513,
+          "bench_core_mae_current": 4.310283717777735,
+          "bench_core_mae_delta_candidate_minus_current": 0.7327954253237783,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612750
+        }
+      ]
+    },
+    "injury_regime": {
+      "player_rows": 2472,
+      "team_games": 141,
+      "worst_teams_by_bench_core_mae": [
+        {
+          "bench_core_bias_candidate": 1.24903343993363,
+          "bench_core_bias_current": -2.756416953491154,
+          "bench_core_mae_candidate": 7.944203280224793,
+          "bench_core_mae_current": 11.214817544694421,
+          "bench_core_mae_delta_candidate_minus_current": -3.2706142644696286,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612753
+        },
+        {
+          "bench_core_bias_candidate": -1.0267395337776772,
+          "bench_core_bias_current": -2.494051574933113,
+          "bench_core_mae_candidate": 6.867737781087581,
+          "bench_core_mae_current": 5.958219569903093,
+          "bench_core_mae_delta_candidate_minus_current": 0.909518211184488,
+          "bench_core_team_games_candidate": 4,
+          "bench_core_team_games_current": 4,
+          "team_id": 1610612757
+        },
+        {
+          "bench_core_bias_candidate": -1.4121614578690678,
+          "bench_core_bias_current": -4.014518636495256,
+          "bench_core_mae_candidate": 6.810830835818237,
+          "bench_core_mae_current": 8.607033435066121,
+          "bench_core_mae_delta_candidate_minus_current": -1.7962025992478843,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612740
+        },
+        {
+          "bench_core_bias_candidate": -3.1456643660246955,
+          "bench_core_bias_current": -1.3320286005146058,
+          "bench_core_mae_candidate": 6.1289900682857095,
+          "bench_core_mae_current": 5.1801354784212075,
+          "bench_core_mae_delta_candidate_minus_current": 0.948854589864502,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612737
+        },
+        {
+          "bench_core_bias_candidate": -5.072092244144105,
+          "bench_core_bias_current": -3.6582137010007174,
+          "bench_core_mae_candidate": 5.904036940353043,
+          "bench_core_mae_current": 5.531885297474635,
+          "bench_core_mae_delta_candidate_minus_current": 0.37215164287840796,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612747
+        },
+        {
+          "bench_core_bias_candidate": 0.913943272590441,
+          "bench_core_bias_current": 1.685332968431254,
+          "bench_core_mae_candidate": 5.784719961707459,
+          "bench_core_mae_current": 4.984513545094791,
+          "bench_core_mae_delta_candidate_minus_current": 0.8002064166126681,
+          "bench_core_team_games_candidate": 4,
+          "bench_core_team_games_current": 4,
+          "team_id": 1610612765
+        },
+        {
+          "bench_core_bias_candidate": 0.44064908516432943,
+          "bench_core_bias_current": -1.289291410419008,
+          "bench_core_mae_candidate": 5.320124993067735,
+          "bench_core_mae_current": 6.527964926763518,
+          "bench_core_mae_delta_candidate_minus_current": -1.2078399336957837,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612764
+        },
+        {
+          "bench_core_bias_candidate": -4.0999370514938605,
+          "bench_core_bias_current": -3.7841949565261292,
+          "bench_core_mae_candidate": 5.28222651685441,
+          "bench_core_mae_current": 5.128391067975541,
+          "bench_core_mae_delta_candidate_minus_current": 0.15383544887886824,
+          "bench_core_team_games_candidate": 4,
+          "bench_core_team_games_current": 4,
+          "team_id": 1610612761
+        },
+        {
+          "bench_core_bias_candidate": -2.7534629843048712,
+          "bench_core_bias_current": -6.372388449505374,
+          "bench_core_mae_candidate": 5.141703927595998,
+          "bench_core_mae_current": 8.209264230980821,
+          "bench_core_mae_delta_candidate_minus_current": -3.0675603033848233,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612762
+        },
+        {
+          "bench_core_bias_candidate": -1.7942643448158677,
+          "bench_core_bias_current": -0.848269761575765,
+          "bench_core_mae_candidate": 5.043079143101513,
+          "bench_core_mae_current": 4.310283717777735,
+          "bench_core_mae_delta_candidate_minus_current": 0.7327954253237783,
+          "bench_core_team_games_candidate": 5,
+          "bench_core_team_games_current": 5,
+          "team_id": 1610612750
+        }
+      ]
+    },
+    "non_injury": {
+      "player_rows": 0,
+      "team_games": 0,
+      "worst_teams_by_bench_core_mae": []
+    }
+  },
+  "snapshot": {
+    "pred_col": "minutes_p50",
+    "snapshot_mode": "last_before_tip",
+    "snapshot_summary": {
+      "games_skipped": 0,
+      "games_with_snapshots": 259,
+      "rows_after_label_join": 111544,
+      "rows_before_label_join": 111563,
+      "skipped_games": [],
+      "total_games": 259
+    }
+  },
+  "window": {
+    "end": "2026-01-10",
+    "start": "2026-01-02"
+  }
+}

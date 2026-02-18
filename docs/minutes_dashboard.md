@@ -89,9 +89,9 @@ Prints row counts and per-team `minutes_p50` totals for a daily artifact.
 
 World generation now supports a feature-flagged constraint-based override mode.
 
-- Default remains legacy behavior:
-  - `--minutes-override-mode legacy`
-- Enable v2 explicitly:
+- Default is v2 behavior:
+  - `--minutes-override-mode v2`
+- Use legacy only for compatibility/debug:
 
 ```bash
 uv run python -m scripts.sim_v2.run_sim_live \

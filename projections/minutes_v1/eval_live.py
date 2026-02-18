@@ -20,6 +20,35 @@ _STATUS_OUT_TOKENS = ("OUT", "INACTIVE", "SUSPENDED", "REST", "INJURY", "COVID",
 _STATUS_Q_TOKENS = ("QUESTIONABLE", "GTD", "GAME-TIME", "PROB", "DAY-TO-DAY")
 _STATUS_CLEAN_PREFIXES = ("AVA", "ACT", "CLE", "HEA")
 
+# Keep prediction-log reads narrow so evaluation doesn't require loading every
+# feature column (and to avoid schema drift across runs).
+_LOGS_REQUIRED_COLS: tuple[str, ...] = (
+    "game_date",
+    "game_id",
+    "player_id",
+    "team_id",
+    "player_name",
+    "team_name",
+    "team_tricode",
+    # Snapshot selection keys
+    "run_as_of_ts",
+    "log_timestamp",
+    "run_id",
+    # Predictions
+    "minutes_p10",
+    "minutes_p50",
+    "minutes_p90",
+    "minutes_p50_pred",
+    # Slice / diagnostic metadata
+    "status",
+    "starter_flag",
+    "spread_home",
+    "total",
+    # Injury regime helpers (for downstream eval scripts)
+    "is_out",
+    "lineup_role",
+)
+
 
 def _normalize_day(value: date | pd.Timestamp | str) -> pd.Timestamp:
     ts = pd.Timestamp(value)
@@ -184,6 +213,18 @@ class MinutesLiveEvalDatasetBuilder:
             on=["game_id", "player_id", "game_date"],
             how="inner",
         )
+        # `team_id` can exist in both logs and labels; normalize back to a single
+        # column for downstream evaluation tooling.
+        if "team_id" not in merged.columns:
+            if "team_id_y" in merged.columns:
+                merged["team_id"] = merged["team_id_y"]
+            elif "team_id_x" in merged.columns:
+                merged["team_id"] = merged["team_id_x"]
+        if "team_id_x" in merged.columns or "team_id_y" in merged.columns:
+            merged = merged.drop(columns=[c for c in ("team_id_x", "team_id_y") if c in merged.columns])
+        if "team_id" in merged.columns:
+            merged["team_id"] = pd.to_numeric(merged["team_id"], errors="coerce")
+
         merged["actual_minutes"] = pd.to_numeric(merged["actual_minutes"], errors="coerce")
         merged = merged.dropna(subset=["actual_minutes"])
 
@@ -263,29 +304,59 @@ class MinutesLiveEvalDatasetBuilder:
             return []
         dirs: set[Path] = set()
         for month in _iter_months(start, end):
-            season = month.year
-            pattern = f"**/season={season}/month={month.month:02d}"
-            for candidate in self.logs_root.glob(pattern):
-                if candidate.is_dir():
-                    dirs.add(candidate.resolve())
+            # Logs are partitioned by season-start year (Aug–Jul). Keep a fallback
+            # to the calendar year in case legacy runs used that convention.
+            for season in {int(month.year), int(_season_start(month))}:
+                pattern = f"**/season={season}/month={month.month:02d}"
+                for candidate in self.logs_root.glob(pattern):
+                    if candidate.is_dir():
+                        dirs.add(candidate.resolve())
         return sorted(dirs)
 
     def _load_prediction_logs(self, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
         dirs = self._log_partition_dirs(start, end)
-        frames: list[pd.DataFrame] = []
+        # Avoid reading every parquet file in a month partition across all runs.
+        # Most runs only write a single `<game_date>_<run_id>.parquet`; we can
+        # pre-filter by filename prefix to keep evaluation windows fast.
+        required_days = {d.date().isoformat() for d in pd.date_range(start, end, freq="D")}
+        chunk_size = 250
+        chunks: list[pd.DataFrame] = []
+        buffer: list[pd.DataFrame] = []
         for partition in dirs:
             run_id = _partition_value_from_path(partition, "run")
             for file in sorted(partition.glob("*.parquet")):
-                df = pd.read_parquet(file)
+                # If the file name starts with an ISO date, skip reads outside the window.
+                prefix = file.name[:10]
+                if prefix not in required_days:
+                    # Fall back to reading files that don't follow the naming convention
+                    # (e.g. "logs.parquet" in tests).
+                    if len(prefix) == 10 and prefix[4] == "-" and prefix[7] == "-":
+                        continue
+                try:
+                    df = pd.read_parquet(file)
+                except Exception as exc:  # pragma: no cover
+                    LOGGER.warning("[minutes-eval] failed to read prediction log %s: %s", file, exc)
+                    continue
                 if df.empty:
                     continue
+                # Drop unused / schema-drifting columns early to make concatenation
+                # safer and keep evaluation memory bounded.
+                keep = [c for c in _LOGS_REQUIRED_COLS if c in df.columns]
+                df = df.loc[:, keep].copy()
                 if "run_id" not in df.columns and run_id is not None:
                     df = df.copy()
                     df["run_id"] = run_id
-                frames.append(df)
-        if not frames:
+                buffer.append(df)
+                if len(buffer) >= chunk_size:
+                    chunks.append(pd.concat(buffer, ignore_index=True))
+                    buffer.clear()
+        if buffer:
+            chunks.append(pd.concat(buffer, ignore_index=True))
+            buffer.clear()
+        if not chunks:
             return pd.DataFrame()
-        logs = pd.concat(frames, ignore_index=True)
+        # Concatenate chunks; keep peak memory bounded.
+        logs = chunks[0] if len(chunks) == 1 else pd.concat(chunks, ignore_index=True)
         logs["game_id"] = pd.to_numeric(logs.get("game_id"), errors="coerce")
         logs["player_id"] = pd.to_numeric(logs.get("player_id"), errors="coerce")
         logs["game_date"] = pd.to_datetime(logs.get("game_date"), errors="coerce")

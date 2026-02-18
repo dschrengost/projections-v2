@@ -70,10 +70,12 @@ def normalize_starter_signals(
     confirmed_series = _coerce_bool_series(df.get("is_confirmed_starter"), index)
     projected_series = _coerce_bool_series(df.get("is_projected_starter"), index)
 
-    df["is_confirmed_starter"] = (confirmed_series | confirmed_from_role).astype(bool)
-    df["is_projected_starter"] = (
-        projected_series | projected_from_role | projected_from_status
-    ).astype(bool)
+    confirmed = confirmed_series | confirmed_from_role
+    # Invariant: confirmed starters must also be projected starters.
+    projected = projected_series | projected_from_role | projected_from_status | confirmed
+
+    df["is_confirmed_starter"] = confirmed.astype(bool)
+    df["is_projected_starter"] = projected.astype(bool)
     return df
 
 
