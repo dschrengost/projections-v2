@@ -25,9 +25,9 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
+import os
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -292,10 +292,13 @@ def _build_features_for_date(
     
     typer.echo(f"    Building features with: build_minutes_live --date {day} --run-as-of-ts {run_as_of_ts}")
     try:
+        env = dict(os.environ)
+        env["PROJECTIONS_SKIP_POINTER_WRITES"] = "1"
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
+            env=env,
             timeout=300,  # 5 minute timeout
         )
         if result.returncode != 0:
@@ -305,7 +308,7 @@ def _build_features_for_date(
         features_root = data_root / "gold" / "features_minutes_v1"
         return _get_features_path_for_date(features_root, day)
     except subprocess.TimeoutExpired:
-        typer.echo(f"    Feature build timed out after 300s", err=True)
+        typer.echo("    Feature build timed out after 300s", err=True)
         return None
     except Exception as exc:
         typer.echo(f"    Feature build error: {exc}", err=True)
@@ -436,7 +439,7 @@ def main(
                 features_built += 1
             else:
                 results.append({"date": day, "status": "FAILED", "error": "feature build failed"})
-                typer.echo(f"  FAILED: could not build features", err=True)
+                typer.echo("  FAILED: could not build features", err=True)
                 failed += 1
                 continue
 
@@ -468,6 +471,7 @@ def main(
                 disable_play_prob=False,
                 target_dates={day},
                 debug_describe=False,
+                allow_missing_feature_defaults=True,
             )
 
             # Verify output
@@ -475,6 +479,10 @@ def main(
             if not day_path.exists():
                 alt_path = out_root / f"game_date={day.isoformat()}" / score_minutes_v1.OUTPUT_FILENAME
                 day_path = alt_path if alt_path.exists() else day_path
+            if not day_path.exists():
+                run_paths = sorted((out_root / day.isoformat()).glob(f"run=*/{score_minutes_v1.OUTPUT_FILENAME}"))
+                if run_paths:
+                    day_path = run_paths[-1]
 
             if day_path.exists():
                 day_df = pd.read_parquet(day_path)

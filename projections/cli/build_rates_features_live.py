@@ -25,6 +25,10 @@ import pandas as pd
 import typer
 
 from projections import paths
+from projections.features.action_props import (
+    attach_action_props_features,
+    load_action_props_feature_snapshots_for_date,
+)
 from projections.minutes_v1.pos import canonical_pos_bucket
 from projections.pipeline.status import JobStatus, write_status
 from projections.rates_v1.schemas import validate_rates_features
@@ -55,6 +59,19 @@ def _status_to_out_probability(status: pd.Series) -> pd.Series:
     out_prob[normalized.isin(_STATUS_PROBABLE)] = 1.0 - 0.78
     out_prob[normalized.isin(_STATUS_DOUBTFUL)] = 1.0 - 0.25
     return out_prob
+
+
+def _count_action_props_matches(df: pd.DataFrame) -> int:
+    """Count rows with at least one attached Action props market."""
+    if "an_has_any_props" not in df.columns:
+        return 0
+    return int(
+        pd.to_numeric(df.get("an_has_any_props"), errors="coerce")
+        .fillna(0.0)
+        .gt(0.0)
+        .sum()
+    )
+
 
 def _load_boxscores_history(data_root: Path, season_year: int) -> pd.DataFrame:
     """Load raw boxscores for the given season to build player history."""
@@ -1075,6 +1092,63 @@ def main(
         minutes_df = _load_minutes_predictions(minutes_features_path)
         if minutes_df.empty:
             raise ValueError("Minutes features are empty")
+
+        action_props_dir = data_root / "bronze" / "action_network" / "props"
+        action_props_snapshot_rows = 0
+        action_props_matched_rows = 0
+        existing_action_props_rows = (
+            _count_action_props_matches(minutes_df)
+            if "an_has_any_props" in minutes_df.columns
+            else 0
+        )
+        attach_action_props_fallback = (
+            "an_has_any_props" not in minutes_df.columns or existing_action_props_rows == 0
+        )
+        if attach_action_props_fallback:
+            action_props_snapshots = pd.DataFrame()
+            if action_props_dir.exists():
+                try:
+                    snapshot_frames: list[pd.DataFrame] = []
+                    action_props_snapshots = load_action_props_feature_snapshots_for_date(
+                        props_dir=action_props_dir,
+                        game_date=pd.Timestamp(game_date),
+                    )
+                    if not action_props_snapshots.empty:
+                        snapshot_frames.append(action_props_snapshots)
+                    next_day_snapshots = load_action_props_feature_snapshots_for_date(
+                        props_dir=action_props_dir,
+                        game_date=pd.Timestamp(game_date) + pd.Timedelta(days=1),
+                    )
+                    if not next_day_snapshots.empty:
+                        snapshot_frames.append(next_day_snapshots)
+                    action_props_snapshots = (
+                        pd.concat(snapshot_frames, ignore_index=True)
+                        if snapshot_frames
+                        else pd.DataFrame()
+                    )
+                    action_props_snapshot_rows = int(len(action_props_snapshots))
+                except Exception as exc:  # noqa: BLE001
+                    typer.echo(f"[rates-live] Warning: failed to load Action props ({exc})", err=True)
+            minutes_df = attach_action_props_features(
+                minutes_df,
+                action_props_snapshots,
+                strict_asof=True,
+                as_of_col="feature_as_of_ts",
+                tip_col="tip_ts",
+                game_date_offsets=(0, -1),
+                clamp_late_asof_to_game_date=True,
+            )
+            action_props_matched_rows = _count_action_props_matches(minutes_df)
+            typer.echo(
+                f"[rates-live] Action props fallback attached: snapshots={action_props_snapshot_rows}, "
+                f"matched_rows={action_props_matched_rows}, total_rows={len(minutes_df)}"
+            )
+        else:
+            action_props_matched_rows = existing_action_props_rows
+            typer.echo(
+                f"[rates-live] Using Action props from minutes features: "
+                f"matched_rows={action_props_matched_rows}, total_rows={len(minutes_df)}"
+            )
 
         player_ids = minutes_df["player_id"].dropna().astype(int).unique().tolist()
         team_ids = minutes_df["team_id"].dropna().astype(int).unique().tolist()

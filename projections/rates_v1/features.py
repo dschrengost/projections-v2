@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Shared feature set definitions for rates_v1 models.
 
@@ -14,6 +12,10 @@ Stage progression:
 - Stage 4: + recency features (last 1/3/5/10 game rolling averages)
 - Stage 5: + extended FTA tracking features (drive FTA, paint touches, foul-drawing)
 """
+
+from __future__ import annotations
+
+from projections.features.action_props import ACTION_MARKET_FEATURE_COLUMNS
 
 STAGE0_FEATURES = [
     "minutes_actual",
@@ -188,12 +190,19 @@ FEATURES_STAGE5_FTA_TRACKING = (
     + SAMPLE_SIZE_FEATURES
 )
 
+# Stage 6: Stage 5 + Action Network prop-market features (excluding as-of timestamp).
+ACTION_PROPS_FEATURES = [
+    col for col in ACTION_MARKET_FEATURE_COLUMNS if col != "action_props_as_of_ts"
+]
+FEATURES_STAGE6_ACTION_PROPS = FEATURES_STAGE5_FTA_TRACKING + ACTION_PROPS_FEATURES
+
 
 def get_rates_feature_sets() -> dict[str, list[str]]:
     """
     Return a mapping of feature set keys to their column lists.
 
-    Keys: stage0, stage1, stage2_tracking, stage3_context, stage4_recency, stage5_fta_tracking
+    Keys: stage0, stage1, stage2_tracking, stage3_context, stage4_recency,
+    stage5_fta_tracking, stage6_action_props
     """
     return {
         "stage0": STAGE0_FEATURES,
@@ -202,6 +211,7 @@ def get_rates_feature_sets() -> dict[str, list[str]]:
         "stage3_context": FEATURES_STAGE3_CONTEXT,
         "stage4_recency": FEATURES_STAGE4_RECENCY,
         "stage5_fta_tracking": FEATURES_STAGE5_FTA_TRACKING,
+        "stage6_action_props": FEATURES_STAGE6_ACTION_PROPS,
     }
 
 
@@ -222,4 +232,6 @@ __all__ = [
     "FEATURES_STAGE3_CONTEXT",
     "FEATURES_STAGE4_RECENCY",
     "FEATURES_STAGE5_FTA_TRACKING",
+    "ACTION_PROPS_FEATURES",
+    "FEATURES_STAGE6_ACTION_PROPS",
 ]

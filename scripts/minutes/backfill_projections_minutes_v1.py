@@ -250,6 +250,7 @@ def main(
                 disable_play_prob=False,
                 target_dates={day},
                 debug_describe=debug_describe if debug_describe is not None else (len(target_days) == 1),
+                allow_missing_feature_defaults=True,
             )
             scored_dates += 1
         except Exception as exc:  # noqa: BLE001
@@ -273,6 +274,10 @@ def main(
         if not day_path.exists():
             alt_path = out_root / f"game_date={day.isoformat()}" / score_minutes_v1.OUTPUT_FILENAME
             day_path = alt_path if alt_path.exists() else day_path
+        if not day_path.exists():
+            run_paths = sorted((out_root / day.isoformat()).glob(f"run=*/{score_minutes_v1.OUTPUT_FILENAME}"))
+            if run_paths:
+                day_path = run_paths[-1]
         if not day_path.exists():
             fallback_df = _copy_daily_minutes_into_gold(day, out_root)
             if fallback_df is not None:

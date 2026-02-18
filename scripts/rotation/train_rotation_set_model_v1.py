@@ -323,7 +323,74 @@ def _rescale_labels_to_240(df: pd.DataFrame, *, label_col: str) -> tuple[pd.Data
     return out, payload
 
 
-def _split_by_game_date(df: pd.DataFrame, *, val_frac: float) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+def _split_by_game_date(
+    df: pd.DataFrame,
+    *,
+    val_frac: float,
+    val_start_day: pd.Timestamp | None = None,
+    val_end_day: pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    if val_start_day is not None:
+        if "game_date" not in df.columns or not pd.api.types.is_datetime64_any_dtype(df["game_date"]):
+            raise ValueError("--val-start-date requires datetime game_date in dataset")
+        if val_end_day is not None and val_end_day < val_start_day:
+            raise ValueError("--val-end-date must be on/after --val-start-date")
+
+        game_dates = df.loc[:, ["game_id_norm", "game_date"]].drop_duplicates()
+        game_dates = game_dates.dropna(subset=["game_date"]).sort_values(["game_date", "game_id_norm"])
+        if game_dates.empty:
+            raise ValueError("Cannot split by explicit val dates: no games with non-null game_date")
+
+        val_mask = game_dates["game_date"] >= val_start_day
+        if val_end_day is not None:
+            val_mask &= game_dates["game_date"] <= val_end_day
+        train_mask = game_dates["game_date"] < val_start_day
+        holdout_mask = (~train_mask) & (~val_mask)
+
+        val_games = set(game_dates.loc[val_mask, "game_id_norm"].astype(str))
+        train_games = set(game_dates.loc[train_mask, "game_id_norm"].astype(str))
+        holdout_games = set(game_dates.loc[holdout_mask, "game_id_norm"].astype(str))
+        if not val_games:
+            raise ValueError("No validation games found in explicit val date window")
+        if not train_games:
+            raise ValueError("No training games found before --val-start-date")
+
+        train_df = df.loc[df["game_id_norm"].astype(str).isin(train_games)].copy()
+        val_df = df.loc[df["game_id_norm"].astype(str).isin(val_games)].copy()
+
+        meta: dict[str, Any] = {
+            "split": {
+                "type": "time_explicit",
+                "sort_key": "game_date",
+                "val_frac": None,
+                "val_start_date": val_start_day.date().isoformat(),
+                "val_end_date": val_end_day.date().isoformat() if val_end_day is not None else None,
+            },
+            "counts": {
+                "games_total": int(len(game_dates)),
+                "games_train": int(len(train_games)),
+                "games_val": int(len(val_games)),
+                "games_holdout": int(len(holdout_games)),
+            },
+            "date_ranges": {
+                "train_min": train_df["game_date"].min().date().isoformat() if len(train_df) else None,
+                "train_max": train_df["game_date"].max().date().isoformat() if len(train_df) else None,
+                "val_min": val_df["game_date"].min().date().isoformat() if len(val_df) else None,
+                "val_max": val_df["game_date"].max().date().isoformat() if len(val_df) else None,
+                "holdout_min": (
+                    game_dates.loc[holdout_mask, "game_date"].min().date().isoformat()
+                    if bool(holdout_mask.any())
+                    else None
+                ),
+                "holdout_max": (
+                    game_dates.loc[holdout_mask, "game_date"].max().date().isoformat()
+                    if bool(holdout_mask.any())
+                    else None
+                ),
+            },
+        }
+        return train_df, val_df, meta
+
     if not (0.0 < val_frac < 1.0):
         raise ValueError("val_frac must be in (0, 1)")
 
@@ -343,7 +410,7 @@ def _split_by_game_date(df: pd.DataFrame, *, val_frac: float) -> tuple[pd.DataFr
     train_df = df.loc[~df["game_id_norm"].astype(str).isin(val_games)].copy()
     val_df = df.loc[df["game_id_norm"].astype(str).isin(val_games)].copy()
 
-    meta: dict[str, Any] = {
+    meta = {
         "split": {"type": "time", "sort_key": sort_key, "val_frac": float(val_frac)},
         "counts": {"games_total": int(n_games), "games_val": int(n_val)},
     }
@@ -1353,6 +1420,24 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--val-frac", type=float, default=0.2)
     parser.add_argument(
+        "--val-start-date",
+        type=str,
+        default=None,
+        help=(
+            "Optional inclusive validation window start (YYYY-MM-DD). "
+            "When set, split ignores --val-frac and trains on games before this date."
+        ),
+    )
+    parser.add_argument(
+        "--val-end-date",
+        type=str,
+        default=None,
+        help=(
+            "Optional inclusive validation window end (YYYY-MM-DD). "
+            "Only used with --val-start-date; games after this date are excluded from train/val."
+        ),
+    )
+    parser.add_argument(
         "--start-date",
         type=str,
         default=None,
@@ -1568,7 +1653,14 @@ def main() -> None:
         )
     if use_prior_head and prior_weight_col not in feature_cols:
         feature_cols.append(prior_weight_col)
-    train_df, val_df, split_meta = _split_by_game_date(merged, val_frac=float(args.val_frac))
+    val_start_day = _parse_date_arg(str(args.val_start_date), arg_name="--val-start-date") if args.val_start_date else None
+    val_end_day = _parse_date_arg(str(args.val_end_date), arg_name="--val-end-date") if args.val_end_date else None
+    train_df, val_df, split_meta = _split_by_game_date(
+        merged,
+        val_frac=float(args.val_frac),
+        val_start_day=val_start_day,
+        val_end_day=val_end_day,
+    )
     train_df = train_df.reset_index(drop=True)
     val_df = val_df.reset_index(drop=True)
 

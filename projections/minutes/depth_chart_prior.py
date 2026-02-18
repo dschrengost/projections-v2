@@ -165,7 +165,14 @@ class DepthChartPriorResult:
 
 
 def _normalize_text_key(value: object) -> str:
-    text = str(value or "").strip().lower()
+    if value is None:
+        text = ""
+    else:
+        try:
+            text = "" if pd.isna(value) else str(value)
+        except Exception:
+            text = str(value)
+    text = text.strip().lower()
     text = re.sub(r"[^a-z0-9]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     if not text:
@@ -174,7 +181,14 @@ def _normalize_text_key(value: object) -> str:
 
 
 def _role_norm(value: object) -> str:
-    raw = str(value or "").strip().lower()
+    if value is None:
+        raw = ""
+    else:
+        try:
+            raw = "" if pd.isna(value) else str(value)
+        except Exception:
+            raw = str(value)
+    raw = raw.strip().lower()
     if raw in {"starter", "starter(s)"}:
         return "starter"
     if raw in {"rotation", "rot", "bench_rotation"}:

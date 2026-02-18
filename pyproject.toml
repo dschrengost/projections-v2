@@ -44,6 +44,7 @@ dependencies = [
   "nba_api>=1.4",
   "playwright>=1.57.0",
   "jpype1>=1.6.0",
+  "tqdm>=4.67.3",
 ]
 
 [project.optional-dependencies]
