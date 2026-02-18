@@ -152,7 +152,10 @@ def run(
     if not files:
         console.print(f"[red]No files matched[/red] {input_glob}")
         raise typer.Exit(1)
-    files = [p for p in files if p.name != "[10-22-2024]-[06-22-2025]-combined-stats.csv"]
+    combined_files = [p for p in files if re.search(r"combined-stats\.csv$", p.name)]
+    if combined_files:
+        console.print(f"Skipping {len(combined_files)} combined season CSV file(s).")
+        files = [p for p in files if not re.search(r"combined-stats\.csv$", p.name)]
 
     if game_id:
         filtered: list[Path] = []

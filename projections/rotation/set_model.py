@@ -9,6 +9,7 @@ This module provides:
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -21,7 +22,7 @@ from torch import nn
 from torch.nn import functional as F
 
 # Re-export utility functions for backward compatibility
-from projections.rotation.utils import (
+from projections.rotation.utils import (  # noqa: F401
     GAME_ID_NORM_COL,
     KEY_COLS,
     OPPONENT_TEAM_ID_COL,
@@ -492,6 +493,12 @@ class RotationSetModelConfig:
     use_team_embeddings: bool = False
     team_id_vocab: list[int] | None = None
     team_embedding_dim: int = 8
+    use_player_embeddings: bool = False
+    player_id_vocab: list[int] | None = None
+    player_embedding_dim: int = 16
+    use_player_team_embeddings: bool = False
+    player_team_hash_buckets: int = 16384
+    player_team_embedding_dim: int = 8
     embed_dim: int = 128
     hidden_dim: int = 128
     dropout: float = 0.1
@@ -604,6 +611,12 @@ class DeepSetsMinutesModel(nn.Module):
         use_team_embeddings: bool = False,
         num_teams: int | None = None,
         team_embedding_dim: int = 8,
+        use_player_embeddings: bool = False,
+        num_players: int | None = None,
+        player_embedding_dim: int = 16,
+        use_player_team_embeddings: bool = False,
+        player_team_hash_buckets: int = 16384,
+        player_team_embedding_dim: int = 8,
         embed_dim: int = 128,
         hidden_dim: int = 128,
         dropout: float = 0.1,
@@ -624,14 +637,31 @@ class DeepSetsMinutesModel(nn.Module):
         self.use_prior_head = bool(use_prior_head)
         self.prior_weight_floor = float(prior_weight_floor)
         self.use_team_embeddings = bool(use_team_embeddings)
+        self.use_player_embeddings = bool(use_player_embeddings)
+        self.use_player_team_embeddings = bool(use_player_team_embeddings)
+
+        in_dim = num_features
         if self.use_team_embeddings:
             if not num_teams or num_teams <= 1:
                 raise ValueError("num_teams must be provided when use_team_embeddings=True")
             self.embeddings = TeamOpponentEmbedding(num_embeddings=num_teams, embedding_dim=team_embedding_dim)
-            in_dim = num_features + 2 * team_embedding_dim
+            in_dim += 2 * team_embedding_dim
         else:
             self.embeddings = None
-            in_dim = num_features
+        if self.use_player_embeddings:
+            if not num_players or num_players <= 1:
+                raise ValueError("num_players must be provided when use_player_embeddings=True")
+            self.player_emb = nn.Embedding(num_players, player_embedding_dim)
+            in_dim += int(player_embedding_dim)
+        else:
+            self.player_emb = None
+        if self.use_player_team_embeddings:
+            if int(player_team_hash_buckets) <= 1:
+                raise ValueError("player_team_hash_buckets must be > 1 when use_player_team_embeddings=True")
+            self.player_team_emb = nn.Embedding(int(player_team_hash_buckets), int(player_team_embedding_dim))
+            in_dim += int(player_team_embedding_dim)
+        else:
+            self.player_team_emb = None
 
         self.phi = MLP(in_dim, embed_dim, hidden_dim=hidden_dim, num_layers=2, dropout=dropout)
         if self.use_gate_head:
@@ -643,18 +673,43 @@ class DeepSetsMinutesModel(nn.Module):
             self.gate_head = None
             self.share_head = None
 
-    def _build_inputs(self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor) -> torch.Tensor:
-        if not self.use_team_embeddings:
-            return x
-        if self.embeddings is None:
-            raise RuntimeError("embeddings module missing")
-        emb = self.embeddings(team_idx, opp_idx)
-        return torch.cat([x, emb], dim=-1)
+    def _build_inputs(
+        self,
+        x: torch.Tensor,
+        team_idx: torch.Tensor,
+        opp_idx: torch.Tensor,
+        player_idx: torch.Tensor | None,
+        player_team_idx: torch.Tensor | None,
+    ) -> torch.Tensor:
+        parts: list[torch.Tensor] = [x]
+        if self.use_team_embeddings:
+            if self.embeddings is None:
+                raise RuntimeError("team embeddings module missing")
+            parts.append(self.embeddings(team_idx, opp_idx))
+        if self.use_player_embeddings:
+            if self.player_emb is None:
+                raise RuntimeError("player embeddings module missing")
+            if player_idx is None:
+                raise ValueError("player_idx is required when use_player_embeddings=True")
+            parts.append(self.player_emb(player_idx))
+        if self.use_player_team_embeddings:
+            if self.player_team_emb is None:
+                raise RuntimeError("player-team embeddings module missing")
+            if player_team_idx is None:
+                raise ValueError("player_team_idx is required when use_player_team_embeddings=True")
+            parts.append(self.player_team_emb(player_team_idx))
+        return torch.cat(parts, dim=-1) if len(parts) > 1 else parts[0]
 
     def _pooled_repr(
-        self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor, mask: torch.Tensor
+        self,
+        x: torch.Tensor,
+        team_idx: torch.Tensor,
+        opp_idx: torch.Tensor,
+        mask: torch.Tensor,
+        player_idx: torch.Tensor | None,
+        player_team_idx: torch.Tensor | None,
     ) -> torch.Tensor:
-        inputs = self._build_inputs(x, team_idx, opp_idx)
+        inputs = self._build_inputs(x, team_idx, opp_idx, player_idx, player_team_idx)
         h = self.phi(inputs)
         pooled = masked_mean(h, mask)
         pooled_rep = pooled.unsqueeze(1).expand(-1, h.shape[1], -1)
@@ -667,11 +722,13 @@ class DeepSetsMinutesModel(nn.Module):
         opp_idx: torch.Tensor,
         mask: torch.Tensor,
         *,
+        player_idx: torch.Tensor | None = None,
+        player_team_idx: torch.Tensor | None = None,
         alloc_mask: torch.Tensor | None = None,
         prior_weights: torch.Tensor | None = None,
         router_features: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
-        pooled = self._pooled_repr(x, team_idx, opp_idx, mask)
+        pooled = self._pooled_repr(x, team_idx, opp_idx, mask, player_idx, player_team_idx)
         final_mask = alloc_mask if alloc_mask is not None else mask
         base = prior_weights if self.use_prior_head else None
 
@@ -719,12 +776,17 @@ class DeepSetsMinutesModel(nn.Module):
         alloc_mask: torch.Tensor | None = None,
         prior_weights: torch.Tensor | None = None,
         router_features: torch.Tensor | None = None,
+        *,
+        player_idx: torch.Tensor | None = None,
+        player_team_idx: torch.Tensor | None = None,
     ) -> torch.Tensor:
         minutes, _, _, _, _ = self.forward_with_aux(
             x,
             team_idx,
             opp_idx,
             mask,
+            player_idx=player_idx,
+            player_team_idx=player_team_idx,
             alloc_mask=alloc_mask,
             prior_weights=prior_weights,
             router_features=router_features,
@@ -742,6 +804,12 @@ class SetTransformerMinutesModel(nn.Module):
         use_team_embeddings: bool = False,
         num_teams: int | None = None,
         team_embedding_dim: int = 8,
+        use_player_embeddings: bool = False,
+        num_players: int | None = None,
+        player_embedding_dim: int = 16,
+        use_player_team_embeddings: bool = False,
+        player_team_hash_buckets: int = 16384,
+        player_team_embedding_dim: int = 8,
         embed_dim: int = 128,
         hidden_dim: int = 256,
         dropout: float = 0.1,
@@ -776,6 +844,8 @@ class SetTransformerMinutesModel(nn.Module):
         self.use_prior_head = bool(use_prior_head)
         self.prior_weight_floor = float(prior_weight_floor)
         self.use_team_embeddings = bool(use_team_embeddings)
+        self.use_player_embeddings = bool(use_player_embeddings)
+        self.use_player_team_embeddings = bool(use_player_team_embeddings)
         if self.num_experts < 1:
             raise ValueError("num_experts must be >= 1")
         if self.num_experts > 1 and not self.use_gate_head:
@@ -786,14 +856,28 @@ class SetTransformerMinutesModel(nn.Module):
             raise ValueError("router_temperature must be > 0")
         if self.router_gumbel_tau <= 0:
             raise ValueError("router_gumbel_tau must be > 0")
+        in_dim = num_features
         if self.use_team_embeddings:
             if not num_teams or num_teams <= 1:
                 raise ValueError("num_teams must be provided when use_team_embeddings=True")
             self.embeddings = TeamOpponentEmbedding(num_embeddings=num_teams, embedding_dim=team_embedding_dim)
-            in_dim = num_features + 2 * team_embedding_dim
+            in_dim += 2 * team_embedding_dim
         else:
             self.embeddings = None
-            in_dim = num_features
+        if self.use_player_embeddings:
+            if not num_players or num_players <= 1:
+                raise ValueError("num_players must be provided when use_player_embeddings=True")
+            self.player_emb = nn.Embedding(num_players, player_embedding_dim)
+            in_dim += int(player_embedding_dim)
+        else:
+            self.player_emb = None
+        if self.use_player_team_embeddings:
+            if int(player_team_hash_buckets) <= 1:
+                raise ValueError("player_team_hash_buckets must be > 1 when use_player_team_embeddings=True")
+            self.player_team_emb = nn.Embedding(int(player_team_hash_buckets), int(player_team_embedding_dim))
+            in_dim += int(player_team_embedding_dim)
+        else:
+            self.player_team_emb = None
 
         self.input_proj = nn.Linear(in_dim, embed_dim)
         encoder_layer = nn.TransformerEncoderLayer(
@@ -838,16 +922,44 @@ class SetTransformerMinutesModel(nn.Module):
             self.expert_gate_heads = None
             self.expert_share_heads = None
 
-    def _build_inputs(self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor) -> torch.Tensor:
-        if not self.use_team_embeddings:
-            return x
-        if self.embeddings is None:
-            raise RuntimeError("embeddings module missing")
-        emb = self.embeddings(team_idx, opp_idx)
-        return torch.cat([x, emb], dim=-1)
+    def _build_inputs(
+        self,
+        x: torch.Tensor,
+        team_idx: torch.Tensor,
+        opp_idx: torch.Tensor,
+        player_idx: torch.Tensor | None,
+        player_team_idx: torch.Tensor | None,
+    ) -> torch.Tensor:
+        parts: list[torch.Tensor] = [x]
+        if self.use_team_embeddings:
+            if self.embeddings is None:
+                raise RuntimeError("team embeddings module missing")
+            parts.append(self.embeddings(team_idx, opp_idx))
+        if self.use_player_embeddings:
+            if self.player_emb is None:
+                raise RuntimeError("player embeddings module missing")
+            if player_idx is None:
+                raise ValueError("player_idx is required when use_player_embeddings=True")
+            parts.append(self.player_emb(player_idx))
+        if self.use_player_team_embeddings:
+            if self.player_team_emb is None:
+                raise RuntimeError("player-team embeddings module missing")
+            if player_team_idx is None:
+                raise ValueError("player_team_idx is required when use_player_team_embeddings=True")
+            parts.append(self.player_team_emb(player_team_idx))
+        return torch.cat(parts, dim=-1) if len(parts) > 1 else parts[0]
 
-    def forward_embeddings(self, x: torch.Tensor, team_idx: torch.Tensor, opp_idx: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        inputs = self._build_inputs(x, team_idx, opp_idx)
+    def forward_embeddings(
+        self,
+        x: torch.Tensor,
+        team_idx: torch.Tensor,
+        opp_idx: torch.Tensor,
+        mask: torch.Tensor,
+        *,
+        player_idx: torch.Tensor | None = None,
+        player_team_idx: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        inputs = self._build_inputs(x, team_idx, opp_idx, player_idx, player_team_idx)
         h = self.input_proj(inputs)
         padding_mask = ~mask
         h = self.encoder(h, src_key_padding_mask=padding_mask)
@@ -860,11 +972,20 @@ class SetTransformerMinutesModel(nn.Module):
         opp_idx: torch.Tensor,
         mask: torch.Tensor,
         *,
+        player_idx: torch.Tensor | None = None,
+        player_team_idx: torch.Tensor | None = None,
         alloc_mask: torch.Tensor | None = None,
         prior_weights: torch.Tensor | None = None,
         router_features: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
-        h = self.forward_embeddings(x, team_idx, opp_idx, mask)
+        h = self.forward_embeddings(
+            x,
+            team_idx,
+            opp_idx,
+            mask,
+            player_idx=player_idx,
+            player_team_idx=player_team_idx,
+        )
         final_mask = alloc_mask if alloc_mask is not None else mask
         base = prior_weights if self.use_prior_head else None
 
@@ -988,12 +1109,17 @@ class SetTransformerMinutesModel(nn.Module):
         alloc_mask: torch.Tensor | None = None,
         prior_weights: torch.Tensor | None = None,
         router_features: torch.Tensor | None = None,
+        *,
+        player_idx: torch.Tensor | None = None,
+        player_team_idx: torch.Tensor | None = None,
     ) -> torch.Tensor:
         minutes, _, _, _, _ = self.forward_with_aux(
             x,
             team_idx,
             opp_idx,
             mask,
+            player_idx=player_idx,
+            player_team_idx=player_team_idx,
             alloc_mask=alloc_mask,
             prior_weights=prior_weights,
             router_features=router_features,
@@ -1005,6 +1131,9 @@ def build_model(config: RotationSetModelConfig) -> nn.Module:
     num_features = len(config.feature_columns)
     use_team_embeddings = bool(config.use_team_embeddings)
     num_teams = (len(config.team_id_vocab) + 1) if (use_team_embeddings and config.team_id_vocab) else None
+    use_player_embeddings = bool(getattr(config, "use_player_embeddings", False))
+    num_players = (len(config.player_id_vocab) + 1) if (use_player_embeddings and config.player_id_vocab) else None
+    use_player_team_embeddings = bool(getattr(config, "use_player_team_embeddings", False))
     if config.model == "deepsets":
         return DeepSetsMinutesModel(
             num_features,
@@ -1013,6 +1142,12 @@ def build_model(config: RotationSetModelConfig) -> nn.Module:
             use_team_embeddings=use_team_embeddings,
             num_teams=num_teams,
             team_embedding_dim=config.team_embedding_dim,
+            use_player_embeddings=use_player_embeddings,
+            num_players=num_players,
+            player_embedding_dim=int(getattr(config, "player_embedding_dim", 16)),
+            use_player_team_embeddings=use_player_team_embeddings,
+            player_team_hash_buckets=int(getattr(config, "player_team_hash_buckets", 16384)),
+            player_team_embedding_dim=int(getattr(config, "player_team_embedding_dim", 8)),
             embed_dim=config.embed_dim,
             hidden_dim=config.hidden_dim,
             dropout=config.dropout,
@@ -1031,6 +1166,12 @@ def build_model(config: RotationSetModelConfig) -> nn.Module:
             use_team_embeddings=use_team_embeddings,
             num_teams=num_teams,
             team_embedding_dim=config.team_embedding_dim,
+            use_player_embeddings=use_player_embeddings,
+            num_players=num_players,
+            player_embedding_dim=int(getattr(config, "player_embedding_dim", 16)),
+            use_player_team_embeddings=use_player_team_embeddings,
+            player_team_hash_buckets=int(getattr(config, "player_team_hash_buckets", 16384)),
+            player_team_embedding_dim=int(getattr(config, "player_team_embedding_dim", 8)),
             embed_dim=config.embed_dim,
             hidden_dim=max(config.hidden_dim, 2 * config.embed_dim),
             dropout=config.dropout,
@@ -1078,6 +1219,8 @@ class TeamGameSet:
     x: np.ndarray
     team_idx: np.ndarray
     opp_idx: np.ndarray
+    player_idx: np.ndarray
+    player_team_idx: np.ndarray
 
 
 @dataclass
@@ -1107,6 +1250,85 @@ def _map_ids_to_index(series: pd.Series, mapping: dict[int, int]) -> np.ndarray:
     return mapped.fillna(0).to_numpy(dtype=np.int64, copy=False)
 
 
+def _hash_player_team_pair(player_id: int, team_id: int, buckets: int) -> int:
+    payload = f"{int(player_id)}:{int(team_id)}".encode("utf-8")
+    digest = hashlib.blake2b(payload, digest_size=8).digest()
+    value = int.from_bytes(digest, byteorder="little", signed=False)
+    # Reserve 0 for unknown/missing.
+    return int(value % max(1, buckets - 1)) + 1
+
+
+def _map_player_team_to_bucket(
+    player_id: pd.Series,
+    team_id: pd.Series,
+    *,
+    buckets: int,
+) -> np.ndarray:
+    if player_id.empty:
+        return np.zeros(0, dtype=np.int64)
+    if buckets <= 1:
+        raise ValueError("player_team_hash_buckets must be > 1 when player-team embeddings are enabled")
+    player_num = pd.to_numeric(player_id, errors="coerce").astype("Int64")
+    team_num = pd.to_numeric(team_id, errors="coerce").astype("Int64")
+    out = np.zeros(len(player_num), dtype=np.int64)
+    for i, (p_val, t_val) in enumerate(zip(player_num.to_numpy(), team_num.to_numpy(), strict=False)):
+        if pd.isna(p_val) or pd.isna(t_val):
+            out[i] = 0
+            continue
+        out[i] = _hash_player_team_pair(int(p_val), int(t_val), int(buckets))
+    return out
+
+
+def _normalize_alloc_mask_mode(value: str | None) -> str:
+    mode = (value or "strict").strip().lower()
+    if mode not in {"strict", "not_out"}:
+        raise ValueError("alloc_mask_mode must be one of: strict, not_out")
+    return mode
+
+
+def _build_not_out_mask(group_df: pd.DataFrame) -> np.ndarray:
+    n = len(group_df)
+    if n == 0:
+        return np.zeros(0, dtype=bool)
+    not_out = np.ones(n, dtype=bool)
+    if "is_out" in group_df.columns:
+        out_flag = pd.to_numeric(group_df["is_out"], errors="coerce").fillna(0).astype(int)
+        not_out &= out_flag.to_numpy(dtype=int) == 0
+    if "status" in group_df.columns:
+        status_out = (
+            group_df["status"]
+            .fillna("")
+            .astype(str)
+            .str.upper()
+            .str.strip()
+            .isin(["OUT", "O"])
+        )
+        not_out &= ~status_out.to_numpy(dtype=bool)
+    return not_out
+
+
+def _build_inference_alloc_mask(
+    group_df: pd.DataFrame,
+    *,
+    mode: str,
+    baseline_col: str | None,
+    min_eligible: int,
+    prior_play_prob_threshold: float,
+    baseline_minutes_threshold: float,
+) -> np.ndarray:
+    not_out = _build_not_out_mask(group_df)
+    if mode == "not_out":
+        return not_out
+    return build_alloc_mask_from_features(
+        group_df,
+        min_eligible=int(min_eligible),
+        max_eligible=None,
+        prior_play_prob_threshold=float(prior_play_prob_threshold),
+        baseline_minutes_threshold=float(baseline_minutes_threshold),
+        baseline_minutes_col=baseline_col,
+    )
+
+
 class RotationSetMinutesPredictor:
     def __init__(self, *, config: RotationSetModelConfig, model: nn.Module, device: str = "cpu") -> None:
         self.config = config
@@ -1122,6 +1344,8 @@ class RotationSetMinutesPredictor:
             raise ValueError("feature_std length does not match feature_columns")
 
         self._team_id_mapping = _build_team_id_mapping(config.team_id_vocab)
+        self._player_id_mapping = _build_team_id_mapping(getattr(config, "player_id_vocab", None))
+        self._player_team_hash_buckets = int(getattr(config, "player_team_hash_buckets", 16384))
 
     @classmethod
     def load(cls, model_dir: Path, *, device: str = "cpu") -> "RotationSetMinutesPredictor":
@@ -1140,6 +1364,10 @@ class RotationSetMinutesPredictor:
         *,
         batch_size: int = 64,
         return_aux: bool = False,
+        alloc_mask_mode: str | None = None,
+        alloc_min_eligible: int = 9,
+        alloc_prior_play_prob_threshold: float = 0.20,
+        alloc_baseline_minutes_threshold: float = 4.0,
     ) -> pd.DataFrame | RotationSetAuxOutputs:
         """Predict per-player minutes from a flat feature dataframe.
 
@@ -1155,6 +1383,7 @@ class RotationSetMinutesPredictor:
         """
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
+        resolved_alloc_mask_mode = _normalize_alloc_mask_mode(alloc_mask_mode)
         df = normalize_key_columns(df_features)
         df = df.reset_index(drop=True)
         feature_matrix = _build_feature_matrix(
@@ -1171,6 +1400,20 @@ class RotationSetMinutesPredictor:
             if self.config.use_team_embeddings
             else np.zeros(len(df), dtype=np.int64)
         )
+        if getattr(self.config, "use_player_embeddings", False):
+            if not self._player_id_mapping:
+                raise ValueError("Model config requires player embeddings, but player_id_vocab is empty/missing")
+            player_idx_all = _map_ids_to_index(df["player_id"], self._player_id_mapping)
+        else:
+            player_idx_all = np.zeros(len(df), dtype=np.int64)
+        if getattr(self.config, "use_player_team_embeddings", False):
+            player_team_idx_all = _map_player_team_to_bucket(
+                df["player_id"],
+                df["team_id"],
+                buckets=self._player_team_hash_buckets,
+            )
+        else:
+            player_team_idx_all = np.zeros(len(df), dtype=np.int64)
         if self.config.use_team_embeddings:
             if OPPONENT_TEAM_ID_COL in df.columns:
                 opp_idx_all = _map_ids_to_index(df[OPPONENT_TEAM_ID_COL], self._team_id_mapping)
@@ -1190,6 +1433,8 @@ class RotationSetMinutesPredictor:
                     x=feature_matrix[idx_arr],
                     team_idx=team_idx_all[idx_arr],
                     opp_idx=opp_idx_all[idx_arr],
+                    player_idx=player_idx_all[idx_arr],
+                    player_team_idx=player_team_idx_all[idx_arr],
                 )
             )
 
@@ -1252,6 +1497,8 @@ class RotationSetMinutesPredictor:
                 prior_w = torch.zeros((len(batch), max_n), dtype=torch.float32, device=self.device)
                 team_idx = torch.zeros((len(batch), max_n), dtype=torch.long, device=self.device)
                 opp_idx = torch.zeros((len(batch), max_n), dtype=torch.long, device=self.device)
+                player_idx = torch.zeros((len(batch), max_n), dtype=torch.long, device=self.device)
+                player_team_idx = torch.zeros((len(batch), max_n), dtype=torch.long, device=self.device)
                 router_features = (
                     torch.zeros((len(batch), router_feat_dim), dtype=torch.float32, device=self.device)
                     if router_feat_dim > 0
@@ -1264,23 +1511,27 @@ class RotationSetMinutesPredictor:
                     mask[i, :n] = True
                     # Build stricter alloc_mask from features instead of just is_out
                     group_df = df.iloc[group.row_indices]
-                    alloc_arr = build_alloc_mask_from_features(
+                    alloc_arr = _build_inference_alloc_mask(
                         group_df,
-                        min_eligible=9,
-                        max_eligible=None,  # No cap for now
-                        prior_play_prob_threshold=0.20,
-                        baseline_minutes_threshold=4.0,
-                        baseline_minutes_col=baseline_col,
+                        mode=resolved_alloc_mask_mode,
+                        baseline_col=baseline_col,
+                        min_eligible=int(alloc_min_eligible),
+                        prior_play_prob_threshold=float(alloc_prior_play_prob_threshold),
+                        baseline_minutes_threshold=float(alloc_baseline_minutes_threshold),
                     )
                     if not bool(np.any(alloc_arr)):
                         # Fallback: if no one is eligible, set all not-out players
-                        alloc_mask[i, :n] = True
+                        alloc_mask[i, :n] = torch.as_tensor(
+                            _build_not_out_mask(group_df), device=self.device
+                        )
                     else:
                         alloc_mask[i, :n] = torch.as_tensor(alloc_arr, device=self.device)
                     if prior_weight_all is not None:
                         prior_w[i, :n] = torch.as_tensor(prior_weight_all[group.row_indices], device=self.device)
                     team_idx[i, :n] = torch.from_numpy(group.team_idx).to(self.device)
                     opp_idx[i, :n] = torch.from_numpy(group.opp_idx).to(self.device)
+                    player_idx[i, :n] = torch.from_numpy(group.player_idx).to(self.device)
+                    player_team_idx[i, :n] = torch.from_numpy(group.player_team_idx).to(self.device)
                     if (
                         router_features is not None
                         and prior20_all is not None
@@ -1312,6 +1563,8 @@ class RotationSetMinutesPredictor:
                             team_idx,
                             opp_idx,
                             mask,
+                            player_idx=player_idx,
+                            player_team_idx=player_team_idx,
                             alloc_mask=alloc_mask,
                             prior_weights=prior_w if prior_weight_all is not None else None,
                             router_features=router_features,
@@ -1342,6 +1595,8 @@ class RotationSetMinutesPredictor:
                             team_idx,
                             opp_idx,
                             mask,
+                            player_idx=player_idx,
+                            player_team_idx=player_team_idx,
                             alloc_mask=alloc_mask,
                             prior_weights=prior_w if prior_weight_all is not None else None,
                             router_features=router_features,
@@ -1379,6 +1634,10 @@ def predict_minutes(
     device: str = "cpu",
     batch_size: int = 64,
     return_aux: bool = False,
+    alloc_mask_mode: str | None = None,
+    alloc_min_eligible: int = 9,
+    alloc_prior_play_prob_threshold: float = 0.20,
+    alloc_baseline_minutes_threshold: float = 4.0,
 ) -> pd.DataFrame | RotationSetAuxOutputs:
     """Predict per-player minutes from a flat feature dataframe.
 
@@ -1392,5 +1651,12 @@ def predict_minutes(
     if not resolved_dir:
         raise ValueError(f"model_dir must be provided or {MODEL_DIR_ENV} must be set")
     predictor = RotationSetMinutesPredictor.load(Path(resolved_dir), device=device)
-    return predictor.predict(df_features, batch_size=batch_size, return_aux=return_aux)
-
+    return predictor.predict(
+        df_features,
+        batch_size=batch_size,
+        return_aux=return_aux,
+        alloc_mask_mode=alloc_mask_mode,
+        alloc_min_eligible=alloc_min_eligible,
+        alloc_prior_play_prob_threshold=alloc_prior_play_prob_threshold,
+        alloc_baseline_minutes_threshold=alloc_baseline_minutes_threshold,
+    )

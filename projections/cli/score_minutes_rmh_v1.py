@@ -146,6 +146,58 @@ def _load_rmh_config(config_path: Path) -> dict[str, Any]:
     return json.loads(config_path.read_text(encoding="utf-8"))
 
 
+def _load_historical_minutes_features_for_dnp(
+    *,
+    data_root: Path,
+    season: int,
+    day: pd.Timestamp,
+    player_ids: list[int],
+    team_ids: list[int],
+) -> pd.DataFrame:
+    """Load historical minutes feature rows (with realized minutes) for DNP-history features."""
+
+    root = data_root / "gold" / "features_minutes_v1" / f"season={season}"
+    if not root.exists():
+        return pd.DataFrame()
+
+    player_set = set(player_ids)
+    team_set = set(team_ids)
+    frames: list[pd.DataFrame] = []
+    cols = ["game_date", "player_id", "team_id", "is_out", "injury_snapshot_missing", "minutes"]
+    for month_dir in sorted(root.glob("month=*")):
+        path = month_dir / "features.parquet"
+        if not path.exists():
+            continue
+        try:
+            df = pd.read_parquet(path, columns=cols)
+        except Exception:
+            df = pd.read_parquet(path)
+            missing = [c for c in cols if c not in df.columns]
+            if missing:
+                continue
+            df = df.loc[:, cols]
+        if df.empty:
+            continue
+        df["player_id"] = pd.to_numeric(df["player_id"], errors="coerce")
+        df["team_id"] = pd.to_numeric(df["team_id"], errors="coerce")
+        df = df.dropna(subset=["player_id", "team_id"]).copy()
+        df["player_id"] = df["player_id"].astype(int)
+        df["team_id"] = df["team_id"].astype(int)
+        df = df[df["player_id"].isin(player_set) & df["team_id"].isin(team_set)].copy()
+        if df.empty:
+            continue
+        frames.append(df)
+
+    if not frames:
+        return pd.DataFrame()
+
+    hist = pd.concat(frames, ignore_index=True)
+    hist["game_date"] = pd.to_datetime(hist["game_date"], errors="coerce").dt.normalize()
+    hist = hist.dropna(subset=["game_date"]).copy()
+    hist = hist[hist["game_date"] < day.normalize()].copy()
+    return hist.reset_index(drop=True)
+
+
 @app.command()
 def main(
     *,
@@ -153,6 +205,11 @@ def main(
     run_id: str = typer.Option(..., "--run-id", help="Run id for run-scoped outputs."),
     data_root: Path = typer.Option(
         DEFAULT_DATA_ROOT, "--data-root", help="PROJECTIONS_DATA_ROOT override."
+    ),
+    artifact_root: Path | None = typer.Option(
+        None,
+        "--artifact-root",
+        help="Override output root for minutes artifacts (defaults to <data_root>/artifacts/minutes_v1/daily).",
     ),
     config_path: Path = typer.Option(
         DEFAULT_CONFIG_PATH, "--config", help="Path to RMH config JSON."
@@ -167,6 +224,13 @@ def main(
     day = _normalize_day(date)
     season = _season_for_day(day)
     data_root = Path(data_root).expanduser().resolve()
+    if artifact_root is None:
+        artifact_root = data_root / "artifacts" / "minutes_v1" / "daily"
+    else:
+        artifact_root = Path(artifact_root)
+        if not artifact_root.is_absolute():
+            artifact_root = data_root / artifact_root
+        artifact_root = artifact_root.expanduser().resolve()
 
     # Resolve config path relative to project root if not absolute
     if not config_path.is_absolute():
@@ -198,7 +262,7 @@ def main(
     typer.echo(
         f"[rmh-scorer] date={day.date()} run_id={run_id} bundle={bundle_dir.name} "
         f"reconcile={reconcile_mode} threshold={in_rotation_threshold_min} "
-        f"max_rotation_players={max_rotation_players}",
+        f"max_rotation_players={max_rotation_players} artifact_root={artifact_root}",
         err=True,
     )
 
@@ -312,6 +376,41 @@ def main(
             team_priors=priors.team_priors,
             player_priors=priors.player_priors,
         )
+
+        # DNP history features are required by the RMH production bundle but are
+        # not currently persisted in live minutes features. Compute them from
+        # gold historical features (minutes realized) to restore parity.
+        from projections.features.dnp_history import (
+            DNPHistoryConfig,
+            compute_dnp_history_features_for_live,
+        )
+
+        dnp_needed = {
+            "games_since_last_roster_active",
+            "never_roster_active_before",
+            "consecutive_active_dnp",
+            "active_but_dnp_rate_last10",
+            "inactive_streak_len",
+        }
+        if dnp_needed.intersection(required_cont) and not dnp_needed.issubset(work.columns):
+            hist = _load_historical_minutes_features_for_dnp(
+                data_root=data_root,
+                season=season,
+                day=day,
+                player_ids=player_ids,
+                team_ids=team_ids,
+            )
+            work = compute_dnp_history_features_for_live(
+                work,
+                hist,
+                config=DNPHistoryConfig(),
+                game_date_col="game_date",
+                player_id_col="player_id",
+                team_id_col="team_id",
+                is_out_col="is_out",
+                injury_snapshot_missing_col="injury_snapshot_missing",
+                minutes_col="minutes",
+            )
         features = prepare_live_features_for_rmh(work)
 
     # 5) Check feature coverage after priors join
@@ -428,7 +527,7 @@ def main(
         out["effective_minutes"] = out["minutes_p50"]
 
     # 9) Write output
-    out_dir = data_root / "artifacts" / "minutes_v1" / "daily" / day.strftime("%Y-%m-%d") / f"run={run_id}"
+    out_dir = Path(artifact_root) / day.strftime("%Y-%m-%d") / f"run={run_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "minutes.parquet"
     out.to_parquet(out_path, index=False)
@@ -440,6 +539,7 @@ def main(
         "generated_at": pd.Timestamp.now(tz=UTC).isoformat(),
         "model": "rmh_v1",
         "bundle_dir": str(bundle_dir),
+        "artifact_root": str(artifact_root),
         "schema_hash": bundle.schema_hash,
         "reconcile_mode": reconcile_mode,
         "in_rotation_threshold_min": in_rotation_threshold_min,

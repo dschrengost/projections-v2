@@ -125,6 +125,26 @@ class TestComputeKRegularizer:
         # mean([(5-9.5)^2, (5-9.5)^2]) = 20.25
         assert loss.item() == pytest.approx(20.25, abs=1e-4)
 
+    def test_tensor_target_per_team(self) -> None:
+        """Regularizer should accept per-team tensor targets."""
+        gate_logits = torch.zeros(2, 10)  # k_hat = [5.0, 5.0]
+        mask = torch.ones(2, 10, dtype=torch.bool)
+        targets = torch.tensor([5.0, 7.0], dtype=torch.float32)
+
+        loss = compute_k_regularizer(gate_logits, mask, k_target=targets)
+
+        # mean([(5-5)^2, (5-7)^2]) = 2.0
+        assert loss.item() == pytest.approx(2.0, abs=1e-5)
+
+    def test_tensor_target_shape_mismatch_raises(self) -> None:
+        """Mismatched k_target tensor length should raise."""
+        gate_logits = torch.zeros(2, 10)
+        mask = torch.ones(2, 10, dtype=torch.bool)
+        targets = torch.tensor([5.0], dtype=torch.float32)
+
+        with pytest.raises(ValueError, match="batch size"):
+            compute_k_regularizer(gate_logits, mask, k_target=targets)
+
 
 class TestComputeAntiSmearPenalty:
     """Tests for compute_anti_smear_penalty function."""

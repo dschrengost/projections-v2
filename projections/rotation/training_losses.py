@@ -51,7 +51,7 @@ def compute_k_hat(
 def compute_k_regularizer(
     gate_logits: torch.Tensor,
     mask: torch.Tensor,
-    k_target: float,
+    k_target: float | torch.Tensor,
 ) -> torch.Tensor:
     """Compute team expected-K regularizer loss.
 
@@ -60,13 +60,24 @@ def compute_k_regularizer(
     Args:
         gate_logits: (B, N) gate logits from the model
         mask: (B, N) boolean mask of valid roster slots
-        k_target: target expected rotation size (e.g., 9.5)
+        k_target: target expected rotation size (scalar or per-team tensor)
 
     Returns:
         scalar loss: mean((k_hat - k_target)^2)
     """
     k_hat = compute_k_hat(gate_logits, mask)
-    return ((k_hat - k_target) ** 2).mean()
+    if isinstance(k_target, torch.Tensor):
+        target = k_target.to(dtype=k_hat.dtype, device=k_hat.device)
+        if target.ndim == 0:
+            target = target.expand_as(k_hat)
+        elif target.ndim == 1:
+            if target.shape[0] != k_hat.shape[0]:
+                raise ValueError("k_target tensor length must match batch size")
+        else:
+            raise ValueError("k_target tensor must be scalar or shape (B,)")
+    else:
+        target = torch.full_like(k_hat, float(k_target))
+    return ((k_hat - target) ** 2).mean()
 
 
 def compute_anti_smear_penalty(

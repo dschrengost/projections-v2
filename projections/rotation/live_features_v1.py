@@ -486,6 +486,23 @@ def build_rotation_set_minutes_v1_features(
     )
     work = apply_odds_missing_flags(work)
 
+    # Backward-compat: some historical minutes snapshots may not carry
+    # context-missing indicators that newer rotation-set models expect.
+    # Derive them from raw context columns before global numeric fill.
+    if "team_ctx_missing" in feature_columns and "team_ctx_missing" not in work.columns:
+        team_ctx_cols = [c for c in ("team_pace_szn", "team_off_rtg_szn", "team_def_rtg_szn") if c in work.columns]
+        if team_ctx_cols:
+            work["team_ctx_missing"] = work[team_ctx_cols].isna().all(axis=1).astype("int8")
+        else:
+            work["team_ctx_missing"] = 1
+
+    if "opp_ctx_missing" in feature_columns and "opp_ctx_missing" not in work.columns:
+        opp_ctx_cols = [c for c in ("opp_pace_szn", "opp_def_rtg_szn") if c in work.columns]
+        if opp_ctx_cols:
+            work["opp_ctx_missing"] = work[opp_ctx_cols].isna().all(axis=1).astype("int8")
+        else:
+            work["opp_ctx_missing"] = 1
+
     # Compute minutes_features_row_missing before global numeric fill.
     base_non_prior = [
         c

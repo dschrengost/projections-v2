@@ -34,6 +34,15 @@ class MinutesWorldsConfig:
     bench_zero_p_base: float = 0.25
     # Slope for zero probability as minutes decrease
     bench_zero_p_slope: float = 0.5
+    # Whether to use share_logits for per-world demand sampling.
+    use_share_logits: bool = True
+    # Temperature applied to share logits before softmax.
+    share_temperature: float = 1.0
+    # Gaussian noise std added to share logits per world.
+    share_noise_std: float = 0.0
+    # Blend weight between share-driven demand and baseline minutes demand.
+    # 0.0 => baseline-only, 1.0 => share-only.
+    share_blend_weight: float = 0.5
 
 
 @dataclass
@@ -55,6 +64,7 @@ def sample_minutes_worlds_model_space_v1(
     gate_prob: np.ndarray | None,
     share_logit: np.ndarray,
     play_prob: np.ndarray,
+    active_mask: np.ndarray | None = None,
     team_indices: np.ndarray,
     n_worlds: int,
     rng: np.random.Generator,
@@ -73,6 +83,8 @@ def sample_minutes_worlds_model_space_v1(
         gate_prob: (P,) gate probabilities (sigmoid of gate_logit), or None
         share_logit: (P,) share logits for within-rotation allocation
         play_prob: (P,) probability each player appears in the game at all
+        active_mask: optional precomputed availability mask (W, P). When provided,
+            sampler uses this mask directly instead of resampling from play_prob.
         team_indices: (P,) integer team index for each player
         n_worlds: number of worlds to sample
         rng: numpy random generator (must be per-chunk, not global)
@@ -94,9 +106,20 @@ def sample_minutes_worlds_model_space_v1(
     if len(play_prob) != n_players:
         raise ValueError(f"play_prob length {len(play_prob)} != n_players {n_players}")
 
-    # 1. Sample active mask from play_prob (Bernoulli per player per world)
-    u_active = rng.random(size=(n_worlds, n_players))
-    active_mask = u_active < play_prob[None, :]
+    # 1. Resolve active mask.
+    if active_mask is not None:
+        active_mask_resolved = np.asarray(active_mask, dtype=bool)
+        if active_mask_resolved.shape != (n_worlds, n_players):
+            raise ValueError(
+                f"active_mask shape {active_mask_resolved.shape} != {(n_worlds, n_players)}"
+            )
+        active_mask_resolved = active_mask_resolved.copy()
+        active_mask_source = "provided"
+    else:
+        # Sample active mask from play_prob (Bernoulli per player per world)
+        u_active = rng.random(size=(n_worlds, n_players))
+        active_mask_resolved = u_active < play_prob[None, :]
+        active_mask_source = "sampled_from_play_prob"
 
     # 2. Apply gate probability to determine rotation membership
     # If gate_prob is provided, use it; otherwise assume all active players are in rotation
@@ -110,13 +133,33 @@ def sample_minutes_worlds_model_space_v1(
 
         # Sample rotation membership: active AND passes gate
         u_gate = rng.random(size=(n_worlds, n_players))
-        in_rotation_mask = active_mask & (u_gate < gate_prob_scaled[None, :])
+        in_rotation_mask = active_mask_resolved & (u_gate < gate_prob_scaled[None, :])
     else:
         # No gate head - all active players are in rotation
-        in_rotation_mask = active_mask.copy()
+        in_rotation_mask = active_mask_resolved.copy()
 
-    # 3. Initialize minutes worlds with baseline allocation
-    minutes_worlds = np.broadcast_to(minutes_mean[None, :], (n_worlds, n_players)).copy()
+    # 3. Build per-world demand minutes.
+    minutes_mean_safe = np.maximum(np.asarray(minutes_mean, dtype=float), 0.0)
+    minutes_worlds = np.broadcast_to(minutes_mean_safe[None, :], (n_worlds, n_players)).copy()
+
+    use_share_logits = (
+        bool(cfg.use_share_logits)
+        and share_logit is not None
+        and len(share_logit) == n_players
+        and n_players > 0
+    )
+    if use_share_logits:
+        share_demand_worlds = _build_share_driven_demand_worlds(
+            share_logit=np.asarray(share_logit, dtype=float),
+            in_rotation_mask=in_rotation_mask,
+            team_indices=team_indices,
+            n_worlds=n_worlds,
+            rng=rng,
+            share_temperature=float(cfg.share_temperature),
+            share_noise_std=float(cfg.share_noise_std),
+        )
+        blend = float(np.clip(cfg.share_blend_weight, 0.0, 1.0))
+        minutes_worlds = (1.0 - blend) * minutes_worlds + blend * share_demand_worlds
 
     # 4. Apply bench-zero mixture for low-minute players
     if cfg.use_bench_zero_mixture:
@@ -149,7 +192,7 @@ def sample_minutes_worlds_model_space_v1(
         )
 
     # 7. Compute diagnostics
-    active_count = active_mask.sum()
+    active_count = active_mask_resolved.sum()
     rotation_count = in_rotation_mask.sum()
     zero_minutes_count = (minutes_worlds == 0.0).sum()
 
@@ -159,13 +202,18 @@ def sample_minutes_worlds_model_space_v1(
         "active_rate": float(active_count / (n_worlds * n_players)) if n_players > 0 else 0.0,
         "rotation_rate": float(rotation_count / (n_worlds * n_players)) if n_players > 0 else 0.0,
         "zero_minutes_rate": float(zero_minutes_count / (n_worlds * n_players)) if n_players > 0 else 0.0,
+        "active_mask_source": active_mask_source,
         "gate_temperature": cfg.gate_temperature,
         "bench_zero_mixture": cfg.use_bench_zero_mixture,
+        "share_logits_used": bool(use_share_logits),
+        "share_temperature": float(cfg.share_temperature),
+        "share_noise_std": float(cfg.share_noise_std),
+        "share_blend_weight": float(np.clip(cfg.share_blend_weight, 0.0, 1.0)),
     }
 
     return MinutesWorldsResult(
         minutes_worlds=minutes_worlds,
-        active_mask=active_mask,
+        active_mask=active_mask_resolved,
         diagnostics=diagnostics,
     )
 
@@ -206,6 +254,63 @@ def _enforce_team_240_simple(
     # Ensure non-rotation players stay at 0 exactly.
     out = np.where(in_rotation_mask, out, 0.0)
     return out
+
+
+def _build_share_driven_demand_worlds(
+    *,
+    share_logit: np.ndarray,
+    in_rotation_mask: np.ndarray,
+    team_indices: np.ndarray,
+    n_worlds: int,
+    rng: np.random.Generator,
+    share_temperature: float,
+    share_noise_std: float,
+) -> np.ndarray:
+    """Build per-world demand from share logits under team-240 constraint."""
+    n_players = len(share_logit)
+    out = np.zeros((n_worlds, n_players), dtype=float)
+    if n_players == 0 or team_indices.size == 0:
+        return out
+
+    n_teams = int(team_indices.max()) + 1
+    temp = max(float(share_temperature), 1e-3)
+    noise_std = max(float(share_noise_std), 0.0)
+
+    base = np.nan_to_num(share_logit.astype(float, copy=False), nan=0.0, posinf=0.0, neginf=0.0)
+    for team_id in range(n_teams):
+        idx = np.flatnonzero(team_indices == team_id)
+        if idx.size == 0:
+            continue
+
+        team_logits = base[idx]
+        team_logits = team_logits - float(np.mean(team_logits))
+        if noise_std > 0.0:
+            noise = rng.normal(0.0, noise_std, size=(n_worlds, idx.size))
+            logits_world = (team_logits[None, :] + noise) / temp
+        else:
+            logits_world = np.broadcast_to(team_logits[None, :] / temp, (n_worlds, idx.size)).copy()
+
+        active_team = in_rotation_mask[:, idx]
+        shares = _masked_softmax_rows(logits_world, active_team)
+        out[:, idx] = shares * 240.0
+
+    return out
+
+
+def _masked_softmax_rows(logits: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Row-wise masked softmax returning zeros for rows with no active slots."""
+    if logits.shape != mask.shape:
+        raise ValueError(f"logits/mask shape mismatch: {logits.shape} vs {mask.shape}")
+    if logits.size == 0:
+        return np.zeros_like(logits, dtype=float)
+
+    masked_logits = np.where(mask, logits, -1e9)
+    row_max = masked_logits.max(axis=1, keepdims=True)
+    stable = masked_logits - row_max
+    exp_vals = np.exp(stable)
+    exp_vals = np.where(mask, exp_vals, 0.0)
+    denom = exp_vals.sum(axis=1, keepdims=True)
+    return np.divide(exp_vals, denom, out=np.zeros_like(exp_vals), where=denom > 0.0)
 
 
 def compute_minutes_quantiles(

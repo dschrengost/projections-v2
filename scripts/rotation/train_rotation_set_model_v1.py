@@ -22,6 +22,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import subprocess
@@ -61,6 +62,8 @@ TEAM_TOTAL_MINUTES_COL = "team_total_minutes_from_stints"
 TEAM_ID_COLS = {"home_team_id", "away_team_id", "opponent_team_id"}
 TEAM_EMBED_TEAM_IDX_COL = "team_id_idx"
 TEAM_EMBED_OPP_IDX_COL = "opp_id_idx"
+PLAYER_EMBED_IDX_COL = "player_id_idx"
+PLAYER_TEAM_HASH_IDX_COL = "player_team_hash_idx"
 DEFAULT_MIN_TEAM_MINUTES_FROM_STINTS = 200.0
 DEFAULT_MAX_TEAM_MINUTES_GAP = 2.0
 
@@ -174,7 +177,7 @@ def _infer_feature_columns(features_df: pd.DataFrame, *, labels_df: pd.DataFrame
     cols: list[str] = []
     excluded = {"game_id", "team_id", "player_id", "game_id_norm", label_col}
     excluded.update(TEAM_ID_COLS)
-    excluded.update({TEAM_EMBED_TEAM_IDX_COL, TEAM_EMBED_OPP_IDX_COL})
+    excluded.update({TEAM_EMBED_TEAM_IDX_COL, TEAM_EMBED_OPP_IDX_COL, PLAYER_EMBED_IDX_COL, PLAYER_TEAM_HASH_IDX_COL})
     excluded.update(set(labels_df.columns))
     excluded.update(EXCLUDE_DNP_BLIND_FEATURES)
     excluded.update(EXCLUDE_INJURY_STATUS_FEATURES)
@@ -210,6 +213,47 @@ def _build_team_id_vocab(df: pd.DataFrame) -> list[int]:
     if not vocab:
         raise ValueError("Empty team_id vocab; check dataset team id columns")
     return vocab
+
+
+def _build_player_id_vocab(df: pd.DataFrame) -> list[int]:
+    player_ids = pd.to_numeric(df["player_id"], errors="coerce").astype("Int64").dropna().astype("int64")
+    vocab = sorted({int(v) for v in player_ids.to_numpy().tolist()})
+    if not vocab:
+        raise ValueError("Empty player_id vocab; check dataset player ids")
+    return vocab
+
+
+def _hash_player_team_pair(player_id: int, team_id: int, buckets: int) -> int:
+    payload = f"{int(player_id)}:{int(team_id)}".encode("utf-8")
+    digest = hashlib.blake2b(payload, digest_size=8).digest()
+    value = int.from_bytes(digest, byteorder="little", signed=False)
+    # Reserve 0 for unknown/missing.
+    return int(value % max(1, buckets - 1)) + 1
+
+
+def _add_player_embedding_indices(df: pd.DataFrame, *, player_id_vocab: list[int]) -> pd.DataFrame:
+    mapping = {int(player_id): i + 1 for i, player_id in enumerate(player_id_vocab)}
+    out = df.copy()
+    out[PLAYER_EMBED_IDX_COL] = (
+        pd.to_numeric(out["player_id"], errors="coerce").astype("Int64").map(mapping).fillna(0).astype("int64")
+    )
+    return out
+
+
+def _add_player_team_hash_indices(df: pd.DataFrame, *, buckets: int) -> pd.DataFrame:
+    if int(buckets) <= 1:
+        raise ValueError("player_team_hash_buckets must be > 1")
+    out = df.copy()
+    player_ids = pd.to_numeric(out["player_id"], errors="coerce").astype("Int64")
+    team_ids = pd.to_numeric(out["team_id"], errors="coerce").astype("Int64")
+    values = np.zeros(len(out), dtype=np.int64)
+    for i, (p_val, t_val) in enumerate(zip(player_ids.to_numpy(), team_ids.to_numpy(), strict=False)):
+        if pd.isna(p_val) or pd.isna(t_val):
+            values[i] = 0
+            continue
+        values[i] = _hash_player_team_pair(int(p_val), int(t_val), int(buckets))
+    out[PLAYER_TEAM_HASH_IDX_COL] = values
+    return out
 
 
 def _add_team_embedding_indices(df: pd.DataFrame, *, team_id_vocab: list[int]) -> pd.DataFrame:
@@ -311,6 +355,73 @@ def _split_by_game_date(df: pd.DataFrame, *, val_frac: float) -> tuple[pd.DataFr
             "val_max": val_df["game_date"].max().date().isoformat() if len(val_df) else None,
         }
     return train_df, val_df, meta
+
+
+def _parse_date_arg(value: str, *, arg_name: str) -> pd.Timestamp:
+    try:
+        return pd.Timestamp(value).normalize()
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ValueError(f"Invalid {arg_name}: {value!r}") from exc
+
+
+def _resolve_date_window(
+    *,
+    start_date: str | None,
+    end_date: str | None,
+    lookback_days: int | None,
+    anchor_date: str | None,
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    start_day = _parse_date_arg(start_date, arg_name="--start-date") if start_date else None
+    end_day = _parse_date_arg(end_date, arg_name="--end-date") if end_date else None
+
+    if lookback_days is not None:
+        if int(lookback_days) <= 0:
+            raise ValueError("--lookback-days must be > 0")
+        anchor_day = (
+            _parse_date_arg(anchor_date, arg_name="--anchor-date")
+            if anchor_date
+            else pd.Timestamp.now(tz=timezone.utc).tz_localize(None).normalize()
+        )
+        lookback_start = anchor_day - pd.Timedelta(days=int(lookback_days))
+        start_day = max(start_day, lookback_start) if start_day is not None else lookback_start
+        if end_day is None:
+            end_day = anchor_day
+
+    if start_day is not None and end_day is not None and end_day < start_day:
+        raise ValueError(f"--end-date ({end_day.date()}) is before --start-date ({start_day.date()})")
+    return start_day, end_day
+
+
+def _filter_by_game_date_window(
+    df: pd.DataFrame,
+    *,
+    start_day: pd.Timestamp | None,
+    end_day: pd.Timestamp | None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if start_day is None and end_day is None:
+        return df, {"enabled": False}
+    if "game_date" not in df.columns:
+        raise ValueError("Cannot apply date window: dataset missing required column 'game_date'")
+
+    out = df.copy()
+    out["game_date"] = pd.to_datetime(out["game_date"], errors="coerce").dt.normalize()
+    before = len(out)
+    mask = pd.Series(True, index=out.index)
+    if start_day is not None:
+        mask &= out["game_date"] >= start_day
+    if end_day is not None:
+        mask &= out["game_date"] <= end_day
+    out = out.loc[mask].copy()
+    meta = {
+        "enabled": True,
+        "start_date": start_day.date().isoformat() if start_day is not None else None,
+        "end_date": end_day.date().isoformat() if end_day is not None else None,
+        "rows_before": int(before),
+        "rows_after": int(len(out)),
+        "game_date_min_after": out["game_date"].min().date().isoformat() if len(out) else None,
+        "game_date_max_after": out["game_date"].max().date().isoformat() if len(out) else None,
+    }
+    return out, meta
 
 
 def _numeric_frame(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -441,6 +552,8 @@ class TeamGameExample:
     x: np.ndarray
     team_idx: np.ndarray
     opp_idx: np.ndarray
+    player_idx: np.ndarray
+    player_team_idx: np.ndarray
     alloc_mask: np.ndarray
     prior_w: np.ndarray
     vacated_minutes_prior_20_total: float
@@ -476,12 +589,16 @@ def _collate_team_games(
     torch.Tensor,
     torch.Tensor,
     torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
 ]:
     max_n = max(ex.x.shape[0] for ex in batch)
     num_features = batch[0].x.shape[1]
     x = torch.zeros((len(batch), max_n, num_features), dtype=torch.float32)
     team_idx = torch.zeros((len(batch), max_n), dtype=torch.long)
     opp_idx = torch.zeros((len(batch), max_n), dtype=torch.long)
+    player_idx = torch.zeros((len(batch), max_n), dtype=torch.long)
+    player_team_idx = torch.zeros((len(batch), max_n), dtype=torch.long)
     alloc_mask = torch.zeros((len(batch), max_n), dtype=torch.bool)
     prior_w = torch.zeros((len(batch), max_n), dtype=torch.float32)
     vacated_minutes = torch.zeros((len(batch),), dtype=torch.float32)
@@ -494,6 +611,8 @@ def _collate_team_games(
         x[i, :n] = torch.from_numpy(ex.x)
         team_idx[i, :n] = torch.from_numpy(ex.team_idx)
         opp_idx[i, :n] = torch.from_numpy(ex.opp_idx)
+        player_idx[i, :n] = torch.from_numpy(ex.player_idx)
+        player_team_idx[i, :n] = torch.from_numpy(ex.player_team_idx)
         alloc_mask[i, :n] = torch.from_numpy(ex.alloc_mask)
         prior_w[i, :n] = torch.from_numpy(ex.prior_w)
         vacated_minutes[i] = float(ex.vacated_minutes_prior_20_total)
@@ -503,7 +622,20 @@ def _collate_team_games(
         sample_w[i] = float(ex.sample_w)
         y[i, :n] = torch.from_numpy(ex.y)
         mask[i, :n] = True
-    return (x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features, sample_w, y, mask)
+    return (
+        x,
+        team_idx,
+        opp_idx,
+        player_idx,
+        player_team_idx,
+        alloc_mask,
+        prior_w,
+        vacated_minutes,
+        router_features,
+        sample_w,
+        y,
+        mask,
+    )
 
 
 def _build_team_game_examples(
@@ -512,6 +644,8 @@ def _build_team_game_examples(
     feature_cols: list[str],
     team_idx_col: str,
     opp_idx_col: str,
+    player_idx_col: str,
+    player_team_idx_col: str,
     label_col: str,
     feature_mean: np.ndarray,
     feature_std: np.ndarray,
@@ -522,6 +656,10 @@ def _build_team_game_examples(
     feats = (feats - feature_mean) / feature_std
     team_idx_all = pd.to_numeric(df[team_idx_col], errors="coerce").fillna(0).to_numpy(dtype=np.int64, copy=False)
     opp_idx_all = pd.to_numeric(df[opp_idx_col], errors="coerce").fillna(0).to_numpy(dtype=np.int64, copy=False)
+    player_idx_all = pd.to_numeric(df[player_idx_col], errors="coerce").fillna(0).to_numpy(dtype=np.int64, copy=False)
+    player_team_idx_all = (
+        pd.to_numeric(df[player_team_idx_col], errors="coerce").fillna(0).to_numpy(dtype=np.int64, copy=False)
+    )
     labels = pd.to_numeric(df[label_col], errors="coerce").fillna(0.0).to_numpy(dtype="float32", copy=False)
     is_out = pd.to_numeric(df.get("is_out", pd.Series(0, index=df.index)), errors="coerce").fillna(0).astype(int)
     alloc_mask_all = (is_out == 0).to_numpy(dtype=bool, copy=False)
@@ -550,6 +688,8 @@ def _build_team_game_examples(
         x = feats[idx_arr]
         team_idx = team_idx_all[idx_arr]
         opp_idx = opp_idx_all[idx_arr]
+        player_idx = player_idx_all[idx_arr]
+        player_team_idx = player_team_idx_all[idx_arr]
         alloc_mask = alloc_mask_all[idx_arr]
         prior_w = prior_w_all[idx_arr]
         out_mask = ~alloc_mask
@@ -569,6 +709,8 @@ def _build_team_game_examples(
                 x=x,
                 team_idx=team_idx,
                 opp_idx=opp_idx,
+                player_idx=player_idx,
+                player_team_idx=player_team_idx,
                 alloc_mask=alloc_mask,
                 prior_w=prior_w,
                 vacated_minutes_prior_20_total=vacated_minutes,
@@ -605,6 +747,24 @@ def _focal_bce_with_logits(
     return alpha_t * focal * bce
 
 
+def _resolve_k_target_tensor(
+    in_rotation: torch.Tensor,
+    *,
+    k_target_fixed: float,
+    k_target_source: str,
+    k_target_blend: float,
+) -> torch.Tensor:
+    """Resolve per-team K targets used by the K regularizer."""
+    label_k = in_rotation.sum(dim=1)
+    if k_target_source == "label":
+        return label_k
+    fixed = torch.full_like(label_k, float(k_target_fixed))
+    if k_target_source == "blend":
+        w = float(np.clip(k_target_blend, 0.0, 1.0))
+        return (1.0 - w) * fixed + w * label_k
+    return fixed
+
+
 def _evaluate(
     model: torch.nn.Module,
     loader: DataLoader,
@@ -621,6 +781,10 @@ def _evaluate(
     rot_loss_type: str,
     focal_gamma: float,
     focal_alpha: float,
+    rotation_minutes_threshold: float,
+    k_target: float,
+    k_target_source: str,
+    k_target_blend: float,
 ) -> dict[str, Any]:
     model.eval()
     total_abs = 0.0
@@ -635,6 +799,9 @@ def _evaluate(
     tail_sum = 0.0
     rot_size8_sum = 0.0
     rotation_size_hat_sum = 0.0
+    rotation_size_label_sum = 0.0
+    k_hat_label_abs_err_sum = 0.0
+    k_hat_target_abs_err_sum = 0.0
     n_teams = 0.0
     # Gate calibration bins: [0,0.2), [0.2,0.4), ..., [0.8,1.0]
     gate_bins = torch.tensor([0.0, 0.2, 0.4, 0.6, 0.8, 1.0], device=device)
@@ -660,10 +827,25 @@ def _evaluate(
     router_max_pi_used_gt_08_inj = 0.0
     router_rows_used_inj = 0.0
     with torch.no_grad():
-        for x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features_batch, sample_w, y, mask in loader:
+        for (
+            x,
+            team_idx,
+            opp_idx,
+            player_idx,
+            player_team_idx,
+            alloc_mask,
+            prior_w,
+            vacated_minutes,
+            router_features_batch,
+            sample_w,
+            y,
+            mask,
+        ) in loader:
             x = x.to(device)
             team_idx = team_idx.to(device)
             opp_idx = opp_idx.to(device)
+            player_idx = player_idx.to(device)
+            player_team_idx = player_team_idx.to(device)
             alloc_mask = alloc_mask.to(device)
             prior_w = prior_w.to(device)
             vacated_minutes = vacated_minutes.to(device)
@@ -696,6 +878,8 @@ def _evaluate(
                     team_idx,
                     opp_idx,
                     mask,
+                    player_idx=player_idx,
+                    player_team_idx=player_team_idx,
                     alloc_mask=alloc_mask,
                     prior_weights=prior_w,
                     router_features=router_features,
@@ -703,7 +887,16 @@ def _evaluate(
                 if gate_logits is None:
                     raise RuntimeError("use_gate_head=True but model returned gate_logits=None")
             else:
-                pred = model(x, team_idx, opp_idx, mask, alloc_mask=alloc_mask, prior_weights=prior_w)
+                pred = model(
+                    x,
+                    team_idx,
+                    opp_idx,
+                    mask,
+                    alloc_mask=alloc_mask,
+                    prior_weights=prior_w,
+                    player_idx=player_idx,
+                    player_team_idx=player_team_idx,
+                )
                 gate_logits = None
                 router_pi_soft = None
                 router_pi_used = None
@@ -730,6 +923,17 @@ def _evaluate(
             if use_gate_head and gate_logits is not None:
                 k_hat = compute_k_hat(gate_logits, final_mask)
                 rotation_size_hat_sum += float(k_hat.sum().item())
+                in_rotation_eval = build_in_rotation_labels(y, float(rotation_minutes_threshold), final_mask)
+                k_label = in_rotation_eval.sum(dim=1)
+                k_target_tensor = _resolve_k_target_tensor(
+                    in_rotation_eval,
+                    k_target_fixed=float(k_target),
+                    k_target_source=str(k_target_source),
+                    k_target_blend=float(k_target_blend),
+                )
+                rotation_size_label_sum += float(k_label.sum().item())
+                k_hat_label_abs_err_sum += float((k_hat - k_label).abs().sum().item())
+                k_hat_target_abs_err_sum += float((k_hat - k_target_tensor).abs().sum().item())
 
             if (lambda_rot > 0 or lambda_fp > 0) and use_gate_head:
                 w_inj = 1.0 + float(inj_weight_scale) * torch.clamp(vacated_minutes / 60.0, min=0.0, max=1.0)
@@ -846,6 +1050,9 @@ def _evaluate(
         "tail_mean_team240_top9": float(tail_sum / max(n_teams, 1.0)),
         "rotation_size8_mean": float(rot_size8_sum / max(n_teams, 1.0)),
         "rotation_size_hat_mean": float(rotation_size_hat_sum / max(n_teams, 1.0)),
+        "rotation_size_label_mean": float(rotation_size_label_sum / max(n_teams, 1.0)),
+        "k_hat_label_mae": float(k_hat_label_abs_err_sum / max(n_teams, 1.0)),
+        "k_hat_target_mae": float(k_hat_target_abs_err_sum / max(n_teams, 1.0)),
     }
     if use_gate_head and (lambda_rot > 0):
         out["rot_loss"] = float(rot_loss_sum / max(rot_loss_denom, 1.0))
@@ -895,16 +1102,30 @@ def _post_train_diagnostics(model: torch.nn.Module, loader: DataLoader, *, devic
     dnp_preds: list[float] = []
 
     with torch.no_grad():
-        for x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features_batch, sample_w, y, mask in loader:
+        for (
+            x,
+            team_idx,
+            opp_idx,
+            player_idx,
+            player_team_idx,
+            alloc_mask,
+            prior_w,
+            vacated_minutes,
+            router_features_batch,
+            sample_w,
+            y,
+            mask,
+        ) in loader:
             x = x.to(device)
             team_idx = team_idx.to(device)
             opp_idx = opp_idx.to(device)
+            player_idx = player_idx.to(device)
+            player_team_idx = player_team_idx.to(device)
             alloc_mask = alloc_mask.to(device)
             prior_w = prior_w.to(device)
             vacated_minutes = vacated_minutes.to(device)
             router_features_batch = router_features_batch.to(device)
             sample_w = sample_w.to(device)
-            w = sample_w.to(dtype=torch.float32).clamp(min=0.0)
             y = y.to(device)
             mask = mask.to(device)
 
@@ -926,6 +1147,8 @@ def _post_train_diagnostics(model: torch.nn.Module, loader: DataLoader, *, devic
                 alloc_mask=alloc_mask,
                 prior_weights=prior_w,
                 router_features=router_features,
+                player_idx=player_idx,
+                player_team_idx=player_team_idx,
             )
 
             pred_np = pred.cpu().numpy()
@@ -1099,8 +1322,60 @@ def main() -> None:
         default=1.0,
         help="Non-negative floor added to prior weights when --use-prior-head is enabled.",
     )
+    parser.add_argument(
+        "--use-player-embeddings",
+        action="store_true",
+        help="Enable learned player_id embeddings (unknown player -> index 0).",
+    )
+    parser.add_argument(
+        "--player-embedding-dim",
+        type=int,
+        default=16,
+        help="Embedding dimension for player_id when --use-player-embeddings is enabled.",
+    )
+    parser.add_argument(
+        "--use-player-team-embeddings",
+        action="store_true",
+        help="Enable hashed player-team embeddings to capture role context by team.",
+    )
+    parser.add_argument(
+        "--player-team-hash-buckets",
+        type=int,
+        default=16384,
+        help="Hash bucket count for player-team embeddings (must be > 1).",
+    )
+    parser.add_argument(
+        "--player-team-embedding-dim",
+        type=int,
+        default=8,
+        help="Embedding dimension for hashed player-team identity.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--val-frac", type=float, default=0.2)
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default=None,
+        help="Optional inclusive game_date floor (YYYY-MM-DD) before train/val split.",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default=None,
+        help="Optional inclusive game_date ceiling (YYYY-MM-DD) before train/val split.",
+    )
+    parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=None,
+        help="Optional rolling lookback window in days (e.g. 365).",
+    )
+    parser.add_argument(
+        "--anchor-date",
+        type=str,
+        default=None,
+        help="Anchor date for --lookback-days (YYYY-MM-DD). Defaults to current UTC date.",
+    )
     parser.add_argument("--max-team-games", type=int, default=None, help="Optional cap for faster smoke runs.")
     parser.add_argument(
         "--min-team-minutes-from-stints",
@@ -1165,6 +1440,19 @@ def main() -> None:
         help="Expected rotation size per team-game (for K regularizer).",
     )
     parser.add_argument(
+        "--k-target-source",
+        type=str,
+        choices=["fixed", "label", "blend"],
+        default="fixed",
+        help="Source for K target used by K regularizer: fixed scalar, label-derived, or blend.",
+    )
+    parser.add_argument(
+        "--k-target-blend",
+        type=float,
+        default=0.5,
+        help="Blend weight for label target when --k-target-source=blend (0=fixed, 1=label).",
+    )
+    parser.add_argument(
         "--k-reg-weight",
         type=float,
         default=0.05,
@@ -1209,6 +1497,24 @@ def main() -> None:
     labels_keep = labels_keep.drop_duplicates(subset=["game_id_norm", "team_id", "player_id"], keep="last")
     merged = features_df.merge(labels_keep, on=["game_id_norm", "team_id", "player_id"], how="left")
 
+    start_day, end_day = _resolve_date_window(
+        start_date=args.start_date,
+        end_date=args.end_date,
+        lookback_days=args.lookback_days,
+        anchor_date=args.anchor_date,
+    )
+    merged, train_window_meta = _filter_by_game_date_window(merged, start_day=start_day, end_day=end_day)
+    if train_window_meta.get("enabled"):
+        print(
+            "[rotation_set_minutes] date_window:",
+            f"start={train_window_meta.get('start_date')}",
+            f"end={train_window_meta.get('end_date')}",
+            f"rows={train_window_meta.get('rows_before')}->{train_window_meta.get('rows_after')}",
+            f"dates={train_window_meta.get('game_date_min_after')}..{train_window_meta.get('game_date_max_after')}",
+        )
+    if merged.empty:
+        raise ValueError("No rows remain after applying date window; adjust --start-date/--end-date/--lookback-days")
+
     merged, qc_meta = _filter_invalid_team_games_for_training(
         merged,
         label_col=target_col,
@@ -1240,10 +1546,18 @@ def main() -> None:
 
     merged, ot_meta = _rescale_labels_to_240(merged, label_col=target_col)
     team_id_vocab = _build_team_id_vocab(merged)
+    player_id_vocab = _build_player_id_vocab(merged)
     merged = _add_team_embedding_indices(merged, team_id_vocab=team_id_vocab)
+    merged = _add_player_embedding_indices(merged, player_id_vocab=player_id_vocab)
+    merged = _add_player_team_hash_indices(merged, buckets=int(args.player_team_hash_buckets))
 
     feature_cols = _infer_feature_columns(features_df, labels_df=labels_df, label_col=target_col)
     use_prior_head = bool(args.use_prior_head)
+    use_player_embeddings = bool(args.use_player_embeddings)
+    use_player_team_embeddings = bool(args.use_player_team_embeddings)
+    player_embedding_dim = int(args.player_embedding_dim)
+    player_team_embedding_dim = int(args.player_team_embedding_dim)
+    player_team_hash_buckets = int(args.player_team_hash_buckets)
     prior_weight_col = str(args.prior_weight_col)
     prior_weight_floor = float(args.prior_weight_floor)
     if prior_weight_floor < 0:
@@ -1301,6 +1615,8 @@ def main() -> None:
         feature_cols=feature_cols,
         team_idx_col=TEAM_EMBED_TEAM_IDX_COL,
         opp_idx_col=TEAM_EMBED_OPP_IDX_COL,
+        player_idx_col=PLAYER_EMBED_IDX_COL,
+        player_team_idx_col=PLAYER_TEAM_HASH_IDX_COL,
         label_col=target_col,
         feature_mean=mean,
         feature_std=std,
@@ -1312,6 +1628,8 @@ def main() -> None:
         feature_cols=feature_cols,
         team_idx_col=TEAM_EMBED_TEAM_IDX_COL,
         opp_idx_col=TEAM_EMBED_OPP_IDX_COL,
+        player_idx_col=PLAYER_EMBED_IDX_COL,
+        player_team_idx_col=PLAYER_TEAM_HASH_IDX_COL,
         label_col=target_col,
         feature_mean=mean,
         feature_std=std,
@@ -1365,6 +1683,12 @@ def main() -> None:
         use_team_embeddings=True,
         team_id_vocab=team_id_vocab,
         team_embedding_dim=8,
+        use_player_embeddings=use_player_embeddings,
+        player_id_vocab=player_id_vocab if use_player_embeddings else None,
+        player_embedding_dim=player_embedding_dim,
+        use_player_team_embeddings=use_player_team_embeddings,
+        player_team_hash_buckets=player_team_hash_buckets,
+        player_team_embedding_dim=player_team_embedding_dim,
         use_gate_head=bool(args.use_gate_head),
         num_experts=int(args.moe_experts),
         router_feature_dim=(3 if int(args.moe_experts) > 1 else 0),
@@ -1414,6 +1738,8 @@ def main() -> None:
     gate_bce_weight = float(args.gate_bce_weight)
     minutes_out_weight = float(args.minutes_out_weight)
     k_target = float(args.k_target)
+    k_target_source = str(args.k_target_source)
+    k_target_blend = float(args.k_target_blend)
     k_reg_weight = float(args.k_reg_weight)
     anti_smear_weight = float(args.anti_smear_weight)
     anti_smear_floor = float(args.anti_smear_floor)
@@ -1447,6 +1773,12 @@ def main() -> None:
         raise ValueError("--lambda-rot/--lambda-fp must be >= 0")
     if float(args.share_temperature) <= 0:
         raise ValueError("--share-temperature must be > 0")
+    if player_embedding_dim <= 0:
+        raise ValueError("--player-embedding-dim must be > 0")
+    if player_team_embedding_dim <= 0:
+        raise ValueError("--player-team-embedding-dim must be > 0")
+    if player_team_hash_buckets <= 1:
+        raise ValueError("--player-team-hash-buckets must be > 1")
 
     # Validation for gate supervision / anti-smear params
     if rotation_minutes_threshold < 0:
@@ -1457,6 +1789,12 @@ def main() -> None:
         raise ValueError("--minutes-out-weight must be >= 0")
     if k_target < 0:
         raise ValueError("--k-target must be >= 0")
+    if k_target_source == "blend" and not (0.0 <= k_target_blend <= 1.0):
+        raise ValueError("--k-target-blend must be in [0,1] when --k-target-source=blend")
+    if k_target_source != "blend" and k_target_blend != 0.5:
+        print(
+            f"[rotation_set_minutes] ignoring --k-target-blend={k_target_blend} (only used when --k-target-source=blend)"
+        )
     if k_reg_weight < 0:
         raise ValueError("--k-reg-weight must be >= 0")
     if anti_smear_weight < 0:
@@ -1490,10 +1828,25 @@ def main() -> None:
         running_mae_w_sum = 0.0
         running_mae_w_denom = 0.0
         batches = 0
-        for x, team_idx, opp_idx, alloc_mask, prior_w, vacated_minutes, router_features_batch, sample_w, y, mask in train_loader:
+        for (
+            x,
+            team_idx,
+            opp_idx,
+            player_idx,
+            player_team_idx,
+            alloc_mask,
+            prior_w,
+            vacated_minutes,
+            router_features_batch,
+            sample_w,
+            y,
+            mask,
+        ) in train_loader:
             x = x.to(device)
             team_idx = team_idx.to(device)
             opp_idx = opp_idx.to(device)
+            player_idx = player_idx.to(device)
+            player_team_idx = player_team_idx.to(device)
             alloc_mask = alloc_mask.to(device)
             prior_w = prior_w.to(device)
             vacated_minutes = vacated_minutes.to(device)
@@ -1520,6 +1873,8 @@ def main() -> None:
                     team_idx,
                     opp_idx,
                     mask,
+                    player_idx=player_idx,
+                    player_team_idx=player_team_idx,
                     alloc_mask=alloc_mask,
                     prior_weights=prior_w if use_prior_head else None,
                     router_features=router_features,
@@ -1532,6 +1887,8 @@ def main() -> None:
                     team_idx,
                     opp_idx,
                     mask,
+                    player_idx=player_idx,
+                    player_team_idx=player_team_idx,
                     alloc_mask=alloc_mask,
                     prior_weights=prior_w if use_prior_head else None,
                     router_features=router_features_batch[:, : int(getattr(model, "router_feature_dim", 0))]
@@ -1540,7 +1897,6 @@ def main() -> None:
                 )
                 gate_logits = None
                 router_pi_soft = None
-                router_pi_used = None
             loss_min = _masked_mae(pred, y, mask)
             # Weighted MAE metric (not used in optimization, logged only).
             abs_err = (pred - y).abs() * mask.to(dtype=pred.dtype)
@@ -1650,7 +2006,13 @@ def main() -> None:
 
                 # Team expected-K regularizer
                 if k_reg_weight > 0:
-                    loss_k_reg = compute_k_regularizer(gate_logits, final_mask_gate, k_target)
+                    k_target_tensor = _resolve_k_target_tensor(
+                        in_rotation,
+                        k_target_fixed=k_target,
+                        k_target_source=k_target_source,
+                        k_target_blend=k_target_blend,
+                    )
+                    loss_k_reg = compute_k_regularizer(gate_logits, final_mask_gate, k_target_tensor)
 
                 # Anti-smear penalty
                 if anti_smear_weight > 0:
@@ -1697,6 +2059,10 @@ def main() -> None:
             rot_loss_type=rot_loss_type,
             focal_gamma=focal_gamma,
             focal_alpha=focal_alpha,
+            rotation_minutes_threshold=rotation_minutes_threshold,
+            k_target=k_target,
+            k_target_source=k_target_source,
+            k_target_blend=k_target_blend,
         )
         val_eval = _evaluate(
             model,
@@ -1713,6 +2079,10 @@ def main() -> None:
             rot_loss_type=rot_loss_type,
             focal_gamma=focal_gamma,
             focal_alpha=focal_alpha,
+            rotation_minutes_threshold=rotation_minutes_threshold,
+            k_target=k_target,
+            k_target_source=k_target_source,
+            k_target_blend=k_target_blend,
         )
         train_mae_team_w = running_mae_w_sum / max(running_mae_w_denom, 1e-6)
         row = {
@@ -1741,6 +2111,9 @@ def main() -> None:
             "val_tail_mean_team240_top9": float(val_eval["tail_mean_team240_top9"]),
             "val_rotation_size8_mean": float(val_eval["rotation_size8_mean"]),
             "val_rotation_size_hat_mean": float(val_eval["rotation_size_hat_mean"]),
+            "val_rotation_size_label_mean": float(val_eval["rotation_size_label_mean"]),
+            "val_k_hat_label_mae": float(val_eval["k_hat_label_mae"]),
+            "val_k_hat_target_mae": float(val_eval["k_hat_target_mae"]),
         }
         if "rot_loss" in val_eval:
             row["val_rot_loss"] = float(val_eval["rot_loss"])
@@ -1786,7 +2159,8 @@ def main() -> None:
             f"train_mae_player={row['train_mae_player']:.4f} train_mae_team_w={row['train_mae_team_w']:.4f} "
             f"val_mae_player={row['val_mae_player']:.4f} val_mae_team={row['val_mae_team']:.4f} val_mae_team_w={row['val_mae_team_w']:.4f} "
             f"val_tail={row['val_tail_mean_team240_top9']:.2f} val_rot8={row['val_rotation_size8_mean']:.2f} "
-            f"val_k_hat={row['val_rotation_size_hat_mean']:.2f}"
+            f"val_k_hat={row['val_rotation_size_hat_mean']:.2f} val_k_label={row['val_rotation_size_label_mean']:.2f} "
+            f"val_k_hat_label_mae={row['val_k_hat_label_mae']:.2f}"
         )
         if "val_rot_loss" in row:
             msg += f" val_rot_loss={row['val_rot_loss']:.4f}"
@@ -1848,6 +2222,10 @@ def main() -> None:
         rot_loss_type=rot_loss_type,
         focal_gamma=focal_gamma,
         focal_alpha=focal_alpha,
+        rotation_minutes_threshold=rotation_minutes_threshold,
+        k_target=k_target,
+        k_target_source=k_target_source,
+        k_target_blend=k_target_blend,
     )
     diagnostics_val = _post_train_diagnostics(model, val_loader, device=device)
 
@@ -1869,6 +2247,10 @@ def main() -> None:
         "best_val_mae_player": float(val_best["mae_player"]),
         "best_val_mae_team": float(val_best["mae_team"]),
         "best_val_mae_team_w": float(val_best["mae_team_w"]),
+        "best_val_rotation_size_hat_mean": float(val_best["rotation_size_hat_mean"]),
+        "best_val_rotation_size_label_mean": float(val_best["rotation_size_label_mean"]),
+        "best_val_k_hat_label_mae": float(val_best["k_hat_label_mae"]),
+        "best_val_k_hat_target_mae": float(val_best["k_hat_target_mae"]),
         # Legacy keys (backward compat).
         "best_val_mae": float(val_best["mae_player"]),
         "best_val_team_mae": float(val_best["mae_team"]),
@@ -1881,6 +2263,17 @@ def main() -> None:
         "git_sha": _git_sha(),
         "dataset_dir": str(dataset_dir),
         "inputs": {"features": str(features_path), "labels": str(labels_path)},
+        "training_options": {
+            "k_target": float(k_target),
+            "k_target_source": str(k_target_source),
+            "k_target_blend": float(k_target_blend),
+            "date_window": train_window_meta,
+            "use_player_embeddings": bool(use_player_embeddings),
+            "player_embedding_dim": int(player_embedding_dim),
+            "use_player_team_embeddings": bool(use_player_team_embeddings),
+            "player_team_hash_buckets": int(player_team_hash_buckets),
+            "player_team_embedding_dim": int(player_team_embedding_dim),
+        },
         "model": config.to_dict(),
         "label_handling": ot_meta,
         "dataset_qc": qc_meta,
@@ -1903,6 +2296,9 @@ def main() -> None:
     print(f"  val_mae_player: {val_best['mae_player']:.4f}")
     print(f"  val_mae_team: {val_best['mae_team']:.4f}")
     print(f"  val_mae_team_w: {val_best['mae_team_w']:.4f}")
+    print(f"  val_k_hat_mean: {val_best['rotation_size_hat_mean']:.3f}")
+    print(f"  val_k_label_mean: {val_best['rotation_size_label_mean']:.3f}")
+    print(f"  val_k_hat_label_mae: {val_best['k_hat_label_mae']:.3f}")
     print(f"  val_dust_rate: {diagnostics_val['dust_rate']:.4f}")
     print(f"  val_top8_share_mean: {diagnostics_val['top8_share_mean']:.4f}")
     print(f"  val_dnp_pred_median: {diagnostics_val['dnp_pred_median']}")

@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "bundle_dir": "artifacts/rotation_minutes_hurdle_v1/rmh_v1_20260123_noleak_q90x5",
+  "reconcile_team_minutes": "p50",
+  "in_rotation_threshold_min": 5.0,
+  "max_rotation_players": 10
+}
+

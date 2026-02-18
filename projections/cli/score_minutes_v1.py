@@ -91,6 +91,7 @@ OUTPUT_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
 LATEST_POINTER = "latest_run.json"
 FEATURE_FILENAME = "features.parquet"
+LIVE_MANIFEST_FILENAME = "manifest.json"
 
 
 def _normalize_name_for_matching(name: str) -> str:
@@ -168,6 +169,43 @@ def _espn_override_allowed(df: pd.DataFrame) -> pd.Series:
 
     # ESPN can override if NBA injury row is missing or NBA status is unknown.
     return (~injury_present) | status_unknown
+
+
+def _read_live_run_as_of_ts(run_dir_path: Path) -> pd.Timestamp | None:
+    """Best-effort extraction of run_as_of_ts for live artifacts.
+
+    Historically, live feature runs write `manifest.json` (via `build_minutes_live`),
+    while some tools write `summary.json`. We use either if present so downstream
+    consumers (notably ESPN injury filtering + logs) are timestamp-correct.
+    """
+
+    summary_path = run_dir_path / SUMMARY_FILENAME
+    if summary_path.exists():
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            payload = None
+        if isinstance(payload, dict):
+            run_as_of_str = payload.get("run_as_of_ts")
+            if run_as_of_str:
+                ts = pd.to_datetime(run_as_of_str, utc=True, errors="coerce")
+                if ts is not pd.NaT:
+                    return ts
+
+    manifest_path = run_dir_path / LIVE_MANIFEST_FILENAME
+    if manifest_path.exists():
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            payload = None
+        if isinstance(payload, dict):
+            run_as_of_str = payload.get("as_of_ts") or payload.get("run_as_of_ts") or payload.get("created_at")
+            if run_as_of_str:
+                ts = pd.to_datetime(run_as_of_str, utc=True, errors="coerce")
+                if ts is not pd.NaT:
+                    return ts
+
+    return None
 
 app = typer.Typer(help=__doc__)
 
@@ -2422,7 +2460,6 @@ def main(
     espn_out_players: set[str] = set()
     normalized_mode: Mode = mode.lower()  # type: ignore[assignment]
     run_dir_path: Path | None = None
-    run_summary: dict | None = None
     run_as_of_ts_value: pd.Timestamp | None = None
 
     if normalized_mode == "live":
@@ -2439,15 +2476,8 @@ def main(
                 run_dir_path = features_path.parent
             if run_dir_path.name.startswith("run=") and run_id is None:
                 run_id = run_dir_path.name.split("=", 1)[1]
-        summary_path = run_dir_path / SUMMARY_FILENAME if run_dir_path else None
-        if summary_path and summary_path.exists():
-            try:
-                run_summary = json.loads(summary_path.read_text(encoding="utf-8"))
-                run_as_of_str = run_summary.get("run_as_of_ts")
-                if run_as_of_str:
-                    run_as_of_ts_value = pd.to_datetime(run_as_of_str, utc=True)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                run_summary = None
+        if run_dir_path is not None:
+            run_as_of_ts_value = _read_live_run_as_of_ts(run_dir_path)
     elif run_id is not None:
         raise typer.BadParameter("--run-id is only valid when --mode live.", param_hint="run_id")
 

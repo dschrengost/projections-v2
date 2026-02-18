@@ -228,7 +228,16 @@ def ingest_vendor_game_csv(
     out["schema_version"] = schema_version
     out["season_id"] = season_id
     out["game_id"] = df["game_id"].map(canonical_game_id)
-    out["game_date"] = pd.to_datetime(df["date"]).dt.date.astype(str)
+    # Vendor files can mix ISO ("YYYY-MM-DD") and slash ("MM/DD/YYYY") dates.
+    date_raw = df["date"].astype("string")
+    date_parsed = pd.to_datetime(date_raw, errors="coerce", format="mixed")
+    if date_parsed.isna().any():
+        # Fallback for environments without robust mixed-format inference.
+        date_parsed = date_parsed.fillna(pd.to_datetime(date_raw, errors="coerce", format="%m/%d/%Y"))
+    if date_parsed.isna().any():
+        sample_bad = sorted({str(v) for v in date_raw[date_parsed.isna()].dropna().astype(str).head(5).tolist()})
+        raise ValueError(f"Unparseable vendor date values (sample): {sample_bad}")
+    out["game_date"] = date_parsed.dt.date.astype(str)
     out["data_set"] = df["data_set"].astype("string")
 
     out["period"] = df["period"].astype(int)

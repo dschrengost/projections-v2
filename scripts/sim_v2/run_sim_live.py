@@ -48,9 +48,9 @@ def main(
     minutes_run_id: str | None = typer.Option(None, "--minutes-run-id", help="Explicit minutes run_id to load."),
     rates_run_id: str | None = typer.Option(None, "--rates-run-id", help="Explicit rates run_id to load."),
     minutes_override_mode: str = typer.Option(
-        "legacy",
+        "v2",
         "--minutes-override-mode",
-        help="Minutes override mode: legacy (default) or v2.",
+        help="Minutes override mode: v2 (default) or legacy compatibility mode.",
     ),
     override_infeasible: str = typer.Option(
         "error",

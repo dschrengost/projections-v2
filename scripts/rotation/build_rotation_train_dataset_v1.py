@@ -330,8 +330,93 @@ def _filter_invalid_team_games(
     }
     return filtered_features, filtered_labels, meta
 
-def _load_minutes_dataset(data_root: Path) -> tuple[pd.DataFrame, pd.DataFrame, Path, Path]:
-    dataset_dir = data_root / "training" / "datasets" / MINUTES_DATASET_DIRNAME
+def _resolve_minutes_dataset_dir(data_root: Path, dataset_ref: str | None) -> Path:
+    if dataset_ref:
+        candidate = Path(dataset_ref).expanduser()
+        if candidate.is_absolute() or candidate.exists():
+            return candidate.resolve()
+        return (data_root / "training" / "datasets" / candidate).resolve()
+    return (data_root / "training" / "datasets" / MINUTES_DATASET_DIRNAME).resolve()
+
+
+def _parse_date_arg(value: str, *, arg_name: str) -> pd.Timestamp:
+    try:
+        return pd.Timestamp(value).normalize()
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ValueError(f"Invalid {arg_name}: {value!r}") from exc
+
+
+def _resolve_date_window(
+    *,
+    start_date: str | None,
+    end_date: str | None,
+    lookback_days: int | None,
+    anchor_date: str | None,
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    start_day = _parse_date_arg(start_date, arg_name="--start-date") if start_date else None
+    end_day = _parse_date_arg(end_date, arg_name="--end-date") if end_date else None
+
+    if lookback_days is not None:
+        if int(lookback_days) <= 0:
+            raise ValueError("--lookback-days must be > 0")
+        anchor_day = (
+            _parse_date_arg(anchor_date, arg_name="--anchor-date")
+            if anchor_date
+            else pd.Timestamp.now(tz=timezone.utc).tz_localize(None).normalize()
+        )
+        lookback_start = anchor_day - pd.Timedelta(days=int(lookback_days))
+        start_day = max(start_day, lookback_start) if start_day is not None else lookback_start
+        if end_day is None:
+            end_day = anchor_day
+
+    if start_day is not None and end_day is not None and end_day < start_day:
+        raise ValueError(f"--end-date ({end_day.date()}) is before --start-date ({start_day.date()})")
+    return start_day, end_day
+
+
+def _filter_minutes_dataset_by_game_date(
+    features_df: pd.DataFrame,
+    labels_df: pd.DataFrame,
+    *,
+    start_day: pd.Timestamp | None,
+    end_day: pd.Timestamp | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    if start_day is None and end_day is None:
+        return features_df, labels_df, {"enabled": False}
+    if "game_date" not in features_df.columns:
+        raise ValueError("Cannot apply date window: minutes features missing required column 'game_date'")
+
+    feat = features_df.copy()
+    feat["game_date"] = pd.to_datetime(feat["game_date"], errors="coerce").dt.normalize()
+    mask = pd.Series(True, index=feat.index)
+    if start_day is not None:
+        mask &= feat["game_date"] >= start_day
+    if end_day is not None:
+        mask &= feat["game_date"] <= end_day
+    feat = feat.loc[mask].copy()
+
+    key_cols = ["game_id", "team_id", "player_id"]
+    for col in key_cols:
+        if col not in feat.columns or col not in labels_df.columns:
+            raise ValueError(f"Cannot align labels after date window; missing key column: {col}")
+    keys = feat.loc[:, key_cols].drop_duplicates()
+    lab = keys.merge(labels_df, on=key_cols, how="left", sort=False)
+
+    meta = {
+        "enabled": True,
+        "start_date": start_day.date().isoformat() if start_day is not None else None,
+        "end_date": end_day.date().isoformat() if end_day is not None else None,
+        "rows_features_before": int(len(features_df)),
+        "rows_features_after": int(len(feat)),
+        "rows_labels_before": int(len(labels_df)),
+        "rows_labels_after": int(len(lab)),
+        "game_date_min_after": feat["game_date"].min().date().isoformat() if len(feat) else None,
+        "game_date_max_after": feat["game_date"].max().date().isoformat() if len(feat) else None,
+    }
+    return feat, lab, meta
+
+
+def _load_minutes_dataset(dataset_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, Path, Path]:
     features_path = dataset_dir / "features.parquet"
     labels_path = dataset_dir / "labels.parquet"
     if not features_path.exists():
@@ -388,6 +473,154 @@ def _load_rotation_team_shape(data_root: Path) -> pd.DataFrame:
     df["team_id"] = pd.to_numeric(df["team_id"], errors="coerce").astype("Int64")
     df = df.drop_duplicates(subset=["game_id_norm", "team_id"], keep="last")
     return df
+
+
+def _backfill_odds_from_silver_snapshot(df: pd.DataFrame, *, data_root: Path) -> tuple[dict[str, Any], pd.DataFrame]:
+    """Backfill missing spread_home/total from silver odds_snapshot by game_id.
+
+    Selection rule:
+      - use latest odds snapshot per game_id
+      - if tip_ts exists in base df, require as_of_ts <= tip_ts
+    """
+
+    if df.empty:
+        return {"enabled": True, "rows": 0}, df
+    if "game_id" not in df.columns:
+        raise ValueError("Cannot backfill odds: missing game_id in minutes features")
+    if "spread_home" not in df.columns or "total" not in df.columns:
+        raise ValueError("Cannot backfill odds: missing spread_home/total columns in minutes features")
+
+    out = df.copy()
+    out["game_id_norm"] = _zfill_game_id(out["game_id"])
+
+    spread_before = pd.to_numeric(out["spread_home"], errors="coerce")
+    total_before = pd.to_numeric(out["total"], errors="coerce")
+    row_missing_before = spread_before.isna() | total_before.isna()
+    games_missing = set(out.loc[row_missing_before, "game_id_norm"].dropna().astype(str).unique().tolist())
+    if not games_missing:
+        out = out.drop(columns=["game_id_norm"], errors="ignore")
+        return {
+            "enabled": True,
+            "rows": int(len(out)),
+            "rows_missing_before": int(row_missing_before.sum()),
+            "rows_missing_after": int(row_missing_before.sum()),
+            "games_missing_before": 0,
+            "games_missing_after": 0,
+            "games_filled": 0,
+            "odds_snapshot_rows_read": 0,
+            "odds_snapshot_candidate_rows": 0,
+        }, out
+
+    seasons: set[int] = set()
+    if "game_date" in out.columns:
+        g = pd.to_datetime(out["game_date"], errors="coerce").dt.normalize().dropna()
+        seasons = {_season_for_date(pd.Timestamp(v)) for v in g}
+    season_dirs = (
+        [data_root / "silver" / "odds_snapshot" / f"season={s}" for s in sorted(seasons)]
+        if seasons
+        else sorted((data_root / "silver" / "odds_snapshot").glob("season=*"))
+    )
+    odds_files: list[Path] = []
+    for season_dir in season_dirs:
+        odds_files.extend(sorted(season_dir.glob("month=*/odds_snapshot.parquet")))
+
+    odds_frames: list[pd.DataFrame] = []
+    read_rows = 0
+    desired = ["game_id", "as_of_ts", "spread_home", "total", "home_line"]
+    for path in odds_files:
+        schema_cols = set(pq.ParquetFile(path).schema.names)
+        cols = [c for c in desired if c in schema_cols]
+        if "game_id" not in cols or "as_of_ts" not in cols:
+            continue
+        odds_part = pd.read_parquet(path, columns=cols)
+        read_rows += int(len(odds_part))
+        if odds_part.empty:
+            continue
+        odds_part["game_id_norm"] = _zfill_game_id(odds_part["game_id"])
+        odds_part = odds_part.loc[odds_part["game_id_norm"].isin(games_missing)].copy()
+        if odds_part.empty:
+            continue
+        if "spread_home" not in odds_part.columns and "home_line" in odds_part.columns:
+            odds_part["spread_home"] = odds_part["home_line"]
+        odds_part["spread_home"] = pd.to_numeric(odds_part.get("spread_home"), errors="coerce")
+        odds_part["total"] = pd.to_numeric(odds_part.get("total"), errors="coerce")
+        odds_part["as_of_ts"] = pd.to_datetime(odds_part["as_of_ts"], utc=True, errors="coerce")
+        odds_part = odds_part.dropna(subset=["game_id_norm", "as_of_ts"])
+        odds_frames.append(odds_part.loc[:, ["game_id_norm", "as_of_ts", "spread_home", "total"]])
+
+    if not odds_frames:
+        out = out.drop(columns=["game_id_norm"], errors="ignore")
+        return {
+            "enabled": True,
+            "rows": int(len(out)),
+            "rows_missing_before": int(row_missing_before.sum()),
+            "rows_missing_after": int(row_missing_before.sum()),
+            "games_missing_before": int(len(games_missing)),
+            "games_missing_after": int(len(games_missing)),
+            "games_filled": 0,
+            "odds_snapshot_rows_read": int(read_rows),
+            "odds_snapshot_candidate_rows": 0,
+            "warning": "No matching odds_snapshot rows for missing games.",
+        }, out
+
+    odds = pd.concat(odds_frames, ignore_index=True)
+
+    tips = out.loc[:, ["game_id_norm"]].drop_duplicates().copy()
+    if "tip_ts" in out.columns:
+        tip_frame = out.loc[:, ["game_id_norm", "tip_ts"]].dropna(subset=["tip_ts"]).copy()
+        tip_frame["tip_ts"] = pd.to_datetime(tip_frame["tip_ts"], utc=True, errors="coerce")
+        tip_frame = tip_frame.dropna(subset=["tip_ts"])
+        tip_frame = tip_frame.sort_values(["game_id_norm", "tip_ts"]).drop_duplicates(subset=["game_id_norm"], keep="last")
+        tips = tips.merge(tip_frame, on="game_id_norm", how="left")
+    else:
+        tips["tip_ts"] = pd.NaT
+
+    candidates = odds.merge(tips, on="game_id_norm", how="inner")
+    has_tip = candidates["tip_ts"].notna()
+    eligible = candidates.loc[~has_tip | (candidates["as_of_ts"] <= candidates["tip_ts"])].copy()
+    if eligible.empty:
+        out = out.drop(columns=["game_id_norm"], errors="ignore")
+        return {
+            "enabled": True,
+            "rows": int(len(out)),
+            "rows_missing_before": int(row_missing_before.sum()),
+            "rows_missing_after": int(row_missing_before.sum()),
+            "games_missing_before": int(len(games_missing)),
+            "games_missing_after": int(len(games_missing)),
+            "games_filled": 0,
+            "odds_snapshot_rows_read": int(read_rows),
+            "odds_snapshot_candidate_rows": int(len(candidates)),
+            "warning": "Odds rows found but none passed as_of_ts <= tip_ts filter.",
+        }, out
+
+    eligible = eligible.sort_values(["game_id_norm", "as_of_ts"]).drop_duplicates(subset=["game_id_norm"], keep="last")
+    odds_map = eligible.set_index("game_id_norm")[["spread_home", "total"]]
+
+    fill_spread = out["spread_home"].isna()
+    fill_total = out["total"].isna()
+    out.loc[fill_spread, "spread_home"] = out.loc[fill_spread, "game_id_norm"].map(odds_map["spread_home"])
+    out.loc[fill_total, "total"] = out.loc[fill_total, "game_id_norm"].map(odds_map["total"])
+
+    spread_after = pd.to_numeric(out["spread_home"], errors="coerce")
+    total_after = pd.to_numeric(out["total"], errors="coerce")
+    row_missing_after = spread_after.isna() | total_after.isna()
+
+    missing_games_after = set(out.loc[row_missing_after, "game_id_norm"].dropna().astype(str).unique().tolist())
+    out = out.drop(columns=["game_id_norm"], errors="ignore")
+
+    meta: dict[str, Any] = {
+        "enabled": True,
+        "rows": int(len(out)),
+        "rows_missing_before": int(row_missing_before.sum()),
+        "rows_missing_after": int(row_missing_after.sum()),
+        "games_missing_before": int(len(games_missing)),
+        "games_missing_after": int(len(missing_games_after)),
+        "games_filled": int(len(games_missing) - len(missing_games_after)),
+        "odds_snapshot_rows_read": int(read_rows),
+        "odds_snapshot_candidate_rows": int(len(candidates)),
+        "odds_snapshot_eligible_rows": int(len(eligible)),
+    }
+    return meta, out
 
 
 def _load_rotation_priors_v1(
@@ -692,7 +925,9 @@ def _write_manifest(
     rotation_missing_rate: float,
     require_rotation: bool,
     max_rows: int | None,
-    team_game_validation: dict[str, Any] | None,
+    date_window: dict[str, Any] | None = None,
+    odds_backfill: dict[str, Any] | None = None,
+    team_game_validation: dict[str, Any] | None = None,
     dnp_history_config: DNPHistoryConfig | None = None,
     rotation_priors_v1: dict[str, object] | None = None,
 ) -> None:
@@ -723,6 +958,10 @@ def _write_manifest(
             "max_rows": int(max_rows) if max_rows is not None else None,
         },
     }
+    if date_window is not None:
+        payload["options"]["date_window"] = date_window
+    if odds_backfill is not None:
+        payload["odds_backfill"] = odds_backfill
     if team_game_validation is not None:
         payload["team_game_validation"] = team_game_validation
     if dnp_history_config is not None:
@@ -737,6 +976,16 @@ def _write_manifest(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        "--minutes-dataset-dir",
+        type=str,
+        default=None,
+        help=(
+            "Minutes dataset source. Can be an absolute path to a dataset directory "
+            "(containing features.parquet + labels.parquet) or a dataset name under "
+            "$PROJECTIONS_DATA_ROOT/training/datasets/."
+        ),
+    )
     parser.add_argument(
         "--out-dir",
         type=str,
@@ -767,16 +1016,85 @@ def main() -> None:
         action="store_true",
         help="Disable dropping team-games with incomplete player coverage or incomplete labels.",
     )
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default=None,
+        help="Optional inclusive game_date floor (YYYY-MM-DD) before joins.",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default=None,
+        help="Optional inclusive game_date ceiling (YYYY-MM-DD) before joins.",
+    )
+    parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=None,
+        help="Optional rolling lookback window in days (e.g. 365).",
+    )
+    parser.add_argument(
+        "--anchor-date",
+        type=str,
+        default=None,
+        help="Anchor date for --lookback-days (YYYY-MM-DD). Defaults to current UTC date.",
+    )
+    parser.add_argument(
+        "--backfill-odds-from-silver",
+        dest="backfill_odds_from_silver",
+        action="store_true",
+        help="Backfill missing spread_home/total from silver/odds_snapshot before applying odds missing flags.",
+    )
+    parser.add_argument(
+        "--no-backfill-odds-from-silver",
+        dest="backfill_odds_from_silver",
+        action="store_false",
+        help="Disable odds backfill from silver/odds_snapshot.",
+    )
+    parser.set_defaults(backfill_odds_from_silver=True)
     args = parser.parse_args()
 
     data_root = paths.get_data_root()
     out_dir = Path(args.out_dir).expanduser().resolve()
     bundle_dir = (paths.get_project_root() / MINUTES_BUNDLE_DIR).resolve()
+    minutes_dataset_dir = _resolve_minutes_dataset_dir(data_root, args.minutes_dataset_dir)
 
     allowlist = _read_feature_allowlist(bundle_dir)
-    features_df, labels_df, source_features_path, source_labels_path = _load_minutes_dataset(data_root)
+    features_df, labels_df, source_features_path, source_labels_path = _load_minutes_dataset(minutes_dataset_dir)
+
+    start_day, end_day = _resolve_date_window(
+        start_date=args.start_date,
+        end_date=args.end_date,
+        lookback_days=args.lookback_days,
+        anchor_date=args.anchor_date,
+    )
+    features_df, labels_df, date_window_meta = _filter_minutes_dataset_by_game_date(
+        features_df,
+        labels_df,
+        start_day=start_day,
+        end_day=end_day,
+    )
+    if date_window_meta.get("enabled"):
+        print(
+            "[rotation_train_v1] Date window:",
+            f"start={date_window_meta.get('start_date')}",
+            f"end={date_window_meta.get('end_date')}",
+            f"rows_features={date_window_meta.get('rows_features_before')}->{date_window_meta.get('rows_features_after')}",
+            f"rows_labels={date_window_meta.get('rows_labels_before')}->{date_window_meta.get('rows_labels_after')}",
+        )
 
     pruned_df, kept_minutes_features = _apply_feature_pruning(features_df, allowlist=allowlist)
+    if bool(args.backfill_odds_from_silver):
+        odds_backfill_meta, pruned_df = _backfill_odds_from_silver_snapshot(pruned_df, data_root=data_root)
+        print(
+            "[rotation_train_v1] Odds backfill:",
+            f"rows_missing={odds_backfill_meta.get('rows_missing_before')}->{odds_backfill_meta.get('rows_missing_after')}",
+            f"games_missing={odds_backfill_meta.get('games_missing_before')}->{odds_backfill_meta.get('games_missing_after')}",
+            f"games_filled={odds_backfill_meta.get('games_filled')}",
+        )
+    else:
+        odds_backfill_meta = {"enabled": False}
     pruned_df = _apply_odds_missing_flags(pruned_df)
 
     player_rotation = _load_rotation_player_labels(data_root)
@@ -912,6 +1230,8 @@ def main() -> None:
         rotation_missing_rate=rotation_missing_rate,
         require_rotation=bool(args.require_rotation),
         max_rows=args.max_rows,
+        date_window=date_window_meta,
+        odds_backfill=odds_backfill_meta,
         team_game_validation=team_game_validation,
         dnp_history_config=dnp_config,
         rotation_priors_v1=priors_meta,
