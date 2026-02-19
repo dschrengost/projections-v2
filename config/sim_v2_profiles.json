@@ -115,8 +115,8 @@
       "minutes_run_id": null,
       "fpts_run_id": null,
       "rotation": {
-        "max_size": 8,
-        "protected_size": 6
+        "max_size": 10,
+        "protected_size": 7
       },
       "worlds": {
         "n_worlds": 25000,
@@ -155,7 +155,7 @@
         "beta_basis": "minutes_share"
       },
       "bench_zero_mixture": {
-        "enabled": true,
+        "enabled": false,
         "minutes_threshold": 10.0,
         "p_zero_base": 0.85,
         "p_zero_slope": 0.35
@@ -210,10 +210,9 @@
         "min_raw_play_prob_for_floor": 0.3,
         "min_rotation_prob_for_floor": 0.6,
         "depth_block_roles": [
-          "limited",
           "not_listed"
         ],
-        "depth_block_min_ahead_global": 7,
+        "depth_block_min_ahead_global": 9,
         "dnp_block_streak_threshold": 3.0,
         "dnp_block_rate_threshold": 0.5,
         "dnp_block_inactive_streak_threshold": 2.0,
@@ -258,12 +257,12 @@
         "share_temperature": 1.0,
         "share_noise_std": 0.0,
         "share_blend_weight": 0.5,
-        "use_bench_zero_mixture": true,
+        "use_bench_zero_mixture": false,
         "bench_zero_minutes_threshold": 8.0,
         "bench_zero_p_base": 0.25,
         "bench_zero_p_slope": 0.5
       },
-      "note": "sim_v3: model_space_v1 minutes worlds + game_script margin surprise (deviation from spread); margin_std=14 matches historical data."
+      "note": "sim_v3: model_space_v1 minutes worlds + game_script margin surprise (deviation from spread), with relaxed rotation/bench-zero compaction for live stability."
     },
     "sim_v3_rates_noise": {
       "mean_source": "rates",
