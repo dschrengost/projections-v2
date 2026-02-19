@@ -1375,6 +1375,70 @@ def main(
             .fillna(0.0)
             .astype(float)
         )
+
+        # Projected starter guardrail: if a player is marked as projected starter,
+        # they should have gate_prob=1.0. This handles "next man up" situations where
+        # a backup is elevated to starter but has weak historical starter stats.
+        # We also need to recompute minutes for these players since pred_minutes was
+        # computed with the original low gate_prob.
+        if "is_projected_starter" in rot_features.columns:
+            starter_mask = (
+                rot_features.set_index(["game_id", "team_id", "player_id"])["is_projected_starter"]
+                .reindex(rot_pred.set_index(["game_id", "team_id", "player_id"]).index)
+                .fillna(0)
+                .astype(bool)
+                .values
+            )
+            needs_boost_mask = starter_mask & (rot_pred["gate_prob"] < 1.0)
+            n_boosted = int(needs_boost_mask.sum())
+            if n_boosted > 0:
+                # Boost gate_prob to 1.0
+                rot_pred.loc[starter_mask, "gate_prob"] = 1.0
+
+                # Recompute minutes for boosted players using share_logit
+                # Formula: minutes = gate_prob * share * team_total_minutes
+                # where share = softmax(share_logit) within each team
+                if "share_logit" in rot_pred.columns:
+                    # For players who got boosted, recompute their minutes
+                    for (game_id, team_id), grp in rot_pred.groupby(["game_id", "team_id"], sort=False):
+                        team_mask = (rot_pred["game_id"] == game_id) & (rot_pred["team_id"] == team_id)
+                        team_starters = team_mask & starter_mask
+
+                        if not team_starters.any():
+                            continue
+
+                        # Get share_logits for the team and compute softmax
+                        team_share_logits = rot_pred.loc[team_mask, "share_logit"].values
+                        team_gate_probs = rot_pred.loc[team_mask, "gate_prob"].values
+
+                        # Compute weighted softmax shares (gate_prob * softmax(share_logit))
+                        exp_shares = np.exp(team_share_logits - team_share_logits.max())
+                        weighted_shares = team_gate_probs * exp_shares
+                        total_weight = weighted_shares.sum()
+                        if total_weight > 0:
+                            shares = weighted_shares / total_weight
+                        else:
+                            shares = np.ones_like(weighted_shares) / len(weighted_shares)
+
+                        # Team total minutes (assume 240 for regulation)
+                        team_total = 240.0
+                        new_minutes = shares * team_total
+
+                        # Only update the boosted players' minutes
+                        boosted_in_team = team_mask & needs_boost_mask
+                        if boosted_in_team.any():
+                            # Map new minutes back to the boosted players
+                            team_indices = np.where(team_mask)[0]
+                            boosted_indices = np.where(boosted_in_team)[0]
+                            for bi in boosted_indices:
+                                pos_in_team = np.where(team_indices == bi)[0][0]
+                                rot_pred.loc[rot_pred.index[bi], "rotation_minutes_p50"] = new_minutes[pos_in_team]
+
+                typer.echo(
+                    f"[rotation_minutes] projected starter guardrail: boosted gate_prob to 1.0 for {n_boosted} players",
+                    err=True,
+                )
+
     for aux_col in ("gate_logit", "share_logit"):
         if aux_col in rot_pred.columns:
             rot_pred[aux_col] = (
