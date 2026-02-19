@@ -16,7 +16,7 @@ from projections.rotation.utils import zfill_game_id_series
 
 ODDS_COLS: tuple[str, str] = ("spread_home", "total")
 
-# The 11 derived features required by newer rotation_set_minutes models.
+# The 15 derived features required by newer rotation_set_minutes models.
 ROTATION_SET_DERIVED_FEATURES: tuple[str, ...] = (
     "vac_missing",
     "team_n_players",
@@ -29,6 +29,12 @@ ROTATION_SET_DERIVED_FEATURES: tuple[str, ...] = (
     "vacated_minutes_prior_20_same_pos",
     "team_prior_minutes_20_not_out",
     "prior_minutes_share_20",
+    # Role-change features: short-vs-long window prior divergence.
+    # Positive values indicate a recent upgrade (e.g., bench → starter).
+    "role_change_starter_5v20",
+    "role_change_minutes_5v20",
+    "role_change_starter_5v10",
+    "role_change_minutes_5v10",
 )
 
 
@@ -265,7 +271,7 @@ def add_rotation_set_derived_features(
 ) -> pd.DataFrame:
     """Add derived features required by rotation_set_minutes models.
 
-    Computes the 11 derived features that depend on team-game context:
+    Computes the 15 derived features that depend on team-game context:
     - vac_missing: 1 if vacancy columns are missing/NaN, else 0
     - team_n_players: count of players per (game_id, team_id)
     - team_n_not_out: count of not-out players per team-game
@@ -277,6 +283,10 @@ def add_rotation_set_derived_features(
     - vacated_minutes_prior_20_same_pos: sum of prior_20 minutes for OUT players at same pos
     - team_prior_minutes_20_not_out: sum of prior_20 minutes for not-out players
     - prior_minutes_share_20: player's share of team_prior_minutes_20_not_out
+    - role_change_starter_5v20: started_proxy_rate_prior_5 - started_proxy_rate_prior_20
+    - role_change_minutes_5v20: minutes_from_stints_prior_5 - minutes_from_stints_prior_20
+    - role_change_starter_5v10: started_proxy_rate_prior_5 - started_proxy_rate_prior_10
+    - role_change_minutes_5v10: minutes_from_stints_prior_5 - minutes_from_stints_prior_10
 
     Args:
         df: DataFrame with game_id, team_id, player_id and position/injury columns
@@ -420,6 +430,30 @@ def add_rotation_set_derived_features(
             # No vacancy columns present - mark as missing
             out["vac_missing"] = 1
         out["vac_missing"] = pd.to_numeric(out["vac_missing"], errors="coerce").fillna(1).astype("int8")
+
+    # Role-change features: short-vs-long window prior divergence.
+    # These signal "next man up" situations where a player's recent role
+    # diverges from their historical role (e.g., bench player promoted to starter).
+    _role_change_pairs = [
+        ("role_change_starter_5v20", "started_proxy_rate_prior_5", "started_proxy_rate_prior_20"),
+        ("role_change_minutes_5v20", "minutes_from_stints_prior_5", "minutes_from_stints_prior_20"),
+        ("role_change_starter_5v10", "started_proxy_rate_prior_5", "started_proxy_rate_prior_10"),
+        ("role_change_minutes_5v10", "minutes_from_stints_prior_5", "minutes_from_stints_prior_10"),
+    ]
+    for feat_name, short_col, long_col in _role_change_pairs:
+        if feat_name not in needed:
+            continue
+        short_vals = (
+            pd.to_numeric(out[short_col], errors="coerce").fillna(0.0)
+            if short_col in out.columns
+            else pd.Series(0.0, index=out.index)
+        )
+        long_vals = (
+            pd.to_numeric(out[long_col], errors="coerce").fillna(0.0)
+            if long_col in out.columns
+            else pd.Series(0.0, index=out.index)
+        )
+        out[feat_name] = (short_vals - long_vals).astype("float64")
 
     # Clean up temporary columns
     out = out.drop(columns=["_pos_bucket", "_is_out", "_prior_20", "_is_not_out"], errors="ignore")

@@ -12,8 +12,8 @@ from projections.rotation.rotation_set_minutes_features_v1 import (
 )
 
 
-def test_add_rotation_set_derived_features_computes_all_11_features() -> None:
-    """Test that all 11 derived features are computed correctly."""
+def test_add_rotation_set_derived_features_computes_all_15_features() -> None:
+    """Test that all 15 derived features are computed correctly."""
     df = pd.DataFrame(
         [
             # Team 100: 7 players, 1 out (BIG with 20 prior minutes)
@@ -205,3 +205,88 @@ def test_add_rotation_set_derived_features_missing_keys_raises() -> None:
 
     with pytest.raises(ValueError, match="Missing required key columns"):
         add_rotation_set_derived_features(df)
+
+
+def test_role_change_features_computed_correctly() -> None:
+    """Test role-change features are correct differences of short vs long window priors."""
+    df = pd.DataFrame(
+        [
+            # Player 1: bench player recently promoted to starter (next-man-up)
+            {
+                "game_id": 1, "team_id": 100, "player_id": 1, "pos_bucket": "B", "is_out": 0,
+                "minutes_from_stints_prior_20": 8.0,
+                "started_proxy_rate_prior_5": 0.4,
+                "started_proxy_rate_prior_10": 0.1,
+                "started_proxy_rate_prior_20": 0.05,
+                "minutes_from_stints_prior_5": 22.0,
+                "minutes_from_stints_prior_10": 12.0,
+            },
+            # Player 2: stable starter (no role change)
+            {
+                "game_id": 1, "team_id": 100, "player_id": 2, "pos_bucket": "G", "is_out": 0,
+                "minutes_from_stints_prior_20": 32.0,
+                "started_proxy_rate_prior_5": 1.0,
+                "started_proxy_rate_prior_10": 1.0,
+                "started_proxy_rate_prior_20": 0.95,
+                "minutes_from_stints_prior_5": 33.0,
+                "minutes_from_stints_prior_10": 32.5,
+            },
+            # Player 3: recently demoted (negative role change)
+            {
+                "game_id": 1, "team_id": 100, "player_id": 3, "pos_bucket": "W", "is_out": 0,
+                "minutes_from_stints_prior_20": 28.0,
+                "started_proxy_rate_prior_5": 0.0,
+                "started_proxy_rate_prior_10": 0.4,
+                "started_proxy_rate_prior_20": 0.7,
+                "minutes_from_stints_prior_5": 10.0,
+                "minutes_from_stints_prior_10": 18.0,
+            },
+        ]
+    )
+
+    result = add_rotation_set_derived_features(df)
+
+    # Player 1: bench → starter (positive divergence)
+    p1 = result[result["player_id"] == 1].iloc[0]
+    assert np.isclose(float(p1["role_change_starter_5v20"]), 0.4 - 0.05)  # 0.35
+    assert np.isclose(float(p1["role_change_minutes_5v20"]), 22.0 - 8.0)  # 14.0
+    assert np.isclose(float(p1["role_change_starter_5v10"]), 0.4 - 0.1)   # 0.3
+    assert np.isclose(float(p1["role_change_minutes_5v10"]), 22.0 - 12.0) # 10.0
+
+    # Player 2: stable starter (near-zero divergence)
+    p2 = result[result["player_id"] == 2].iloc[0]
+    assert np.isclose(float(p2["role_change_starter_5v20"]), 1.0 - 0.95)  # 0.05
+    assert np.isclose(float(p2["role_change_minutes_5v20"]), 33.0 - 32.0) # 1.0
+    assert np.isclose(float(p2["role_change_starter_5v10"]), 1.0 - 1.0)   # 0.0
+    assert np.isclose(float(p2["role_change_minutes_5v10"]), 33.0 - 32.5) # 0.5
+
+    # Player 3: recently demoted (negative divergence)
+    p3 = result[result["player_id"] == 3].iloc[0]
+    assert np.isclose(float(p3["role_change_starter_5v20"]), 0.0 - 0.7)   # -0.7
+    assert np.isclose(float(p3["role_change_minutes_5v20"]), 10.0 - 28.0) # -18.0
+    assert np.isclose(float(p3["role_change_starter_5v10"]), 0.0 - 0.4)   # -0.4
+    assert np.isclose(float(p3["role_change_minutes_5v10"]), 10.0 - 18.0) # -8.0
+
+
+def test_role_change_features_zero_when_priors_missing() -> None:
+    """Test role-change features gracefully fall back to 0 when prior columns are absent."""
+    df = pd.DataFrame(
+        [
+            {
+                "game_id": 1, "team_id": 100, "player_id": 1, "pos_bucket": "G", "is_out": 0,
+                "minutes_from_stints_prior_20": 20.0,
+                # No started_proxy_rate_prior_* or minutes_from_stints_prior_5/10
+            },
+        ]
+    )
+
+    result = add_rotation_set_derived_features(df)
+
+    # Starter features: all source columns missing → 0 - 0 = 0
+    assert np.isclose(float(result["role_change_starter_5v20"].iloc[0]), 0.0)
+    assert np.isclose(float(result["role_change_starter_5v10"].iloc[0]), 0.0)
+
+    # Minutes features: _prior_5 missing (→ 0) but _prior_20 present (20.0) → 0 - 20 = -20
+    assert np.isclose(float(result["role_change_minutes_5v20"].iloc[0]), -20.0)
+    # _prior_10 also missing → 0 - 0 = 0
+    assert np.isclose(float(result["role_change_minutes_5v10"].iloc[0]), 0.0)

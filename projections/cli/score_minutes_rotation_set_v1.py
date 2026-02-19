@@ -216,11 +216,18 @@ class BaselineMinutesResult:
 
 def _extract_baseline_minutes(
     minutes_feat: pd.DataFrame,
-    candidate_cols: tuple[str, ...] = ("minutes_p50_model", "minutes_final", "minutes_p50"),
+    candidate_cols: tuple[str, ...] = (
+        "minutes_p50_model",
+        "minutes_final",
+        "minutes_p50",
+        "roll_mean_5",
+        "roll_mean_3",
+    ),
 ) -> BaselineMinutesResult:
     """Extract baseline minutes from the first valid candidate column.
 
-    Priority order: minutes_p50_model > minutes_final > minutes_p50.
+    Priority order: minutes_p50_model > minutes_final > minutes_p50 >
+    roll_mean_5 > roll_mean_3 (historical averages as last-resort fallback).
     Uses the first column that has any non-zero values.
     """
     for candidate_col in candidate_cols:

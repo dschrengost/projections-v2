@@ -79,10 +79,19 @@ def estimate_game_id_range(target_date: str) -> tuple[int, int]:
         after = ANCHORS[-1]
         after = (after[0], datetime.strptime(after[1], "%Y-%m-%d"))
 
-    # Interpolate (roughly 75 IDs per day across all sports)
-    ids_per_day = 75
+    # Interpolate between surrounding anchors when both exist.
+    # Previous bug: only used `before` anchor with a fixed 75-IDs/day rate,
+    # which drifted ~2,500 IDs off for dates far from the nearest anchor.
     days_from_before = (target - before[1]).days
-    estimated_id = before[0] + (days_from_before * ids_per_day)
+    total_span_days = (after[1] - before[1]).days
+    if total_span_days > 0 and before[1] != after[1]:
+        # Linear interpolation between the two surrounding anchors
+        id_span = after[0] - before[0]
+        estimated_id = before[0] + int(id_span * days_from_before / total_span_days)
+    else:
+        # Exact anchor match or extrapolation beyond all anchors
+        ids_per_day = 75
+        estimated_id = before[0] + (days_from_before * ids_per_day)
 
     # Search window of +/- 500 IDs (about a week of all sports)
     return (max(230000, estimated_id - 500), estimated_id + 500)
@@ -287,10 +296,18 @@ def main():
     # Check for cached game list
     cache_file = BRONZE_DIR / f"games_cache_{start_date}_{end_date}.json".replace("-", "")
 
+    use_cache = False
     if cache_file.exists():
         print(f"\nLoading cached game list from {cache_file}")
         with open(cache_file) as f:
             games_by_date = json.load(f)
+        if games_by_date:
+            use_cache = True
+        else:
+            print(f"WARNING: cached game list is empty — deleting stale cache and rescanning")
+            cache_file.unlink()
+
+    if use_cache:
         all_games = []
         for date_games in games_by_date.values():
             all_games.extend(date_games)
@@ -305,10 +322,17 @@ def main():
                 filtered[date] = games
         games_by_date = filtered
 
-        # Cache results
-        with open(cache_file, "w") as f:
-            json.dump(games_by_date, f, indent=2)
-        print(f"Cached game list to {cache_file}")
+        # Only cache non-empty results to avoid poisoning future runs
+        if games_by_date:
+            with open(cache_file, "w") as f:
+                json.dump(games_by_date, f, indent=2)
+            print(f"Cached game list to {cache_file}")
+        else:
+            print(
+                f"WARNING: scan found 0 NBA games for {start_date}..{end_date} "
+                f"in ID range {full_start:,}–{full_end:,}; NOT caching empty result. "
+                f"Anchor staleness or ID drift may need attention."
+            )
 
         all_games = []
         for date_games in games_by_date.values():

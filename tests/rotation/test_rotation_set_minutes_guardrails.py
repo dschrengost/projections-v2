@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -439,3 +440,46 @@ def test_guardrail_degraded_reason_nonempty_when_fallback_occurs() -> None:
     # Summary has degraded info
     assert result.summary.get("degraded") is True
     assert result.summary.get("degraded_reasons") == result.degraded_reasons
+
+
+# --- Baseline extraction regression tests ---
+
+
+def test_baseline_extraction_uses_roll_mean_when_model_cols_missing() -> None:
+    """Regression: in primary mode without prior LightGBM pass, baseline should
+    fall back to roll_mean_5 instead of returning all zeros."""
+    from projections.cli.score_minutes_rotation_set_v1 import _extract_baseline_minutes
+
+    df = pd.DataFrame({
+        "roll_mean_5": [25.0, 30.0, 0.0, 18.0],
+        "roll_mean_3": [24.0, 29.0, 0.0, 17.0],
+    })
+    result = _extract_baseline_minutes(df)
+    assert result.source_col == "roll_mean_5"
+    assert result.gt0_count == 3
+    assert result.max_val == 30.0
+
+
+def test_baseline_extraction_prefers_model_over_rolling() -> None:
+    """minutes_p50_model should be preferred over roll_mean_5 when both are present."""
+    from projections.cli.score_minutes_rotation_set_v1 import _extract_baseline_minutes
+
+    df = pd.DataFrame({
+        "minutes_p50_model": [25.0, 30.0],
+        "roll_mean_5": [20.0, 28.0],
+    })
+    result = _extract_baseline_minutes(df)
+    assert result.source_col == "minutes_p50_model"
+
+
+def test_baseline_extraction_returns_none_when_all_zero() -> None:
+    """If no candidate has non-zero values, return source_col='none'."""
+    from projections.cli.score_minutes_rotation_set_v1 import _extract_baseline_minutes
+
+    df = pd.DataFrame({
+        "roll_mean_5": [0.0, 0.0],
+        "roll_mean_3": [0.0, 0.0],
+    })
+    result = _extract_baseline_minutes(df)
+    assert result.source_col == "none"
+    assert np.all(result.values == 0.0)

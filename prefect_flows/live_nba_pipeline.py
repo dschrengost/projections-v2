@@ -325,9 +325,21 @@ def build_minutes_features_task(
     action_props_snapshots = pd.DataFrame()
     if action_props_dir.exists():
         try:
-            action_props_snapshots = load_action_props_feature_snapshots_for_date(
-                props_dir=action_props_dir,
-                game_date=target_day,
+            # Load snapshots for both game_date and game_date+1 (UTC/ET day boundary).
+            # AN stores games by UTC start_time, so a 7pm ET game on Feb-19 appears
+            # as a Feb-20 UTC file. Loading next-day covers this offset.
+            snapshot_frames: list[pd.DataFrame] = []
+            for offset in (0, 1):
+                snap = load_action_props_feature_snapshots_for_date(
+                    props_dir=action_props_dir,
+                    game_date=target_day + pd.Timedelta(days=offset),
+                )
+                if not snap.empty:
+                    snapshot_frames.append(snap)
+            action_props_snapshots = (
+                pd.concat(snapshot_frames, ignore_index=True)
+                if snapshot_frames
+                else pd.DataFrame()
             )
             action_props_snapshot_rows = int(len(action_props_snapshots))
         except Exception as exc:  # noqa: BLE001
@@ -336,9 +348,11 @@ def build_minutes_features_task(
     live_slice = attach_action_props_features(
         live_slice,
         action_props_snapshots,
-        strict_asof=False,
+        strict_asof=True,
         as_of_col="feature_as_of_ts",
         tip_col="tip_ts",
+        game_date_offsets=(0, -1),
+        clamp_late_asof_to_game_date=True,
     )
     if "an_has_any_props" in live_slice.columns:
         action_props_matched_rows = int(
