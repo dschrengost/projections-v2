@@ -130,6 +130,10 @@ class RotationLiveConfig:
     sparsify_kmax: int
     sparsify_min_keep: int
     sparsify_use_col: str
+    alloc_mask_mode: str
+    alloc_min_eligible: int
+    alloc_prior_play_prob_threshold: float
+    alloc_baseline_minutes_threshold: float
 
     @classmethod
     def load(cls, path: Path) -> "RotationLiveConfig":
@@ -161,6 +165,12 @@ class RotationLiveConfig:
         sparsify_kmax = int(payload.get("sparsify_kmax", 11))
         sparsify_min_keep = int(payload.get("sparsify_min_keep", 8))
         sparsify_use_col = str(payload.get("sparsify_use_col", "gate_prob"))
+        alloc_mask_mode = str(payload.get("alloc_mask_mode", "strict"))
+        if alloc_mask_mode not in ("strict", "not_out"):
+            alloc_mask_mode = "strict"
+        alloc_min_eligible = int(payload.get("alloc_min_eligible", 9))
+        alloc_prior_play_prob_threshold = float(payload.get("alloc_prior_play_prob_threshold", 0.20))
+        alloc_baseline_minutes_threshold = float(payload.get("alloc_baseline_minutes_threshold", 4.0))
         return cls(
             enabled=enabled,
             model_dir=str(model_dir) if model_dir else None,
@@ -177,6 +187,10 @@ class RotationLiveConfig:
             sparsify_kmax=sparsify_kmax,
             sparsify_min_keep=sparsify_min_keep,
             sparsify_use_col=sparsify_use_col,
+            alloc_mask_mode=alloc_mask_mode,
+            alloc_min_eligible=alloc_min_eligible,
+            alloc_prior_play_prob_threshold=alloc_prior_play_prob_threshold,
+            alloc_baseline_minutes_threshold=alloc_baseline_minutes_threshold,
         )
 
 
@@ -901,23 +915,23 @@ def main(
     batch_size: int = typer.Option(
         64, "--batch-size", help="Batch size (team-games) for rotation model."
     ),
-    alloc_mask_mode: str = typer.Option(
-        "strict",
+    alloc_mask_mode: str | None = typer.Option(
+        None,
         "--alloc-mask-mode",
         help="Inference allocation mask: strict (heuristic eligibility) or not_out (all non-OUT players).",
     ),
-    alloc_min_eligible: int = typer.Option(
-        9,
+    alloc_min_eligible: int | None = typer.Option(
+        None,
         "--alloc-min-eligible",
         help="Minimum eligible players per team-game for strict allocation mask mode.",
     ),
-    alloc_prior_play_prob_threshold: float = typer.Option(
-        0.20,
+    alloc_prior_play_prob_threshold: float | None = typer.Option(
+        None,
         "--alloc-prior-play-prob-threshold",
         help="Strict alloc-mask threshold on prior_play_prob eligibility.",
     ),
-    alloc_baseline_minutes_threshold: float = typer.Option(
-        4.0,
+    alloc_baseline_minutes_threshold: float | None = typer.Option(
+        None,
         "--alloc-baseline-minutes-threshold",
         help="Strict alloc-mask threshold on baseline minutes eligibility.",
     ),
@@ -1056,6 +1070,24 @@ def main(
         if dnp_tail_minutes_threshold is not None
         else float(config.dnp_tail_minutes_threshold)
     )
+    resolved_alloc_mask_mode = str(
+        alloc_mask_mode if alloc_mask_mode is not None else config.alloc_mask_mode
+    ).strip().lower()
+    if resolved_alloc_mask_mode not in ("strict", "not_out"):
+        resolved_alloc_mask_mode = "strict"
+    resolved_alloc_min_eligible = int(
+        alloc_min_eligible if alloc_min_eligible is not None else config.alloc_min_eligible
+    )
+    resolved_alloc_prior_play_prob_threshold = float(
+        alloc_prior_play_prob_threshold
+        if alloc_prior_play_prob_threshold is not None
+        else config.alloc_prior_play_prob_threshold
+    )
+    resolved_alloc_baseline_minutes_threshold = float(
+        alloc_baseline_minutes_threshold
+        if alloc_baseline_minutes_threshold is not None
+        else config.alloc_baseline_minutes_threshold
+    )
     allow_priors_fallback = bool(config.allow_priors_fallback)
     # PR3: blend-to-baseline is now disabled by default (let transformer signal through)
     enable_blend = bool(config.enable_blend_to_baseline)
@@ -1064,6 +1096,13 @@ def main(
     typer.echo(
         f"[rotation_minutes] rotation_set_minutes enabled mode={resolved_mode} model_dir={resolved_model_dir} blend_weight={w} "
         f"injury_thr={inj_thr} dnp_tail_thr={dnp_thr} enable_blend={enable_blend} fallback_mode={fallback_mode}",
+        err=True,
+    )
+    typer.echo(
+        "[rotation_minutes] alloc_mask "
+        f"mode={resolved_alloc_mask_mode} min_eligible={resolved_alloc_min_eligible} "
+        f"prior_thr={resolved_alloc_prior_play_prob_threshold:.2f} "
+        f"baseline_thr={resolved_alloc_baseline_minutes_threshold:.1f}",
         err=True,
     )
 
@@ -1308,10 +1347,10 @@ def main(
             device=str(device),
             batch_size=int(batch_size),
             return_aux=True,
-            alloc_mask_mode=str(alloc_mask_mode),
-            alloc_min_eligible=int(alloc_min_eligible),
-            alloc_prior_play_prob_threshold=float(alloc_prior_play_prob_threshold),
-            alloc_baseline_minutes_threshold=float(alloc_baseline_minutes_threshold),
+            alloc_mask_mode=resolved_alloc_mask_mode,
+            alloc_min_eligible=resolved_alloc_min_eligible,
+            alloc_prior_play_prob_threshold=resolved_alloc_prior_play_prob_threshold,
+            alloc_baseline_minutes_threshold=resolved_alloc_baseline_minutes_threshold,
         )
         # Handle both DataFrame and RotationSetAuxOutputs return types
         if isinstance(rot_result, RotationSetAuxOutputs):
@@ -1666,6 +1705,14 @@ def main(
                     "enabled": True,
                     "mode": resolved_mode,
                     "model_dir": str(Path(resolved_model_dir).expanduser()),
+                    "alloc_mask_mode": resolved_alloc_mask_mode,
+                    "alloc_min_eligible": int(resolved_alloc_min_eligible),
+                    "alloc_prior_play_prob_threshold": float(
+                        resolved_alloc_prior_play_prob_threshold
+                    ),
+                    "alloc_baseline_minutes_threshold": float(
+                        resolved_alloc_baseline_minutes_threshold
+                    ),
                     "team_scale": scale_summary,
                     "espn_out_count": espn_out_count,
                     "espn_matched_count": espn_matched_count,
@@ -1706,6 +1753,14 @@ def main(
             degraded_reason="; ".join(degraded_reasons) if degraded_reasons else "",
             extras={
                 "mode": resolved_mode,
+                "alloc_mask_mode": resolved_alloc_mask_mode,
+                "alloc_min_eligible": int(resolved_alloc_min_eligible),
+                "alloc_prior_play_prob_threshold": float(
+                    resolved_alloc_prior_play_prob_threshold
+                ),
+                "alloc_baseline_minutes_threshold": float(
+                    resolved_alloc_baseline_minutes_threshold
+                ),
                 "team_scale": scale_summary,
                 "espn_out_count": espn_out_count,
                 "espn_matched_count": espn_matched_count,
@@ -2041,6 +2096,14 @@ def main(
                 "enabled": True,
                 "mode": resolved_mode,
                 "model_dir": str(Path(resolved_model_dir).expanduser()),
+                "alloc_mask_mode": resolved_alloc_mask_mode,
+                "alloc_min_eligible": int(resolved_alloc_min_eligible),
+                "alloc_prior_play_prob_threshold": float(
+                    resolved_alloc_prior_play_prob_threshold
+                ),
+                "alloc_baseline_minutes_threshold": float(
+                    resolved_alloc_baseline_minutes_threshold
+                ),
                 "blend_weight": w,
                 "injury_coverage_threshold": inj_thr,
                 "dnp_tail_minutes_threshold": dnp_thr,
@@ -2073,6 +2136,14 @@ def main(
             "blend_weight": w,
             "injury_coverage_threshold": inj_thr,
             "dnp_tail_minutes_threshold": dnp_thr,
+            "alloc_mask_mode": resolved_alloc_mask_mode,
+            "alloc_min_eligible": int(resolved_alloc_min_eligible),
+            "alloc_prior_play_prob_threshold": float(
+                resolved_alloc_prior_play_prob_threshold
+            ),
+            "alloc_baseline_minutes_threshold": float(
+                resolved_alloc_baseline_minutes_threshold
+            ),
             "enable_blend_to_baseline": enable_blend,
             "fallback_mode": fallback_mode,
             "mode": resolved_mode,

@@ -35,3 +35,19 @@ def test_attach_availability_features_normalizes_ava_status() -> None:
     assert int(out.loc[0, "is_q"]) == 0
     assert int(out.loc[0, "is_prob"]) == 0
 
+
+def test_attach_availability_features_sets_available_prior_when_no_injury_row() -> None:
+    base = pd.DataFrame(
+        {
+            "game_id": ["0022500506"],
+            "player_id": [1631105],
+            "tip_ts": [pd.Timestamp("2026-01-06T01:00:00Z")],
+        }
+    )
+
+    out = attach_availability_features(base, injuries_snapshot=pd.DataFrame())
+
+    assert out.loc[0, "status"] == "Ava"
+    assert float(out.loc[0, "prior_play_prob"]) == STATUS_PRIORS[AvailabilityStatus.AVAILABLE]
+    assert int(out.loc[0, "injury_snapshot_missing"]) == 1
+    assert bool(out.loc[0, "injury_row_present"]) is False
