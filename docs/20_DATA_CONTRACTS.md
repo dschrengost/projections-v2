@@ -80,6 +80,30 @@ Important notes:
   - `p_ge5_prior_heur`: heuristic `P(minutes >= 5)` derived from `minutes_prior` + quantiles
   - `p_eq0_prior_heur`: heuristic `P(minutes == 0)` / DNP-ish derived from `minutes_prior` + quantiles
 
+### Rotation Set Priors (Live Inference)
+
+The rotation-set minutes model (`rotation_set_minutes_v1`) uses rolling prior statistics
+loaded from `rotation_priors_v1/`. These priors are "pre-game" snapshots computed BEFORE
+each game, so special handling is needed for live inference.
+
+**Live inference adjustments** (in `projections/rotation/live_features_v1.py`):
+
+1. **All-Star game filtering**: Game IDs with non-002 prefix (All-Star, preseason, play-in)
+   are excluded when loading priors. This prevents team_id mismatches when a player's
+   most recent game was an All-Star game.
+
+2. **Prior freshness update**: After loading priors, `_update_player_priors_with_latest_labels()`
+   refreshes rolling columns (`started_proxy_rate_prior_5`, `minutes_from_stints_prior_5`)
+   using box score labels. This ensures "next man up" situations reflect the player's
+   most recent game results.
+
+Key prior columns affected:
+- `started_proxy_rate_prior_5` — rolling starter rate (used by gate_prob model)
+- `minutes_from_stints_prior_5` — rolling minutes average
+
+Without these adjustments, players returning from All-Star break or newly elevated to
+starter roles may be incorrectly zeroed out due to stale prior data.
+
 ### Depth Chart Prior (Inference-Only)
 
 `effective_minutes.parquet` may include RealGM-derived depth-chart fields that are applied at inference time only

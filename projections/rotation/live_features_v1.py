@@ -142,6 +142,80 @@ def _is_regular_season_game_id(game_id: str) -> bool:
     return gid.startswith("002")
 
 
+def _update_player_priors_with_latest_labels(
+    player_priors: pd.DataFrame,
+    data_root: Path,
+    season: int,
+) -> pd.DataFrame:
+    """Update player priors to include the game they were computed for.
+
+    The priors in rotation_priors_v1 are "pre-game" - they show what we knew
+    BEFORE each game. For live inference, we need "post-game" priors that include
+    the results from the latest game.
+
+    This function loads box score labels and updates the rolling prior columns
+    (e.g., started_proxy_rate_prior_5, minutes_from_stints_prior_5) to include
+    the latest game's results.
+    """
+    if player_priors.empty:
+        return player_priors
+
+    # Load box score labels
+    labels_path = data_root / "labels" / f"season={season}" / "boxscore_labels.parquet"
+    if not labels_path.exists():
+        return player_priors
+
+    try:
+        labels = pd.read_parquet(labels_path)
+    except Exception:
+        return player_priors
+
+    labels["player_id"] = pd.to_numeric(labels["player_id"], errors="coerce").astype("Int64")
+    labels["game_date"] = pd.to_datetime(labels["game_date"], errors="coerce")
+
+    # For each player, get their latest game from priors and check if labels
+    # have that game's results
+    updated = player_priors.copy()
+    updated["person_id"] = pd.to_numeric(updated["person_id"], errors="coerce").astype("Int64")
+
+    # Get the game_id that each prior was computed for
+    if "game_id" not in updated.columns:
+        return player_priors
+
+    for idx, row in updated.iterrows():
+        person_id = row["person_id"]
+        prior_game_id = row.get("game_id") or row.get("game_id_norm")
+        if pd.isna(person_id) or pd.isna(prior_game_id):
+            continue
+
+        # Get this player's labels, sorted by date descending
+        player_labels = labels[labels["player_id"] == int(person_id)].copy()
+        if player_labels.empty:
+            continue
+
+        player_labels = player_labels.sort_values("game_date", ascending=False)
+
+        # Get the last 5 games including the prior game
+        # The prior was computed BEFORE prior_game_id, so we need to include it
+        last5 = player_labels.head(5)
+        if last5.empty:
+            continue
+
+        # Update started_proxy_rate_prior_5 using starter_flag_label
+        if "starter_flag_label" in last5.columns and "started_proxy_rate_prior_5" in updated.columns:
+            new_start_rate = last5["starter_flag_label"].mean()
+            if not pd.isna(new_start_rate):
+                updated.at[idx, "started_proxy_rate_prior_5"] = new_start_rate
+
+        # Update minutes_from_stints_prior_5 using minutes
+        if "minutes" in last5.columns and "minutes_from_stints_prior_5" in updated.columns:
+            new_minutes = last5["minutes"].mean()
+            if not pd.isna(new_minutes):
+                updated.at[idx, "minutes_from_stints_prior_5"] = new_minutes
+
+    return updated
+
+
 def load_latest_rotation_priors_by_entity(
     data_root: Path,
     *,
@@ -158,6 +232,9 @@ def load_latest_rotation_priors_by_entity(
     use special team IDs that don't match regular season teams. If the latest
     game for a player is an All-Star game, the priors would have the wrong team_id
     and fail to join with the minutes features.
+
+    After loading, updates player priors with box score labels to include the
+    results from the latest game (since priors are "pre-game" snapshots).
 
     Returns:
         (team_priors, player_priors) DataFrames with one row per team/player
@@ -209,6 +286,10 @@ def load_latest_rotation_priors_by_entity(
 
     team_priors = _load_all_and_get_latest(team_root, "team_id", team_filter)
     player_priors = _load_all_and_get_latest(player_root, "person_id", player_filter)
+
+    # Update player priors with latest box score results
+    # This fixes the "pre-game vs post-game" prior staleness issue
+    player_priors = _update_player_priors_with_latest_labels(player_priors, data_root, season)
 
     return team_priors, player_priors
 
