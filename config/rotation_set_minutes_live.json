@@ -8,7 +8,7 @@
   "allow_priors_fallback": true,
   "fallback_mode": "fail_closed",
 
-  "sparsify_enable": false,
+  "sparsify_enable": true,
   "sparsify_use_col": "minutes_p50",
   "sparsify_topk": 9,
   "sparsify_tau": 8.0,
