@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from projections.minutes_v1.constants import AvailabilityStatus, STATUS_PRIORS
@@ -202,11 +201,11 @@ def attach_availability_features(
 ) -> pd.DataFrame:
     """Attach status priors and availability indicators to the base label frame.
 
-    Parity invariants (matches RMH training semantics):
+    Availability invariants (live + training):
     - Rows without an injury-feed record are labeled `status="Ava"` ("no injury row"), with:
         - injury_as_of_ts = NaT
         - injury_snapshot_missing = 1
-        - prior_play_prob = NaN
+        - prior_play_prob = STATUS_PRIORS[AvailabilityStatus.AVAILABLE]
     - Rows with a record but missing the pre-tip snapshot (e.g. snapshot_missing=1) keep
       `status="UNK"`, with:
         - injury_as_of_ts = NaT
@@ -221,7 +220,7 @@ def attach_availability_features(
         if injuries_snapshot is None or injuries_snapshot.empty:
             enriched = base_df.copy()
             enriched["status"] = "Ava"
-            enriched["prior_play_prob"] = np.nan
+            enriched["prior_play_prob"] = float(STATUS_PRIORS[AvailabilityStatus.AVAILABLE])
             enriched["is_out"] = 0
             enriched["is_q"] = 0
             enriched["is_prob"] = 0
@@ -266,7 +265,7 @@ def attach_availability_features(
     # even when the pre-tip snapshot is missing (injury_as_of_ts is null).
     has_row_mask = merged["injury_row_present"].astype(bool)
 
-    # Training parity: missing injury rows become status="Ava", prior_play_prob=NaN.
+    # Missing injury rows become status="Ava" with an explicit available prior.
     no_row = ~has_row_mask
     status = merged.get("status", pd.Series(pd.NA, index=merged.index))
     status = status.where(~no_row, "Ava")
@@ -284,7 +283,11 @@ def attach_availability_features(
         status_out.loc[has_row_mask] = norm_enum.map(lambda v: v.value).astype("string[pyarrow]")
     merged["status"] = status_out
 
-    prior = pd.Series(np.nan, index=merged.index, dtype="float64")
+    prior = pd.Series(
+        float(STATUS_PRIORS[AvailabilityStatus.AVAILABLE]),
+        index=merged.index,
+        dtype="float64",
+    )
     if has_row_mask.any():
         norm_enum = normalized.loc[has_row_mask].apply(normalize_status)
         prior.loc[has_row_mask] = norm_enum.map(STATUS_PRIORS).astype("float64")

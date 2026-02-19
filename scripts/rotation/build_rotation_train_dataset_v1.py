@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
@@ -42,6 +43,7 @@ from projections.features.action_props import (
     load_action_props_feature_snapshots_for_date,
 )
 from projections.rotation.rotation_set_minutes_features_v1 import join_rotation_priors
+from projections.minutes_v1.constants import AvailabilityStatus, STATUS_PRIORS
 
 
 MINUTES_DATASET_DIRNAME = "v1_enriched_20251214"
@@ -431,6 +433,76 @@ def _load_minutes_dataset(dataset_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame
     features_df = pd.read_parquet(features_path)
     labels_df = pd.read_parquet(labels_path)
     return features_df, labels_df, features_path, labels_path
+
+
+def _normalize_prior_play_prob_semantics(features_df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Normalize legacy/null prior_play_prob values to current availability semantics.
+
+    Some historical minutes datasets were built with no-row injury semantics:
+      status == "Ava" and prior_play_prob == NaN.
+    Current live semantics use an explicit available prior for these rows.
+    """
+
+    if features_df.empty:
+        return features_df, {"enabled": True, "rows": 0}
+
+    out = features_df.copy()
+    if "prior_play_prob" not in out.columns:
+        out["prior_play_prob"] = np.nan
+    prior = pd.to_numeric(out["prior_play_prob"], errors="coerce")
+    null_before = int(prior.isna().sum())
+
+    if "status" in out.columns:
+        status_norm = (
+            out["status"].astype("string").fillna("UNK").str.strip().str.upper()
+        )
+    else:
+        status_norm = pd.Series("UNK", index=out.index, dtype="string")
+
+    status_prior_map = {
+        "OUT": float(STATUS_PRIORS[AvailabilityStatus.OUT]),
+        "Q": float(STATUS_PRIORS[AvailabilityStatus.QUESTIONABLE]),
+        "QUESTIONABLE": float(STATUS_PRIORS[AvailabilityStatus.QUESTIONABLE]),
+        "PROB": float(STATUS_PRIORS[AvailabilityStatus.PROBABLE]),
+        "PROBABLE": float(STATUS_PRIORS[AvailabilityStatus.PROBABLE]),
+        "AVAIL": float(STATUS_PRIORS[AvailabilityStatus.AVAILABLE]),
+        "AVAILABLE": float(STATUS_PRIORS[AvailabilityStatus.AVAILABLE]),
+        "AVA": float(STATUS_PRIORS[AvailabilityStatus.AVAILABLE]),
+        "UNK": float(STATUS_PRIORS[AvailabilityStatus.UNKNOWN]),
+        "UNKNOWN": float(STATUS_PRIORS[AvailabilityStatus.UNKNOWN]),
+    }
+
+    mapped = status_norm.map(status_prior_map).astype("float64")
+    fill_from_status = prior.isna() & mapped.notna()
+    prior.loc[fill_from_status] = mapped.loc[fill_from_status]
+
+    fill_from_snapshot_missing = pd.Series(False, index=out.index)
+    if "injury_snapshot_missing" in out.columns:
+        snap_missing = (
+            pd.to_numeric(out["injury_snapshot_missing"], errors="coerce")
+            .fillna(1)
+            .astype(int)
+            == 1
+        )
+        fill_from_snapshot_missing = prior.isna() & snap_missing
+        prior.loc[fill_from_snapshot_missing] = float(STATUS_PRIORS[AvailabilityStatus.UNKNOWN])
+
+    fill_fallback_available = prior.isna()
+    prior.loc[fill_fallback_available] = float(STATUS_PRIORS[AvailabilityStatus.AVAILABLE])
+
+    out["prior_play_prob"] = prior.astype("float64")
+    null_after = int(pd.to_numeric(out["prior_play_prob"], errors="coerce").isna().sum())
+
+    meta = {
+        "enabled": True,
+        "rows": int(len(out)),
+        "prior_null_before": null_before,
+        "prior_null_after": null_after,
+        "filled_from_status": int(fill_from_status.sum()),
+        "filled_from_snapshot_missing": int(fill_from_snapshot_missing.sum()),
+        "filled_fallback_available": int(fill_fallback_available.sum()),
+    }
+    return out, meta
 
 
 def _discover_rotation_files(root: Path, subdir: str) -> list[Path]:
@@ -1051,6 +1123,7 @@ def _write_manifest(
     team_game_validation: dict[str, Any] | None = None,
     dnp_history_config: DNPHistoryConfig | None = None,
     rotation_priors_v1: dict[str, object] | None = None,
+    prior_normalization: dict[str, Any] | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "created_at": _utc_now_iso(),
@@ -1094,6 +1167,8 @@ def _write_manifest(
         }
     if rotation_priors_v1 is not None:
         payload["rotation_priors_v1"] = rotation_priors_v1
+    if prior_normalization is not None:
+        payload["prior_play_prob_normalization"] = prior_normalization
     (out_dir / "manifest.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
@@ -1225,6 +1300,15 @@ def main() -> None:
             f"rows_features={date_window_meta.get('rows_features_before')}->{date_window_meta.get('rows_features_after')}",
             f"rows_labels={date_window_meta.get('rows_labels_before')}->{date_window_meta.get('rows_labels_after')}",
         )
+
+    features_df, prior_norm_meta = _normalize_prior_play_prob_semantics(features_df)
+    print(
+        "[rotation_train_v1] Prior normalization:",
+        f"nulls={prior_norm_meta.get('prior_null_before')}->{prior_norm_meta.get('prior_null_after')}",
+        f"filled_status={prior_norm_meta.get('filled_from_status')}",
+        f"filled_snapshot_missing={prior_norm_meta.get('filled_from_snapshot_missing')}",
+        f"filled_fallback_available={prior_norm_meta.get('filled_fallback_available')}",
+    )
 
     pruned_df, kept_minutes_features = _apply_feature_pruning(features_df, allowlist=allowlist)
     if bool(args.backfill_odds_from_silver):
@@ -1392,6 +1476,7 @@ def main() -> None:
         team_game_validation=team_game_validation,
         dnp_history_config=dnp_config,
         rotation_priors_v1=priors_meta,
+        prior_normalization=prior_norm_meta,
     )
 
     print(f"[rotation_train_v1] Wrote features -> {out_features_path}")
