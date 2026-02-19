@@ -31,6 +31,8 @@ type GameviewV2PageProps = {
 
 type ResolvedPlayer = ApplyOverridesResponse['resolved_players'][number]
 
+type MinutesBandSource = 'base' | 'sim_uncond' | 'sim_cond'
+
 type TeamData = {
     teamId: string
     teamName: string
@@ -56,6 +58,58 @@ const toMaybeNum = (value: unknown): number | null => {
     if (value == null) return null
     const parsed = Number(value)
     return Number.isFinite(parsed) ? parsed : null
+}
+
+const pickNum = (...values: unknown[]): number | null => {
+    for (const value of values) {
+        const parsed = Number(value)
+        if (Number.isFinite(parsed)) return parsed
+    }
+    return null
+}
+
+const minutesBandLabel = (source: MinutesBandSource): string => {
+    if (source === 'sim_uncond') return 'Sim (uncond)'
+    if (source === 'sim_cond') return 'Sim (cond)'
+    return 'Base (model)'
+}
+
+const resolveMinutesBand = (player: PlayerRow, source: MinutesBandSource) => {
+    const base = {
+        p10: pickNum(player.minutes_p10),
+        p50: pickNum(player.minutes_p50),
+        p90: pickNum(player.minutes_p90),
+    }
+    const simUncond = {
+        p10: pickNum(player.minutes_sim_uncond_p10, player.sim_minutes_sim_p10_uncond),
+        p50: pickNum(player.minutes_sim_uncond_p50, player.sim_minutes_sim_p50_uncond),
+        p90: pickNum(player.minutes_sim_uncond_p90, player.sim_minutes_sim_p90_uncond),
+    }
+    const simCond = {
+        p10: pickNum(player.sim_minutes_sim_p10),
+        p50: pickNum(player.sim_minutes_sim_p50),
+        p90: pickNum(player.sim_minutes_sim_p90),
+    }
+
+    if (source === 'sim_uncond') {
+        return {
+            p10: simUncond.p10 ?? base.p10,
+            p50: simUncond.p50 ?? base.p50,
+            p90: simUncond.p90 ?? base.p90,
+        }
+    }
+    if (source === 'sim_cond') {
+        return {
+            p10: simCond.p10 ?? base.p10,
+            p50: simCond.p50 ?? base.p50,
+            p90: simCond.p90 ?? base.p90,
+        }
+    }
+    return {
+        p10: base.p10 ?? simUncond.p10 ?? simCond.p10,
+        p50: base.p50 ?? simUncond.p50 ?? simCond.p50,
+        p90: base.p90 ?? simUncond.p90 ?? simCond.p90,
+    }
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -231,6 +285,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
     const [isRunning, setIsRunning] = useState(false)
     const [message, setMessage] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
+    const [bandSource, setBandSource] = useState<MinutesBandSource>('base')
     const [lastAppliedAt, setLastAppliedAt] = useState<string | null>(null)
     const [lastRunId, setLastRunId] = useState<string | null>(null)
     const [lastGamesByKey, setLastGamesByKey] = useState<Record<string, PlayerLastGameStat[]>>({})
@@ -483,15 +538,10 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
             const resolvedMinutes = toNum(resolvedInfo?.mu_minutes, baselineMinutes)
             const baselineFpts = toMaybeNum(player.fpts_sim_uncond_mean ?? player.sim_dk_fpts_mean ?? player.proj_fpts)
             const resolvedFpts = scaleByMinutes(baselineFpts, baselineMinutes, resolvedMinutes)
-            const minutesP10 = toMaybeNum(
-                player.minutes_sim_uncond_p10 ?? player.sim_minutes_sim_p10_uncond ?? player.minutes_p10,
-            )
-            const minutesP50 = toMaybeNum(
-                player.minutes_sim_uncond_p50 ?? player.sim_minutes_sim_p50_uncond ?? player.minutes_p50,
-            )
-            const minutesP90 = toMaybeNum(
-                player.minutes_sim_uncond_p90 ?? player.sim_minutes_sim_p90_uncond ?? player.minutes_p90,
-            )
+            const band = resolveMinutesBand(player, bandSource)
+            const minutesP10 = toMaybeNum(band.p10)
+            const minutesP50 = toMaybeNum(band.p50)
+            const minutesP90 = toMaybeNum(band.p90)
 
             const override = overrideMap[playerId] || defaultOverride()
 
@@ -535,15 +585,10 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
 
         const baselineMinutes = toNum(player.minutes_final ?? player.minutes_p50 ?? player.minutes_sim_uncond_mean)
         const resolvedMinutes = toNum(resolvedInfo?.mu_minutes, baselineMinutes)
-        const minutesP10 = toMaybeNum(
-            player.minutes_sim_uncond_p10 ?? player.sim_minutes_sim_p10_uncond ?? player.minutes_p10,
-        )
-        const minutesP50 = toMaybeNum(
-            player.minutes_sim_uncond_p50 ?? player.sim_minutes_sim_p50_uncond ?? player.minutes_p50,
-        )
-        const minutesP90 = toMaybeNum(
-            player.minutes_sim_uncond_p90 ?? player.sim_minutes_sim_p90_uncond ?? player.minutes_p90,
-        )
+        const band = resolveMinutesBand(player, bandSource)
+        const minutesP10 = toMaybeNum(band.p10)
+        const minutesP50 = toMaybeNum(band.p50)
+        const minutesP90 = toMaybeNum(band.p90)
 
         const baselineFpts = toMaybeNum(player.fpts_sim_uncond_mean ?? player.sim_dk_fpts_mean ?? player.proj_fpts)
         const resolvedFpts = scaleByMinutes(baselineFpts, baselineMinutes, resolvedMinutes)
@@ -604,6 +649,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
             lastGames,
             lastGamesLoading,
             lastGamesError,
+            minutesBandLabel: minutesBandLabel(bandSource),
         }
     }, [
         activeGame,
@@ -616,6 +662,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         lastGamesByKey,
         lastGamesLoadingByKey,
         lastGamesErrorByKey,
+        bandSource,
     ])
 
     if (!games.length) {
@@ -657,6 +704,18 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                 {error ? <span className="error">{error}</span> : null}
             </div>
 
+            <div className="gv2-controls">
+                <label>
+                    Minutes band
+                    <select value={bandSource} onChange={(event) => setBandSource(event.target.value as MinutesBandSource)}>
+                        <option value="base">{minutesBandLabel('base')}</option>
+                        <option value="sim_uncond">{minutesBandLabel('sim_uncond')}</option>
+                        <option value="sim_cond">{minutesBandLabel('sim_cond')}</option>
+                    </select>
+                </label>
+                <span className="muted">Uncond median can undercount fringe minutes; base keeps team totals intact.</span>
+            </div>
+
             <GameTabs tabs={tabs} activeGameId={activeGameId} onChange={onTabChange} />
 
             {activeGame ? (
@@ -665,6 +724,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                         teamName={activeGame.awayTeam.teamName}
                         diagnostics={getTeamDiagnostics(activeGame.awayTeam.teamId)}
                         rows={teamRows(activeGame.awayTeam)}
+                        minutesBandLabel={minutesBandLabel(bandSource)}
                         onSelectPlayer={(playerId) => setSelectedPlayerId(playerId)}
                         onOverrideChange={(playerId, next) => setOverride(activeGame.gameId, playerId, next)}
                     />
@@ -672,6 +732,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                         teamName={activeGame.homeTeam.teamName}
                         diagnostics={getTeamDiagnostics(activeGame.homeTeam.teamId)}
                         rows={teamRows(activeGame.homeTeam)}
+                        minutesBandLabel={minutesBandLabel(bandSource)}
                         onSelectPlayer={(playerId) => setSelectedPlayerId(playerId)}
                         onOverrideChange={(playerId, next) => setOverride(activeGame.gameId, playerId, next)}
                     />
