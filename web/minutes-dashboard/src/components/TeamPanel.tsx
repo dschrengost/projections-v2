@@ -8,6 +8,7 @@ type TeamPanelProps = {
     teamName: string
     diagnostics?: TeamDiagnostics | null
     rows: PlayerTableRow[]
+    minutesBandLabel: string
     onSelectPlayer: (playerId: string) => void
     onOverrideChange: (playerId: string, next: PlayerOverrideState) => void
 }
@@ -16,6 +17,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
     teamName,
     diagnostics,
     rows,
+    minutesBandLabel,
     onSelectPlayer,
     onOverrideChange,
 }) => {
@@ -45,7 +47,10 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
     return (
         <section className="gv2-team-panel">
             <header className="gv2-team-header">
-                <h3>{teamName}</h3>
+                <div>
+                    <h3>{teamName}</h3>
+                    <div className="muted gv2-band-source">Band source: {minutesBandLabel}</div>
+                </div>
             </header>
             <TeamBudgetBar diagnostics={diagnostics ?? null} />
             {sections.filter((section) => section.rows.length > 0).map((section) => (

@@ -44,6 +44,29 @@
   color: #9ca3af;
 }
 
+.gv2-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: center;
+  font-size: 0.82rem;
+  color: #cbd5e1;
+}
+
+.gv2-controls label {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.gv2-controls select {
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 0.25rem 0.45rem;
+}
+
 .gv2-status-line .warning {
   color: #f59e0b;
 }
@@ -90,6 +113,11 @@
 
 .gv2-team-header h3 {
   margin: 0 0 0.35rem 0;
+}
+
+.gv2-band-source {
+  font-size: 0.75rem;
+  color: #94a3b8;
 }
 
 .gv2-team-section {
