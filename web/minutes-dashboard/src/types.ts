@@ -96,9 +96,11 @@ export type PlayerRow = {
     minutes_sim_cond_mean?: number
     minutes_sim_cond_std?: number
     minutes_sim_cond_p50?: number
+    minutes_sim_uncond_p10?: number
     minutes_sim_uncond_mean?: number
     minutes_sim_uncond_std?: number
     minutes_sim_uncond_p50?: number
+    minutes_sim_uncond_p90?: number
     // Vegas lines (game-level, same for all players in game)
     total?: number
     spread_home?: number

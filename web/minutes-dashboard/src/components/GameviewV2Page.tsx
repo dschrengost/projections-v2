@@ -484,13 +484,13 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
             const baselineFpts = toMaybeNum(player.fpts_sim_uncond_mean ?? player.sim_dk_fpts_mean ?? player.proj_fpts)
             const resolvedFpts = scaleByMinutes(baselineFpts, baselineMinutes, resolvedMinutes)
             const minutesP10 = toMaybeNum(
-                player.sim_minutes_sim_p10_uncond ?? player.sim_minutes_sim_p10 ?? player.minutes_p10_cond ?? player.minutes_p10,
+                player.minutes_sim_uncond_p10 ?? player.sim_minutes_sim_p10_uncond ?? player.minutes_p10,
             )
             const minutesP50 = toMaybeNum(
-                player.sim_minutes_sim_p50_uncond ?? player.sim_minutes_sim_p50 ?? player.minutes_p50,
+                player.minutes_sim_uncond_p50 ?? player.sim_minutes_sim_p50_uncond ?? player.minutes_p50,
             )
             const minutesP90 = toMaybeNum(
-                player.sim_minutes_sim_p90_uncond ?? player.sim_minutes_sim_p90 ?? player.minutes_p90_cond ?? player.minutes_p90,
+                player.minutes_sim_uncond_p90 ?? player.sim_minutes_sim_p90_uncond ?? player.minutes_p90,
             )
 
             const override = overrideMap[playerId] || defaultOverride()
@@ -536,13 +536,13 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         const baselineMinutes = toNum(player.minutes_final ?? player.minutes_p50 ?? player.minutes_sim_uncond_mean)
         const resolvedMinutes = toNum(resolvedInfo?.mu_minutes, baselineMinutes)
         const minutesP10 = toMaybeNum(
-            player.sim_minutes_sim_p10_uncond ?? player.sim_minutes_sim_p10 ?? player.minutes_p10_cond ?? player.minutes_p10,
+            player.minutes_sim_uncond_p10 ?? player.sim_minutes_sim_p10_uncond ?? player.minutes_p10,
         )
         const minutesP50 = toMaybeNum(
-            player.sim_minutes_sim_p50_uncond ?? player.sim_minutes_sim_p50 ?? player.minutes_p50,
+            player.minutes_sim_uncond_p50 ?? player.sim_minutes_sim_p50_uncond ?? player.minutes_p50,
         )
         const minutesP90 = toMaybeNum(
-            player.sim_minutes_sim_p90_uncond ?? player.sim_minutes_sim_p90 ?? player.minutes_p90_cond ?? player.minutes_p90,
+            player.minutes_sim_uncond_p90 ?? player.sim_minutes_sim_p90_uncond ?? player.minutes_p90,
         )
 
         const baselineFpts = toMaybeNum(player.fpts_sim_uncond_mean ?? player.sim_dk_fpts_mean ?? player.proj_fpts)

@@ -167,7 +167,9 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "minutes_sim_cond_std",
     "minutes_sim_uncond_mean",
     "minutes_sim_uncond_std",
+    "minutes_sim_uncond_p10",
     "minutes_sim_uncond_p50",
+    "minutes_sim_uncond_p90",
     # Ownership/DFS columns
     "salary",
     "pred_own_pct",
