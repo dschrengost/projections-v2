@@ -109,6 +109,9 @@ PRIMARY_PASSTHROUGH_COLS: tuple[str, ...] = (
     "is_out",
     "is_q",
     "is_prob",
+    # Optional volatility signals for tail reconstruction in primary mode.
+    "roll_iqr_5",
+    "rotation_minutes_std_5g",
 )
 
 
@@ -1683,14 +1686,58 @@ def main(
         out_df["model_run_id"] = str(Path(resolved_model_dir).name)
         out_df = out_df.drop(columns=["rotation_minutes_p50"], errors="ignore")
 
-        out_df["minutes_p10"] = out_df["minutes_p50"]
-        out_df["minutes_p90"] = out_df["minutes_p50"]
-        out_df["minutes_p10_cond"] = out_df["minutes_p50"]
+        # Preserve baseline tail shape in primary mode: map new p50 onto baseline
+        # p10/p90 deltas instead of collapsing all quantiles to p50.
+        tail_base_p50_col = (
+            guardrail_baseline_col
+            if guardrail_baseline_col in out_df.columns
+            else (
+                "baseline_minutes_p50"
+                if "baseline_minutes_p50" in out_df.columns
+                else "minutes_p50"
+            )
+        )
+        base_p50_tail = pd.to_numeric(out_df[tail_base_p50_col], errors="coerce").fillna(0.0)
+        base_p10 = (
+            pd.to_numeric(out_df["minutes_p10"], errors="coerce").fillna(base_p50_tail)
+            if "minutes_p10" in out_df.columns
+            else base_p50_tail.copy()
+        )
+        base_p90 = (
+            pd.to_numeric(out_df["minutes_p90"], errors="coerce").fillna(base_p50_tail)
+            if "minutes_p90" in out_df.columns
+            else base_p50_tail.copy()
+        )
+        # Primary mode often has no baseline quantiles in live features. When tails
+        # are degenerate, synthesize baseline deltas from volatility proxies.
+        degenerate_tail = (
+            float((base_p50_tail - base_p10).abs().max()) < 1e-9
+            and float((base_p90 - base_p50_tail).abs().max()) < 1e-9
+        )
+        if degenerate_tail:
+            iqr5 = pd.to_numeric(out_df.get("roll_iqr_5"), errors="coerce").fillna(0.0)
+            std5 = pd.to_numeric(out_df.get("rotation_minutes_std_5g"), errors="coerce").fillna(0.0)
+            sigma_from_iqr = iqr5 / 1.349
+            sigma_est = sigma_from_iqr.where(sigma_from_iqr > 0.0, std5)
+            sigma_fallback = (0.12 * base_p50_tail + 0.8).clip(lower=0.75, upper=4.5)
+            sigma = sigma_est.where(sigma_est > 0.0, sigma_fallback)
+            delta = (1.2815515655446004 * sigma).clip(lower=0.75, upper=8.0)
+            base_p10 = (base_p50_tail - delta).clip(lower=0.0)
+            base_p90 = (base_p50_tail + delta).clip(lower=0.0, upper=48.0)
+        p10_new, p90_new = _derive_minutes_tails(
+            base_p10=base_p10,
+            base_p50=base_p50_tail,
+            base_p90=base_p90,
+            new_p50=out_df["minutes_p50"],
+        )
+        out_df["minutes_p10"] = p10_new
+        out_df["minutes_p90"] = p90_new
+        out_df["minutes_p10_cond"] = p10_new
         out_df["minutes_p50_cond"] = out_df["minutes_p50"]
-        out_df["minutes_p90_cond"] = out_df["minutes_p50"]
-        out_df["minutes_p10_uncond"] = out_df["minutes_p50"]
+        out_df["minutes_p90_cond"] = p90_new
+        out_df["minutes_p10_uncond"] = p10_new
         out_df["minutes_p50_uncond"] = out_df["minutes_p50"]
-        out_df["minutes_p90_uncond"] = out_df["minutes_p50"]
+        out_df["minutes_p90_uncond"] = p90_new
 
         out_df = _select_minutes_columns(out_df, minutes_output)
         out_df.to_parquet(minutes_path, index=False)

@@ -340,6 +340,73 @@ def load_rotation_priors_for_live_inference(
     missing_team_game_ids = [gid for gid in game_ids_norm if not (team_root / f"game_id={gid}.parquet").exists()]
     missing_player_game_ids = [gid for gid in game_ids_norm if not (player_root / f"game_id={gid}.parquet").exists()]
 
+    all_team_partitions_missing = bool(game_ids_norm) and len(missing_team_game_ids) == len(game_ids_norm)
+    all_player_partitions_missing = bool(game_ids_norm) and len(missing_player_game_ids) == len(game_ids_norm)
+
+    def _coverage_counts(tp: pd.DataFrame, pp: pd.DataFrame) -> tuple[int, int, int, int]:
+        if not tp.empty:
+            tp = tp.copy()
+            tp["team_id"] = pd.to_numeric(tp["team_id"], errors="coerce").astype("Int64")
+            teams_in_priors = set(tp["team_id"].dropna().astype(int).tolist())
+        else:
+            teams_in_priors = set()
+
+        if not pp.empty:
+            pp = pp.copy()
+            pp["person_id"] = pd.to_numeric(pp["person_id"], errors="coerce").astype("Int64")
+            players_in_priors = set(pp["person_id"].dropna().astype(int).tolist())
+        else:
+            players_in_priors = set()
+
+        teams_found_local = len(teams_in_priors & team_ids_set)
+        teams_missing_local = len(team_ids_set - teams_in_priors)
+        players_found_local = len(players_in_priors & player_ids_set)
+        players_missing_local = len(player_ids_set - players_in_priors)
+        return teams_found_local, teams_missing_local, players_found_local, players_missing_local
+
+    def _stamp(df: pd.DataFrame, *, game_ids_to_stamp: list[str]) -> pd.DataFrame:
+        if df.empty or not game_ids_to_stamp:
+            return pd.DataFrame()
+        frames: list[pd.DataFrame] = []
+        for gid in game_ids_to_stamp:
+            copy = df.copy()
+            copy["game_id"] = gid
+            copy["game_id_norm"] = gid
+            frames.append(copy)
+        return pd.concat(frames, ignore_index=True)
+
+    # Live slates frequently do not have same-day game_id priors partitions yet.
+    # In fallback mode, short-circuit directly to latest-by-entity priors.
+    if allow_priors_fallback and all_team_partitions_missing and all_player_partitions_missing:
+        latest_team, latest_player = load_latest_rotation_priors_by_entity(
+            data_root,
+            season=season,
+            team_ids=sorted(team_ids_set) if team_ids_set else None,
+            player_ids=sorted(player_ids_set) if player_ids_set else None,
+        )
+        stamped_team = _stamp(latest_team, game_ids_to_stamp=game_ids_norm)
+        stamped_player = _stamp(latest_player, game_ids_to_stamp=game_ids_norm)
+        teams_found, teams_missing, players_found, players_missing = _coverage_counts(
+            stamped_team, stamped_player
+        )
+        date_clause = f" date={game_date}" if game_date else ""
+        warning_msg = (
+            "No game-id priors partitions found for requested slate game_ids "
+            f"(n={len(game_ids_norm)}).{date_clause} "
+            f"Using latest available priors by entity (teams_missing={teams_missing}, "
+            f"players_missing={players_missing})."
+        )
+        return RotationPriorsLoadResult(
+            team_priors=stamped_team,
+            player_priors=stamped_player,
+            teams_found=teams_found,
+            teams_missing=teams_missing,
+            players_found=players_found,
+            players_missing=players_missing,
+            used_latest_fallback=True,
+            warning_message=warning_msg,
+        )
+
     team_priors, player_priors = load_rotation_priors_for_game_ids(
         data_root,
         season=season,
@@ -359,22 +426,9 @@ def load_rotation_priors_for_live_inference(
         )
 
     # Check coverage
-    if not team_priors.empty:
-        team_priors["team_id"] = pd.to_numeric(team_priors["team_id"], errors="coerce").astype("Int64")
-        teams_in_priors = set(team_priors["team_id"].dropna().astype(int).tolist())
-    else:
-        teams_in_priors = set()
-
-    if not player_priors.empty:
-        player_priors["person_id"] = pd.to_numeric(player_priors["person_id"], errors="coerce").astype("Int64")
-        players_in_priors = set(player_priors["person_id"].dropna().astype(int).tolist())
-    else:
-        players_in_priors = set()
-
-    teams_found = len(teams_in_priors & team_ids_set)
-    teams_missing = len(team_ids_set - teams_in_priors)
-    players_found = len(players_in_priors & player_ids_set)
-    players_missing = len(player_ids_set - players_in_priors)
+    teams_found, teams_missing, players_found, players_missing = _coverage_counts(
+        team_priors, player_priors
+    )
 
     # If we have good coverage and no missing game_id partitions, return as-is.
     if teams_missing == 0 and players_missing == 0 and not missing_team_game_ids and not missing_player_game_ids:
@@ -404,17 +458,6 @@ def load_rotation_priors_for_live_inference(
         player_ids=sorted(player_ids_set) if missing_player_game_ids else None,
     )
 
-    def _stamp(df: pd.DataFrame, *, game_ids_to_stamp: list[str]) -> pd.DataFrame:
-        if df.empty or not game_ids_to_stamp:
-            return pd.DataFrame()
-        frames: list[pd.DataFrame] = []
-        for gid in game_ids_to_stamp:
-            copy = df.copy()
-            copy["game_id"] = gid
-            copy["game_id_norm"] = gid
-            frames.append(copy)
-        return pd.concat(frames, ignore_index=True)
-
     # Merge fallback priors: ensure the missing game_id partitions are represented.
     if missing_team_game_ids:
         stamped_team = _stamp(latest_team, game_ids_to_stamp=missing_team_game_ids)
@@ -428,22 +471,9 @@ def load_rotation_priors_for_live_inference(
             )
 
     # Recalculate coverage
-    if not team_priors.empty:
-        team_priors["team_id"] = pd.to_numeric(team_priors["team_id"], errors="coerce").astype("Int64")
-        teams_in_priors = set(team_priors["team_id"].dropna().astype(int).tolist())
-    else:
-        teams_in_priors = set()
-
-    if not player_priors.empty:
-        player_priors["person_id"] = pd.to_numeric(player_priors["person_id"], errors="coerce").astype("Int64")
-        players_in_priors = set(player_priors["person_id"].dropna().astype(int).tolist())
-    else:
-        players_in_priors = set()
-
-    final_teams_found = len(teams_in_priors & team_ids_set)
-    final_teams_missing = len(team_ids_set - teams_in_priors)
-    final_players_found = len(players_in_priors & player_ids_set)
-    final_players_missing = len(player_ids_set - players_in_priors)
+    final_teams_found, final_teams_missing, final_players_found, final_players_missing = _coverage_counts(
+        team_priors, player_priors
+    )
 
     return RotationPriorsLoadResult(
         team_priors=team_priors,
