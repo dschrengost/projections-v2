@@ -125,6 +125,23 @@ def load_rotation_priors_for_game_ids(
     return team_df, player_df
 
 
+def _is_regular_season_game_id(game_id: str) -> bool:
+    """Check if a game_id is a regular season game (prefix 002).
+
+    Game ID prefixes:
+    - 002: Regular season
+    - 003: Playoffs / NBA Cup knockout rounds
+    - 004: Preseason
+    - 005: Play-in tournament
+    - 006: All-Star Weekend
+
+    All-Star and NBA Cup knockout games use special team IDs that don't match
+    regular season team IDs, which breaks the team_id-based priors join.
+    """
+    gid = str(game_id).zfill(10)
+    return gid.startswith("002")
+
+
 def load_latest_rotation_priors_by_entity(
     data_root: Path,
     *,
@@ -136,6 +153,11 @@ def load_latest_rotation_priors_by_entity(
 
     This is the correct approach for live inference: we want the latest available
     priors for each entity, not priors keyed by today's (non-existent) game_ids.
+
+    IMPORTANT: Excludes All-Star and special games (non-002 prefix) because they
+    use special team IDs that don't match regular season teams. If the latest
+    game for a player is an All-Star game, the priors would have the wrong team_id
+    and fail to join with the minutes features.
 
     Returns:
         (team_priors, player_priors) DataFrames with one row per team/player
@@ -151,6 +173,11 @@ def load_latest_rotation_priors_by_entity(
 
         frames: list[pd.DataFrame] = []
         for path in root.glob("game_id=*.parquet"):
+            # Skip non-regular-season games (All-Star, playoffs, etc.)
+            # These use special team IDs that break the team_id-based join
+            game_id_str = path.name.replace("game_id=", "").replace(".parquet", "")
+            if not _is_regular_season_game_id(game_id_str):
+                continue
             try:
                 df = pd.read_parquet(path)
                 frames.append(df)
