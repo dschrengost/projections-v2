@@ -44,6 +44,7 @@ from projections.rotation.live_features_v1 import (
     build_rotation_set_minutes_v1_features,
     load_rotation_priors_for_live_inference,
 )
+from projections.rotation.projected_starter_boost import apply_projected_starter_boost
 from projections.rotation.set_model import (
     predict_minutes as predict_rotation_minutes,
     RotationSetAuxOutputs,
@@ -126,6 +127,9 @@ class RotationLiveConfig:
     enable_blend_to_baseline: bool  # Default False (PR3: disable suppression)
     fallback_mode: str  # "fail_closed" or "degrade_loudly"
     mode: str  # "overlay" or "primary"
+    play_prob_source: str  # "minutes_threshold" or "gate_prob"
+    rotation_prob_source: str  # "minutes_threshold" or "gate_prob"
+    dnp_override_enabled: bool
     # Sparsify parameters (opt-in, default disabled)
     sparsify_enable: bool
     sparsify_topk: int
@@ -137,6 +141,9 @@ class RotationLiveConfig:
     alloc_min_eligible: int
     alloc_prior_play_prob_threshold: float
     alloc_baseline_minutes_threshold: float
+    projected_starter_boost_enabled: bool
+    projected_starter_gate_prob_boost_threshold: float
+    projected_starter_gate_logit_boost: float
 
     @classmethod
     def load(cls, path: Path) -> "RotationLiveConfig":
@@ -161,6 +168,13 @@ class RotationLiveConfig:
         if fallback_mode not in ("fail_closed", "degrade_loudly"):
             fallback_mode = "degrade_loudly"
         mode = _normalize_rotation_mode(str(payload.get("mode", "overlay")))
+        play_prob_source = str(payload.get("play_prob_source", "minutes_threshold")).strip().lower()
+        if play_prob_source not in {"minutes_threshold", "gate_prob"}:
+            play_prob_source = "minutes_threshold"
+        rotation_prob_source = str(payload.get("rotation_prob_source", "minutes_threshold")).strip().lower()
+        if rotation_prob_source not in {"minutes_threshold", "gate_prob"}:
+            rotation_prob_source = "minutes_threshold"
+        dnp_override_enabled = bool(payload.get("dnp_override_enabled", True))
         # Sparsify parameters (safe defaults: disabled)
         sparsify_enable = bool(payload.get("sparsify_enable", False))
         sparsify_topk = int(payload.get("sparsify_topk", 9))
@@ -174,6 +188,11 @@ class RotationLiveConfig:
         alloc_min_eligible = int(payload.get("alloc_min_eligible", 9))
         alloc_prior_play_prob_threshold = float(payload.get("alloc_prior_play_prob_threshold", 0.20))
         alloc_baseline_minutes_threshold = float(payload.get("alloc_baseline_minutes_threshold", 4.0))
+        projected_starter_boost_enabled = bool(payload.get("projected_starter_boost_enabled", False))
+        projected_gate_prob_thr = float(payload.get("projected_starter_gate_prob_boost_threshold", 0.90))
+        if not (0.0 < projected_gate_prob_thr < 1.0):
+            projected_gate_prob_thr = 0.90
+        projected_gate_logit_boost = float(payload.get("projected_starter_gate_logit_boost", 20.0))
         return cls(
             enabled=enabled,
             model_dir=str(model_dir) if model_dir else None,
@@ -184,6 +203,9 @@ class RotationLiveConfig:
             enable_blend_to_baseline=enable_blend,
             fallback_mode=fallback_mode,
             mode=mode,
+            play_prob_source=play_prob_source,
+            rotation_prob_source=rotation_prob_source,
+            dnp_override_enabled=dnp_override_enabled,
             sparsify_enable=sparsify_enable,
             sparsify_topk=sparsify_topk,
             sparsify_tau=sparsify_tau,
@@ -194,6 +216,9 @@ class RotationLiveConfig:
             alloc_min_eligible=alloc_min_eligible,
             alloc_prior_play_prob_threshold=alloc_prior_play_prob_threshold,
             alloc_baseline_minutes_threshold=alloc_baseline_minutes_threshold,
+            projected_starter_boost_enabled=projected_starter_boost_enabled,
+            projected_starter_gate_prob_boost_threshold=projected_gate_prob_thr,
+            projected_starter_gate_logit_boost=projected_gate_logit_boost,
         )
 
 
@@ -1425,66 +1450,28 @@ def main(
             .astype(float)
         )
 
-        # Projected starter guardrail: if a player is marked as projected starter,
-        # they should have gate_prob=1.0. This handles "next man up" situations where
-        # a backup is elevated to starter but has weak historical starter stats.
-        # We also need to recompute minutes for these players since pred_minutes was
-        # computed with the original low gate_prob.
-        if "is_projected_starter" in rot_features.columns:
-            starter_mask = (
-                rot_features.set_index(["game_id", "team_id", "player_id"])["is_projected_starter"]
-                .reindex(rot_pred.set_index(["game_id", "team_id", "player_id"]).index)
-                .fillna(0)
-                .astype(bool)
-                .values
+        if config.projected_starter_boost_enabled:
+            rot_pred, boost_stats = apply_projected_starter_boost(
+                rot_pred,
+                rot_features=rot_features,
+                model_dir=Path(resolved_model_dir),
+                alloc_mask_mode=resolved_alloc_mask_mode,
+                alloc_min_eligible=int(resolved_alloc_min_eligible),
+                alloc_prior_play_prob_threshold=float(resolved_alloc_prior_play_prob_threshold),
+                alloc_baseline_minutes_threshold=float(resolved_alloc_baseline_minutes_threshold),
+                gate_prob_threshold=float(config.projected_starter_gate_prob_boost_threshold),
+                gate_logit_boost=float(config.projected_starter_gate_logit_boost),
             )
-            needs_boost_mask = starter_mask & (rot_pred["gate_prob"] < 1.0)
-            n_boosted = int(needs_boost_mask.sum())
-            if n_boosted > 0:
-                # Boost gate_prob to 1.0
-                rot_pred.loc[starter_mask, "gate_prob"] = 1.0
-
-                # Recompute minutes for boosted players using share_logit
-                # Formula: minutes = gate_prob * share * team_total_minutes
-                # where share = softmax(share_logit) within each team
-                if "share_logit" in rot_pred.columns:
-                    # For players who got boosted, recompute their minutes
-                    for (game_id, team_id), grp in rot_pred.groupby(["game_id", "team_id"], sort=False):
-                        team_mask = (rot_pred["game_id"] == game_id) & (rot_pred["team_id"] == team_id)
-                        team_starters = team_mask & starter_mask
-
-                        if not team_starters.any():
-                            continue
-
-                        # Get share_logits for the team and compute softmax
-                        team_share_logits = rot_pred.loc[team_mask, "share_logit"].values
-                        team_gate_probs = rot_pred.loc[team_mask, "gate_prob"].values
-
-                        # Compute weighted softmax shares (gate_prob * softmax(share_logit))
-                        exp_shares = np.exp(team_share_logits - team_share_logits.max())
-                        weighted_shares = team_gate_probs * exp_shares
-                        total_weight = weighted_shares.sum()
-                        if total_weight > 0:
-                            shares = weighted_shares / total_weight
-                        else:
-                            shares = np.ones_like(weighted_shares) / len(weighted_shares)
-
-                        # Team total minutes (assume 240 for regulation)
-                        team_total = 240.0
-                        new_minutes = shares * team_total
-
-                        # Only update the boosted players' minutes
-                        boosted_in_team = team_mask & needs_boost_mask
-                        if boosted_in_team.any():
-                            # Map new minutes back to the boosted players
-                            team_indices = np.where(team_mask)[0]
-                            boosted_indices = np.where(boosted_in_team)[0]
-                            for bi in boosted_indices:
-                                pos_in_team = np.where(team_indices == bi)[0][0]
-                                rot_pred.loc[rot_pred.index[bi], "rotation_minutes_p50"] = new_minutes[pos_in_team]
-
+            if boost_stats.skipped_reason:
                 typer.echo(
-                    f"[rotation_minutes] projected starter guardrail: boosted gate_prob to 1.0 for {n_boosted} players",
+                    f"[rotation_minutes] projected starter boost skipped: {boost_stats.skipped_reason}",
+                    err=True,
+                )
+            elif boost_stats.boosted_players > 0:
+                typer.echo(
+                    f"[rotation_minutes] projected starter boost: boosted={boost_stats.boosted_players} "
+                    f"(gate_prob<{boost_stats.gate_prob_threshold:g}, gate_logit={boost_stats.gate_logit_boost:g}) "
+                    f"recomputed_team_games={boost_stats.recomputed_team_games}",
                     err=True,
                 )
 
@@ -1524,7 +1511,7 @@ def main(
 
         # Prepare explicit real baseline column for guardrails if available.
         # We prefer 'minutes_p50_model' (raw transformer output) over derived baseline.
-        guardrail_baseline_col = "minutes_p50"
+        guardrail_baseline_col = "baseline_minutes_p50"
         if "minutes_p50_model" in minutes_feat.columns:
             out_df["minutes_p50_model"] = (
                 pd.to_numeric(minutes_feat["minutes_p50_model"], errors="coerce")
@@ -1534,7 +1521,7 @@ def main(
             guardrail_baseline_col = "minutes_p50_model"
         else:
             typer.echo(
-                "[rotation_minutes] WARNING: minutes_p50_model missing from features; falling back to minutes_p50 for guardrails",
+                "[rotation_minutes] WARNING: minutes_p50_model missing from features; falling back to baseline_minutes_p50 for guardrails",
                 err=True,
             )
 
@@ -1619,29 +1606,30 @@ def main(
         out_mask = _derive_out_mask(out_df)
         out_df.loc[out_mask, "minutes_p50"] = 0.0
 
-        dnp_cols_needed = ["consecutive_active_dnp", "active_but_dnp_rate_last10"]
-        dnp_cols_present = [c for c in dnp_cols_needed if c in rot_features.columns]
-        if len(dnp_cols_present) == len(dnp_cols_needed):
-            dnp_check = out_df.merge(
-                rot_features[["game_id", "team_id", "player_id"] + dnp_cols_needed],
-                on=["game_id", "team_id", "player_id"],
-                how="left",
-            )
-            consec_dnp = pd.to_numeric(
-                dnp_check["consecutive_active_dnp"], errors="coerce"
-            ).fillna(0)
-            dnp_rate = pd.to_numeric(
-                dnp_check["active_but_dnp_rate_last10"], errors="coerce"
-            ).fillna(0)
-            dnp_override_mask = (consec_dnp >= 3) & (dnp_rate >= 0.8)
-            n_overridden = int(dnp_override_mask.sum())
-            if n_overridden > 0:
-                out_df.loc[dnp_override_mask, "minutes_p50"] = 0.0
-                typer.echo(
-                    f"[rotation_minutes] DNP override: zeroed {n_overridden} players with "
-                    f"consecutive_active_dnp>=3 AND dnp_rate>=0.8",
-                    err=True,
+        if config.dnp_override_enabled:
+            dnp_cols_needed = ["consecutive_active_dnp", "active_but_dnp_rate_last10"]
+            dnp_cols_present = [c for c in dnp_cols_needed if c in rot_features.columns]
+            if len(dnp_cols_present) == len(dnp_cols_needed):
+                dnp_check = out_df.merge(
+                    rot_features[["game_id", "team_id", "player_id"] + dnp_cols_needed],
+                    on=["game_id", "team_id", "player_id"],
+                    how="left",
                 )
+                consec_dnp = pd.to_numeric(
+                    dnp_check["consecutive_active_dnp"], errors="coerce"
+                ).fillna(0)
+                dnp_rate = pd.to_numeric(
+                    dnp_check["active_but_dnp_rate_last10"], errors="coerce"
+                ).fillna(0)
+                dnp_override_mask = (consec_dnp >= 3) & (dnp_rate >= 0.8)
+                n_overridden = int(dnp_override_mask.sum())
+                if n_overridden > 0:
+                    out_df.loc[dnp_override_mask, "minutes_p50"] = 0.0
+                    typer.echo(
+                        f"[rotation_minutes] DNP override: zeroed {n_overridden} players with "
+                        f"consecutive_active_dnp>=3 AND dnp_rate>=0.8",
+                        err=True,
+                    )
 
         scaled_minutes, scale_summary = _scale_minutes_to_team_target(
             out_df, out_df["minutes_p50"], team_target=240.0
@@ -1679,9 +1667,20 @@ def main(
         )
 
         out_mask = _derive_out_mask(out_df)
-        play_prob, rotation_prob = _derive_gate_probs(out_df["minutes_p50"], out_mask=out_mask)
-        out_df["play_prob"] = play_prob
-        out_df["rotation_prob"] = rotation_prob
+        if str(config.play_prob_source).strip().lower() == "gate_prob" and "gate_prob" in out_df.columns:
+            play_prob = pd.to_numeric(out_df["gate_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+            play_prob = play_prob.where(~out_mask.to_numpy(dtype=bool), 0.0)
+        else:
+            play_prob, _ = _derive_gate_probs(out_df["minutes_p50"], out_mask=out_mask)
+
+        if str(config.rotation_prob_source).strip().lower() == "gate_prob" and "gate_prob" in out_df.columns:
+            rotation_prob = pd.to_numeric(out_df["gate_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+            rotation_prob = rotation_prob.where(~out_mask.to_numpy(dtype=bool), 0.0)
+        else:
+            _, rotation_prob = _derive_gate_probs(out_df["minutes_p50"], out_mask=out_mask)
+
+        out_df["play_prob"] = play_prob.astype(float)
+        out_df["rotation_prob"] = rotation_prob.astype(float)
         out_df["minutes_alloc_mode"] = "rotation_set"
         out_df["model_run_id"] = str(Path(resolved_model_dir).name)
         out_df = out_df.drop(columns=["rotation_minutes_p50"], errors="ignore")
@@ -1760,6 +1759,14 @@ def main(
                     "alloc_baseline_minutes_threshold": float(
                         resolved_alloc_baseline_minutes_threshold
                     ),
+                    "projected_starter_boost_enabled": bool(config.projected_starter_boost_enabled),
+                    "projected_starter_gate_prob_boost_threshold": float(
+                        config.projected_starter_gate_prob_boost_threshold
+                    ),
+                    "projected_starter_gate_logit_boost": float(config.projected_starter_gate_logit_boost),
+                    "play_prob_source": str(config.play_prob_source),
+                    "rotation_prob_source": str(config.rotation_prob_source),
+                    "dnp_override_enabled": bool(config.dnp_override_enabled),
                     "team_scale": scale_summary,
                     "espn_out_count": espn_out_count,
                     "espn_matched_count": espn_matched_count,
@@ -1978,31 +1985,32 @@ def main(
     # override their minutes to 0 regardless of baseline. This allows us to use
     # baseline for normal players while still catching players like Kuminga who
     # are healthy scratches with a consistent DNP pattern.
-    dnp_cols_needed = ["consecutive_active_dnp", "active_but_dnp_rate_last10"]
-    dnp_cols_present = [c for c in dnp_cols_needed if c in rot_features.columns]
-    if len(dnp_cols_present) == len(dnp_cols_needed):
-        # Merge DNP features for override check
-        dnp_check = guard.merge(
-            rot_features[["game_id", "team_id", "player_id"] + dnp_cols_needed],
-            on=["game_id", "team_id", "player_id"],
-            how="left",
-        )
-        consec_dnp = pd.to_numeric(
-            dnp_check["consecutive_active_dnp"], errors="coerce"
-        ).fillna(0)
-        dnp_rate = pd.to_numeric(
-            dnp_check["active_but_dnp_rate_last10"], errors="coerce"
-        ).fillna(0)
-        # Override to 0 if: consecutive DNP >= 3 AND DNP rate >= 80%
-        dnp_override_mask = (consec_dnp >= 3) & (dnp_rate >= 0.8)
-        n_overridden = int(dnp_override_mask.sum())
-        if n_overridden > 0:
-            new_p50 = new_p50.where(~dnp_override_mask, 0.0)
-            typer.echo(
-                f"[rotation_minutes] DNP override: zeroed {n_overridden} players with "
-                f"consecutive_active_dnp>=3 AND dnp_rate>=0.8",
-                err=True,
+    if config.dnp_override_enabled:
+        dnp_cols_needed = ["consecutive_active_dnp", "active_but_dnp_rate_last10"]
+        dnp_cols_present = [c for c in dnp_cols_needed if c in rot_features.columns]
+        if len(dnp_cols_present) == len(dnp_cols_needed):
+            # Merge DNP features for override check
+            dnp_check = guard.merge(
+                rot_features[["game_id", "team_id", "player_id"] + dnp_cols_needed],
+                on=["game_id", "team_id", "player_id"],
+                how="left",
             )
+            consec_dnp = pd.to_numeric(
+                dnp_check["consecutive_active_dnp"], errors="coerce"
+            ).fillna(0)
+            dnp_rate = pd.to_numeric(
+                dnp_check["active_but_dnp_rate_last10"], errors="coerce"
+            ).fillna(0)
+            # Override to 0 if: consecutive DNP >= 3 AND DNP rate >= 80%
+            dnp_override_mask = (consec_dnp >= 3) & (dnp_rate >= 0.8)
+            n_overridden = int(dnp_override_mask.sum())
+            if n_overridden > 0:
+                new_p50 = new_p50.where(~dnp_override_mask, 0.0)
+                typer.echo(
+                    f"[rotation_minutes] DNP override: zeroed {n_overridden} players with "
+                    f"consecutive_active_dnp>=3 AND dnp_rate>=0.8",
+                    err=True,
+                )
 
     # 5) Map rotation p50 to minutes quantiles using baseline tail deltas.
     out_df = base_df.copy()

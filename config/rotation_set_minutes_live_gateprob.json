@@ -12,9 +12,9 @@
   "alloc_prior_play_prob_threshold": 0.2,
   "alloc_baseline_minutes_threshold": 4.0,
 
-  "play_prob_source": "minutes_threshold",
-  "rotation_prob_source": "minutes_threshold",
-  "dnp_override_enabled": true,
+  "play_prob_source": "gate_prob",
+  "rotation_prob_source": "gate_prob",
+  "dnp_override_enabled": false,
 
   "projected_starter_boost_enabled": false,
   "projected_starter_gate_prob_boost_threshold": 0.9,
@@ -27,3 +27,4 @@
   "sparsify_kmax": 9,
   "sparsify_min_keep": 9
 }
+
