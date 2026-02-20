@@ -20,7 +20,7 @@
   "projected_starter_gate_prob_boost_threshold": 0.9,
   "projected_starter_gate_logit_boost": 20.0,
 
-  "sparsify_enable": false,
+  "sparsify_enable": true,
   "sparsify_use_col": "minutes_p50",
   "sparsify_topk": 9,
   "sparsify_tau": 8.0,

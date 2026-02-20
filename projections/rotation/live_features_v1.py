@@ -682,6 +682,31 @@ def build_rotation_set_minutes_v1_features(
     if derived_needed:
         work = add_rotation_set_derived_features(work, feature_columns=feature_columns)
 
+    # ---------------------------------------------------------------------------
+    # Action Network props features (an_*)
+    # ---------------------------------------------------------------------------
+    # Some historical `features_minutes_v1` snapshots predate the Action props
+    # attachment step and will be missing these columns entirely. Newer
+    # rotation-set models expect them as numeric features; when absent we fill
+    # defaults matching `projections.features.action_props`.
+    if any(str(c).startswith("an_") for c in feature_columns):
+        try:
+            from projections.features.action_props import ACTION_MARKET_FEATURE_COLUMNS, _market_feature_defaults
+
+            defaults = _market_feature_defaults()
+            for col in ACTION_MARKET_FEATURE_COLUMNS:
+                if col not in feature_columns:
+                    continue
+                default = defaults.get(col, 0.0)
+                if col not in work.columns:
+                    work[col] = default
+                else:
+                    work[col] = work[col].fillna(default)
+        except Exception:  # noqa: BLE001
+            # Best-effort only: if import fails for any reason, leave columns as-is
+            # and let the missing-features gate below raise a loud error.
+            pass
+
     # Validate feature list + keep opponent_team_id for embeddings.
     # Also keep minutes_features_row_missing for guardrail logic even if not a model feature.
     keep_cols = [OPPONENT_TEAM_ID_COL] if OPPONENT_TEAM_ID_COL in work.columns else []
