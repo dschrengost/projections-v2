@@ -707,6 +707,30 @@ def build_rotation_set_minutes_v1_features(
             # and let the missing-features gate below raise a loud error.
             pass
 
+    # ---------------------------------------------------------------------------
+    # Prop-implied minutes features (an_implied_minutes, etc.)
+    # ---------------------------------------------------------------------------
+    # Newer rotation-set models may include prop-derived implied minutes features.
+    # These are derived from Action props + historical boxscores, so older snapshots
+    # (or best-effort runs where the attachment fails) may not carry them. Fill
+    # conservative defaults that indicate "missing" rather than "0 implied minutes".
+    implied_cols = {
+        "an_pra_per_min_prior": 1.0,
+        "an_pra_prior_minutes_sum": 0.0,
+        "an_pra_prior_games": 0,
+        "an_implied_minutes": 0.0,
+        "an_has_implied_minutes": 0,
+        "an_implied_minutes_missing": 1,
+    }
+    if any(col in feature_columns for col in implied_cols):
+        for col, default in implied_cols.items():
+            if col not in feature_columns:
+                continue
+            if col not in work.columns:
+                work[col] = default
+            else:
+                work[col] = work[col].fillna(default)
+
     # Validate feature list + keep opponent_team_id for embeddings.
     # Also keep minutes_features_row_missing for guardrail logic even if not a model feature.
     keep_cols = [OPPONENT_TEAM_ID_COL] if OPPONENT_TEAM_ID_COL in work.columns else []

@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "mode": "primary",
-  "model_dir": "artifacts/rotation_set_minutes/rotation_set_minutes_v1_settransformer_20260219T202319Z",
+  "model_dir": "artifacts/rotation_set_minutes/rotation_set_minutes_v1_settransformer_20260220T214455Z",
   "blend_weight": 1.0,
   "injury_coverage_threshold": 0.5,
   "dnp_tail_minutes_threshold": 8.0,

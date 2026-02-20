@@ -1864,6 +1864,84 @@ def _build_minutes_live_logic(
         f"matched_rows={action_props_matched_rows}, total_rows={len(live_slice)}"
     )
 
+    prop_implied_minutes_diag: dict[str, object] = {
+        "enabled": True,
+        "season": int(season_value),
+        "history_start": None,
+        "history_end": None,
+        "lookback_days": 365,
+        "history_rows": 0,
+        "prior_rows": 0,
+        "matched_rows": 0,
+        "coverage_rate": 0.0,
+        "players_with_props": 0,
+    }
+    try:
+        from projections.features.prop_implied_minutes import (
+            attach_prop_implied_minutes,
+            compute_player_pra_priors_asof,
+            load_fpts_training_base_history_multi_season,
+        )
+
+        prior_end = (target_day - pd.Timedelta(days=1)).normalize()
+        lookback_days = 365
+        prior_start = (prior_end - pd.Timedelta(days=lookback_days)).normalize()
+        prop_implied_minutes_diag["history_start"] = prior_start.date().isoformat()
+        prop_implied_minutes_diag["history_end"] = prior_end.date().isoformat()
+        prop_implied_minutes_diag["lookback_days"] = int(lookback_days)
+
+        player_ids: list[int] | None = None
+        if action_props_matched_rows > 0 and "player_id" in live_slice.columns:
+            has_props = pd.to_numeric(live_slice.get("an_has_any_props", 0), errors="coerce").fillna(0.0).gt(0.0)
+            pid = pd.to_numeric(live_slice.loc[has_props, "player_id"], errors="coerce").dropna()
+            if not pid.empty:
+                player_ids = pid.astype(int).unique().tolist()
+        prop_implied_minutes_diag["players_with_props"] = len(player_ids or [])
+
+        history = load_fpts_training_base_history_multi_season(
+            data_root=data_root,
+            start=prior_start,
+            end=prior_end,
+            player_ids=player_ids,
+        )
+        prop_implied_minutes_diag["history_rows"] = int(len(history))
+
+        priors = compute_player_pra_priors_asof(history)
+        prop_implied_minutes_diag["prior_rows"] = int(len(priors))
+
+        live_slice = attach_prop_implied_minutes(
+            live_slice,
+            priors=priors,
+            join_keys=("player_id",),
+        )
+        if "an_implied_minutes" in live_slice.columns:
+            matched = (
+                pd.to_numeric(live_slice["an_implied_minutes"], errors="coerce")
+                .fillna(0.0)
+                .gt(0.0)
+                .sum()
+            )
+            prop_implied_minutes_diag["matched_rows"] = int(matched)
+            prop_implied_minutes_diag["coverage_rate"] = (
+                round(float(matched) / float(action_props_matched_rows), 4)
+                if action_props_matched_rows > 0
+                else 0.0
+            )
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"Prop implied minutes attach failed: {exc}")
+        # Ensure downstream parity by providing defaults when attachment fails.
+        for col, default in (
+            ("an_pra_per_min_prior", 1.0),
+            ("an_pra_prior_minutes_sum", 0.0),
+            ("an_pra_prior_games", 0),
+            ("an_implied_minutes", 0.0),
+            ("an_has_implied_minutes", 0),
+            ("an_implied_minutes_missing", 1),
+        ):
+            if col not in live_slice.columns:
+                live_slice[col] = default
+        prop_implied_minutes_diag["enabled"] = False
+
     active_validation: dict | None = None
     if active_roster_df is not None and not active_roster_df.empty and active_pairs_set:
         team_series = pd.to_numeric(live_slice["team_id"], errors="coerce")
@@ -1929,6 +2007,21 @@ def _build_minutes_live_logic(
             ),
             "feature_columns_present": [
                 col for col in ACTION_MARKET_FEATURE_COLUMNS if col in live_slice.columns
+            ],
+        },
+        "prop_implied_minutes": {
+            **prop_implied_minutes_diag,
+            "feature_columns_present": [
+                col
+                for col in (
+                    "an_pra_per_min_prior",
+                    "an_pra_prior_minutes_sum",
+                    "an_pra_prior_games",
+                    "an_implied_minutes",
+                    "an_has_implied_minutes",
+                    "an_implied_minutes_missing",
+                )
+                if col in live_slice.columns
             ],
         },
     }

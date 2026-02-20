@@ -42,6 +42,12 @@ from projections.features.action_props import (
     attach_action_props_features,
     load_action_props_feature_snapshots_for_date,
 )
+from projections.features.prop_implied_minutes import (
+    DEFAULT_LOOKBACK_DAYS,
+    attach_prop_implied_minutes,
+    compute_player_game_pra_priors,
+    load_fpts_training_base_history_multi_season,
+)
 from projections.rotation.rotation_set_minutes_features_v1 import join_rotation_priors
 from projections.minutes_v1.constants import AvailabilityStatus, STATUS_PRIORS
 
@@ -900,6 +906,93 @@ def _attach_action_props_training_features(
     return meta, out
 
 
+def _attach_prop_implied_minutes_training_features(
+    df: pd.DataFrame,
+    *,
+    data_root: Path,
+    enabled: bool,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    out = df.copy()
+    meta: dict[str, Any] = {
+        "enabled": bool(enabled),
+        "rows": int(len(out)),
+        "lookback_days": int(lookback_days),
+        "history_start": None,
+        "history_end": None,
+        "history_rows": 0,
+        "prior_rows": 0,
+        "players_with_props": 0,
+        "matched_rows": 0,
+        "coverage_rate": 0.0,
+    }
+
+    if not enabled:
+        meta["reason"] = "disabled_by_flag"
+        defaults = {
+            "an_pra_per_min_prior": 1.0,
+            "an_pra_prior_minutes_sum": 0.0,
+            "an_pra_prior_games": 0,
+            "an_implied_minutes": 0.0,
+            "an_has_implied_minutes": 0,
+            "an_implied_minutes_missing": 1,
+        }
+        for col, default in defaults.items():
+            if col not in out.columns:
+                out[col] = default
+            else:
+                out[col] = pd.to_numeric(out[col], errors="coerce").fillna(default)
+        return meta, out
+
+    if out.empty or "game_date" not in out.columns:
+        meta["reason"] = "missing_game_date"
+        return meta, out
+
+    game_dates = pd.to_datetime(out["game_date"], errors="coerce").dt.normalize().dropna()
+    if game_dates.empty:
+        meta["reason"] = "invalid_game_date"
+        return meta, out
+
+    history_end = pd.Timestamp(game_dates.max()).normalize()
+    history_start = (pd.Timestamp(game_dates.min()).normalize() - pd.Timedelta(days=int(lookback_days))).normalize()
+    meta["history_start"] = history_start.date().isoformat()
+    meta["history_end"] = history_end.date().isoformat()
+
+    player_ids: list[int] | None = None
+    if "an_has_any_props" in out.columns and "player_id" in out.columns:
+        has_props = pd.to_numeric(out["an_has_any_props"], errors="coerce").fillna(0.0).gt(0.0)
+        pids = pd.to_numeric(out.loc[has_props, "player_id"], errors="coerce").dropna()
+        if not pids.empty:
+            player_ids = pids.astype(int).unique().tolist()
+    meta["players_with_props"] = int(len(player_ids or []))
+
+    history = load_fpts_training_base_history_multi_season(
+        data_root=data_root,
+        start=history_start,
+        end=history_end,
+        player_ids=player_ids,
+    )
+    meta["history_rows"] = int(len(history))
+
+    priors = compute_player_game_pra_priors(history)
+    meta["prior_rows"] = int(len(priors))
+
+    out = attach_prop_implied_minutes(
+        out,
+        priors=priors,
+        join_keys=("game_id", "player_id"),
+    )
+    matched_rows = int(
+        pd.to_numeric(out.get("an_has_implied_minutes"), errors="coerce")
+        .fillna(0.0)
+        .gt(0.0)
+        .sum()
+    )
+    meta["matched_rows"] = matched_rows
+    meta["coverage_rate"] = round(float(matched_rows) / float(len(out)), 4) if len(out) > 0 else 0.0
+    return meta, out
+
+
 def _join_rotation(
     df: pd.DataFrame,
     *,
@@ -1120,6 +1213,7 @@ def _write_manifest(
     date_window: dict[str, Any] | None = None,
     odds_backfill: dict[str, Any] | None = None,
     action_props: dict[str, Any] | None = None,
+    prop_implied_minutes: dict[str, Any] | None = None,
     team_game_validation: dict[str, Any] | None = None,
     dnp_history_config: DNPHistoryConfig | None = None,
     rotation_priors_v1: dict[str, object] | None = None,
@@ -1158,6 +1252,8 @@ def _write_manifest(
         payload["odds_backfill"] = odds_backfill
     if action_props is not None:
         payload["action_props"] = action_props
+    if prop_implied_minutes is not None:
+        payload["prop_implied_minutes"] = prop_implied_minutes
     if team_game_validation is not None:
         payload["team_game_validation"] = team_game_validation
     if dnp_history_config is not None:
@@ -1270,6 +1366,25 @@ def main() -> None:
         default=None,
         help="Optional override for bronze Action props directory.",
     )
+    parser.add_argument(
+        "--prop-implied-minutes",
+        dest="prop_implied_minutes",
+        action="store_true",
+        help="Attach prop-derived implied minutes features (an_implied_minutes).",
+    )
+    parser.add_argument(
+        "--no-prop-implied-minutes",
+        dest="prop_implied_minutes",
+        action="store_false",
+        help="Disable prop-derived implied minutes features.",
+    )
+    parser.set_defaults(prop_implied_minutes=True)
+    parser.add_argument(
+        "--prop-implied-minutes-lookback-days",
+        type=int,
+        default=DEFAULT_LOOKBACK_DAYS,
+        help="Lookback window (days) for PRA-per-minute priors used to derive implied minutes.",
+    )
     args = parser.parse_args()
 
     data_root = paths.get_data_root()
@@ -1335,6 +1450,20 @@ def main() -> None:
         f"snapshot_rows={action_props_meta.get('snapshot_rows', 0)}",
         f"matched_rows={action_props_meta.get('matched_rows', 0)}",
         f"coverage={action_props_meta.get('coverage_rate', 0.0)}",
+    )
+
+    prop_implied_minutes_meta, pruned_df = _attach_prop_implied_minutes_training_features(
+        pruned_df,
+        data_root=data_root,
+        enabled=bool(args.prop_implied_minutes),
+        lookback_days=int(args.prop_implied_minutes_lookback_days),
+    )
+    print(
+        "[rotation_train_v1] Prop implied minutes:",
+        f"enabled={prop_implied_minutes_meta.get('enabled')}",
+        f"matched_rows={prop_implied_minutes_meta.get('matched_rows', 0)}",
+        f"coverage={prop_implied_minutes_meta.get('coverage_rate', 0.0)}",
+        f"history_rows={prop_implied_minutes_meta.get('history_rows', 0)}",
     )
 
     player_rotation = _load_rotation_player_labels(data_root)
@@ -1473,6 +1602,7 @@ def main() -> None:
         date_window=date_window_meta,
         odds_backfill=odds_backfill_meta,
         action_props=action_props_meta,
+        prop_implied_minutes=prop_implied_minutes_meta,
         team_game_validation=team_game_validation,
         dnp_history_config=dnp_config,
         rotation_priors_v1=priors_meta,
