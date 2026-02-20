@@ -22,6 +22,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import random
@@ -1418,6 +1419,14 @@ def main() -> None:
         help="Embedding dimension for hashed player-team identity.",
     )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--drop-implied-minutes-missingness",
+        action="store_true",
+        help=(
+            "Exclude implied-minutes missingness indicators from the model feature set "
+            "(an_has_implied_minutes, an_implied_minutes_missing)."
+        ),
+    )
     parser.add_argument("--val-frac", type=float, default=0.2)
     parser.add_argument(
         "--val-start-date",
@@ -1637,6 +1646,10 @@ def main() -> None:
     merged = _add_player_team_hash_indices(merged, buckets=int(args.player_team_hash_buckets))
 
     feature_cols = _infer_feature_columns(features_df, labels_df=labels_df, label_col=target_col)
+    if bool(args.drop_implied_minutes_missingness):
+        for col in ("an_has_implied_minutes", "an_implied_minutes_missing"):
+            if col in feature_cols:
+                feature_cols.remove(col)
     use_prior_head = bool(args.use_prior_head)
     use_player_embeddings = bool(args.use_player_embeddings)
     use_player_team_embeddings = bool(args.use_player_team_embeddings)
@@ -2293,7 +2306,13 @@ def main() -> None:
         current_val = row[val_metric_key]
         if current_val < best_val:
             best_val = current_val
-            best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+            # Snapshot weights. NOTE: on CPU, `.cpu()` returns the same Tensor object, so we must clone;
+            # otherwise `best_state` would be mutated by subsequent training steps and end up equal to
+            # the final epoch weights.
+            best_state = {
+                k: (v.detach().cpu().clone() if isinstance(v, torch.Tensor) else copy.deepcopy(v))
+                for k, v in model.state_dict().items()
+            }
 
     if best_state is None:
         raise RuntimeError("No best_state captured")
