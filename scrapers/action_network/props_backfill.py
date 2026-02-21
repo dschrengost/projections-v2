@@ -17,7 +17,6 @@ Usage:
 import argparse
 import json
 import os
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -54,6 +53,31 @@ ANCHORS = [
     (261653, "2025-10-24"),  # 2025-26 early
     (273525, "2026-02-20"),  # Recent
 ]
+
+
+def _date_set_with_utc_buffer(start_date: str, end_date: str, utc_buffer_days: int) -> set[str]:
+    """Return inclusive date set [start_date, end_date + utc_buffer_days]."""
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+    buffer_days = max(0, int(utc_buffer_days))
+    out: set[str] = set()
+    cursor = start_dt
+    final_day = end_dt + timedelta(days=buffer_days)
+    while cursor <= final_day:
+        out.add(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return out
+
+
+def _filter_games_by_date(
+    games_by_date: dict[str, list[dict]], start_date: str, end_date: str, utc_buffer_days: int
+) -> dict[str, list[dict]]:
+    allowed_dates = _date_set_with_utc_buffer(start_date, end_date, utc_buffer_days)
+    return {date: games for date, games in games_by_date.items() if date in allowed_dates}
+
+
+def _expand_id_window(start_id: int, end_id: int, *, expansion: int) -> tuple[int, int]:
+    return (max(230000, start_id - expansion), end_id + expansion)
 
 
 def estimate_game_id_range(target_date: str) -> tuple[int, int]:
@@ -267,6 +291,15 @@ def main():
     parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD)")
     parser.add_argument("--scan-only", action="store_true", help="Only scan for games")
     parser.add_argument("--workers", type=int, default=100, help="Parallel workers for scanning")
+    parser.add_argument(
+        "--utc-date-buffer-days",
+        type=int,
+        default=1,
+        help=(
+            "Include this many extra UTC days past --end-date when filtering discovered games. "
+            "Default 1 handles U.S. evening slates that appear under next UTC date."
+        ),
+    )
     args = parser.parse_args()
 
     BRONZE_DIR.mkdir(parents=True, exist_ok=True)
@@ -279,7 +312,7 @@ def main():
         start_date = "2024-10-01"  # Include preseason
         end_date = datetime.now().strftime("%Y-%m-%d")
 
-    print(f"Action Network NBA Props Backfill")
+    print("Action Network NBA Props Backfill")
     print(f"{'='*60}")
     print(f"Date range: {start_date} to {end_date}")
     print(f"Output: {BRONZE_DIR}")
@@ -294,7 +327,9 @@ def main():
     print(f"Estimated ID range: {full_start:,} to {full_end:,} ({full_end - full_start:,} IDs)")
 
     # Check for cached game list
-    cache_file = BRONZE_DIR / f"games_cache_{start_date}_{end_date}.json".replace("-", "")
+    cache_file = BRONZE_DIR / (
+        f"games_cache_{start_date}_{end_date}_utcbuf{max(0, int(args.utc_date_buffer_days))}.json".replace("-", "")
+    )
 
     use_cache = False
     if cache_file.exists():
@@ -304,7 +339,7 @@ def main():
         if games_by_date:
             use_cache = True
         else:
-            print(f"WARNING: cached game list is empty — deleting stale cache and rescanning")
+            print("WARNING: cached game list is empty — deleting stale cache and rescanning")
             cache_file.unlink()
 
     if use_cache:
@@ -312,15 +347,42 @@ def main():
         for date_games in games_by_date.values():
             all_games.extend(date_games)
     else:
-        print(f"\nScanning for NBA games...")
+        print("\nScanning for NBA games...")
         games_by_date = scan_date_range_parallel(full_start, full_end, workers=args.workers)
 
-        # Filter to date range
-        filtered = {}
-        for date, games in games_by_date.items():
-            if start_date <= date <= end_date:
-                filtered[date] = games
-        games_by_date = filtered
+        # Filter to date range with UTC buffer.
+        games_by_date = _filter_games_by_date(
+            games_by_date,
+            start_date=start_date,
+            end_date=end_date,
+            utc_buffer_days=args.utc_date_buffer_days,
+        )
+
+        # If no matches for a short range request, adaptively widen the ID search window.
+        # This protects daily runs when anchor interpolation drifts.
+        date_span_days = (
+            datetime.strptime(end_date, "%Y-%m-%d").date()
+            - datetime.strptime(start_date, "%Y-%m-%d").date()
+        ).days + 1
+        if not games_by_date and date_span_days <= 3:
+            for step in range(1, 5):
+                expansion = step * 750
+                exp_start, exp_end = _expand_id_window(full_start, full_end, expansion=expansion)
+                print(
+                    f"Retrying scan with expanded range: {exp_start:,} to {exp_end:,} "
+                    f"(step={step}, expansion={expansion})"
+                )
+                retry_games_by_date = scan_date_range_parallel(exp_start, exp_end, workers=args.workers)
+                filtered_retry = _filter_games_by_date(
+                    retry_games_by_date,
+                    start_date=start_date,
+                    end_date=end_date,
+                    utc_buffer_days=args.utc_date_buffer_days,
+                )
+                if filtered_retry:
+                    games_by_date = filtered_retry
+                    print(f"Recovered {sum(len(v) for v in games_by_date.values())} games after retry step={step}")
+                    break
 
         # Only cache non-empty results to avoid poisoning future runs
         if games_by_date:
@@ -330,6 +392,7 @@ def main():
         else:
             print(
                 f"WARNING: scan found 0 NBA games for {start_date}..{end_date} "
+                f"(utc_buffer_days={max(0, int(args.utc_date_buffer_days))}) "
                 f"in ID range {full_start:,}–{full_end:,}; NOT caching empty result. "
                 f"Anchor staleness or ID drift may need attention."
             )
@@ -351,7 +414,7 @@ def main():
         return
 
     # Fetch props
-    print(f"\nFetching props...")
+    print("\nFetching props...")
     stats = fetch_props_for_games(all_games, BRONZE_DIR, workers=30)
 
     print(f"\n{'='*60}")
