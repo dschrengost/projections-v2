@@ -27,7 +27,7 @@
         "run_id": "rates_v1_stage5_fta_20260107_231545"
       },
       "minutes_noise": {
-        "enabled": false,
+        "enabled": true,
         "sigma_min": 1.0
       },
       "minutes_noise_config": {

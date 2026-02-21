@@ -1,0 +1,17 @@
+{
+  "rows_total": 3763,
+  "rows_matched_rates_base": 2179,
+  "rows_unmatched_rates_base": 1584,
+  "rates_loss_eligible_rows": 2179,
+  "rates_loss_eligible_and_matched_rows": 2179,
+  "rates_mae_9targets": {
+    "joint_on_matched": 0.06164515690158943,
+    "current_on_matched": 0.05347379603042358,
+    "count": 19611
+  },
+  "eff_mae_3targets": {
+    "joint_on_matched": 0.1834164392055528,
+    "current_on_matched": 0.1800288359527237,
+    "count": 3913
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "slice": {
+    "val_min_date": "2026-01-29",
+    "val_max_date": "2026-02-11",
+    "rows": 3763,
+    "team_games": 214
+  },
+  "joint_model": {
+    "run_id": "joint_rotation_rates_v1_full_20260221T165109Z",
+    "minutes_mae": 2.7576866149902344,
+    "minutes_count": 3763,
+    "rates_mae_9targets": 0.06164515690158943,
+    "rates_count": 19611,
+    "eff_mae_3targets": 0.1834164392055528,
+    "eff_count": 3913,
+    "rates_by_target": {
+      "fga2_per_min": {
+        "mae": 0.10171540826559067,
+        "count": 2179
+      },
+      "fga3_per_min": {
+        "mae": 0.08767595142126083,
+        "count": 2179
+      },
+      "fta_per_min": {
+        "mae": 0.07426492869853973,
+        "count": 2179
+      },
+      "ast_per_min": {
+        "mae": 0.06825266778469086,
+        "count": 2179
+      },
+      "tov_per_min": {
+        "mae": 0.04414421692490578,
+        "count": 2179
+      },
+      "oreb_per_min": {
+        "mae": 0.04729464277625084,
+        "count": 2179
+      },
+      "dreb_per_min": {
+        "mae": 0.07651979476213455,
+        "count": 2179
+      },
+      "stl_per_min": {
+        "mae": 0.03401394560933113,
+        "count": 2179
+      },
+      "blk_per_min": {
+        "mae": 0.02092485874891281,
+        "count": 2179
+      }
+    },
+    "eff_by_target": {
+      "fg2_pct_label": {
+        "mae": 0.17498692870140076,
+        "count": 1489
+      },
+      "fg3_pct_label": {
+        "mae": 0.16851961612701416,
+        "count": 1279
+      },
+      "ft_pct_label": {
+        "mae": 0.21101868152618408,
+        "count": 1145
+      }
+    }
+  },
+  "current_rotation_set_minutes": {
+    "model_dir": "/home/daniel/projects/projections-v2/artifacts/rotation_set_minutes/rotation_set_minutes_v1_settransformer_20260220T214455Z",
+    "minutes_mae": 2.689657688140869,
+    "minutes_count": 3763
+  },
+  "current_rates": {
+    "run_id": "rates_v1_stage6_action_props_h75_propsfix_20260218_194555",
+    "rows_with_all_required_features": 649,
+    "rows_total": 3763,
+    "rates_mae_9targets": 0.05326945829464952,
+    "rates_count": 5841,
+    "eff_mae_3targets": 0.1772549828667443,
+    "eff_count": 1181,
+    "rates_by_target": {
+      "fga2_per_min": {
+        "mae": 0.07772640138864517,
+        "count": 649
+      },
+      "fga3_per_min": {
+        "mae": 0.06676313281059265,
+        "count": 649
+      },
+      "fta_per_min": {
+        "mae": 0.07261693477630615,
+        "count": 649
+      },
+      "ast_per_min": {
+        "mae": 0.055123575031757355,
+        "count": 649
+      },
+      "tov_per_min": {
+        "mae": 0.042500052601099014,
+        "count": 649
+      },
+      "oreb_per_min": {
+        "mae": 0.03980837017297745,
+        "count": 649
+      },
+      "dreb_per_min": {
+        "mae": 0.06652536988258362,
+        "count": 649
+      },
+      "stl_per_min": {
+        "mae": 0.035608675330877304,
+        "count": 649
+      },
+      "blk_per_min": {
+        "mae": 0.022752609103918076,
+        "count": 649
+      }
+    },
+    "eff_by_target": {
+      "fg2_pct_label": {
+        "mae": 0.17423278093338013,
+        "count": 440
+      },
+      "fg3_pct_label": {
+        "mae": 0.16387327015399933,
+        "count": 407
+      },
+      "ft_pct_label": {
+        "mae": 0.19754280149936676,
+        "count": 334
+      }
+    }
+  }
+}

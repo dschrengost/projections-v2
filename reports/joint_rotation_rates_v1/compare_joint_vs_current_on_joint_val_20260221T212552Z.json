@@ -1,0 +1,87 @@
+{
+  "created_at": "2026-02-21T21:36:38.051319+00:00",
+  "dataset_dir": "/home/daniel/projections-data/training/datasets/joint_rotation_rates_v1_20260221T163500Z",
+  "joint_run_dir": "/home/daniel/projections-data/artifacts/joint_rotation_rates_v1/runs/joint_rotation_rates_v1_full_20260221T212552Z",
+  "raw_vs_raw": {
+    "efficiency": {
+      "current_mae_3targets": NaN,
+      "current_mae_by_target": {
+        "fg2_pct_label": NaN,
+        "fg3_pct_label": NaN,
+        "ft_pct_label": NaN
+      },
+      "joint_mae_3targets": 0.1849050077405078,
+      "joint_mae_by_target": {
+        "fg2_pct_label": 0.1752144316139135,
+        "fg3_pct_label": 0.1684868341938007,
+        "ft_pct_label": 0.21101375741380923
+      }
+    },
+    "minutes": {
+      "current_count": 3763,
+      "current_mae": 2.68965742562494,
+      "joint_count": 3763,
+      "joint_mae": 2.9254873825222187
+    },
+    "rates": {
+      "current_mae_9targets": 0.06716280560703577,
+      "current_mae_by_target": {
+        "ast_per_min": 0.06929354140261489,
+        "blk_per_min": 0.025603825533000505,
+        "dreb_per_min": 0.0754960724248308,
+        "fga2_per_min": 0.13336468494159157,
+        "fga3_per_min": 0.09101561182411487,
+        "fta_per_min": 0.08288760204166094,
+        "oreb_per_min": 0.04637064045293565,
+        "stl_per_min": 0.03489243713251187,
+        "tov_per_min": 0.04554083471006078
+      },
+      "current_rows_eligible_and_feature_complete": 2179,
+      "joint_mae_9targets": 0.061510632980028186,
+      "joint_mae_by_target": {
+        "ast_per_min": 0.07136247791295947,
+        "blk_per_min": 0.020923169260642003,
+        "dreb_per_min": 0.0750511508388108,
+        "fga2_per_min": 0.10053820051428738,
+        "fga3_per_min": 0.08630116906981859,
+        "fta_per_min": 0.074708707986642,
+        "oreb_per_min": 0.0465938847193541,
+        "stl_per_min": 0.03403559461822256,
+        "tov_per_min": 0.04408134189951685
+      },
+      "joint_rows_eligible": 2179
+    }
+  },
+  "sim_setup": {
+    "current_minutes_run_id": "current_eval_20260221T212552Z",
+    "current_rates_run_id": "current_eval_20260221T212552Z",
+    "dates": [
+      "2026-01-29",
+      "2026-01-30",
+      "2026-01-31",
+      "2026-02-01",
+      "2026-02-02",
+      "2026-02-03",
+      "2026-02-04",
+      "2026-02-05",
+      "2026-02-06",
+      "2026-02-07",
+      "2026-02-08",
+      "2026-02-09",
+      "2026-02-10",
+      "2026-02-11"
+    ],
+    "joint_minutes_run_id": "joint_eval_20260221T212552Z",
+    "joint_rates_run_id": "joint_eval_20260221T212552Z",
+    "sim_commands": {
+      "current": "uv run python -m scripts.sim_v2.generate_worlds_fpts_v2 --start-date 2026-01-29 --end-date 2026-02-11 --profile sim_v3 --n-worlds 1000 --minutes-run-id current_eval_20260221T212552Z --rates-run-id current_eval_20260221T212552Z --run-id sim_current_eval_20260221T213638Z",
+      "joint": "uv run python -m scripts.sim_v2.generate_worlds_fpts_v2 --start-date 2026-01-29 --end-date 2026-02-11 --profile sim_v3 --n-worlds 1000 --minutes-run-id joint_eval_20260221T212552Z --rates-run-id joint_eval_20260221T212552Z --run-id sim_joint_eval_20260221T213638Z"
+    }
+  },
+  "val_slice": {
+    "rows": 3763,
+    "team_games": 214,
+    "val_max_date": "2026-02-11",
+    "val_min_date": "2026-01-29"
+  }
+}
