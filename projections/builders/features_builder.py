@@ -171,6 +171,30 @@ class SharedFeaturesBuilder:
         warnings: list[str] = []
         cfg = self.config
 
+        # Drop All-Star weekend games (game_id prefix 006) from history/prior windows so
+        # rolling features and priors aren't polluted by exhibition formats.
+        labels, schedule, game_ids, dropped_all_star = self._filter_all_star_games(
+            labels=labels,
+            schedule=schedule,
+            game_ids=game_ids,
+        )
+        if dropped_all_star:
+            warnings.append(
+                f"[all-star-filter] Dropped {len(dropped_all_star)} All-Star weekend game(s) from history."
+            )
+        if not game_ids:
+            return FeatureBuildResult(
+                features=pd.DataFrame(),
+                injuries_result=InjuriesResolutionResult(
+                    injuries=pd.DataFrame(),
+                    source="empty",
+                    games_with_injuries=set(),
+                    games_without_injuries=set(),
+                    warnings=["No game_ids remain after All-Star filtering."],
+                ),
+                warnings=warnings,
+            )
+
         # Build tip lookup for injuries resolution
         tip_lookup = self._build_tip_lookup(schedule, game_ids)
 
@@ -443,6 +467,46 @@ class SharedFeaturesBuilder:
                     tip_lookup[game_id_int] = pd.to_datetime(tip_ts, utc=True)
 
         return tip_lookup
+
+    @staticmethod
+    def _filter_all_star_games(
+        *,
+        labels: pd.DataFrame,
+        schedule: pd.DataFrame,
+        game_ids: list[int],
+    ) -> tuple[pd.DataFrame, pd.DataFrame, list[int], set[int]]:
+        """Remove All-Star weekend games (game_id prefix 006) from inputs.
+
+        All-Star games use special teams and exhibition formats that should not
+        influence rolling priors or history-driven features. We filter them out
+        across labels, schedule, and game_ids before building features.
+        """
+
+        def _is_all_star(gid: object) -> bool:
+            if gid is None or (isinstance(gid, float) and pd.isna(gid)):
+                return False
+            try:
+                return str(int(gid)).zfill(10).startswith("006")
+            except Exception:
+                return False
+
+        dropped: set[int] = set()
+
+        if labels is not None and not labels.empty and "game_id" in labels.columns:
+            mask = labels["game_id"].apply(_is_all_star)
+            if mask.any():
+                dropped.update(int(gid) for gid in labels.loc[mask, "game_id"].dropna().unique())
+                labels = labels.loc[~mask].copy()
+
+        if schedule is not None and not schedule.empty and "game_id" in schedule.columns:
+            mask = schedule["game_id"].apply(_is_all_star)
+            if mask.any():
+                dropped.update(int(gid) for gid in schedule.loc[mask, "game_id"].dropna().unique())
+                schedule = schedule.loc[~mask].copy()
+
+        filtered_game_ids = [gid for gid in game_ids if not _is_all_star(gid)]
+
+        return labels, schedule, filtered_game_ids, dropped
 
     def _filter_snapshot_by_asof(
         self,
