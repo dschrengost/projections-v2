@@ -188,9 +188,11 @@ const deriveGames = (rows: PlayerRow[]): GameData[] => {
 
 const defaultOverride = (): PlayerOverrideState => ({ mode: 'none' })
 
-const toBandOnlyOverride = (override: PlayerOverrideState): PlayerOverrideState => {
-    const mode = override.mode
-    if (mode === 'none') return { mode: 'none', protect_weight: override.protect_weight }
+const toTargetOnlyOverride = (override: PlayerOverrideState): PlayerOverrideState => {
+    const mode = override.mode ?? 'none'
+    const protect_weight = override.protect_weight
+    if (mode === 'none') return { mode: 'none', protect_weight }
+    if (mode === 'zero' || mode === 'force_inactive') return { mode: 'zero', protect_weight }
 
     const asNum = (value: unknown): number | null => {
         if (value == null) return null
@@ -198,44 +200,26 @@ const toBandOnlyOverride = (override: PlayerOverrideState): PlayerOverrideState 
         return Number.isFinite(parsed) ? Math.max(0, Math.min(48, parsed)) : null
     }
 
-    let min = asNum(override.min_value)
-    let max = asNum(override.max_value)
-
-    if (mode === 'lock') {
-        const lock = asNum(override.lock_value)
-        if (lock != null) {
-            min = lock
-            max = lock
-        }
-    } else if (mode === 'cap') {
-        const cap = asNum(override.cap_value)
-        min = 0
-        max = cap ?? 48
-    } else if (mode === 'floor') {
-        const floor = asNum(override.floor_value)
-        min = floor ?? 0
-        max = 48
-    } else if (mode === 'zero' || mode === 'force_inactive') {
-        min = 0
-        max = 0
-    } else if (mode === 'force_active') {
-        return { mode: 'none', protect_weight: override.protect_weight }
+    const lock = asNum(override.lock_value)
+    if (mode === 'lock' && lock != null) {
+        if (lock <= 0) return { mode: 'zero', protect_weight }
+        return { mode: 'lock', lock_value: Number(lock.toFixed(1)), protect_weight }
     }
 
-    if (min == null && max == null) {
-        return { mode: 'none', protect_weight: override.protect_weight }
+    const min = asNum(override.min_value)
+    const max = asNum(override.max_value)
+    if (min != null && max != null) {
+        const mid = 0.5 * (min + max)
+        if (mid <= 0) return { mode: 'zero', protect_weight }
+        return { mode: 'lock', lock_value: Number(mid.toFixed(1)), protect_weight }
     }
-    if (min == null) min = Math.max(0, Math.min(48, max ?? 48))
-    if (max == null) max = Math.max(0, Math.min(48, min))
 
-    const lb = Math.min(min, max)
-    const ub = Math.max(min, max)
-    return {
-        mode: 'band',
-        min_value: Number(lb.toFixed(1)),
-        max_value: Number(ub.toFixed(1)),
-        protect_weight: override.protect_weight,
-    }
+    const cap = asNum(override.cap_value)
+    const floor = asNum(override.floor_value)
+    const fallback = lock ?? cap ?? floor
+    if (fallback == null) return { mode: 'none', protect_weight }
+    if (fallback <= 0) return { mode: 'zero', protect_weight }
+    return { mode: 'lock', lock_value: Number(fallback.toFixed(1)), protect_weight }
 }
 
 const overrideFromServer = (item: { mode: OverrideMode; fields: Record<string, unknown> }): PlayerOverrideState => {
@@ -258,6 +242,20 @@ const scaleByMinutes = (stat: number | null, baselineMinutes: number, resolvedMi
     if (stat == null) return null
     if (baselineMinutes <= 1e-6) return stat
     return stat * (resolvedMinutes / baselineMinutes)
+}
+
+const shiftMinutesBandToResolved = (band: { p10: number | null; p50: number | null; p90: number | null }, resolved: number, fallbackCenter: number) => {
+    const clamp = (n: number) => Math.max(0, Math.min(48, n))
+    const center = band.p50 ?? fallbackCenter
+    const delta = resolved - center
+    const shiftedP50 = clamp(resolved)
+    const shiftedP10 = band.p10 == null ? null : clamp(band.p10 + delta)
+    const shiftedP90 = band.p90 == null ? null : clamp(band.p90 + delta)
+    return {
+        p10: shiftedP10 == null ? null : Math.min(shiftedP10, shiftedP50),
+        p50: shiftedP50,
+        p90: shiftedP90 == null ? null : Math.max(shiftedP90, shiftedP50),
+    }
 }
 
 export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
@@ -395,7 +393,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         const overrides = localOverrides[targetGameId] || {}
         const payload = Object.entries(overrides).map(([playerId, override]) => ({
             player_id: playerId,
-            ...toBandOnlyOverride(override),
+            ...toTargetOnlyOverride(override),
         }))
 
         const response = await applyOverrides({
@@ -539,9 +537,15 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
             const baselineFpts = toMaybeNum(player.fpts_sim_uncond_mean ?? player.sim_dk_fpts_mean ?? player.proj_fpts)
             const resolvedFpts = scaleByMinutes(baselineFpts, baselineMinutes, resolvedMinutes)
             const band = resolveMinutesBand(player, bandSource)
-            const minutesP10 = toMaybeNum(band.p10)
-            const minutesP50 = toMaybeNum(band.p50)
-            const minutesP90 = toMaybeNum(band.p90)
+            const shiftedBand = shiftMinutesBandToResolved(
+                {
+                    p10: toMaybeNum(band.p10),
+                    p50: toMaybeNum(band.p50),
+                    p90: toMaybeNum(band.p90),
+                },
+                resolvedMinutes,
+                baselineMinutes,
+            )
 
             const override = overrideMap[playerId] || defaultOverride()
 
@@ -558,9 +562,9 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                 resolvedMinutes,
                 baselineFpts,
                 resolvedFpts,
-                minutesP10,
-                minutesP50,
-                minutesP90,
+                minutesP10: shiftedBand.p10,
+                minutesP50: shiftedBand.p50,
+                minutesP90: shiftedBand.p90,
                 override,
             }
         })
@@ -586,9 +590,15 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         const baselineMinutes = toNum(player.minutes_final ?? player.minutes_p50 ?? player.minutes_sim_uncond_mean)
         const resolvedMinutes = toNum(resolvedInfo?.mu_minutes, baselineMinutes)
         const band = resolveMinutesBand(player, bandSource)
-        const minutesP10 = toMaybeNum(band.p10)
-        const minutesP50 = toMaybeNum(band.p50)
-        const minutesP90 = toMaybeNum(band.p90)
+        const shiftedBand = shiftMinutesBandToResolved(
+            {
+                p10: toMaybeNum(band.p10),
+                p50: toMaybeNum(band.p50),
+                p90: toMaybeNum(band.p90),
+            },
+            resolvedMinutes,
+            baselineMinutes,
+        )
 
         const baselineFpts = toMaybeNum(player.fpts_sim_uncond_mean ?? player.sim_dk_fpts_mean ?? player.proj_fpts)
         const resolvedFpts = scaleByMinutes(baselineFpts, baselineMinutes, resolvedMinutes)
@@ -606,7 +616,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         const reasons: string[] = []
         if (teamDiag?.hit_floor_player_ids?.includes(selectedPlayerId)) reasons.push('binding floor')
         if (teamDiag?.hit_cap_player_ids?.includes(selectedPlayerId)) reasons.push('binding cap')
-        if (override.mode !== 'none') reasons.push('minutes band active')
+        if (override.mode !== 'none') reasons.push('target minutes active')
         if (teamDiag?.infeasibility_reason) reasons.push(`team infeasible: ${teamDiag.infeasibility_reason}`)
         const historyKey = `${date}:${selectedPlayerId}`
         const lastGames = lastGamesByKey[historyKey] || []
@@ -628,9 +638,9 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                 minutes: {
                     baseline: baselineMinutes,
                     resolved: resolvedMinutes,
-                    p10: minutesP10,
-                    p50: minutesP50 ?? resolvedMinutes,
-                    p90: minutesP90,
+                    p10: shiftedBand.p10,
+                    p50: shiftedBand.p50,
+                    p90: shiftedBand.p90,
                 },
                 fpts: {
                     baseline: baselineFpts,
@@ -706,14 +716,14 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
 
             <div className="gv2-controls">
                 <label>
-                    Minutes band
+                    Minutes tails
                     <select value={bandSource} onChange={(event) => setBandSource(event.target.value as MinutesBandSource)}>
                         <option value="base">{minutesBandLabel('base')}</option>
                         <option value="sim_uncond">{minutesBandLabel('sim_uncond')}</option>
                         <option value="sim_cond">{minutesBandLabel('sim_cond')}</option>
                     </select>
                 </label>
-                <span className="muted">Uncond median can undercount fringe minutes; base keeps team totals intact.</span>
+                <span className="muted">Source for displayed p10/p50/p90 (shifted to match resolved μ).</span>
             </div>
 
             <GameTabs tabs={tabs} activeGameId={activeGameId} onChange={onTabChange} />

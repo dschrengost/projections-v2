@@ -25,10 +25,10 @@ def main(
         None, "--run-date", help="Date to run sim for (YYYY-MM-DD). Defaults to today."
     ),
     profile_name: str = typer.Option(
-        "baseline",
+        "sim_v3",
         "--profile-name",
         "--profile",
-        help="Sim profile name (defaults to baseline for rates path).",
+        help="Sim profile name (defaults to sim_v3).",
     ),
     num_worlds: int = typer.Option(1000, "--num-worlds", "--n-worlds", help="Number of worlds per slate to simulate."),
     data_root: Path | None = typer.Option(None, "--data-root", help="Optional override for data root."),

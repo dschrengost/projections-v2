@@ -215,7 +215,7 @@ def _aggregate_for_date(
 def main(
     start_date: str = typer.Option(..., "--start-date", help="Inclusive start date (YYYY-MM-DD)."),
     end_date: str = typer.Option(..., "--end-date", help="Inclusive end date (YYYY-MM-DD)."),
-    profile: str = typer.Option("baseline", "--profile", help="Sim profile to filter when available."),
+    profile: str = typer.Option("sim_v3", "--profile", help="Sim profile to filter when available."),
     worlds_root: Path | None = typer.Option(
         None,
         "--worlds-root",

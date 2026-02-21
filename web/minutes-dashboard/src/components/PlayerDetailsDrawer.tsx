@@ -98,8 +98,8 @@ export const PlayerDetailsDrawer: React.FC<PlayerDetailsDrawerProps> = ({
                 </div>
 
                 <section className="gv2-drawer-section">
-                    <h4>Minutes Band</h4>
-                    <div className="muted gv2-band-note">Constrains resolved mean μ only; world tails remain stochastic.</div>
+                    <h4>Target Minutes</h4>
+                    <div className="muted gv2-band-note">Sets resolved mean minutes μ; worlds remain stochastic.</div>
                     <OverrideControl
                         value={player.override}
                         baselineMinutes={player.baselineMinutes}

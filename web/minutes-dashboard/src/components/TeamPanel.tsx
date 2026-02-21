@@ -49,7 +49,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
             <header className="gv2-team-header">
                 <div>
                     <h3>{teamName}</h3>
-                    <div className="muted gv2-band-source">Band source: {minutesBandLabel}</div>
+                    <div className="muted gv2-band-source">Tail source: {minutesBandLabel}</div>
                 </div>
             </header>
             <TeamBudgetBar diagnostics={diagnostics ?? null} />

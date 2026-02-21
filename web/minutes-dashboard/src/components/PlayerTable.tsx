@@ -42,10 +42,10 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                         <th>Status</th>
                         <th>Baseline Min</th>
                         <th>Resolved μ</th>
-                        <th>Band P10</th>
-                        <th>Band P50</th>
-                        <th>Band P90</th>
-                        <th>Minutes Band</th>
+                        <th>P10</th>
+                        <th>P50</th>
+                        <th>P90</th>
+                        <th>Target Min</th>
                         <th>FPTS</th>
                     </tr>
                 </thead>

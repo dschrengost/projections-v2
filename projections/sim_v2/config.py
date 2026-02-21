@@ -321,7 +321,7 @@ def _resolve_minutes_run_id(explicit: Optional[str]) -> Optional[str]:
 
 def load_sim_v2_profile(
     *,
-    profile: str = "baseline",
+    profile: str = "sim_v3",
     profiles_path: Optional[Path] = None,
 ) -> SimV2Profile:
     path = (profiles_path or DEFAULT_PROFILES_PATH).expanduser().resolve()

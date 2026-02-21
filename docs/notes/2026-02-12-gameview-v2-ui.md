@@ -8,7 +8,8 @@ Key UX updates:
 - Game tabs for fast switching between games.
 - Each game shows both teams side-by-side.
 - Player row click opens a right-side drawer with baseline vs resolved projections.
-- Override controls now edit constraints (`none`, `lock`, `band`, `cap`, `floor`, `zero`, `force_active`, `force_inactive`) rather than ad-hoc deltas.
+- Override controls now expose a single **Target Minutes** input (mean μ). The server compiles this into a v2 `lock` constraint and reallocates the rest of the team to sum to 240.
+- Minutes p10/p50/p90 tails shown in the UI are shifted to match the resolved mean (so distributions move with overrides).
 
 ## Apply vs Apply & Run Worlds
 

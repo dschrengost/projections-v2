@@ -11,42 +11,38 @@ type OverrideControlProps = {
 
 const normalizeMinutes = (n: number) => Number(Math.max(0, Math.min(48, n)).toFixed(1))
 
-const orderBand = (a: number, b: number) => {
-    const min = normalizeMinutes(Math.min(a, b))
-    const max = normalizeMinutes(Math.max(a, b))
-    return { min, max }
+const toMaybeNum = (value: unknown): number | null => {
+    if (value == null) return null
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
 }
 
-const deriveBand = (
-    current: PlayerOverrideState | undefined,
-    resolvedMinutes: number,
-    baselineMinutes: number,
-): { min: number; max: number; sourceMode: OverrideMode } => {
+const deriveTarget = (current: PlayerOverrideState | undefined): { target: number | null; sourceMode: OverrideMode } => {
     const mode = current?.mode ?? 'none'
-    if (mode === 'band') {
-        const min = normalizeMinutes(current?.min_value ?? Math.max(0, resolvedMinutes - 2))
-        const max = normalizeMinutes(current?.max_value ?? Math.min(48, resolvedMinutes + 2))
-        return { ...orderBand(min, max), sourceMode: mode }
-    }
+    if (mode === 'none') return { target: null, sourceMode: mode }
+    if (mode === 'zero' || mode === 'force_inactive') return { target: 0, sourceMode: mode }
     if (mode === 'lock') {
-        const lock = normalizeMinutes(current?.lock_value ?? resolvedMinutes)
-        return { min: lock, max: lock, sourceMode: mode }
+        const lock = toMaybeNum(current?.lock_value)
+        return { target: lock == null ? null : normalizeMinutes(lock), sourceMode: mode }
     }
+    if (mode === 'band') {
+        const min = toMaybeNum(current?.min_value)
+        const max = toMaybeNum(current?.max_value)
+        if (min != null && max != null) {
+            return { target: normalizeMinutes(0.5 * (min + max)), sourceMode: mode }
+        }
+        return { target: null, sourceMode: mode }
+    }
+    // Legacy/advanced v2 modes: prefer showing something rather than an empty box.
     if (mode === 'cap') {
-        const cap = normalizeMinutes(current?.cap_value ?? resolvedMinutes)
-        return { ...orderBand(0, cap), sourceMode: mode }
+        const cap = toMaybeNum(current?.cap_value)
+        return { target: cap == null ? null : normalizeMinutes(cap), sourceMode: mode }
     }
     if (mode === 'floor') {
-        const floor = normalizeMinutes(current?.floor_value ?? Math.max(0, baselineMinutes * 0.5))
-        return { ...orderBand(floor, 48), sourceMode: mode }
+        const floor = toMaybeNum(current?.floor_value)
+        return { target: floor == null ? null : normalizeMinutes(floor), sourceMode: mode }
     }
-    if (mode === 'zero' || mode === 'force_inactive') {
-        return { min: 0, max: 0, sourceMode: mode }
-    }
-    return {
-        ...orderBand(Math.max(0, resolvedMinutes - 2), Math.min(48, resolvedMinutes + 2)),
-        sourceMode: mode,
-    }
+    return { target: null, sourceMode: mode }
 }
 
 export const OverrideControl: React.FC<OverrideControlProps> = ({
@@ -57,56 +53,61 @@ export const OverrideControl: React.FC<OverrideControlProps> = ({
     compact = false,
 }) => {
     const current = value ?? { mode: 'none' as OverrideMode }
-    const band = deriveBand(current, resolvedMinutes, baselineMinutes)
-    const isActive = current.mode !== 'none'
+    const derived = deriveTarget(current)
+    const target = derived.target
+    const isActive = (current.mode ?? 'none') !== 'none'
 
-    const applyBand = (min: number, max: number) => {
-        const ordered = orderBand(min, max)
+    const applyTarget = (val: number | null) => {
+        if (val == null) {
+            onChange({ mode: 'none', protect_weight: current.protect_weight })
+            return
+        }
+        const normalized = normalizeMinutes(val)
+        if (normalized <= 0) {
+            onChange({ mode: 'zero', protect_weight: current.protect_weight })
+            return
+        }
         onChange({
-            mode: 'band',
-            min_value: ordered.min,
-            max_value: ordered.max,
+            mode: 'lock',
+            lock_value: normalized,
             protect_weight: current.protect_weight,
         })
     }
 
-    const clearBand = () => {
-        onChange({ mode: 'none', protect_weight: current.protect_weight })
-    }
+    const clearTarget = () => applyTarget(null)
+
+    const placeholder = current.mode === 'none'
+        ? normalizeMinutes(resolvedMinutes).toFixed(1)
+        : target == null
+            ? ''
+            : target.toFixed(1)
 
     return (
         <div className={`gv2-override-control ${compact ? 'compact' : ''}`} onClick={(e) => e.stopPropagation()}>
-            <div className="gv2-override-row gv2-band-row">
-                {!compact ? <span className="gv2-band-label">Band</span> : null}
+            <div className="gv2-override-row gv2-target-row">
+                {!compact ? <span className="gv2-band-label">Target</span> : null}
                 <input
                     type="number"
                     className="gv2-input"
                     step={0.5}
                     min={0}
                     max={48}
-                    value={band.min}
+                    value={target ?? ''}
+                    placeholder={placeholder}
                     onChange={(e) => {
-                        if (!e.target.value) return
-                        applyBand(Number(e.target.value), band.max)
+                        const raw = e.target.value
+                        if (!raw) {
+                            applyTarget(null)
+                            return
+                        }
+                        const parsed = Number(raw)
+                        if (!Number.isFinite(parsed)) return
+                        applyTarget(parsed)
                     }}
-                    aria-label="Minimum mean minutes"
-                />
-                <span className="gv2-band-sep">to</span>
-                <input
-                    type="number"
-                    className="gv2-input"
-                    step={0.5}
-                    min={0}
-                    max={48}
-                    value={band.max}
-                    onChange={(e) => {
-                        if (!e.target.value) return
-                        applyBand(band.min, Number(e.target.value))
-                    }}
-                    aria-label="Maximum mean minutes"
+                    aria-label="Target mean minutes"
                 />
                 {compact && isActive ? (
-                    <button type="button" className="gv2-band-clear" onClick={clearBand} title="Clear band">
+                    <button type="button" className="gv2-band-clear" onClick={clearTarget} title="Clear target">
                         Clear
                     </button>
                 ) : null}
@@ -114,16 +115,16 @@ export const OverrideControl: React.FC<OverrideControlProps> = ({
 
             {!compact && (
                 <div className="gv2-quick-actions">
-                    <button type="button" onClick={() => applyBand(resolvedMinutes - 2, resolvedMinutes + 2)}>μ ±2</button>
-                    <button type="button" onClick={() => applyBand(resolvedMinutes, resolvedMinutes)}>Lock μ</button>
-                    <button type="button" onClick={() => applyBand(0, 0)}>0</button>
-                    <button type="button" onClick={clearBand}>Clear</button>
+                    <button type="button" onClick={() => applyTarget(resolvedMinutes)}>Use resolved</button>
+                    <button type="button" onClick={() => applyTarget(baselineMinutes)}>Use baseline</button>
+                    <button type="button" onClick={() => applyTarget(0)}>0</button>
+                    <button type="button" onClick={clearTarget}>Clear</button>
                 </div>
             )}
 
-            {!compact && band.sourceMode !== 'none' && band.sourceMode !== 'band' ? (
+            {!compact && derived.sourceMode !== 'none' && derived.sourceMode !== 'lock' && derived.sourceMode !== 'zero' ? (
                 <div className="muted gv2-band-note">
-                    Existing `{band.sourceMode}` converted to band on edit.
+                    Existing `{derived.sourceMode}` converted to target on edit.
                 </div>
             ) : null}
         </div>
