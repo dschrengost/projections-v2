@@ -18,7 +18,7 @@ import argparse
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -78,6 +78,47 @@ def _filter_games_by_date(
 
 def _expand_id_window(start_id: int, end_id: int, *, expansion: int) -> tuple[int, int]:
     return (max(230000, start_id - expansion), end_id + expansion)
+
+
+def _parse_utc_ts(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    value = str(raw).strip()
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(value)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _should_refresh_existing_file(path: Path, refresh_older_than_minutes: int) -> bool:
+    """Return True when an existing props file is old enough to re-fetch."""
+    if refresh_older_than_minutes <= 0 or not path.exists():
+        return False
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    age_limit = timedelta(minutes=int(refresh_older_than_minutes))
+    fetched_at: datetime | None = None
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        fetched_at = _parse_utc_ts(payload.get("fetched_at"))
+    except Exception:
+        fetched_at = None
+
+    if fetched_at is None:
+        try:
+            fetched_at = datetime.utcfromtimestamp(path.stat().st_mtime)
+        except Exception:
+            return True
+
+    return (now - fetched_at) >= age_limit
 
 
 def estimate_game_id_range(target_date: str) -> tuple[int, int]:
@@ -226,7 +267,12 @@ def scan_date_range_parallel(start_id: int, end_id: int, workers: int = 100) -> 
     return games_by_date
 
 
-def fetch_props_for_games(games: list[dict], output_dir: Path, workers: int = 30) -> dict:
+def fetch_props_for_games(
+    games: list[dict],
+    output_dir: Path,
+    workers: int = 30,
+    refresh_older_than_minutes: int = 0,
+) -> dict:
     """Fetch props for games and save to bronze."""
     output_dir.mkdir(parents=True, exist_ok=True)
     stats = {"success": 0, "no_props": 0, "failed": 0, "skipped": 0}
@@ -239,7 +285,9 @@ def fetch_props_for_games(games: list[dict], output_dir: Path, workers: int = 30
         # Check if already fetched
         filename = f"{date}_{game_id}_{'_'.join(teams)}.json"
         output_path = output_dir / filename
-        if output_path.exists():
+        if output_path.exists() and not _should_refresh_existing_file(
+            output_path, refresh_older_than_minutes
+        ):
             return ("skipped", None)
 
         # Fetch props
@@ -298,6 +346,15 @@ def main():
         help=(
             "Include this many extra UTC days past --end-date when filtering discovered games. "
             "Default 1 handles U.S. evening slates that appear under next UTC date."
+        ),
+    )
+    parser.add_argument(
+        "--refresh-older-than-minutes",
+        type=int,
+        default=0,
+        help=(
+            "When >0, re-fetch existing game files older than this many minutes "
+            "(delta refresh for moving lines). Default 0 keeps current skip behavior."
         ),
     )
     args = parser.parse_args()
@@ -415,7 +472,12 @@ def main():
 
     # Fetch props
     print("\nFetching props...")
-    stats = fetch_props_for_games(all_games, BRONZE_DIR, workers=30)
+    stats = fetch_props_for_games(
+        all_games,
+        BRONZE_DIR,
+        workers=30,
+        refresh_older_than_minutes=max(0, int(args.refresh_older_than_minutes)),
+    )
 
     print(f"\n{'='*60}")
     print("Backfill Complete")

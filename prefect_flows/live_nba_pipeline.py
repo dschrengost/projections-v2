@@ -211,7 +211,16 @@ def scrape_props_task(*, game_date: str, data_root: Path) -> None:
     try:
         _run_python_module(
             "scrapers.action_network.props_backfill",
-            ["--start-date", game_date, "--end-date", game_date, "--workers", "40"],
+            [
+                "--start-date",
+                game_date,
+                "--end-date",
+                game_date,
+                "--workers",
+                "40",
+                "--refresh-older-than-minutes",
+                "20",
+            ],
             data_root=data_root,
             timeout_s=1200,
         )
