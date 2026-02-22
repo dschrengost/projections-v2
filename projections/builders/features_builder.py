@@ -475,7 +475,7 @@ class SharedFeaturesBuilder:
         schedule: pd.DataFrame,
         game_ids: list[int],
     ) -> tuple[pd.DataFrame, pd.DataFrame, list[int], set[int]]:
-        """Remove All-Star weekend games (game_id prefix 006) from inputs.
+        """Remove All-Star weekend games from inputs.
 
         All-Star games use special teams and exhibition formats that should not
         influence rolling priors or history-driven features. We filter them out
@@ -486,7 +486,10 @@ class SharedFeaturesBuilder:
             if gid is None or (isinstance(gid, float) and pd.isna(gid)):
                 return False
             try:
-                return str(int(gid)).zfill(10).startswith("006")
+                gid_norm = str(int(gid)).zfill(10)
+                # Historical All-Star / exhibition formats can appear under
+                # both `006*` and `00325*` game-id namespaces.
+                return gid_norm.startswith("006") or gid_norm.startswith("00325")
             except Exception:
                 return False
 
