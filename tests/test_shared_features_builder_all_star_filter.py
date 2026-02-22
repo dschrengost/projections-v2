@@ -8,9 +8,9 @@ from projections.builders.features_builder import SharedFeaturesBuilder
 def test_all_star_games_are_filtered_from_history() -> None:
     labels = pd.DataFrame(
         {
-            "game_id": [int("0060000001"), int("0022600001")],
-            "player_id": [1, 2],
-            "team_id": [999001, 1610612737],
+            "game_id": [int("0060000001"), int("32500021"), int("0022600001")],
+            "player_id": [1, 2, 3],
+            "team_id": [999001, 1610616860, 1610612737],
         }
     )
     schedule = pd.DataFrame({"game_id": labels["game_id"]})
@@ -22,7 +22,7 @@ def test_all_star_games_are_filtered_from_history() -> None:
     )
 
     # All-Star game removed
-    assert set(dropped) == {int("0060000001")}
+    assert set(dropped) == {int("0060000001"), int("32500021")}
     assert filtered_labels["game_id"].tolist() == [int("0022600001")]
     assert filtered_schedule["game_id"].tolist() == [int("0022600001")]
     assert game_ids == [int("0022600001")]
