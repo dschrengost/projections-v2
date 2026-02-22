@@ -888,7 +888,19 @@ class SetTransformerMinutesModel(nn.Module):
             batch_first=True,
             activation="gelu",
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_transformer_layers)
+        # Disable nested-tensor path for stability; some environments hit low-level
+        # runtime issues in the prototype nested implementation.
+        try:
+            self.encoder = nn.TransformerEncoder(
+                encoder_layer,
+                num_layers=num_transformer_layers,
+                enable_nested_tensor=False,
+            )
+        except TypeError:
+            # Older torch versions do not expose enable_nested_tensor.
+            self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_transformer_layers)
+            if hasattr(self.encoder, "enable_nested_tensor"):
+                self.encoder.enable_nested_tensor = False
         if self.use_gate_head:
             if self.num_experts > 1:
                 router_in_dim = embed_dim + self.router_feature_dim
