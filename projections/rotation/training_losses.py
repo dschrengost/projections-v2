@@ -125,8 +125,13 @@ def compute_minutes_out_loss(
         mask: (B, N) boolean mask of valid roster slots
 
     Returns:
-        scalar loss: mean absolute minutes for non-rotation players
+        scalar loss: mean smooth-L1 minutes for non-rotation players
     """
-    out_rotation = (1.0 - in_rotation) * mask.to(dtype=pred_minutes.dtype)
+    out_rotation = (1.0 - in_rotation).to(dtype=pred_minutes.dtype) * mask.to(dtype=pred_minutes.dtype)
     denom = out_rotation.sum().clamp(min=1.0)
-    return (pred_minutes.abs() * out_rotation).sum() / denom
+    smooth_l1 = torch.nn.functional.smooth_l1_loss(
+        pred_minutes * out_rotation,
+        torch.zeros_like(pred_minutes),
+        reduction="none",
+    )
+    return smooth_l1.sum() / denom

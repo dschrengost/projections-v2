@@ -978,25 +978,18 @@ def main() -> None:
         efficiency_highs=EFFICIENCY_HIGHS,
     )
     model = build_joint_model(config).to(device)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(args.lr),
+        weight_decay=float(args.weight_decay),
+    )
 
     history: list[dict[str, Any]] = []
     best_val = float("inf")
     best_state: dict[str, torch.Tensor] | None = None
-    optimizer: torch.optim.Optimizer | None = None
-    prev_freeze_now: bool | None = None
     for epoch in range(1, int(args.epochs) + 1):
         freeze_now = epoch <= int(args.freeze_minutes_epochs)
         _set_minutes_backbone_trainable(model, not freeze_now)
-        if optimizer is None or prev_freeze_now != freeze_now:
-            # Rebuild optimizer only when trainable parameter set changes
-            # (e.g., freeze->unfreeze transition). This preserves optimizer
-            # state across normal epochs instead of resetting every epoch.
-            optimizer = torch.optim.AdamW(
-                [p for p in model.parameters() if p.requires_grad],
-                lr=float(args.lr),
-                weight_decay=float(args.weight_decay),
-            )
-            prev_freeze_now = freeze_now
         model.train()
         train_total = 0.0
         train_minutes = 0.0
@@ -1108,8 +1101,6 @@ def main() -> None:
                 + float(args.anti_smear_weight) * loss_anti_smear
             )
 
-            if optimizer is None:
-                raise RuntimeError("Optimizer is not initialized")
             optimizer.zero_grad(set_to_none=True)
             total_loss.backward()
             if float(args.grad_clip_norm) > 0:

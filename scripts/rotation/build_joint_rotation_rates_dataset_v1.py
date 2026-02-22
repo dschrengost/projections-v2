@@ -602,12 +602,37 @@ def main() -> None:
     )
 
     if args.drop_rows_missing_any_rates:
-        keep = pd.to_numeric(labels_rates_df["rates_label_available_any"], errors="coerce").fillna(0).astype(int) > 0
-        before = int(len(features_aug_df))
-        features_aug_df = features_aug_df.loc[keep].reset_index(drop=True)
-        labels_minutes_df = labels_minutes_df.loc[keep].reset_index(drop=True)
-        labels_rates_df = labels_rates_df.loc[keep].reset_index(drop=True)
-        print(f"[joint_dataset] drop missing rates rows: {before}->{len(features_aug_df)}")
+        # Keep whole team-game sets intact (do not drop individual rows), otherwise
+        # roster-set structure is corrupted and 240-minute allocation training is biased.
+        rates_any = pd.to_numeric(labels_rates_df["rates_label_available_any"], errors="coerce").fillna(0).astype(int)
+        tg_index = features_aug_df.loc[:, ["game_id", "team_id"]].copy()
+        tg_index["rates_any"] = rates_any.to_numpy()
+        keep_team_games = (
+            tg_index.groupby(["game_id", "team_id"], sort=False)["rates_any"].sum() > 0
+        )
+        keep_mask = pd.Series(
+            list(zip(features_aug_df["game_id"], features_aug_df["team_id"], strict=False)),
+            index=features_aug_df.index,
+        ).isin(set(keep_team_games[keep_team_games].index.tolist()))
+        before_rows = int(len(features_aug_df))
+        before_tg = int(
+            features_aug_df.loc[:, ["game_id", "team_id"]]
+            .drop_duplicates()
+            .shape[0]
+        )
+        features_aug_df = features_aug_df.loc[keep_mask].reset_index(drop=True)
+        labels_minutes_df = labels_minutes_df.loc[keep_mask].reset_index(drop=True)
+        labels_rates_df = labels_rates_df.loc[keep_mask].reset_index(drop=True)
+        after_tg = int(
+            features_aug_df.loc[:, ["game_id", "team_id"]]
+            .drop_duplicates()
+            .shape[0]
+        )
+        print(
+            "[joint_dataset] drop missing rates team-games:",
+            f"rows={before_rows}->{len(features_aug_df)}",
+            f"team_games={before_tg}->{after_tg}",
+        )
 
     if args.max_rows is not None and args.max_rows > 0 and len(features_aug_df) > args.max_rows:
         keep_n = int(args.max_rows)
