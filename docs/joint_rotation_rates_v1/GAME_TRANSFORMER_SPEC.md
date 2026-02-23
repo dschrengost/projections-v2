@@ -146,7 +146,7 @@ without bench/starter hand-coded realloc rules.
 
 Let `Y` be `(P, S)` for each game.
 
-v1 target dimensions per player (`S = 14`):
+v1 target dimensions per player (`S = 13`):
 
 1. `fga2`
 2. `fg2m`
@@ -161,10 +161,13 @@ v1 target dimensions per player (`S = 14`):
 11. `blk`
 12. `tov`
 13. `pf`
-14. `minutes` (jointly modeled with stats)
 
 Notes:
 
+- `minutes` is **not** a flow target. `M` from Section 3.4 is the conditioning input
+  to `p_flow(Y | A, M, X)`; raw count stats scale with minutes through that conditioning.
+  Predicting minutes twice would overdetermine the flow and create an inference ambiguity
+  between the two heads.
 - `plus_minus` is excluded in v1 to reduce noise and data pressure.
 - percentages are derived downstream (`fg2_pct`, `fg3_pct`, `ft_pct`),
   avoiding undefined-label edge cases at zero attempts.
@@ -228,6 +231,19 @@ Use box-score-derived labels where possible to increase sample size.
 
 - mandatory: attempts, makes, rebounds, assists, steals, blocks, turnovers, fouls, minutes
 - derived in pipeline: points, percentages, totals
+
+## 4.5 Required game-level features in X
+
+The following game-level features are **mandatory** inputs (not optional):
+
+- `vegas_total`: pre-game over/under (pace proxy)
+- `vegas_spread`: point spread (game-script prior)
+- `estimated_possessions`: derived from historical pace of both teams (or Vegas total surrogate)
+
+These features are the primary mechanism by which the flow learns game-volume budget
+constraints (total rebounds, total possessions). Without them, the `H_game` token carries
+insufficient information to bound "everyone hits their ceiling" worlds. Omitting any of
+these from X is a training error, not a tuning choice.
 
 ## 4.3 Dequantization
 
@@ -373,6 +389,10 @@ These definitions must be asserted in tests and documented in output manifest.
   - team-stack variance calibration
 - active-rate calibration by role tier
 - DD/TD rate calibration
+- game-volume budget calibration:
+  - sampled total rebounds per game vs. implied missed FGAs (`fga - fgm` summed across both teams)
+  - sampled total possessions estimate vs. `estimated_possessions` feature
+  - flag worlds where total game rebounds exceed total missed shots by > 5%
 
 ## 8.2 Backtest metrics (QuickBuild)
 
@@ -489,6 +509,12 @@ Do not fallback to independent per-player sampling.
 2. Active-label threshold definition (`>= 1` min vs `>= 4` min).
 3. Whether to include `pf` in v1 target space.
 4. Whether to include explicit blowout token beyond spread/total features.
+5. Rebound/possession budget enforcement: the current design relies on the `H_game`
+   token (conditioned on `vegas_total` and `estimated_possessions`) to teach the flow
+   implicit budget constraints. If game-volume calibration diagnostics (Section 8.1)
+   show persistent violations, consider an explicit first-pass sample of
+   `total_possessions` as a latent variable that player-level stats are then conditioned
+   on — analogous to the capped-simplex for minutes.
 
 ---
 
