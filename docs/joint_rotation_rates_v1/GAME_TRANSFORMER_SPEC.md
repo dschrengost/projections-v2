@@ -1057,10 +1057,78 @@ Current state:
 - **A promoted Phase 2 checkpoint exists and passes the current gate criteria.**
 - World sampling strict contracts pass for the promoted checkpoint.
 
-Recommended next step:
+Required next step (quality-first before Phase 3):
 
-1. Start Phase 3 (`L_decision`) from promoted run:
+1. Run a focused **Phase 2 optimizer/hyperparameter pass** starting from the promoted checkpoint:
    `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T022707Z/trials/anchor95_warm12_flow010/run`
-2. Keep the frozen Phase 1 baseline eval file as anchor reference for ongoing parity checks:
+   - primary knobs: AdamW `lr`, `weight_decay` (optionally betas), batch size, grad clipping
+   - secondary knobs: `flow_num_blocks`, `flow_scale_clip`, and Phase 2 schedule controls
+     (`phase2_flow_warmup_epochs`, `phase2_anchor_end_weight`, `w_*` loss weights)
+2. Re-evaluate all candidates against the frozen Phase 1 anchor on `val_days=60`:
    `/home/daniel/projections-data/training/runs/game_transformer_v2_possfix_20260224T002514Z_e10/eval_slices_60d.json`
-3. Preserve fallback readiness: retain the Phase 1 checkpoint as immediate rollback path until Phase 3/4 go-no-go is complete.
+   - require parity/contract checks for every candidate
+   - run multi-seed confirmation (minimum 3 seeds) on top configs before promotion
+3. Promote a **Phase 2 quality-optimized** checkpoint only after consistent multi-seed gains.
+4. Start Phase 3 (`L_decision`) only after Step 3 is complete.
+5. Preserve fallback readiness: retain the Phase 1 and current promoted Phase 2 checkpoints
+   as rollback options until Phase 3/4 go-no-go is complete.
+
+### Status Update (2026-02-24, Phase 2 optimizer-quality pass + multi-seed promotion)
+
+Completed the required quality-first steps (1-3) from the post-Phase-2 promotion handoff.
+
+Implementation additions:
+
+1. Extended `scripts/rotation/sweep_game_transformer_v2_phase2.py` for quality-pass workflows:
+   - new optimizer-focused default preset (`--trial-preset optimizer_quality`)
+   - per-candidate strict world-contract verification (`--require-world-contract-check-all`)
+   - multi-seed confirmation flow on top configs (`--multi-seed-top-k`, `--multi-seed-list`, gating controls)
+   - new artifacts:
+     - `multiseed_results.json`
+     - `multiseed_leaderboard.csv`
+     - `multiseed_leaderboard.md`
+2. Added/expanded tests in `tests/rotation/test_sweep_game_transformer_v2_phase2.py`:
+   - seed-list parsing behavior
+   - multi-seed promotion gate behavior
+
+Quality-pass run details:
+
+- command used:
+  `uv run python -m scripts.rotation.sweep_game_transformer_v2_phase2 --trial-preset optimizer_quality --dataset-dir /home/daniel/projections-data/training/datasets/joint_rotation_rates_v1_possfix_20260224T002514Z --baseline-eval-json /home/daniel/projections-data/training/runs/game_transformer_v2_possfix_20260224T002514Z_e10/eval_slices_60d.json --init-model-pt /home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T022707Z/trials/anchor95_warm12_flow010/run/model.pt --epochs 3 --train-val-days 14 --eval-val-days 60 --device cpu --require-world-contract-check-all --world-num-games 1 --world-num-worlds 64 --multi-seed-top-k 2 --multi-seed-list 42,77,123 --multi-seed-min-seeds 3 --multi-seed-require-all-pass --multi-seed-require-mean-gains --multi-seed-max-mean-delta-minutes-mae-lineup1 0.05 --multi-seed-max-mean-delta-minutes-gap-abs 0.05 --auto-promote`
+- sweep root:
+  `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z`
+- base sweep result: `4/4` trials passed gate + strict contracts.
+- multi-seed result: `2/2` top configs passed with 3/3 seed runs each.
+
+Promoted quality-optimized Phase 2 checkpoint:
+
+- promoted trial:
+  `opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18`
+- promoted run dir:
+  `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z/trials/opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18/run`
+- promotion record:
+  `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z/promoted_phase2.json`
+
+Promoted selected-seed metrics vs frozen Phase 1 baseline (`eval_slices_60d.json`):
+
+- minutes MAE (`lineup_available=0`): `3.2124 -> 3.1699` (improved)
+- minutes MAE (`lineup_available=1`): `3.2236 -> 3.1779` (improved)
+- lineup parity gap: `0.0112 -> 0.0080` (improved)
+- active-count MAE: `0.6495 -> 0.5817` (improved)
+- possessions proxy MAE: `4.0874 -> 4.0874` (unchanged)
+
+Multi-seed mean deltas for promoted config (`seeds=42,77,123`):
+
+- `delta_minutes_mae_lineup0=-0.0303`
+- `delta_minutes_mae_lineup1=-0.0258`
+- `delta_minutes_mae_gap_abs=+0.0045`
+- `delta_active_count_mae=-0.0419`
+
+Contract verification status:
+
+- strict world-contract checks were required and passed for every base candidate and every multi-seed run in this pass (no failures).
+
+Phase boundary:
+
+- Step 3 is complete (quality-optimized Phase 2 checkpoint promoted).
+- Phase 3 (`L_decision`) has **not** been started in this update.

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Targeted Phase 2 sweep for GameTransformerV2 anchor-parity recovery."""
+"""Targeted Phase 2 sweep for GameTransformerV2 anchor-parity recovery.
+
+Supports two operation modes:
+- anchor-recovery sweep (legacy/default)
+- optimizer-quality sweep with optional multi-seed confirmation
+"""
 
 from __future__ import annotations
 
@@ -127,6 +132,84 @@ def _default_trials() -> list[Trial]:
     return [Trial(name=_slugify(name), params=params) for name, params in rows]
 
 
+def _default_optimizer_trials() -> list[Trial]:
+    rows = [
+        (
+            "opt_lr5e4_wd5e5_bs32_clip075_flow4",
+            {
+                "lr": 5e-4,
+                "weight_decay": 5e-5,
+                "batch_size": 32,
+                "backbone_grad_clip_norm": 0.75,
+                "flow_grad_clip_norm": 3.0,
+                "flow_num_blocks": 4,
+                "flow_scale_clip": 2.0,
+                "phase2_anchor_end_weight": 0.95,
+                "phase2_flow_warmup_epochs": 12,
+                "w_count": 0.50,
+                "w_member": 0.50,
+                "w_minutes_nll": 0.50,
+                "w_flow_nll": 0.10,
+            },
+        ),
+        (
+            "opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18",
+            {
+                "lr": 3e-4,
+                "weight_decay": 1e-4,
+                "batch_size": 32,
+                "backbone_grad_clip_norm": 0.75,
+                "flow_grad_clip_norm": 3.0,
+                "flow_num_blocks": 4,
+                "flow_scale_clip": 1.8,
+                "phase2_anchor_end_weight": 0.95,
+                "phase2_flow_warmup_epochs": 12,
+                "w_count": 0.50,
+                "w_member": 0.50,
+                "w_minutes_nll": 0.50,
+                "w_flow_nll": 0.10,
+            },
+        ),
+        (
+            "opt_lr7e4_wd1e5_bs24_clip10_flow5_warm10",
+            {
+                "lr": 7e-4,
+                "weight_decay": 1e-5,
+                "batch_size": 24,
+                "backbone_grad_clip_norm": 1.0,
+                "flow_grad_clip_norm": 4.0,
+                "flow_num_blocks": 5,
+                "flow_scale_clip": 2.0,
+                "phase2_anchor_end_weight": 0.95,
+                "phase2_flow_warmup_epochs": 10,
+                "w_count": 0.50,
+                "w_member": 0.50,
+                "w_minutes_nll": 0.60,
+                "w_flow_nll": 0.08,
+            },
+        ),
+        (
+            "opt_lr4e4_wd5e5_bs24_clip075_flow5_anchor96_w14",
+            {
+                "lr": 4e-4,
+                "weight_decay": 5e-5,
+                "batch_size": 24,
+                "backbone_grad_clip_norm": 0.75,
+                "flow_grad_clip_norm": 3.5,
+                "flow_num_blocks": 5,
+                "flow_scale_clip": 1.8,
+                "phase2_anchor_end_weight": 0.96,
+                "phase2_flow_warmup_epochs": 14,
+                "w_count": 0.55,
+                "w_member": 0.55,
+                "w_minutes_nll": 0.55,
+                "w_flow_nll": 0.08,
+            },
+        ),
+    ]
+    return [Trial(name=_slugify(name), params=params) for name, params in rows]
+
+
 def _read_trials_file(path: Path) -> list[Trial]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
@@ -238,6 +321,98 @@ def _meets_promotion_gate(
     )
 
 
+def _parse_seed_list(value: str | None, *, base_seed: int, min_seeds: int) -> list[int]:
+    seeds: list[int] = []
+    if value:
+        for token in str(value).split(","):
+            tok = token.strip()
+            if not tok:
+                continue
+            seeds.append(int(tok))
+
+    if not seeds:
+        seeds = [int(base_seed), int(base_seed) + 17, int(base_seed) + 29]
+
+    seeds = [int(base_seed), *[int(s) for s in seeds if int(s) != int(base_seed)]]
+
+    ordered: list[int] = []
+    seen: set[int] = set()
+    for seed in seeds:
+        if int(seed) in seen:
+            continue
+        seen.add(int(seed))
+        ordered.append(int(seed))
+
+    while len(ordered) < int(min_seeds):
+        ordered.append(int(ordered[-1]) + 17)
+
+    return ordered
+
+
+def _safe_mean(values: list[float]) -> float:
+    vals = [float(v) for v in values if math.isfinite(float(v))]
+    if not vals:
+        return float("nan")
+    return float(sum(vals) / len(vals))
+
+
+def _mean_deltas(seed_rows: list[dict[str, Any]]) -> dict[str, float]:
+    keys = [
+        "delta_minutes_mae_lineup0",
+        "delta_minutes_mae_lineup1",
+        "delta_minutes_mae_gap_abs",
+        "delta_active_count_mae",
+        "delta_possessions_proxy_mae",
+    ]
+    out: dict[str, float] = {}
+    for key in keys:
+        out[key] = _safe_mean([
+            _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get(key)) for r in seed_rows
+        ])
+    return out
+
+
+def _meets_multi_seed_promotion_gate(
+    *,
+    seed_rows: list[dict[str, Any]],
+    min_required: int,
+    require_all_pass: bool,
+    require_mean_gains: bool,
+    max_mean_delta_minutes_mae_lineup1: float,
+    max_mean_delta_minutes_gap_abs: float,
+) -> bool:
+    if not seed_rows:
+        return False
+
+    ok_rows = [r for r in seed_rows if str(r.get("status")) == "ok"]
+    if len(ok_rows) < int(min_required):
+        return False
+
+    pass_rows = [r for r in ok_rows if bool(r.get("promotion_gate_pass", False))]
+    if len(pass_rows) < int(min_required):
+        return False
+    if bool(require_all_pass) and len(pass_rows) < len(seed_rows):
+        return False
+
+    mean_deltas = _mean_deltas(pass_rows)
+    if not math.isfinite(float(mean_deltas["delta_minutes_mae_lineup1"])):
+        return False
+    if not math.isfinite(float(mean_deltas["delta_minutes_mae_gap_abs"])):
+        return False
+    if float(mean_deltas["delta_minutes_mae_lineup1"]) > float(max_mean_delta_minutes_mae_lineup1):
+        return False
+    if float(mean_deltas["delta_minutes_mae_gap_abs"]) > float(max_mean_delta_minutes_gap_abs):
+        return False
+
+    if bool(require_mean_gains):
+        if float(mean_deltas["delta_minutes_mae_lineup0"]) > 0.0:
+            return False
+        if float(mean_deltas["delta_active_count_mae"]) > 0.0:
+            return False
+
+    return True
+
+
 def _run(cmd: list[str], *, log_path: Path) -> subprocess.CompletedProcess[str]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
@@ -256,12 +431,297 @@ def _print_cmd(prefix: str, cmd: list[str]) -> None:
     print(f"{prefix}: {' '.join(shlex.quote(c) for c in cmd)}", flush=True)
 
 
+def _select_trials(args: argparse.Namespace) -> list[Trial]:
+    if args.trials_json:
+        return _read_trials_file(Path(args.trials_json).expanduser().resolve())
+    if str(args.trial_preset) == "optimizer_quality":
+        return _default_optimizer_trials()
+    return _default_trials()
+
+
+def _build_train_cmd(
+    *,
+    args: argparse.Namespace,
+    dataset_dir: Path,
+    run_dir: Path,
+    seed: int,
+    params: dict[str, Any],
+) -> list[str]:
+    train_cmd = [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.rotation.train_game_transformer_v2",
+        "--dataset-dir",
+        str(dataset_dir),
+        "--out-dir",
+        str(run_dir),
+        "--epochs",
+        str(int(args.epochs)),
+        "--val-days",
+        str(int(args.train_val_days)),
+        "--batch-size",
+        str(int(args.batch_size)),
+        "--num-workers",
+        str(int(args.num_workers)),
+        "--device",
+        str(args.device),
+        "--seed",
+        str(int(seed)),
+        "--w-minutes",
+        str(float(args.w_minutes)),
+        "--phase2-anchor-start-weight",
+        str(float(args.phase2_anchor_start_weight)),
+        "--enable-phase2-flow",
+        "--phase2-nll-guard-ratio",
+        str(float(args.phase2_nll_guard_ratio)),
+        "--phase2-nll-guard-abs",
+        str(float(args.phase2_nll_guard_abs)),
+        "--phase2-nll-guard-ema-alpha",
+        str(float(args.phase2_nll_guard_ema_alpha)),
+        "--phase2-nll-guard-consecutive-batches",
+        str(int(args.phase2_nll_guard_consecutive_batches)),
+        "--phase2-max-backoffs-before-rollback",
+        str(int(args.phase2_max_backoffs_before_rollback)),
+        "--phase2-min-a2-scale",
+        str(float(args.phase2_min_a2_scale)),
+    ]
+    if args.init_model_pt:
+        train_cmd.extend(["--init-model-pt", str(Path(args.init_model_pt).expanduser().resolve())])
+    train_cmd.extend(_to_cli_args(params))
+    return train_cmd
+
+
+def _build_eval_cmd(
+    *,
+    args: argparse.Namespace,
+    dataset_dir: Path,
+    run_dir: Path,
+    eval_json: Path,
+    params: dict[str, Any],
+) -> list[str]:
+    eval_batch_size = int(params.get("batch_size", int(args.batch_size)))
+    eval_cmd = [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.rotation.eval_game_transformer_v2",
+        "--run-dir",
+        str(run_dir),
+        "--dataset-dir",
+        str(dataset_dir),
+        "--val-days",
+        str(int(args.eval_val_days)),
+        "--batch-size",
+        str(int(eval_batch_size)),
+        "--num-workers",
+        str(int(args.num_workers)),
+        "--device",
+        str(args.device),
+        "--active-threshold",
+        "4.0",
+        "--out-json",
+        str(eval_json),
+    ]
+    return eval_cmd
+
+
+def _build_world_cmd(
+    *,
+    args: argparse.Namespace,
+    dataset_dir: Path,
+    run_dir: Path,
+    world_summary: Path,
+) -> list[str]:
+    return [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.rotation.generate_worlds_game_transformer_v2",
+        "--run-dir",
+        str(run_dir),
+        "--dataset-dir",
+        str(dataset_dir),
+        "--val-days",
+        str(int(args.eval_val_days)),
+        "--num-games",
+        str(int(args.world_num_games)),
+        "--num-worlds",
+        str(int(args.world_num_worlds)),
+        "--batch-size",
+        "1",
+        "--num-workers",
+        "0",
+        "--device",
+        str(args.device),
+        "--strict-contracts",
+        "--out-summary-json",
+        str(world_summary),
+    ]
+
+
+def _run_trial_once(
+    *,
+    args: argparse.Namespace,
+    dataset_dir: Path,
+    baseline: EvalMetrics,
+    trial_name: str,
+    params: dict[str, Any],
+    run_root: Path,
+    seed: int,
+    step_prefix: str,
+    require_world_check: bool,
+    dry_run: bool,
+) -> dict[str, Any]:
+    run_dir = run_root / "run"
+    eval_json = run_root / f"eval_slices_{int(args.eval_val_days)}d.json"
+
+    result: dict[str, Any] = {
+        "trial_name": str(trial_name),
+        "params": dict(params),
+        "seed": int(seed),
+        "run_dir": str(run_dir),
+        "eval_json": str(eval_json),
+        "status": "planned",
+    }
+
+    train_cmd = _build_train_cmd(
+        args=args,
+        dataset_dir=dataset_dir,
+        run_dir=run_dir,
+        seed=int(seed),
+        params=params,
+    )
+    eval_cmd = _build_eval_cmd(
+        args=args,
+        dataset_dir=dataset_dir,
+        run_dir=run_dir,
+        eval_json=eval_json,
+        params=params,
+    )
+
+    _print_cmd(f"{step_prefix} train", train_cmd)
+    if dry_run:
+        result["status"] = "dry_run"
+        return result
+
+    train_proc = _run(train_cmd, log_path=run_root / "train.log")
+    result["train_rc"] = int(train_proc.returncode)
+    if train_proc.returncode != 0:
+        result["status"] = "train_failed"
+        return result
+
+    summary_path = run_dir / "summary.json"
+    if not summary_path.exists():
+        result["status"] = "missing_summary"
+        return result
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    stability = summary.get("phase2_stability", {}) or {}
+    rollback = bool(stability.get("rollback_triggered", False))
+    result["rollback_triggered"] = rollback
+    result["phase2_backoff_count"] = int(stability.get("backoff_count", 0))
+    result["phase2_final_a2_scale"] = _float_or_nan(stability.get("final_a2_scale"))
+
+    _print_cmd(f"{step_prefix} eval", eval_cmd)
+    eval_proc = _run(eval_cmd, log_path=run_root / "eval.log")
+    result["eval_rc"] = int(eval_proc.returncode)
+    if eval_proc.returncode != 0 or not eval_json.exists():
+        result["status"] = "eval_failed"
+        return result
+
+    metrics = _load_eval_metrics(eval_json)
+    if not _is_finite_eval(metrics):
+        result["status"] = "eval_nonfinite"
+        result["metrics"] = metrics.__dict__
+        return result
+
+    deltas = _diff_metrics(metrics, baseline)
+    score = _composite_score(deltas)
+    single_gate_pass = _meets_promotion_gate(
+        deltas=deltas,
+        rollback_triggered=rollback,
+        max_delta_minutes_mae_lineup0=float(args.max_delta_minutes_mae_lineup0),
+        max_delta_minutes_mae_lineup1=float(args.max_delta_minutes_mae_lineup1),
+        max_delta_minutes_gap_abs=float(args.max_delta_minutes_gap_abs),
+        max_delta_active_count_mae=float(args.max_delta_active_count_mae),
+    )
+
+    world_ok = True
+    if bool(require_world_check):
+        world_summary = run_root / "world_summary.json"
+        world_cmd = _build_world_cmd(
+            args=args,
+            dataset_dir=dataset_dir,
+            run_dir=run_dir,
+            world_summary=world_summary,
+        )
+        _print_cmd(f"{step_prefix} world", world_cmd)
+        world_proc = _run(world_cmd, log_path=run_root / "world.log")
+        result["world_check_rc"] = int(world_proc.returncode)
+        result["world_check_summary_json"] = str(world_summary)
+        world_ok = bool(world_proc.returncode == 0)
+        result["world_contract_pass"] = world_ok
+        if world_summary.exists():
+            try:
+                result["world_check"] = json.loads(world_summary.read_text(encoding="utf-8"))
+            except Exception:
+                result["world_check"] = None
+    else:
+        result["world_contract_pass"] = True
+
+    result["metrics"] = metrics.__dict__
+    result["deltas_vs_baseline"] = deltas
+    result["composite_score"] = float(score)
+    result["single_run_gate_pass"] = bool(single_gate_pass)
+    result["promotion_gate_pass"] = bool(single_gate_pass and world_ok)
+    result["status"] = "ok"
+    return result
+
+
+def _write_leaderboard(rows: list[dict[str, Any]], *, csv_path: Path, md_path: Path, title: str) -> None:
+    if not rows:
+        return
+
+    leaderboard = pd.DataFrame(rows)
+    leaderboard.to_csv(csv_path, index=False)
+
+    cols = list(leaderboard.columns)
+    header = "| " + " | ".join(cols) + " |"
+    sep = "| " + " | ".join(["---"] * len(cols)) + " |"
+    body = [
+        "| " + " | ".join(str(row[c]) for c in cols) + " |"
+        for row in leaderboard.to_dict(orient="records")
+    ]
+    md_lines = [
+        f"# {title}",
+        "",
+        f"Generated at: {datetime.now(timezone.utc).isoformat()}",
+        "",
+        header,
+        sep,
+        *body,
+        "",
+    ]
+    md_path.write_text("\n".join(md_lines), encoding="utf-8")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-dir", type=str, default=None)
     parser.add_argument("--baseline-eval-json", type=str, required=True)
     parser.add_argument("--init-model-pt", type=str, default=None)
     parser.add_argument("--trials-json", type=str, default=None)
+    parser.add_argument(
+        "--trial-preset",
+        type=str,
+        default="anchor_recovery",
+        choices=["anchor_recovery", "optimizer_quality"],
+        help="Default trial grid to use when --trials-json is not provided.",
+    )
     parser.add_argument("--sweep-root", type=str, default=None)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--train-val-days", type=int, default=60)
@@ -283,8 +743,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-delta-minutes-gap-abs", type=float, default=0.05)
     parser.add_argument("--max-delta-active-count-mae", type=float, default=0.10)
     parser.add_argument("--skip-world-contract-check", action="store_true")
+    parser.add_argument(
+        "--require-world-contract-check-all",
+        action="store_true",
+        help="Run strict world contract checks for every candidate (and for each multi-seed run).",
+    )
     parser.add_argument("--world-num-games", type=int, default=1)
     parser.add_argument("--world-num-worlds", type=int, default=64)
+    parser.add_argument("--multi-seed-top-k", type=int, default=0)
+    parser.add_argument(
+        "--multi-seed-list",
+        type=str,
+        default="",
+        help="Comma-separated seeds for confirmation. Base seed is auto-included if missing.",
+    )
+    parser.add_argument("--multi-seed-min-seeds", type=int, default=3)
+    parser.add_argument("--multi-seed-require-all-pass", action="store_true")
+    parser.add_argument("--multi-seed-require-mean-gains", action="store_true")
+    parser.add_argument("--multi-seed-max-mean-delta-minutes-mae-lineup1", type=float, default=0.05)
+    parser.add_argument("--multi-seed-max-mean-delta-minutes-gap-abs", type=float, default=0.05)
     parser.add_argument("--auto-promote", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -307,12 +784,21 @@ def main() -> None:
     trials_dir = sweep_root / "trials"
     trials_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.trials_json:
-        trials = _read_trials_file(Path(args.trials_json).expanduser().resolve())
-    else:
-        trials = _default_trials()
+    trials = _select_trials(args)
     if not trials:
         raise ValueError("no trials resolved")
+
+    require_world_check_all = bool(args.require_world_contract_check_all)
+    if not require_world_check_all and str(args.trial_preset) == "optimizer_quality":
+        # Quality pass defaults to contract verification on every candidate.
+        require_world_check_all = True
+
+    multi_seed_enabled = int(args.multi_seed_top_k) > 0
+    multi_seed_list = _parse_seed_list(
+        args.multi_seed_list,
+        base_seed=int(args.seed),
+        min_seeds=max(1, int(args.multi_seed_min_seeds)),
+    )
 
     manifest = {
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -320,11 +806,13 @@ def main() -> None:
         "baseline_eval_json": str(baseline_eval_path),
         "baseline_metrics": baseline.__dict__,
         "sweep_root": str(sweep_root),
+        "trial_preset": str(args.trial_preset),
         "epochs": int(args.epochs),
         "train_val_days": int(args.train_val_days),
         "eval_val_days": int(args.eval_val_days),
         "batch_size": int(args.batch_size),
         "device": str(args.device),
+        "seed": int(args.seed),
         "init_model_pt": str(Path(args.init_model_pt).expanduser().resolve()) if args.init_model_pt else None,
         "promotion_gate": {
             "max_delta_minutes_mae_lineup0": float(args.max_delta_minutes_mae_lineup0),
@@ -332,249 +820,248 @@ def main() -> None:
             "max_delta_minutes_gap_abs": float(args.max_delta_minutes_gap_abs),
             "max_delta_active_count_mae": float(args.max_delta_active_count_mae),
         },
+        "world_check": {
+            "skip_world_contract_check": bool(args.skip_world_contract_check),
+            "require_world_contract_check_all": bool(require_world_check_all),
+            "world_num_games": int(args.world_num_games),
+            "world_num_worlds": int(args.world_num_worlds),
+        },
+        "multi_seed": {
+            "enabled": bool(multi_seed_enabled),
+            "top_k": int(args.multi_seed_top_k),
+            "seed_list": list(multi_seed_list),
+            "min_seeds": int(args.multi_seed_min_seeds),
+            "require_all_pass": bool(args.multi_seed_require_all_pass),
+            "require_mean_gains": bool(args.multi_seed_require_mean_gains),
+            "max_mean_delta_minutes_mae_lineup1": float(args.multi_seed_max_mean_delta_minutes_mae_lineup1),
+            "max_mean_delta_minutes_gap_abs": float(args.multi_seed_max_mean_delta_minutes_gap_abs),
+        },
         "trials": [{"name": t.name, "params": t.params} for t in trials],
     }
     (sweep_root / "sweep_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
     results: list[dict[str, Any]] = []
+    trials_by_name = {t.name: t for t in trials}
+
     for idx, trial in enumerate(trials, start=1):
         trial_root = trials_dir / trial.name
-        run_dir = trial_root / "run"
-        eval_json = trial_root / f"eval_slices_{int(args.eval_val_days)}d.json"
-        train_log = trial_root / "train.log"
-        eval_log = trial_root / "eval.log"
-
-        trial_result: dict[str, Any] = {
-            "trial_name": trial.name,
-            "trial_index": idx,
-            "params": trial.params,
-            "run_dir": str(run_dir),
-            "eval_json": str(eval_json),
-            "status": "planned",
-        }
-
-        train_cmd = [
-            "uv",
-            "run",
-            "python",
-            "-m",
-            "scripts.rotation.train_game_transformer_v2",
-            "--dataset-dir",
-            str(dataset_dir),
-            "--out-dir",
-            str(run_dir),
-            "--epochs",
-            str(int(args.epochs)),
-            "--val-days",
-            str(int(args.train_val_days)),
-            "--batch-size",
-            str(int(args.batch_size)),
-            "--num-workers",
-            str(int(args.num_workers)),
-            "--device",
-            str(args.device),
-            "--seed",
-            str(int(args.seed)),
-            "--w-minutes",
-            str(float(args.w_minutes)),
-            "--phase2-anchor-start-weight",
-            str(float(args.phase2_anchor_start_weight)),
-            "--enable-phase2-flow",
-            "--phase2-nll-guard-ratio",
-            str(float(args.phase2_nll_guard_ratio)),
-            "--phase2-nll-guard-abs",
-            str(float(args.phase2_nll_guard_abs)),
-            "--phase2-nll-guard-ema-alpha",
-            str(float(args.phase2_nll_guard_ema_alpha)),
-            "--phase2-nll-guard-consecutive-batches",
-            str(int(args.phase2_nll_guard_consecutive_batches)),
-            "--phase2-max-backoffs-before-rollback",
-            str(int(args.phase2_max_backoffs_before_rollback)),
-            "--phase2-min-a2-scale",
-            str(float(args.phase2_min_a2_scale)),
-        ]
-        if args.init_model_pt:
-            train_cmd.extend(["--init-model-pt", str(Path(args.init_model_pt).expanduser().resolve())])
-        train_cmd.extend(_to_cli_args(trial.params))
-
-        eval_cmd = [
-            "uv",
-            "run",
-            "python",
-            "-m",
-            "scripts.rotation.eval_game_transformer_v2",
-            "--run-dir",
-            str(run_dir),
-            "--dataset-dir",
-            str(dataset_dir),
-            "--val-days",
-            str(int(args.eval_val_days)),
-            "--batch-size",
-            str(int(args.batch_size)),
-            "--num-workers",
-            str(int(args.num_workers)),
-            "--device",
-            str(args.device),
-            "--active-threshold",
-            "4.0",
-            "--out-json",
-            str(eval_json),
-        ]
-
-        _print_cmd(f"[phase2_sweep] train {idx}/{len(trials)} {trial.name}", train_cmd)
-        if args.dry_run:
-            trial_result["status"] = "dry_run"
-            results.append(trial_result)
-            continue
-        train_proc = _run(train_cmd, log_path=train_log)
-        trial_result["train_rc"] = int(train_proc.returncode)
-        if train_proc.returncode != 0:
-            trial_result["status"] = "train_failed"
-            results.append(trial_result)
-            continue
-
-        if not (run_dir / "summary.json").exists():
-            trial_result["status"] = "missing_summary"
-            results.append(trial_result)
-            continue
-
-        summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-        stability = summary.get("phase2_stability", {}) or {}
-        rollback = bool(stability.get("rollback_triggered", False))
-        trial_result["rollback_triggered"] = rollback
-        trial_result["phase2_backoff_count"] = int(stability.get("backoff_count", 0))
-        trial_result["phase2_final_a2_scale"] = _float_or_nan(stability.get("final_a2_scale"))
-
-        _print_cmd(f"[phase2_sweep] eval {idx}/{len(trials)} {trial.name}", eval_cmd)
-        eval_proc = _run(eval_cmd, log_path=eval_log)
-        trial_result["eval_rc"] = int(eval_proc.returncode)
-        if eval_proc.returncode != 0 or not eval_json.exists():
-            trial_result["status"] = "eval_failed"
-            results.append(trial_result)
-            continue
-
-        metrics = _load_eval_metrics(eval_json)
-        if not _is_finite_eval(metrics):
-            trial_result["status"] = "eval_nonfinite"
-            trial_result["metrics"] = metrics.__dict__
-            results.append(trial_result)
-            continue
-
-        deltas = _diff_metrics(metrics, baseline)
-        score = _composite_score(deltas)
-        promotion_ok = _meets_promotion_gate(
-            deltas=deltas,
-            rollback_triggered=rollback,
-            max_delta_minutes_mae_lineup0=float(args.max_delta_minutes_mae_lineup0),
-            max_delta_minutes_mae_lineup1=float(args.max_delta_minutes_mae_lineup1),
-            max_delta_minutes_gap_abs=float(args.max_delta_minutes_gap_abs),
-            max_delta_active_count_mae=float(args.max_delta_active_count_mae),
+        trial_result = _run_trial_once(
+            args=args,
+            dataset_dir=dataset_dir,
+            baseline=baseline,
+            trial_name=trial.name,
+            params=trial.params,
+            run_root=trial_root,
+            seed=int(args.seed),
+            step_prefix=f"[phase2_sweep] trial {idx}/{len(trials)} {trial.name}",
+            require_world_check=bool(require_world_check_all and not args.skip_world_contract_check),
+            dry_run=bool(args.dry_run),
         )
-
-        trial_result["metrics"] = metrics.__dict__
-        trial_result["deltas_vs_baseline"] = deltas
-        trial_result["composite_score"] = float(score)
-        trial_result["promotion_gate_pass"] = bool(promotion_ok)
-        trial_result["status"] = "ok"
+        trial_result["trial_index"] = idx
         results.append(trial_result)
 
     (sweep_root / "trial_results.json").write_text(json.dumps(results, indent=2, sort_keys=True), encoding="utf-8")
 
     ok_rows = [r for r in results if r.get("status") == "ok"]
-    promoted: dict[str, Any] | None = None
-    if ok_rows:
-        ranked = sorted(ok_rows, key=lambda r: (float(r["composite_score"]), str(r["trial_name"])))
-        leaderboard = pd.DataFrame(
-            [
-                {
-                    "trial_name": r["trial_name"],
-                    "composite_score": float(r["composite_score"]),
-                    "promotion_gate_pass": bool(r["promotion_gate_pass"]),
-                    "minutes_mae_lineup0": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup0")),
-                    "minutes_mae_lineup1": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup1")),
-                    "minutes_mae_gap_abs": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_gap_abs")),
-                    "active_count_mae": _float_or_nan((r.get("metrics", {}) or {}).get("active_count_mae")),
-                    "delta_minutes_mae_lineup0": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup0")),
-                    "delta_minutes_mae_lineup1": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup1")),
-                    "delta_minutes_mae_gap_abs": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_gap_abs")),
-                    "delta_active_count_mae": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_active_count_mae")),
-                    "rollback_triggered": bool(r.get("rollback_triggered", False)),
-                    "run_dir": str(r.get("run_dir", "")),
-                    "eval_json": str(r.get("eval_json", "")),
-                }
-                for r in ranked
-            ]
-        )
-        leaderboard.to_csv(sweep_root / "leaderboard.csv", index=False)
+    ranked: list[dict[str, Any]] = sorted(ok_rows, key=lambda r: (float(r.get("composite_score", float("inf"))), str(r.get("trial_name", ""))))
 
-        md_cols = list(leaderboard.columns)
-        md_header = "| " + " | ".join(md_cols) + " |"
-        md_sep = "| " + " | ".join(["---"] * len(md_cols)) + " |"
-        md_rows = [
-            "| " + " | ".join(str(row[c]) for c in md_cols) + " |"
-            for row in leaderboard.to_dict(orient="records")
-        ]
-        md_lines = ["# GameTransformerV2 Phase 2 Sweep Leaderboard", "", f"Generated at: {datetime.now(timezone.utc).isoformat()}", "", md_header, md_sep, *md_rows, ""]
-        (sweep_root / "leaderboard.md").write_text("\n".join(md_lines), encoding="utf-8")
-
-        passing = [r for r in ranked if bool(r.get("promotion_gate_pass"))]
-        if passing and args.auto_promote:
-            best = passing[0]
-            promoted = {
-                "trial_name": str(best["trial_name"]),
-                "run_dir": str(best["run_dir"]),
-                "eval_json": str(best["eval_json"]),
-                "metrics": best["metrics"],
-                "deltas_vs_baseline": best["deltas_vs_baseline"],
-                "composite_score": float(best["composite_score"]),
+    if ranked:
+        leaderboard_rows = [
+            {
+                "trial_name": str(r.get("trial_name")),
+                "seed": int(r.get("seed", int(args.seed))),
+                "composite_score": float(r.get("composite_score", float("nan"))),
+                "single_run_gate_pass": bool(r.get("single_run_gate_pass", False)),
+                "world_contract_pass": bool(r.get("world_contract_pass", False)),
+                "promotion_gate_pass": bool(r.get("promotion_gate_pass", False)),
+                "minutes_mae_lineup0": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup0")),
+                "minutes_mae_lineup1": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup1")),
+                "minutes_mae_gap_abs": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_gap_abs")),
+                "active_count_mae": _float_or_nan((r.get("metrics", {}) or {}).get("active_count_mae")),
+                "delta_minutes_mae_lineup0": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup0")),
+                "delta_minutes_mae_lineup1": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup1")),
+                "delta_minutes_mae_gap_abs": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_gap_abs")),
+                "delta_active_count_mae": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_active_count_mae")),
+                "rollback_triggered": bool(r.get("rollback_triggered", False)),
+                "run_dir": str(r.get("run_dir", "")),
+                "eval_json": str(r.get("eval_json", "")),
             }
-            if not args.skip_world_contract_check:
-                world_summary = sweep_root / "promoted_world_summary.json"
-                world_cmd = [
-                    "uv",
-                    "run",
-                    "python",
-                    "-m",
-                    "scripts.rotation.generate_worlds_game_transformer_v2",
-                    "--run-dir",
-                    str(best["run_dir"]),
-                    "--dataset-dir",
-                    str(dataset_dir),
-                    "--val-days",
-                    str(int(args.eval_val_days)),
-                    "--num-games",
-                    str(int(args.world_num_games)),
-                    "--num-worlds",
-                    str(int(args.world_num_worlds)),
-                    "--batch-size",
-                    "1",
-                    "--num-workers",
-                    "0",
-                    "--device",
-                    str(args.device),
-                    "--strict-contracts",
-                    "--out-summary-json",
-                    str(world_summary),
-                ]
-                _print_cmd("[phase2_sweep] promoted world check", world_cmd)
-                world_proc = _run(world_cmd, log_path=sweep_root / "promoted_world_check.log")
-                promoted["world_check_rc"] = int(world_proc.returncode)
-                promoted["world_check_summary_json"] = str(world_summary)
-                if world_proc.returncode != 0:
-                    promoted["world_check_failed"] = True
-            (sweep_root / "promoted_phase2.json").write_text(
-                json.dumps(promoted, indent=2, sort_keys=True),
-                encoding="utf-8",
+            for r in ranked
+        ]
+        _write_leaderboard(
+            leaderboard_rows,
+            csv_path=sweep_root / "leaderboard.csv",
+            md_path=sweep_root / "leaderboard.md",
+            title="GameTransformerV2 Phase 2 Sweep Leaderboard",
+        )
+
+    promoted: dict[str, Any] | None = None
+
+    multi_seed_results: list[dict[str, Any]] = []
+    if multi_seed_enabled and not args.dry_run:
+        passable_rows = [r for r in ranked if bool(r.get("promotion_gate_pass", False))]
+        top_rows = passable_rows[: max(0, int(args.multi_seed_top_k))]
+
+        for cand in top_rows:
+            trial_name = str(cand["trial_name"])
+            trial = trials_by_name[trial_name]
+            trial_root = trials_dir / trial_name
+
+            seed_rows: list[dict[str, Any]] = []
+            for seed in multi_seed_list:
+                if int(seed) == int(args.seed):
+                    seed_row = dict(cand)
+                    seed_row["seed"] = int(seed)
+                    seed_row["reused_primary_seed_run"] = True
+                    seed_rows.append(seed_row)
+                    continue
+
+                seed_root = trial_root / "multiseed" / f"seed_{int(seed)}"
+                seed_row = _run_trial_once(
+                    args=args,
+                    dataset_dir=dataset_dir,
+                    baseline=baseline,
+                    trial_name=trial_name,
+                    params=trial.params,
+                    run_root=seed_root,
+                    seed=int(seed),
+                    step_prefix=f"[phase2_sweep][multiseed] {trial_name} seed={int(seed)}",
+                    require_world_check=bool(not args.skip_world_contract_check),
+                    dry_run=False,
+                )
+                seed_rows.append(seed_row)
+
+            passing_seed_rows = [r for r in seed_rows if str(r.get("status")) == "ok" and bool(r.get("promotion_gate_pass", False))]
+            mean_deltas = _mean_deltas(passing_seed_rows) if passing_seed_rows else _mean_deltas(seed_rows)
+            mean_composite = _safe_mean([_float_or_nan(r.get("composite_score")) for r in passing_seed_rows])
+
+            multi_pass = _meets_multi_seed_promotion_gate(
+                seed_rows=seed_rows,
+                min_required=max(1, int(args.multi_seed_min_seeds)),
+                require_all_pass=bool(args.multi_seed_require_all_pass),
+                require_mean_gains=bool(args.multi_seed_require_mean_gains),
+                max_mean_delta_minutes_mae_lineup1=float(args.multi_seed_max_mean_delta_minutes_mae_lineup1),
+                max_mean_delta_minutes_gap_abs=float(args.multi_seed_max_mean_delta_minutes_gap_abs),
             )
+
+            record = {
+                "trial_name": trial_name,
+                "params": trial.params,
+                "seed_list": list(multi_seed_list),
+                "seed_runs": seed_rows,
+                "num_seed_runs": int(len(seed_rows)),
+                "num_seed_ok": int(len([r for r in seed_rows if str(r.get("status")) == "ok"])),
+                "num_seed_promotion_pass": int(len(passing_seed_rows)),
+                "mean_deltas_vs_baseline": mean_deltas,
+                "mean_composite_score": float(mean_composite),
+                "multi_seed_promotion_pass": bool(multi_pass),
+            }
+            multi_seed_results.append(record)
+
+        (sweep_root / "multiseed_results.json").write_text(
+            json.dumps(multi_seed_results, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+        if multi_seed_results:
+            ms_rows = sorted(
+                multi_seed_results,
+                key=lambda r: (float(r.get("mean_composite_score", float("inf"))), str(r.get("trial_name", ""))),
+            )
+            ms_lb_rows = [
+                {
+                    "trial_name": str(r.get("trial_name", "")),
+                    "mean_composite_score": _float_or_nan(r.get("mean_composite_score")),
+                    "multi_seed_promotion_pass": bool(r.get("multi_seed_promotion_pass", False)),
+                    "num_seed_runs": int(r.get("num_seed_runs", 0)),
+                    "num_seed_ok": int(r.get("num_seed_ok", 0)),
+                    "num_seed_promotion_pass": int(r.get("num_seed_promotion_pass", 0)),
+                    "mean_delta_minutes_mae_lineup0": _float_or_nan((r.get("mean_deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup0")),
+                    "mean_delta_minutes_mae_lineup1": _float_or_nan((r.get("mean_deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup1")),
+                    "mean_delta_minutes_mae_gap_abs": _float_or_nan((r.get("mean_deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_gap_abs")),
+                    "mean_delta_active_count_mae": _float_or_nan((r.get("mean_deltas_vs_baseline", {}) or {}).get("delta_active_count_mae")),
+                }
+                for r in ms_rows
+            ]
+            _write_leaderboard(
+                ms_lb_rows,
+                csv_path=sweep_root / "multiseed_leaderboard.csv",
+                md_path=sweep_root / "multiseed_leaderboard.md",
+                title="GameTransformerV2 Phase 2 Multi-Seed Leaderboard",
+            )
+
+    if args.auto_promote and not args.dry_run:
+        if multi_seed_results:
+            passing_ms = [r for r in multi_seed_results if bool(r.get("multi_seed_promotion_pass", False))]
+            if passing_ms:
+                best_cfg = sorted(
+                    passing_ms,
+                    key=lambda r: (float(r.get("mean_composite_score", float("inf"))), str(r.get("trial_name", ""))),
+                )[0]
+                pass_seeds = [
+                    r
+                    for r in best_cfg.get("seed_runs", [])
+                    if str(r.get("status")) == "ok" and bool(r.get("promotion_gate_pass", False))
+                ]
+                best_seed_run = sorted(
+                    pass_seeds,
+                    key=lambda r: (float(r.get("composite_score", float("inf"))), int(r.get("seed", 10**9))),
+                )[0]
+                promoted = {
+                    "promotion_mode": "multi_seed",
+                    "trial_name": str(best_cfg.get("trial_name", "")),
+                    "mean_composite_score": float(best_cfg.get("mean_composite_score", float("nan"))),
+                    "mean_deltas_vs_baseline": best_cfg.get("mean_deltas_vs_baseline", {}),
+                    "num_seed_runs": int(best_cfg.get("num_seed_runs", 0)),
+                    "num_seed_promotion_pass": int(best_cfg.get("num_seed_promotion_pass", 0)),
+                    "selected_seed": int(best_seed_run.get("seed", int(args.seed))),
+                    "run_dir": str(best_seed_run.get("run_dir", "")),
+                    "eval_json": str(best_seed_run.get("eval_json", "")),
+                    "metrics": best_seed_run.get("metrics", {}),
+                    "deltas_vs_baseline": best_seed_run.get("deltas_vs_baseline", {}),
+                    "composite_score": _float_or_nan(best_seed_run.get("composite_score")),
+                    "world_check_summary_json": best_seed_run.get("world_check_summary_json"),
+                }
+        else:
+            passing = [r for r in ranked if bool(r.get("promotion_gate_pass", False))]
+            if passing:
+                best = passing[0]
+                promoted = {
+                    "promotion_mode": "single_seed",
+                    "trial_name": str(best.get("trial_name", "")),
+                    "selected_seed": int(best.get("seed", int(args.seed))),
+                    "run_dir": str(best.get("run_dir", "")),
+                    "eval_json": str(best.get("eval_json", "")),
+                    "metrics": best.get("metrics", {}),
+                    "deltas_vs_baseline": best.get("deltas_vs_baseline", {}),
+                    "composite_score": _float_or_nan(best.get("composite_score")),
+                    "world_check_summary_json": best.get("world_check_summary_json"),
+                }
+
+    if promoted is not None:
+        (sweep_root / "promoted_phase2.json").write_text(
+            json.dumps(promoted, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
     summary = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "dataset_dir": str(dataset_dir),
         "baseline_eval_json": str(baseline_eval_path),
         "baseline_metrics": baseline.__dict__,
         "sweep_root": str(sweep_root),
+        "trial_preset": str(args.trial_preset),
         "num_trials": int(len(trials)),
         "num_completed": int(len([r for r in results if r.get("status") == "ok"])),
         "num_promotion_pass": int(len([r for r in results if bool(r.get("promotion_gate_pass"))])),
+        "world_check_all_candidates": bool(require_world_check_all and not args.skip_world_contract_check),
+        "multi_seed": {
+            "enabled": bool(multi_seed_enabled),
+            "top_k": int(args.multi_seed_top_k),
+            "seed_list": list(multi_seed_list),
+            "num_configs_checked": int(len(multi_seed_results)),
+            "num_configs_pass": int(len([r for r in multi_seed_results if bool(r.get("multi_seed_promotion_pass", False))])),
+        },
         "promoted": promoted,
     }
     (sweep_root / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")

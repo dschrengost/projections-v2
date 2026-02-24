@@ -7,7 +7,9 @@ from scripts.rotation.sweep_game_transformer_v2_phase2 import (
     _composite_score,
     _diff_metrics,
     _load_eval_metrics,
+    _meets_multi_seed_promotion_gate,
     _meets_promotion_gate,
+    _parse_seed_list,
 )
 
 
@@ -83,4 +85,103 @@ def test_promotion_gate_rejects_rollbacks_and_large_deltas() -> None:
         max_delta_minutes_mae_lineup1=0.15,
         max_delta_minutes_gap_abs=0.05,
         max_delta_active_count_mae=0.10,
+    )
+
+
+def test_parse_seed_list_includes_base_seed_and_minimum_count() -> None:
+    seeds = _parse_seed_list("17,42,17", base_seed=42, min_seeds=3)
+    assert seeds == [42, 17, 34]
+
+
+def test_multi_seed_gate_requires_consistent_pass_and_mean_gains() -> None:
+    rows = [
+        {
+            "status": "ok",
+            "promotion_gate_pass": True,
+            "deltas_vs_baseline": {
+                "delta_minutes_mae_lineup0": -0.03,
+                "delta_minutes_mae_lineup1": 0.01,
+                "delta_minutes_mae_gap_abs": 0.02,
+                "delta_active_count_mae": -0.02,
+                "delta_possessions_proxy_mae": 0.0,
+            },
+        },
+        {
+            "status": "ok",
+            "promotion_gate_pass": True,
+            "deltas_vs_baseline": {
+                "delta_minutes_mae_lineup0": -0.01,
+                "delta_minutes_mae_lineup1": 0.02,
+                "delta_minutes_mae_gap_abs": 0.01,
+                "delta_active_count_mae": -0.01,
+                "delta_possessions_proxy_mae": 0.0,
+            },
+        },
+        {
+            "status": "ok",
+            "promotion_gate_pass": True,
+            "deltas_vs_baseline": {
+                "delta_minutes_mae_lineup0": 0.0,
+                "delta_minutes_mae_lineup1": 0.03,
+                "delta_minutes_mae_gap_abs": 0.02,
+                "delta_active_count_mae": 0.0,
+                "delta_possessions_proxy_mae": 0.0,
+            },
+        },
+    ]
+
+    assert _meets_multi_seed_promotion_gate(
+        seed_rows=rows,
+        min_required=3,
+        require_all_pass=True,
+        require_mean_gains=True,
+        max_mean_delta_minutes_mae_lineup1=0.05,
+        max_mean_delta_minutes_gap_abs=0.05,
+    )
+
+
+def test_multi_seed_gate_rejects_if_any_seed_fails_when_require_all() -> None:
+    rows = [
+        {
+            "status": "ok",
+            "promotion_gate_pass": True,
+            "deltas_vs_baseline": {
+                "delta_minutes_mae_lineup0": -0.02,
+                "delta_minutes_mae_lineup1": 0.01,
+                "delta_minutes_mae_gap_abs": 0.02,
+                "delta_active_count_mae": -0.01,
+                "delta_possessions_proxy_mae": 0.0,
+            },
+        },
+        {
+            "status": "ok",
+            "promotion_gate_pass": False,
+            "deltas_vs_baseline": {
+                "delta_minutes_mae_lineup0": 0.01,
+                "delta_minutes_mae_lineup1": 0.07,
+                "delta_minutes_mae_gap_abs": 0.09,
+                "delta_active_count_mae": 0.03,
+                "delta_possessions_proxy_mae": 0.0,
+            },
+        },
+        {
+            "status": "ok",
+            "promotion_gate_pass": True,
+            "deltas_vs_baseline": {
+                "delta_minutes_mae_lineup0": -0.01,
+                "delta_minutes_mae_lineup1": 0.02,
+                "delta_minutes_mae_gap_abs": 0.02,
+                "delta_active_count_mae": -0.01,
+                "delta_possessions_proxy_mae": 0.0,
+            },
+        },
+    ]
+
+    assert not _meets_multi_seed_promotion_gate(
+        seed_rows=rows,
+        min_required=3,
+        require_all_pass=True,
+        require_mean_gains=True,
+        max_mean_delta_minutes_mae_lineup1=0.05,
+        max_mean_delta_minutes_gap_abs=0.05,
     )
