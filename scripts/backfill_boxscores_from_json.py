@@ -68,16 +68,21 @@ def _labels_from_games(games: List[Dict], start: pd.Timestamp, end: pd.Timestamp
 
 def _write_bronze(games: List[Dict], data_root: Path, season: int) -> None:
     base = data_root / "bronze" / "boxscores_raw" / f"season={season}"
+    by_day: dict[str, list[dict]] = {}
     for game in games:
-        day_dir = base / f"date={_game_date(game).date().isoformat()}"
-        day_dir.mkdir(parents=True, exist_ok=True)
-        payload = pd.DataFrame([
+        day_token = _game_date(game).date().isoformat()
+        by_day.setdefault(day_token, []).append(
             {
                 "game_id": game.get("game_id"),
                 "payload": json.dumps(game),
                 "tip_ts": _tip_timestamp(game),
             }
-        ])
+        )
+
+    for day_token, rows in by_day.items():
+        day_dir = base / f"date={day_token}"
+        day_dir.mkdir(parents=True, exist_ok=True)
+        payload = pd.DataFrame(rows, columns=["game_id", "payload", "tip_ts"])
         payload.to_parquet(day_dir / "boxscores_raw.parquet", index=False)
 
 

@@ -911,10 +911,18 @@ def _compute_team_context(stats: pd.DataFrame) -> pd.DataFrame:
     agg_cols = ["season", "game_id", "team_id", "opponent_id", "game_date", "tip_ts"]
     team_game = (
         stats.groupby(agg_cols, as_index=False)
-        .agg(points=("points", "sum"), fga=("fga", "sum"), fta=("fta", "sum"), tov=("turnovers", "sum"))
+        .agg(
+            points=("points", "sum"),
+            fga=("fga", "sum"),
+            fta=("fta", "sum"),
+            oreb=("oreb", "sum"),
+            tov=("turnovers", "sum"),
+        )
         .rename(columns={"points": "pts_for", "tov": "tov"})
     )
-    team_game["poss"] = team_game["fga"] + 0.44 * team_game["fta"] + team_game["tov"]
+    # Basic possessions estimate:
+    # 0.96 * (FGA + TOV + 0.44*FTA - OREB)
+    team_game["poss"] = 0.96 * (team_game["fga"] + team_game["tov"] + 0.44 * team_game["fta"] - team_game["oreb"])
 
     opp_map = team_game[
         ["season", "game_date", "game_id", "team_id", "pts_for", "poss", "fta"]

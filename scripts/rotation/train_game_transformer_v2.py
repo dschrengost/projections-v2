@@ -1,0 +1,1069 @@
+#!/usr/bin/env python3
+"""Train Phase 1b GameTransformerV2 (joint active-set + joint minutes)."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import random
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
+
+from projections import paths
+from projections.rotation.game_transformer_v2 import (
+    FLOW_TARGET_COLUMNS_V1,
+    FLOW_TARGET_COLUMNS_WITH_PF,
+    GameLevelDataset,
+    GameTransformerV2Config,
+    build_game_level_examples,
+    build_game_transformer_v2,
+    collate_game_level_examples,
+)
+from projections.rotation.joint_active_set import (
+    build_active_set_labels,
+    compute_active_set_losses,
+)
+from projections.rotation.set_model import zfill_game_id_series
+
+JOIN_KEYS = ["game_id", "team_id", "player_id", "game_date"]
+
+EXCLUDE_FEATURES = {
+    "minutes",
+    "minutes_label",
+    "starter_flag_label",
+    "starter_flag",
+    "source",
+    "first_in_time_real",
+    "last_out_time_real",
+    "time_unit_detected",
+}
+
+# Match proven v1 exclusion policy for known leakage-prone/same-game fields.
+EXCLUDE_DNP_BLIND_FEATURES = {
+    "min_last1",
+    "min_last3",
+    "min_last5",
+    "roll_mean_3",
+    "roll_mean_5",
+    "roll_mean_10",
+    "roll_iqr_5",
+    "z_vs_10",
+}
+EXCLUDE_INJURY_STATUS_FEATURES = {"is_prob", "is_q"}
+EXCLUDE_SAME_GAME_ROTATION_FEATURES = {
+    "depth_6",
+    "depth_10",
+    "depth_14",
+    "effective_n",
+    "bench_conc_top1",
+    "bench_conc_top2",
+    "starter_pool_minutes",
+    "bench_pool_minutes",
+    "team_total_minutes_from_stints",
+    "num_stints",
+    "first_in_time_real",
+    "last_out_time_real",
+    "max_stint_len_real",
+    "minutes_from_stints",
+    "started_proxy",
+    "rotation_team_missing",
+    "rotation_missing",
+    "rotation_player_row_missing_raw",
+    "rotation_player_filled_zero",
+}
+EXCLUDE_UNSTABLE_FEATURES = {
+    "vac_min_szn",
+    "vac_min_guard_szn",
+    "vac_min_wing_szn",
+    "vac_min_big_szn",
+}
+
+DEFAULT_GAME_FEATURE_COLS = [
+    "vegas_total",
+    "vegas_spread",
+    "estimated_possessions",
+    "vegas_total_missing",
+    "vegas_spread_missing",
+    "estimated_possessions_missing",
+]
+
+
+@dataclass(frozen=True)
+class EpochMetrics:
+    epoch: int
+    phase2_flow_warmup: float
+    phase2_anchor_weight: float
+    phase2_a2_scale: float
+    phase2_backoff_count: int
+    train_skipped_batches: int
+    train_instability_events: int
+    train_total: float
+    train_minutes_mae: float
+    train_count_loss: float
+    train_member_loss: float
+    train_minutes_nll: float
+    train_flow_nll: float
+    train_count_acc: float
+    val_total: float
+    val_minutes_mae: float
+    val_count_loss: float
+    val_member_loss: float
+    val_minutes_nll: float
+    val_flow_nll: float
+    val_count_acc: float
+
+
+@dataclass(frozen=True)
+class Phase2EpochWeights:
+    w_minutes: float
+    w_minutes_nll: float
+    w_count: float
+    w_member: float
+    w_flow_nll: float
+    flow_warmup: float
+    anchor_weight: float
+    run_phase2_flow: bool
+
+
+@dataclass(frozen=True)
+class Phase2StabilityConfig:
+    nll_explosion_ratio: float = 3.0
+    nll_explosion_abs: float = 25.0
+    nll_ema_alpha: float = 0.1
+    nll_backoff_consecutive_batches: int = 2
+    max_backoffs_before_rollback: int = 3
+    min_a2_scale: float = 0.125
+
+
+@dataclass
+class Phase2StabilityState:
+    a2_scale: float = 1.0
+    ema_gen_nll: float | None = None
+    consecutive_explosions: int = 0
+    backoff_count: int = 0
+    rollback_requested: bool = False
+    rollback_reason: str | None = None
+    events: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _utc_now_compact() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def _coerce_join_keys(df: pd.DataFrame, *, name: str) -> pd.DataFrame:
+    out = df.copy()
+    for col in ["game_id", "team_id", "player_id"]:
+        if col not in out.columns:
+            raise ValueError(f"{name} missing key column: {col}")
+        out[col] = pd.to_numeric(out[col], errors="coerce").astype("Int64")
+    if "game_date" not in out.columns:
+        raise ValueError(f"{name} missing key column: game_date")
+    out["game_date"] = pd.to_datetime(out["game_date"], errors="coerce").dt.normalize()
+
+    invalid_keys = out[["game_id", "team_id", "player_id", "game_date"]].isna().any(axis=1)
+    if invalid_keys.any():
+        raise ValueError(f"{name} has invalid key rows: {int(invalid_keys.sum())}")
+    return out
+
+
+def _infer_feature_columns(features_df: pd.DataFrame, labels_minutes_df: pd.DataFrame) -> list[str]:
+    excluded = {
+        "game_id",
+        "team_id",
+        "player_id",
+        "game_date",
+        "game_id_norm",
+    }
+    excluded.update(labels_minutes_df.columns.tolist())
+    excluded.update(EXCLUDE_FEATURES)
+    excluded.update(EXCLUDE_DNP_BLIND_FEATURES)
+    excluded.update(EXCLUDE_INJURY_STATUS_FEATURES)
+    excluded.update(EXCLUDE_SAME_GAME_ROTATION_FEATURES)
+    excluded.update(EXCLUDE_UNSTABLE_FEATURES)
+
+    cols: list[str] = []
+    for col in features_df.columns:
+        if col in excluded:
+            continue
+        if pd.api.types.is_numeric_dtype(features_df[col]) or pd.api.types.is_bool_dtype(features_df[col]):
+            cols.append(col)
+    if not cols:
+        raise ValueError("No numeric feature columns inferred")
+    return cols
+
+
+def _numeric_frame(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    parts: list[pd.Series] = []
+    for col in cols:
+        if col not in df.columns:
+            parts.append(pd.Series(0.0, index=df.index, name=col, dtype="float32"))
+            continue
+        if pd.api.types.is_bool_dtype(df[col]):
+            parts.append(df[col].astype("float32").rename(col))
+        else:
+            parts.append(pd.to_numeric(df[col], errors="coerce").rename(col))
+    if not parts:
+        return pd.DataFrame(index=df.index)
+    return pd.concat(parts, axis=1)
+
+
+def _compute_feature_norm(train_df: pd.DataFrame, feature_columns: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    x = _numeric_frame(train_df, feature_columns).to_numpy(dtype=np.float32, copy=False)
+    mean = np.nanmean(x, axis=0)
+    std = np.nanstd(x, axis=0)
+    mean = np.where(np.isfinite(mean), mean, 0.0).astype(np.float32)
+    std = np.where(np.isfinite(std) & (std > 1e-6), std, 1.0).astype(np.float32)
+    return mean, std
+
+
+def _split_train_val(df: pd.DataFrame, *, val_days: int) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    days = sorted(pd.to_datetime(df["game_date"]).dropna().dt.normalize().unique().tolist())
+    if len(days) < 2:
+        raise ValueError("Need at least 2 distinct game dates for train/val split")
+    vd = max(1, int(val_days))
+    val_dates = set(days[-vd:])
+
+    is_val = pd.to_datetime(df["game_date"]).dt.normalize().isin(val_dates)
+    train = df.loc[~is_val].copy()
+    val = df.loc[is_val].copy()
+    if train.empty or val.empty:
+        raise ValueError(f"Invalid split train={len(train)} val={len(val)}")
+
+    meta = {
+        "train_rows": int(len(train)),
+        "val_rows": int(len(val)),
+        "train_games": int(train[["game_id_norm", "game_date"]].drop_duplicates().shape[0]),
+        "val_games": int(val[["game_id_norm", "game_date"]].drop_duplicates().shape[0]),
+        "train_min_date": str(pd.to_datetime(train["game_date"]).min().date()),
+        "train_max_date": str(pd.to_datetime(train["game_date"]).max().date()),
+        "val_min_date": str(pd.to_datetime(val["game_date"]).min().date()),
+        "val_max_date": str(pd.to_datetime(val["game_date"]).max().date()),
+    }
+    return train, val, meta
+
+
+def _flatten_side(x: torch.Tensor) -> torch.Tensor:
+    if x.ndim != 3 or x.shape[1] != 2:
+        raise ValueError("expected x shape (B,2,N)")
+    return torch.cat([x[:, 0], x[:, 1]], dim=1)
+
+
+def _team_index(batch_size: int, n_team_slots: int, *, device: torch.device) -> torch.Tensor:
+    return torch.cat(
+        [
+            torch.zeros((batch_size, n_team_slots), dtype=torch.long, device=device),
+            torch.ones((batch_size, n_team_slots), dtype=torch.long, device=device),
+        ],
+        dim=1,
+    )
+
+
+def _masked_mae(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    err = (pred - target).abs() * mask.to(dtype=pred.dtype)
+    denom = mask.to(dtype=pred.dtype).sum().clamp(min=1.0)
+    return err.sum() / denom
+
+
+def _gaussian_nll(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, *, sigma: float) -> torch.Tensor:
+    if sigma <= 0:
+        raise ValueError("sigma must be > 0")
+    mask_f = mask.to(dtype=pred.dtype)
+    var = float(sigma) * float(sigma)
+    residual = target - pred
+    per = 0.5 * ((residual * residual) / var + math.log(2.0 * math.pi * var))
+    denom = mask_f.sum().clamp(min=1.0)
+    return (per * mask_f).sum() / denom
+
+
+def _phase2_flow_warmup_factor(epoch: int, *, warmup_epochs: int) -> float:
+    if int(epoch) <= 0:
+        raise ValueError("epoch must be >= 1")
+    if int(warmup_epochs) <= 0:
+        return 1.0
+    return float(min(1.0, float(epoch) / float(warmup_epochs)))
+
+
+def _phase2_anchor_weight(
+    flow_warmup: float,
+    *,
+    start_weight: float,
+    end_weight: float,
+) -> float:
+    warm = float(min(max(flow_warmup, 0.0), 1.0))
+    return float(end_weight + (start_weight - end_weight) * (1.0 - warm))
+
+
+def _resolve_phase2_epoch_weights(
+    *,
+    epoch: int,
+    enable_phase2_flow: bool,
+    w_minutes: float,
+    w_minutes_nll: float,
+    w_count: float,
+    w_member: float,
+    w_flow_nll: float,
+    flow_warmup_epochs: int,
+    anchor_start_weight: float,
+    anchor_end_weight: float,
+    a2_scale: float,
+) -> Phase2EpochWeights:
+    if not bool(enable_phase2_flow):
+        return Phase2EpochWeights(
+            w_minutes=float(w_minutes),
+            w_minutes_nll=0.0,
+            w_count=float(w_count),
+            w_member=float(w_member),
+            w_flow_nll=0.0,
+            flow_warmup=0.0,
+            anchor_weight=1.0,
+            run_phase2_flow=False,
+        )
+
+    flow_warmup = _phase2_flow_warmup_factor(int(epoch), warmup_epochs=int(flow_warmup_epochs))
+    anchor_weight = _phase2_anchor_weight(
+        flow_warmup,
+        start_weight=float(anchor_start_weight),
+        end_weight=float(anchor_end_weight),
+    )
+    a2 = max(float(a2_scale), 0.0)
+    return Phase2EpochWeights(
+        w_minutes=float(w_minutes) * anchor_weight,
+        w_minutes_nll=float(w_minutes_nll) * a2,
+        w_count=float(w_count) * anchor_weight,
+        w_member=float(w_member) * anchor_weight,
+        w_flow_nll=float(w_flow_nll) * flow_warmup * a2,
+        flow_warmup=float(flow_warmup),
+        anchor_weight=float(anchor_weight),
+        run_phase2_flow=bool(flow_warmup > 0.0),
+    )
+
+
+def _update_phase2_nll_guard(
+    *,
+    epoch: int,
+    batch_idx: int,
+    gen_nll: float,
+    config: Phase2StabilityConfig,
+    state: Phase2StabilityState,
+) -> tuple[bool, bool, float]:
+    threshold = float(config.nll_explosion_abs)
+    if state.ema_gen_nll is not None and math.isfinite(float(state.ema_gen_nll)):
+        threshold = max(threshold, float(config.nll_explosion_ratio) * float(state.ema_gen_nll))
+
+    exploded = (not math.isfinite(float(gen_nll))) or (float(gen_nll) > threshold)
+    backoff_applied = False
+    if exploded:
+        state.consecutive_explosions += 1
+        if state.consecutive_explosions >= max(1, int(config.nll_backoff_consecutive_batches)):
+            prev_a2 = float(state.a2_scale)
+            state.consecutive_explosions = 0
+            state.a2_scale = max(float(config.min_a2_scale), float(state.a2_scale) * 0.5)
+            state.backoff_count += 1
+            backoff_applied = True
+            state.events.append(
+                {
+                    "epoch": int(epoch),
+                    "batch": int(batch_idx),
+                    "event": "a2_backoff",
+                    "gen_nll": float(gen_nll),
+                    "threshold": float(threshold),
+                    "a2_before": float(prev_a2),
+                    "a2_after": float(state.a2_scale),
+                    "backoff_count": int(state.backoff_count),
+                }
+            )
+            if state.backoff_count >= max(1, int(config.max_backoffs_before_rollback)):
+                state.rollback_requested = True
+                state.rollback_reason = (
+                    "phase2_instability_repeated_backoff_limit_reached"
+                    f"(backoff_count={state.backoff_count})"
+                )
+                state.events.append(
+                    {
+                        "epoch": int(epoch),
+                        "batch": int(batch_idx),
+                        "event": "rollback_requested",
+                        "reason": str(state.rollback_reason),
+                    }
+                )
+    else:
+        state.consecutive_explosions = 0
+        if state.ema_gen_nll is None:
+            state.ema_gen_nll = float(gen_nll)
+        else:
+            alpha = float(min(max(config.nll_ema_alpha, 0.0), 1.0))
+            state.ema_gen_nll = (1.0 - alpha) * float(state.ema_gen_nll) + alpha * float(gen_nll)
+
+    return bool(exploded), bool(backoff_applied), float(threshold)
+
+
+def _stats_finite(stats: dict[str, float]) -> bool:
+    keys = ["total", "minutes_mae", "count_loss", "member_loss", "minutes_nll", "flow_nll", "count_acc"]
+    return all(math.isfinite(float(stats.get(k, float("nan")))) for k in keys)
+
+
+def _run_epoch(
+    model: nn.Module,
+    loader: DataLoader,
+    *,
+    device: torch.device,
+    optimizer: torch.optim.Optimizer | None,
+    active_threshold: float,
+    min_active_count: int,
+    max_active_count: int,
+    run_phase2_flow: bool,
+    w_minutes: float,
+    w_minutes_nll: float,
+    w_count: float,
+    w_member: float,
+    w_flow_nll: float,
+    minutes_nll_sigma: float,
+    positive_weight: float,
+    epoch_index: int,
+    backbone_grad_clip_norm: float,
+    flow_grad_clip_norm: float,
+    phase2_stability_config: Phase2StabilityConfig | None = None,
+    phase2_stability_state: Phase2StabilityState | None = None,
+) -> dict[str, float]:
+    training = optimizer is not None
+    model.train(training)
+
+    totals = {
+        "total": 0.0,
+        "minutes_mae": 0.0,
+        "count_loss": 0.0,
+        "member_loss": 0.0,
+        "minutes_nll": 0.0,
+        "flow_nll": 0.0,
+        "count_acc": 0.0,
+        "steps": 0,
+        "skipped_batches": 0,
+        "instability_events": 0,
+    }
+    flow_params: list[nn.Parameter] = []
+    backbone_params: list[nn.Parameter] = []
+    if training:
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if name.startswith("flow_head."):
+                flow_params.append(param)
+            else:
+                backbone_params.append(param)
+
+    for batch_idx, batch in enumerate(loader, start=1):
+        player_features = batch["player_features"].to(device=device)
+        player_valid_mask = batch["player_valid_mask"].to(device=device)
+        y_minutes = batch["y_minutes"].to(device=device)
+        flow_targets = batch["flow_targets"].to(device=device)
+        flow_observed_mask = batch["flow_observed_mask"].to(device=device)
+        game_features = batch["game_features"].to(device=device)
+        team_features = batch["team_features"].to(device=device)
+
+        y_flat = _flatten_side(y_minutes)
+        valid_flat = _flatten_side(player_valid_mask)
+        team_index = _team_index(batch_size=y_minutes.shape[0], n_team_slots=y_minutes.shape[2], device=device)
+
+        label_targets = build_active_set_labels(
+            y_flat,
+            valid_flat,
+            team_index,
+            threshold=float(active_threshold),
+            min_active_count=int(min_active_count),
+            max_active_count=int(max_active_count),
+        )
+        target_active_mask_2d = label_targets.active_mask.view(y_minutes.shape[0], 2, y_minutes.shape[2])
+
+        flow_mask = flow_observed_mask
+        if bool(run_phase2_flow):
+            # No flow likelihood terms for DNP rows; only score rows with observed count labels.
+            dnp_mask = (y_minutes > 0.0).unsqueeze(-1)
+            flow_mask = flow_mask & player_valid_mask.unsqueeze(-1) & dnp_mask
+
+        with torch.set_grad_enabled(training):
+            out = model(
+                player_features,
+                player_valid_mask,
+                game_features=game_features,
+                team_features=team_features,
+                sample_active=False,
+                active_temperature=1.0,
+                target_active_mask=target_active_mask_2d,
+                minutes_use_target_active=True,
+                run_flow=bool(run_phase2_flow),
+                flow_targets=flow_targets if bool(run_phase2_flow) else None,
+                flow_observed_mask=flow_mask if bool(run_phase2_flow) else None,
+            )
+            active_losses = compute_active_set_losses(
+                count_logits=out.active.count_logits,
+                player_logits=out.active.player_logits,
+                count_targets=label_targets.count_targets,
+                active_targets=label_targets.active_mask,
+                valid_mask=out.player_valid_mask,
+                min_active_count=int(min_active_count),
+                positive_weight=float(positive_weight),
+            )
+            minutes_mae = _masked_mae(out.minutes.minutes, y_flat, out.player_valid_mask)
+            minutes_nll = _gaussian_nll(
+                out.minutes.preferences,
+                y_flat,
+                label_targets.active_mask & out.player_valid_mask,
+                sigma=float(minutes_nll_sigma),
+            )
+            if bool(run_phase2_flow):
+                if out.flow is None:
+                    raise RuntimeError("run_phase2_flow=True but model did not return flow outputs")
+                flow_nll = out.flow.nll_mean
+            else:
+                flow_nll = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            total_loss = (
+                float(w_minutes) * minutes_mae
+                + float(w_count) * active_losses["count_loss"]
+                + float(w_member) * active_losses["member_loss"]
+                + float(w_minutes_nll) * minutes_nll
+                + float(w_flow_nll) * flow_nll
+            )
+
+            skip_step = False
+            if (
+                training
+                and bool(run_phase2_flow)
+                and float(w_minutes_nll + w_flow_nll) > 0.0
+                and phase2_stability_config is not None
+                and phase2_stability_state is not None
+            ):
+                gen_nll = float((minutes_nll + flow_nll).detach().item())
+                exploded, backoff_applied, threshold = _update_phase2_nll_guard(
+                    epoch=int(epoch_index),
+                    batch_idx=int(batch_idx),
+                    gen_nll=float(gen_nll),
+                    config=phase2_stability_config,
+                    state=phase2_stability_state,
+                )
+                if exploded:
+                    totals["instability_events"] += 1
+                    skip_step = True
+                    totals["skipped_batches"] += 1
+                    if backoff_applied:
+                        print(
+                            (
+                                "[phase2][nll-guard] "
+                                f"epoch={epoch_index:03d} batch={batch_idx:04d} "
+                                f"gen_nll={gen_nll:.4f} threshold={threshold:.4f} "
+                                f"a2_scale={phase2_stability_state.a2_scale:.4f} "
+                                f"backoff_count={phase2_stability_state.backoff_count}"
+                            ),
+                            flush=True,
+                        )
+                    if phase2_stability_state.rollback_requested:
+                        print(
+                            (
+                                "[phase2][rollback] "
+                                f"epoch={epoch_index:03d} batch={batch_idx:04d} "
+                                f"reason={phase2_stability_state.rollback_reason}"
+                            ),
+                            flush=True,
+                        )
+
+            if training:
+                if skip_step or (
+                    phase2_stability_state is not None and bool(phase2_stability_state.rollback_requested)
+                ):
+                    optimizer.zero_grad(set_to_none=True)
+                else:
+                    optimizer.zero_grad(set_to_none=True)
+                    total_loss.backward()
+                    if backbone_params:
+                        torch.nn.utils.clip_grad_norm_(
+                            backbone_params,
+                            max_norm=max(0.0, float(backbone_grad_clip_norm)),
+                        )
+                    if bool(run_phase2_flow) and flow_params:
+                        torch.nn.utils.clip_grad_norm_(
+                            flow_params,
+                            max_norm=max(0.0, float(flow_grad_clip_norm)),
+                        )
+                    optimizer.step()
+
+        with torch.no_grad():
+            pred_counts = out.active.sampled_counts
+            count_acc = (pred_counts == label_targets.count_targets).to(dtype=torch.float32).mean()
+
+            totals["total"] += float(total_loss.item())
+            totals["minutes_mae"] += float(minutes_mae.item())
+            totals["count_loss"] += float(active_losses["count_loss"].item())
+            totals["member_loss"] += float(active_losses["member_loss"].item())
+            totals["minutes_nll"] += float(minutes_nll.item())
+            totals["flow_nll"] += float(flow_nll.item())
+            totals["count_acc"] += float(count_acc.item())
+            totals["steps"] += 1
+        if phase2_stability_state is not None and bool(phase2_stability_state.rollback_requested):
+            break
+
+    denom = max(1, totals["steps"])
+    return {
+        "total": totals["total"] / denom,
+        "minutes_mae": totals["minutes_mae"] / denom,
+        "count_loss": totals["count_loss"] / denom,
+        "member_loss": totals["member_loss"] / denom,
+        "minutes_nll": totals["minutes_nll"] / denom,
+        "flow_nll": totals["flow_nll"] / denom,
+        "count_acc": totals["count_acc"] / denom,
+        "skipped_batches": float(totals["skipped_batches"]),
+        "instability_events": float(totals["instability_events"]),
+        "rollback_requested": 1.0 if (phase2_stability_state and phase2_stability_state.rollback_requested) else 0.0,
+    }
+
+
+def _resolve_dataset_dir(value: str | None) -> Path:
+    root = paths.get_data_root() / "training" / "datasets"
+    if value:
+        p = Path(value).expanduser()
+        if p.exists():
+            return p.resolve()
+        p2 = root / value
+        if p2.exists():
+            return p2.resolve()
+        raise FileNotFoundError(f"Dataset directory not found: {value}")
+
+    candidates = sorted(root.glob("joint_rotation_rates_v1*"))
+    if not candidates:
+        raise FileNotFoundError(f"No joint_rotation_rates_v1* datasets found under {root}")
+    return candidates[-1].resolve()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset-dir", type=str, default=None)
+    parser.add_argument("--out-dir", type=str, default=None)
+    parser.add_argument(
+        "--init-model-pt",
+        type=str,
+        default=None,
+        help="Optional checkpoint path for warm-start (for example Phase 1 model.pt).",
+    )
+    parser.add_argument("--val-days", type=int, default=14)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+
+    parser.add_argument("--d-model", type=int, default=192)
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--num-layers", type=int, default=4)
+    parser.add_argument("--num-heads", type=int, default=6)
+    parser.add_argument("--dropout", type=float, default=0.1)
+
+    parser.add_argument("--active-threshold", type=float, default=4.0)
+    parser.add_argument("--min-active-count", type=int, default=5)
+    parser.add_argument("--max-active-count", type=int, default=13)
+
+    parser.add_argument("--w-minutes", type=float, default=1.0)
+    parser.add_argument("--w-minutes-nll", type=float, default=1.0)
+    parser.add_argument("--w-count", type=float, default=0.5)
+    parser.add_argument("--w-member", type=float, default=0.5)
+    parser.add_argument("--w-flow-nll", type=float, default=1.0)
+    parser.add_argument("--minutes-nll-sigma", type=float, default=6.0)
+    parser.add_argument("--active-positive-weight", type=float, default=1.0)
+    parser.add_argument("--enable-phase2-flow", action="store_true")
+    parser.add_argument("--phase2-flow-warmup-epochs", type=int, default=4)
+    parser.add_argument("--phase2-anchor-start-weight", type=float, default=1.0)
+    parser.add_argument("--phase2-anchor-end-weight", type=float, default=0.5)
+    parser.add_argument("--phase2-nll-guard-ratio", type=float, default=3.0)
+    parser.add_argument("--phase2-nll-guard-abs", type=float, default=25.0)
+    parser.add_argument("--phase2-nll-guard-ema-alpha", type=float, default=0.1)
+    parser.add_argument("--phase2-nll-guard-consecutive-batches", type=int, default=2)
+    parser.add_argument("--phase2-max-backoffs-before-rollback", type=int, default=3)
+    parser.add_argument("--phase2-min-a2-scale", type=float, default=0.125)
+    parser.add_argument("--flow-num-blocks", type=int, default=4)
+    parser.add_argument("--flow-scale-clip", type=float, default=2.0)
+    parser.add_argument("--backbone-grad-clip-norm", type=float, default=1.0)
+    parser.add_argument("--flow-grad-clip-norm", type=float, default=5.0)
+
+    parser.add_argument(
+        "--game-feature-cols",
+        type=str,
+        default=",".join(DEFAULT_GAME_FEATURE_COLS),
+        help="Comma-separated game-level columns fed to the [GAME] token.",
+    )
+    parser.add_argument(
+        "--team-feature-cols",
+        type=str,
+        default="",
+        help="Comma-separated team-level columns fed to [TEAM_*] tokens.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    _set_seed(int(args.seed))
+
+    dataset_dir = _resolve_dataset_dir(args.dataset_dir)
+    features_path = dataset_dir / "features.parquet"
+    labels_minutes_path = dataset_dir / "labels_minutes.parquet"
+    labels_boxscore_counts_path = dataset_dir / "labels_boxscore_counts.parquet"
+    if not features_path.exists() or not labels_minutes_path.exists():
+        raise FileNotFoundError(f"Missing dataset files under {dataset_dir}")
+    if bool(args.enable_phase2_flow) and not labels_boxscore_counts_path.exists():
+        raise FileNotFoundError(f"Missing labels_boxscore_counts.parquet under {dataset_dir} for Phase 2 flow training")
+
+    features_df = _coerce_join_keys(pd.read_parquet(features_path), name="features")
+    labels_minutes_df = _coerce_join_keys(pd.read_parquet(labels_minutes_path), name="labels_minutes")
+    if "minutes_label" not in labels_minutes_df.columns and "minutes" not in labels_minutes_df.columns:
+        raise ValueError("labels_minutes must contain minutes_label or minutes column")
+
+    label_overlap = [c for c in labels_minutes_df.columns if c in features_df.columns and c not in JOIN_KEYS]
+    labels_for_merge = labels_minutes_df.drop(columns=label_overlap)
+    merged = features_df.merge(
+        labels_for_merge,
+        on=JOIN_KEYS,
+        how="left",
+        validate="one_to_one",
+    )
+    flow_label_cols = list(FLOW_TARGET_COLUMNS_V1) if bool(args.enable_phase2_flow) else []
+    if bool(args.enable_phase2_flow):
+        labels_counts_df = _coerce_join_keys(
+            pd.read_parquet(labels_boxscore_counts_path),
+            name="labels_boxscore_counts",
+        )
+        labels_counts_df = labels_counts_df.drop_duplicates(subset=JOIN_KEYS, keep="last")
+        count_overlap = [c for c in labels_counts_df.columns if c in merged.columns and c not in JOIN_KEYS]
+        labels_counts_for_merge = labels_counts_df.drop(columns=count_overlap)
+        merged = merged.merge(
+            labels_counts_for_merge,
+            on=JOIN_KEYS,
+            how="left",
+            validate="one_to_one",
+        )
+    else:
+        flow_label_cols = []
+    merged["game_id_norm"] = zfill_game_id_series(merged["game_id"])
+
+    feature_cols = _infer_feature_columns(features_df, labels_minutes_df)
+    train_df, val_df, split_meta = _split_train_val(merged, val_days=int(args.val_days))
+
+    feature_mean, feature_std = _compute_feature_norm(train_df, feature_cols)
+    game_feature_cols = [c.strip() for c in str(args.game_feature_cols).split(",") if c.strip()]
+    team_feature_cols = [c.strip() for c in str(args.team_feature_cols).split(",") if c.strip()]
+
+    train_examples = build_game_level_examples(
+        train_df,
+        feature_columns=feature_cols,
+        feature_mean=feature_mean,
+        feature_std=feature_std,
+        game_feature_columns=game_feature_cols,
+        team_feature_columns=team_feature_cols,
+        flow_label_columns=flow_label_cols,
+        minutes_label_col="minutes_label" if "minutes_label" in merged.columns else "minutes",
+    )
+    val_examples = build_game_level_examples(
+        val_df,
+        feature_columns=feature_cols,
+        feature_mean=feature_mean,
+        feature_std=feature_std,
+        game_feature_columns=game_feature_cols,
+        team_feature_columns=team_feature_cols,
+        flow_label_columns=flow_label_cols,
+        minutes_label_col="minutes_label" if "minutes_label" in merged.columns else "minutes",
+    )
+
+    train_loader = DataLoader(
+        GameLevelDataset(train_examples),
+        batch_size=max(1, int(args.batch_size)),
+        shuffle=True,
+        num_workers=max(0, int(args.num_workers)),
+        collate_fn=collate_game_level_examples,
+    )
+    val_loader = DataLoader(
+        GameLevelDataset(val_examples),
+        batch_size=max(1, int(args.batch_size)),
+        shuffle=False,
+        num_workers=max(0, int(args.num_workers)),
+        collate_fn=collate_game_level_examples,
+    )
+
+    include_pf_in_flow_targets = False
+    if bool(args.enable_phase2_flow):
+        flow_label_cols = list(
+            FLOW_TARGET_COLUMNS_WITH_PF if include_pf_in_flow_targets else FLOW_TARGET_COLUMNS_V1
+        )
+
+    config = GameTransformerV2Config(
+        feature_columns=feature_cols,
+        feature_mean=feature_mean.astype(np.float64).tolist(),
+        feature_std=feature_std.astype(np.float64).tolist(),
+        game_feature_columns=game_feature_cols,
+        team_feature_columns=team_feature_cols,
+        d_model=int(args.d_model),
+        hidden_dim=int(args.hidden_dim),
+        num_layers=int(args.num_layers),
+        num_heads=int(args.num_heads),
+        dropout=float(args.dropout),
+        min_active_count=int(args.min_active_count),
+        max_active_count=int(args.max_active_count),
+        active_threshold_minutes=float(args.active_threshold),
+        include_pf_in_flow_targets=bool(include_pf_in_flow_targets),
+        flow_num_blocks=int(args.flow_num_blocks),
+        flow_scale_clip=float(args.flow_scale_clip),
+    )
+
+    device = torch.device(str(args.device))
+    model = build_game_transformer_v2(config).to(device=device)
+    init_model_pt = Path(args.init_model_pt).expanduser().resolve() if args.init_model_pt else None
+    if init_model_pt is not None:
+        if not init_model_pt.exists():
+            raise FileNotFoundError(f"init checkpoint not found: {init_model_pt}")
+        init_state = torch.load(init_model_pt, map_location=device)
+        missing, unexpected = model.load_state_dict(init_state, strict=False)
+        if unexpected:
+            raise RuntimeError(f"Unexpected keys in init checkpoint {init_model_pt}: {unexpected}")
+        if missing:
+            print(
+                f"[warm-start] missing keys from init checkpoint ({len(missing)}): {missing}",
+                flush=True,
+            )
+        print(f"[warm-start] loaded init checkpoint: {init_model_pt}", flush=True)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(args.lr),
+        weight_decay=float(args.weight_decay),
+    )
+
+    out_dir = Path(args.out_dir).expanduser() if args.out_dir else (
+        paths.get_data_root() / "training" / "runs" / f"game_transformer_v2_{_utc_now_compact()}"
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    history: list[EpochMetrics] = []
+    best_val = float("inf")
+    best_epoch = -1
+    rollback_triggered = False
+    stable_checkpoint_path = out_dir / "checkpoint_stable.pt"
+    torch.save(model.state_dict(), stable_checkpoint_path)
+    stable_checkpoint_epoch = 0
+
+    phase2_guard_cfg = Phase2StabilityConfig(
+        nll_explosion_ratio=float(args.phase2_nll_guard_ratio),
+        nll_explosion_abs=float(args.phase2_nll_guard_abs),
+        nll_ema_alpha=float(args.phase2_nll_guard_ema_alpha),
+        nll_backoff_consecutive_batches=int(args.phase2_nll_guard_consecutive_batches),
+        max_backoffs_before_rollback=int(args.phase2_max_backoffs_before_rollback),
+        min_a2_scale=float(args.phase2_min_a2_scale),
+    )
+    phase2_guard_state = Phase2StabilityState(a2_scale=1.0)
+
+    for epoch in range(1, int(args.epochs) + 1):
+        phase2_weights = _resolve_phase2_epoch_weights(
+            epoch=int(epoch),
+            enable_phase2_flow=bool(args.enable_phase2_flow),
+            w_minutes=float(args.w_minutes),
+            w_minutes_nll=float(args.w_minutes_nll),
+            w_count=float(args.w_count),
+            w_member=float(args.w_member),
+            w_flow_nll=float(args.w_flow_nll),
+            flow_warmup_epochs=int(args.phase2_flow_warmup_epochs),
+            anchor_start_weight=float(args.phase2_anchor_start_weight),
+            anchor_end_weight=float(args.phase2_anchor_end_weight),
+            a2_scale=float(phase2_guard_state.a2_scale),
+        )
+
+        train_stats = _run_epoch(
+            model,
+            train_loader,
+            device=device,
+            optimizer=optimizer,
+            active_threshold=float(args.active_threshold),
+            min_active_count=int(args.min_active_count),
+            max_active_count=int(args.max_active_count),
+            run_phase2_flow=bool(phase2_weights.run_phase2_flow),
+            w_minutes=float(phase2_weights.w_minutes),
+            w_minutes_nll=float(phase2_weights.w_minutes_nll),
+            w_count=float(phase2_weights.w_count),
+            w_member=float(phase2_weights.w_member),
+            w_flow_nll=float(phase2_weights.w_flow_nll),
+            minutes_nll_sigma=float(args.minutes_nll_sigma),
+            positive_weight=float(args.active_positive_weight),
+            epoch_index=int(epoch),
+            backbone_grad_clip_norm=float(args.backbone_grad_clip_norm),
+            flow_grad_clip_norm=float(args.flow_grad_clip_norm),
+            phase2_stability_config=phase2_guard_cfg if bool(args.enable_phase2_flow) else None,
+            phase2_stability_state=phase2_guard_state if bool(args.enable_phase2_flow) else None,
+        )
+        rollback_requested = bool(train_stats.get("rollback_requested", 0.0) > 0.0)
+        if rollback_requested:
+            rollback_triggered = True
+            if stable_checkpoint_path.exists():
+                state = torch.load(stable_checkpoint_path, map_location=device)
+                model.load_state_dict(state)
+                torch.save(model.state_dict(), out_dir / "model_rollback.pt")
+            val_stats = {
+                "total": float("nan"),
+                "minutes_mae": float("nan"),
+                "count_loss": float("nan"),
+                "member_loss": float("nan"),
+                "minutes_nll": float("nan"),
+                "flow_nll": float("nan"),
+                "count_acc": float("nan"),
+                "skipped_batches": 0.0,
+                "instability_events": 0.0,
+                "rollback_requested": 1.0,
+            }
+        else:
+            val_stats = _run_epoch(
+                model,
+                val_loader,
+                device=device,
+                optimizer=None,
+                active_threshold=float(args.active_threshold),
+                min_active_count=int(args.min_active_count),
+                max_active_count=int(args.max_active_count),
+                run_phase2_flow=bool(phase2_weights.run_phase2_flow),
+                w_minutes=float(phase2_weights.w_minutes),
+                w_minutes_nll=float(phase2_weights.w_minutes_nll),
+                w_count=float(phase2_weights.w_count),
+                w_member=float(phase2_weights.w_member),
+                w_flow_nll=float(phase2_weights.w_flow_nll),
+                minutes_nll_sigma=float(args.minutes_nll_sigma),
+                positive_weight=float(args.active_positive_weight),
+                epoch_index=int(epoch),
+                backbone_grad_clip_norm=float(args.backbone_grad_clip_norm),
+                flow_grad_clip_norm=float(args.flow_grad_clip_norm),
+            )
+
+        metrics = EpochMetrics(
+            epoch=epoch,
+            phase2_flow_warmup=float(phase2_weights.flow_warmup),
+            phase2_anchor_weight=float(phase2_weights.anchor_weight),
+            phase2_a2_scale=float(phase2_guard_state.a2_scale),
+            phase2_backoff_count=int(phase2_guard_state.backoff_count),
+            train_skipped_batches=int(train_stats.get("skipped_batches", 0.0)),
+            train_instability_events=int(train_stats.get("instability_events", 0.0)),
+            train_total=train_stats["total"],
+            train_minutes_mae=train_stats["minutes_mae"],
+            train_count_loss=train_stats["count_loss"],
+            train_member_loss=train_stats["member_loss"],
+            train_minutes_nll=train_stats["minutes_nll"],
+            train_flow_nll=train_stats["flow_nll"],
+            train_count_acc=train_stats["count_acc"],
+            val_total=val_stats["total"],
+            val_minutes_mae=val_stats["minutes_mae"],
+            val_count_loss=val_stats["count_loss"],
+            val_member_loss=val_stats["member_loss"],
+            val_minutes_nll=val_stats["minutes_nll"],
+            val_flow_nll=val_stats["flow_nll"],
+            val_count_acc=val_stats["count_acc"],
+        )
+        history.append(metrics)
+
+        msg = (
+            f"epoch={epoch:03d} "
+            f"train_total={metrics.train_total:.4f} val_total={metrics.val_total:.4f} "
+            f"val_minutes_mae={metrics.val_minutes_mae:.4f} val_count_acc={metrics.val_count_acc:.4f} "
+            f"phase2_warmup={metrics.phase2_flow_warmup:.3f} "
+            f"anchor={metrics.phase2_anchor_weight:.3f} a2={metrics.phase2_a2_scale:.3f}"
+        )
+        if bool(args.enable_phase2_flow):
+            msg = (
+                f"{msg} "
+                f"val_minutes_nll={metrics.val_minutes_nll:.4f} "
+                f"val_flow_nll={metrics.val_flow_nll:.4f} "
+                f"skipped_batches={metrics.train_skipped_batches} "
+                f"instability_events={metrics.train_instability_events}"
+            )
+        print(msg, flush=True)
+
+        if math.isfinite(float(metrics.val_total)) and metrics.val_total < best_val:
+            best_val = metrics.val_total
+            best_epoch = epoch
+            torch.save(model.state_dict(), out_dir / "model.pt")
+
+        if rollback_requested:
+            print(
+                (
+                    "[phase2][rollback] "
+                    f"stopped_at_epoch={epoch:03d} "
+                    f"reason={phase2_guard_state.rollback_reason} "
+                    f"stable_checkpoint_epoch={stable_checkpoint_epoch:03d}"
+                ),
+                flush=True,
+            )
+            break
+
+        if (
+            bool(args.enable_phase2_flow)
+            and int(train_stats.get("instability_events", 0.0)) > 0
+        ):
+            continue
+        if _stats_finite(train_stats) and _stats_finite(val_stats):
+            torch.save(model.state_dict(), stable_checkpoint_path)
+            stable_checkpoint_epoch = int(epoch)
+
+    if not (out_dir / "model.pt").exists():
+        torch.save(model.state_dict(), out_dir / "model.pt")
+
+    config.save(out_dir / "config.json")
+    (out_dir / "history.json").write_text(
+        json.dumps([asdict(m) for m in history], indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    summary = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "dataset_dir": str(dataset_dir),
+        "features_path": str(features_path),
+        "labels_minutes_path": str(labels_minutes_path),
+        "labels_boxscore_counts_path": str(labels_boxscore_counts_path) if bool(args.enable_phase2_flow) else None,
+        "num_feature_columns": int(len(feature_cols)),
+        "flow_target_columns": flow_label_cols,
+        "phase2_flow_enabled": bool(args.enable_phase2_flow),
+        "phase2_schedule": {
+            "flow_warmup_epochs": int(args.phase2_flow_warmup_epochs),
+            "anchor_start_weight": float(args.phase2_anchor_start_weight),
+            "anchor_end_weight": float(args.phase2_anchor_end_weight),
+        },
+        "phase2_stability": {
+            "rollback_triggered": bool(rollback_triggered),
+            "rollback_reason": str(phase2_guard_state.rollback_reason) if rollback_triggered else None,
+            "stable_checkpoint_epoch": int(stable_checkpoint_epoch),
+            "final_a2_scale": float(phase2_guard_state.a2_scale),
+            "backoff_count": int(phase2_guard_state.backoff_count),
+            "events": phase2_guard_state.events[-50:],
+            "config": asdict(phase2_guard_cfg),
+        },
+        "split": split_meta,
+        "train_examples": int(len(train_examples)),
+        "val_examples": int(len(val_examples)),
+        "best_val_total": float(best_val),
+        "best_epoch": int(best_epoch),
+        "init_model_pt": str(init_model_pt) if init_model_pt is not None else None,
+        "args": vars(args),
+    }
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+    print(json.dumps({"out_dir": str(out_dir), "best_epoch": best_epoch, "best_val_total": best_val}, indent=2), flush=True)
+
+
+if __name__ == "__main__":
+    main()

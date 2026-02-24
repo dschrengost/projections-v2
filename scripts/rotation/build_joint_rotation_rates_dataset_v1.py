@@ -34,6 +34,35 @@ from projections import paths
 KEY_COLS = ["game_id", "team_id", "player_id"]
 JOIN_KEYS = ["game_id", "team_id", "player_id", "game_date"]
 
+# Raw count-stat columns produced by build_boxscore_count_labels.py.
+COUNT_STAT_COLS = [
+    "fga2",
+    "fg2m",
+    "fga3",
+    "fg3m",
+    "fta",
+    "ftm",
+    "oreb",
+    "dreb",
+    "ast",
+    "stl",
+    "blk",
+    "tov",
+    "pf",
+    "minutes",   # minutes from boxscore payload (may differ slightly from rotation labels)
+    "starter_flag",
+    "played",
+]
+
+# Feature columns to drop from the rotation feature spine.
+# See spec Section 4.7 for rationale.
+FEATURE_COLS_DROP = [
+    "is_confirmed_starter",         # redundant with is_projected_starter
+    "first_in_time_real",           # current-game PBP label, not a pre-game feature
+    "last_out_time_real",           # current-game PBP label
+    "time_unit_detected",           # current-game PBP label
+]
+
 RATE_TARGET_COLS = [
     "fga2_per_min",
     "fga3_per_min",
@@ -55,6 +84,13 @@ RATES_LABEL_COLS = ["minutes_actual", *RATE_TARGET_COLS, *EFFICIENCY_LABEL_COLS]
 DEFAULT_ROTATION_PREFIX = "rotation_train_v1"
 DEFAULT_OUT_PREFIX = "joint_rotation_rates_v1"
 DEFAULT_MINUTES_FOR_RATES_LOSS = 4.0
+# Game-total points per possession (~2.2 to 2.3 in modern NBA scoring).
+# estimated_possessions ~= vegas_total / league_ppp
+DEFAULT_LEAGUE_PPP = 2.27
+# Vegas-first by default. Pace component can be reintroduced after calibration.
+DEFAULT_EST_POSSESSIONS_PACE_WEIGHT = 0.0
+DEFAULT_EST_POSSESSIONS_CLIP_MIN = 85.0
+DEFAULT_EST_POSSESSIONS_CLIP_MAX = 130.0
 
 
 def _utc_now_iso() -> str:
@@ -83,6 +119,12 @@ def _season_for_date(day: pd.Timestamp) -> int:
 def _zfill_game_id(series: pd.Series) -> pd.Series:
     coerced = pd.to_numeric(series, errors="coerce").astype("Int64")
     return coerced.astype("string").str.zfill(10)
+
+
+def _numeric_series(df: pd.DataFrame, col: str) -> pd.Series:
+    if col in df.columns:
+        return pd.to_numeric(df[col], errors="coerce").astype("float64")
+    return pd.Series(np.nan, index=df.index, dtype="float64")
 
 
 def _resolve_date_window(
@@ -394,6 +436,241 @@ def _assert_unique_keys(df: pd.DataFrame, *, name: str, keys: list[str]) -> None
         raise ValueError(f"{name} has duplicated rows for keys={keys}; sample={sample}")
 
 
+def _apply_lineup_feature_contract(features_df: pd.DataFrame) -> pd.DataFrame:
+    """Apply the lineup/starter feature contract from spec Section 4.7.
+
+    Changes:
+    - Derives `lineup_available` per team-game (1 if lineup was scraped for this team-game).
+    - Renames `is_projected_starter` -> `lineup_starter_announced`.
+    - Drops `is_confirmed_starter` (redundant) and current-game PBP labels.
+    """
+    df = features_df.copy()
+
+    # lineup_available: True for every player on a team-game where lineup data
+    # was present at the as_of_ts cutoff. Derived from lineup_timestamp being
+    # non-null for at least one player in that (game_id, team_id) group.
+    if "lineup_timestamp" in df.columns:
+        has_lineup = df.groupby(["game_id", "team_id"], sort=False)["lineup_timestamp"].transform(
+            lambda x: x.notna().any()
+        )
+        df["lineup_available"] = has_lineup.astype("int8")
+    else:
+        df["lineup_available"] = np.int8(0)
+
+    # Derive lineup_starter_announced from lineup metadata.
+    # Semantics:
+    # - treat projected starters as announced starters (same as confirmed)
+    # - suppress standalone projected-starter noise when lineup data is absent
+    role_norm = (
+        df.get("lineup_role", pd.Series("", index=df.index))
+        .astype("string", copy=False)
+        .fillna("")
+        .str.strip()
+        .str.lower()
+    )
+    status_norm = (
+        df.get("lineup_status", pd.Series("", index=df.index))
+        .astype("string", copy=False)
+        .fillna("")
+        .str.strip()
+        .str.lower()
+    )
+    starter_from_lineup = role_norm.isin({"projected_starter", "confirmed_starter"}) | status_norm.isin(
+        {"expected", "confirmed"}
+    )
+    starter_from_flag = (
+        pd.to_numeric(df.get("is_projected_starter", 0), errors="coerce")
+        .fillna(0)
+        .astype(float)
+        .gt(0.0)
+    )
+    lineup_present = pd.to_numeric(df.get("lineup_available", 0), errors="coerce").fillna(0).astype(float).gt(0.0)
+    df["lineup_starter_announced"] = (
+        (lineup_present & (starter_from_lineup | starter_from_flag)).astype("int8")
+    )
+    if "is_projected_starter" in df.columns:
+        df = df.drop(columns=["is_projected_starter"])
+
+    # Drop redundant / PBP-only columns (spec Section 4.7 / 4.6).
+    drop = [c for c in FEATURE_COLS_DROP if c in df.columns]
+    if drop:
+        df = df.drop(columns=drop)
+
+    return df
+
+
+def _apply_game_context_feature_contract(
+    features_df: pd.DataFrame,
+    *,
+    league_ppp: float,
+    pace_weight: float,
+    clip_min: float,
+    clip_max: float,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Add canonical game context features required by spec Section 4.8.
+
+    Produces:
+    - vegas_total (from total)
+    - vegas_spread (from spread_home)
+    - estimated_possessions (blend of pace-based and odds-based estimates)
+    """
+    if league_ppp <= 0:
+        raise ValueError("league_ppp must be > 0")
+    if not (0.0 <= pace_weight <= 1.0):
+        raise ValueError("estimated_possessions pace_weight must be in [0, 1]")
+    if clip_max <= clip_min:
+        raise ValueError("estimated_possessions clip_max must be > clip_min")
+
+    df = features_df.copy()
+
+    raw_total = _numeric_series(df, "total")
+    raw_spread = _numeric_series(df, "spread_home")
+
+    total_missing_flag = (
+        pd.to_numeric(df["total_missing"], errors="coerce").fillna(0).astype(bool)
+        if "total_missing" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    spread_missing_flag = (
+        pd.to_numeric(df["spread_home_missing"], errors="coerce").fillna(0).astype(bool)
+        if "spread_home_missing" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+
+    # Treat rows marked by *_missing flags as null for canonical vegas features.
+    vegas_total = raw_total.mask(total_missing_flag)
+    vegas_spread = raw_spread.mask(spread_missing_flag)
+
+    team_pace = _numeric_series(df, "team_pace_szn")
+    opp_pace = _numeric_series(df, "opp_pace_szn")
+    poss_from_pace = 0.5 * (team_pace + opp_pace)
+    poss_from_vegas = vegas_total / float(league_ppp)
+
+    est_possessions = poss_from_pace.copy()
+    est_possessions = est_possessions.where(est_possessions.notna(), poss_from_vegas)
+    both = poss_from_pace.notna() & poss_from_vegas.notna()
+    est_possessions.loc[both] = (
+        float(pace_weight) * poss_from_pace.loc[both]
+        + (1.0 - float(pace_weight)) * poss_from_vegas.loc[both]
+    )
+    est_possessions = est_possessions.clip(lower=float(clip_min), upper=float(clip_max))
+    est_missing_mask = est_possessions.isna()
+    vegas_non_null = poss_from_vegas.dropna()
+    pace_non_null = poss_from_pace.dropna()
+    if not vegas_non_null.empty:
+        neutral_possessions = float(vegas_non_null.median())
+    elif not pace_non_null.empty:
+        neutral_possessions = float(pace_non_null.median())
+    else:
+        neutral_possessions = 0.5 * (float(clip_min) + float(clip_max))
+    neutral_possessions = float(np.clip(neutral_possessions, float(clip_min), float(clip_max)))
+    est_possessions = est_possessions.fillna(neutral_possessions).astype("float64")
+
+    df["vegas_total"] = vegas_total.astype("float64")
+    df["vegas_spread"] = vegas_spread.astype("float64")
+    df["estimated_possessions"] = est_possessions
+    df["vegas_total_missing"] = df["vegas_total"].isna().astype("int8")
+    df["vegas_spread_missing"] = df["vegas_spread"].isna().astype("int8")
+    df["estimated_possessions_missing"] = est_missing_mask.astype("int8")
+
+    meta = {
+        "league_ppp": float(league_ppp),
+        "estimated_possessions_pace_weight": float(pace_weight),
+        "estimated_possessions_clip_min": float(clip_min),
+        "estimated_possessions_clip_max": float(clip_max),
+        "estimated_possessions_neutral_fallback": float(neutral_possessions),
+        "vegas_total_coverage": float(df["vegas_total"].notna().mean()),
+        "vegas_spread_coverage": float(df["vegas_spread"].notna().mean()),
+        "estimated_possessions_raw_coverage": float((~est_missing_mask).mean()),
+        "estimated_possessions_final_coverage": float(df["estimated_possessions"].notna().mean()),
+        "estimated_possessions_source": {
+            "pace_only": int((poss_from_pace.notna() & poss_from_vegas.isna()).sum()),
+            "vegas_only": int((poss_from_pace.isna() & poss_from_vegas.notna()).sum()),
+            "blended": int(both.sum()),
+            "missing": int((poss_from_pace.isna() & poss_from_vegas.isna()).sum()),
+        },
+    }
+    return df, meta
+
+
+def _load_boxscore_count_labels(
+    counts_path: Path,
+    game_dates: list[pd.Timestamp],
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Load labels_boxscore_counts.parquet and filter to relevant game dates."""
+    if not counts_path.exists():
+        print(f"[joint_dataset] warning: boxscore count labels not found at {counts_path}; count labels will be null.")
+        empty = pd.DataFrame(columns=JOIN_KEYS + COUNT_STAT_COLS + ["count_labels_available"])
+        return empty, {"path": str(counts_path), "found": False, "rows_loaded": 0}
+
+    df = pd.read_parquet(counts_path)
+    df = _coerce_join_keys(df, name="boxscore_count_labels", require_game_date=True)
+
+    if game_dates:
+        date_set = {pd.Timestamp(d).normalize() for d in game_dates}
+        min_day = min(date_set) - pd.Timedelta(days=1)
+        max_day = max(date_set) + pd.Timedelta(days=1)
+        df = df.loc[(df["game_date"] >= min_day) & (df["game_date"] <= max_day)].copy()
+
+    pre_dedupe = len(df)
+    df = df.drop_duplicates(subset=JOIN_KEYS, keep="last")
+    if len(df) < pre_dedupe:
+        print(f"[joint_dataset] count labels dedup: {pre_dedupe} -> {len(df)}")
+
+    meta: dict[str, Any] = {
+        "path": str(counts_path),
+        "found": True,
+        "rows_loaded": int(len(df)),
+        "games_loaded": int(df["game_id"].nunique()) if not df.empty else 0,
+    }
+    return df, meta
+
+
+def _align_boxscore_count_labels_to_features(
+    features_df: pd.DataFrame,
+    counts_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Left-join count labels onto the feature spine, row-aligned."""
+    spine = features_df.loc[:, JOIN_KEYS].copy()
+    spine["_row_idx"] = np.arange(len(spine), dtype=np.int64)
+
+    cols_present = [c for c in COUNT_STAT_COLS if c in counts_df.columns]
+    counts_payload = counts_df.loc[:, JOIN_KEYS + cols_present].copy() if not counts_df.empty else pd.DataFrame()
+    aligned = spine.merge(counts_payload, on=JOIN_KEYS, how="left", sort=False)
+    aligned = aligned.sort_values("_row_idx").drop(columns=["_row_idx"])
+
+    # Fallback for known date-shift issues in some historical boxscore partitions:
+    # if strict (game_id, team_id, player_id, game_date) join misses, backfill from
+    # (game_id, team_id, player_id) when that key maps to a unique row in counts.
+    if cols_present and not counts_df.empty:
+        anchor_col = cols_present[0]
+        missing_mask = aligned[anchor_col].isna()
+        if missing_mask.any():
+            counts_by_id = (
+                counts_df.loc[:, KEY_COLS + cols_present]
+                .drop_duplicates(subset=KEY_COLS, keep="last")
+            )
+            fallback_spine = features_df.loc[missing_mask, KEY_COLS].copy()
+            fallback = fallback_spine.merge(counts_by_id, on=KEY_COLS, how="left", sort=False)
+            for col in cols_present:
+                aligned.loc[missing_mask, col] = aligned.loc[missing_mask, col].where(
+                    aligned.loc[missing_mask, col].notna(),
+                    fallback[col].to_numpy(),
+                )
+
+    for col in cols_present:
+        aligned[col] = pd.to_numeric(aligned[col], errors="coerce")
+
+    # Availability flag: 1 if at least fga2 is non-null (game was captured in bronze).
+    fga2_col = "fga2" if "fga2" in aligned.columns else None
+    if fga2_col:
+        aligned["count_labels_available"] = aligned[fga2_col].notna().astype("int8")
+    else:
+        aligned["count_labels_available"] = np.int8(0)
+
+    return aligned
+
+
 def _coverage_by_column(df: pd.DataFrame, cols: list[str]) -> dict[str, float]:
     out: dict[str, float] = {}
     for col in cols:
@@ -418,13 +695,17 @@ def _write_manifest(
     features_df: pd.DataFrame,
     labels_minutes_df: pd.DataFrame,
     labels_rates_df: pd.DataFrame,
+    labels_boxscore_counts_df: pd.DataFrame,
     team_game_index_df: pd.DataFrame,
     rates_meta: dict[str, Any],
     alignment_meta: dict[str, Any],
+    boxscore_counts_meta: dict[str, Any],
+    game_context_meta: dict[str, Any],
     appended_rates_context_cols: list[str],
     args_dict: dict[str, Any],
 ) -> None:
     rates_cov = _coverage_by_column(labels_rates_df, RATE_TARGET_COLS + EFFICIENCY_LABEL_COLS + ["minutes_actual"])
+    counts_cov = _coverage_by_column(labels_boxscore_counts_df, COUNT_STAT_COLS)
     payload: dict[str, Any] = {
         "version": "joint_rotation_rates_v1_dataset",
         "created_at": _utc_now_iso(),
@@ -437,11 +718,13 @@ def _write_manifest(
             "rates_partition_count": int(len(rates_partition_paths)),
             "rates_partitions_sample": [str(p) for p in rates_partition_paths[:25]],
             "missing_rates_dates": missing_rates_dates,
+            "boxscore_counts": boxscore_counts_meta,
         },
         "outputs": {
             "features": str(out_dir / "features.parquet"),
             "labels_minutes": str(out_dir / "labels_minutes.parquet"),
             "labels_rates": str(out_dir / "labels_rates.parquet"),
+            "labels_boxscore_counts": str(out_dir / "labels_boxscore_counts.parquet"),
             "team_game_index": str(out_dir / "team_game_index.parquet"),
         },
         "counts": {
@@ -467,6 +750,24 @@ def _write_manifest(
             ),
             "rows_loss_eligible": int(pd.to_numeric(labels_rates_df["rates_loss_eligible"], errors="coerce").fillna(0).sum()),
         },
+        "boxscore_counts": {
+            "coverage_by_column": counts_cov,
+            "rows_with_count_labels": int(
+                pd.to_numeric(labels_boxscore_counts_df.get("count_labels_available", 0), errors="coerce").fillna(0).sum()
+            ),
+            "count_label_join_rate": float(
+                pd.to_numeric(labels_boxscore_counts_df.get("count_labels_available", 0), errors="coerce").fillna(0).mean()
+            ),
+        },
+        "lineup_feature_contract": {
+            "lineup_available_coverage": float(
+                pd.to_numeric(features_df.get("lineup_available", 0), errors="coerce").fillna(0).mean()
+            ),
+            "lineup_starter_announced_coverage": float(
+                pd.to_numeric(features_df.get("lineup_starter_announced", 0), errors="coerce").fillna(0).mean()
+            ),
+        },
+        "game_context_feature_contract": game_context_meta,
         "alignment": alignment_meta,
         "features_appended_from_rates_context": appended_rates_context_cols,
         "args": args_dict,
@@ -491,6 +792,16 @@ def main() -> None:
         type=str,
         default=None,
         help="Root for rates training base partitions (default: $PROJECTIONS_DATA_ROOT/gold/rates_training_base).",
+    )
+    parser.add_argument(
+        "--boxscore-counts-dir",
+        type=str,
+        default=None,
+        help=(
+            "Directory containing labels_boxscore_counts.parquet "
+            "(default: $PROJECTIONS_DATA_ROOT/gold/labels_boxscore_counts). "
+            "Build with scripts/rotation/build_boxscore_count_labels.py."
+        ),
     )
     parser.add_argument(
         "--out-dir",
@@ -527,6 +838,36 @@ def main() -> None:
         default=DEFAULT_MINUTES_FOR_RATES_LOSS,
         help="Eligibility threshold used to mark rows suitable for rates loss.",
     )
+    parser.add_argument(
+        "--league-ppp",
+        type=float,
+        default=DEFAULT_LEAGUE_PPP,
+        help=(
+            "League-average game-total points per possession used for vegas-only possessions fallback "
+            "(for example, ~2.25)."
+        ),
+    )
+    parser.add_argument(
+        "--estimated-possessions-pace-weight",
+        type=float,
+        default=DEFAULT_EST_POSSESSIONS_PACE_WEIGHT,
+        help=(
+            "Blend weight for pace-based possessions estimate when both pace and vegas are available. "
+            "0 uses vegas-only, 1 uses pace-only."
+        ),
+    )
+    parser.add_argument(
+        "--estimated-possessions-clip-min",
+        type=float,
+        default=DEFAULT_EST_POSSESSIONS_CLIP_MIN,
+        help="Lower clip bound for estimated_possessions.",
+    )
+    parser.add_argument(
+        "--estimated-possessions-clip-max",
+        type=float,
+        default=DEFAULT_EST_POSSESSIONS_CLIP_MAX,
+        help="Upper clip bound for estimated_possessions.",
+    )
     parser.add_argument("--report-only", action="store_true", help="Print diagnostics and exit without writing files.")
     args = parser.parse_args()
 
@@ -536,6 +877,11 @@ def main() -> None:
         Path(args.rates_training_base_root).expanduser().resolve()
         if args.rates_training_base_root
         else (data_root / "gold" / "rates_training_base").resolve()
+    )
+    counts_path = (
+        Path(args.boxscore_counts_dir).expanduser().resolve() / "labels_boxscore_counts.parquet"
+        if args.boxscore_counts_dir
+        else (data_root / "gold" / "labels_boxscore_counts" / "labels_boxscore_counts.parquet")
     )
     out_dir = (
         Path(args.out_dir).expanduser().resolve()
@@ -553,6 +899,7 @@ def main() -> None:
     print(f"[joint_dataset] data_root={data_root}")
     print(f"[joint_dataset] rotation_dataset_dir={rotation_dataset_dir}")
     print(f"[joint_dataset] rates_training_base_root={rates_root}")
+    print(f"[joint_dataset] boxscore_counts_path={counts_path}")
     if start_day is not None or end_day is not None:
         print(f"[joint_dataset] date_window start={start_day} end={end_day}")
 
@@ -573,6 +920,28 @@ def main() -> None:
         raise ValueError("No rotation feature rows remain after date filtering.")
 
     _assert_unique_keys(features_df, name="rotation_features(filtered)", keys=JOIN_KEYS)
+
+    # Apply lineup/starter feature contract (spec Section 4.7).
+    features_df = _apply_lineup_feature_contract(features_df)
+    print(
+        "[joint_dataset] lineup contract applied:",
+        f"lineup_available={features_df['lineup_available'].mean():.1%}",
+        f"lineup_starter_announced={features_df.get('lineup_starter_announced', pd.Series([0])).mean():.1%}",
+    )
+    features_df, game_context_meta = _apply_game_context_feature_contract(
+        features_df,
+        league_ppp=float(args.league_ppp),
+        pace_weight=float(args.estimated_possessions_pace_weight),
+        clip_min=float(args.estimated_possessions_clip_min),
+        clip_max=float(args.estimated_possessions_clip_max),
+    )
+    print(
+        "[joint_dataset] game-context contract applied:",
+        f"vegas_total={game_context_meta['vegas_total_coverage']:.1%}",
+        f"vegas_spread={game_context_meta['vegas_spread_coverage']:.1%}",
+        f"estimated_possessions_raw={game_context_meta['estimated_possessions_raw_coverage']:.1%}",
+        f"estimated_possessions_final={game_context_meta['estimated_possessions_final_coverage']:.1%}",
+    )
 
     minutes_label_col = _infer_minutes_label_column(labels_df)
     labels_minutes_df, alignment_meta = _align_minutes_labels_to_features(
@@ -599,6 +968,19 @@ def main() -> None:
         features_aug_df,
         rates_df,
         min_minutes_for_rates_loss=float(args.min_minutes_for_rates_loss),
+    )
+
+    # Load and align boxscore count labels.
+    counts_df, boxscore_counts_meta = _load_boxscore_count_labels(
+        counts_path,
+        game_dates=[pd.Timestamp(day) for day in unique_days],
+    )
+    labels_boxscore_counts_df = _align_boxscore_count_labels_to_features(features_aug_df, counts_df)
+    count_join_rate = float(labels_boxscore_counts_df["count_labels_available"].mean())
+    print(
+        "[joint_dataset] boxscore count labels:",
+        f"join_rate={count_join_rate:.1%}",
+        f"rows_with_counts={int(labels_boxscore_counts_df['count_labels_available'].sum())}",
     )
 
     if args.drop_rows_missing_any_rates:
@@ -639,6 +1021,7 @@ def main() -> None:
         features_aug_df = features_aug_df.iloc[:keep_n].reset_index(drop=True)
         labels_minutes_df = labels_minutes_df.iloc[:keep_n].reset_index(drop=True)
         labels_rates_df = labels_rates_df.iloc[:keep_n].reset_index(drop=True)
+        labels_boxscore_counts_df = labels_boxscore_counts_df.iloc[:keep_n].reset_index(drop=True)
         print(f"[joint_dataset] max_rows cap applied: {keep_n}")
 
     team_game_index_df = _build_team_game_index(features_aug_df, labels_minutes_df, labels_rates_df)
@@ -654,6 +1037,7 @@ def main() -> None:
         f"rows_with_any_rate_labels={rates_any}",
         f"rows_with_all_rate_targets={rates_all}",
         f"rows_rates_loss_eligible={loss_eligible}",
+        f"rows_with_count_labels={int(labels_boxscore_counts_df['count_labels_available'].sum())}",
     )
 
     date_min = pd.to_datetime(features_aug_df["game_date"]).min()
@@ -675,11 +1059,13 @@ def main() -> None:
     out_features = out_dir / "features.parquet"
     out_labels_minutes = out_dir / "labels_minutes.parquet"
     out_labels_rates = out_dir / "labels_rates.parquet"
+    out_labels_boxscore_counts = out_dir / "labels_boxscore_counts.parquet"
     out_team_game_index = out_dir / "team_game_index.parquet"
 
     features_aug_df.to_parquet(out_features, index=False)
     labels_minutes_df.to_parquet(out_labels_minutes, index=False)
     labels_rates_df.to_parquet(out_labels_rates, index=False)
+    labels_boxscore_counts_df.to_parquet(out_labels_boxscore_counts, index=False)
     team_game_index_df.to_parquet(out_team_game_index, index=False)
 
     _write_manifest(
@@ -695,13 +1081,17 @@ def main() -> None:
         features_df=features_aug_df,
         labels_minutes_df=labels_minutes_df,
         labels_rates_df=labels_rates_df,
+        labels_boxscore_counts_df=labels_boxscore_counts_df,
         team_game_index_df=team_game_index_df,
         rates_meta=rates_meta,
         alignment_meta=alignment_meta,
+        boxscore_counts_meta=boxscore_counts_meta,
+        game_context_meta=game_context_meta,
         appended_rates_context_cols=appended_rates_context_cols,
         args_dict={
             "rotation_dataset_dir": args.rotation_dataset_dir,
             "rates_training_base_root": args.rates_training_base_root,
+            "boxscore_counts_dir": args.boxscore_counts_dir,
             "out_dir": args.out_dir,
             "start_date": args.start_date,
             "end_date": args.end_date,
@@ -710,14 +1100,19 @@ def main() -> None:
             "max_rows": args.max_rows,
             "drop_rows_missing_any_rates": bool(args.drop_rows_missing_any_rates),
             "min_minutes_for_rates_loss": float(args.min_minutes_for_rates_loss),
+            "league_ppp": float(args.league_ppp),
+            "estimated_possessions_pace_weight": float(args.estimated_possessions_pace_weight),
+            "estimated_possessions_clip_min": float(args.estimated_possessions_clip_min),
+            "estimated_possessions_clip_max": float(args.estimated_possessions_clip_max),
         },
     )
 
-    print(f"[joint_dataset] wrote features        -> {out_features}")
-    print(f"[joint_dataset] wrote labels_minutes  -> {out_labels_minutes}")
-    print(f"[joint_dataset] wrote labels_rates    -> {out_labels_rates}")
-    print(f"[joint_dataset] wrote team_game_index -> {out_team_game_index}")
-    print(f"[joint_dataset] wrote manifest        -> {out_dir / 'manifest.json'}")
+    print(f"[joint_dataset] wrote features              -> {out_features}")
+    print(f"[joint_dataset] wrote labels_minutes        -> {out_labels_minutes}")
+    print(f"[joint_dataset] wrote labels_rates          -> {out_labels_rates}")
+    print(f"[joint_dataset] wrote labels_boxscore_counts-> {out_labels_boxscore_counts}")
+    print(f"[joint_dataset] wrote team_game_index       -> {out_team_game_index}")
+    print(f"[joint_dataset] wrote manifest              -> {out_dir / 'manifest.json'}")
 
 
 if __name__ == "__main__":

@@ -288,12 +288,14 @@ def _compute_team_context(team_history: pd.DataFrame, *, team_ids: set[int]) -> 
     if df.empty:
         return pd.DataFrame()
 
-    for col in ("points_for", "points_against", "fga", "fta", "turnovers"):
+    for col in ("points_for", "points_against", "fga", "fta", "oreb", "turnovers"):
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
     df["team_id"] = pd.to_numeric(df["team_id"], errors="coerce").astype(int)
     df["game_id"] = pd.to_numeric(df.get("game_id"), errors="coerce").astype("Int64")
 
-    df["poss"] = df["fga"] + 0.44 * df["fta"] + df["turnovers"]
+    # Basic possessions estimate:
+    # 0.96 * (FGA + TOV + 0.44*FTA - OREB)
+    df["poss"] = 0.96 * (df["fga"] + df["turnovers"] + 0.44 * df["fta"] - df["oreb"])
     grouped = df.groupby("team_id", as_index=False).agg(
         games_played=("game_id", "nunique"),
         poss_total=("poss", "sum"),
