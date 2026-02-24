@@ -1131,4 +1131,25 @@ Contract verification status:
 Phase boundary:
 
 - Step 3 is complete (quality-optimized Phase 2 checkpoint promoted).
-- Phase 3 (`L_decision`) has **not** been started in this update.
+- Phase 3 (`L_decision`) is **no longer blocked** and can start from the promoted quality-optimized checkpoint.
+- Phase 3 was not started in this update; this pass stops at the Phase 2 quality gate.
+
+### Next-Agent Handoff (2026-02-24, post-Phase-2 quality promotion)
+
+Current state:
+
+- **Phase 2 quality gate is complete** (optimizer pass + multi-seed confirmation + promotion).
+- **Phase 3 is unblocked.**
+- Fallback checkpoints remain available:
+  - Phase 1 baseline anchor:
+    `/home/daniel/projections-data/training/runs/game_transformer_v2_possfix_20260224T002514Z_e10`
+  - prior promoted Phase 2 checkpoint:
+    `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T022707Z/trials/anchor95_warm12_flow010/run`
+  - latest quality-optimized Phase 2 checkpoint:
+    `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z/trials/opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18/run`
+
+Recommended next step:
+
+1. Start Phase 3 (`L_decision`) from:
+   `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z/trials/opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18/run`
+2. Keep Phase 1 and both promoted Phase 2 checkpoints as rollback options until Phase 3/4 go-no-go is complete.
