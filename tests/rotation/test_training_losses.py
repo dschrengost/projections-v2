@@ -8,9 +8,11 @@ import torch
 from projections.rotation.training_losses import (
     build_in_rotation_labels,
     compute_anti_smear_penalty,
+    compute_crps_loss,
     compute_k_hat,
     compute_k_regularizer,
     compute_minutes_out_loss,
+    compute_team_energy_score,
 )
 
 
@@ -263,3 +265,72 @@ class TestComputeMinutesOutLoss:
         loss.backward()
 
         assert pred_minutes.grad is not None
+
+
+class TestComputeCrpsLoss:
+    """Tests for compute_crps_loss helper."""
+
+    def test_crps_is_zero_for_perfect_degenerate_samples(self) -> None:
+        samples = torch.tensor([[[10.0], [10.0], [10.0]]])  # (B=1,K=3,N=1)
+        target = torch.tensor([[10.0]])
+        mask = torch.tensor([[True]])
+        loss = compute_crps_loss(samples, target, mask)
+        assert loss.item() == pytest.approx(0.0, abs=1e-7)
+
+    def test_crps_matches_manual_value_single_player(self) -> None:
+        samples = torch.tensor([[[1.0], [2.0], [3.0]]])  # K=3
+        target = torch.tensor([[2.0]])
+        mask = torch.tensor([[True]])
+        loss = compute_crps_loss(samples, target, mask)
+        # term1 = (1 + 0 + 1)/3 = 2/3
+        # pairwise mean abs = 8/9 -> 0.5 * 8/9 = 4/9
+        # crps = 2/3 - 4/9 = 2/9
+        assert loss.item() == pytest.approx(2.0 / 9.0, abs=1e-6)
+
+    def test_crps_respects_mask(self) -> None:
+        samples = torch.tensor([[[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]])  # (1,3,2)
+        target = torch.tensor([[2.0, 0.0]])
+        mask = torch.tensor([[True, False]])
+        loss = compute_crps_loss(samples, target, mask)
+        assert loss.item() == pytest.approx(2.0 / 9.0, abs=1e-6)
+
+
+class TestComputeTeamEnergyScore:
+    """Tests for compute_team_energy_score helper."""
+
+    def test_team_energy_zero_for_perfect_degenerate_samples(self) -> None:
+        samples = torch.tensor([[[5.0, 7.0], [5.0, 7.0], [5.0, 7.0]]])  # (1,3,2)
+        target = torch.tensor([[5.0, 7.0]])
+        mask = torch.tensor([[True, True]])
+        team_index = torch.tensor([[0, 0]])
+        score = compute_team_energy_score(samples, target, mask, team_index)
+        assert score.item() == pytest.approx(0.0, abs=1e-6)
+
+    def test_team_energy_respects_team_partition(self) -> None:
+        samples = torch.tensor(
+            [
+                [[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]],
+            ]
+        )  # (1,3,2)
+        target = torch.tensor([[2.0, 3.0]])
+        mask = torch.tensor([[True, True]])
+        team_index = torch.tensor([[0, 1]])
+        score = compute_team_energy_score(samples, target, mask, team_index)
+        # With one player per team, team energy reduces to scalar CRPS per player.
+        crps = compute_crps_loss(samples, target, mask)
+        assert score.item() == pytest.approx(crps.item(), abs=1e-6)
+
+    def test_team_energy_backward_is_finite_at_zero_distance(self) -> None:
+        samples = torch.tensor(
+            [[[5.0, 7.0], [5.0, 7.0], [5.0, 7.0]]],
+            requires_grad=True,
+        )
+        target = torch.tensor([[5.0, 7.0]])
+        mask = torch.tensor([[True, True]])
+        team_index = torch.tensor([[0, 0]])
+
+        score = compute_team_energy_score(samples, target, mask, team_index, eps=1e-6)
+        score.backward()
+
+        assert samples.grad is not None
+        assert torch.isfinite(samples.grad).all()

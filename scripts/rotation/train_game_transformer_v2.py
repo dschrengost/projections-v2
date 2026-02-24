@@ -32,6 +32,7 @@ from projections.rotation.joint_active_set import (
     build_active_set_labels,
     compute_active_set_losses,
 )
+from projections.rotation.training_losses import compute_crps_loss, compute_team_energy_score
 from projections.rotation.set_model import zfill_game_id_series
 
 JOIN_KEYS = ["game_id", "team_id", "player_id", "game_date"]
@@ -112,6 +113,8 @@ class EpochMetrics:
     train_member_loss: float
     train_minutes_nll: float
     train_flow_nll: float
+    train_crps_fpts: float
+    train_team_energy: float
     train_count_acc: float
     val_total: float
     val_minutes_mae: float
@@ -119,6 +122,8 @@ class EpochMetrics:
     val_member_loss: float
     val_minutes_nll: float
     val_flow_nll: float
+    val_crps_fpts: float
+    val_team_energy: float
     val_count_acc: float
 
 
@@ -129,9 +134,12 @@ class Phase2EpochWeights:
     w_count: float
     w_member: float
     w_flow_nll: float
+    w_crps_fpts: float
+    w_team_energy: float
     flow_warmup: float
     anchor_weight: float
     run_phase2_flow: bool
+    run_phase3_decision: bool
 
 
 @dataclass(frozen=True)
@@ -293,6 +301,142 @@ def _gaussian_nll(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, 
     return (per * mask_f).sum() / denom
 
 
+def _flow_index(flow_target_columns: list[str], name: str) -> int:
+    try:
+        return int(flow_target_columns.index(name))
+    except ValueError as exc:
+        raise KeyError(f"missing flow target column: {name}") from exc
+
+
+def _project_flow_stats_to_contract(
+    flow_values: torch.Tensor,
+    *,
+    flow_target_columns: list[str],
+) -> torch.Tensor:
+    fg2m_idx = _flow_index(flow_target_columns, "fg2m")
+    fga2_idx = _flow_index(flow_target_columns, "fga2")
+    fg3m_idx = _flow_index(flow_target_columns, "fg3m")
+    fga3_idx = _flow_index(flow_target_columns, "fga3")
+    ftm_idx = _flow_index(flow_target_columns, "ftm")
+    fta_idx = _flow_index(flow_target_columns, "fta")
+    y_pos = torch.clamp(flow_values, min=0.0)
+
+    cols: list[torch.Tensor] = []
+    for idx in range(y_pos.shape[-1]):
+        col = y_pos[..., idx]
+        if idx == fg2m_idx:
+            col = torch.minimum(col, y_pos[..., fga2_idx])
+        elif idx == fg3m_idx:
+            col = torch.minimum(col, y_pos[..., fga3_idx])
+        elif idx == ftm_idx:
+            col = torch.minimum(col, y_pos[..., fta_idx])
+        cols.append(col.unsqueeze(-1))
+    return torch.cat(cols, dim=-1)
+
+
+def _compute_dk_fpts_from_flow(
+    flow_values: torch.Tensor,
+    *,
+    flow_target_columns: list[str],
+) -> torch.Tensor:
+    fg2m_idx = _flow_index(flow_target_columns, "fg2m")
+    fg3m_idx = _flow_index(flow_target_columns, "fg3m")
+    ftm_idx = _flow_index(flow_target_columns, "ftm")
+    oreb_idx = _flow_index(flow_target_columns, "oreb")
+    dreb_idx = _flow_index(flow_target_columns, "dreb")
+    ast_idx = _flow_index(flow_target_columns, "ast")
+    stl_idx = _flow_index(flow_target_columns, "stl")
+    blk_idx = _flow_index(flow_target_columns, "blk")
+    tov_idx = _flow_index(flow_target_columns, "tov")
+
+    fg2m = flow_values[..., fg2m_idx]
+    fg3m = flow_values[..., fg3m_idx]
+    ftm = flow_values[..., ftm_idx]
+    oreb = flow_values[..., oreb_idx]
+    dreb = flow_values[..., dreb_idx]
+    ast = flow_values[..., ast_idx]
+    stl = flow_values[..., stl_idx]
+    blk = flow_values[..., blk_idx]
+    tov = flow_values[..., tov_idx]
+
+    pts = 2.0 * fg2m + 3.0 * fg3m + ftm
+    reb = oreb + dreb
+    base = pts + 1.25 * reb + 1.5 * ast + 2.0 * stl + 2.0 * blk - 0.5 * tov
+    qualifying = torch.stack([pts, reb, ast, stl, blk], dim=-1).ge(10.0).sum(dim=-1)
+    dd_bonus = (qualifying == 2).to(dtype=base.dtype) * 1.5
+    td_bonus = (qualifying >= 3).to(dtype=base.dtype) * 3.0
+    return base + dd_bonus + td_bonus
+
+
+def _sample_decision_fpts(
+    model: nn.Module,
+    *,
+    context_out: Any,
+    num_samples: int,
+    active_temperature: float,
+) -> torch.Tensor:
+    if int(num_samples) <= 0:
+        raise ValueError("num_samples must be > 0")
+    if float(active_temperature) <= 0:
+        raise ValueError("active_temperature must be > 0")
+    if not hasattr(model, "flow_head") or not hasattr(model, "flow_target_columns"):
+        raise ValueError("model must expose flow_head and flow_target_columns")
+
+    # Reuse one context pass from the caller, then sample worlds from active/minutes/flow heads.
+    ctx = context_out
+    flow_head = model.flow_head  # type: ignore[attr-defined]
+    flow_target_columns: list[str] = list(model.flow_target_columns)  # type: ignore[attr-defined]
+    valid_flat = ctx.player_valid_mask.to(dtype=torch.bool)
+
+    worlds: list[torch.Tensor] = []
+    for _ in range(int(num_samples)):
+        active_out = model.active_head(  # type: ignore[attr-defined]
+            ctx.player_states,
+            ctx.team_states,
+            ctx.player_team_index,
+            valid_flat,
+            sample=False,
+            temperature=float(active_temperature),
+        )
+
+        z = torch.randn(
+            (
+                ctx.player_states.shape[0],
+                ctx.player_states.shape[1],
+                len(flow_target_columns),
+            ),
+            dtype=ctx.player_states.dtype,
+            device=ctx.player_states.device,
+        )
+        flow_samples = flow_head.sample(
+            z,
+            player_states=ctx.player_states,
+            team_states=ctx.team_states,
+            game_state=ctx.game_state,
+            player_team_index=ctx.player_team_index,
+            valid_mask=valid_flat,
+            observed_mask=valid_flat.unsqueeze(-1).expand_as(z),
+        )
+        flow_samples = _project_flow_stats_to_contract(
+            flow_samples,
+            flow_target_columns=flow_target_columns,
+        )
+        flow_samples = flow_samples * active_out.active_mask.unsqueeze(-1).to(dtype=flow_samples.dtype)
+        worlds.append(
+            torch.nan_to_num(
+                _compute_dk_fpts_from_flow(
+                    flow_samples,
+                    flow_target_columns=flow_target_columns,
+                ),
+                nan=0.0,
+                posinf=200.0,
+                neginf=-200.0,
+            )
+        )
+
+    return torch.stack(worlds, dim=1)
+
+
 def _phase2_flow_warmup_factor(epoch: int, *, warmup_epochs: int) -> float:
     if int(epoch) <= 0:
         raise ValueError("epoch must be >= 1")
@@ -315,11 +459,14 @@ def _resolve_phase2_epoch_weights(
     *,
     epoch: int,
     enable_phase2_flow: bool,
+    enable_phase3_decision: bool,
     w_minutes: float,
     w_minutes_nll: float,
     w_count: float,
     w_member: float,
     w_flow_nll: float,
+    w_crps_fpts: float,
+    w_team_energy: float,
     flow_warmup_epochs: int,
     anchor_start_weight: float,
     anchor_end_weight: float,
@@ -332,9 +479,12 @@ def _resolve_phase2_epoch_weights(
             w_count=float(w_count),
             w_member=float(w_member),
             w_flow_nll=0.0,
+            w_crps_fpts=0.0,
+            w_team_energy=0.0,
             flow_warmup=0.0,
             anchor_weight=1.0,
             run_phase2_flow=False,
+            run_phase3_decision=False,
         )
 
     flow_warmup = _phase2_flow_warmup_factor(int(epoch), warmup_epochs=int(flow_warmup_epochs))
@@ -350,9 +500,12 @@ def _resolve_phase2_epoch_weights(
         w_count=float(w_count) * anchor_weight,
         w_member=float(w_member) * anchor_weight,
         w_flow_nll=float(w_flow_nll) * flow_warmup * a2,
+        w_crps_fpts=float(w_crps_fpts) if bool(enable_phase3_decision) else 0.0,
+        w_team_energy=float(w_team_energy) if bool(enable_phase3_decision) else 0.0,
         flow_warmup=float(flow_warmup),
         anchor_weight=float(anchor_weight),
         run_phase2_flow=bool(flow_warmup > 0.0),
+        run_phase3_decision=bool(enable_phase3_decision),
     )
 
 
@@ -416,7 +569,17 @@ def _update_phase2_nll_guard(
 
 
 def _stats_finite(stats: dict[str, float]) -> bool:
-    keys = ["total", "minutes_mae", "count_loss", "member_loss", "minutes_nll", "flow_nll", "count_acc"]
+    keys = [
+        "total",
+        "minutes_mae",
+        "count_loss",
+        "member_loss",
+        "minutes_nll",
+        "flow_nll",
+        "crps_fpts",
+        "team_energy",
+        "count_acc",
+    ]
     return all(math.isfinite(float(stats.get(k, float("nan")))) for k in keys)
 
 
@@ -430,12 +593,18 @@ def _run_epoch(
     min_active_count: int,
     max_active_count: int,
     run_phase2_flow: bool,
+    run_phase3_decision: bool,
     w_minutes: float,
     w_minutes_nll: float,
     w_count: float,
     w_member: float,
     w_flow_nll: float,
+    w_crps_fpts: float,
+    w_team_energy: float,
     minutes_nll_sigma: float,
+    phase3_num_samples: int,
+    phase3_active_temperature: float,
+    phase3_stop_grad: bool,
     positive_weight: float,
     epoch_index: int,
     backbone_grad_clip_norm: float,
@@ -453,6 +622,8 @@ def _run_epoch(
         "member_loss": 0.0,
         "minutes_nll": 0.0,
         "flow_nll": 0.0,
+        "crps_fpts": 0.0,
+        "team_energy": 0.0,
         "count_acc": 0.0,
         "steps": 0,
         "skipped_batches": 0,
@@ -497,6 +668,8 @@ def _run_epoch(
             # No flow likelihood terms for DNP rows; only score rows with observed count labels.
             dnp_mask = (y_minutes > 0.0).unsqueeze(-1)
             flow_mask = flow_mask & player_valid_mask.unsqueeze(-1) & dnp_mask
+        flow_target_flat = torch.cat([flow_targets[:, 0], flow_targets[:, 1]], dim=1)
+        flow_observed_flat = torch.cat([flow_observed_mask[:, 0], flow_observed_mask[:, 1]], dim=1)
 
         with torch.set_grad_enabled(training):
             out = model(
@@ -534,15 +707,58 @@ def _run_epoch(
                 flow_nll = out.flow.nll_mean
             else:
                 flow_nll = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+
+            if bool(run_phase3_decision):
+                if not bool(run_phase2_flow):
+                    raise RuntimeError("run_phase3_decision=True requires run_phase2_flow=True")
+                if not hasattr(model, "flow_target_columns"):
+                    raise RuntimeError("run_phase3_decision=True requires model.flow_target_columns")
+                flow_target_columns: list[str] = list(model.flow_target_columns)  # type: ignore[attr-defined]
+                sampled_fpts = _sample_decision_fpts(
+                    model,
+                    context_out=out,
+                    num_samples=int(phase3_num_samples),
+                    active_temperature=float(phase3_active_temperature),
+                )
+                if bool(phase3_stop_grad):
+                    sampled_fpts = sampled_fpts.detach()
+                target_flow = _project_flow_stats_to_contract(
+                    flow_target_flat,
+                    flow_target_columns=flow_target_columns,
+                )
+                target_fpts = _compute_dk_fpts_from_flow(
+                    target_flow,
+                    flow_target_columns=flow_target_columns,
+                )
+                decision_mask = flow_observed_flat.all(dim=-1) & out.player_valid_mask
+                crps_fpts = compute_crps_loss(sampled_fpts, target_fpts, decision_mask)
+                team_energy = compute_team_energy_score(
+                    sampled_fpts,
+                    target_fpts,
+                    decision_mask,
+                    out.player_team_index,
+                    eps=1e-6,
+                )
+                crps_fpts = torch.nan_to_num(crps_fpts, nan=0.0, posinf=50.0, neginf=-50.0)
+                team_energy = torch.nan_to_num(team_energy, nan=0.0, posinf=50.0, neginf=-50.0)
+            else:
+                crps_fpts = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+                team_energy = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             total_loss = (
                 float(w_minutes) * minutes_mae
                 + float(w_count) * active_losses["count_loss"]
                 + float(w_member) * active_losses["member_loss"]
                 + float(w_minutes_nll) * minutes_nll
                 + float(w_flow_nll) * flow_nll
+                + float(w_crps_fpts) * crps_fpts
+                + float(w_team_energy) * team_energy
             )
 
             skip_step = False
+            if training and not bool(torch.isfinite(total_loss)):
+                totals["instability_events"] += 1
+                totals["skipped_batches"] += 1
+                skip_step = True
             if (
                 training
                 and bool(run_phase2_flow)
@@ -613,6 +829,8 @@ def _run_epoch(
             totals["member_loss"] += float(active_losses["member_loss"].item())
             totals["minutes_nll"] += float(minutes_nll.item())
             totals["flow_nll"] += float(flow_nll.item())
+            totals["crps_fpts"] += float(crps_fpts.item())
+            totals["team_energy"] += float(team_energy.item())
             totals["count_acc"] += float(count_acc.item())
             totals["steps"] += 1
         if phase2_stability_state is not None and bool(phase2_stability_state.rollback_requested):
@@ -626,6 +844,8 @@ def _run_epoch(
         "member_loss": totals["member_loss"] / denom,
         "minutes_nll": totals["minutes_nll"] / denom,
         "flow_nll": totals["flow_nll"] / denom,
+        "crps_fpts": totals["crps_fpts"] / denom,
+        "team_energy": totals["team_energy"] / denom,
         "count_acc": totals["count_acc"] / denom,
         "skipped_batches": float(totals["skipped_batches"]),
         "instability_events": float(totals["instability_events"]),
@@ -700,6 +920,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--flow-scale-clip", type=float, default=2.0)
     parser.add_argument("--backbone-grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--flow-grad-clip-norm", type=float, default=5.0)
+    parser.add_argument("--enable-phase3-decision", action="store_true")
+    parser.add_argument("--w-crps-fpts", type=float, default=1.0)
+    parser.add_argument("--w-team-energy", type=float, default=0.25)
+    parser.add_argument("--phase3-num-samples", type=int, default=16)
+    parser.add_argument("--phase3-active-temperature", type=float, default=1.0)
+    parser.add_argument("--phase3-stop-grad", action="store_true")
 
     parser.add_argument(
         "--game-feature-cols",
@@ -719,6 +945,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     _set_seed(int(args.seed))
+    if bool(args.enable_phase3_decision) and not bool(args.enable_phase2_flow):
+        raise ValueError("--enable-phase3-decision requires --enable-phase2-flow")
+    if int(args.phase3_num_samples) <= 0:
+        raise ValueError("--phase3-num-samples must be > 0")
+    if float(args.phase3_active_temperature) <= 0:
+        raise ValueError("--phase3-active-temperature must be > 0")
 
     dataset_dir = _resolve_dataset_dir(args.dataset_dir)
     features_path = dataset_dir / "features.parquet"
@@ -878,11 +1110,14 @@ def main() -> None:
         phase2_weights = _resolve_phase2_epoch_weights(
             epoch=int(epoch),
             enable_phase2_flow=bool(args.enable_phase2_flow),
+            enable_phase3_decision=bool(args.enable_phase3_decision),
             w_minutes=float(args.w_minutes),
             w_minutes_nll=float(args.w_minutes_nll),
             w_count=float(args.w_count),
             w_member=float(args.w_member),
             w_flow_nll=float(args.w_flow_nll),
+            w_crps_fpts=float(args.w_crps_fpts),
+            w_team_energy=float(args.w_team_energy),
             flow_warmup_epochs=int(args.phase2_flow_warmup_epochs),
             anchor_start_weight=float(args.phase2_anchor_start_weight),
             anchor_end_weight=float(args.phase2_anchor_end_weight),
@@ -898,12 +1133,18 @@ def main() -> None:
             min_active_count=int(args.min_active_count),
             max_active_count=int(args.max_active_count),
             run_phase2_flow=bool(phase2_weights.run_phase2_flow),
+            run_phase3_decision=bool(phase2_weights.run_phase3_decision),
             w_minutes=float(phase2_weights.w_minutes),
             w_minutes_nll=float(phase2_weights.w_minutes_nll),
             w_count=float(phase2_weights.w_count),
             w_member=float(phase2_weights.w_member),
             w_flow_nll=float(phase2_weights.w_flow_nll),
+            w_crps_fpts=float(phase2_weights.w_crps_fpts),
+            w_team_energy=float(phase2_weights.w_team_energy),
             minutes_nll_sigma=float(args.minutes_nll_sigma),
+            phase3_num_samples=int(args.phase3_num_samples),
+            phase3_active_temperature=float(args.phase3_active_temperature),
+            phase3_stop_grad=bool(args.phase3_stop_grad),
             positive_weight=float(args.active_positive_weight),
             epoch_index=int(epoch),
             backbone_grad_clip_norm=float(args.backbone_grad_clip_norm),
@@ -925,6 +1166,8 @@ def main() -> None:
                 "member_loss": float("nan"),
                 "minutes_nll": float("nan"),
                 "flow_nll": float("nan"),
+                "crps_fpts": float("nan"),
+                "team_energy": float("nan"),
                 "count_acc": float("nan"),
                 "skipped_batches": 0.0,
                 "instability_events": 0.0,
@@ -940,12 +1183,18 @@ def main() -> None:
                 min_active_count=int(args.min_active_count),
                 max_active_count=int(args.max_active_count),
                 run_phase2_flow=bool(phase2_weights.run_phase2_flow),
+                run_phase3_decision=bool(phase2_weights.run_phase3_decision),
                 w_minutes=float(phase2_weights.w_minutes),
                 w_minutes_nll=float(phase2_weights.w_minutes_nll),
                 w_count=float(phase2_weights.w_count),
                 w_member=float(phase2_weights.w_member),
                 w_flow_nll=float(phase2_weights.w_flow_nll),
+                w_crps_fpts=float(phase2_weights.w_crps_fpts),
+                w_team_energy=float(phase2_weights.w_team_energy),
                 minutes_nll_sigma=float(args.minutes_nll_sigma),
+                phase3_num_samples=int(args.phase3_num_samples),
+                phase3_active_temperature=float(args.phase3_active_temperature),
+                phase3_stop_grad=bool(args.phase3_stop_grad),
                 positive_weight=float(args.active_positive_weight),
                 epoch_index=int(epoch),
                 backbone_grad_clip_norm=float(args.backbone_grad_clip_norm),
@@ -966,6 +1215,8 @@ def main() -> None:
             train_member_loss=train_stats["member_loss"],
             train_minutes_nll=train_stats["minutes_nll"],
             train_flow_nll=train_stats["flow_nll"],
+            train_crps_fpts=train_stats["crps_fpts"],
+            train_team_energy=train_stats["team_energy"],
             train_count_acc=train_stats["count_acc"],
             val_total=val_stats["total"],
             val_minutes_mae=val_stats["minutes_mae"],
@@ -973,6 +1224,8 @@ def main() -> None:
             val_member_loss=val_stats["member_loss"],
             val_minutes_nll=val_stats["minutes_nll"],
             val_flow_nll=val_stats["flow_nll"],
+            val_crps_fpts=val_stats["crps_fpts"],
+            val_team_energy=val_stats["team_energy"],
             val_count_acc=val_stats["count_acc"],
         )
         history.append(metrics)
@@ -991,6 +1244,12 @@ def main() -> None:
                 f"val_flow_nll={metrics.val_flow_nll:.4f} "
                 f"skipped_batches={metrics.train_skipped_batches} "
                 f"instability_events={metrics.train_instability_events}"
+            )
+        if bool(args.enable_phase3_decision):
+            msg = (
+                f"{msg} "
+                f"val_crps_fpts={metrics.val_crps_fpts:.4f} "
+                f"val_team_energy={metrics.val_team_energy:.4f}"
             )
         print(msg, flush=True)
 
@@ -1038,10 +1297,18 @@ def main() -> None:
         "num_feature_columns": int(len(feature_cols)),
         "flow_target_columns": flow_label_cols,
         "phase2_flow_enabled": bool(args.enable_phase2_flow),
+        "phase3_decision_enabled": bool(args.enable_phase3_decision),
         "phase2_schedule": {
             "flow_warmup_epochs": int(args.phase2_flow_warmup_epochs),
             "anchor_start_weight": float(args.phase2_anchor_start_weight),
             "anchor_end_weight": float(args.phase2_anchor_end_weight),
+        },
+        "phase3_decision": {
+            "w_crps_fpts": float(args.w_crps_fpts),
+            "w_team_energy": float(args.w_team_energy),
+            "num_samples": int(args.phase3_num_samples),
+            "active_temperature": float(args.phase3_active_temperature),
+            "stop_grad": bool(args.phase3_stop_grad),
         },
         "phase2_stability": {
             "rollback_triggered": bool(rollback_triggered),

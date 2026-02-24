@@ -5,6 +5,8 @@ This module provides:
 - compute_k_hat: Expected rotation size per team-game from gate probabilities
 - compute_anti_smear_penalty: Penalty for minutes predicted on low-gate-prob players
 - compute_minutes_out_loss: Penalty encouraging non-rotation players toward zero minutes
+- compute_crps_loss: CRPS loss from sampled scalar outcomes
+- compute_team_energy_score: Energy score over team vector samples
 """
 
 from __future__ import annotations
@@ -135,3 +137,102 @@ def compute_minutes_out_loss(
         reduction="none",
     )
     return smooth_l1.sum() / denom
+
+
+def compute_crps_loss(
+    samples: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    """Compute scalar CRPS from Monte Carlo samples.
+
+    Uses the explicit pairwise form:
+      CRPS = E|X - y| - 0.5 * E|X - X'|
+
+    Args:
+        samples: (B, K, N) sampled scalar outcomes
+        target: (B, N) observed targets
+        mask: (B, N) observed/eligible mask
+
+    Returns:
+        Scalar mean CRPS over masked entries.
+    """
+    if samples.ndim != 3:
+        raise ValueError("samples must have shape (B,K,N)")
+    if target.ndim != 2 or mask.ndim != 2:
+        raise ValueError("target and mask must have shape (B,N)")
+    if samples.shape[0] != target.shape[0] or samples.shape[2] != target.shape[1]:
+        raise ValueError("samples shape must align with target shape")
+
+    target_f = target.to(dtype=samples.dtype, device=samples.device)
+    mask_f = mask.to(dtype=samples.dtype, device=samples.device)
+
+    term_obs = (samples - target_f.unsqueeze(1)).abs().mean(dim=1)  # (B,N)
+    pairwise = (samples.unsqueeze(2) - samples.unsqueeze(1)).abs().mean(dim=(1, 2))  # (B,N)
+    crps = term_obs - 0.5 * pairwise
+
+    denom = mask_f.sum().clamp(min=1.0)
+    return (crps * mask_f).sum() / denom
+
+
+def compute_team_energy_score(
+    samples: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    team_index: torch.Tensor,
+    *,
+    eps: float = 0.0,
+) -> torch.Tensor:
+    """Compute team-level energy score for sampled FPTS vectors.
+
+    Args:
+        samples: (B, K, N) sampled scalar outcomes per player.
+        target: (B, N) observed outcomes per player.
+        mask: (B, N) observed/eligible mask.
+        team_index: (B, N) team index (0 or 1) per player slot.
+        eps: numeric epsilon for norm stability.
+
+    Returns:
+        Scalar mean energy score over valid team-games.
+    """
+    if samples.ndim != 3:
+        raise ValueError("samples must have shape (B,K,N)")
+    if target.ndim != 2 or mask.ndim != 2 or team_index.ndim != 2:
+        raise ValueError("target, mask, and team_index must have shape (B,N)")
+    if (
+        samples.shape[0] != target.shape[0]
+        or samples.shape[2] != target.shape[1]
+        or mask.shape != target.shape
+        or team_index.shape != target.shape
+    ):
+        raise ValueError("samples/target/mask/team_index shapes must align")
+
+    if float(eps) < 0.0:
+        raise ValueError("eps must be >= 0")
+
+    target_f = target.to(dtype=samples.dtype, device=samples.device)
+    mask_b = mask.to(dtype=torch.bool, device=samples.device)
+    team_idx = team_index.to(dtype=torch.long, device=samples.device)
+
+    total = samples.new_tensor(0.0)
+    count = samples.new_tensor(0.0)
+    for team_id in (0, 1):
+        team_mask = mask_b & (team_idx == int(team_id))  # (B,N)
+        if not bool(team_mask.any()):
+            continue
+
+        team_mask_f = team_mask.to(dtype=samples.dtype)
+        x = samples * team_mask_f.unsqueeze(1)  # (B,K,N)
+        y = target_f * team_mask_f  # (B,N)
+
+        dist_xy = torch.sqrt(((x - y.unsqueeze(1)) ** 2).sum(dim=-1).clamp(min=float(eps)))  # (B,K)
+        dist_xx = torch.sqrt(
+            ((x.unsqueeze(2) - x.unsqueeze(1)) ** 2).sum(dim=-1).clamp(min=float(eps))
+        )  # (B,K,K)
+        es = dist_xy.mean(dim=1) - 0.5 * dist_xx.mean(dim=(1, 2))  # (B,)
+
+        row_has_team = team_mask.any(dim=1)
+        total = total + es[row_has_team].sum()
+        count = count + row_has_team.to(dtype=samples.dtype).sum()
+
+    return total / count.clamp(min=1.0)

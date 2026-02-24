@@ -590,8 +590,8 @@ Do not fallback to independent per-player sampling.
 
 ### Phase 3: Decision fine-tuning
 
-- [ ] Add `L_crps_fpts` and `L_team_energy`
-- [ ] Run offline eval suite vs sim_v2
+- [x] Add `L_crps_fpts` and `L_team_energy`
+- [x] Run offline eval suite vs sim_v2
 - [ ] Run historical slate backtests with QuickBuild
 - [ ] Produce go/no-go report
 
@@ -1153,3 +1153,86 @@ Recommended next step:
 1. Start Phase 3 (`L_decision`) from:
    `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z/trials/opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18/run`
 2. Keep Phase 1 and both promoted Phase 2 checkpoints as rollback options until Phase 3/4 go-no-go is complete.
+
+### Status Update (2026-02-24, Phase 3 kickoff + no-stop-grad stabilization)
+
+Completed Phase 3 checklist items:
+
+1. Added decision losses:
+   - `L_crps_fpts`
+   - `L_team_energy`
+2. Added and ran offline eval suite vs sim_v2:
+   - `scripts/rotation/eval_game_transformer_v2_vs_sim_v2.py`
+
+Phase 3 training/eval runs:
+
+- stop-grad bootstrap run:
+  `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_stopgrad_20260224T032215Z`
+  - trained stably
+  - offline eval (`offline_eval_vs_sim_v2_60d_64w.json`):
+    - `crps_mean=3.9157` vs sim_v2 `4.3562` (improved)
+    - tail errors: `p90=0.0016`, `p95=0.0127` (both <= 0.03)
+    - `team_total_mae=22.2847` vs sim_v2 `17.7135` (worse)
+- initial no-stop-grad attempts (unstable, rolled back at epoch 1 due repeated `gen_nll=nan`):
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_nostopgrad_20260224T082605Z`
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_nostopgrad_stabA_20260224T082825Z`
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_nostopgrad_stabB_20260224T082904Z`
+
+Stabilization fix applied:
+
+- numeric stabilization for team energy during Phase 3 training:
+  - `compute_team_energy_score(..., eps=1e-6)` in the training path
+  - files:
+    - `scripts/rotation/train_game_transformer_v2.py`
+    - `projections/rotation/training_losses.py`
+    - `tests/rotation/test_training_losses.py` (finite-gradient coverage)
+
+Stable no-stop-grad run after fix:
+
+- run:
+  `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_nostopgrad_fix1_20260224T083106Z`
+- training stability:
+  - `phase2_stability.rollback_triggered=false`
+  - `backoff_count=0`, `skipped_batches=0`, `instability_events=0`
+- offline eval (`offline_eval_vs_sim_v2_60d_64w.json`):
+  - `crps_mean=3.9072` vs sim_v2 `4.3562` (improved)
+  - tail errors: `p90=0.0338`, `p95=0.0467` (both > 0.03; gate fail)
+  - `team_total_mae=20.9787` vs sim_v2 `17.7135` (still worse, but improved vs stop-grad run)
+
+Current interpretation:
+
+- no-stop-grad is now technically stable after the energy-loss numeric fix.
+- offline go/no-go remains incomplete:
+  - CRPS criterion passes
+  - tail calibration criterion fails on current no-stop-grad checkpoint
+  - QuickBuild backtests not yet run
+  - therefore Phase 4 promotion is not ready.
+
+### Next-Agent Handoff (2026-02-24, post-Phase-3 stabilization + offline eval)
+
+Current state:
+
+- Phase 3 loss plumbing is complete and tested.
+- Offline eval suite vs sim_v2 is implemented and runnable.
+- A stable no-stop-grad checkpoint now exists:
+  `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_nostopgrad_fix1_20260224T083106Z`
+- Fallback checkpoints remain available:
+  - Phase 1 baseline anchor:
+    `/home/daniel/projections-data/training/runs/game_transformer_v2_possfix_20260224T002514Z_e10`
+  - promoted Phase 2 checkpoints:
+    - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T022707Z/trials/anchor95_warm12_flow010/run`
+    - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z/trials/opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18/run`
+
+Required next steps:
+
+1. Run a focused Phase 3 tuning pass (no-stop-grad) targeting tail calibration recovery while preserving CRPS gains.
+   - starting checkpoint:
+     `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z/trials/opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18/run`
+   - prioritize knobs: `w_crps_fpts`, `w_team_energy`, `phase3_num_samples`, LR/clip schedule
+2. Re-run offline eval suite on each candidate:
+   - `scripts/rotation/eval_game_transformer_v2_vs_sim_v2.py`
+   - enforce Phase 3 offline criteria:
+     - `CRPS < sim_v2`
+     - tail error (`p90`, `p95`) <= 0.03
+3. Run historical slate QuickBuild backtests on best offline candidate(s).
+4. Produce consolidated Phase 3 go/no-go report (offline + backtest), then decide Phase 4 entry.
