@@ -959,7 +959,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase2-max-backoffs-before-rollback", type=int, default=3)
     parser.add_argument("--phase2-min-a2-scale", type=float, default=0.125)
     parser.add_argument("--flow-num-blocks", type=int, default=4)
-    parser.add_argument("--flow-scale-clip", type=float, default=2.0)
+    parser.add_argument("--flow-scale-clip", type=float, default=3.0)  # H1 fix: 2.0 → 3.0
+    parser.add_argument("--flow-context-mode", type=str, default="attention", choices=["mean", "attention"])  # H2 fix
     parser.add_argument("--backbone-grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--flow-grad-clip-norm", type=float, default=5.0)
     parser.add_argument("--enable-phase3-decision", action="store_true")
@@ -1129,6 +1130,7 @@ def main() -> None:
         include_pf_in_flow_targets=bool(include_pf_in_flow_targets),
         flow_num_blocks=int(args.flow_num_blocks),
         flow_scale_clip=float(args.flow_scale_clip),
+        flow_context_mode=str(args.flow_context_mode),
         overflow_protected_prior_play_prob_floor=float(args.overflow_protected_prior_play_prob_floor),
         overflow_protected_prior_minutes_floor=float(args.overflow_protected_prior_minutes_floor),
         overflow_risk_weight_consecutive_active_dnp=float(args.overflow_risk_weight_consecutive_active_dnp),
