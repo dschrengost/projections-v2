@@ -2197,3 +2197,60 @@ Development-facing eval/report scripts were updated to default to unconditional 
 5. **Offline GTv2-vs-sim_v2 eval payload now states semantics explicitly**
    - `scripts/rotation/eval_game_transformer_v2_vs_sim_v2.py`
    - payload now includes `evaluation_semantics.default_view = unconditional_dnp_zero`.
+
+#### Progress Update (2026-02-25, read-only live dashboard wiring via v3 flow)
+
+Objective for this phase was narrowed to live observation only (no downstream coupling):
+
+1. **Dashboard integration mode is read-only by design**
+   - v3 outputs are surfaced for operator monitoring only.
+   - No optimizer / contest-sim dependency wiring is required in this phase.
+   - Focus views:
+     - game view for each slate game,
+     - player unconditional stat counts (`pts`, `reb`, `ast`, etc.),
+     - implied totals: `sim (unconditional)` vs Vegas.
+
+2. **v3 flow is now the canonical path for this observation phase**
+   - deployment: `nba-live-pipeline-v3/nba-live-pipeline-isolated`
+   - old overlapping v3 deployment schedule was deactivated to remove ambiguity.
+   - cadence set to every 15 minutes during active window (`*/15 8-23`, `America/New_York`).
+
+3. **Operational status**
+   - isolated v3 flow completed successfully in production-like smoke after runtime stabilization:
+     - run id: `1547f5a5-dfe4-4876-a2bd-24a2a0d6fe0a`
+     - state: `Completed`
+     - run window: `2026-02-25T02:09:13Z` -> `2026-02-25T02:16:05Z`
+   - dashboard/Prefect access is via Tailscale host address.
+
+4. **Known temporary scope constraints**
+   - this phase intentionally defers downstream consumers and dashboard redesign.
+   - this phase is strictly for behavior observation and failure-mode identification.
+
+#### Working Hypothesis (2026-02-25, player-level under on points/rebounds/assists)
+
+Current evidence indicates a **concentration/usage calibration issue**, not a minutes issue:
+
+1. **Team-level concentration is too flat vs market**
+   - mean gap (`props top3 share - model top3 share`, prop-covered players): `+2.7pp`
+   - worst teams observed:
+     - `LAL: +13.0pp`
+     - `PHX: +9.1pp`
+
+2. **Star point buckets are materially under-projected**
+   - `20-24.99` line bucket: mean error `-4.82 pts`
+   - `25-29.99` line bucket: mean error `-11.60 pts`
+   - `30+` line bucket: mean error `-11.55 pts`
+
+3. **Minutes are approximately on target; rates are not**
+   - stars (`line >= 20`) mean minutes gap (`model_cond_minutes - implied_minutes`): `+0.14`
+   - mean points-per-minute gap (`model - line/implied_minutes`): `-0.22`
+   - in this diagnostic slice, all stars had model `pts/min` below line-implied `pts/min`.
+
+4. **Interpretation**
+   - primary: star usage/ppm is over-shrunk in rate/flow allocation, yielding plausible team totals but under-concentrated player outcomes.
+   - secondary: live conditioning for usage rank may still be too coarse when prop coverage is partial and priors are bucketized.
+   - tertiary: 15-player truncation/overflow remains a structural risk, but does not alone explain broad star ppm deflation.
+
+5. **Action/Rotowire context**
+   - props-source fallback hardening is in place (Action + Rotowire fallback when Action is off-slate/unusable).
+   - latest live telemetry showed non-zero match coverage under fallback path, so the current bias is not explained by total props-source failure.
