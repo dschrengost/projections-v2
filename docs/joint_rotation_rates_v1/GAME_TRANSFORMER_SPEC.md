@@ -2791,3 +2791,81 @@ Artifacts:
   - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/offline_eval_vs_sim_v2_60d_64w_ctx100.json`
   - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/offline_eval_vs_sim_v2_60d_64w_ctx085.json`
   - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/offline_eval_vs_sim_v2_60d_64w_ctx07.json`
+
+---
+
+## Next-Agent Handoff: GTv2 Star Under-Projection Fix
+
+**Date:** 2026-02-25
+
+### Summary
+
+Diagnostic investigation confirmed two root causes of star player under-projection:
+
+| Hypothesis | Status | Impact |
+|------------|--------|--------|
+| H2: Mean-pooled team context | **CONFIRMED (primary)** | Compresses star projections toward team mean |
+| H1: flow_scale_clip=2.0 ceiling | **CONFIRMED (secondary)** | 45% of elite bias addressable via clip=3.0 |
+
+### Recommended Actions
+
+#### 1. Retrain with `flow_scale_clip=3.0` (quick win)
+
+The current training default is `scale_clip=2.0`. Sweep results show `clip=3.0` is optimal:
+
+| Clip | Elite Bias (35+ pts) | Star Bias (25-34) | Elite MAE |
+|------|---------------------|-------------------|-----------|
+| 2.0  | -21.3               | -12.1             | 21.3      |
+| 3.0  | -11.8               | -3.8              | 12.3      |
+| 4.0  | +4.1                | +9.8              | 11.9      |
+
+**Implementation:**
+- Update `JointGameFlowConfig.scale_clip` default from `2.0` to `3.0`
+- Or pass `scale_clip=3.0` explicitly in training config
+- Location: `projections/rotation/joint_game_flow.py` → `JointGameFlowConfig`
+
+#### 2. Replace mean-pooling with attention/gated context (architectural fix)
+
+The flow conditioner currently uses fixed mean-pooling for team/game context:
+```python
+# Current (problematic):
+y_cond = y[:, :, self.cond_indices].mean(dim=1, keepdim=True)
+```
+
+**Target architecture:**
+- Replace with learned attention or gated weighting over roster players
+- Allow model to selectively attend to relevant context (e.g., starter vs bench)
+- Train end-to-end so correlation structure is preserved
+
+**Key constraints to maintain:**
+- `pair_corr_rmse_vs_sim_v2 < 0.30`
+- `team_variance_calibration_mse_norm < 1.5`
+- Same-team pair correlation near zero (not artificially positive/negative)
+
+**Location:** `projections/rotation/joint_game_flow.py` → `JointGameFlow._compute_context()`
+
+### Training Recipe
+
+```bash
+# Suggested training command with clip=3.0
+uv run python -m projections.rotation.train_game_transformer_v2 \
+    --dataset-path /path/to/dataset \
+    --output-dir /path/to/output \
+    --flow-scale-clip 3.0 \
+    --seed 123
+```
+
+### Validation Checklist
+
+After retraining, verify:
+1. [ ] Elite bias (35+ pts) improved from -21.3 baseline
+2. [ ] Star bias (25-34 pts) improved from -12.1 baseline  
+3. [ ] Correlation metrics remain within gates
+4. [ ] World contracts pass (team_minutes=240, inactive zero stats, etc.)
+5. [ ] Run live backtest on recent slates to confirm production parity
+
+### Relevant Artifacts
+
+- H1 sweep results: `/home/daniel/projections-data/artifacts/experiments/gtv2_clip_sweep/20260225T151837Z/`
+- H2 lambda sweep: `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/h2_ctx_lambda_sweep_summary.csv`
+- Current promoted bundle: check `config/rotation_set_minutes_live.json` for path
