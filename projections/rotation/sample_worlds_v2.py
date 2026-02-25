@@ -439,7 +439,7 @@ def sample_worlds_for_batch(
     game_features = batch["game_features"].to(device=device)  # type: ignore[index]
     team_features = batch["team_features"].to(device=device)  # type: ignore[index]
 
-    rows: list[dict[str, Any]] = []
+    frames: list[pd.DataFrame] = []
     contract_counter: Counter[str] = Counter()
     total_worlds = max(1, int(num_worlds))
     chunk = max(1, int(chunk_size))
@@ -498,18 +498,19 @@ def sample_worlds_for_batch(
         if strict_contracts and int(checks.get("total_violations", 0)) > 0:
             raise RuntimeError(f"World contract check failed: {checks}")
 
-        rows.extend(
-            _build_world_rows(
-                batch=batch,
-                world_offset=int(world_offset),
-                minutes=minutes,
-                active_mask=active,
-                flow_values=flow_vals,
-                flow_target_columns=flow_target_columns,
-            )
+        chunk_rows = _build_world_rows(
+            batch=batch,
+            world_offset=int(world_offset),
+            minutes=minutes,
+            active_mask=active,
+            flow_values=flow_vals,
+            flow_target_columns=flow_target_columns,
         )
+        if chunk_rows:
+            frames.append(pd.DataFrame.from_records(chunk_rows))
 
-    return pd.DataFrame(rows), dict(contract_counter)
+    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    return out, dict(contract_counter)
 
 
 def parse_args() -> argparse.Namespace:

@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pandas as pd
 import requests
 from tqdm import tqdm
 
@@ -187,6 +188,123 @@ def estimate_game_id_range(target_date: str) -> tuple[int, int]:
 
     # Search window of +/- 500 IDs (about a week of all sports)
     return (max(230000, estimated_id - 500), estimated_id + 500)
+
+
+def _resolve_season_month(day: datetime.date) -> tuple[int, int]:
+    season = int(day.year) if int(day.month) >= 8 else int(day.year) - 1
+    return season, int(day.month)
+
+
+def _matchup_key(team_a: str, team_b: str) -> tuple[str, str] | None:
+    a = normalize_team(team_a)
+    b = normalize_team(team_b)
+    if not a or not b:
+        return None
+    return tuple(sorted((a, b)))
+
+
+def _load_expected_matchups_from_schedule(
+    *,
+    data_root: Path,
+    start_date: str,
+    end_date: str,
+) -> set[tuple[str, str]]:
+    start_day = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_day = datetime.strptime(end_date, "%Y-%m-%d").date()
+    if end_day < start_day:
+        return set()
+
+    month_keys: set[tuple[int, int]] = set()
+    cursor = start_day
+    while cursor <= end_day:
+        month_keys.add(_resolve_season_month(cursor))
+        cursor += timedelta(days=1)
+
+    frames: list[pd.DataFrame] = []
+    for season, month in sorted(month_keys):
+        schedule_path = (
+            data_root
+            / "silver"
+            / "schedule"
+            / f"season={season}"
+            / f"month={month:02d}"
+            / "schedule.parquet"
+        )
+        if not schedule_path.exists():
+            continue
+        try:
+            frame = pd.read_parquet(
+                schedule_path,
+                columns=["game_date", "home_team_tricode", "away_team_tricode"],
+            )
+        except Exception:
+            continue
+        if not frame.empty:
+            frames.append(frame)
+
+    if not frames:
+        return set()
+
+    schedule = pd.concat(frames, ignore_index=True)
+    schedule["game_date"] = pd.to_datetime(schedule["game_date"], errors="coerce").dt.date
+    schedule = schedule.loc[
+        (schedule["game_date"] >= start_day) & (schedule["game_date"] <= end_day)
+    ].copy()
+    if schedule.empty:
+        return set()
+
+    expected: set[tuple[str, str]] = set()
+    for row in schedule.itertuples(index=False):
+        key = _matchup_key(str(row.home_team_tricode or ""), str(row.away_team_tricode or ""))
+        if key is not None:
+            expected.add(key)
+    return expected
+
+
+def _filter_games_to_expected_matchups(
+    games_by_date: dict[str, list[dict]],
+    *,
+    expected_matchups: set[tuple[str, str]],
+) -> tuple[dict[str, list[dict]], dict]:
+    if not expected_matchups:
+        total_games = sum(len(v) for v in games_by_date.values())
+        return games_by_date, {
+            "expected_matchups": 0,
+            "matched_expected_matchups": 0,
+            "matched_expected_coverage": None,
+            "games_before_filter": int(total_games),
+            "games_after_filter": int(total_games),
+        }
+
+    filtered: dict[str, list[dict]] = {}
+    matched_keys: set[tuple[str, str]] = set()
+    games_before = 0
+    games_after = 0
+    for date_key, games in games_by_date.items():
+        games_before += len(games)
+        kept: list[dict] = []
+        for game in games:
+            teams = game.get("teams") or []
+            if len(teams) < 2:
+                continue
+            key = _matchup_key(str(teams[0]), str(teams[1]))
+            if key is None:
+                continue
+            if key in expected_matchups:
+                kept.append(game)
+                matched_keys.add(key)
+        if kept:
+            filtered[date_key] = kept
+            games_after += len(kept)
+
+    coverage = float(len(matched_keys) / len(expected_matchups)) if expected_matchups else None
+    return filtered, {
+        "expected_matchups": int(len(expected_matchups)),
+        "matched_expected_matchups": int(len(matched_keys)),
+        "matched_expected_coverage": coverage,
+        "games_before_filter": int(games_before),
+        "games_after_filter": int(games_after),
+    }
 
 
 def get_game_info(game_id: int) -> dict | None:
@@ -367,6 +485,32 @@ def main():
     parser.add_argument("--scan-only", action="store_true", help="Only scan for games")
     parser.add_argument("--workers", type=int, default=100, help="Parallel workers for scanning")
     parser.add_argument(
+        "--skip-schedule-matchup-check",
+        action="store_true",
+        help=(
+            "Skip schedule-team matchup validation for discovered game IDs. "
+            "Not recommended for live/daily runs."
+        ),
+    )
+    parser.add_argument(
+        "--min-expected-matchup-coverage",
+        type=float,
+        default=0.8,
+        help=(
+            "Minimum matched expected schedule matchup coverage required to accept scan "
+            "results when schedule matchup check is enabled."
+        ),
+    )
+    parser.add_argument(
+        "--max-scan-expansion-steps",
+        type=int,
+        default=6,
+        help=(
+            "Maximum adaptive scan expansion retries (short date windows only). "
+            "0 disables retries."
+        ),
+    )
+    parser.add_argument(
         "--utc-date-buffer-days",
         type=int,
         default=1,
@@ -400,6 +544,27 @@ def main():
     print(f"{'='*60}")
     print(f"Date range: {start_date} to {end_date}")
     print(f"Output: {BRONZE_DIR}")
+    date_span_days = (
+        datetime.strptime(end_date, "%Y-%m-%d").date()
+        - datetime.strptime(start_date, "%Y-%m-%d").date()
+    ).days + 1
+    enforce_schedule_matchups = bool(not args.skip_schedule_matchup_check and date_span_days <= 3)
+    expected_matchups = (
+        _load_expected_matchups_from_schedule(
+            data_root=DATA_ROOT,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if enforce_schedule_matchups
+        else set()
+    )
+    if enforce_schedule_matchups:
+        print(
+            "Schedule matchup gate: enabled "
+            f"(expected matchups={len(expected_matchups)}, min_coverage={float(args.min_expected_matchup_coverage):.2f})"
+        )
+    else:
+        print("Schedule matchup gate: disabled")
 
     # Estimate ID range
     start_range = estimate_game_id_range(start_date)
@@ -415,7 +580,37 @@ def main():
         f"games_cache_{start_date}_{end_date}_utcbuf{max(0, int(args.utc_date_buffer_days))}.json".replace("-", "")
     )
 
+    def _evaluate_candidate(candidate_games_by_date: dict[str, list[dict]], *, context: str) -> tuple[dict[str, list[dict]], bool, dict]:
+        filtered = candidate_games_by_date
+        diag = {
+            "expected_matchups": int(len(expected_matchups)),
+            "matched_expected_matchups": 0,
+            "matched_expected_coverage": None,
+            "games_before_filter": int(sum(len(v) for v in candidate_games_by_date.values())),
+            "games_after_filter": int(sum(len(v) for v in candidate_games_by_date.values())),
+        }
+        if enforce_schedule_matchups:
+            filtered, diag = _filter_games_to_expected_matchups(
+                candidate_games_by_date,
+                expected_matchups=expected_matchups,
+            )
+            coverage = diag.get("matched_expected_coverage")
+            coverage_value = float(coverage) if coverage is not None else 0.0
+            accepted = bool(filtered) and (
+                bool(not expected_matchups) or coverage_value >= float(args.min_expected_matchup_coverage)
+            )
+            print(
+                f"[matchup-gate:{context}] matched={diag.get('matched_expected_matchups')}/"
+                f"{diag.get('expected_matchups')} coverage="
+                f"{coverage_value:.3f} games={diag.get('games_after_filter')}"
+            )
+            return filtered, accepted, diag
+
+        accepted = bool(filtered)
+        return filtered, accepted, diag
+
     use_cache = False
+    games_by_date: dict[str, list[dict]] = {}
     if cache_file.exists():
         print(f"\nLoading cached game list from {cache_file}")
         with open(cache_file) as f:
@@ -439,59 +634,75 @@ def main():
             print(f"\nLoaded requested date window from existing cache: {cache_source}")
 
     if use_cache:
+        games_by_date, cache_ok, _ = _evaluate_candidate(games_by_date, context="cache")
+        if not cache_ok:
+            print("Cached game list failed matchup gate; forcing fresh scan.")
+            use_cache = False
+
+    scan_diag: dict | None = None
+    scan_accepted = False
+    if use_cache:
+        scan_accepted = True
         all_games = []
         for date_games in games_by_date.values():
             all_games.extend(date_games)
     else:
         print("\nScanning for NBA games...")
-        games_by_date = scan_date_range_parallel(full_start, full_end, workers=args.workers)
-
-        # Filter to date range with UTC buffer.
-        games_by_date = _filter_games_by_date(
-            games_by_date,
-            start_date=start_date,
-            end_date=end_date,
-            utc_buffer_days=args.utc_date_buffer_days,
-        )
-
-        # If no matches for a short range request, adaptively widen the ID search window.
-        # This protects daily runs when anchor interpolation drifts.
-        date_span_days = (
-            datetime.strptime(end_date, "%Y-%m-%d").date()
-            - datetime.strptime(start_date, "%Y-%m-%d").date()
-        ).days + 1
-        if not games_by_date and date_span_days <= 3:
-            for step in range(1, 5):
+        max_retry_steps = max(0, int(args.max_scan_expansion_steps)) if date_span_days <= 3 else 0
+        for step in range(0, max_retry_steps + 1):
+            if step == 0:
+                exp_start, exp_end = full_start, full_end
+                print(
+                    f"Primary scan range: {exp_start:,} to {exp_end:,} "
+                    f"({exp_end - exp_start:,} IDs)"
+                )
+            else:
                 expansion = step * 750
                 exp_start, exp_end = _expand_id_window(full_start, full_end, expansion=expansion)
                 print(
                     f"Retrying scan with expanded range: {exp_start:,} to {exp_end:,} "
                     f"(step={step}, expansion={expansion})"
                 )
-                retry_games_by_date = scan_date_range_parallel(exp_start, exp_end, workers=args.workers)
-                filtered_retry = _filter_games_by_date(
-                    retry_games_by_date,
-                    start_date=start_date,
-                    end_date=end_date,
-                    utc_buffer_days=args.utc_date_buffer_days,
-                )
-                if filtered_retry:
-                    games_by_date = filtered_retry
-                    print(f"Recovered {sum(len(v) for v in games_by_date.values())} games after retry step={step}")
-                    break
 
-        # Only cache non-empty results to avoid poisoning future runs
-        if games_by_date:
+            candidate = scan_date_range_parallel(exp_start, exp_end, workers=args.workers)
+            candidate = _filter_games_by_date(
+                candidate,
+                start_date=start_date,
+                end_date=end_date,
+                utc_buffer_days=args.utc_date_buffer_days,
+            )
+            candidate, accepted, diag = _evaluate_candidate(candidate, context=f"scan-step-{step}")
+            scan_diag = diag
+            if accepted:
+                games_by_date = candidate
+                scan_accepted = True
+                if step > 0:
+                    print(
+                        f"Recovered {sum(len(v) for v in games_by_date.values())} games "
+                        f"after retry step={step}"
+                    )
+                break
+            games_by_date = candidate
+
+        # Only cache accepted results to avoid poisoning future runs
+        if scan_accepted and games_by_date:
             with open(cache_file, "w") as f:
                 json.dump(games_by_date, f, indent=2)
             print(f"Cached game list to {cache_file}")
         else:
-            print(
-                f"WARNING: scan found 0 NBA games for {start_date}..{end_date} "
-                f"(utc_buffer_days={max(0, int(args.utc_date_buffer_days))}) "
-                f"in ID range {full_start:,}–{full_end:,}; NOT caching empty result. "
-                f"Anchor staleness or ID drift may need attention."
-            )
+            if not games_by_date:
+                print(
+                    f"WARNING: scan found 0 accepted NBA games for {start_date}..{end_date} "
+                    f"(utc_buffer_days={max(0, int(args.utc_date_buffer_days))}) "
+                    f"in ID range {full_start:,}–{full_end:,}; NOT caching result."
+                )
+            else:
+                print(
+                    "WARNING: scan produced games but failed matchup coverage threshold; "
+                    f"matched={0 if scan_diag is None else scan_diag.get('matched_expected_matchups')}/"
+                    f"{0 if scan_diag is None else scan_diag.get('expected_matchups')} "
+                    f"(min={float(args.min_expected_matchup_coverage):.2f}). NOT caching result."
+                )
 
         all_games = []
         for date_games in games_by_date.values():
@@ -504,6 +715,13 @@ def main():
         dates = sorted(set(g["date"] for g in all_games))
         print(f"Date range: {dates[0]} to {dates[-1]}")
         print(f"Unique dates: {len(dates)}")
+    if enforce_schedule_matchups and expected_matchups and not scan_accepted:
+        raise RuntimeError(
+            "Action Network game discovery failed expected matchup coverage gate; "
+            "aborting to avoid wrong-slate or partial-slate props. "
+            f"expected_matchups={len(expected_matchups)} "
+            f"min_coverage={float(args.min_expected_matchup_coverage):.2f}"
+        )
 
     if args.scan_only:
         print("\nScan complete (--scan-only mode)")

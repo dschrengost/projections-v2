@@ -94,6 +94,14 @@ PLACEHOLDER_PROJECTION_COLUMNS = [
     "sim_profile",
 ]
 
+_PROPS_TEAM_ABBR_TO_NBA: dict[str, str] = {
+    "PHO": "PHX",
+    "GS": "GSW",
+    "NO": "NOP",
+    "SA": "SAS",
+    "NY": "NYK",
+}
+
 
 def _utc_now_iso() -> str:
     return datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -381,6 +389,13 @@ def _latest_ts(df: pd.DataFrame, *, time_col: str = "as_of_ts") -> pd.Timestamp 
     return pd.Timestamp(ts.max())
 
 
+def _normalize_props_team_abbr(value: object) -> str:
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return ""
+    return _PROPS_TEAM_ABBR_TO_NBA.get(raw, raw)
+
+
 def _build_feature_input_checklist(
     *,
     game_date: str,
@@ -419,6 +434,24 @@ def _build_feature_input_checklist(
         if not slate_df.empty
         else []
     )
+    expected_props_teams: set[str] = set()
+    if not slate_df.empty:
+        for team_col in ("home_team_tricode", "away_team_tricode"):
+            if team_col not in slate_df.columns:
+                continue
+            vals = (
+                slate_df[team_col]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .str.upper()
+                .tolist()
+            )
+            expected_props_teams.update(
+                _normalize_props_team_abbr(v)
+                for v in vals
+                if str(v).strip()
+            )
     checks.append(
         {
             "name": "schedule_slate_rows",
@@ -587,6 +620,31 @@ def _build_feature_input_checklist(
             },
         }
     )
+    action_props_teams = (
+        {
+            _normalize_props_team_abbr(team)
+            for team in action_props_snapshots.get("team_tricode", pd.Series(dtype="object")).dropna().tolist()
+            if str(team).strip()
+        }
+        if not action_props_snapshots.empty
+        else set()
+    )
+    action_props_team_overlap = action_props_teams.intersection(expected_props_teams)
+    action_overlap_ok = bool((not expected_props_teams) or action_props_team_overlap)
+    checks.append(
+        {
+            "name": "action_network_props_team_overlap",
+            "required": False,
+            "ok": bool(action_overlap_ok),
+            "details": {
+                "expected_slate_team_count": int(len(expected_props_teams)),
+                "snapshot_team_count": int(len(action_props_teams)),
+                "overlap_team_count": int(len(action_props_team_overlap)),
+                "expected_slate_teams": sorted(expected_props_teams),
+                "overlap_teams": sorted(action_props_team_overlap),
+            },
+        }
+    )
     checks.append(
         {
             "name": "rotowire_props_raw_files",
@@ -615,8 +673,41 @@ def _build_feature_input_checklist(
             },
         }
     )
-    action_ok = bool(not action_props_snapshots.empty and action_props_parse_error is None)
-    rotowire_ok = bool(not rotowire_snapshots.empty and rotowire_parse_error is None)
+    rotowire_props_teams = (
+        {
+            _normalize_props_team_abbr(team)
+            for team in rotowire_snapshots.get("team_tricode", pd.Series(dtype="object")).dropna().tolist()
+            if str(team).strip()
+        }
+        if not rotowire_snapshots.empty
+        else set()
+    )
+    rotowire_props_team_overlap = rotowire_props_teams.intersection(expected_props_teams)
+    rotowire_overlap_ok = bool((not expected_props_teams) or rotowire_props_team_overlap)
+    checks.append(
+        {
+            "name": "rotowire_props_team_overlap",
+            "required": False,
+            "ok": bool(rotowire_overlap_ok),
+            "details": {
+                "expected_slate_team_count": int(len(expected_props_teams)),
+                "snapshot_team_count": int(len(rotowire_props_teams)),
+                "overlap_team_count": int(len(rotowire_props_team_overlap)),
+                "expected_slate_teams": sorted(expected_props_teams),
+                "overlap_teams": sorted(rotowire_props_team_overlap),
+            },
+        }
+    )
+    action_ok = bool(
+        not action_props_snapshots.empty
+        and action_props_parse_error is None
+        and action_overlap_ok
+    )
+    rotowire_ok = bool(
+        not rotowire_snapshots.empty
+        and rotowire_parse_error is None
+        and rotowire_overlap_ok
+    )
     policy_ok = (not require_action_props) or action_ok or (allow_rotowire_props_fallback and rotowire_ok)
     checks.append(
         {
