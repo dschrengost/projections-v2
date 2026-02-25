@@ -2254,3 +2254,37 @@ Current evidence indicates a **concentration/usage calibration issue**, not a mi
 5. **Action/Rotowire context**
    - props-source fallback hardening is in place (Action + Rotowire fallback when Action is off-slate/unusable).
    - latest live telemetry showed non-zero match coverage under fallback path, so the current bias is not explained by total props-source failure.
+
+#### Next-Agent Handoff (2026-02-25)
+
+Primary immediate objective:
+
+- determine why live player-level stat projections (`pts`, `reb`, `ast`) are systematically coming in under market/props, especially for stars, despite acceptable minutes/rotation behavior.
+
+Priority diagnostic plan:
+
+1. **Decompose per-player under by minutes vs rate**
+   - produce slate-wide table for prop-covered players:
+     - `model_cond_minutes`, `implied_minutes`,
+     - `model_pts_per_min`, `line_implied_pts_per_min`,
+     - contribution split: minutes gap vs ppm gap.
+   - confirm whether under is still predominantly ppm/usage shrink.
+
+2. **Measure concentration error directly in live outputs**
+   - team-level top-3 scorer share (model vs props market) by game/team.
+   - track worst teams and repeat offenders across slates.
+
+3. **Audit usage/rate shrink sources in the v3 path**
+   - inspect priors + live features reaching GTV2 for top-usage players.
+   - verify no unintended clipping/normalization in stat-rate heads or flow post-processing.
+
+4. **Rule out remaining data-contract causes**
+   - validate star rows are present and active in final projection universe.
+   - confirm no residual overflow/truncation artifact disproportionately affecting high-usage players.
+   - verify Action/Rotowire props coverage for stars on each slate is as expected.
+
+5. **Deliverable expected**
+   - one per-slate diagnostic artifact summarizing:
+     - star ppm gap distribution,
+     - team concentration gaps,
+     - top candidate root cause(s) with recommended model/calibration fix.
