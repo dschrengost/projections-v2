@@ -62,9 +62,11 @@ class _AffineCouplingConditioner(nn.Module):
         num_stats: int,
         hidden_dim: int,
         dropout: float,
+        mean_ctx_weight: float,
     ) -> None:
         super().__init__()
         cond_dim = int(3 * num_stats)
+        self.mean_ctx_weight = float(mean_ctx_weight)
         self.cond_proj = nn.Sequential(
             nn.LayerNorm(cond_dim),
             nn.Linear(cond_dim, int(hidden_dim)),
@@ -103,8 +105,10 @@ class _AffineCouplingConditioner(nn.Module):
             team0_ctx.expand(-1, y_cond.shape[1], -1),
             team1_ctx.expand(-1, y_cond.shape[1], -1),
         )
-
-        cond_in = torch.cat([y_cond, team_ctx, game_ctx], dim=-1)
+        mean_ctx_weight = float(self.mean_ctx_weight)
+        team_ctx_scaled = team_ctx * mean_ctx_weight
+        game_ctx_scaled = game_ctx * mean_ctx_weight
+        cond_in = torch.cat([y_cond, team_ctx_scaled, game_ctx_scaled], dim=-1)
         cond_h = self.cond_proj(cond_in)
         player_h = self.player_proj(player_states)
         team_h = self.team_proj(_team_context_for_players(team_states, team_index))
@@ -126,6 +130,7 @@ class _AffineCouplingBlock(nn.Module):
         dropout: float,
         stat_mask: torch.Tensor,
         scale_clip: float,
+        mean_ctx_weight: float,
     ) -> None:
         super().__init__()
         if stat_mask.ndim != 1 or stat_mask.shape[0] != int(num_stats):
@@ -135,6 +140,7 @@ class _AffineCouplingBlock(nn.Module):
             num_stats=int(num_stats),
             hidden_dim=int(hidden_dim),
             dropout=float(dropout),
+            mean_ctx_weight=float(mean_ctx_weight),
         )
         self.scale_clip = float(scale_clip)
         self.register_buffer("stat_mask", stat_mask.to(dtype=torch.bool), persistent=False)
@@ -214,6 +220,7 @@ class JointGameFlow(nn.Module):
         num_blocks: int = 4,
         coupling_type: str = "affine",
         scale_clip: float = 2.0,
+        mean_ctx_weight: float = 1.0,
     ) -> None:
         super().__init__()
         if int(num_stats) <= 0:
@@ -226,6 +233,7 @@ class JointGameFlow(nn.Module):
         self.num_stats = int(num_stats)
         self.num_blocks = int(num_blocks)
         self.coupling_type = str(coupling_type).lower()
+        self.mean_ctx_weight = float(mean_ctx_weight)
 
         blocks: list[_AffineCouplingBlock] = []
         for block_idx in range(self.num_blocks):
@@ -241,9 +249,26 @@ class JointGameFlow(nn.Module):
                     dropout=float(dropout),
                     stat_mask=mask,
                     scale_clip=float(scale_clip),
+                    mean_ctx_weight=float(mean_ctx_weight),
                 )
             )
         self.blocks = nn.ModuleList(blocks)
+
+    def set_mean_ctx_weight(self, value: float) -> None:
+        self.mean_ctx_weight = float(value)
+        for block in self.blocks:
+            block.conditioner.mean_ctx_weight = float(value)
+
+    def set_scale_clip(self, value: float) -> None:
+        """Override scale_clip on all coupling blocks at inference time.
+
+        This is safe because scale_clip only affects the hard-clamp range of
+        tanh(log_scale) * scale_clip and does not change parameter shapes.
+        Useful for H1 experiments testing whether the 2.0 ceiling suppresses
+        star stat projections.
+        """
+        for block in self.blocks:
+            block.scale_clip = float(value)
 
     def _resolve_observed_mask(
         self,

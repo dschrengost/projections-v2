@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -524,9 +525,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--active-temperature", type=float, default=1.0)
+    parser.add_argument(
+        "--flow-mean-ctx-weight-override",
+        type=float,
+        default=None,
+        help="Inference-only override for mean-pooled flow conditioner context weight.",
+    )
+    parser.add_argument(
+        "--flow-scale-clip-override",
+        type=float,
+        default=None,
+        help="Inference-only override for flow coupling scale_clip (default 2.0). "
+        "Higher values allow more extreme scale factors in affine coupling blocks. "
+        "Also respects GT_FLOW_SCALE_CLIP env var if CLI not set.",
+    )
     parser.add_argument("--strict-contracts", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--out-parquet", type=str, default=None)
     parser.add_argument("--out-summary-json", type=str, default=None)
     parser.add_argument("--out-projections-parquet", type=str, default=None)
@@ -546,6 +561,23 @@ def main() -> None:
     model = build_game_transformer_v2(config)
     state = torch.load(run_dir / "model.pt", map_location="cpu")
     model.load_state_dict(state)
+    if args.flow_mean_ctx_weight_override is not None:
+        if not hasattr(model, "flow_head") or model.flow_head is None:  # type: ignore[attr-defined]
+            raise RuntimeError("Model does not expose flow_head for mean context override")
+        model.flow_head.set_mean_ctx_weight(float(args.flow_mean_ctx_weight_override))  # type: ignore[attr-defined]
+
+    # flow_scale_clip override: CLI takes precedence over env var
+    scale_clip_override = args.flow_scale_clip_override
+    if scale_clip_override is None:
+        env_clip = os.environ.get("GT_FLOW_SCALE_CLIP")
+        if env_clip is not None:
+            scale_clip_override = float(env_clip)
+    if scale_clip_override is not None:
+        if not hasattr(model, "flow_head") or model.flow_head is None:  # type: ignore[attr-defined]
+            raise RuntimeError("Model does not expose flow_head for scale_clip override")
+        print(f"[scale_clip override] setting flow_head.scale_clip = {scale_clip_override}")
+        model.flow_head.set_scale_clip(float(scale_clip_override))  # type: ignore[attr-defined]
+
     device = torch.device(str(args.device))
     model = model.to(device=device)
     model.eval()
@@ -623,6 +655,11 @@ def main() -> None:
         "dataset_dir": str(dataset_dir),
         "num_games": int(max_games),
         "num_worlds_per_game": int(args.num_worlds),
+        "flow_mean_ctx_weight_effective": float(
+            args.flow_mean_ctx_weight_override
+            if args.flow_mean_ctx_weight_override is not None
+            else getattr(model.flow_head, "mean_ctx_weight", float("nan"))  # type: ignore[attr-defined]
+        ),
         "rows": int(len(worlds_df)),
         "flow_target_columns": list(model.flow_target_columns),  # type: ignore[attr-defined]
         "contract_checks": dict(contract_counter),

@@ -2288,3 +2288,506 @@ Priority diagnostic plan:
      - star ppm gap distribution,
      - team concentration gaps,
      - top candidate root cause(s) with recommended model/calibration fix.
+
+#### Diagnostic: Feature Normalization Audit (2026-02-25)
+
+Investigated whether z-score feature normalization erases star identity signal or
+whether training data contamination (All-Star games, preseason) pollutes feature stats.
+
+1. **All-Star game contamination: RULED OUT**
+   - Zero All-Star, preseason, or playoff games in training dataset.
+   - Feb 14-18 (All-Star weekend) has zero rows in both 24-25 and 25-26 seasons.
+   - Only 2 NBA Cup games (`006` prefix) present — negligible.
+   - Dataset: 1,930 regular-season games, 67,856 rows, Oct 2024 – Feb 2026.
+
+2. **Bundle feature stats: correctly computed from train split**
+   - `feature_mean`/`feature_std` match `nanmean`/`nanstd` on train split exactly.
+   - Train: 1,820 games / 64,093 rows. Val: 107 games / 3,763 rows (last 14 days).
+   - No stale or mismatched stats artifact.
+
+3. **Star vs bench z-score separation: adequate on top features**
+   - Top discriminators after z-scoring (star=avg pts>=20, bench=avg pts<10, min 20 games):
+
+     | feature | star (z) | bench (z) | separation |
+     |---|---|---|---|
+     | `an_pts_line` | +2.10 | -0.28 | **2.38σ** |
+     | `an_implied_minutes` | +1.75 | -0.25 | **2.00σ** |
+     | `started_proxy_rate_prior_20` | +1.50 | -0.34 | **1.85σ** |
+     | `minutes_from_stints_prior_20` | +1.46 | -0.34 | **1.80σ** |
+     | `sum_min_7d` | +1.18 | -0.27 | **1.45σ** |
+
+   - 44 / 336 features have >1.0σ separation; 64 have >0.5σ; median is 0.17σ.
+   - `prior_play_prob` has only **0.20σ** separation (star raw=0.82, bench=0.74, std=0.40).
+     The model's primary "will this player play?" signal barely distinguishes tiers.
+
+4. **Props coverage asymmetry in training data**
+   - Only 30% of training rows have Action Network props (`an_has_any_props > 0`).
+   - For the 70% without props, all `an_*` features are zero → z-scored to ~-0.28σ.
+   - Stars always have props in live but not always in training.
+   - The model learned from a mixture where the strongest star-discriminating features
+     (`an_pts_line`, `an_implied_minutes`) were present only ~30% of the time.
+   - This may cause under-weighting of props signals relative to weaker non-props features.
+
+5. **Live vs training distribution: mostly aligned, with ID-feature noise**
+   - Key features (`an_pts_line`, `minutes_from_stints_prior_20`, `prior_play_prob`,
+     `team_pace_szn`, `total`, `spread_home`) are within 1σ between live and train.
+   - OOD features in live:
+     - `home_team_id`, `away_team_id`, `opponent_team_id`: **12-16σ OOD** because these are
+       large integers (1.6B range) with bundle std=1.0 (near-constant in train split).
+       These inject noise into transformer attention but do not cause star-specific bias.
+     - `available_G/W/B`, `depth_same_pos_active`: **2-3σ OOD**, likely live fill differences.
+   - 83 features have `bundle_std = 1.0` (constant/near-constant in train split) and
+     become effectively unscaled noise channels in live inference.
+
+6. **Verdict: feature normalization is NOT the primary cause of star under-projection**
+   - Z-scoring preserves 1.8-2.4σ separation on the top ~40 features.
+   - A transformer with cross-attention has enough signal to distinguish star from bench.
+   - The bigger risks are (a) props coverage asymmetry causing learned under-reliance on
+     the strongest star-discriminating features, and (b) 83 noise-channel features from
+     constant-in-train columns degrading attention quality.
+   - Neither of these mechanisms specifically explains the observed concentration/ppm shrink
+     for stars vs role players. The under-projection is more likely in the flow head or
+     post-backbone allocation, not in the feature encoding.
+
+7. **Updated hypothesis priority**
+   - H2 (team-mean conditioning feedback loop in flow conditioner) remains top suspect.
+   - H1 (scale_clip=2.0 / 4-block expressiveness limit for right-tail stat lines) is next.
+   - H6 (new: props coverage asymmetry → learned under-reliance on star features) is a
+     contributing factor but unlikely to be primary.
+   - H3 (standard normal base distribution for heavy-tailed stats) deferred to spline
+     coupling ablation already on roadmap.
+
+#### Diagnostic: H6 Props Coverage & Feature Importance (2026-02-25)
+
+Investigated whether Action Network props coverage asymmetry between training and live
+causes the model to under-weight the strongest star-discriminating features.
+
+1. **H6.1: Props coverage by player tier in training data**
+
+   | tier | game-rows | has_any_props | has_pts | has_implied_min |
+   |---|---|---|---|---|
+   | star (17 players) | 2,182 | **71.0%** | 70.9% | 67.2% |
+   | role (114 players) | 13,997 | **57.1%** | 56.9% | 53.6% |
+   | bench (515 players) | 51,462 | **21.2%** | 21.0% | 19.9% |
+
+   - Stars have 71% props coverage in training — significantly higher than the 30%
+     population average. The earlier concern that stars "sometimes have props, sometimes
+     don't" was overstated: most star game-rows do have props.
+   - Two outlier stars with low coverage: player `201142` (32.3%) and `201935` (2.3%).
+     These are likely players who entered/exited star-tier during the training window or
+     whose props markets are thin.
+   - When props are present, star lines are strongly differentiated:
+     `an_pts_line` mean = 26.1 (stars) vs 16.0 (role) vs 9.1 (bench).
+
+2. **H6.2: Learned feature importance from input projection weights**
+
+   Used L2 norm of each feature's column in the `player_proj` weight matrix (192×336)
+   as a proxy for how much representation capacity the model allocated per feature.
+
+   Top 10 features by weight norm:
+
+   | rank | feature | L2 norm | category |
+   |---|---|---|---|
+   | 1 | `team_prior_minutes_20_not_out` | 2.651 | team context |
+   | 2 | `sum_min_7d` | 1.720 | usage |
+   | 3 | `minutes_from_stints_prior_20` | 1.531 | usage |
+   | 4 | `minutes_from_stints_prior_5` | 1.512 | usage |
+   | 5 | `minutes_from_stints_prior_10` | 1.509 | usage |
+   | 6 | `prior_minutes_share_20` | 1.505 | usage |
+   | 7 | `team_n_not_out` | 1.003 | team context |
+   | 8 | `max_stint_minutes_prior_20` | 0.985 | usage |
+   | 9 | `consecutive_active_dnp` | 0.958 | DNP |
+   | 10 | `active_but_dnp_rate_last10` | 0.870 | DNP |
+
+   - The model overwhelmingly relies on **minutes/usage history features** (ranks 2-6,
+     norms 1.5-1.7) and **team roster context** (ranks 1, 7).
+   - The highest-ranked AN/props feature is `an_implied_minutes` at rank 13 (norm 0.797).
+   - The key star-discriminating feature `an_pts_line` ranks only **55th** (norm 0.632).
+   - AN/props features as a group (50 features) have mean norm 0.571 vs non-AN mean 0.557
+     — a ratio of only **1.02x**. The model treats props features as roughly average
+     importance, not as premium signal.
+
+3. **Interpretation: the model learned a minutes-first representation**
+
+   - The backbone's input projection heavily prioritizes minutes history
+     (`minutes_from_stints_prior_*`, `sum_min_7d`, `prior_minutes_share_20`) over
+     props-derived stat lines (`an_pts_line`, `an_pra_line`).
+   - This is consistent with the observed behavior: minutes projections are accurate
+     but stat rates (which depend on *what players do per minute*) are under-concentrated.
+   - The model learned to predict "how many minutes will this player play" well, but
+     the flow head that maps minutes → stat counts doesn't have strong enough input
+     signal about *usage intensity* because the backbone under-weights props features.
+   - This is not a training data coverage issue (stars have 71% props coverage) but a
+     **learned feature priority issue**: the minutes-focused loss terms (which dominate
+     training) drive the backbone to allocate capacity toward minutes predictors, while
+     the flow head that needs usage/rate signal gets weaker player representations.
+
+4. **H6 verdict: contributing factor, not primary cause**
+
+   - The model does learn from props features but assigns them middling importance.
+   - The backbone representation is minutes-heavy, which helps the minutes head but
+     starves the flow head of the usage-intensity signal it needs to differentiate
+     star stat rates from role-player stat rates.
+   - This compounds with whatever architectural issue in H2/H1 is causing the flow
+     to under-concentrate: even if the flow were perfectly expressive, its conditioning
+     signal from the backbone is weaker on the "what kind of scorer is this player?"
+     axis than on the "how many minutes will they play?" axis.
+   - Potential remediation: increase flow-NLL weight relative to minutes losses during
+     training, or add a dedicated usage-feature projection path to the flow conditioner
+     that bypasses the shared backbone.
+
+5. **Updated hypothesis priority (unchanged)**
+   - H2 (flow conditioner team-mean feedback loop) remains top suspect for the
+     concentration flattening mechanism.
+   - H1 (scale_clip / expressiveness) for the right-tail compression.
+   - H6 is now understood as a contributing amplifier, not root cause.
+
+---
+
+### Diagnostic: H2 Flow Conditioner Team-Mean Feedback Loop (2026-02-25)
+
+**Hypothesis**: The `_AffineCouplingConditioner` uses mean-pooled `y_cond` values
+across all valid players (game-mean) and per-team (team-mean) as conditioning
+context during the inverse pass. Since these are *averages over ~15 players per
+team*, they dilute star-specific information and bias the shift/scale parameters
+toward the population center, causing systematic under-projection of outlier
+(star) performances.
+
+**Code path** (`joint_game_flow.py:85-116`):
+```python
+# In the conditioner forward:
+game_ctx = _masked_player_mean(y_cond, valid)     # avg of all 30 players' y
+team_ctx = _masked_team_mean(y_cond, valid, ...)   # avg of ~15 players per team
+cond_in = torch.cat([y_cond, team_ctx, game_ctx], dim=-1)  # 3*S features
+fused = cond_proj(cond_in) + player_proj(player_states) + team_proj(team_ctx) + game_proj(game_state)
+```
+
+During inverse sampling, `y_cond` is the *partially decoded stat vector* from
+previous coupling blocks. The mean-pooling creates a feedback loop: star players
+with high decoded values get averaged down with role players in the context,
+and this dampened context feeds back into subsequent blocks' shift/scale.
+
+#### H2.1: Single-world instrumented inverse pass (Jokic 61-pt game)
+
+Instrumented one world on MIN@DEN game 22401102, capturing per-block shift,
+inverse-scale, and intermediate `y` for all 30 player slots.
+
+- Jokic: model 25.2 pts vs actual 61 pts
+- Anthony Edwards: model 6.0 pts vs actual 34 pts
+- The inverse scale (`exp(-log_scale)`) is systematically higher for stars in
+  middle blocks (2, 1), meaning the flow IS attempting to separate stars
+- But the final block (0) produces lower inverse scale, compressing values back
+- The `game_ctx` and `team_ctx` (mean-pooled from partially decoded y) feed
+  moderate context, pulling all conditioning toward a population average
+
+#### H2.2: Multi-world mean projections vs actuals (200 worlds, 52 star games)
+
+Sampled 200 worlds for all 52 val-set games containing at least one 30+ point
+performer (70 total star performances, 1,534 total player-game observations).
+
+**Per-player results (elite stars, actual >= 35 pts)**:
+
+| Player | Actual | Model Mean | P50 | P90 | Std | Error |
+|--------|--------|-----------|-----|-----|-----|-------|
+| Cooper Flagg | 49 | 14.3 | 14.6 | 23.0 | 6.8 | -34.7 |
+| Trey Murphy III | 44 | 18.9 | 18.7 | 31.0 | 8.7 | -25.1 |
+| Jalen Brunson | 42 | 21.2 | 21.8 | 31.2 | 8.0 | -20.8 |
+| Kawhi Leonard | 41 | 19.1 | 18.7 | 30.2 | 8.5 | -21.9 |
+| Joel Embiid | 40 | 18.1 | 17.4 | 29.9 | 8.4 | -21.9 |
+| Victor Wembanyama | 40 | 14.2 | 13.8 | 23.9 | 7.0 | -25.8 |
+| Anthony Edwards | 39 | 22.8 | 22.9 | 34.9 | 9.7 | -16.2 |
+| Luka Dončić | 37 | 25.7 | 26.2 | 36.8 | 9.9 | -11.3 |
+
+**Tier-level summary (all 52 star games, 200 worlds)**:
+
+| Tier | N | Mean Actual | Mean Pred | Bias | MAE |
+|------|---|------------|-----------|------|-----|
+| Elite (35+ pts) | 26 | 38.8 | 17.6 | **-21.2** | 21.2 |
+| Star (25-34 pts) | 80 | 29.3 | 16.7 | **-12.6** | 12.6 |
+| Starter (15-24 pts) | 218 | 18.6 | 12.4 | **-6.2** | 6.4 |
+| Role (5-14 pts) | 477 | 9.0 | 8.6 | **-0.4** | 3.7 |
+| Bench (<5 pts) | 733 | 0.7 | 2.4 | **+1.6** | 2.0 |
+
+**Key observations**:
+- The bias is **monotonically tier-dependent**: from -21.2 for elites to +1.6 for bench.
+  This is the signature of a **mean-compressing mechanism**, not random noise.
+- Even with 200 worlds, the P90 for elite stars (~31 pts) doesn't reach their actual
+  performance (~39 pts), indicating the compression is in the *distribution center*,
+  not just the tails.
+- Role players (5-14 pts) are nearly unbiased (-0.4), confirming the model is
+  well-calibrated *at the mean* but fails at the extremes.
+- Reb/ast show similar compression: e.g., Jarrett Allen actual 17 reb, model 5.0;
+  Stephon Castle actual 12 ast, model 3.4.
+
+#### H2.3: Ablation — zero out team/game context in flow conditioner
+
+**Experiment**: Set `team_states = zeros_like(team_states)` and
+`game_state = zeros_like(game_state)` at inference time, keeping
+`player_states` intact. Same 200 worlds, same random seed per game. This
+removes the mean-pooled context from the conditioner while preserving the
+per-player backbone representation and the `y_cond` self-conditioning.
+
+**Results for elite stars (actual >= 35 pts)**:
+
+| Player | Actual | Normal | Ablated | Delta | Abl. Closer? |
+|--------|--------|--------|---------|-------|-------------|
+| Cooper Flagg | 49 | 14.3 | 30.9 | +16.5 | YES |
+| Trey Murphy III | 44 | 18.9 | 44.0 | +25.1 | YES |
+| Jalen Brunson | 42 | 21.2 | 56.5 | +35.2 | YES |
+| Kawhi Leonard | 41 | 19.1 | 48.3 | +29.2 | YES |
+| Joel Embiid | 40 | 18.1 | 44.1 | +26.1 | YES |
+| Anthony Edwards | 39 | 22.8 | 63.4 | +40.6 | no (overshoot) |
+| Luka Dončić | 37 | 25.7 | 69.1 | +43.4 | no (overshoot) |
+
+**Tier-level ablation comparison**:
+
+| Tier | Normal Bias | Ablated Bias | Normal MAE | Ablated MAE |
+|------|------------|-------------|-----------|------------|
+| Elite (35+ pts) | -21.2 | **+3.4** | 21.2 | **12.2** |
+| Star (25-34 pts) | -12.6 | **+10.9** | 12.6 | 16.1 |
+| Starter (15-24 pts) | -6.2 | **+6.5** | 6.4 | 12.2 |
+| Role (5-14 pts) | -0.4 | **+4.5** | 3.7 | 8.7 |
+| Bench (<5 pts) | +1.6 | **+1.7** | 2.0 | 2.2 |
+
+**Key findings from ablation**:
+
+1. **Team/game ctx is the primary compression mechanism**. Removing it shifts elite
+   star bias from -21.2 to +3.4 (nearly unbiased on average), cutting elite MAE
+   from 21.2 to 12.2. This is direct evidence that the mean-pooled context is
+   responsible for the majority of star under-projection.
+
+2. **But the ablation overshoots and destroys calibration elsewhere**. For stars and
+   starters, the ablated model *over-projects*, and the MAE worsens for all tiers
+   below elite. Anthony Edwards jumps to 63-79 predicted pts; Cade Cunningham to 72.
+   The team/game context provides useful information for constraining predictions —
+   the problem is that it over-constrains stars while being roughly neutral for the
+   average player.
+
+3. **The compression is not a training artifact — it's an architectural bottleneck**.
+   The model's backbone `player_states` already contain star-differentiating info
+   (as evidenced by ablated projections correctly being *higher* for stars). But
+   when team/game ctx is combined, the mean-pooled signal dominates, pulling
+   the conditioner's shift/scale back toward the population average.
+
+4. **The `y_cond` self-conditioning feedback exacerbates the problem**. During
+   inverse sampling, block N's output (partially decoded stats) becomes block
+   N-1's conditioning input. The mean-pooled `team_ctx` and `game_ctx` over
+   `y_cond` means that even if one block tries to scale a star up, the mean
+   context seen by the next block is diluted by ~14 role players.
+
+#### H2 Verdict: **CONFIRMED as primary cause**
+
+The team-mean pooling in `_AffineCouplingConditioner` is the dominant mechanism
+driving star under-projection. It creates a systematic compression where:
+
+- Stars lose ~21 pts of predicted scoring on average (54% compression)
+- The compression is monotonically tier-dependent
+- Removing team/game ctx recovers star-level calibration (bias → near zero for elites)
+- But a naive zeroing destroys role/bench calibration, indicating the ctx is useful —
+  it just needs to be used differently
+
+**Recommended architectural changes** (priority order):
+
+1. **Replace mean-pooling with attention-based context** in the conditioner.
+   Instead of `mean(y_cond[team])`, use cross-attention where each player attends
+   to teammates with learned attention weights. This preserves team context while
+   allowing the model to weight star contributions appropriately.
+
+2. **Add explicit player-level conditioning** by feeding `player_states` directly
+   into the conditioner alongside (or instead of) the mean-pooled signals. The
+   ablation shows the backbone already differentiates stars adequately.
+
+3. **Scale-aware conditioning**: Rather than a single mean, provide both the team
+   mean and team variance (or explicit quantile features) so the conditioner knows
+   how spread the team's stats are, rather than collapsing to a single average.
+
+4. **Reduce coupling depth from 4 to 2 blocks** to limit the feedback loop's
+   compounding effect. Fewer blocks = fewer opportunities for mean-pooling to
+   dampen star-specific scale factors.
+
+5. **Increase `scale_clip` from 2.0 to 3.0-4.0** (H1 investigation pending). The
+   `tanh(log_scale) * 2.0` ceiling means `exp(scale) ∈ [0.14, 7.39]`, which may
+   be insufficient for the ~3x multiplier needed to get from model mean (~18) to
+   actual elite mean (~39).
+
+#### Updated Hypothesis Priority
+
+- **H2: CONFIRMED** — primary cause of star under-projection (compression ratio ~54%)
+- **H1: CONFIRMED** — scale_clip ceiling compounds H2 (see H1 diagnostic below)
+- **H6: contributing amplifier** — minutes-first backbone underweights usage signal
+- **H4: ruled out** — feature normalization preserves adequate tier separation
+- **H3, H5**: not yet tested; lower priority given H2 confirmation
+
+---
+
+### Diagnostic: H1 Flow Scale Clip Ceiling (2026-02-25)
+
+**Hypothesis**: The `tanh(log_scale) * scale_clip` hard clamp (default 2.0) in affine
+coupling blocks limits the maximum scale factor to `exp(2.0) ≈ 7.4x`. This ceiling
+may be insufficient for the model to "undo" the mean-compression from H2, preventing
+star-level stat predictions from reaching their true values.
+
+**Experiment design**: Inference-only sweep with identical checkpoint weights but
+different `scale_clip` values at model construction time. No retraining.
+
+**Implementation**:
+- Added `JointGameFlow.set_scale_clip(value)` method to override all coupling blocks
+- Added `--flow-scale-clip-override` CLI flag and `GT_FLOW_SCALE_CLIP` env var
+- Created `scripts/experiments/gtv2_flow_clip_sweep.py` for systematic comparison
+- Live pipeline supports experimental runs with `_clipXpY` suffix on run_id
+
+#### H1 Sweep Results (val split: 107 games, 3,763 players, 200 worlds)
+
+**Tier-level PTS bias by scale_clip**:
+
+| Tier | N | Clip 2.0 Bias | Clip 3.0 Bias | Clip 4.0 Bias |
+|------|---|---------------|---------------|---------------|
+| Elite (35+ pts) | 26 | **-21.3** | **-11.8** | +4.1 |
+| Star (25-34 pts) | 136 | -12.1 | **-3.8** | +9.8 |
+| Starter (15-24 pts) | 489 | -6.1 | **-1.1** | +6.4 |
+| Role (5-14 pts) | 1032 | **-0.3** | +2.2 | +5.5 |
+| Bench (<5 pts) | 1484 | +4.0 | +4.7 | +5.5 |
+
+**Tier-level PTS MAE by scale_clip**:
+
+| Tier | Clip 2.0 MAE | Clip 3.0 MAE | Clip 4.0 MAE |
+|------|-------------|-------------|-------------|
+| Elite (35+ pts) | 21.3 | **12.3** | 11.9 |
+| Star (25-34 pts) | 12.1 | **6.6** | 14.9 |
+| Starter (15-24 pts) | 6.4 | **5.8** | 11.0 |
+| Role (5-14 pts) | **3.4** | 5.1 | 8.1 |
+| Bench (<5 pts) | **4.1** | 4.8 | 5.6 |
+
+**Overall metrics**:
+
+| Metric | Clip 2.0 | Clip 3.0 | Clip 4.0 |
+|--------|----------|----------|----------|
+| Overall Bias | +0.15 | +2.50 | +5.83 |
+| Overall MAE | **4.72** | 5.19 | 7.70 |
+
+#### H1 Key Findings
+
+1. **H1 CONFIRMED as contributing factor**: Increasing `scale_clip` from 2.0 to 3.0
+   cuts elite star bias in half (-21.3 → -11.8, 45% improvement) while keeping
+   starters/stars reasonably calibrated.
+
+2. **clip=3.0 is the optimal inference-only setting**:
+   - Elite bias: -21.3 → -11.8 (45% improvement)
+   - Star bias: -12.1 → -3.8 (69% improvement)
+   - Starter bias: -6.1 → -1.1 (82% improvement)
+   - Role bias worsens slightly: -0.3 → +2.2 (acceptable tradeoff)
+   - MAE improves for elite (21.3 → 12.3) and star (12.1 → 6.6)
+
+3. **clip=4.0 overshoots**: Flips from under-projection to over-projection for all
+   tiers. Stars get +9.8 bias (predicted 38 on 28 actual). The learned log_scale
+   values become too aggressive when un-clamped beyond 3.0.
+
+4. **H1 and H2 are additive**: The remaining -11.8 elite bias at clip=3.0 is due to
+   the team-mean pooling issue (H2). The two mechanisms compound:
+   - H2 (mean pooling): compresses toward population mean during conditioning
+   - H1 (scale_clip): hard ceiling on how much the flow can "undo" this compression
+
+#### H1 Recommendation
+
+**Immediate production improvement** (no retrain required):
+```bash
+# Set via env var
+GT_FLOW_SCALE_CLIP=3.0 uv run python -m prefect_flows.live_nba_pipeline_v3
+
+# Or via flow parameter
+nba_live_pipeline_v3_flow(gtv2_flow_scale_clip_override=3.0)
+```
+
+Expected impact:
+- Elite star under-projection: 21.3 → 11.8 pts (45% reduction)
+- Star MAE: 12.1 → 6.6 (45% reduction)
+- Slight degradation for role/bench (+1.7 MAE) — acceptable tradeoff for DFS use case
+
+**For full fix**: Combine clip=3.0 with H2 architectural change (attention-based
+context in conditioner). The fixes are complementary — H1 gives quick gains via
+config change, H2 addresses root cause via retrain.
+
+#### Updated Hypothesis Priority (Post-H1)
+
+- **H2: CONFIRMED** — primary cause (~54% compression from mean-pooling)
+- **H1: CONFIRMED** — secondary cause (~45% of remaining gap addressable via clip=3.0)
+- **H6: contributing amplifier** — minutes-first backbone underweights usage signal
+- **H4: ruled out** — feature normalization preserves adequate tier separation
+- **H3, H5**: deprioritized given H1+H2 findings explain majority of star under-projection
+
+### Progress Update (2026-02-25, H2 mean-context lambda sweep; inference-only)
+
+Objective:
+
+- test whether reducing mean-pooled `y_cond` context strength in the flow conditioner
+  improves star concentration without breaking correlation quality.
+
+Implementation (inference-only; no retrain):
+
+1. Added runtime mean-context weight hook in flow conditioner:
+   - `JointGameFlow(..., mean_ctx_weight=1.0)` + `set_mean_ctx_weight(...)`
+   - wired through model config as `flow_mean_ctx_weight`
+   - world-generation CLI override:
+     `--flow-mean-ctx-weight-override`
+2. Swept `lambda in {1.00, 0.85, 0.70}` on the current promoted parity-remediation bundle:
+   - bundle/run:
+     `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123`
+   - dataset:
+     `/home/daniel/projections-data/training/datasets/joint_rotation_rates_v1_priors_contract_livefill_20260224T183839Z`
+   - window:
+     `2025-12-09` to `2026-02-11` (`val_days=60`)
+   - worlds:
+     `64` per game, `seed=123`, strict contracts enabled.
+
+World-contract status:
+
+- all lambdas passed strict contracts with zero violations:
+  - `team_minutes_not_240=0`
+  - `inactive_nonzero_stats=0`
+  - `fg2m_gt_fga2=0`, `fg3m_gt_fga3=0`, `ftm_gt_fta=0`
+
+Observed metrics (same eval harness as offline phase checks):
+
+| lambda | pair_corr_rmse_vs_sim_v2 | same_team_pair_corr_mean | team_variance_calibration_mse_norm | elite_bias_pts (35+) | star_bias_pts (25-34) | p95_error_abs |
+|---|---:|---:|---:|---:|---:|---:|
+| 1.00 | 0.2804 | -0.0103 | 1.3525 | -21.34 | -11.94 | 0.0465 |
+| 0.85 | 0.2797 | -0.0094 | 0.9862 | -20.41 | -11.04 | 0.0330 |
+| 0.70 | 0.2786 | -0.0080 | 0.8526 | -19.44 | -10.10 | 0.0199 |
+
+Interpretation:
+
+1. Reducing mean-context weight improves star tiers monotonically
+   (elite bias improves by `+1.90` pts at `lambda=0.70` vs `1.00`).
+2. Correlation diagnostics did **not** regress under this sweep:
+   - slight improvement in `pair_corr_rmse_vs_sim_v2`
+   - same-team correlation mean moved slightly toward zero
+   - team variance calibration improved materially.
+3. This confirms that full context removal is unnecessary; controlled attenuation can
+   recover concentration signal while preserving structural coupling.
+4. Remaining gap is still large (elite bias remains `-19.44` at `lambda=0.70`);
+   attenuation alone is not a complete fix.
+
+Recommendation (updated):
+
+1. Treat `flow_mean_ctx_weight` sweep as a **diagnostic-only ablation control**.
+   Do not rely on manual inference-time knob tuning as the target solution.
+2. Next architecture step should replace fixed mean pooling with a learned/gated
+   context path (attention or learned weighting), with tails/correlation behavior
+   learned end-to-end during training.
+3. Keep correlation metrics as hard gates in all follow-up training experiments:
+   - `pair_corr_rmse_vs_sim_v2`
+   - `team_variance_calibration_mse_norm`
+   - same-team pair-correlation summary.
+4. After learned context change, re-test H1 (`scale_clip` and block depth) to recover
+   remaining elite/star under-projection.
+
+Artifacts:
+
+- sweep summary CSV:
+  `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/h2_ctx_lambda_sweep_summary.csv`
+- sweep summary JSON (deltas vs `lambda=1.00`):
+  `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/h2_ctx_lambda_sweep_summary.json`
+- eval JSONs:
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/offline_eval_vs_sim_v2_60d_64w_ctx100.json`
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/offline_eval_vs_sim_v2_60d_64w_ctx085.json`
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/offline_eval_vs_sim_v2_60d_64w_ctx07.json`

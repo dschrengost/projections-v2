@@ -256,7 +256,12 @@ def _resolve_torch_device(device: str | None) -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def _load_gtv2_model(bundle_dir: Path, *, device: torch.device) -> tuple[GameTransformerV2Config, torch.nn.Module]:
+def _load_gtv2_model(
+    bundle_dir: Path,
+    *,
+    device: torch.device,
+    flow_scale_clip_override: float | None = None,
+) -> tuple[GameTransformerV2Config, torch.nn.Module]:
     config_path = Path(bundle_dir) / "config.json"
     model_path = Path(bundle_dir) / "model.pt"
     if not config_path.exists():
@@ -268,6 +273,11 @@ def _load_gtv2_model(bundle_dir: Path, *, device: torch.device) -> tuple[GameTra
     model = build_game_transformer_v2(config)
     state = torch.load(model_path, map_location=device)
     model.load_state_dict(state)
+
+    # Inference-only scale_clip override (H1 experiment support)
+    if flow_scale_clip_override is not None:
+        model.flow_head.set_scale_clip(float(flow_scale_clip_override))
+
     model = model.to(device=device)
     model.eval()
     return config, model
@@ -1351,6 +1361,7 @@ def generate_worlds_gtv2_live_task(
     active_temperature: float = 1.0,
     random_seed: int = 42,
     strict_world_contracts: bool = True,
+    flow_scale_clip_override: float | None = None,
 ) -> dict[str, str]:
     run_dir = data_root / "artifacts" / WORLDS_ROOT / f"game_date={game_date}" / f"run={run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1388,9 +1399,23 @@ def generate_worlds_gtv2_live_task(
             "placeholder_mode": True,
         }
     else:
+        logger = get_run_logger()
         _set_inference_seed(int(random_seed))
         device = _resolve_torch_device(gtv2_device)
-        config, model = _load_gtv2_model(bundle_dir, device=device)
+
+        # Warn loudly if using scale_clip override (experimental mode)
+        if flow_scale_clip_override is not None:
+            logger.warning("=" * 80)
+            logger.warning("EXPERIMENTAL: flow_scale_clip_override = %.2f", flow_scale_clip_override)
+            logger.warning("This is a non-default setting for H1 hypothesis testing.")
+            logger.warning("Production runs should use the trained default (2.0).")
+            logger.warning("=" * 80)
+
+        config, model = _load_gtv2_model(
+            bundle_dir,
+            device=device,
+            flow_scale_clip_override=flow_scale_clip_override,
+        )
         features_df = pd.read_parquet(features_path)
         examples = _build_gtv2_inference_examples(
             features_df=features_df,
@@ -1572,6 +1597,7 @@ def nba_live_pipeline_v3_flow(
     gtv2_active_temperature: float = 1.0,
     gtv2_seed: int = 42,
     gtv2_strict_world_contracts: bool = True,
+    gtv2_flow_scale_clip_override: float | None = None,
     input_max_age_minutes: float = 360.0,
     require_action_props: bool = True,
     allow_rotowire_props_fallback: bool = True,
@@ -1590,6 +1616,23 @@ def nba_live_pipeline_v3_flow(
                 resolved_allow_rotowire_props_fallback = bool(rotation_cfg.get("allow_rotowire_props_fallback"))
         except Exception:
             pass
+
+    # Resolve flow_scale_clip override: CLI param > env var > None
+    resolved_flow_scale_clip_override = gtv2_flow_scale_clip_override
+    if resolved_flow_scale_clip_override is None:
+        env_clip = os.environ.get("GT_FLOW_SCALE_CLIP")
+        if env_clip is not None:
+            resolved_flow_scale_clip_override = float(env_clip)
+            logger.warning(
+                "GT_FLOW_SCALE_CLIP env var set to %.2f — using experimental scale_clip override",
+                resolved_flow_scale_clip_override,
+            )
+
+    # Append suffix to run_id if using experimental scale_clip (avoids overwriting production)
+    if resolved_flow_scale_clip_override is not None:
+        clip_suffix = f"_clip{resolved_flow_scale_clip_override:.1f}".replace(".", "p")
+        run_id = run_id + clip_suffix
+        logger.info("Experimental run_id with clip suffix: %s", run_id)
 
     # Runtime stamp for reproducibility and incident triage.
     enforce_clean_tree()
@@ -1703,6 +1746,7 @@ def nba_live_pipeline_v3_flow(
             active_temperature=float(gtv2_active_temperature),
             random_seed=int(gtv2_seed),
             strict_world_contracts=bool(gtv2_strict_world_contracts),
+            flow_scale_clip_override=resolved_flow_scale_clip_override,
         )
 
         projections_dir = finalize_projections_live_task(

@@ -71,6 +71,7 @@ class GameTransformerV2Config:
     flow_coupling_type: str = "affine"
     flow_num_blocks: int = 4
     flow_scale_clip: float = 2.0
+    flow_mean_ctx_weight: float = 1.0
     include_pf_in_flow_targets: bool = False
     overflow_protected_prior_play_prob_floor: float = PROTECTED_PRIOR_PLAY_PROB_FLOOR
     overflow_protected_prior_minutes_floor: float = PROTECTED_PRIOR_MINUTES_FLOOR
@@ -538,6 +539,7 @@ class GameTransformerV2(nn.Module):
         flow_coupling_type: str = "affine",
         flow_num_blocks: int = 4,
         flow_scale_clip: float = 2.0,
+        flow_mean_ctx_weight: float = 1.0,
         include_pf_in_flow_targets: bool = False,
     ) -> None:
         super().__init__()
@@ -600,6 +602,7 @@ class GameTransformerV2(nn.Module):
             num_blocks=int(flow_num_blocks),
             coupling_type=str(flow_coupling_type),
             scale_clip=float(flow_scale_clip),
+            mean_ctx_weight=float(flow_mean_ctx_weight),
         )
 
         token_type_ids = [0, 1, *([2] * MAX_PLAYERS_PER_TEAM), 1, *([2] * MAX_PLAYERS_PER_TEAM)]
@@ -812,5 +815,6 @@ def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransforme
         flow_coupling_type=str(config.flow_coupling_type),
         flow_num_blocks=int(config.flow_num_blocks),
         flow_scale_clip=float(config.flow_scale_clip),
+        flow_mean_ctx_weight=float(config.flow_mean_ctx_weight),
         include_pf_in_flow_targets=bool(config.include_pf_in_flow_targets),
     )

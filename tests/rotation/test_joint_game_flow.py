@@ -84,3 +84,49 @@ def test_joint_game_flow_inverse_sampling_round_trip() -> None:
         valid_mask=valid_mask,
     )
     assert torch.max(torch.abs(y_recon - y)).item() < 1e-4
+
+
+def test_joint_game_flow_mean_ctx_weight_runtime_override() -> None:
+    torch.manual_seed(17)
+    bsz, num_players, num_stats, d_model = 1, 30, 12, 16
+    flow = JointGameFlow(
+        d_model=d_model,
+        num_stats=num_stats,
+        hidden_dim=32,
+        dropout=0.0,
+        num_blocks=2,
+        coupling_type="affine",
+        scale_clip=1.2,
+        mean_ctx_weight=1.0,
+    )
+    flow.set_mean_ctx_weight(0.7)
+    assert flow.mean_ctx_weight == 0.7
+    assert all(block.conditioner.mean_ctx_weight == 0.7 for block in flow.blocks)
+
+    y = torch.randn((bsz, num_players, num_stats), dtype=torch.float32)
+    player_states = torch.randn((bsz, num_players, d_model), dtype=torch.float32)
+    team_states = torch.randn((bsz, 2, d_model), dtype=torch.float32)
+    game_state = torch.randn((bsz, d_model), dtype=torch.float32)
+    player_team_index = torch.cat(
+        [torch.zeros((bsz, 15), dtype=torch.long), torch.ones((bsz, 15), dtype=torch.long)],
+        dim=1,
+    )
+    valid_mask = torch.ones((bsz, num_players), dtype=torch.bool)
+
+    out = flow(
+        y,
+        player_states=player_states,
+        team_states=team_states,
+        game_state=game_state,
+        player_team_index=player_team_index,
+        valid_mask=valid_mask,
+    )
+    y_recon = flow.sample(
+        out.z,
+        player_states=player_states,
+        team_states=team_states,
+        game_state=game_state,
+        player_team_index=player_team_index,
+        valid_mask=valid_mask,
+    )
+    assert torch.max(torch.abs(y_recon - y)).item() < 1e-4

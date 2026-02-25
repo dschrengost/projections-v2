@@ -609,3 +609,165 @@ def test_build_game_level_examples_truncation_prefers_lower_dnp_risk() -> None:
     home_ids = set(int(v) for v in examples[0].player_ids[0][examples[0].player_valid_mask[0]].tolist())
     assert 1301 in home_ids
     assert 1302 not in home_ids
+
+
+def test_flow_head_set_scale_clip_overrides_all_blocks() -> None:
+    """Smoke test: verify scale_clip override works and state_dict loads cleanly."""
+    import torch
+
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        flow_scale_clip=2.0,  # default
+    )
+
+    # Build model with default clip
+    model_base = build_game_transformer_v2(config)
+    state_dict = model_base.state_dict()
+
+    # Build another model and load the same weights
+    model_with_override = build_game_transformer_v2(config)
+    model_with_override.load_state_dict(state_dict)  # Should succeed
+
+    # Verify default clip
+    for block in model_base.flow_head.blocks:
+        assert block.scale_clip == pytest.approx(2.0)
+
+    # Apply override
+    model_with_override.flow_head.set_scale_clip(3.5)
+    for block in model_with_override.flow_head.blocks:
+        assert block.scale_clip == pytest.approx(3.5)
+
+    # Verify forward pass works with overridden clip
+    df = _toy_frame()
+    flow_cols = ["fga2", "fg2m", "fga3", "fg3m", "fta", "ftm", "oreb", "dreb", "ast", "stl", "blk", "tov"]
+    for col in flow_cols:
+        df[col] = 5.0
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        flow_label_columns=flow_cols,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+
+    model_with_override.eval()
+    with torch.no_grad():
+        out = model_with_override(
+            batch["player_features"],
+            batch["player_valid_mask"],
+            game_features=batch["game_features"],
+            team_features=batch["team_features"],
+            run_flow=True,
+            flow_targets=batch["flow_targets"],
+            flow_observed_mask=batch["flow_observed_mask"],
+        )
+
+    assert out.flow is not None
+    assert out.flow.nll_mean.item() > 0.0  # Runs without error
+
+
+def test_flow_head_set_scale_clip_with_different_values_produces_different_samples() -> None:
+    """Verify different scale_clip values produce different inverse samples (smoke test)."""
+    import torch
+
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+    )
+
+    model_clip2 = build_game_transformer_v2(config)
+    model_clip4 = build_game_transformer_v2(config)
+
+    # Share weights
+    model_clip4.load_state_dict(model_clip2.state_dict())
+
+    # Override one model's scale_clip
+    model_clip4.flow_head.set_scale_clip(4.0)
+
+    model_clip2.eval()
+    model_clip4.eval()
+
+    # Build batch
+    df = _toy_frame()
+    examples = build_game_level_examples(
+        df,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+
+    # Run forward to get player_states
+    with torch.no_grad():
+        out2 = model_clip2(
+            batch["player_features"],
+            batch["player_valid_mask"],
+            game_features=batch["game_features"],
+            team_features=batch["team_features"],
+            sample_active=True,
+        )
+        out4 = model_clip4(
+            batch["player_features"],
+            batch["player_valid_mask"],
+            game_features=batch["game_features"],
+            team_features=batch["team_features"],
+            sample_active=True,
+        )
+
+    # Sample from flow with same z
+    torch.manual_seed(123)
+    z = torch.randn(1, 30, 12)
+
+    from projections.rotation.game_transformer_v2 import flow_target_columns
+
+    ftc = flow_target_columns(include_pf=config.include_pf_in_flow_targets)
+    assert len(ftc) == 12
+
+    with torch.no_grad():
+        y2 = model_clip2.flow_head.sample(
+            z,
+            player_states=out2.player_states,
+            team_states=out2.team_states,
+            game_state=out2.game_state,
+            player_team_index=out2.player_team_index,
+            valid_mask=out2.player_valid_mask,
+        )
+        y4 = model_clip4.flow_head.sample(
+            z,
+            player_states=out4.player_states,
+            team_states=out4.team_states,
+            game_state=out4.game_state,
+            player_team_index=out4.player_team_index,
+            valid_mask=out4.player_valid_mask,
+        )
+
+    # Different scale_clip should produce different samples (not identical)
+    # Note: player_states are identical, z is identical, only scale_clip differs
+    # The difference may be small but should be non-zero
+    diff = (y2 - y4).abs().sum().item()
+    assert diff > 0.0, "Different scale_clip should produce different samples"
