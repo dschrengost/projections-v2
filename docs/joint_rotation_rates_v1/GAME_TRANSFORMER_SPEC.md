@@ -2791,7 +2791,6 @@ Artifacts:
   - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/offline_eval_vs_sim_v2_60d_64w_ctx100.json`
   - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/offline_eval_vs_sim_v2_60d_64w_ctx085.json`
   - `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/offline_eval_vs_sim_v2_60d_64w_ctx07.json`
-
 ---
 
 ## Next-Agent Handoff: GTv2 Star Under-Projection Fix
@@ -2807,11 +2806,23 @@ Diagnostic investigation confirmed two root causes of star player under-projecti
 | H2: Mean-pooled team context | **CONFIRMED (primary)** | Compresses star projections toward team mean |
 | H1: flow_scale_clip=2.0 ceiling | **CONFIRMED (secondary)** | 45% of elite bias addressable via clip=3.0 |
 
-### Recommended Actions
+### Recommended Action: Combined Retrain (H1 + H2)
 
-#### 1. Retrain with `flow_scale_clip=3.0` (quick win)
+Both fixes are orthogonal and should be applied together in a single retrain:
 
-The current training default is `scale_clip=2.0`. Sweep results show `clip=3.0` is optimal:
+| Fix | Component | Change |
+|-----|-----------|--------|
+| H1 | Coupling block clamp | `scale_clip=2.0` → `3.0` |
+| H2 | Flow conditioner | Mean-pooling → Attention/gated context |
+
+**Rationale for combined retrain:**
+- No interaction risk — fixes operate on different architecture components
+- Faster iteration — one training run instead of two
+- Attribution possible — compare combined results vs H1-only inference sweep (baseline exists)
+
+#### H1: scale_clip=3.0
+
+Sweep results show `clip=3.0` is optimal:
 
 | Clip | Elite Bias (35+ pts) | Star Bias (25-34) | Elite MAE |
 |------|---------------------|-------------------|-----------|
@@ -2819,16 +2830,12 @@ The current training default is `scale_clip=2.0`. Sweep results show `clip=3.0` 
 | 3.0  | -11.8               | -3.8              | 12.3      |
 | 4.0  | +4.1                | +9.8              | 11.9      |
 
-**Implementation:**
-- Update `JointGameFlowConfig.scale_clip` default from `2.0` to `3.0`
-- Or pass `scale_clip=3.0` explicitly in training config
-- Location: `projections/rotation/joint_game_flow.py` → `JointGameFlowConfig`
+**Implementation:** Pass `scale_clip=3.0` in `JointGameFlowConfig`
 
-#### 2. Replace mean-pooling with attention/gated context (architectural fix)
+#### H2: Attention/gated context
 
-The flow conditioner currently uses fixed mean-pooling for team/game context:
+Current (problematic):
 ```python
-# Current (problematic):
 y_cond = y[:, :, self.cond_indices].mean(dim=1, keepdim=True)
 ```
 
@@ -2847,11 +2854,12 @@ y_cond = y[:, :, self.cond_indices].mean(dim=1, keepdim=True)
 ### Training Recipe
 
 ```bash
-# Suggested training command with clip=3.0
+# Combined retrain with H1 + H2 fixes
 uv run python -m projections.rotation.train_game_transformer_v2 \
     --dataset-path /path/to/dataset \
     --output-dir /path/to/output \
     --flow-scale-clip 3.0 \
+    --flow-context-mode attention \
     --seed 123
 ```
 

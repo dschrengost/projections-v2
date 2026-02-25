@@ -165,7 +165,8 @@ def test_game_transformer_v2_config_defaults_match_locked_decisions() -> None:
     assert config.active_threshold_minutes == pytest.approx(4.0)
     assert config.flow_coupling_type == "affine"
     assert config.flow_num_blocks == 4
-    assert config.flow_scale_clip == pytest.approx(2.0)
+    assert config.flow_scale_clip == pytest.approx(3.0)  # H1 fix: increased from 2.0
+    assert config.flow_context_mode == "attention"  # H2 fix: gated attention instead of mean pooling
     assert config.include_pf_in_flow_targets is False
     assert config.overflow_protected_prior_play_prob_floor == pytest.approx(0.938507)
     assert config.overflow_protected_prior_minutes_floor == pytest.approx(29.520922)

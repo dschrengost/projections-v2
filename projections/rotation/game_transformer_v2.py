@@ -70,8 +70,9 @@ class GameTransformerV2Config:
     max_minutes_per_player: float = 48.0
     flow_coupling_type: str = "affine"
     flow_num_blocks: int = 4
-    flow_scale_clip: float = 2.0
+    flow_scale_clip: float = 3.0  # H1 fix: increased from 2.0 to reduce star under-projection
     flow_mean_ctx_weight: float = 1.0
+    flow_context_mode: str = "attention"  # H2 fix: "attention" instead of "mean" for star concentration
     include_pf_in_flow_targets: bool = False
     overflow_protected_prior_play_prob_floor: float = PROTECTED_PRIOR_PLAY_PROB_FLOOR
     overflow_protected_prior_minutes_floor: float = PROTECTED_PRIOR_MINUTES_FLOOR
@@ -538,8 +539,9 @@ class GameTransformerV2(nn.Module):
         max_minutes_per_player: float = 48.0,
         flow_coupling_type: str = "affine",
         flow_num_blocks: int = 4,
-        flow_scale_clip: float = 2.0,
+        flow_scale_clip: float = 3.0,
         flow_mean_ctx_weight: float = 1.0,
+        flow_context_mode: str = "attention",
         include_pf_in_flow_targets: bool = False,
     ) -> None:
         super().__init__()
@@ -603,6 +605,7 @@ class GameTransformerV2(nn.Module):
             coupling_type=str(flow_coupling_type),
             scale_clip=float(flow_scale_clip),
             mean_ctx_weight=float(flow_mean_ctx_weight),
+            context_mode=str(flow_context_mode),
         )
 
         token_type_ids = [0, 1, *([2] * MAX_PLAYERS_PER_TEAM), 1, *([2] * MAX_PLAYERS_PER_TEAM)]
@@ -816,5 +819,6 @@ def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransforme
         flow_num_blocks=int(config.flow_num_blocks),
         flow_scale_clip=float(config.flow_scale_clip),
         flow_mean_ctx_weight=float(config.flow_mean_ctx_weight),
+        flow_context_mode=str(getattr(config, "flow_context_mode", "mean")),
         include_pf_in_flow_targets=bool(config.include_pf_in_flow_targets),
     )

@@ -130,3 +130,113 @@ def test_joint_game_flow_mean_ctx_weight_runtime_override() -> None:
         valid_mask=valid_mask,
     )
     assert torch.max(torch.abs(y_recon - y)).item() < 1e-4
+
+
+def test_joint_game_flow_attention_context_mode_forward_and_inverse() -> None:
+    """Test that attention context mode works end-to-end with forward/inverse passes."""
+    torch.manual_seed(42)
+    bsz, num_players, num_stats, d_model = 2, 30, 12, 24
+    flow = JointGameFlow(
+        d_model=d_model,
+        num_stats=num_stats,
+        hidden_dim=32,
+        dropout=0.0,
+        num_blocks=3,
+        coupling_type="affine",
+        scale_clip=3.0,
+        context_mode="attention",  # H2 fix
+    )
+    assert flow.context_mode == "attention"
+    assert all(block.conditioner.context_mode == "attention" for block in flow.blocks)
+    assert all(block.conditioner.team_attn is not None for block in flow.blocks)
+    assert all(block.conditioner.game_attn is not None for block in flow.blocks)
+
+    y = torch.randn((bsz, num_players, num_stats), dtype=torch.float32)
+    player_states = torch.randn((bsz, num_players, d_model), dtype=torch.float32)
+    team_states = torch.randn((bsz, 2, d_model), dtype=torch.float32)
+    game_state = torch.randn((bsz, d_model), dtype=torch.float32)
+    player_team_index = torch.cat(
+        [torch.zeros((bsz, 15), dtype=torch.long), torch.ones((bsz, 15), dtype=torch.long)],
+        dim=1,
+    )
+    valid_mask = torch.ones((bsz, num_players), dtype=torch.bool)
+
+    # Forward pass
+    out = flow(
+        y,
+        player_states=player_states,
+        team_states=team_states,
+        game_state=game_state,
+        player_team_index=player_team_index,
+        valid_mask=valid_mask,
+    )
+    assert out.z.shape == y.shape
+    assert out.nll_mean.item() > 0.0
+
+    # Inverse pass (sampling)
+    y_recon = flow.sample(
+        out.z,
+        player_states=player_states,
+        team_states=team_states,
+        game_state=game_state,
+        player_team_index=player_team_index,
+        valid_mask=valid_mask,
+    )
+    # Round-trip should be exact (up to float precision)
+    assert torch.max(torch.abs(y_recon - y)).item() < 1e-4
+
+
+def test_joint_game_flow_attention_vs_mean_produces_different_samples() -> None:
+    """Verify attention and mean context modes produce different samples from same noise."""
+    torch.manual_seed(123)
+    bsz, num_players, num_stats, d_model = 1, 30, 12, 24
+
+    flow_mean = JointGameFlow(
+        d_model=d_model,
+        num_stats=num_stats,
+        hidden_dim=32,
+        dropout=0.0,
+        num_blocks=3,
+        scale_clip=3.0,
+        context_mode="mean",
+    )
+    flow_attn = JointGameFlow(
+        d_model=d_model,
+        num_stats=num_stats,
+        hidden_dim=32,
+        dropout=0.0,
+        num_blocks=3,
+        scale_clip=3.0,
+        context_mode="attention",
+    )
+
+    z = torch.randn((bsz, num_players, num_stats), dtype=torch.float32)
+    player_states = torch.randn((bsz, num_players, d_model), dtype=torch.float32)
+    team_states = torch.randn((bsz, 2, d_model), dtype=torch.float32)
+    game_state = torch.randn((bsz, d_model), dtype=torch.float32)
+    player_team_index = torch.cat(
+        [torch.zeros((bsz, 15), dtype=torch.long), torch.ones((bsz, 15), dtype=torch.long)],
+        dim=1,
+    )
+    valid_mask = torch.ones((bsz, num_players), dtype=torch.bool)
+
+    with torch.no_grad():
+        y_mean = flow_mean.sample(
+            z,
+            player_states=player_states,
+            team_states=team_states,
+            game_state=game_state,
+            player_team_index=player_team_index,
+            valid_mask=valid_mask,
+        )
+        y_attn = flow_attn.sample(
+            z,
+            player_states=player_states,
+            team_states=team_states,
+            game_state=game_state,
+            player_team_index=player_team_index,
+            valid_mask=valid_mask,
+        )
+
+    # Different context modes should produce different samples
+    assert not torch.allclose(y_mean, y_attn, atol=1e-4)
