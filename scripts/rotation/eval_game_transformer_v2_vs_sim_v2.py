@@ -379,6 +379,10 @@ def main() -> None:
         "gt_worlds_parquet": str(gt_worlds),
         "sim_v2_worlds_root": str(sim_root),
         "sim_v2_run_id": str(args.sim_v2_run_id),
+        "evaluation_semantics": {
+            "default_view": "unconditional_dnp_zero",
+            "explanation": "Metrics are computed from full worlds samples; inactive worlds contribute zero.",
+        },
         "window": {
             "start_date": str(args.start_date),
             "end_date": str(args.end_date),

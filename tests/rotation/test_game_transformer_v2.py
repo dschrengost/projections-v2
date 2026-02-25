@@ -167,6 +167,13 @@ def test_game_transformer_v2_config_defaults_match_locked_decisions() -> None:
     assert config.flow_num_blocks == 4
     assert config.flow_scale_clip == pytest.approx(2.0)
     assert config.include_pf_in_flow_targets is False
+    assert config.overflow_protected_prior_play_prob_floor == pytest.approx(0.938507)
+    assert config.overflow_protected_prior_minutes_floor == pytest.approx(29.520922)
+    assert config.overflow_risk_weight_consecutive_active_dnp == pytest.approx(0.579943)
+    assert config.overflow_risk_weight_active_but_dnp_rate_last10 == pytest.approx(6.053079)
+    assert config.overflow_risk_weight_inactive_streak_len == pytest.approx(0.117685)
+    assert config.overflow_keep_weight_prior_play_prob == pytest.approx(2.202986)
+    assert config.overflow_keep_weight_prior_minutes == pytest.approx(0.051353)
 
 
 def test_game_transformer_v2_forward_with_flow_targets_returns_flow_outputs() -> None:
@@ -213,3 +220,392 @@ def test_game_transformer_v2_forward_with_flow_targets_returns_flow_outputs() ->
     assert out.flow is not None
     assert out.flow.z.shape == (1, 30, len(flow_cols))
     assert out.flow.nll_mean.item() > 0.0
+
+
+def test_build_game_level_examples_skips_malformed_single_side_games() -> None:
+    df = _toy_frame()
+
+    bad_rows: list[dict[str, object]] = []
+    for i, pid in enumerate([301, 302, 303, 304, 305], start=1):
+        bad_rows.append(
+            {
+                "game_id": 2002,
+                "team_id": 30,
+                "player_id": pid,
+                "game_date": "2026-01-19",
+                "home_team_id": 30,
+                "away_team_id": 0,
+                "home_flag": 1,
+                "lineup_starter_announced": 1 if i <= 5 else 0,
+                "lineup_available": 1,
+                "prior_play_prob": 0.9 - i * 0.1,
+                "minutes_from_stints_prior_20": 22 - i,
+                "vegas_total": 225.0,
+                "vegas_spread": -1.5,
+                "estimated_possessions": 99.0,
+                "f1": float(i),
+                "f2": float(i) * 0.3,
+                "minutes_label": float(28 - i),
+            }
+        )
+    df2 = pd.concat([df, pd.DataFrame(bad_rows)], ignore_index=True)
+
+    examples = build_game_level_examples(
+        df2,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array([0.0, 0.0], dtype=np.float32),
+        feature_std=np.array([1.0, 1.0], dtype=np.float32),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        minutes_label_col="minutes_label",
+    )
+    assert len(examples) == 1
+    assert examples[0].game_id_norm == "0000001001"
+
+
+def test_build_game_level_examples_prefers_non_out_players_when_truncating() -> None:
+    rows: list[dict[str, object]] = []
+    game_id = 3003
+    game_date = "2026-01-20"
+    home_team_id = 10
+    away_team_id = 20
+
+    # 15 available home players with weak priors.
+    for i in range(15):
+        rows.append(
+            {
+                "game_id": game_id,
+                "team_id": home_team_id,
+                "player_id": 1000 + i,
+                "game_date": game_date,
+                "home_team_id": home_team_id,
+                "away_team_id": away_team_id,
+                "home_flag": 1,
+                "lineup_starter_announced": 0,
+                "lineup_available": 1,
+                "is_out": 0,
+                "prior_play_prob": 0.10,
+                "minutes_from_stints_prior_20": 2.0,
+                "vegas_total": 228.0,
+                "vegas_spread": -1.0,
+                "estimated_possessions": 99.0,
+                "f1": float(i),
+                "f2": float(i) * 0.1,
+                "minutes_label": 10.0,
+            }
+        )
+
+    # 1 OUT home player with very strong priors; should still be truncated first.
+    rows.append(
+        {
+            "game_id": game_id,
+            "team_id": home_team_id,
+            "player_id": 9999,
+            "game_date": game_date,
+            "home_team_id": home_team_id,
+            "away_team_id": away_team_id,
+            "home_flag": 1,
+            "lineup_starter_announced": 0,
+            "lineup_available": 1,
+            "is_out": 1,
+            "prior_play_prob": 0.99,
+            "minutes_from_stints_prior_20": 30.0,
+            "vegas_total": 228.0,
+            "vegas_spread": -1.0,
+            "estimated_possessions": 99.0,
+            "f1": 99.0,
+            "f2": 9.9,
+            "minutes_label": 0.0,
+        }
+    )
+
+    # Minimal away side to satisfy feasible-game checks.
+    for i in range(5):
+        rows.append(
+            {
+                "game_id": game_id,
+                "team_id": away_team_id,
+                "player_id": 2000 + i,
+                "game_date": game_date,
+                "home_team_id": home_team_id,
+                "away_team_id": away_team_id,
+                "home_flag": 0,
+                "lineup_starter_announced": 1 if i < 5 else 0,
+                "lineup_available": 1,
+                "is_out": 0,
+                "prior_play_prob": 0.9,
+                "minutes_from_stints_prior_20": 25.0,
+                "vegas_total": 228.0,
+                "vegas_spread": -1.0,
+                "estimated_possessions": 99.0,
+                "f1": float(i + 30),
+                "f2": float(i + 30) * 0.1,
+                "minutes_label": 20.0,
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    examples = build_game_level_examples(
+        df,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array([0.0, 0.0], dtype=np.float32),
+        feature_std=np.array([1.0, 1.0], dtype=np.float32),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        minutes_label_col="minutes_label",
+    )
+    assert len(examples) == 1
+    home_ids = set(int(v) for v in examples[0].player_ids[0][examples[0].player_valid_mask[0]].tolist())
+    assert 9999 not in home_ids
+    assert len(home_ids) == 15
+
+
+def test_build_game_level_examples_truncation_protects_props_and_starters() -> None:
+    rows: list[dict[str, object]] = []
+    game_id = 3004
+    game_date = "2026-01-20"
+    home_team_id = 10
+    away_team_id = 20
+
+    # 15 ordinary non-out home players.
+    for i in range(15):
+        rows.append(
+            {
+                "game_id": game_id,
+                "team_id": home_team_id,
+                "player_id": 1100 + i,
+                "game_date": game_date,
+                "home_team_id": home_team_id,
+                "away_team_id": away_team_id,
+                "home_flag": 1,
+                "lineup_starter_announced": 0,
+                "lineup_available": 1,
+                "is_out": 0,
+                "an_has_any_props": 0,
+                "an_implied_minutes": 0.0,
+                "prior_play_prob": 0.40,
+                "minutes_from_stints_prior_20": 6.0,
+                "consecutive_active_dnp": 0.0,
+                "active_but_dnp_rate_last10": 0.0,
+                "inactive_streak_len": 0.0,
+                "vegas_total": 228.0,
+                "vegas_spread": -1.0,
+                "estimated_possessions": 99.0,
+                "f1": float(i),
+                "f2": float(i) * 0.1,
+                "minutes_label": 10.0,
+            }
+        )
+
+    # 1 extra player with strong props signal and weaker priors.
+    rows.append(
+        {
+            "game_id": game_id,
+            "team_id": home_team_id,
+            "player_id": 1199,
+            "game_date": game_date,
+            "home_team_id": home_team_id,
+            "away_team_id": away_team_id,
+            "home_flag": 1,
+            "lineup_starter_announced": 0,
+            "lineup_available": 1,
+            "is_out": 0,
+            "an_has_any_props": 1,
+            "an_implied_minutes": 18.0,
+            "prior_play_prob": 0.10,
+            "minutes_from_stints_prior_20": 2.0,
+            "consecutive_active_dnp": 4.0,
+            "active_but_dnp_rate_last10": 0.7,
+            "inactive_streak_len": 5.0,
+            "vegas_total": 228.0,
+            "vegas_spread": -1.0,
+            "estimated_possessions": 99.0,
+            "f1": 99.0,
+            "f2": 9.9,
+            "minutes_label": 0.0,
+        }
+    )
+
+    # Minimal away side to satisfy feasibility.
+    for i in range(5):
+        rows.append(
+            {
+                "game_id": game_id,
+                "team_id": away_team_id,
+                "player_id": 2100 + i,
+                "game_date": game_date,
+                "home_team_id": home_team_id,
+                "away_team_id": away_team_id,
+                "home_flag": 0,
+                "lineup_starter_announced": 1,
+                "lineup_available": 1,
+                "is_out": 0,
+                "an_has_any_props": 0,
+                "an_implied_minutes": 0.0,
+                "prior_play_prob": 0.9,
+                "minutes_from_stints_prior_20": 25.0,
+                "consecutive_active_dnp": 0.0,
+                "active_but_dnp_rate_last10": 0.0,
+                "inactive_streak_len": 0.0,
+                "vegas_total": 228.0,
+                "vegas_spread": -1.0,
+                "estimated_possessions": 99.0,
+                "f1": float(i + 30),
+                "f2": float(i + 30) * 0.1,
+                "minutes_label": 20.0,
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    examples = build_game_level_examples(
+        df,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array([0.0, 0.0], dtype=np.float32),
+        feature_std=np.array([1.0, 1.0], dtype=np.float32),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        minutes_label_col="minutes_label",
+    )
+    assert len(examples) == 1
+    home_ids = set(int(v) for v in examples[0].player_ids[0][examples[0].player_valid_mask[0]].tolist())
+    assert 1199 in home_ids
+    assert len(home_ids) == 15
+
+
+def test_build_game_level_examples_truncation_prefers_lower_dnp_risk() -> None:
+    rows: list[dict[str, object]] = []
+    game_id = 3005
+    game_date = "2026-01-20"
+    home_team_id = 10
+    away_team_id = 20
+
+    # 14 non-out baseline players.
+    for i in range(14):
+        rows.append(
+            {
+                "game_id": game_id,
+                "team_id": home_team_id,
+                "player_id": 1200 + i,
+                "game_date": game_date,
+                "home_team_id": home_team_id,
+                "away_team_id": away_team_id,
+                "home_flag": 1,
+                "lineup_starter_announced": 0,
+                "lineup_available": 1,
+                "is_out": 0,
+                "an_has_any_props": 0,
+                "an_implied_minutes": 0.0,
+                "prior_play_prob": 0.50,
+                "minutes_from_stints_prior_20": 8.0,
+                "consecutive_active_dnp": 0.0,
+                "active_but_dnp_rate_last10": 0.0,
+                "inactive_streak_len": 0.0,
+                "vegas_total": 228.0,
+                "vegas_spread": -1.0,
+                "estimated_possessions": 99.0,
+                "f1": float(i),
+                "f2": float(i) * 0.1,
+                "minutes_label": 10.0,
+            }
+        )
+
+    # Candidate A: low-risk fringe player.
+    rows.append(
+        {
+            "game_id": game_id,
+            "team_id": home_team_id,
+            "player_id": 1301,
+            "game_date": game_date,
+            "home_team_id": home_team_id,
+            "away_team_id": away_team_id,
+            "home_flag": 1,
+            "lineup_starter_announced": 0,
+            "lineup_available": 1,
+            "is_out": 0,
+            "an_has_any_props": 0,
+            "an_implied_minutes": 0.0,
+            "prior_play_prob": 0.30,
+            "minutes_from_stints_prior_20": 4.0,
+            "consecutive_active_dnp": 0.0,
+            "active_but_dnp_rate_last10": 0.0,
+            "inactive_streak_len": 0.0,
+            "vegas_total": 228.0,
+            "vegas_spread": -1.0,
+            "estimated_possessions": 99.0,
+            "f1": 31.0,
+            "f2": 3.1,
+            "minutes_label": 6.0,
+        }
+    )
+    # Candidate B: high DNP-risk fringe player with same priors.
+    rows.append(
+        {
+            "game_id": game_id,
+            "team_id": home_team_id,
+            "player_id": 1302,
+            "game_date": game_date,
+            "home_team_id": home_team_id,
+            "away_team_id": away_team_id,
+            "home_flag": 1,
+            "lineup_starter_announced": 0,
+            "lineup_available": 1,
+            "is_out": 0,
+            "an_has_any_props": 0,
+            "an_implied_minutes": 0.0,
+            "prior_play_prob": 0.30,
+            "minutes_from_stints_prior_20": 4.0,
+            "consecutive_active_dnp": 6.0,
+            "active_but_dnp_rate_last10": 0.9,
+            "inactive_streak_len": 7.0,
+            "vegas_total": 228.0,
+            "vegas_spread": -1.0,
+            "estimated_possessions": 99.0,
+            "f1": 32.0,
+            "f2": 3.2,
+            "minutes_label": 0.0,
+        }
+    )
+
+    for i in range(5):
+        rows.append(
+            {
+                "game_id": game_id,
+                "team_id": away_team_id,
+                "player_id": 2200 + i,
+                "game_date": game_date,
+                "home_team_id": home_team_id,
+                "away_team_id": away_team_id,
+                "home_flag": 0,
+                "lineup_starter_announced": 1,
+                "lineup_available": 1,
+                "is_out": 0,
+                "an_has_any_props": 0,
+                "an_implied_minutes": 0.0,
+                "prior_play_prob": 0.9,
+                "minutes_from_stints_prior_20": 25.0,
+                "consecutive_active_dnp": 0.0,
+                "active_but_dnp_rate_last10": 0.0,
+                "inactive_streak_len": 0.0,
+                "vegas_total": 228.0,
+                "vegas_spread": -1.0,
+                "estimated_possessions": 99.0,
+                "f1": float(i + 30),
+                "f2": float(i + 30) * 0.1,
+                "minutes_label": 20.0,
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    examples = build_game_level_examples(
+        df,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array([0.0, 0.0], dtype=np.float32),
+        feature_std=np.array([1.0, 1.0], dtype=np.float32),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        minutes_label_col="minutes_label",
+    )
+    assert len(examples) == 1
+    home_ids = set(int(v) for v in examples[0].player_ids[0][examples[0].player_valid_mask[0]].tolist())
+    assert 1301 in home_ids
+    assert 1302 not in home_ids

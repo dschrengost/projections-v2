@@ -468,16 +468,11 @@ def _apply_lineup_feature_contract(features_df: pd.DataFrame) -> pd.DataFrame:
         .str.strip()
         .str.lower()
     )
-    status_norm = (
-        df.get("lineup_status", pd.Series("", index=df.index))
-        .astype("string", copy=False)
-        .fillna("")
-        .str.strip()
-        .str.lower()
-    )
-    starter_from_lineup = role_norm.isin({"projected_starter", "confirmed_starter"}) | status_norm.isin(
-        {"expected", "confirmed"}
-    )
+    # Starter announcements must come from explicit starter role or starter flags.
+    # `lineup_status` (e.g. "confirmed"/"expected") is feed-level freshness metadata
+    # and can be populated for bench players; using it as starter signal marks whole
+    # team-games as starters and breaks train/live parity.
+    starter_from_lineup = role_norm.isin({"projected_starter", "confirmed_starter"})
     starter_from_flag = (
         pd.to_numeric(df.get("is_projected_starter", 0), errors="coerce")
         .fillna(0)

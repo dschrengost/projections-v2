@@ -14,13 +14,19 @@ import json
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 import typer
 
 from projections.paths import data_path
 
 app = typer.Typer(add_completion=False)
+
+
+def _first_existing(columns: pd.Index, candidates: list[str]) -> str | None:
+    for candidate in candidates:
+        if candidate in columns:
+            return candidate
+    return None
 
 
 def _load_sim_projections(root: Path) -> pd.DataFrame:
@@ -159,32 +165,49 @@ def main(
     if merged.empty:
         typer.echo("[calibration] No matched rows after filtering!", err=True)
         raise typer.Exit(1)
-    
-    # Compute coverage for each percentile
-    percentile_cols = {
-        "p05": "dk_fpts_p05",
-        "p10": "dk_fpts_p10",
-        "p25": "dk_fpts_p25",
-        "p50": "dk_fpts_p50",
-        "p75": "dk_fpts_p75",
-        "p95": "dk_fpts_p95",
+
+    # Development default: use unconditional (DNP=0) summaries when available.
+    percentile_candidates = {
+        "p05": ["dk_fpts_p05_uncond", "sim_dk_fpts_p05_uncond", "fpts_sim_uncond_p05", "dk_fpts_p05", "sim_dk_fpts_p05", "fpts_sim_cond_p05"],
+        "p10": ["dk_fpts_p10_uncond", "sim_dk_fpts_p10_uncond", "fpts_sim_uncond_p10", "dk_fpts_p10", "sim_dk_fpts_p10", "fpts_sim_cond_p10"],
+        "p25": ["dk_fpts_p25_uncond", "sim_dk_fpts_p25_uncond", "fpts_sim_uncond_p25", "dk_fpts_p25", "sim_dk_fpts_p25", "fpts_sim_cond_p25"],
+        "p50": ["dk_fpts_p50_uncond", "sim_dk_fpts_p50_uncond", "fpts_sim_uncond_p50", "dk_fpts_p50", "sim_dk_fpts_p50", "fpts_sim_cond_p50"],
+        "p75": ["dk_fpts_p75_uncond", "sim_dk_fpts_p75_uncond", "fpts_sim_uncond_p75", "dk_fpts_p75", "sim_dk_fpts_p75", "fpts_sim_cond_p75"],
+        "p95": ["dk_fpts_p95_uncond", "sim_dk_fpts_p95_uncond", "fpts_sim_uncond_p95", "dk_fpts_p95", "sim_dk_fpts_p95", "fpts_sim_cond_p95"],
     }
-    
+    percentile_cols = {
+        key: _first_existing(merged.columns, candidates)
+        for key, candidates in percentile_candidates.items()
+    }
+    fpts_mean_col = _first_existing(
+        merged.columns,
+        ["dk_fpts_mean_uncond", "sim_dk_fpts_mean_uncond", "fpts_sim_uncond_mean", "dk_fpts_mean", "sim_dk_fpts_mean", "fpts_sim_cond_mean"],
+    )
+
     results = {
         "n_rows": len(merged),
         "n_dates": int(merged["game_date"].nunique()),
+        "evaluation_semantics": "unconditional_preferred",
+        "resolved_columns": {
+            "fpts_mean": fpts_mean_col,
+            "percentiles": percentile_cols,
+        },
         "percentile_coverage": {},
         "interval_coverage": {},
     }
-    
+
     typer.echo("\n=== Percentile Coverage ===")
+    typer.echo(
+        f"[calibration] Using fpts_mean column: {fpts_mean_col or 'N/A'}; "
+        "percentiles resolve with unconditional-first preference."
+    )
     typer.echo("(Expected: p10 should have ~10% below, p50 should have ~50% below, etc.)\n")
-    
+
     for name, col in percentile_cols.items():
-        if col not in merged.columns:
-            typer.echo(f"  {name}: column {col} not found")
+        if not col:
+            typer.echo(f"  {name}: no compatible percentile column found")
             continue
-        
+
         coverage = _compute_coverage(merged, col)
         results["percentile_coverage"][name] = coverage
         expected_below = int(name.replace("p", ""))
@@ -200,20 +223,22 @@ def main(
             else:
                 status = "⚠ aggressive (tails too wide)"
         
-        typer.echo(f"  {name}: {actual_below:.1f}% below (expected {expected_below}%) {status}")
-    
+        typer.echo(f"  {name} ({col}): {actual_below:.1f}% below (expected {expected_below}%) {status}")
+
     # Compute interval coverage
     typer.echo("\n=== Interval Coverage ===")
     intervals = [
-        ("p10-p95", "dk_fpts_p10", "dk_fpts_p95", 85),  # Expected 85% inside
-        ("p25-p75", "dk_fpts_p25", "dk_fpts_p75", 50),  # Expected 50% inside
-        ("p05-p95", "dk_fpts_p05", "dk_fpts_p95", 90),  # Expected 90% inside
+        ("p10-p95", "p10", "p95", 85),  # Expected 85% inside
+        ("p25-p75", "p25", "p75", 50),  # Expected 50% inside
+        ("p05-p95", "p05", "p95", 90),  # Expected 90% inside
     ]
-    
-    for name, low_col, high_col, expected_in in intervals:
-        if low_col not in merged.columns or high_col not in merged.columns:
+
+    for name, low_key, high_key, expected_in in intervals:
+        low_col = percentile_cols.get(low_key)
+        high_col = percentile_cols.get(high_key)
+        if not low_col or not high_col:
             continue
-        
+
         interval_cov = _compute_interval_coverage(merged, low_col, high_col)
         results["interval_coverage"][name] = interval_cov
         actual_in = interval_cov["in_interval_pct"]
@@ -230,33 +255,43 @@ def main(
         
         below_pct = interval_cov["below_low_pct"]
         above_pct = interval_cov["above_high_pct"]
-        typer.echo(f"  {name}: {actual_in:.1f}% inside (expected {expected_in}%), {below_pct:.1f}% below, {above_pct:.1f}% above {status}")
-    
-    # Stratify by minutes bucket
-    typer.echo("\n=== Coverage by Minutes Bucket ===")
-    merged["minutes_bucket"] = pd.cut(
-        merged["dk_fpts_mean"],
-        bins=[0, 15, 25, 35, 45, 100],
-        labels=["0-15", "15-25", "25-35", "35-45", "45+"],
-    )
-    
-    bucket_results = {}
-    for bucket, group in merged.groupby("minutes_bucket", observed=True):
-        if len(group) < 20:
-            continue
-        p10_cov = _compute_coverage(group, "dk_fpts_p10")
-        p95_cov = _compute_coverage(group, "dk_fpts_p95") if "dk_fpts_p95" in group.columns else {"above_pct": None}
-        bucket_results[str(bucket)] = {
-            "n": len(group),
-            "p10_below_pct": p10_cov["below_pct"],
-            "p95_above_pct": 100 - (p95_cov.get("below_pct") or 0) if p95_cov.get("below_pct") else None,
-        }
         typer.echo(
-            f"  FPTS mean {bucket}: n={len(group):,}, "
-            f"p10 has {p10_cov['below_pct']:.1f}% below (exp 10%), "
-            f"p95 has {100 - (p95_cov.get('below_pct') or 0):.1f}% above (exp 5%)"
+            f"  {name} ({low_col}..{high_col}): {actual_in:.1f}% inside "
+            f"(expected {expected_in}%), {below_pct:.1f}% below, {above_pct:.1f}% above {status}"
         )
-    
+
+    # Stratify by minutes bucket
+    typer.echo("\n=== Coverage by FPTS Mean Bucket ===")
+    if not fpts_mean_col:
+        typer.echo("  Skipping bucket coverage: no compatible fpts mean column found.")
+        bucket_results = {}
+    else:
+        merged["minutes_bucket"] = pd.cut(
+            pd.to_numeric(merged[fpts_mean_col], errors="coerce"),
+            bins=[0, 15, 25, 35, 45, 100],
+            labels=["0-15", "15-25", "25-35", "35-45", "45+"],
+        )
+
+        bucket_results = {}
+        p10_col = percentile_cols.get("p10")
+        p95_col = percentile_cols.get("p95")
+        for bucket, group in merged.groupby("minutes_bucket", observed=True):
+            if len(group) < 20 or not p10_col:
+                continue
+            p10_cov = _compute_coverage(group, p10_col)
+            p95_cov = _compute_coverage(group, p95_col) if p95_col else {"below_pct": None}
+            bucket_results[str(bucket)] = {
+                "n": len(group),
+                "p10_below_pct": p10_cov["below_pct"],
+                "p95_above_pct": 100 - (p95_cov.get("below_pct") or 0) if p95_cov.get("below_pct") is not None else None,
+            }
+            p95_above = 100 - (p95_cov.get("below_pct") or 0) if p95_cov.get("below_pct") is not None else float("nan")
+            typer.echo(
+                f"  FPTS mean {bucket}: n={len(group):,}, "
+                f"p10 ({p10_col}) has {p10_cov['below_pct']:.1f}% below (exp 10%), "
+                f"p95 ({p95_col}) has {p95_above:.1f}% above (exp 5%)"
+            )
+
     results["by_fpts_bucket"] = bucket_results
     
     # Save results

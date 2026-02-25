@@ -417,6 +417,50 @@ def add_canonical_projection_fields(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     # ------------------------------------------------------------------
+    # Box score stat means (PTS/REB/AST/STL/BLK/TOV)
+    # ------------------------------------------------------------------
+    #
+    # Keep both canonical (`pts_mean[_uncond]`) and prefixed aliases
+    # (`sim_pts_mean[_uncond]`) available for dashboard/back-compat.
+    #
+    # If unconditional means are missing, approximate as
+    # conditional_mean * p_play_eff.
+    stat_names = ("pts", "reb", "ast", "stl", "blk", "tov")
+    for stat in stat_names:
+        cond_canon = f"{stat}_mean"
+        uncond_canon = f"{stat}_mean_uncond"
+        cond_pref = f"sim_{stat}_mean"
+        uncond_pref = f"sim_{stat}_mean_uncond"
+
+        cond_source = _first_present(out, [cond_pref, cond_canon])
+        uncond_source = _first_present(out, [uncond_pref, uncond_canon])
+
+        cond_series = (
+            pd.to_numeric(out[cond_source], errors="coerce")
+            if cond_source is not None
+            else None
+        )
+        if cond_series is not None:
+            if cond_canon not in out.columns:
+                out[cond_canon] = cond_series
+            if cond_pref not in out.columns:
+                out[cond_pref] = cond_series
+
+        uncond_series = (
+            pd.to_numeric(out[uncond_source], errors="coerce")
+            if uncond_source is not None
+            else None
+        )
+        if uncond_series is None and cond_series is not None:
+            uncond_series = cond_series.fillna(0.0).astype(float) * out["p_play_eff"].astype(float)
+
+        if uncond_series is not None:
+            if uncond_canon not in out.columns:
+                out[uncond_canon] = uncond_series
+            if uncond_pref not in out.columns:
+                out[uncond_pref] = uncond_series
+
+    # ------------------------------------------------------------------
     # Contract invariants (best-effort).
     # ------------------------------------------------------------------
 

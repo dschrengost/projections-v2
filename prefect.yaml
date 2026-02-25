@@ -25,7 +25,38 @@ deployments:
   concurrency_limit: 1
   concurrency_options:
     collision_strategy: CANCEL_NEW
-  description: Canonical end-to-end NBA live pipeline (Prefect-only control plane).
+  description: Canonical end-to-end NBA live pipeline (v3 GameTransformerV2 path).
+  entrypoint: prefect_flows/live_nba_pipeline_v3.py:nba_live_pipeline_v3_flow
+  parameters:
+    placeholder_mode: false
+    promote_pointers: true
+    replay_mode: false
+    require_action_props: true
+    allow_rotowire_props_fallback: true
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+        PYTHONFAULTHANDLER: "1"
+        ARROW_NUM_THREADS: "1"
+        OMP_NUM_THREADS: "1"
+        OPENBLAS_NUM_THREADS: "1"
+        MKL_NUM_THREADS: "1"
+        NUMEXPR_NUM_THREADS: "1"
+        MALLOC_ARENA_MAX: "2"
+  schedules:
+    - cron: "*/5 8-23 * * *"
+      timezone: "America/New_York"
+
+- name: nba-live-pipeline-legacy
+  version: null
+  tags: []
+  concurrency_limit: 1
+  concurrency_options:
+    collision_strategy: CANCEL_NEW
+  description: Legacy pre-v3 NBA live pipeline (manual rollback deployment).
   entrypoint: prefect_flows/live_nba_pipeline.py:nba_live_pipeline_flow
   parameters:
     minutes_override_mode: v2
@@ -43,9 +74,6 @@ deployments:
         MKL_NUM_THREADS: "1"
         NUMEXPR_NUM_THREADS: "1"
         MALLOC_ARENA_MAX: "2"
-  schedules:
-    - cron: "*/5 8-23 * * *"
-      timezone: "America/New_York"
 
 - name: boxscores-etl
   version: null

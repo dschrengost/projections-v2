@@ -9,6 +9,8 @@ from projections.features.action_props import (
     attach_action_props_features,
     build_action_props_feature_snapshots,
     load_action_props_long_from_bronze,
+    load_action_props_feature_snapshots_for_date_live,
+    load_rotowire_props_long_from_bronze,
 )
 
 
@@ -313,3 +315,145 @@ def test_attach_action_props_features_overwrites_existing_columns() -> None:
     row = out.iloc[0]
     assert int(row["an_has_any_props"]) == 1
     assert float(row["an_pts_line"]) == 24.5
+
+
+def test_load_rotowire_props_long_from_bronze_maps_supported_markets(tmp_path) -> None:
+    day = "2025-01-01"
+    frame = pd.DataFrame(
+        {
+            "player_id": ["1", "1", "1"],
+            "player_name": ["Jalen Brunson", "Jalen Brunson", "Jalen Brunson"],
+            "team": ["NYK", "NYK", "NYK"],
+            "opponent": ["BOS", "BOS", "BOS"],
+            "game_id": ["999", "999", "999"],
+            "book": ["draftkings", "fanduel", "draftkings"],
+            "prop_type": ["pts", "pts", "ptsrebast"],
+            "line": [25.5, 26.0, 36.5],
+            "over_odds": [-110, -105, -115],
+            "under_odds": [-110, -115, -105],
+            "implied_over_prob": [0.5, 0.5122, 0.5349],
+            "implied_under_prob": [0.5, 0.4878, 0.4651],
+            "scraped_at": [
+                "2025-01-01T20:00:00Z",
+                "2025-01-01T20:00:00Z",
+                "2025-01-01T20:00:00Z",
+            ],
+        }
+    )
+    out_path = tmp_path / "game_date=2025-01-01" / "props_1.parquet"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(out_path, index=False)
+
+    out = load_rotowire_props_long_from_bronze(
+        rotowire_props_root=tmp_path,
+        game_date=pd.Timestamp(day),
+    )
+    assert len(out) == 2
+    assert sorted(out["prop_key"].tolist()) == ["pra", "pts"]
+    assert int(out.loc[out["prop_key"] == "pts", "books"].iloc[0]) == 2
+
+
+def test_live_action_props_loader_falls_back_to_rotowire(tmp_path) -> None:
+    day = "2025-01-01"
+    rw = pd.DataFrame(
+        {
+            "player_id": ["1"],
+            "player_name": ["Jalen Brunson"],
+            "team": ["NYK"],
+            "opponent": ["BOS"],
+            "game_id": ["999"],
+            "book": ["draftkings"],
+            "prop_type": ["pts"],
+            "line": [25.5],
+            "over_odds": [-110],
+            "under_odds": [-110],
+            "implied_over_prob": [0.5],
+            "implied_under_prob": [0.5],
+            "scraped_at": ["2025-01-01T20:00:00Z"],
+        }
+    )
+    rw_path = tmp_path / "bronze" / "props" / "game_date=2025-01-01" / "props_1.parquet"
+    rw_path.parent.mkdir(parents=True, exist_ok=True)
+    rw.to_parquet(rw_path, index=False)
+
+    snapshots, source = load_action_props_feature_snapshots_for_date_live(
+        action_props_dir=tmp_path / "bronze" / "action_network" / "props",
+        game_date=pd.Timestamp(day),
+        allow_rotowire_fallback=True,
+        rotowire_props_root=tmp_path / "bronze" / "props",
+    )
+    assert source == "rotowire_fallback"
+    assert len(snapshots) == 1
+    assert int(snapshots.iloc[0]["an_has_any_props"]) == 1
+
+
+def test_live_action_props_loader_falls_back_when_action_teams_off_slate(tmp_path) -> None:
+    day = "2025-01-01"
+    action_payload = {
+        "game_id": 123456,
+        "teams": ["DET", "BOS"],
+        "away_team_id": 1,
+        "home_team_id": 2,
+        "fetched_at": "2025-01-01T20:00:00Z",
+        "props": {
+            "players": {
+                "10": {
+                    "full_name": "Cade Cunningham",
+                    "display_text": "DET - PG",
+                    "team_id": 1,
+                }
+            },
+            "player_props": {
+                "points": [
+                    {
+                        "player_id": "10",
+                        "custom_pick_type_name": "Points",
+                        "lines": {
+                            "15": [
+                                {"period": "event", "side": "over", "odds": -110, "value": 25.5},
+                                {"period": "event", "side": "under", "odds": -110, "value": 25.5},
+                            ]
+                        },
+                    }
+                ]
+            },
+        },
+    }
+    action_dir = tmp_path / "bronze" / "action_network" / "props"
+    action_dir.mkdir(parents=True, exist_ok=True)
+    (action_dir / f"{day}_123456_DET_BOS.json").write_text(json.dumps(action_payload), encoding="utf-8")
+
+    rw = pd.DataFrame(
+        {
+            "player_id": ["1"],
+            "player_name": ["Jalen Brunson"],
+            "team": ["NYK"],
+            "opponent": ["BOS"],
+            "game_id": ["999"],
+            "book": ["draftkings"],
+            "prop_type": ["pts"],
+            "line": [25.5],
+            "over_odds": [-110],
+            "under_odds": [-110],
+            "implied_over_prob": [0.5],
+            "implied_under_prob": [0.5],
+            "scraped_at": ["2025-01-01T20:00:00Z"],
+        }
+    )
+    rw_path = tmp_path / "bronze" / "props" / "game_date=2025-01-01" / "props_1.parquet"
+    rw_path.parent.mkdir(parents=True, exist_ok=True)
+    rw.to_parquet(rw_path, index=False)
+
+    snapshots, source = load_action_props_feature_snapshots_for_date_live(
+        action_props_dir=action_dir,
+        game_date=pd.Timestamp(day),
+        allow_rotowire_fallback=True,
+        rotowire_props_root=tmp_path / "bronze" / "props",
+        expected_team_tricodes={"NYK"},
+    )
+
+    assert source == "rotowire_fallback"
+    assert len(snapshots) == 1
+    row = snapshots.iloc[0]
+    assert row["team_tricode"] == "NYK"
+    assert row["player_name_norm"] == "jalen brunson"

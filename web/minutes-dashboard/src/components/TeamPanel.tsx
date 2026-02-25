@@ -9,6 +9,7 @@ type TeamPanelProps = {
     diagnostics?: TeamDiagnostics | null
     rows: PlayerTableRow[]
     minutesBandLabel: string
+    readOnly?: boolean
     onSelectPlayer: (playerId: string) => void
     onOverrideChange: (playerId: string, next: PlayerOverrideState) => void
 }
@@ -18,6 +19,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
     diagnostics,
     rows,
     minutesBandLabel,
+    readOnly = false,
     onSelectPlayer,
     onOverrideChange,
 }) => {
@@ -52,7 +54,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
                     <div className="muted gv2-band-source">Tail source: {minutesBandLabel}</div>
                 </div>
             </header>
-            <TeamBudgetBar diagnostics={diagnostics ?? null} />
+            {!readOnly ? <TeamBudgetBar diagnostics={diagnostics ?? null} /> : null}
             {sections.filter((section) => section.rows.length > 0).map((section) => (
                 <div key={section.label} className="gv2-team-section">
                     <div className="gv2-team-section-title">
@@ -61,6 +63,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({
                     </div>
                     <PlayerTable
                         rows={section.rows}
+                        readOnly={readOnly}
                         onSelectPlayer={onSelectPlayer}
                         onOverrideChange={onOverrideChange}
                     />

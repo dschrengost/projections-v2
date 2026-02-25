@@ -116,6 +116,11 @@ TEAM_ROTATION_COLS = [
 DEFAULT_MIN_TEAM_MINUTES_FROM_STINTS = 200.0
 DEFAULT_MAX_TEAM_MINUTES_GAP = 2.0
 
+ROTATION_PRIORS_CONTRACT_GAME_ID_ONLY = "game_id_partitions_only"
+ROTATION_PRIORS_CONTRACT_GAME_ID_PLUS_PRE_GAME_ENTITY_FALLBACK = (
+    "game_id_partitions_plus_pre_game_entity_fallback"
+)
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -838,11 +843,10 @@ def _backfill_lineups_from_silver_daily_lineups(
     lineups["lineup_roster_status"] = lineups.get("roster_status", pd.Series(pd.NA, index=lineups.index)).astype("string")
 
     role_norm = lineups["lineup_role"].fillna("").str.lower().str.strip()
-    status_norm = lineups["lineup_status"].fillna("").str.lower().str.strip()
-    lineups["lineup_projected_starter"] = (
-        role_norm.isin({"projected_starter", "confirmed_starter"})
-        | status_norm.isin({"expected", "confirmed"})
-    )
+    # Starter signals should come from explicit starter role only.
+    # `lineup_status` can be "confirmed"/"expected" for non-starters and must not
+    # be interpreted as "starter announced".
+    lineups["lineup_projected_starter"] = role_norm.isin({"projected_starter", "confirmed_starter"})
 
     keep_cols = [
         "game_id",
@@ -969,6 +973,216 @@ def _load_rotation_priors_v1(
     }
 
     return team_priors, player_priors, meta
+
+
+def _load_player_priors_history_for_seasons(
+    data_root: Path,
+    *,
+    seasons: list[int],
+    player_ids: set[int] | None = None,
+    team_ids: set[int] | None = None,
+) -> pd.DataFrame:
+    """Load historical player priors partitions for as-of fallback joins."""
+    root = data_root / "silver" / "rotation_priors_v1" / "player_game_priors"
+    frames: list[pd.DataFrame] = []
+    for season in sorted(set(int(s) for s in seasons)):
+        season_dir = root / f"season={int(season)}"
+        if not season_dir.exists():
+            continue
+        for path in sorted(season_dir.glob("game_id=*.parquet")):
+            try:
+                frames.append(pd.read_parquet(path))
+            except Exception:
+                continue
+    if not frames:
+        return pd.DataFrame()
+
+    out = pd.concat(frames, ignore_index=True)
+    if "game_id_norm" not in out.columns and "game_id" in out.columns:
+        out["game_id_norm"] = _zfill_game_id(out["game_id"])
+    out["team_id"] = pd.to_numeric(out.get("team_id"), errors="coerce").astype("Int64")
+    out["person_id"] = pd.to_numeric(out.get("person_id"), errors="coerce").astype("Int64")
+    out["game_date"] = pd.to_datetime(out.get("game_date"), errors="coerce").dt.normalize()
+    out = out.dropna(subset=["game_id_norm", "team_id", "person_id", "game_date"]).copy()
+
+    if player_ids:
+        out = out.loc[out["person_id"].astype(int).isin(player_ids)].copy()
+    if team_ids:
+        out = out.loc[out["team_id"].astype(int).isin(team_ids)].copy()
+    if out.empty:
+        return pd.DataFrame()
+
+    prior_cols = [c for c in out.columns if "prior_" in str(c).lower()]
+    keep_cols = ["game_id", "game_id_norm", "game_date", "team_id", "person_id", *prior_cols]
+    keep_cols = [c for i, c in enumerate(keep_cols) if c in out.columns and c not in keep_cols[:i]]
+    out = out.loc[:, keep_cols].copy()
+    out = out.sort_values(["game_date", "game_id_norm"], kind="mergesort")
+    out = out.drop_duplicates(subset=["game_id_norm", "team_id", "person_id"], keep="last")
+    return out
+
+
+def _augment_player_priors_with_pre_game_entity_fallback(
+    *,
+    data_root: Path,
+    game_spine: pd.DataFrame,
+    player_priors: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Fill missing (game,team,player) priors from latest pre-game entity priors.
+
+    This enforces a dense, leakage-safe contract:
+    - base rows come from game_id partitions (when present),
+    - missing player priors are filled from latest row where
+      (team_id, person_id) matches and historical game_date < target game_date.
+    """
+    required = {"game_id", "game_date", "team_id", "player_id"}
+    if not required.issubset(game_spine.columns):
+        missing = sorted(required - set(game_spine.columns))
+        raise ValueError(f"game_spine missing required columns for priors augmentation: {missing}")
+
+    spine = game_spine.loc[:, [c for c in ["game_id", "game_date", "team_id", "player_id", "is_out"] if c in game_spine.columns]].copy()
+    spine["game_id_norm"] = _zfill_game_id(spine["game_id"])
+    spine["game_date"] = pd.to_datetime(spine["game_date"], errors="coerce").dt.normalize()
+    spine["team_id"] = pd.to_numeric(spine["team_id"], errors="coerce").astype("Int64")
+    spine["person_id"] = pd.to_numeric(spine["player_id"], errors="coerce").astype("Int64")
+    spine = spine.dropna(subset=["game_id_norm", "game_date", "team_id", "person_id"]).copy()
+    spine = spine.drop_duplicates(subset=["game_id_norm", "team_id", "person_id"], keep="last")
+    if spine.empty:
+        return player_priors, {"enabled": True, "spine_rows": 0, "filled_rows": 0}
+
+    pp = player_priors.copy()
+    if pp.empty:
+        pp = pd.DataFrame(columns=["game_id", "game_id_norm", "team_id", "person_id"])
+    if "game_id_norm" not in pp.columns and "game_id" in pp.columns:
+        pp["game_id_norm"] = _zfill_game_id(pp["game_id"])
+    pp["team_id"] = pd.to_numeric(pp.get("team_id"), errors="coerce").astype("Int64")
+    pp["person_id"] = pd.to_numeric(pp.get("person_id"), errors="coerce").astype("Int64")
+    pp = pp.dropna(subset=["game_id_norm", "team_id", "person_id"]).copy()
+
+    pp_keys = pp.loc[:, ["game_id_norm", "team_id", "person_id"]].drop_duplicates()
+    key_probe = spine.loc[:, ["game_id_norm", "game_date", "team_id", "person_id"]].merge(
+        pp_keys.assign(_has=1),
+        on=["game_id_norm", "team_id", "person_id"],
+        how="left",
+    )
+    missing_keys = key_probe.loc[key_probe["_has"].isna(), ["game_id_norm", "game_date", "team_id", "person_id"]].copy()
+    missing_keys = missing_keys.drop_duplicates(subset=["game_id_norm", "team_id", "person_id"], keep="last")
+    if missing_keys.empty:
+        return pp, {
+            "enabled": True,
+            "spine_rows": int(len(spine)),
+            "missing_keys_before_fallback": 0,
+            "filled_rows": 0,
+        }
+
+    seasons = sorted({_season_for_date(pd.Timestamp(day)) for day in missing_keys["game_date"].dropna().tolist()})
+    hist = _load_player_priors_history_for_seasons(
+        data_root,
+        seasons=seasons,
+        player_ids=set(missing_keys["person_id"].dropna().astype(int).tolist()),
+        team_ids=set(missing_keys["team_id"].dropna().astype(int).tolist()),
+    )
+    if hist.empty:
+        return pp, {
+            "enabled": True,
+            "spine_rows": int(len(spine)),
+            "missing_keys_before_fallback": int(len(missing_keys)),
+            "filled_rows": 0,
+            "warning": "no historical player priors available for fallback",
+        }
+
+    prior_cols = [c for c in hist.columns if "prior_" in str(c).lower()]
+    hist_asof = hist.loc[:, ["team_id", "person_id", "game_date", *prior_cols]].copy()
+    hist_asof = hist_asof.sort_values(["team_id", "person_id", "game_date"], kind="mergesort")
+    target = missing_keys.sort_values(["team_id", "person_id", "game_date"], kind="mergesort")
+
+    # Pandas merge_asof can be strict about sort monotonicity with `by=...`.
+    # Use per-entity joins to keep behavior deterministic and robust.
+    merged_frames: list[pd.DataFrame] = []
+    for (team_id, person_id), target_grp in target.groupby(["team_id", "person_id"], sort=False):
+        hist_grp = hist_asof.loc[
+            (hist_asof["team_id"] == team_id) & (hist_asof["person_id"] == person_id)
+        ].copy()
+        if hist_grp.empty:
+            blank = target_grp.copy()
+            for col in prior_cols:
+                blank[col] = np.nan
+            merged_frames.append(blank)
+            continue
+        merged_grp = pd.merge_asof(
+            target_grp.sort_values("game_date", kind="mergesort"),
+            hist_grp.sort_values("game_date", kind="mergesort"),
+            on="game_date",
+            direction="backward",
+            allow_exact_matches=False,
+            suffixes=("", "_hist"),
+        )
+        merged_frames.append(merged_grp)
+    merged = pd.concat(merged_frames, ignore_index=True) if merged_frames else pd.DataFrame(columns=target.columns)
+    has_hist = merged[prior_cols].notna().any(axis=1)
+    fallback = merged.loc[has_hist].copy()
+    if fallback.empty:
+        return pp, {
+            "enabled": True,
+            "spine_rows": int(len(spine)),
+            "missing_keys_before_fallback": int(len(missing_keys)),
+            "filled_rows": 0,
+            "warning": "historical priors found but no pre-game rows matched missing keys",
+        }
+
+    fallback["game_id"] = pd.to_numeric(fallback["game_id_norm"], errors="coerce").astype("Int64")
+    fallback_rows = fallback.loc[:, ["game_id", "game_id_norm", "team_id", "person_id", *prior_cols]].copy()
+
+    base_cols = list(pp.columns) if len(pp.columns) > 0 else list(fallback_rows.columns)
+    for col in base_cols:
+        if col not in fallback_rows.columns:
+            fallback_rows[col] = pd.NA
+    fallback_rows = fallback_rows.loc[:, base_cols].copy()
+
+    combined = pd.concat([pp, fallback_rows], ignore_index=True)
+    combined = combined.drop_duplicates(subset=["game_id_norm", "team_id", "person_id"], keep="first")
+
+    before_out_missing_rate = None
+    after_out_missing_rate = None
+    if "is_out" in spine.columns:
+        out_spine = spine.copy()
+        out_spine["is_out"] = pd.to_numeric(out_spine["is_out"], errors="coerce").fillna(0).astype(int)
+        out_only = out_spine.loc[out_spine["is_out"] == 1, ["game_id_norm", "team_id", "person_id"]].drop_duplicates()
+        if not out_only.empty:
+            out_with_before = out_only.merge(
+                pp_keys.assign(_has=1),
+                on=["game_id_norm", "team_id", "person_id"],
+                how="left",
+            )
+            out_with_after = out_only.merge(
+                combined.loc[:, ["game_id_norm", "team_id", "person_id"]].drop_duplicates().assign(_has=1),
+                on=["game_id_norm", "team_id", "person_id"],
+                how="left",
+            )
+            before_out_missing_rate = float(out_with_before["_has"].isna().mean())
+            after_out_missing_rate = float(out_with_after["_has"].isna().mean())
+
+    return combined, {
+        "enabled": True,
+        "spine_rows": int(len(spine)),
+        "missing_keys_before_fallback": int(len(missing_keys)),
+        "filled_rows": int(len(fallback_rows)),
+        "missing_keys_after_fallback": int(
+            len(
+                spine.loc[:, ["game_id_norm", "team_id", "person_id"]]
+                .drop_duplicates()
+                .merge(
+                    combined.loc[:, ["game_id_norm", "team_id", "person_id"]]
+                    .drop_duplicates()
+                    .assign(_has=1),
+                    on=["game_id_norm", "team_id", "person_id"],
+                    how="left",
+                )
+                .loc[lambda d: d["_has"].isna()]
+            )
+        ),
+        "out_rows_missing_rate_before": before_out_missing_rate,
+        "out_rows_missing_rate_after": after_out_missing_rate,
+    }
 
 
 def _apply_feature_pruning(features_df: pd.DataFrame, *, allowlist: list[str]) -> tuple[pd.DataFrame, list[str]]:
@@ -1422,6 +1636,7 @@ def _write_manifest(
     dnp_history_config: DNPHistoryConfig | None = None,
     rotation_priors_v1: dict[str, object] | None = None,
     prior_normalization: dict[str, Any] | None = None,
+    rotation_priors_contract: str | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "created_at": _utc_now_iso(),
@@ -1450,6 +1665,8 @@ def _write_manifest(
             "max_rows": int(max_rows) if max_rows is not None else None,
         },
     }
+    if rotation_priors_contract is not None:
+        payload["options"]["rotation_priors_contract"] = str(rotation_priors_contract)
     if date_window is not None:
         payload["options"]["date_window"] = date_window
     if lineup_backfill is not None:
@@ -1607,6 +1824,21 @@ def main() -> None:
         default=DEFAULT_LOOKBACK_DAYS,
         help="Lookback window (days) for PRA-per-minute priors used to derive implied minutes.",
     )
+    parser.add_argument(
+        "--rotation-priors-contract",
+        type=str,
+        choices=[
+            ROTATION_PRIORS_CONTRACT_GAME_ID_ONLY,
+            ROTATION_PRIORS_CONTRACT_GAME_ID_PLUS_PRE_GAME_ENTITY_FALLBACK,
+        ],
+        default=ROTATION_PRIORS_CONTRACT_GAME_ID_PLUS_PRE_GAME_ENTITY_FALLBACK,
+        help=(
+            "Contract for rotation_priors_v1 player joins. "
+            "'game_id_partitions_only' keeps strict game-id partitions; "
+            "'game_id_partitions_plus_pre_game_entity_fallback' fills missing player priors "
+            "using latest pre-game entity priors (leakage-safe)."
+        ),
+    )
     args = parser.parse_args()
 
     data_root = paths.get_data_root()
@@ -1720,10 +1952,21 @@ def main() -> None:
         team_priors, player_priors, priors_meta = _load_rotation_priors_v1(
             data_root, game_id_norm_by_season=game_id_norm_by_season
         )
+        priors_meta["contract_mode"] = str(args.rotation_priors_contract)
+        if str(args.rotation_priors_contract) == ROTATION_PRIORS_CONTRACT_GAME_ID_PLUS_PRE_GAME_ENTITY_FALLBACK:
+            player_priors, fallback_meta = _augment_player_priors_with_pre_game_entity_fallback(
+                data_root=data_root,
+                game_spine=joined.loc[:, [c for c in ["game_id", "game_date", "team_id", "player_id", "is_out"] if c in joined.columns]],
+                player_priors=player_priors,
+            )
+            priors_meta["player_entity_fallback"] = fallback_meta
         joined = join_rotation_priors(joined, team_priors=team_priors, player_priors=player_priors)
         joined = add_rotation_set_derived_features(joined)
     else:
-        priors_meta = {"warning": "game_date missing; skipping rotation_priors_v1 join"}
+        priors_meta = {
+            "warning": "game_date missing; skipping rotation_priors_v1 join",
+            "contract_mode": str(args.rotation_priors_contract),
+        }
 
     if args.require_rotation:
         joined = joined.loc[joined["rotation_team_missing"] == 0].copy()
@@ -1842,6 +2085,7 @@ def main() -> None:
         dnp_history_config=dnp_config,
         rotation_priors_v1=priors_meta,
         prior_normalization=prior_norm_meta,
+        rotation_priors_contract=str(args.rotation_priors_contract),
     )
 
     print(f"[rotation_train_v1] Wrote features -> {out_features_path}")

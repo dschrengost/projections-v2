@@ -528,32 +528,39 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
     if len(merged) == 0:
         return {'players_matched': 0}
     
-    # Prefer world-derived point estimates for MAE/bias.
-    fpts_point_col = next(
+    def _pick_col(candidates: tuple[str, ...]) -> str | None:
+        for candidate in candidates:
+            if candidate in merged.columns:
+                return candidate
+        return None
+
+    # Development default: use unconditional (DNP=0) point estimates when available.
+    fpts_point_col = _pick_col(
         (
-            col
-            for col in (
-                'dk_fpts_p50',
-                'fpts_sim_cond_p50',
-                'fpts_sim_uncond_p50',
-                'dk_fpts_mean',
-            )
-            if col in merged.columns
-        ),
-        None,
+            'dk_fpts_p50_uncond',
+            'sim_dk_fpts_p50_uncond',
+            'fpts_sim_uncond_p50',
+            'dk_fpts_p50',
+            'sim_dk_fpts_p50',
+            'fpts_sim_cond_p50',
+            'dk_fpts_mean_uncond',
+            'sim_dk_fpts_mean_uncond',
+            'fpts_sim_uncond_mean',
+            'dk_fpts_mean',
+        )
     )
-    mins_point_col = next(
+    mins_point_col = _pick_col(
         (
-            col
-            for col in (
-                'minutes_sim_p50',
-                'minutes_p50_cond',
-                'minutes_p50',
-                'minutes_mean',
-            )
-            if col in merged.columns
-        ),
-        None,
+            'minutes_sim_p50_uncond',
+            'sim_minutes_sim_p50_uncond',
+            'minutes_sim_uncond_p50',
+            'minutes_sim_p50',
+            'sim_minutes_sim_p50',
+            'minutes_p50',
+            'minutes_p50_cond',
+            'minutes_sim_mean_uncond',
+            'minutes_mean',
+        )
     )
 
     # === Roster Accuracy (based on merged predictions only) ===
@@ -584,13 +591,30 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
     
     # === Calibration Metrics ===
     calibration = {}
+    calibration_sources = {}
     intervals = [
-        ('50', 'dk_fpts_p25', 'dk_fpts_p75', 0.50),
-        ('80', 'dk_fpts_p10', 'dk_fpts_p90', 0.80),
-        ('90', 'dk_fpts_p05', 'dk_fpts_p95', 0.90),
+        (
+            '50',
+            _pick_col(('dk_fpts_p25_uncond', 'sim_dk_fpts_p25_uncond', 'fpts_sim_uncond_p25', 'dk_fpts_p25', 'sim_dk_fpts_p25', 'fpts_sim_cond_p25')),
+            _pick_col(('dk_fpts_p75_uncond', 'sim_dk_fpts_p75_uncond', 'fpts_sim_uncond_p75', 'dk_fpts_p75', 'sim_dk_fpts_p75', 'fpts_sim_cond_p75')),
+            0.50,
+        ),
+        (
+            '80',
+            _pick_col(('dk_fpts_p10_uncond', 'sim_dk_fpts_p10_uncond', 'fpts_sim_uncond_p10', 'dk_fpts_p10', 'sim_dk_fpts_p10', 'fpts_sim_cond_p10')),
+            _pick_col(('dk_fpts_p90_uncond', 'sim_dk_fpts_p90_uncond', 'fpts_sim_uncond_p90', 'dk_fpts_p90', 'sim_dk_fpts_p90', 'fpts_sim_cond_p90')),
+            0.80,
+        ),
+        (
+            '90',
+            _pick_col(('dk_fpts_p05_uncond', 'sim_dk_fpts_p05_uncond', 'fpts_sim_uncond_p05', 'dk_fpts_p05', 'sim_dk_fpts_p05', 'fpts_sim_cond_p05')),
+            _pick_col(('dk_fpts_p95_uncond', 'sim_dk_fpts_p95_uncond', 'fpts_sim_uncond_p95', 'dk_fpts_p95', 'sim_dk_fpts_p95', 'fpts_sim_cond_p95')),
+            0.90,
+        ),
     ]
     for name, lo_col, hi_col, expected in intervals:
-        if lo_col in played.columns and hi_col in played.columns:
+        calibration_sources[f'coverage_{name}_cols'] = [lo_col, hi_col]
+        if lo_col and hi_col and lo_col in played.columns and hi_col in played.columns:
             in_range = (played['actual_dk_fpts'] >= played[lo_col]) & (played['actual_dk_fpts'] <= played[hi_col])
             observed = in_range.mean()
             calibration[f'coverage_{name}'] = round(observed, 3)
@@ -751,6 +775,7 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
         'fpts_point_source': fpts_point_col,
         'minutes_point_source': mins_point_col,
         'roster_minutes_source': pred_min_col,
+        'evaluation_semantics': 'unconditional_preferred',
     }
     
     # Add calibration (backward compatible: coverage_80, coverage_90)
@@ -760,6 +785,7 @@ def compute_metrics(actuals: pd.DataFrame, predictions: pd.DataFrame, min_minute
     result['cal_gap_50'] = calibration.get('cal_gap_50')
     result['cal_gap_80'] = calibration.get('cal_gap_80')
     result['cal_gap_90'] = calibration.get('cal_gap_90')
+    result['calibration_sources'] = calibration_sources
     
     # Add salary tiers
     result.update(salary_tiers)

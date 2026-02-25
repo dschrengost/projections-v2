@@ -350,6 +350,13 @@ def main() -> None:
         game_feature_columns=list(config.game_feature_columns),
         team_feature_columns=list(config.team_feature_columns),
         minutes_label_col="minutes_label" if "minutes_label" in val_df.columns else "minutes",
+        overflow_protected_prior_play_prob_floor=float(config.overflow_protected_prior_play_prob_floor),
+        overflow_protected_prior_minutes_floor=float(config.overflow_protected_prior_minutes_floor),
+        overflow_risk_weight_consecutive_active_dnp=float(config.overflow_risk_weight_consecutive_active_dnp),
+        overflow_risk_weight_active_but_dnp_rate_last10=float(config.overflow_risk_weight_active_but_dnp_rate_last10),
+        overflow_risk_weight_inactive_streak_len=float(config.overflow_risk_weight_inactive_streak_len),
+        overflow_keep_weight_prior_play_prob=float(config.overflow_keep_weight_prior_play_prob),
+        overflow_keep_weight_prior_minutes=float(config.overflow_keep_weight_prior_minutes),
     )
 
     loader = DataLoader(

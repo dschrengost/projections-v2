@@ -476,7 +476,7 @@ def _load_rotation_historical_features_for_dnp(
     target_day: pd.Timestamp,
     team_ids: set[int],
     player_ids: set[int],
-    lookback_days: int = 120,
+    lookback_days: int | None = 120,
 ) -> pd.DataFrame:
     """Load realized minutes + pre-tip availability for DNP history features.
 
@@ -493,25 +493,33 @@ def _load_rotation_historical_features_for_dnp(
         return pd.DataFrame()
 
     end_day = pd.Timestamp(target_day).normalize()
-    cutoff = (end_day - timedelta(days=int(lookback_days))).normalize()
-    days = pd.date_range(cutoff, end_day - timedelta(days=1), freq="D")
+    if lookback_days is not None and int(lookback_days) <= 0:
+        raise ValueError("lookback_days must be > 0 when provided")
 
-    labels_path = (
-        data_root / "labels" / f"season={int(season)}" / "boxscore_labels.parquet"
-    )
-    if not labels_path.exists():
+    if lookback_days is None:
+        label_paths = sorted((data_root / "labels").glob("season=*/boxscore_labels.parquet"))
+    else:
+        label_paths = [data_root / "labels" / f"season={int(season)}" / "boxscore_labels.parquet"]
+    label_paths = [p for p in label_paths if p.exists()]
+    if not label_paths:
         return pd.DataFrame()
-    try:
-        labels = pd.read_parquet(
-            labels_path, columns=["game_date", "team_id", "player_id", "minutes"]
-        )
-    except Exception:  # noqa: BLE001
-        labels = pd.read_parquet(labels_path)
-        if not {"game_date", "team_id", "player_id", "minutes"}.issubset(
-            labels.columns
-        ):
-            return pd.DataFrame()
-        labels = labels.loc[:, ["game_date", "team_id", "player_id", "minutes"]]
+
+    label_frames: list[pd.DataFrame] = []
+    for labels_path in label_paths:
+        try:
+            frame = pd.read_parquet(
+                labels_path,
+                columns=["game_date", "team_id", "player_id", "minutes"],
+            )
+        except Exception:  # noqa: BLE001
+            frame = pd.read_parquet(labels_path)
+            if not {"game_date", "team_id", "player_id", "minutes"}.issubset(frame.columns):
+                continue
+            frame = frame.loc[:, ["game_date", "team_id", "player_id", "minutes"]]
+        label_frames.append(frame)
+    if not label_frames:
+        return pd.DataFrame()
+    labels = pd.concat(label_frames, ignore_index=True)
 
     labels["game_date"] = pd.to_datetime(
         labels["game_date"], errors="coerce"
@@ -527,11 +535,13 @@ def _load_rotation_historical_features_for_dnp(
         return pd.DataFrame()
 
     labels = labels.loc[
-        (labels["game_date"] >= cutoff)
-        & (labels["game_date"] < end_day)
+        (labels["game_date"] < end_day)
         & labels["team_id"].astype(int).isin(team_ids)
         & labels["player_id"].astype(int).isin(player_ids)
     ].copy()
+    if lookback_days is not None:
+        cutoff = (end_day - timedelta(days=int(lookback_days))).normalize()
+        labels = labels.loc[labels["game_date"] >= cutoff].copy()
     if labels.empty:
         return pd.DataFrame()
 
@@ -542,11 +552,12 @@ def _load_rotation_historical_features_for_dnp(
     # Derive is_out from injuries_raw partitions (keyed by date folder).
     # IMPORTANT: Use the LATEST snapshot per player per date, not "any OUT".
     # The source_row_id format is "{unix_ts}_{row_id}" - we parse the timestamp to sort.
-    injuries_root = data_root / "bronze" / "injuries_raw" / f"season={int(season)}"
     out_frames: list[pd.DataFrame] = []
-    if injuries_root.exists():
-        for day in days:
-            day_dir = injuries_root / f"date={day.strftime('%Y-%m-%d')}"
+    for day in sorted(pd.to_datetime(labels["game_date"], errors="coerce").dropna().dt.normalize().unique().tolist()):
+        season_for_day = _season_for_day(pd.Timestamp(day))
+        injuries_root = data_root / "bronze" / "injuries_raw" / f"season={int(season_for_day)}"
+        if injuries_root.exists():
+            day_dir = injuries_root / f"date={pd.Timestamp(day).strftime('%Y-%m-%d')}"
             pq_path = day_dir / "injuries.parquet"
             if not pq_path.exists():
                 continue

@@ -20,6 +20,15 @@ from projections.rotation.set_model import zfill_game_id_series
 
 MAX_PLAYERS_PER_TEAM = 15
 TOTAL_PLAYERS_PER_GAME = 2 * MAX_PLAYERS_PER_TEAM
+# With max_minutes_per_player=48, at least 5 players are required to make 240 feasible.
+MIN_FEASIBLE_PLAYERS_PER_TEAM = 5
+PROTECTED_PRIOR_PLAY_PROB_FLOOR = 0.938507
+PROTECTED_PRIOR_MINUTES_FLOOR = 29.520922
+OVERFLOW_RISK_WEIGHT_CONSECUTIVE_ACTIVE_DNP = 0.579943
+OVERFLOW_RISK_WEIGHT_ACTIVE_BUT_DNP_RATE_LAST10 = 6.053079
+OVERFLOW_RISK_WEIGHT_INACTIVE_STREAK_LEN = 0.117685
+OVERFLOW_KEEP_WEIGHT_PRIOR_PLAY_PROB = 2.202986
+OVERFLOW_KEEP_WEIGHT_PRIOR_MINUTES = 0.051353
 FLOW_TARGET_COLUMNS_V1 = [
     "fga2",
     "fg2m",
@@ -63,6 +72,13 @@ class GameTransformerV2Config:
     flow_num_blocks: int = 4
     flow_scale_clip: float = 2.0
     include_pf_in_flow_targets: bool = False
+    overflow_protected_prior_play_prob_floor: float = PROTECTED_PRIOR_PLAY_PROB_FLOOR
+    overflow_protected_prior_minutes_floor: float = PROTECTED_PRIOR_MINUTES_FLOOR
+    overflow_risk_weight_consecutive_active_dnp: float = OVERFLOW_RISK_WEIGHT_CONSECUTIVE_ACTIVE_DNP
+    overflow_risk_weight_active_but_dnp_rate_last10: float = OVERFLOW_RISK_WEIGHT_ACTIVE_BUT_DNP_RATE_LAST10
+    overflow_risk_weight_inactive_streak_len: float = OVERFLOW_RISK_WEIGHT_INACTIVE_STREAK_LEN
+    overflow_keep_weight_prior_play_prob: float = OVERFLOW_KEEP_WEIGHT_PRIOR_PLAY_PROB
+    overflow_keep_weight_prior_minutes: float = OVERFLOW_KEEP_WEIGHT_PRIOR_MINUTES
     version: str = "game_transformer_v2"
 
     def to_dict(self) -> dict[str, Any]:
@@ -186,28 +202,83 @@ def _resolve_home_away_team_ids(game_df: pd.DataFrame) -> tuple[int | None, int 
     return None, None
 
 
-def _sort_team_rows(team_df: pd.DataFrame) -> pd.DataFrame:
+def _sort_team_rows(
+    team_df: pd.DataFrame,
+    *,
+    protected_prior_play_prob_floor: float,
+    protected_prior_minutes_floor: float,
+    risk_weight_consecutive_active_dnp: float,
+    risk_weight_active_but_dnp_rate_last10: float,
+    risk_weight_inactive_streak_len: float,
+    keep_weight_prior_play_prob: float,
+    keep_weight_prior_minutes: float,
+) -> pd.DataFrame:
     out = team_df.copy()
+    if "is_out" not in out.columns:
+        out["is_out"] = 0.0
     if "lineup_starter_announced" not in out.columns:
         out["lineup_starter_announced"] = 0
     if "prior_play_prob" not in out.columns:
         out["prior_play_prob"] = 0.0
     if "minutes_from_stints_prior_20" not in out.columns:
         out["minutes_from_stints_prior_20"] = 0.0
+    if "an_has_any_props" not in out.columns:
+        out["an_has_any_props"] = 0.0
+    if "an_implied_minutes" not in out.columns:
+        out["an_implied_minutes"] = 0.0
+    if "consecutive_active_dnp" not in out.columns:
+        out["consecutive_active_dnp"] = 0.0
+    if "active_but_dnp_rate_last10" not in out.columns:
+        out["active_but_dnp_rate_last10"] = 0.0
+    if "inactive_streak_len" not in out.columns:
+        out["inactive_streak_len"] = 0.0
 
+    out["is_out"] = pd.to_numeric(out["is_out"], errors="coerce").fillna(0.0)
     out["lineup_starter_announced"] = pd.to_numeric(out["lineup_starter_announced"], errors="coerce").fillna(0.0)
     out["prior_play_prob"] = pd.to_numeric(out["prior_play_prob"], errors="coerce").fillna(0.0)
     out["minutes_from_stints_prior_20"] = pd.to_numeric(out["minutes_from_stints_prior_20"], errors="coerce").fillna(0.0)
+    out["an_has_any_props"] = pd.to_numeric(out["an_has_any_props"], errors="coerce").fillna(0.0)
+    out["an_implied_minutes"] = pd.to_numeric(out["an_implied_minutes"], errors="coerce").fillna(0.0)
+    out["consecutive_active_dnp"] = pd.to_numeric(out["consecutive_active_dnp"], errors="coerce").fillna(0.0)
+    out["active_but_dnp_rate_last10"] = pd.to_numeric(out["active_but_dnp_rate_last10"], errors="coerce").fillna(0.0)
+    out["inactive_streak_len"] = pd.to_numeric(out["inactive_streak_len"], errors="coerce").fillna(0.0)
     out["player_id"] = pd.to_numeric(out["player_id"], errors="coerce").fillna(0).astype("int64")
+
+    starter = out["lineup_starter_announced"].ge(0.5)
+    has_props = out["an_has_any_props"].ge(0.5)
+    has_implied_minutes = out["an_implied_minutes"].gt(0.0)
+    high_prior = out["prior_play_prob"].ge(float(protected_prior_play_prob_floor)) | out[
+        "minutes_from_stints_prior_20"
+    ].ge(float(protected_prior_minutes_floor))
+    protected = starter | has_props | has_implied_minutes | high_prior
+    out["overflow_protected"] = protected.astype(np.int8)
+
+    # Lower values = higher risk of pre-tip DNP/zero-minute outcome.
+    out["overflow_dnp_risk"] = (
+        float(risk_weight_consecutive_active_dnp) * out["consecutive_active_dnp"].clip(lower=0.0, upper=20.0)
+        + float(risk_weight_active_but_dnp_rate_last10) * out["active_but_dnp_rate_last10"].clip(lower=0.0, upper=1.0)
+        + float(risk_weight_inactive_streak_len) * out["inactive_streak_len"].clip(lower=0.0, upper=20.0)
+    )
+    # Higher values = better keep candidates for overflow tie-breaks.
+    out["overflow_keep_score"] = (
+        float(keep_weight_prior_play_prob) * out["prior_play_prob"].clip(lower=0.0, upper=1.0)
+        + float(keep_weight_prior_minutes) * out["minutes_from_stints_prior_20"].clip(lower=0.0, upper=48.0)
+        - out["overflow_dnp_risk"]
+    )
 
     return out.sort_values(
         by=[
+            "is_out",
+            "overflow_protected",
+            "overflow_keep_score",
             "lineup_starter_announced",
+            "an_has_any_props",
+            "an_implied_minutes",
             "prior_play_prob",
             "minutes_from_stints_prior_20",
             "player_id",
         ],
-        ascending=[False, False, False, True],
+        ascending=[True, False, False, False, False, False, False, False, True],
         kind="mergesort",
     )
 
@@ -223,11 +294,23 @@ def build_game_level_examples(
     flow_label_columns: list[str] | None = None,
     minutes_label_col: str = "minutes_label",
     max_players_per_team: int = MAX_PLAYERS_PER_TEAM,
+    min_valid_players_per_team: int = MIN_FEASIBLE_PLAYERS_PER_TEAM,
+    overflow_protected_prior_play_prob_floor: float = PROTECTED_PRIOR_PLAY_PROB_FLOOR,
+    overflow_protected_prior_minutes_floor: float = PROTECTED_PRIOR_MINUTES_FLOOR,
+    overflow_risk_weight_consecutive_active_dnp: float = OVERFLOW_RISK_WEIGHT_CONSECUTIVE_ACTIVE_DNP,
+    overflow_risk_weight_active_but_dnp_rate_last10: float = OVERFLOW_RISK_WEIGHT_ACTIVE_BUT_DNP_RATE_LAST10,
+    overflow_risk_weight_inactive_streak_len: float = OVERFLOW_RISK_WEIGHT_INACTIVE_STREAK_LEN,
+    overflow_keep_weight_prior_play_prob: float = OVERFLOW_KEEP_WEIGHT_PRIOR_PLAY_PROB,
+    overflow_keep_weight_prior_minutes: float = OVERFLOW_KEEP_WEIGHT_PRIOR_MINUTES,
 ) -> list[GameLevelExample]:
     """Convert flat player rows into per-game (home+away) training examples."""
 
     if max_players_per_team <= 0:
         raise ValueError("max_players_per_team must be > 0")
+    if min_valid_players_per_team <= 0:
+        raise ValueError("min_valid_players_per_team must be > 0")
+    if min_valid_players_per_team > max_players_per_team:
+        raise ValueError("min_valid_players_per_team must be <= max_players_per_team")
     if len(feature_columns) <= 0:
         raise ValueError("feature_columns must be non-empty")
 
@@ -299,7 +382,16 @@ def build_game_level_examples(
             team_rows = game_df.loc[pd.to_numeric(game_df["team_id"], errors="coerce") == int(team_id)]
             if team_rows.empty:
                 continue
-            team_rows = _sort_team_rows(team_rows).head(max_players_per_team)
+            team_rows = _sort_team_rows(
+                team_rows,
+                protected_prior_play_prob_floor=float(overflow_protected_prior_play_prob_floor),
+                protected_prior_minutes_floor=float(overflow_protected_prior_minutes_floor),
+                risk_weight_consecutive_active_dnp=float(overflow_risk_weight_consecutive_active_dnp),
+                risk_weight_active_but_dnp_rate_last10=float(overflow_risk_weight_active_but_dnp_rate_last10),
+                risk_weight_inactive_streak_len=float(overflow_risk_weight_inactive_streak_len),
+                keep_weight_prior_play_prob=float(overflow_keep_weight_prior_play_prob),
+                keep_weight_prior_minutes=float(overflow_keep_weight_prior_minutes),
+            ).head(max_players_per_team)
             team_ids[side_idx] = int(team_id)
             local_idx = team_rows.index.to_numpy(dtype=np.int64)
             n = local_idx.shape[0]
@@ -316,6 +408,15 @@ def build_game_level_examples(
             lineup_arr[side_idx, :n] = lineup_by_idx[local_idx]
 
         if bool(player_valid[0].sum() == 0 and player_valid[1].sum() == 0):
+            continue
+
+        # Drop malformed games where either side has no valid/non-positive team id rows,
+        # or where a side cannot satisfy the 240-minute team constraint under 48-minute caps.
+        if int(team_ids[0]) <= 0 or int(team_ids[1]) <= 0:
+            continue
+        if int(player_valid[0].sum()) < int(min_valid_players_per_team):
+            continue
+        if int(player_valid[1].sum()) < int(min_valid_players_per_team):
             continue
 
         if game_feature_columns:

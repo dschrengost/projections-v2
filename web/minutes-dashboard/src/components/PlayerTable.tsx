@@ -23,11 +23,12 @@ export type PlayerTableRow = {
 
 type PlayerTableProps = {
     rows: PlayerTableRow[]
+    readOnly?: boolean
     onSelectPlayer: (playerId: string) => void
     onOverrideChange: (playerId: string, next: PlayerOverrideState) => void
 }
 
-export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, onOverrideChange }) => {
+export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, readOnly = false, onSelectPlayer, onOverrideChange }) => {
     if (!rows.length) {
         return <div className="muted">No players found.</div>
     }
@@ -45,7 +46,7 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                         <th>P10</th>
                         <th>P50</th>
                         <th>P90</th>
-                        <th>Target Min</th>
+                        {!readOnly ? <th>Target Min</th> : null}
                         <th>FPTS</th>
                     </tr>
                 </thead>
@@ -75,15 +76,17 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, onSelectPlayer, 
                             <td>{fmt(row.minutesP10)}</td>
                             <td>{fmt(row.minutesP50)}</td>
                             <td>{fmt(row.minutesP90)}</td>
-                            <td>
-                                <OverrideControl
-                                    compact
-                                    value={row.override}
-                                    baselineMinutes={row.baselineMinutes}
-                                    resolvedMinutes={row.resolvedMinutes}
-                                    onChange={(next) => onOverrideChange(row.player_id, next)}
-                                />
-                            </td>
+                            {!readOnly ? (
+                                <td>
+                                    <OverrideControl
+                                        compact
+                                        value={row.override}
+                                        baselineMinutes={row.baselineMinutes}
+                                        resolvedMinutes={row.resolvedMinutes}
+                                        onChange={(next) => onOverrideChange(row.player_id, next)}
+                                    />
+                                </td>
+                            ) : null}
                             <td>{row.resolvedFpts == null ? '-' : row.resolvedFpts.toFixed(1)}</td>
                         </tr>
                     ))}

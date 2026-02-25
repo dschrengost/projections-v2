@@ -75,9 +75,27 @@ export type PlayerRow = {
     fpts_sim_uncond_p50?: number
     fpts_sim_uncond_p90?: number
     fpts_sim_uncond_p95?: number
+    pts_mean?: number
+    pts_mean_uncond?: number
     sim_pts_mean?: number
+    sim_pts_mean_uncond?: number
+    reb_mean?: number
+    reb_mean_uncond?: number
     sim_reb_mean?: number
+    sim_reb_mean_uncond?: number
+    ast_mean?: number
+    ast_mean_uncond?: number
     sim_ast_mean?: number
+    sim_ast_mean_uncond?: number
+    stl_mean?: number
+    stl_mean_uncond?: number
+    sim_stl_mean_uncond?: number
+    blk_mean?: number
+    blk_mean_uncond?: number
+    sim_blk_mean_uncond?: number
+    tov_mean?: number
+    tov_mean_uncond?: number
+    sim_tov_mean_uncond?: number
     sim_stl_mean?: number
     sim_blk_mean?: number
     sim_tov_mean?: number

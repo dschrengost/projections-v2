@@ -53,6 +53,7 @@ tmp/
 local/
 reports/sim_audit/
 reports/parity_audit/
+handoffs/
 
 # -------------------------
 # Data files (ignored by default)

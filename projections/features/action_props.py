@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -446,6 +447,250 @@ def load_action_props_feature_snapshots_for_date(*, props_dir: Path, game_date: 
 
     long_df = load_action_props_long_from_bronze(props_dir=props_dir, game_date=game_date)
     return build_action_props_feature_snapshots(long_df)
+
+
+def _canonical_rotowire_prop_key(raw_name: object) -> str | None:
+    normalized = str(raw_name or "").strip().lower()
+    mapping = {
+        "pts": "pts",
+        "reb": "reb",
+        "ast": "ast",
+        "threes": "3pm",
+        "ptsrebast": "pra",
+        "ptsreb": "pr",
+        "ptsast": "pa",
+        "rebast": "ra",
+    }
+    return mapping.get(normalized)
+
+
+def load_rotowire_props_long_from_bronze(
+    *,
+    rotowire_props_root: Path,
+    game_date: pd.Timestamp,
+) -> pd.DataFrame:
+    """Load normalized per-player market rows from Rotowire bronze parquet for one date."""
+    day = pd.Timestamp(game_date).normalize().date().isoformat()
+    partition = Path(rotowire_props_root) / f"game_date={day}"
+    files = sorted(partition.glob("*.parquet")) if partition.exists() else []
+    if not files:
+        return pd.DataFrame(
+            columns=[
+                "game_date",
+                "team_tricode",
+                "player_name",
+                "player_name_norm",
+                "prop_key",
+                "line",
+                "p_over",
+                "line_std",
+                "books",
+                "action_props_as_of_ts",
+                "action_game_id",
+                "source_file",
+            ]
+        )
+
+    frames: list[pd.DataFrame] = []
+    for path in files:
+        try:
+            df = pd.read_parquet(path)
+        except Exception:
+            continue
+        if df.empty:
+            continue
+        df = df.copy()
+        df["source_file"] = path.name
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame(
+            columns=[
+                "game_date",
+                "team_tricode",
+                "player_name",
+                "player_name_norm",
+                "prop_key",
+                "line",
+                "p_over",
+                "line_std",
+                "books",
+                "action_props_as_of_ts",
+                "action_game_id",
+                "source_file",
+            ]
+        )
+
+    raw = pd.concat(frames, ignore_index=True)
+    required_cols = {"player_name", "team", "prop_type", "line", "book", "scraped_at"}
+    if not required_cols.issubset(raw.columns):
+        return pd.DataFrame(
+            columns=[
+                "game_date",
+                "team_tricode",
+                "player_name",
+                "player_name_norm",
+                "prop_key",
+                "line",
+                "p_over",
+                "line_std",
+                "books",
+                "action_props_as_of_ts",
+                "action_game_id",
+                "source_file",
+            ]
+        )
+
+    work = raw.copy()
+    work["prop_key"] = work["prop_type"].map(_canonical_rotowire_prop_key)
+    work = work.loc[work["prop_key"].isin(_SUPPORTED_PROP_KEYS)].copy()
+    if work.empty:
+        return pd.DataFrame(
+            columns=[
+                "game_date",
+                "team_tricode",
+                "player_name",
+                "player_name_norm",
+                "prop_key",
+                "line",
+                "p_over",
+                "line_std",
+                "books",
+                "action_props_as_of_ts",
+                "action_game_id",
+                "source_file",
+            ]
+        )
+
+    work["line"] = pd.to_numeric(work["line"], errors="coerce")
+    work["over_odds"] = pd.to_numeric(work.get("over_odds"), errors="coerce")
+    implied_over = pd.to_numeric(work.get("implied_over_prob"), errors="coerce")
+    work["p_over"] = implied_over
+    missing_over = work["p_over"].isna()
+    if missing_over.any():
+        work.loc[missing_over, "p_over"] = work.loc[missing_over, "over_odds"].map(_american_to_implied_prob)
+    work["p_over"] = pd.to_numeric(work["p_over"], errors="coerce").fillna(0.5).clip(0.0, 1.0)
+    work["action_props_as_of_ts"] = pd.to_datetime(work["scraped_at"], utc=True, errors="coerce")
+    work["team_tricode"] = work["team"].map(_normalize_team_abbr)
+    work["player_name_norm"] = work["player_name"].map(_normalize_player_name)
+    work["game_date"] = pd.Timestamp(day)
+    work["action_game_id"] = pd.to_numeric(work.get("game_id"), errors="coerce").astype("Int64")
+    work = work.dropna(subset=["line", "action_props_as_of_ts"])
+    work = work.loc[
+        work["team_tricode"].astype(str).str.len().gt(0)
+        & work["player_name_norm"].astype(str).str.len().gt(0)
+    ].copy()
+    if work.empty:
+        return pd.DataFrame(
+            columns=[
+                "game_date",
+                "team_tricode",
+                "player_name",
+                "player_name_norm",
+                "prop_key",
+                "line",
+                "p_over",
+                "line_std",
+                "books",
+                "action_props_as_of_ts",
+                "action_game_id",
+                "source_file",
+            ]
+        )
+
+    grouped = (
+        work.groupby(
+            [
+                "game_date",
+                "team_tricode",
+                "player_name",
+                "player_name_norm",
+                "prop_key",
+                "action_props_as_of_ts",
+            ],
+            as_index=False,
+        )
+        .agg(
+            line=("line", "mean"),
+            p_over=("p_over", "mean"),
+            line_std=("line", lambda s: float(np.std(pd.to_numeric(s, errors="coerce"), ddof=0))),
+            books=("book", "nunique"),
+            action_game_id=("action_game_id", "first"),
+            source_file=("source_file", "first"),
+        )
+    )
+    grouped["line_std"] = pd.to_numeric(grouped["line_std"], errors="coerce").fillna(0.0)
+    grouped["books"] = pd.to_numeric(grouped["books"], errors="coerce").fillna(0.0)
+    return grouped[
+        [
+            "game_date",
+            "team_tricode",
+            "player_name",
+            "player_name_norm",
+            "prop_key",
+            "line",
+            "p_over",
+            "line_std",
+            "books",
+            "action_props_as_of_ts",
+            "action_game_id",
+            "source_file",
+        ]
+    ].copy()
+
+
+def load_action_props_feature_snapshots_for_date_live(
+    *,
+    action_props_dir: Path,
+    game_date: pd.Timestamp,
+    allow_rotowire_fallback: bool = False,
+    rotowire_props_root: Path | None = None,
+    expected_team_tricodes: Iterable[object] | None = None,
+) -> tuple[pd.DataFrame, str]:
+    """Load live action-props snapshots with optional Rotowire fallback.
+
+    Returns (snapshots, source), where source is one of:
+    - "action_network"
+    - "rotowire_fallback"
+    - "none"
+    """
+    action_long = load_action_props_long_from_bronze(
+        props_dir=Path(action_props_dir),
+        game_date=game_date,
+    )
+    action_snapshots = build_action_props_feature_snapshots(action_long)
+    expected_teams_norm = {
+        _normalize_team_abbr(team)
+        for team in (expected_team_tricodes or [])
+        if str(team or "").strip()
+    }
+    if not action_snapshots.empty:
+        if expected_teams_norm:
+            action_teams = {
+                _normalize_team_abbr(team)
+                for team in action_snapshots["team_tricode"].tolist()
+                if str(team or "").strip()
+            }
+            if action_teams and not action_teams.isdisjoint(expected_teams_norm):
+                return action_snapshots, "action_network"
+            action_snapshots = action_snapshots.iloc[0:0].copy()
+        else:
+            return action_snapshots, "action_network"
+
+    if not allow_rotowire_fallback:
+        return action_snapshots, "none"
+
+    root = (
+        Path(rotowire_props_root)
+        if rotowire_props_root is not None
+        else Path(action_props_dir).parents[1] / "props"
+    )
+    rotowire_long = load_rotowire_props_long_from_bronze(
+        rotowire_props_root=root,
+        game_date=game_date,
+    )
+    if rotowire_long.empty:
+        return action_snapshots, "none"
+    return build_action_props_feature_snapshots(rotowire_long), "rotowire_fallback"
 
 
 def attach_action_props_features(

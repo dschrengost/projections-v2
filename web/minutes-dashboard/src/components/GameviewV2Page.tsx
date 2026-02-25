@@ -22,6 +22,7 @@ type GameviewV2PageProps = {
     rows: PlayerRow[]
     date: string
     runId?: string | null
+    readOnly?: boolean
     initialGameId?: string | null
     onGameChange?: (gameId: string) => void
     onRefresh?: () => void
@@ -66,6 +67,15 @@ const pickNum = (...values: unknown[]): number | null => {
         if (Number.isFinite(parsed)) return parsed
     }
     return null
+}
+
+const resolveUncondPts = (player: PlayerRow): number => {
+    const direct = pickNum(player.sim_pts_mean_uncond, player.pts_mean_uncond)
+    if (direct != null) return direct
+    const cond = pickNum(player.sim_pts_mean, player.pts_mean)
+    if (cond == null) return 0
+    const pActive = pickNum(player.minutes_sim_p_active, player.play_prob_eff, player.p_play_eff, player.play_prob)
+    return pActive == null ? cond : cond * pActive
 }
 
 const minutesBandLabel = (source: MinutesBandSource): string => {
@@ -262,6 +272,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
     rows,
     date,
     runId,
+    readOnly = false,
     initialGameId,
     onGameChange,
     onRefresh,
@@ -314,7 +325,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
     }, [games, initialGameId, activeGameId])
 
     useEffect(() => {
-        if (!activeGameId || hydratedGames.current.has(activeGameId)) return
+        if (readOnly || !activeGameId || hydratedGames.current.has(activeGameId)) return
         let cancelled = false
 
         const load = async () => {
@@ -350,7 +361,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         return () => {
             cancelled = true
         }
-    }, [activeGameId, date])
+    }, [activeGameId, date, readOnly])
 
     useEffect(() => {
         if (!selectedPlayerId) return
@@ -378,6 +389,47 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
     }, [selectedPlayerId, date, lastGamesByKey])
 
     const activeGame = useMemo(() => games.find((game) => game.gameId === activeGameId) || null, [games, activeGameId])
+    const activeGameTotals = useMemo(() => {
+        if (!activeGame) return null
+
+        const teamSummary = (team: TeamData) => {
+            const simPtsUncond = team.players.reduce((acc, player) => {
+                return acc + resolveUncondPts(player)
+            }, 0)
+
+            const sample = team.players[0]
+            let vegasImplied = pickNum(sample?.team_implied_total)
+            if (vegasImplied == null) {
+                const total = pickNum(sample?.total)
+                const spreadHome = pickNum(sample?.spread_home)
+                if (total != null && spreadHome != null) {
+                    const homeImplied = total / 2 - spreadHome / 2
+                    vegasImplied = team.teamId === activeGame.homeTeam.teamId ? homeImplied : (total - homeImplied)
+                }
+            }
+            return {
+                teamName: team.teamName,
+                simPtsUncond,
+                vegasImplied,
+                delta: vegasImplied == null ? null : simPtsUncond - vegasImplied,
+            }
+        }
+
+        const away = teamSummary(activeGame.awayTeam)
+        const home = teamSummary(activeGame.homeTeam)
+        const simGameTotal = away.simPtsUncond + home.simPtsUncond
+        const vegasGameTotal = pickNum(
+            activeGame.awayTeam.players[0]?.total,
+            activeGame.homeTeam.players[0]?.total,
+        )
+        return {
+            away,
+            home,
+            simGameTotal,
+            vegasGameTotal,
+            gameDelta: vegasGameTotal == null ? null : simGameTotal - vegasGameTotal,
+        }
+    }, [activeGame])
 
     const setOverride = (gameId: string, playerId: string, next: PlayerOverrideState) => {
         setLocalOverrides((prev) => ({
@@ -603,12 +655,17 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         const baselineFpts = toMaybeNum(player.fpts_sim_uncond_mean ?? player.sim_dk_fpts_mean ?? player.proj_fpts)
         const resolvedFpts = scaleByMinutes(baselineFpts, baselineMinutes, resolvedMinutes)
 
-        const baselinePts = toMaybeNum(player.sim_pts_mean)
-        const baselineReb = toMaybeNum(player.sim_reb_mean)
-        const baselineAst = toMaybeNum(player.sim_ast_mean)
-        const baselineStl = toMaybeNum(player.sim_stl_mean)
-        const baselineBlk = toMaybeNum(player.sim_blk_mean)
-        const baselineTo = toMaybeNum(player.sim_tov_mean)
+        const baselinePts = pickNum(
+            player.sim_pts_mean_uncond,
+            player.pts_mean_uncond,
+            player.sim_pts_mean,
+            player.pts_mean,
+        )
+        const baselineReb = pickNum(player.sim_reb_mean_uncond, player.reb_mean_uncond, player.sim_reb_mean, player.reb_mean)
+        const baselineAst = pickNum(player.sim_ast_mean_uncond, player.ast_mean_uncond, player.sim_ast_mean, player.ast_mean)
+        const baselineStl = pickNum(player.sim_stl_mean_uncond, player.stl_mean_uncond, player.sim_stl_mean, player.stl_mean)
+        const baselineBlk = pickNum(player.sim_blk_mean_uncond, player.blk_mean_uncond, player.sim_blk_mean, player.blk_mean)
+        const baselineTo = pickNum(player.sim_tov_mean_uncond, player.tov_mean_uncond, player.sim_tov_mean, player.tov_mean)
 
         const ratioScaled = (value: number | null) => scaleByMinutes(value, baselineMinutes, resolvedMinutes)
 
@@ -687,46 +744,90 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         <div className="gv2-root">
             <header className="gv2-header">
                 <div>
-                    <h2>Gameview v2 Patch Layer</h2>
+                    <h2>{readOnly ? 'Gameview (Read-only)' : 'Gameview v2 Patch Layer'}</h2>
                     <div className="muted">Slate {date} · Time to lock {formatCountdown(activeGame?.startTime)}</div>
                 </div>
-                <div className="gv2-actions">
-                    <button type="button" onClick={onApply} disabled={isApplying || isRunning}>
-                        {isApplying ? 'Applying...' : 'Apply'}
-                    </button>
-                    <button type="button" onClick={onApplyAndRun} disabled={isApplying || isRunning}>
-                        {isRunning ? 'Running...' : 'Apply & Run Worlds'}
-                    </button>
-                    <button type="button" onClick={() => onOpenLateSwap?.()}>
-                        Export Late Swap
-                    </button>
-                    <button type="button" onClick={onRevert} disabled={isApplying || isRunning}>
-                        Revert
-                    </button>
-                </div>
+                {!readOnly ? (
+                    <div className="gv2-actions">
+                        <button type="button" onClick={onApply} disabled={isApplying || isRunning}>
+                            {isApplying ? 'Applying...' : 'Apply'}
+                        </button>
+                        <button type="button" onClick={onApplyAndRun} disabled={isApplying || isRunning}>
+                            {isRunning ? 'Running...' : 'Apply & Run Worlds'}
+                        </button>
+                        <button type="button" onClick={() => onOpenLateSwap?.()}>
+                            Export Late Swap
+                        </button>
+                        <button type="button" onClick={onRevert} disabled={isApplying || isRunning}>
+                            Revert
+                        </button>
+                    </div>
+                ) : (
+                    <div className="gv2-readonly-pill">Overrides disabled</div>
+                )}
             </header>
 
             <div className="gv2-status-line">
-                {lastAppliedAt ? <span>Last applied: {new Date(lastAppliedAt).toLocaleString()}</span> : <span>No applied overrides yet</span>}
-                {lastRunId ? <span>Last run id: {lastRunId}</span> : null}
-                {legacyCount > 0 ? <span className="warning">Legacy fields present on {legacyCount} players (read-only in v2 UI)</span> : null}
+                {!readOnly ? (
+                    <>
+                        {lastAppliedAt ? <span>Last applied: {new Date(lastAppliedAt).toLocaleString()}</span> : <span>No applied overrides yet</span>}
+                        {lastRunId ? <span>Last run id: {lastRunId}</span> : null}
+                        {legacyCount > 0 ? <span className="warning">Legacy fields present on {legacyCount} players (read-only in v2 UI)</span> : null}
+                    </>
+                ) : (
+                    <span>Read-only projection view (unconditional stat counts).</span>
+                )}
                 {message ? <span>{message}</span> : null}
                 {error ? <span className="error">{error}</span> : null}
             </div>
 
-            <div className="gv2-controls">
-                <label>
-                    Minutes tails
-                    <select value={bandSource} onChange={(event) => setBandSource(event.target.value as MinutesBandSource)}>
-                        <option value="base">{minutesBandLabel('base')}</option>
-                        <option value="sim_uncond">{minutesBandLabel('sim_uncond')}</option>
-                        <option value="sim_cond">{minutesBandLabel('sim_cond')}</option>
-                    </select>
-                </label>
-                <span className="muted">Source for displayed p10/p50/p90 (shifted to match resolved μ).</span>
-            </div>
+            {!readOnly ? (
+                <div className="gv2-controls">
+                    <label>
+                        Minutes tails
+                        <select value={bandSource} onChange={(event) => setBandSource(event.target.value as MinutesBandSource)}>
+                            <option value="base">{minutesBandLabel('base')}</option>
+                            <option value="sim_uncond">{minutesBandLabel('sim_uncond')}</option>
+                            <option value="sim_cond">{minutesBandLabel('sim_cond')}</option>
+                        </select>
+                    </label>
+                    <span className="muted">Source for displayed p10/p50/p90 (shifted to match resolved μ).</span>
+                </div>
+            ) : null}
 
             <GameTabs tabs={tabs} activeGameId={activeGameId} onChange={onTabChange} />
+
+            {activeGameTotals ? (
+                <section className="gv2-game-totals">
+                    <div className="gv2-game-totals-header">Implied Totals: Sim (Uncond) vs Vegas</div>
+                    <div className="gv2-game-totals-grid">
+                        <div className="gv2-game-total-card">
+                            <div className="label">{activeGameTotals.away.teamName}</div>
+                            <div className="line">Sim: {activeGameTotals.away.simPtsUncond.toFixed(1)}</div>
+                            <div className="line">Vegas: {activeGameTotals.away.vegasImplied == null ? '-' : activeGameTotals.away.vegasImplied.toFixed(1)}</div>
+                            <div className={`delta ${(activeGameTotals.away.delta ?? 0) >= 0 ? 'up' : 'down'}`}>
+                                Δ {activeGameTotals.away.delta == null ? '-' : activeGameTotals.away.delta.toFixed(1)}
+                            </div>
+                        </div>
+                        <div className="gv2-game-total-card">
+                            <div className="label">{activeGameTotals.home.teamName}</div>
+                            <div className="line">Sim: {activeGameTotals.home.simPtsUncond.toFixed(1)}</div>
+                            <div className="line">Vegas: {activeGameTotals.home.vegasImplied == null ? '-' : activeGameTotals.home.vegasImplied.toFixed(1)}</div>
+                            <div className={`delta ${(activeGameTotals.home.delta ?? 0) >= 0 ? 'up' : 'down'}`}>
+                                Δ {activeGameTotals.home.delta == null ? '-' : activeGameTotals.home.delta.toFixed(1)}
+                            </div>
+                        </div>
+                        <div className="gv2-game-total-card">
+                            <div className="label">Game Total</div>
+                            <div className="line">Sim: {activeGameTotals.simGameTotal.toFixed(1)}</div>
+                            <div className="line">Vegas: {activeGameTotals.vegasGameTotal == null ? '-' : activeGameTotals.vegasGameTotal.toFixed(1)}</div>
+                            <div className={`delta ${(activeGameTotals.gameDelta ?? 0) >= 0 ? 'up' : 'down'}`}>
+                                Δ {activeGameTotals.gameDelta == null ? '-' : activeGameTotals.gameDelta.toFixed(1)}
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            ) : null}
 
             {activeGame ? (
                 <div className="gv2-teams-grid">
@@ -735,6 +836,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                         diagnostics={getTeamDiagnostics(activeGame.awayTeam.teamId)}
                         rows={teamRows(activeGame.awayTeam)}
                         minutesBandLabel={minutesBandLabel(bandSource)}
+                        readOnly={readOnly}
                         onSelectPlayer={(playerId) => setSelectedPlayerId(playerId)}
                         onOverrideChange={(playerId, next) => setOverride(activeGame.gameId, playerId, next)}
                     />
@@ -743,6 +845,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
                         diagnostics={getTeamDiagnostics(activeGame.homeTeam.teamId)}
                         rows={teamRows(activeGame.homeTeam)}
                         minutesBandLabel={minutesBandLabel(bandSource)}
+                        readOnly={readOnly}
                         onSelectPlayer={(playerId) => setSelectedPlayerId(playerId)}
                         onOverrideChange={(playerId, next) => setOverride(activeGame.gameId, playerId, next)}
                     />
@@ -752,6 +855,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
             <PlayerDetailsDrawer
                 open={Boolean(selectedDrawerPlayer)}
                 player={selectedDrawerPlayer}
+                readOnly={readOnly}
                 onClose={() => setSelectedPlayerId(null)}
                 onOverrideChange={(playerId, next) => setOverride(activeGameId, playerId, next)}
             />

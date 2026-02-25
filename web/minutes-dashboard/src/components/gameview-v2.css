@@ -36,6 +36,15 @@
   cursor: not-allowed;
 }
 
+.gv2-readonly-pill {
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  color: #cbd5e1;
+  background: #0b1220;
+}
+
 .gv2-status-line {
   display: flex;
   flex-wrap: wrap;
@@ -96,6 +105,59 @@
   background: #1e3a8a;
   border-color: #2563eb;
   color: #eff6ff;
+}
+
+.gv2-game-totals {
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  background: #060b16;
+  padding: 0.6rem;
+}
+
+.gv2-game-totals-header {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  margin-bottom: 0.45rem;
+}
+
+.gv2-game-totals-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.gv2-game-total-card {
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  background: #0b1220;
+  padding: 0.45rem;
+}
+
+.gv2-game-total-card .label {
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  margin-bottom: 0.25rem;
+}
+
+.gv2-game-total-card .line {
+  color: #cbd5e1;
+  font-size: 0.76rem;
+}
+
+.gv2-game-total-card .delta {
+  margin-top: 0.25rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.gv2-game-total-card .delta.up {
+  color: #34d399;
+}
+
+.gv2-game-total-card .delta.down {
+  color: #f87171;
 }
 
 .gv2-teams-grid {
@@ -408,6 +470,10 @@
 }
 
 @media (max-width: 1024px) {
+  .gv2-game-totals-grid {
+    grid-template-columns: 1fr;
+  }
+
   .gv2-teams-grid {
     grid-template-columns: 1fr;
   }

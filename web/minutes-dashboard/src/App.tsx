@@ -793,6 +793,7 @@ function App() {
             gameId={selectedGameId}
             date={selectedDate}
             runId={runId}
+            readOnly
             onGameChange={setSelectedGameId}
             onOpenLateSwap={() => setActiveTab('entry-manager')}
             onRunCompleted={(nextRunId) => {

@@ -18,6 +18,16 @@ import pandas as pd
 from projections import paths
 
 
+def _pick_shared_column(df_a: pd.DataFrame, df_b: pd.DataFrame, candidates: list[str]) -> str | None:
+    """Return first candidate present in both DataFrames."""
+    cols_a = set(df_a.columns)
+    cols_b = set(df_b.columns)
+    for col in candidates:
+        if col in cols_a and col in cols_b:
+            return col
+    return None
+
+
 def load_projections(data_root: Path, game_date: str, run_id: str) -> pd.DataFrame:
     """Load projections.parquet for a sim run."""
     path = (
@@ -94,6 +104,42 @@ def main():
     proj_a = load_projections(data_root, args.date, args.run_a)
     proj_b = load_projections(data_root, args.date, args.run_b)
 
+    # Development default: compare unconditional (DNP=0) summaries when available.
+    mean_col = _pick_shared_column(
+        proj_a,
+        proj_b,
+        ["dk_fpts_mean_uncond", "sim_dk_fpts_mean_uncond", "fpts_sim_uncond_mean", "dk_fpts_mean", "sim_dk_fpts_mean", "fpts_sim_cond_mean"],
+    )
+    p50_col = _pick_shared_column(
+        proj_a,
+        proj_b,
+        ["dk_fpts_p50_uncond", "sim_dk_fpts_p50_uncond", "fpts_sim_uncond_p50", "dk_fpts_p50", "sim_dk_fpts_p50", "fpts_sim_cond_p50"],
+    )
+    p95_col = _pick_shared_column(
+        proj_a,
+        proj_b,
+        ["dk_fpts_p95_uncond", "sim_dk_fpts_p95_uncond", "fpts_sim_uncond_p95", "dk_fpts_p95", "sim_dk_fpts_p95", "fpts_sim_cond_p95"],
+    )
+    std_col = _pick_shared_column(
+        proj_a,
+        proj_b,
+        ["dk_fpts_std_uncond", "sim_dk_fpts_std_uncond", "fpts_sim_uncond_std", "dk_fpts_std", "sim_dk_fpts_std", "fpts_sim_cond_std"],
+    )
+    missing_metric_cols = [name for name, col in {"mean": mean_col, "p50": p50_col, "p95": p95_col, "std": std_col}.items() if col is None]
+    if missing_metric_cols:
+        raise ValueError(f"Missing comparable projection columns for: {', '.join(missing_metric_cols)}")
+
+    proj_a_eval = (
+        proj_a[["player_id", mean_col, p50_col, p95_col, std_col]]
+        .rename(columns={mean_col: "fpts_mean_eval", p50_col: "fpts_p50_eval", p95_col: "fpts_p95_eval", std_col: "fpts_std_eval"})
+        .copy()
+    )
+    proj_b_eval = (
+        proj_b[["player_id", mean_col, p50_col, p95_col, std_col]]
+        .rename(columns={mean_col: "fpts_mean_eval", p50_col: "fpts_p50_eval", p95_col: "fpts_p95_eval", std_col: "fpts_std_eval"})
+        .copy()
+    )
+
     # Verify input run_ids match
     print("\n--- INPUT VERIFICATION ---")
     a_minutes = proj_a["minutes_run_id"].iloc[0] if "minutes_run_id" in proj_a.columns else "N/A"
@@ -105,6 +151,10 @@ def main():
 
     print(f"Run A: profile={a_profile} minutes_run_id={a_minutes} rates_run_id={a_rates}")
     print(f"Run B: profile={b_profile} minutes_run_id={b_minutes} rates_run_id={b_rates}")
+    print(
+        "Eval columns (uncond-preferred): "
+        f"mean={mean_col} p50={p50_col} p95={p95_col} std={std_col}"
+    )
 
     inputs_match = (a_minutes == b_minutes) and (a_rates == b_rates)
     if not inputs_match:
@@ -114,28 +164,28 @@ def main():
 
     # Task 1: Compare MEANS
     print("\n--- TASK 1: MEAN COMPARISON ---")
-    print(f"\nMax dk_fpts_mean:")
-    print(f"  Run A: {proj_a['dk_fpts_mean'].max():.4f}")
-    print(f"  Run B: {proj_b['dk_fpts_mean'].max():.4f}")
+    print(f"\nMax fpts mean ({mean_col}):")
+    print(f"  Run A: {proj_a_eval['fpts_mean_eval'].max():.4f}")
+    print(f"  Run B: {proj_b_eval['fpts_mean_eval'].max():.4f}")
 
-    print(f"\nTop-10 players by dk_fpts_mean (Run A):")
-    top_a = proj_a.nlargest(10, "dk_fpts_mean")[["player_id", "dk_fpts_mean", "dk_fpts_p50", "dk_fpts_p95", "dk_fpts_std"]]
+    print(f"\nTop-10 players by fpts mean ({mean_col}) (Run A):")
+    top_a = proj_a_eval.nlargest(10, "fpts_mean_eval")[["player_id", "fpts_mean_eval", "fpts_p50_eval", "fpts_p95_eval", "fpts_std_eval"]]
     print(top_a.to_string(index=False))
 
-    print(f"\nTop-10 players by dk_fpts_mean (Run B):")
-    top_b = proj_b.nlargest(10, "dk_fpts_mean")[["player_id", "dk_fpts_mean", "dk_fpts_p50", "dk_fpts_p95", "dk_fpts_std"]]
+    print(f"\nTop-10 players by fpts mean ({mean_col}) (Run B):")
+    top_b = proj_b_eval.nlargest(10, "fpts_mean_eval")[["player_id", "fpts_mean_eval", "fpts_p50_eval", "fpts_p95_eval", "fpts_std_eval"]]
     print(top_b.to_string(index=False))
 
     # Join and compute differences
-    merged = proj_a[["player_id", "dk_fpts_mean", "dk_fpts_p50", "dk_fpts_p95", "dk_fpts_std"]].merge(
-        proj_b[["player_id", "dk_fpts_mean", "dk_fpts_p50", "dk_fpts_p95", "dk_fpts_std"]],
+    merged = proj_a_eval[["player_id", "fpts_mean_eval", "fpts_p50_eval", "fpts_p95_eval", "fpts_std_eval"]].merge(
+        proj_b_eval[["player_id", "fpts_mean_eval", "fpts_p50_eval", "fpts_p95_eval", "fpts_std_eval"]],
         on="player_id",
         suffixes=("_a", "_b"),
         how="inner",
     )
-    merged["mean_diff"] = merged["dk_fpts_mean_b"] - merged["dk_fpts_mean_a"]
-    merged["p95_diff"] = merged["dk_fpts_p95_b"] - merged["dk_fpts_p95_a"]
-    merged["std_diff"] = merged["dk_fpts_std_b"] - merged["dk_fpts_std_a"]
+    merged["mean_diff"] = merged["fpts_mean_eval_b"] - merged["fpts_mean_eval_a"]
+    merged["p95_diff"] = merged["fpts_p95_eval_b"] - merged["fpts_p95_eval_a"]
+    merged["std_diff"] = merged["fpts_std_eval_b"] - merged["fpts_std_eval_a"]
     merged["mean_abs_diff"] = merged["mean_diff"].abs()
 
     print(f"\nJoined {len(merged)} players")
@@ -147,59 +197,57 @@ def main():
 
     # Task 2: P95 comparison
     print("\n--- TASK 2: P95 COMPARISON ---")
-    print(f"\nTop-10 by p95 (Run A):")
-    top_p95_a = proj_a.nlargest(10, "dk_fpts_p95")[["player_id", "dk_fpts_mean", "dk_fpts_p95"]]
+    print(f"\nTop-10 by p95 ({p95_col}) (Run A):")
+    top_p95_a = proj_a_eval.nlargest(10, "fpts_p95_eval")[["player_id", "fpts_mean_eval", "fpts_p95_eval"]]
     print(top_p95_a.to_string(index=False))
 
-    print(f"\nTop-10 by p95 (Run B):")
-    top_p95_b = proj_b.nlargest(10, "dk_fpts_p95")[["player_id", "dk_fpts_mean", "dk_fpts_p95"]]
+    print(f"\nTop-10 by p95 ({p95_col}) (Run B):")
+    top_p95_b = proj_b_eval.nlargest(10, "fpts_p95_eval")[["player_id", "fpts_mean_eval", "fpts_p95_eval"]]
     print(top_p95_b.to_string(index=False))
 
     # Top-10 by upside (p95 - mean)
-    proj_a["upside"] = proj_a["dk_fpts_p95"] - proj_a["dk_fpts_mean"]
-    proj_b["upside"] = proj_b["dk_fpts_p95"] - proj_b["dk_fpts_mean"]
+    proj_a_eval["upside"] = proj_a_eval["fpts_p95_eval"] - proj_a_eval["fpts_mean_eval"]
+    proj_b_eval["upside"] = proj_b_eval["fpts_p95_eval"] - proj_b_eval["fpts_mean_eval"]
 
-    print(f"\nTop-10 by upside (p95 - mean) (Run A):")
-    top_up_a = proj_a.nlargest(10, "upside")[["player_id", "dk_fpts_mean", "dk_fpts_p95", "upside"]]
+    print("\nTop-10 by upside (p95 - mean) (Run A):")
+    top_up_a = proj_a_eval.nlargest(10, "upside")[["player_id", "fpts_mean_eval", "fpts_p95_eval", "upside"]]
     print(top_up_a.to_string(index=False))
 
-    print(f"\nTop-10 by upside (p95 - mean) (Run B):")
-    top_up_b = proj_b.nlargest(10, "upside")[["player_id", "dk_fpts_mean", "dk_fpts_p95", "upside"]]
+    print("\nTop-10 by upside (p95 - mean) (Run B):")
+    top_up_b = proj_b_eval.nlargest(10, "upside")[["player_id", "fpts_mean_eval", "fpts_p95_eval", "upside"]]
     print(top_up_b.to_string(index=False))
 
     # Single top-mean player detailed stats
-    top_player_a = proj_a.loc[proj_a["dk_fpts_mean"].idxmax(), "player_id"]
-    top_player_b = proj_b.loc[proj_b["dk_fpts_mean"].idxmax(), "player_id"]
-
+    top_player_a = proj_a_eval.loc[proj_a_eval["fpts_mean_eval"].idxmax(), "player_id"]
     print(f"\nTop-mean player from Run A (player_id={top_player_a}):")
-    row_a = proj_a[proj_a["player_id"] == top_player_a].iloc[0]
-    row_b = proj_b[proj_b["player_id"] == top_player_a].iloc[0] if top_player_a in proj_b["player_id"].values else None
-    print(f"  Run A: mean={row_a['dk_fpts_mean']:.2f} p50={row_a['dk_fpts_p50']:.2f} p95={row_a['dk_fpts_p95']:.2f} std={row_a['dk_fpts_std']:.2f}")
+    row_a = proj_a_eval[proj_a_eval["player_id"] == top_player_a].iloc[0]
+    row_b = proj_b_eval[proj_b_eval["player_id"] == top_player_a].iloc[0] if top_player_a in proj_b_eval["player_id"].values else None
+    print(f"  Run A: mean={row_a['fpts_mean_eval']:.2f} p50={row_a['fpts_p50_eval']:.2f} p95={row_a['fpts_p95_eval']:.2f} std={row_a['fpts_std_eval']:.2f}")
     if row_b is not None:
-        print(f"  Run B: mean={row_b['dk_fpts_mean']:.2f} p50={row_b['dk_fpts_p50']:.2f} p95={row_b['dk_fpts_p95']:.2f} std={row_b['dk_fpts_std']:.2f}")
+        print(f"  Run B: mean={row_b['fpts_mean_eval']:.2f} p50={row_b['fpts_p50_eval']:.2f} p95={row_b['fpts_p95_eval']:.2f} std={row_b['fpts_std_eval']:.2f}")
 
     # Summary stats
     print("\n--- SUMMARY STATISTICS ---")
-    print(f"Mean of means (A): {proj_a['dk_fpts_mean'].mean():.4f}")
-    print(f"Mean of means (B): {proj_b['dk_fpts_mean'].mean():.4f}")
-    print(f"Mean of stds (A): {proj_a['dk_fpts_std'].mean():.4f}")
-    print(f"Mean of stds (B): {proj_b['dk_fpts_std'].mean():.4f}")
-    print(f"Mean of p95-mean (A): {proj_a['upside'].mean():.4f}")
-    print(f"Mean of p95-mean (B): {proj_b['upside'].mean():.4f}")
+    print(f"Mean of means (A): {proj_a_eval['fpts_mean_eval'].mean():.4f}")
+    print(f"Mean of means (B): {proj_b_eval['fpts_mean_eval'].mean():.4f}")
+    print(f"Mean of stds (A): {proj_a_eval['fpts_std_eval'].mean():.4f}")
+    print(f"Mean of stds (B): {proj_b_eval['fpts_std_eval'].mean():.4f}")
+    print(f"Mean of p95-mean (A): {proj_a_eval['upside'].mean():.4f}")
+    print(f"Mean of p95-mean (B): {proj_b_eval['upside'].mean():.4f}")
 
     # Detailed diff table for top players
     print("\n--- TOP-10 PLAYERS DETAILED DIFF ---")
-    top_ids = proj_a.nlargest(10, "dk_fpts_mean")["player_id"].tolist()
+    top_ids = proj_a_eval.nlargest(10, "fpts_mean_eval")["player_id"].tolist()
     diff_table = merged[merged["player_id"].isin(top_ids)].copy()
-    diff_table = diff_table.sort_values("dk_fpts_mean_a", ascending=False)
-    print(diff_table[["player_id", "dk_fpts_mean_a", "dk_fpts_mean_b", "mean_diff", "dk_fpts_std_a", "dk_fpts_std_b", "std_diff"]].to_string(index=False))
+    diff_table = diff_table.sort_values("fpts_mean_eval_a", ascending=False)
+    print(diff_table[["player_id", "fpts_mean_eval_a", "fpts_mean_eval_b", "mean_diff", "fpts_std_eval_a", "fpts_std_eval_b", "std_diff"]].to_string(index=False))
 
     # Stat-level breakdown (if columns available)
     stat_cols = ["pts_mean", "reb_mean", "ast_mean", "stl_mean", "blk_mean", "tov_mean"]
     available_stats = [c for c in stat_cols if c in proj_a.columns and c in proj_b.columns]
     if available_stats:
         print("\n--- STAT-LEVEL MEAN COMPARISON (Top player) ---")
-        top_id = proj_a.loc[proj_a["dk_fpts_mean"].idxmax(), "player_id"]
+        top_id = proj_a_eval.loc[proj_a_eval["fpts_mean_eval"].idxmax(), "player_id"]
         row_a = proj_a[proj_a["player_id"] == top_id].iloc[0]
         row_b = proj_b[proj_b["player_id"] == top_id].iloc[0]
         for stat in available_stats:

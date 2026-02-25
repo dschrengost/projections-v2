@@ -52,3 +52,48 @@ def test_load_rotation_historical_features_for_dnp_uses_latest_run_and_filters(t
     assert len(hist_out) == 1
     row_out = hist_out.iloc[0].to_dict()
     assert int(row_out["is_out"]) == 1
+
+
+def test_load_rotation_historical_features_for_dnp_full_history_mode_reads_cross_season(tmp_path) -> None:
+    data_root = tmp_path
+
+    labels_2024 = data_root / "labels" / "season=2024"
+    labels_2024.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {"game_date": "2025-01-05", "team_id": 1, "player_id": 10, "minutes": 18.0},
+        ]
+    ).to_parquet(labels_2024 / "boxscore_labels.parquet", index=False)
+
+    labels_2025 = data_root / "labels" / "season=2025"
+    labels_2025.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {"game_date": "2025-12-10", "team_id": 1, "player_id": 10, "minutes": 22.0},
+        ]
+    ).to_parquet(labels_2025 / "boxscore_labels.parquet", index=False)
+
+    hist_bounded = _load_rotation_historical_features_for_dnp(
+        data_root,
+        season=2025,
+        target_day=pd.Timestamp("2025-12-12"),
+        team_ids={1},
+        player_ids={10},
+        lookback_days=30,
+    )
+    assert len(hist_bounded) == 1
+    assert str(pd.Timestamp(hist_bounded.iloc[0]["game_date"]).date()) == "2025-12-10"
+
+    hist_full = _load_rotation_historical_features_for_dnp(
+        data_root,
+        season=2025,
+        target_day=pd.Timestamp("2025-12-12"),
+        team_ids={1},
+        player_ids={10},
+        lookback_days=None,
+    )
+    assert len(hist_full) == 2
+    assert sorted(pd.to_datetime(hist_full["game_date"]).dt.date.astype(str).tolist()) == [
+        "2025-01-05",
+        "2025-12-10",
+    ]

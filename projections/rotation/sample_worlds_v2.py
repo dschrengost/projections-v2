@@ -405,6 +405,8 @@ def summarize_worlds_to_projections(
             if stat_name in grp.columns:
                 vals = grp[stat_name].to_numpy(dtype=float, copy=False)
                 payload[f"{stat_name}_mean"] = float(vals[cond_mask].mean()) if cond_mask.any() else 0.0
+                payload[f"{stat_name}_mean_uncond"] = float(vals.mean())
+                payload[f"sim_{stat_name}_mean_uncond"] = float(vals.mean())
 
         rows.append(payload)
 
@@ -564,6 +566,13 @@ def main() -> None:
         game_feature_columns=list(config.game_feature_columns),
         team_feature_columns=list(config.team_feature_columns),
         minutes_label_col="minutes_label" if "minutes_label" in val_df.columns else "minutes",
+        overflow_protected_prior_play_prob_floor=float(config.overflow_protected_prior_play_prob_floor),
+        overflow_protected_prior_minutes_floor=float(config.overflow_protected_prior_minutes_floor),
+        overflow_risk_weight_consecutive_active_dnp=float(config.overflow_risk_weight_consecutive_active_dnp),
+        overflow_risk_weight_active_but_dnp_rate_last10=float(config.overflow_risk_weight_active_but_dnp_rate_last10),
+        overflow_risk_weight_inactive_streak_len=float(config.overflow_risk_weight_inactive_streak_len),
+        overflow_keep_weight_prior_play_prob=float(config.overflow_keep_weight_prior_play_prob),
+        overflow_keep_weight_prior_minutes=float(config.overflow_keep_weight_prior_minutes),
     )
     max_games = max(1, int(args.num_games))
     examples = examples[:max_games]

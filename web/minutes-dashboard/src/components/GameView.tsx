@@ -7,6 +7,7 @@ type GameViewProps = {
     gameId: string
     date?: string
     runId?: string | null
+    readOnly?: boolean
     onGameChange?: (gameId: string) => void
     onOverridesSaved?: () => void
     onOpenLateSwap?: () => void
@@ -18,6 +19,7 @@ export const GameView: React.FC<GameViewProps> = ({
     gameId,
     date,
     runId,
+    readOnly,
     onGameChange,
     onOverridesSaved,
     onOpenLateSwap,
@@ -30,6 +32,7 @@ export const GameView: React.FC<GameViewProps> = ({
             rows={rows}
             date={targetDate}
             runId={runId}
+            readOnly={Boolean(readOnly)}
             initialGameId={gameId}
             onGameChange={onGameChange}
             onRefresh={onOverridesSaved}

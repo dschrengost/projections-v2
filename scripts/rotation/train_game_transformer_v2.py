@@ -24,6 +24,13 @@ from projections.rotation.game_transformer_v2 import (
     FLOW_TARGET_COLUMNS_WITH_PF,
     GameLevelDataset,
     GameTransformerV2Config,
+    OVERFLOW_KEEP_WEIGHT_PRIOR_MINUTES,
+    OVERFLOW_KEEP_WEIGHT_PRIOR_PLAY_PROB,
+    OVERFLOW_RISK_WEIGHT_ACTIVE_BUT_DNP_RATE_LAST10,
+    OVERFLOW_RISK_WEIGHT_CONSECUTIVE_ACTIVE_DNP,
+    OVERFLOW_RISK_WEIGHT_INACTIVE_STREAK_LEN,
+    PROTECTED_PRIOR_MINUTES_FLOOR,
+    PROTECTED_PRIOR_PLAY_PROB_FLOOR,
     build_game_level_examples,
     build_game_transformer_v2,
     collate_game_level_examples,
@@ -898,6 +905,41 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--active-threshold", type=float, default=4.0)
     parser.add_argument("--min-active-count", type=int, default=5)
     parser.add_argument("--max-active-count", type=int, default=13)
+    parser.add_argument(
+        "--overflow-protected-prior-play-prob-floor",
+        type=float,
+        default=PROTECTED_PRIOR_PLAY_PROB_FLOOR,
+    )
+    parser.add_argument(
+        "--overflow-protected-prior-minutes-floor",
+        type=float,
+        default=PROTECTED_PRIOR_MINUTES_FLOOR,
+    )
+    parser.add_argument(
+        "--overflow-risk-weight-consecutive-active-dnp",
+        type=float,
+        default=OVERFLOW_RISK_WEIGHT_CONSECUTIVE_ACTIVE_DNP,
+    )
+    parser.add_argument(
+        "--overflow-risk-weight-active-but-dnp-rate-last10",
+        type=float,
+        default=OVERFLOW_RISK_WEIGHT_ACTIVE_BUT_DNP_RATE_LAST10,
+    )
+    parser.add_argument(
+        "--overflow-risk-weight-inactive-streak-len",
+        type=float,
+        default=OVERFLOW_RISK_WEIGHT_INACTIVE_STREAK_LEN,
+    )
+    parser.add_argument(
+        "--overflow-keep-weight-prior-play-prob",
+        type=float,
+        default=OVERFLOW_KEEP_WEIGHT_PRIOR_PLAY_PROB,
+    )
+    parser.add_argument(
+        "--overflow-keep-weight-prior-minutes",
+        type=float,
+        default=OVERFLOW_KEEP_WEIGHT_PRIOR_MINUTES,
+    )
 
     parser.add_argument("--w-minutes", type=float, default=1.0)
     parser.add_argument("--w-minutes-nll", type=float, default=1.0)
@@ -951,6 +993,20 @@ def main() -> None:
         raise ValueError("--phase3-num-samples must be > 0")
     if float(args.phase3_active_temperature) <= 0:
         raise ValueError("--phase3-active-temperature must be > 0")
+    if float(args.overflow_protected_prior_play_prob_floor) < 0.0 or float(args.overflow_protected_prior_play_prob_floor) > 1.0:
+        raise ValueError("--overflow-protected-prior-play-prob-floor must be within [0, 1]")
+    if float(args.overflow_protected_prior_minutes_floor) < 0.0:
+        raise ValueError("--overflow-protected-prior-minutes-floor must be >= 0")
+    if float(args.overflow_risk_weight_consecutive_active_dnp) < 0.0:
+        raise ValueError("--overflow-risk-weight-consecutive-active-dnp must be >= 0")
+    if float(args.overflow_risk_weight_active_but_dnp_rate_last10) < 0.0:
+        raise ValueError("--overflow-risk-weight-active-but-dnp-rate-last10 must be >= 0")
+    if float(args.overflow_risk_weight_inactive_streak_len) < 0.0:
+        raise ValueError("--overflow-risk-weight-inactive-streak-len must be >= 0")
+    if float(args.overflow_keep_weight_prior_play_prob) < 0.0:
+        raise ValueError("--overflow-keep-weight-prior-play-prob must be >= 0")
+    if float(args.overflow_keep_weight_prior_minutes) < 0.0:
+        raise ValueError("--overflow-keep-weight-prior-minutes must be >= 0")
 
     dataset_dir = _resolve_dataset_dir(args.dataset_dir)
     features_path = dataset_dir / "features.parquet"
@@ -1009,6 +1065,13 @@ def main() -> None:
         team_feature_columns=team_feature_cols,
         flow_label_columns=flow_label_cols,
         minutes_label_col="minutes_label" if "minutes_label" in merged.columns else "minutes",
+        overflow_protected_prior_play_prob_floor=float(args.overflow_protected_prior_play_prob_floor),
+        overflow_protected_prior_minutes_floor=float(args.overflow_protected_prior_minutes_floor),
+        overflow_risk_weight_consecutive_active_dnp=float(args.overflow_risk_weight_consecutive_active_dnp),
+        overflow_risk_weight_active_but_dnp_rate_last10=float(args.overflow_risk_weight_active_but_dnp_rate_last10),
+        overflow_risk_weight_inactive_streak_len=float(args.overflow_risk_weight_inactive_streak_len),
+        overflow_keep_weight_prior_play_prob=float(args.overflow_keep_weight_prior_play_prob),
+        overflow_keep_weight_prior_minutes=float(args.overflow_keep_weight_prior_minutes),
     )
     val_examples = build_game_level_examples(
         val_df,
@@ -1019,6 +1082,13 @@ def main() -> None:
         team_feature_columns=team_feature_cols,
         flow_label_columns=flow_label_cols,
         minutes_label_col="minutes_label" if "minutes_label" in merged.columns else "minutes",
+        overflow_protected_prior_play_prob_floor=float(args.overflow_protected_prior_play_prob_floor),
+        overflow_protected_prior_minutes_floor=float(args.overflow_protected_prior_minutes_floor),
+        overflow_risk_weight_consecutive_active_dnp=float(args.overflow_risk_weight_consecutive_active_dnp),
+        overflow_risk_weight_active_but_dnp_rate_last10=float(args.overflow_risk_weight_active_but_dnp_rate_last10),
+        overflow_risk_weight_inactive_streak_len=float(args.overflow_risk_weight_inactive_streak_len),
+        overflow_keep_weight_prior_play_prob=float(args.overflow_keep_weight_prior_play_prob),
+        overflow_keep_weight_prior_minutes=float(args.overflow_keep_weight_prior_minutes),
     )
 
     train_loader = DataLoader(
@@ -1059,6 +1129,13 @@ def main() -> None:
         include_pf_in_flow_targets=bool(include_pf_in_flow_targets),
         flow_num_blocks=int(args.flow_num_blocks),
         flow_scale_clip=float(args.flow_scale_clip),
+        overflow_protected_prior_play_prob_floor=float(args.overflow_protected_prior_play_prob_floor),
+        overflow_protected_prior_minutes_floor=float(args.overflow_protected_prior_minutes_floor),
+        overflow_risk_weight_consecutive_active_dnp=float(args.overflow_risk_weight_consecutive_active_dnp),
+        overflow_risk_weight_active_but_dnp_rate_last10=float(args.overflow_risk_weight_active_but_dnp_rate_last10),
+        overflow_risk_weight_inactive_streak_len=float(args.overflow_risk_weight_inactive_streak_len),
+        overflow_keep_weight_prior_play_prob=float(args.overflow_keep_weight_prior_play_prob),
+        overflow_keep_weight_prior_minutes=float(args.overflow_keep_weight_prior_minutes),
     )
 
     device = torch.device(str(args.device))

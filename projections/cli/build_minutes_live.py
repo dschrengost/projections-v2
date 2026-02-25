@@ -49,7 +49,9 @@ from projections.pipeline.status import JobStatus, write_status
 from projections.features.action_props import (
     ACTION_MARKET_FEATURE_COLUMNS,
     attach_action_props_features,
-    load_action_props_feature_snapshots_for_date,
+    build_action_props_feature_snapshots,
+    load_action_props_feature_snapshots_for_date_live,
+    load_rotowire_props_long_from_bronze,
 )
 from scrapers.nba_players import NbaPlayersScraper, PlayerProfile
 
@@ -1056,6 +1058,14 @@ def _build_minutes_live_logic(
             "enables roster fallback, skips active roster validation, and relaxes age checks."
         ),
     ),
+    allow_rotowire_props_fallback: bool = typer.Option(
+        False,
+        "--allow-rotowire-props-fallback/--no-allow-rotowire-props-fallback",
+        help=(
+            "If Action Network props snapshots are missing, fallback to Rotowire bronze props "
+            "converted into the same action-props feature schema."
+        ),
+    ),
     run_id_override: str | None = typer.Option(
         None,
         "--run-id",
@@ -1204,9 +1214,27 @@ def _build_minutes_live_logic(
             if not rotowire_df.empty and "lineup_role" in rotowire_df.columns:
                 # Filter to starters (both confirmed and projected) - lineup_role encodes status
                 starter_roles = rotowire_df["lineup_role"].isin(["confirmed_starter", "projected_starter"])
-                rotowire_starters = rotowire_df[starter_roles]
+                rotowire_starters = rotowire_df[starter_roles].copy()
 
                 if not rotowire_starters.empty:
+                    # Keep a per-player scrape timestamp so downstream lineup_available
+                    # contract can treat Rotowire-provided starter rows as lineup-present.
+                    name_norm_series = (
+                        rotowire_starters["player_name"]
+                        .astype(str)
+                        .map(_normalize_name_for_matching)
+                    )
+                    if "ingested_ts" in rotowire_starters.columns:
+                        ingested_ts = pd.to_datetime(rotowire_starters["ingested_ts"], utc=True, errors="coerce")
+                    else:
+                        ingested_ts = pd.Series(pd.NaT, index=rotowire_starters.index, dtype="datetime64[ns, UTC]")
+                    starter_ts_by_name = (
+                        pd.DataFrame({"name_norm": name_norm_series, "ingested_ts": ingested_ts})
+                        .dropna(subset=["name_norm"])
+                        .groupby("name_norm", sort=False)["ingested_ts"]
+                        .max()
+                    )
+
                     # Separate confirmed from projected
                     confirmed_mask = rotowire_starters["lineup_role"] == "confirmed_starter"
                     rotowire_confirmed_names = set(
@@ -1263,6 +1291,8 @@ def _build_minutes_live_logic(
                                 roster_df["is_projected_starter"] = False
                             if "lineup_role" not in roster_df.columns:
                                 roster_df["lineup_role"] = pd.NA
+                            if "lineup_timestamp" not in roster_df.columns:
+                                roster_df["lineup_timestamp"] = pd.NaT
 
                             # Upgrade is_projected_starter for all starters (confirmed or projected)
                             roster_df.loc[eligible, "is_projected_starter"] = True
@@ -1272,6 +1302,16 @@ def _build_minutes_live_logic(
                             roster_df.loc[confirmed_eligible, "is_confirmed_starter"] = True
                             roster_df.loc[eligible, "lineup_role"] = "projected_starter"
                             roster_df.loc[confirmed_eligible, "lineup_role"] = "confirmed_starter"
+
+                            # Stamp lineup_timestamp for Rotowire starter rows so
+                            # lineup_available contract remains consistent in live builds.
+                            rotowire_ts = pd.to_datetime(
+                                name_normalized.map(starter_ts_by_name),
+                                utc=True,
+                                errors="coerce",
+                            )
+                            rotowire_ts = rotowire_ts.fillna(run_ts)
+                            roster_df.loc[eligible, "lineup_timestamp"] = rotowire_ts.loc[eligible].values
 
                             projected_count = int(eligible.sum())
                             confirmed_count = int(confirmed_eligible.sum())
@@ -1819,27 +1859,56 @@ def _build_minutes_live_logic(
     action_props_snapshot_rows = 0
     action_props_matched_rows = 0
     action_props_snapshots = pd.DataFrame()
+    action_props_source = "none"
+    expected_props_teams = {
+        str(team).strip().upper()
+        for team in live_slice.get("team_tricode", pd.Series(dtype="object")).dropna().tolist()
+        if str(team).strip()
+    }
+    rotowire_props_root = data_root / "bronze" / "props"
     if action_props_dir.exists():
         try:
             snapshot_frames: list[pd.DataFrame] = []
-            action_props_snapshots = load_action_props_feature_snapshots_for_date(
-                props_dir=action_props_dir,
+            source_modes: list[str] = []
+            day_snapshots, day_source = load_action_props_feature_snapshots_for_date_live(
+                action_props_dir=action_props_dir,
                 game_date=target_day,
+                allow_rotowire_fallback=allow_rotowire_props_fallback,
+                rotowire_props_root=rotowire_props_root,
+                expected_team_tricodes=expected_props_teams,
             )
-            if not action_props_snapshots.empty:
-                snapshot_frames.append(action_props_snapshots)
-            next_day_snapshots = load_action_props_feature_snapshots_for_date(
-                props_dir=action_props_dir,
+            if not day_snapshots.empty:
+                snapshot_frames.append(day_snapshots)
+            if day_source != "none":
+                source_modes.append(day_source)
+
+            next_day_snapshots, next_day_source = load_action_props_feature_snapshots_for_date_live(
+                action_props_dir=action_props_dir,
                 game_date=target_day + pd.Timedelta(days=1),
+                allow_rotowire_fallback=allow_rotowire_props_fallback,
+                rotowire_props_root=rotowire_props_root,
+                expected_team_tricodes=expected_props_teams,
             )
             if not next_day_snapshots.empty:
                 snapshot_frames.append(next_day_snapshots)
+            if next_day_source != "none":
+                source_modes.append(next_day_source)
+
             action_props_snapshots = (
                 pd.concat(snapshot_frames, ignore_index=True)
                 if snapshot_frames
                 else pd.DataFrame()
             )
             action_props_snapshot_rows = int(len(action_props_snapshots))
+            action_props_source = "+".join(sorted(set(source_modes))) if source_modes else "none"
+            if "rotowire_fallback" in action_props_source:
+                msg = (
+                    "Action props fallback: using Rotowire-derived snapshots "
+                    "because Action Network snapshots were unavailable or "
+                    "did not align with slate teams."
+                )
+                warnings.append(msg)
+                typer.echo(f"[minutes-live] WARNING: {msg}")
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"Action props load failed: {exc}")
 
@@ -1859,8 +1928,65 @@ def _build_minutes_live_logic(
             .gt(0.0)
             .sum()
         )
+    if (
+        allow_rotowire_props_fallback
+        and action_props_matched_rows == 0
+        and "action_network" in action_props_source
+        and "rotowire_fallback" not in action_props_source
+    ):
+        fallback_frames: list[pd.DataFrame] = []
+        for fallback_day in (target_day, target_day + pd.Timedelta(days=1)):
+            rotowire_long = load_rotowire_props_long_from_bronze(
+                rotowire_props_root=rotowire_props_root,
+                game_date=fallback_day,
+            )
+            if rotowire_long.empty:
+                continue
+            fallback_frames.append(build_action_props_feature_snapshots(rotowire_long))
+        if fallback_frames:
+            fallback_snapshots = pd.concat(fallback_frames, ignore_index=True)
+            live_slice = attach_action_props_features(
+                live_slice,
+                fallback_snapshots,
+                strict_asof=True,
+                as_of_col="feature_as_of_ts",
+                tip_col="tip_ts",
+                game_date_offsets=(0, -1),
+                clamp_late_asof_to_game_date=True,
+            )
+            fallback_matched_rows = int(
+                pd.to_numeric(live_slice.get("an_has_any_props", 0), errors="coerce")
+                .fillna(0.0)
+                .gt(0.0)
+                .sum()
+            )
+            if fallback_matched_rows > 0:
+                action_props_snapshots = fallback_snapshots
+                action_props_snapshot_rows = int(len(fallback_snapshots))
+                action_props_matched_rows = fallback_matched_rows
+                action_props_source = "rotowire_fallback_zero_match"
+                msg = (
+                    "Action props fallback: switched to Rotowire-derived snapshots "
+                    "because Action Network snapshots produced zero matched rows."
+                )
+                warnings.append(msg)
+                typer.echo(f"[minutes-live] WARNING: {msg}")
+            else:
+                msg = (
+                    "Action props fallback attempted after zero Action matches, "
+                    "but Rotowire snapshots also produced zero matches."
+                )
+                warnings.append(msg)
+                typer.echo(f"[minutes-live] WARNING: {msg}")
+        else:
+            msg = (
+                "Action props fallback attempted after zero Action matches, "
+                "but no Rotowire snapshots were found."
+            )
+            warnings.append(msg)
+            typer.echo(f"[minutes-live] WARNING: {msg}")
     typer.echo(
-        f"[minutes-live] Action props: snapshots={action_props_snapshot_rows}, "
+        f"[minutes-live] Action props: source={action_props_source}, snapshots={action_props_snapshot_rows}, "
         f"matched_rows={action_props_matched_rows}, total_rows={len(live_slice)}"
     )
 
@@ -1998,6 +2124,8 @@ def _build_minutes_live_logic(
         "roster": _snapshot_stats(roster_builder_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
         "action_props": {
             "source_dir": str(action_props_dir),
+            "source": action_props_source,
+            "allow_rotowire_fallback": bool(allow_rotowire_props_fallback),
             "snapshot_rows": action_props_snapshot_rows,
             "matched_rows": action_props_matched_rows,
             "coverage_rate": (
@@ -2139,6 +2267,14 @@ def main(
             "enables roster fallback, skips active roster validation, and relaxes age checks."
         ),
     ),
+    allow_rotowire_props_fallback: bool = typer.Option(
+        False,
+        "--allow-rotowire-props-fallback/--no-allow-rotowire-props-fallback",
+        help=(
+            "If Action Network props snapshots are missing, fallback to Rotowire bronze props "
+            "converted into the same action-props feature schema."
+        ),
+    ),
     run_id_override: str | None = typer.Option(
         None,
         "--run-id",
@@ -2175,6 +2311,7 @@ def main(
             lock_buffer_minutes=lock_buffer_minutes,
             scraper_timeout=scraper_timeout,
             backfill_mode=backfill_mode,
+            allow_rotowire_props_fallback=allow_rotowire_props_fallback,
             run_id_override=run_id_override,
         )
         write_status(

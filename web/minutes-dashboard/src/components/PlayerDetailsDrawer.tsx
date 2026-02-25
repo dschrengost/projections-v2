@@ -41,6 +41,7 @@ export type PlayerDrawerData = {
 type PlayerDetailsDrawerProps = {
     open: boolean
     player: PlayerDrawerData | null
+    readOnly?: boolean
     onClose: () => void
     onOverrideChange: (playerId: string, next: PlayerOverrideState) => void
 }
@@ -69,6 +70,7 @@ const MetricRow: React.FC<{ label: string; metric: DrawerMetric }> = ({ label, m
 export const PlayerDetailsDrawer: React.FC<PlayerDetailsDrawerProps> = ({
     open,
     player,
+    readOnly = false,
     onClose,
     onOverrideChange,
 }) => {
@@ -97,16 +99,18 @@ export const PlayerDetailsDrawer: React.FC<PlayerDetailsDrawerProps> = ({
                     <button type="button" onClick={onClose}>Close</button>
                 </div>
 
-                <section className="gv2-drawer-section">
-                    <h4>Target Minutes</h4>
-                    <div className="muted gv2-band-note">Sets resolved mean minutes μ; worlds remain stochastic.</div>
-                    <OverrideControl
-                        value={player.override}
-                        baselineMinutes={player.baselineMinutes}
-                        resolvedMinutes={player.resolvedMinutes}
-                        onChange={(next) => onOverrideChange(player.player_id, next)}
-                    />
-                </section>
+                {!readOnly ? (
+                    <section className="gv2-drawer-section">
+                        <h4>Target Minutes</h4>
+                        <div className="muted gv2-band-note">Sets resolved mean minutes μ; worlds remain stochastic.</div>
+                        <OverrideControl
+                            value={player.override}
+                            baselineMinutes={player.baselineMinutes}
+                            resolvedMinutes={player.resolvedMinutes}
+                            onChange={(next) => onOverrideChange(player.player_id, next)}
+                        />
+                    </section>
+                ) : null}
 
                 <section className="gv2-drawer-section">
                     <h4>Projections</h4>
@@ -123,7 +127,7 @@ export const PlayerDetailsDrawer: React.FC<PlayerDetailsDrawerProps> = ({
                     <MetricRow label="TO" metric={player.metrics.to} />
                 </section>
 
-                {player.whyChanged ? (
+                {!readOnly && player.whyChanged ? (
                     <section className="gv2-drawer-section">
                         <h4>Why Changed</h4>
                         <div className="gv2-why-changed">{player.whyChanged}</div>

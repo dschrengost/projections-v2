@@ -76,6 +76,33 @@ def _filter_games_by_date(
     return {date: games for date, games in games_by_date.items() if date in allowed_dates}
 
 
+def _load_games_from_any_cache(
+    bronze_dir: Path,
+    *,
+    start_date: str,
+    end_date: str,
+    utc_buffer_days: int,
+) -> tuple[dict[str, list[dict]], Path | None]:
+    """Try to load requested dates from any existing cache file (newest first)."""
+    cache_files = sorted(bronze_dir.glob("games_cache_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for cache_path in cache_files:
+        try:
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict) or not payload:
+            continue
+        filtered = _filter_games_by_date(
+            payload,
+            start_date=start_date,
+            end_date=end_date,
+            utc_buffer_days=utc_buffer_days,
+        )
+        if filtered:
+            return filtered, cache_path
+    return {}, None
+
+
 def _expand_id_window(start_id: int, end_id: int, *, expansion: int) -> tuple[int, int]:
     return (max(230000, start_id - expansion), end_id + expansion)
 
@@ -398,6 +425,18 @@ def main():
         else:
             print("WARNING: cached game list is empty — deleting stale cache and rescanning")
             cache_file.unlink()
+
+    if not use_cache:
+        cached_any, cache_source = _load_games_from_any_cache(
+            BRONZE_DIR,
+            start_date=start_date,
+            end_date=end_date,
+            utc_buffer_days=max(0, int(args.utc_date_buffer_days)),
+        )
+        if cached_any:
+            games_by_date = cached_any
+            use_cache = True
+            print(f"\nLoaded requested date window from existing cache: {cache_source}")
 
     if use_cache:
         all_games = []
