@@ -74,7 +74,6 @@ from projections.runtime_stamp import enforce_clean_tree, enforce_prod_sanity, l
 
 
 PROJECT_ROOT = paths.get_project_root()
-_DEFAULT_UV_PATH = Path("/home/daniel/.local/bin/uv")
 
 FEATURES_ROOT = "features_gtv2_v1"
 SCORES_ROOT = "gtv2_scores"
@@ -115,18 +114,16 @@ def _cli_compatible_ts(ts_value: str) -> str:
     return ts_utc.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _uv_bin() -> str:
-    env_uv = os.environ.get("UV_BIN")
-    if env_uv:
-        if Path(env_uv).exists():
-            return env_uv
-        raise FileNotFoundError(f"UV_BIN={env_uv} specified but file does not exist")
-    if _DEFAULT_UV_PATH.exists():
-        return str(_DEFAULT_UV_PATH)
-    which_uv = shutil.which("uv")
-    if which_uv:
-        return which_uv
-    raise FileNotFoundError("Could not find 'uv' executable")
+def _subprocess_python() -> str:
+    # Use the exact interpreter running the flow to avoid `uv run` syncing
+    # and mutating site-packages while the worker is active.
+    override = os.environ.get("PROJECTIONS_SUBPROCESS_PYTHON")
+    if override:
+        resolved = shutil.which(override) if Path(override).name == override else override
+        if resolved and Path(resolved).exists():
+            return str(resolved)
+        raise FileNotFoundError(f"PROJECTIONS_SUBPROCESS_PYTHON={override} does not exist")
+    return sys.executable
 
 
 def _run_python_module(
@@ -138,7 +135,7 @@ def _run_python_module(
 ) -> None:
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
-    cmd = [_uv_bin(), "run", "python", "-m", module, *args]
+    cmd = [_subprocess_python(), "-m", module, *args]
     result = subprocess.run(
         cmd,
         cwd=str(PROJECT_ROOT),
