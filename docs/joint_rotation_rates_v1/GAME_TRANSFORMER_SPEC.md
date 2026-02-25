@@ -2877,3 +2877,100 @@ After retraining, verify:
 - H1 sweep results: `/home/daniel/projections-data/artifacts/experiments/gtv2_clip_sweep/20260225T151837Z/`
 - H2 lambda sweep: `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_priors_contract_livefill_20260224T183839Z/seed_123/h2_ctx_lambda_sweep_summary.csv`
 - Current promoted bundle: check `config/rotation_set_minutes_live.json` for path
+
+---
+
+## H1+H2 Combined Retrain Results (2026-02-25)
+
+### Training Summary
+
+Completed combined retrain with both H1 (scale_clip=3.0) and H2 (attention context) fixes.
+
+**Training approach:**
+- Phase 1: 15 epochs (backbone only)
+- Phase 2+3: 25 epochs warm-started from phase 1 checkpoint
+
+**Final training metrics:**
+- `best_val_total`: 14.61
+- `val_minutes_mae`: 3.09
+- `val_flow_nll`: 1.16
+- `val_crps_fpts`: 4.92
+- NLL guard: 2 backoffs (a2_scale → 0.25), no rollback
+
+**Run directory:** `/home/daniel/projections-data/training/runs/gtv2_h1h2_phase23_20260225`
+
+### Tier-Sliced FPTS Evaluation (100 games, 200 worlds)
+
+| Tier | N | Actual | Baseline Bias | H1+H2 Bias | Bias Δ | MAE Δ |
+|------|---|--------|---------------|------------|--------|-------|
+| Elite (35+) | 372 | 44.1 | **-14.5** | -11.6 | **+2.9** ✓ | +1.7 ✓ |
+| Star (25-34) | 416 | 29.1 | -4.4 | -5.5 | -1.1 | -2.8 |
+| Starter (15-24) | 595 | 19.7 | +1.6 | -2.0 | -0.5 | -1.7 |
+| Role (5-14) | 508 | 10.0 | **+6.8** | +1.6 | **+5.2** ✓ | +1.6 ✓ |
+| Bench (<5) | 1109 | 0.5 | **+10.7** | +1.9 | **+8.8** ✓ | +8.5 ✓ |
+
+### Team-Level Accounting
+
+| Metric | Baseline | H1+H2 | Change |
+|--------|----------|-------|--------|
+| Team total bias | **+45.1 pts** | **-24.3 pts** | -69.4 |
+| Team MAE | 49.8 | 31.3 | -18.5 ✓ |
+
+**Total FPTS flow (all 3000 player-games):**
+
+| Tier | Actual | Baseline | H1+H2 | Delta |
+|------|--------|----------|-------|-------|
+| Elite (35+) | 16,397 | 11,009 | 12,070 | +1,061 |
+| Star (25-34) | 12,092 | 10,256 | 9,810 | -445 |
+| Starter (15-24) | 11,722 | 12,657 | 10,516 | -2,141 |
+| Role (5-14) | 5,092 | 8,525 | 5,892 | -2,633 |
+| Bench (<5) | 541 | **12,423** | 2,700 | **-9,723** |
+| **TOTAL** | 45,843 | **54,869** (+20%) | **40,987** (-11%) | -13,882 |
+
+### Key Findings
+
+1. **Elite under-projection partially addressed**: Bias improved from -14.5 to -11.6 (20% reduction)
+
+2. **Bench over-prediction fixed**: Bias collapsed from +10.7 to +1.9 (82% reduction)
+   - Baseline was predicting 12,423 total FPTS for bench players who scored only 541
+   - This was the primary source of team-level inflation
+
+3. **Team totals now under-predict**: Baseline had +45.1 team bias (inflation); H1+H2 has -24.3 (deflation)
+   - The attention mechanism is being too conservative overall
+   - Points were removed from the system, not redistributed to stars
+
+4. **Middle tiers slight regression**: Star/Starter MAE slightly worse — attention may over-distribute
+
+### Interpretation
+
+The baseline had a **team-level inflation problem**, not just a distribution problem. The mean-pooled
+context was inflating bench/role predictions massively (+10.7 and +6.8 bias respectively).
+
+H1+H2 fixed the inflation but overcorrected — the gated attention learns to down-weight predictions
+more than intended. Potential follow-up tuning:
+- Initialize gate bias higher (start closer to mean-pooling)
+- Add team-total regularization during training
+- Tune attention temperature
+
+### Implementation Changes
+
+**Code changes:**
+1. `projections/rotation/joint_game_flow.py`:
+   - Added `_GatedTeamAttention` class (cross-attention from player to teammates)
+   - Added `_GatedGameAttention` class (cross-attention to all valid players)
+   - Modified `_AffineCouplingConditioner` to support `context_mode` parameter
+   - Gate interpolates: `g * attended_ctx + (1-g) * mean_ctx`
+
+2. `projections/rotation/game_transformer_v2.py`:
+   - Updated `GameTransformerV2Config` defaults: `flow_scale_clip=3.0`, `flow_context_mode="attention"`
+   - Added backward-compatible config loading (old configs default to `"mean"` and `2.0`)
+
+3. `scripts/rotation/train_game_transformer_v2.py`:
+   - Added `--flow-context-mode` CLI argument
+
+### Artifacts
+
+- H1+H2 model: `/home/daniel/projections-data/training/runs/gtv2_h1h2_phase23_20260225/`
+- Worlds evaluation: `worlds_eval_full.parquet` (100 games, 200 worlds)
+- Tier comparison: `tier_comparison.csv`
+- Promoted bundle: `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/h1h2_phase23_20260225/`

@@ -90,6 +90,13 @@ class GameTransformerV2Config:
     def from_dict(cls, payload: dict[str, Any]) -> "GameTransformerV2Config":
         known = {f.name for f in fields(cls)}
         filtered = {k: v for k, v in dict(payload).items() if k in known}
+        # Backward-compatible defaults for models trained before H1+H2 changes
+        # If config doesn't have flow_context_mode, use "mean" (original behavior)
+        if "flow_context_mode" not in filtered:
+            filtered["flow_context_mode"] = "mean"
+        # If config doesn't have flow_scale_clip, use 2.0 (original default)
+        if "flow_scale_clip" not in filtered:
+            filtered["flow_scale_clip"] = 2.0
         return cls(**filtered)
 
     def save(self, path: Path) -> None:
