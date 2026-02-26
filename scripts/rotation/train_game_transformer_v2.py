@@ -780,11 +780,24 @@ def _run_epoch(
                 # Extract team-level truth counts from flow_targets (B, 2, 15, S)
                 # Sum across players per team to get team totals
                 ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
-                fga2_i = ftc.index("fga2")
-                fga3_i = ftc.index("fga3")
-                fta_i = ftc.index("fta")
-                oreb_i = ftc.index("oreb")
-                tov_i = ftc.index("tov")
+                required_cols = ["fga2", "fga3", "fta", "oreb", "tov"]
+                missing_required_cols = [name for name in required_cols if name not in ftc]
+                if missing_required_cols:
+                    raise RuntimeError(
+                        f"Missing required flow target columns for possession backbone: {missing_required_cols}",
+                    )
+                fga2_i = _flow_index(ftc, "fga2")
+                fga3_i = _flow_index(ftc, "fga3")
+                fta_i = _flow_index(ftc, "fta")
+                oreb_i = _flow_index(ftc, "oreb")
+                tov_i = _flow_index(ftc, "tov")
+                max_required_idx = max(fga2_i, fga3_i, fta_i, oreb_i, tov_i)
+                if flow_targets.ndim != 4 or int(flow_targets.shape[-1]) <= int(max_required_idx):
+                    raise RuntimeError(
+                        "Possession backbone requires populated flow_targets stats. "
+                        f"Got flow_targets shape={tuple(flow_targets.shape)} with required index={max_required_idx}. "
+                        "Use --enable-phase2-flow so labels_boxscore_counts are loaded.",
+                    )
 
                 # flow_targets is (B, 2, 15, S); valid players mask is player_valid_mask (B, 2, 15)
                 ft = flow_targets  # (B, 2, 15, S)
@@ -1088,6 +1101,13 @@ def main() -> None:
     _set_seed(int(args.seed))
     if bool(args.enable_phase3_decision) and not bool(args.enable_phase2_flow):
         raise ValueError("--enable-phase3-decision requires --enable-phase2-flow")
+    if (bool(args.enable_possession_backbone) or bool(args.enable_three_pa_share)) and not bool(args.enable_phase2_flow):
+        raise ValueError(
+            "--enable-possession-backbone/--enable-three-pa-share require --enable-phase2-flow "
+            "(backbone supervision uses flow count labels)",
+        )
+    if bool(args.enable_three_pa_share) and not bool(args.enable_possession_backbone):
+        raise ValueError("--enable-three-pa-share requires --enable-possession-backbone")
     if int(args.phase3_num_samples) <= 0:
         raise ValueError("--phase3-num-samples must be > 0")
     if float(args.phase3_active_temperature) <= 0:

@@ -849,19 +849,23 @@ class GameTransformerV2(nn.Module):
         poss_out: PossessionHeadOutputs | None = None
         backbone_out: TeamEventBackboneOutputs | None = None
         if self.enable_possession_backbone and self.possession_head is not None and self.event_backbone is not None:
-            poss_out = self.possession_head(game_state, sample=bool(sample_backbone))
+            # Detach shared encoder outputs so backbone head gradients don't
+            # destabilize the already-trained transformer during early epochs.
+            game_state_bb = game_state.detach()
+            team_states_bb = team_states.detach()
+            poss_out = self.possession_head(game_state_bb, sample=bool(sample_backbone))
             if poss_out.sampled_poss is not None:
                 poss_for_backbone = poss_out.sampled_poss
             else:
                 # During training (no sampling), use the predicted mean
                 poss_for_backbone = poss_out.mu
             backbone_out = self.event_backbone(
-                team_states, game_state, poss_for_backbone, sample=bool(sample_backbone),
+                team_states_bb, game_state_bb, poss_for_backbone, sample=bool(sample_backbone),
             )
             # Optional shot-mix latent
             if self.three_pa_share_head is not None and backbone_out is not None:
                 three_pa_share = self.three_pa_share_head(
-                    team_states, game_state, backbone_out.fga, sample=bool(sample_backbone),
+                    team_states_bb, game_state_bb, backbone_out.fga, sample=bool(sample_backbone),
                 )
                 backbone_out = TeamEventBackboneOutputs(
                     fga=backbone_out.fga,
