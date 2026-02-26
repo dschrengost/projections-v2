@@ -3296,14 +3296,14 @@ What to look for:
 PROJECTIONS_DATA_ROOT=/home/daniel/projections-data \
 uv run python scripts/rotation/train_game_transformer_v2.py \
   --dataset-dir $PROJECTIONS_DATA_ROOT/training/datasets/joint_rotation_rates_v1_priors_contract_livefill_overflowpol_20260224T200110Z \
-  --out-dir /path/to/run_dir \
-  --init-model-pt /path/to/prior_run/model.pt \
+  --out-dir $PROJECTIONS_DATA_ROOT/training/runs/gtv2_poss_backbone_v1 \
+  --init-model-pt $PROJECTIONS_DATA_ROOT/training/runs/gtv2_h1h2_phase23_20260225/model.pt \
   --val-days 14 \
   --batch-size 32 \
   --epochs 40 \
   --lr 1e-3 \
   --seed 42 \
-  --device cuda \
+  --device cpu \
   --enable-phase2-flow \
   --flow-context-mode attention \
   --flow-scale-clip 3.0 \
