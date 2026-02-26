@@ -9,7 +9,6 @@
 ### 1.1 Current gap
 
 The current production stack is still a staged pipeline:
-
 ```
 Minutes model -> rates model -> sim_v2 worlds -> quantiles -> QuickBuild optimizer
 ```
@@ -2974,3 +2973,258 @@ more than intended. Potential follow-up tuning:
 - Worlds evaluation: `worlds_eval_full.parquet` (100 games, 200 worlds)
 - Tier comparison: `tier_comparison.csv`
 - Promoted bundle: `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/h1h2_phase23_20260225/`
+
+
+15. Possession-Coupled Event Backbone Refactor (2026-02-25)
+
+15.1 Motivation
+
+Observed issue: sampled worlds can produce materially different implied possessions for opponents in the same game (for example, poss_home vs poss_away diverging by 20+). This violates a hard game invariant (opponents share possessions) and is a primary suspect for systematic suppression of player stat lines and team totals.
+
+This spec revision adds an explicit game-level possession latent and rewrites the generative head to ensure possession symmetry by construction, not by soft penalties or post-hoc rescaling.
+
+15.2 Non-negotiable invariants
+
+In every sampled world:
+	1.	Possession symmetry: the two teams’ implied possessions are near-equal.
+	2.	Count feasibility: all existing count constraints remain enforced:
+	•	non-negative counts
+	•	fg2m <= fga2, fg3m <= fga3, ftm <= fta
+	•	derived consistency (pts, reb, etc.)  ￼
+	3.	Minutes feasibility: existing minutes constraints remain unchanged (sum=240, bounds).
+
+15.3 Proposed factorization change
+
+Current factorization (high-level):
+
+p(A, M, Y | X) = p(A|X) * p(M|A,X) * p_flow(Y | A,M,X)
+
+New factorization adds an explicit game-volume latent and a joint team-event backbone:
+
+p(A, M, P, E, Y | X) = p(A|X) * p(M|A,X) * p(P,E|X) * p_backbone(E_team | P,E,X) * p_player(Y | A,M,E_team,X)
+
+Where:
+	•	P: shared game possessions latent (per-team possessions scale; single scalar per game-world)
+	•	E_team: joint team event backbone per world for both teams
+	•	Y: player boxscore counts (existing target tensor)
+
+15.4 New modeled objects
+
+15.4.1 Game possessions latent (P)
+Add a head off H_game that predicts a distribution for P_game (per-team possessions):
+	•	Output: mu_P, sigma_P (Gaussian or Student-t)
+	•	Sampling: P_game_world ~ p(P | X) (one value shared by both teams)
+
+Truth label:
+	•	P_true_team = fga - oreb + tov + 0.44*fta from boxscore counts
+	•	P_true_game = mean(P_true_team_home, P_true_team_away) (stabilizes noisy ORB term)
+
+Loss:
+	•	proper scoring rule (NLL or CRPS in 1D) on P_game
+
+15.4.2 Joint team event backbone (E_team)
+Introduce a joint team-level event vector per world:
+
+E_team = [FGA_home, FTA_home, TOV_home, OREB_home, FGA_away, FTA_away, TOV_away, OREB_away]
+
+Key: both teams’ backbone is generated in a single joint module and uses the shared P_game_world.
+
+Enforcement (preferred):
+	•	Parameterize in a way that satisfies the possession identity by construction:
+
+Poss_team = FGA_team - OREB_team + TOV_team + 0.44*FTA_team ≈ P_game_world
+
+Implementation approach:
+	•	sample bounded rates for FTA, TOV, OREB (for each team) in a stable space (sigmoid/logit-normal)
+	•	compute FGA_team deterministically to satisfy the identity:
+	•	FGA_team = P_game_world + OREB_team - TOV_team - 0.44*FTA_team
+	•	apply lightweight numeric cleanup only for rounding / feasibility edge cases (should be rare)
+
+This removes the possibility of “87 vs 133” possession worlds.
+
+15.4.3 Optional: explicit game efficiency latent (E)
+If totals remain systematically deflated or inflated after possession symmetry is fixed, add an explicit PPP/efficiency latent:
+	•	PPP_game_world ~ p(PPP | X) off H_game
+	•	Use it as conditioning for downstream made-shot / FT make processes (or as a calibration prior for shot-making rates)
+
+This is strictly optional; do not block the possession refactor on it.
+
+15.5 Relationship to 3PA / 3P%
+
+No additional modeling required for 3PA or 3P%.
+	•	fga3 and fg3m are already explicit flow targets.  ￼
+	•	3p% should remain a derived statistic (fg3m / fga3) to avoid undefined labels at fga3=0 and to preserve internal consistency.
+
+If needed for stability, introduce a shot-mix prior inside the team event backbone (for example a latent 3pa_share_team), but do not add 3p% as a separate supervised target.
+
+15.6 Training and evaluation changes
+
+15.6.1 Loss additions
+Add:
+	•	L_poss: proper scoring rule on P_game
+	•	L_event_backbone: supervised loss for E_team vs truth team counts (NLL for counts or Huber/pinball)
+
+Do not rely on a standalone symmetry penalty as the primary mechanism; symmetry must be structural.
+
+15.6.2 Validation gates (hard)
+Add gates to fail runs if violated:
+	•	possession symmetry: p95(|Poss_home - Poss_away|) <= 3 (start at 5 for first implementation, tighten to 3 after stable)
+	•	team-total sanity checks remain as tracked metrics, but symmetry is a hard invariant.
+
+Also log per-game summaries for quick diagnosis.
+
+15.7 Implementation roadmap impact
+
+This refactor is a breaking change to JointGameFlow and world sampling:
+	•	Replace the per-player-only flow sampling contract with:
+	1.	sample P_game
+	2.	sample E_team jointly (home+away)
+	3.	sample player-level outcomes conditional on E_team (allocation + per-player flow)
+
+Keep downstream output contract unchanged (worlds/parquet schema remains compatible).
+
+15.8 Agent handoff (next implementation pass)
+
+Goal for next agent:
+	1.	Implement P_game head and supervised training for P_true_game.
+	2.	Implement joint E_team generator that enforces possession identity by construction.
+	3.	Wire E_team into player generation (allocation + existing per-player stat modeling).
+	4.	Add validation gates and a standalone diagnostic script to report Poss_home, Poss_away, and p95(|delta|) per game on sampled worlds.
+	5.	Retrain Phase 1/2/3 per existing schedule after refactor.
+
+Non-goals:
+	•	Do not add redundant percentage targets (e.g., 3p%).
+	•	Do not add post-hoc rescaling/clipping to “fix” symmetry; fix must be structural.
+
+
+15.9 Team Shot-Mix Latent (3PA Share)
+
+15.9.1 Motivation
+
+After enforcing possession symmetry, remaining stat-line suppression or tail failures may arise from insufficient modeling of shot distribution (especially 3PA concentration). The model already includes fga3 and fg3m as explicit targets, and 3p% remains derived.  ￼
+
+However, without a team-level shot-mix latent, the model may struggle to express regimes such as:
+	•	high-variance “bombing threes” games,
+	•	opponent-driven perimeter inflation/deflation,
+	•	injury-driven shot reallocation toward 3PT-heavy players.
+
+15.9.2 Design
+
+Add a team-level latent:
+
+three_pa_share_team ∈ (0,1)
+
+Per team, per world:
+	•	3PA_team = three_pa_share_team * FGA_team
+	•	2PA_team = FGA_team - 3PA_team
+
+Parameterization:
+	•	Model three_pa_share_team via logit-normal or Beta distribution conditioned on H_team.
+	•	Supervise against truth:
+	•	three_pa_share_true = fga3 / max(FGA, ε)
+
+Loss:
+	•	Proper scoring rule in logit space (NLL) or Huber/pinball on share.
+
+Important:
+	•	Do not model 3p% separately.
+	•	Made shots remain derived from:
+	•	fg3m conditional on 3PA_team
+	•	fg2m conditional on 2PA_team
+
+This preserves count consistency and avoids redundant percentage supervision.
+
+⸻
+
+15.10 Residual Distribution Upgrade (Student-t → Spline Coupling Fallback)
+
+15.10.1 Motivation
+
+Initial implementation of the joint event backbone should use:
+	•	Student-t residual noise for:
+	•	P_game
+	•	backbone rates (FTA, TOV, OREB)
+	•	share logits
+
+Rationale:
+	•	Heavy-tailed base reduces need for extreme affine scaling.
+	•	Simpler and more stable than complex flow couplers.
+	•	Lower risk of reintroducing “scale_clip” style tuning.
+
+However, if after possession symmetry and shot-mix refactor:
+	•	star p90/p95 FPTS remain suppressed,
+	•	event residuals exhibit skew not captured by Student-t,
+	•	or calibration plots show systematic tail undercoverage,
+
+we escalate to spline-based coupling.
+
+15.10.2 Spline Coupling Upgrade Path
+
+If Student-t is insufficient:
+	1.	Replace affine coupling layers for continuous residual blocks with Rational Quadratic Spline (RQS) coupling.
+	2.	Use fixed bin count (e.g., 8–16) with:
+	•	minimum bin width
+	•	minimum bin height
+	•	minimum derivative constraints
+	3.	Keep:
+	•	no per-slate hyperparameter knobs,
+	•	no dynamic bin counts.
+
+Design principles:
+	•	Coupling applies only in unconstrained latent spaces (e.g., logit rates, unconstrained residuals).
+	•	Hard structural constraints (possession identity, count feasibility) remain outside the spline and enforced by parameterization.
+	•	Remove scale clipping logic for these layers once spline coupling is stable.
+
+15.10.3 Guardrails
+	•	Do not introduce new tuning weights for spline behavior.
+	•	Keep coupling hyperparameters constant in config.
+	•	Add calibration diagnostics:
+	•	p90/p95 coverage for top-5 minutes players,
+	•	tail coverage vs empirical quantiles.
+
+Escalation rule:
+	•	Only migrate to spline coupling if Student-t residuals demonstrably fail tail calibration on validation after possession + shot-mix refactor.
+
+⸻
+
+15.11 Updated Refactor Checklist (Consolidated)
+
+Next implementation pass must:
+	1.	Implement shared P_game latent and supervised loss.
+	2.	Implement joint E_team backbone enforcing possession identity by construction.
+	3.	Add optional three_pa_share_team latent within backbone.
+	4.	Keep 3p% derived; do not add separate percentage targets.
+	5.	Use Student-t residuals initially.
+	6.	Add spline coupling only if heavy-tail base is insufficient.
+	7.	Add hard validation gate:
+	•	p95(|Poss_home - Poss_away|) <= 3 (tightened from 5 after stabilization).
+	8.	Retrain full Phase 1/2/3 schedule.
+
+Non-goals:
+	•	No post-hoc possession rescaling.
+	•	No additional manual loss weights for symmetry.
+	•	No new per-slate hyperparameters.
+
+⸻
+
+Agent Handoff Note (Next Session)
+
+This is a structural rewrite. Preserve:
+	•	Existing data contracts (flow target ordering, parquet schema).
+	•	Existing minutes and active-set heads.
+	•	Existing evaluation dashboards.
+
+Replace:
+	•	Independent team stat emergence inside player-level flow.
+	•	Soft possession penalties.
+
+With:
+	•	Shared game possession latent.
+	•	Joint team event backbone.
+	•	Allocation-based player stat generation.
+
+Primary success criteria:
+	1.	No impossible possession asymmetry in worlds.
+	2.	Team totals calibrated without manual weight tuning.
+	3.	Star-level tails (p90/p95) not systematically suppressed.
+	4.	No regression in minutes feasibility or count consistency.
