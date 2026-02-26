@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 from collections import Counter
 from datetime import datetime, timezone
@@ -13,6 +14,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
+
+from projections.rotation.possession_backbone import FTA_POSS_COEFF
 from torch.utils.data import DataLoader
 
 from projections.minutes import PLAY_THRESHOLD_MINUTES, ROTATION_THRESHOLD_MINUTES
@@ -27,6 +30,8 @@ from projections.rotation.game_transformer_v2 import (
     collate_game_level_examples,
 )
 from projections.rotation.set_model import zfill_game_id_series
+
+logger = logging.getLogger(__name__)
 
 JOIN_KEYS = ["game_id", "team_id", "player_id", "game_date"]
 
@@ -166,6 +171,55 @@ def check_world_contracts(
         )
     out["total_violations"] = int(sum(out.values()))
     return out
+
+
+def check_possession_symmetry(
+    *,
+    flow_values: torch.Tensor,
+    valid_mask: torch.Tensor,
+    team_index: torch.Tensor,
+    flow_target_columns: list[str],
+) -> dict[str, float]:
+    """Compute possession symmetry diagnostics from sampled world stats.
+
+    Returns a dict with:
+      - poss_home_mean, poss_away_mean: average team possessions
+      - poss_delta_abs_mean: mean |home - away| possession gap
+      - poss_delta_abs_p95: p95 |home - away| possession gap
+      - poss_delta_abs_max: max |home - away| possession gap
+    """
+    if flow_values.ndim != 3:
+        raise ValueError("flow_values must have shape (N, 30, S)")
+
+    valid = valid_mask.to(dtype=torch.bool)
+    fga2_idx = _flow_idx(flow_target_columns, "fga2")
+    fga3_idx = _flow_idx(flow_target_columns, "fga3")
+    fta_idx = _flow_idx(flow_target_columns, "fta")
+    oreb_idx = _flow_idx(flow_target_columns, "oreb")
+    tov_idx = _flow_idx(flow_target_columns, "tov")
+
+    poss_list: list[torch.Tensor] = []
+    for side in (0, 1):
+        mask = valid & (team_index == side)
+        mask_f = mask.unsqueeze(-1).to(dtype=flow_values.dtype)
+        fv = flow_values * mask_f
+        fga = fv[:, :, fga2_idx].sum(dim=1) + fv[:, :, fga3_idx].sum(dim=1)
+        fta = fv[:, :, fta_idx].sum(dim=1)
+        oreb = fv[:, :, oreb_idx].sum(dim=1)
+        tov = fv[:, :, tov_idx].sum(dim=1)
+        poss = fga - oreb + tov + FTA_POSS_COEFF * fta
+        poss_list.append(poss)
+
+    poss_home, poss_away = poss_list
+    delta = (poss_home - poss_away).abs()
+
+    return {
+        "poss_home_mean": float(poss_home.mean().item()),
+        "poss_away_mean": float(poss_away.mean().item()),
+        "poss_delta_abs_mean": float(delta.mean().item()),
+        "poss_delta_abs_p95": float(torch.quantile(delta, 0.95).item()) if delta.numel() > 0 else 0.0,
+        "poss_delta_abs_max": float(delta.max().item()) if delta.numel() > 0 else 0.0,
+    }
 
 
 def _compute_dk_fpts(
@@ -428,6 +482,7 @@ def sample_worlds_for_batch(
     chunk_size: int,
     active_temperature: float,
     strict_contracts: bool,
+    poss_symmetry_gate: float | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     if not hasattr(model, "flow_head") or model.flow_head is None:  # type: ignore[attr-defined]
         raise RuntimeError("Model does not expose flow_head for inverse flow sampling")
@@ -442,6 +497,9 @@ def sample_worlds_for_batch(
 
     frames: list[pd.DataFrame] = []
     contract_counter: Counter[str] = Counter()
+    poss_sym_flow_parts: list[torch.Tensor] = []
+    poss_sym_valid_parts: list[torch.Tensor] = []
+    poss_sym_team_parts: list[torch.Tensor] = []
     total_worlds = max(1, int(num_worlds))
     chunk = max(1, int(chunk_size))
     for world_offset in range(0, total_worlds, chunk):
@@ -452,6 +510,8 @@ def sample_worlds_for_batch(
         rep_team_features = team_features.repeat_interleave(n_worlds_chunk, dim=0)
 
         with torch.no_grad():
+            # Enable backbone sampling when possession backbone is present
+            has_backbone = getattr(model, "enable_possession_backbone", False)
             out = model(
                 rep_player_features,
                 rep_player_valid_mask,
@@ -460,6 +520,7 @@ def sample_worlds_for_batch(
                 sample_active=True,
                 active_temperature=float(active_temperature),
                 run_flow=False,
+                sample_backbone=bool(has_backbone),
             )
             z = torch.randn(
                 (rep_player_features.shape[0], out.player_states.shape[1], len(flow_target_columns)),
@@ -499,6 +560,12 @@ def sample_worlds_for_batch(
         if strict_contracts and int(checks.get("total_violations", 0)) > 0:
             raise RuntimeError(f"World contract check failed: {checks}")
 
+        # Accumulate tensors for possession symmetry check (lightweight CPU copies)
+        if has_backbone:
+            poss_sym_flow_parts.append(flow_vals.reshape(-1, flow_vals.shape[-2], flow_vals.shape[-1]).cpu())
+            poss_sym_valid_parts.append(valid_flat.reshape(-1, valid_flat.shape[-1]).cpu())
+            poss_sym_team_parts.append(team_flat.reshape(-1, team_flat.shape[-1]).cpu())
+
         chunk_rows = _build_world_rows(
             batch=batch,
             world_offset=int(world_offset),
@@ -509,6 +576,40 @@ def sample_worlds_for_batch(
         )
         if chunk_rows:
             frames.append(pd.DataFrame.from_records(chunk_rows))
+
+    # -- Possession symmetry diagnostics (when backbone is enabled) --
+    if has_backbone and poss_sym_flow_parts:
+        all_flow = torch.cat(poss_sym_flow_parts, dim=0)
+        all_valid = torch.cat(poss_sym_valid_parts, dim=0)
+        all_team = torch.cat(poss_sym_team_parts, dim=0)
+        poss_diag = check_possession_symmetry(
+            flow_values=all_flow,
+            valid_mask=all_valid,
+            team_index=all_team,
+            flow_target_columns=flow_target_columns,
+        )
+        logger.info(
+            "possession symmetry: home=%.1f  away=%.1f  |delta| mean=%.2f  p95=%.2f  max=%.2f",
+            poss_diag["poss_home_mean"],
+            poss_diag["poss_away_mean"],
+            poss_diag["poss_delta_abs_mean"],
+            poss_diag["poss_delta_abs_p95"],
+            poss_diag["poss_delta_abs_max"],
+        )
+        # Add possession symmetry diagnostics to contract counter for upstream visibility
+        for k, v in poss_diag.items():
+            contract_counter[k] = v  # type: ignore[assignment]
+
+        # Hard validation gate: p95(|Poss_home - Poss_away|) must be within threshold
+        gate = poss_symmetry_gate
+        if gate is not None and poss_diag["poss_delta_abs_p95"] > gate:
+            msg = (
+                f"Possession symmetry gate FAILED: "
+                f"p95(|delta|)={poss_diag['poss_delta_abs_p95']:.2f} > {gate:.1f}"
+            )
+            logger.warning(msg)
+            if strict_contracts:
+                raise RuntimeError(msg)
 
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     return out, dict(contract_counter)
@@ -540,6 +641,12 @@ def parse_args() -> argparse.Namespace:
         "Also respects GT_FLOW_SCALE_CLIP env var if CLI not set.",
     )
     parser.add_argument("--strict-contracts", action="store_true")
+    parser.add_argument(
+        "--poss-symmetry-gate",
+        type=float,
+        default=None,
+        help="Hard gate for p95(|Poss_home - Poss_away|). Warn if exceeded; fail if --strict-contracts.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--out-parquet", type=str, default=None)
@@ -628,6 +735,7 @@ def main() -> None:
             chunk_size=int(args.chunk_size),
             active_temperature=float(args.active_temperature),
             strict_contracts=bool(args.strict_contracts),
+            poss_symmetry_gate=getattr(args, "poss_symmetry_gate", None),
         )
         frames.append(df_batch)
         contract_counter.update(checks)

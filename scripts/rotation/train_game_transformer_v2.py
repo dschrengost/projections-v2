@@ -39,6 +39,10 @@ from projections.rotation.joint_active_set import (
     build_active_set_labels,
     compute_active_set_losses,
 )
+from projections.rotation.possession_backbone import (
+    compute_possession_truth,
+    FTA_POSS_COEFF,
+)
 from projections.rotation.training_losses import compute_crps_loss, compute_team_energy_score
 from projections.rotation.set_model import zfill_game_id_series
 
@@ -123,15 +127,21 @@ class EpochMetrics:
     train_crps_fpts: float
     train_team_energy: float
     train_count_acc: float
-    val_total: float
-    val_minutes_mae: float
-    val_count_loss: float
-    val_member_loss: float
-    val_minutes_nll: float
-    val_flow_nll: float
-    val_crps_fpts: float
-    val_team_energy: float
-    val_count_acc: float
+    train_poss_nll: float = 0.0
+    train_backbone_nll: float = 0.0
+    train_three_pa_nll: float = 0.0
+    val_total: float = 0.0
+    val_minutes_mae: float = 0.0
+    val_count_loss: float = 0.0
+    val_member_loss: float = 0.0
+    val_minutes_nll: float = 0.0
+    val_flow_nll: float = 0.0
+    val_crps_fpts: float = 0.0
+    val_team_energy: float = 0.0
+    val_count_acc: float = 0.0
+    val_poss_nll: float = 0.0
+    val_backbone_nll: float = 0.0
+    val_three_pa_nll: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -586,6 +596,9 @@ def _stats_finite(stats: dict[str, float]) -> bool:
         "crps_fpts",
         "team_energy",
         "count_acc",
+        "poss_nll",
+        "backbone_nll",
+        "three_pa_nll",
     ]
     return all(math.isfinite(float(stats.get(k, float("nan")))) for k in keys)
 
@@ -616,6 +629,10 @@ def _run_epoch(
     epoch_index: int,
     backbone_grad_clip_norm: float,
     flow_grad_clip_norm: float,
+    w_poss_nll: float = 0.0,
+    w_backbone_nll: float = 0.0,
+    w_three_pa_nll: float = 0.0,
+    enable_possession_backbone: bool = False,
     phase2_stability_config: Phase2StabilityConfig | None = None,
     phase2_stability_state: Phase2StabilityState | None = None,
 ) -> dict[str, float]:
@@ -632,6 +649,9 @@ def _run_epoch(
         "crps_fpts": 0.0,
         "team_energy": 0.0,
         "count_acc": 0.0,
+        "poss_nll": 0.0,
+        "backbone_nll": 0.0,
+        "three_pa_nll": 0.0,
         "steps": 0,
         "skipped_batches": 0,
         "instability_events": 0,
@@ -751,6 +771,68 @@ def _run_epoch(
             else:
                 crps_fpts = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
                 team_energy = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+
+            # Possession backbone losses (section 15)
+            poss_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            backbone_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            three_pa_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            if bool(enable_possession_backbone) and out.possession is not None and out.backbone is not None:
+                # Extract team-level truth counts from flow_targets (B, 2, 15, S)
+                # Sum across players per team to get team totals
+                ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
+                fga2_i = ftc.index("fga2")
+                fga3_i = ftc.index("fga3")
+                fta_i = ftc.index("fta")
+                oreb_i = ftc.index("oreb")
+                tov_i = ftc.index("tov")
+
+                # flow_targets is (B, 2, 15, S); valid players mask is player_valid_mask (B, 2, 15)
+                ft = flow_targets  # (B, 2, 15, S)
+                vm = player_valid_mask.unsqueeze(-1).to(dtype=ft.dtype)  # (B, 2, 15, 1)
+                ft_masked = ft * vm
+
+                # Team sums: (B, 2)
+                fga_team = ft_masked[:, :, :, fga2_i].sum(dim=2) + ft_masked[:, :, :, fga3_i].sum(dim=2)
+                fta_team = ft_masked[:, :, :, fta_i].sum(dim=2)
+                oreb_team = ft_masked[:, :, :, oreb_i].sum(dim=2)
+                tov_team = ft_masked[:, :, :, tov_i].sum(dim=2)
+
+                # Only compute losses where flow labels are observed
+                flow_obs_any = flow_observed_mask.any(dim=-1)  # (B, 2, 15) -> any stat observed
+                team_has_labels = flow_obs_any.any(dim=2)  # (B, 2) -> team has at least one observed player
+                game_has_labels = team_has_labels.all(dim=1)  # (B,) -> both teams have labels
+
+                if game_has_labels.any():
+                    # Possession truth
+                    poss_true = compute_possession_truth(fga_team, oreb_team, tov_team, fta_team)  # (B,)
+                    # Possession NLL (only on games with labels)
+                    from projections.rotation.possession_backbone import PossessionHead
+                    poss_nll_per_game = PossessionHead.nll_student_t(
+                        poss_true, out.possession.mu, out.possession.sigma, out.possession.df,
+                    )
+                    poss_nll_loss = (poss_nll_per_game * game_has_labels.to(dtype=poss_nll_per_game.dtype)).sum() / game_has_labels.to(dtype=poss_nll_per_game.dtype).sum().clamp(min=1.0)
+
+                    # Backbone rate NLL
+                    backbone_nll_loss = model.event_backbone.nll_rates(  # type: ignore[attr-defined]
+                        out.team_states,
+                        out.game_state,
+                        poss_true,
+                        fta_true=fta_team,
+                        tov_true=tov_team,
+                        oreb_true=oreb_team,
+                    )
+
+                    # 3PA share NLL (optional)
+                    if hasattr(model, "three_pa_share_head") and model.three_pa_share_head is not None:  # type: ignore[attr-defined]
+                        fga3_team = ft_masked[:, :, :, fga3_i].sum(dim=2)
+                        three_pa_share_true = fga3_team / fga_team.clamp(min=1.0)
+                        three_pa_nll_loss = model.three_pa_share_head.nll(  # type: ignore[attr-defined]
+                            out.team_states,
+                            out.game_state,
+                            fga_team,
+                            three_pa_share_true=three_pa_share_true,
+                        )
+
             total_loss = (
                 float(w_minutes) * minutes_mae
                 + float(w_count) * active_losses["count_loss"]
@@ -759,6 +841,9 @@ def _run_epoch(
                 + float(w_flow_nll) * flow_nll
                 + float(w_crps_fpts) * crps_fpts
                 + float(w_team_energy) * team_energy
+                + float(w_poss_nll) * poss_nll_loss
+                + float(w_backbone_nll) * backbone_nll_loss
+                + float(w_three_pa_nll) * three_pa_nll_loss
             )
 
             skip_step = False
@@ -839,6 +924,9 @@ def _run_epoch(
             totals["crps_fpts"] += float(crps_fpts.item())
             totals["team_energy"] += float(team_energy.item())
             totals["count_acc"] += float(count_acc.item())
+            totals["poss_nll"] += float(poss_nll_loss.item())
+            totals["backbone_nll"] += float(backbone_nll_loss.item())
+            totals["three_pa_nll"] += float(three_pa_nll_loss.item())
             totals["steps"] += 1
         if phase2_stability_state is not None and bool(phase2_stability_state.rollback_requested):
             break
@@ -854,6 +942,9 @@ def _run_epoch(
         "crps_fpts": totals["crps_fpts"] / denom,
         "team_energy": totals["team_energy"] / denom,
         "count_acc": totals["count_acc"] / denom,
+        "poss_nll": totals["poss_nll"] / denom,
+        "backbone_nll": totals["backbone_nll"] / denom,
+        "three_pa_nll": totals["three_pa_nll"] / denom,
         "skipped_batches": float(totals["skipped_batches"]),
         "instability_events": float(totals["instability_events"]),
         "rollback_requested": 1.0 if (phase2_stability_state and phase2_stability_state.rollback_requested) else 0.0,
@@ -969,6 +1060,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase3-num-samples", type=int, default=16)
     parser.add_argument("--phase3-active-temperature", type=float, default=1.0)
     parser.add_argument("--phase3-stop-grad", action="store_true")
+
+    # Possession backbone (section 15)
+    parser.add_argument("--enable-possession-backbone", action="store_true")
+    parser.add_argument("--enable-three-pa-share", action="store_true")
+    parser.add_argument("--w-poss-nll", type=float, default=1.0)
+    parser.add_argument("--w-backbone-nll", type=float, default=1.0)
+    parser.add_argument("--w-three-pa-nll", type=float, default=0.5)
 
     parser.add_argument(
         "--game-feature-cols",
@@ -1131,6 +1229,8 @@ def main() -> None:
         flow_num_blocks=int(args.flow_num_blocks),
         flow_scale_clip=float(args.flow_scale_clip),
         flow_context_mode=str(args.flow_context_mode),
+        enable_possession_backbone=bool(args.enable_possession_backbone),
+        enable_three_pa_share=bool(args.enable_three_pa_share),
         overflow_protected_prior_play_prob_floor=float(args.overflow_protected_prior_play_prob_floor),
         overflow_protected_prior_minutes_floor=float(args.overflow_protected_prior_minutes_floor),
         overflow_risk_weight_consecutive_active_dnp=float(args.overflow_risk_weight_consecutive_active_dnp),
@@ -1228,6 +1328,10 @@ def main() -> None:
             epoch_index=int(epoch),
             backbone_grad_clip_norm=float(args.backbone_grad_clip_norm),
             flow_grad_clip_norm=float(args.flow_grad_clip_norm),
+            w_poss_nll=float(args.w_poss_nll) if bool(args.enable_possession_backbone) else 0.0,
+            w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
+            w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
+            enable_possession_backbone=bool(args.enable_possession_backbone),
             phase2_stability_config=phase2_guard_cfg if bool(args.enable_phase2_flow) else None,
             phase2_stability_state=phase2_guard_state if bool(args.enable_phase2_flow) else None,
         )
@@ -1248,6 +1352,9 @@ def main() -> None:
                 "crps_fpts": float("nan"),
                 "team_energy": float("nan"),
                 "count_acc": float("nan"),
+                "poss_nll": float("nan"),
+                "backbone_nll": float("nan"),
+                "three_pa_nll": float("nan"),
                 "skipped_batches": 0.0,
                 "instability_events": 0.0,
                 "rollback_requested": 1.0,
@@ -1278,6 +1385,10 @@ def main() -> None:
                 epoch_index=int(epoch),
                 backbone_grad_clip_norm=float(args.backbone_grad_clip_norm),
                 flow_grad_clip_norm=float(args.flow_grad_clip_norm),
+                w_poss_nll=float(args.w_poss_nll) if bool(args.enable_possession_backbone) else 0.0,
+                w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
+                w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
+                enable_possession_backbone=bool(args.enable_possession_backbone),
             )
 
         metrics = EpochMetrics(
@@ -1297,6 +1408,9 @@ def main() -> None:
             train_crps_fpts=train_stats["crps_fpts"],
             train_team_energy=train_stats["team_energy"],
             train_count_acc=train_stats["count_acc"],
+            train_poss_nll=train_stats.get("poss_nll", 0.0),
+            train_backbone_nll=train_stats.get("backbone_nll", 0.0),
+            train_three_pa_nll=train_stats.get("three_pa_nll", 0.0),
             val_total=val_stats["total"],
             val_minutes_mae=val_stats["minutes_mae"],
             val_count_loss=val_stats["count_loss"],
@@ -1306,6 +1420,9 @@ def main() -> None:
             val_crps_fpts=val_stats["crps_fpts"],
             val_team_energy=val_stats["team_energy"],
             val_count_acc=val_stats["count_acc"],
+            val_poss_nll=val_stats.get("poss_nll", 0.0),
+            val_backbone_nll=val_stats.get("backbone_nll", 0.0),
+            val_three_pa_nll=val_stats.get("three_pa_nll", 0.0),
         )
         history.append(metrics)
 
@@ -1330,6 +1447,14 @@ def main() -> None:
                 f"val_crps_fpts={metrics.val_crps_fpts:.4f} "
                 f"val_team_energy={metrics.val_team_energy:.4f}"
             )
+        if bool(args.enable_possession_backbone):
+            msg = (
+                f"{msg} "
+                f"val_poss_nll={metrics.val_poss_nll:.4f} "
+                f"val_backbone_nll={metrics.val_backbone_nll:.4f}"
+            )
+            if bool(args.enable_three_pa_share):
+                msg = f"{msg} val_three_pa_nll={metrics.val_three_pa_nll:.4f}"
         print(msg, flush=True)
 
         if math.isfinite(float(metrics.val_total)) and metrics.val_total < best_val:

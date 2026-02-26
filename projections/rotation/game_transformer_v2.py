@@ -16,6 +16,13 @@ from torch.utils.data import Dataset
 from projections.rotation.joint_active_set import JointActiveSetHead, JointActiveSetOutputs
 from projections.rotation.joint_game_flow import JointGameFlow, JointGameFlowOutputs
 from projections.rotation.joint_minutes import JointMinutesHead, JointMinutesOutputs
+from projections.rotation.possession_backbone import (
+    PossessionHead,
+    PossessionHeadOutputs,
+    TeamEventBackbone,
+    TeamEventBackboneOutputs,
+    ThreePAShareHead,
+)
 from projections.rotation.set_model import zfill_game_id_series
 
 MAX_PLAYERS_PER_TEAM = 15
@@ -74,6 +81,12 @@ class GameTransformerV2Config:
     flow_mean_ctx_weight: float = 1.0
     flow_context_mode: str = "attention"  # H2 fix: "attention" instead of "mean" for star concentration
     include_pf_in_flow_targets: bool = False
+    # Possession backbone (section 15 refactor)
+    enable_possession_backbone: bool = False
+    enable_three_pa_share: bool = False
+    possession_head_hidden: int = 128
+    backbone_hidden: int = 128
+    three_pa_share_hidden: int = 64
     overflow_protected_prior_play_prob_floor: float = PROTECTED_PRIOR_PLAY_PROB_FLOOR
     overflow_protected_prior_minutes_floor: float = PROTECTED_PRIOR_MINUTES_FLOOR
     overflow_risk_weight_consecutive_active_dnp: float = OVERFLOW_RISK_WEIGHT_CONSECUTIVE_ACTIVE_DNP
@@ -97,6 +110,11 @@ class GameTransformerV2Config:
         # If config doesn't have flow_scale_clip, use 2.0 (original default)
         if "flow_scale_clip" not in filtered:
             filtered["flow_scale_clip"] = 2.0
+        # Backbone defaults for models trained before possession refactor
+        if "enable_possession_backbone" not in filtered:
+            filtered["enable_possession_backbone"] = False
+        if "enable_three_pa_share" not in filtered:
+            filtered["enable_three_pa_share"] = False
         return cls(**filtered)
 
     def save(self, path: Path) -> None:
@@ -147,6 +165,8 @@ class GameTransformerV2Outputs:
     active: JointActiveSetOutputs
     minutes: JointMinutesOutputs
     flow: JointGameFlowOutputs | None
+    possession: PossessionHeadOutputs | None = None
+    backbone: TeamEventBackboneOutputs | None = None
 
 
 def _numeric_frame(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -550,6 +570,11 @@ class GameTransformerV2(nn.Module):
         flow_mean_ctx_weight: float = 1.0,
         flow_context_mode: str = "attention",
         include_pf_in_flow_targets: bool = False,
+        enable_possession_backbone: bool = False,
+        enable_three_pa_share: bool = False,
+        possession_head_hidden: int = 128,
+        backbone_hidden: int = 128,
+        three_pa_share_hidden: int = 64,
     ) -> None:
         super().__init__()
         if num_player_features <= 0:
@@ -614,6 +639,30 @@ class GameTransformerV2(nn.Module):
             mean_ctx_weight=float(flow_mean_ctx_weight),
             context_mode=str(flow_context_mode),
         )
+
+        # Possession-coupled event backbone (section 15 refactor)
+        self.enable_possession_backbone = bool(enable_possession_backbone)
+        self.enable_three_pa_share = bool(enable_three_pa_share)
+        self.possession_head: PossessionHead | None = None
+        self.event_backbone: TeamEventBackbone | None = None
+        self.three_pa_share_head: ThreePAShareHead | None = None
+        if self.enable_possession_backbone:
+            self.possession_head = PossessionHead(
+                d_model=int(d_model),
+                hidden_dim=int(possession_head_hidden),
+                dropout=float(dropout),
+            )
+            self.event_backbone = TeamEventBackbone(
+                d_model=int(d_model),
+                hidden_dim=int(backbone_hidden),
+                dropout=float(dropout),
+            )
+            if self.enable_three_pa_share:
+                self.three_pa_share_head = ThreePAShareHead(
+                    d_model=int(d_model),
+                    hidden_dim=int(three_pa_share_hidden),
+                    dropout=float(dropout),
+                )
 
         token_type_ids = [0, 1, *([2] * MAX_PLAYERS_PER_TEAM), 1, *([2] * MAX_PLAYERS_PER_TEAM)]
         side_ids = [2, 0, *([0] * MAX_PLAYERS_PER_TEAM), 1, *([1] * MAX_PLAYERS_PER_TEAM)]
@@ -690,6 +739,7 @@ class GameTransformerV2(nn.Module):
         run_flow: bool = False,
         flow_targets: torch.Tensor | None = None,
         flow_observed_mask: torch.Tensor | None = None,
+        sample_backbone: bool = False,
     ) -> GameTransformerV2Outputs:
         """Forward pass for one batch of full-game tensors."""
 
@@ -795,6 +845,33 @@ class GameTransformerV2(nn.Module):
                 observed_mask=flow_obs_flat,
             )
 
+        # Possession-coupled event backbone (runs when backbone is enabled)
+        poss_out: PossessionHeadOutputs | None = None
+        backbone_out: TeamEventBackboneOutputs | None = None
+        if self.enable_possession_backbone and self.possession_head is not None and self.event_backbone is not None:
+            poss_out = self.possession_head(game_state, sample=bool(sample_backbone))
+            if poss_out.sampled_poss is not None:
+                poss_for_backbone = poss_out.sampled_poss
+            else:
+                # During training (no sampling), use the predicted mean
+                poss_for_backbone = poss_out.mu
+            backbone_out = self.event_backbone(
+                team_states, game_state, poss_for_backbone, sample=bool(sample_backbone),
+            )
+            # Optional shot-mix latent
+            if self.three_pa_share_head is not None and backbone_out is not None:
+                three_pa_share = self.three_pa_share_head(
+                    team_states, game_state, backbone_out.fga, sample=bool(sample_backbone),
+                )
+                backbone_out = TeamEventBackboneOutputs(
+                    fga=backbone_out.fga,
+                    fta=backbone_out.fta,
+                    tov=backbone_out.tov,
+                    oreb=backbone_out.oreb,
+                    three_pa_share=three_pa_share,
+                    poss_used=backbone_out.poss_used,
+                )
+
         return GameTransformerV2Outputs(
             game_state=game_state,
             team_states=team_states,
@@ -804,6 +881,8 @@ class GameTransformerV2(nn.Module):
             active=active_out,
             minutes=minutes_out,
             flow=flow_out,
+            possession=poss_out,
+            backbone=backbone_out,
         )
 
 
@@ -828,4 +907,9 @@ def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransforme
         flow_mean_ctx_weight=float(config.flow_mean_ctx_weight),
         flow_context_mode=str(getattr(config, "flow_context_mode", "mean")),
         include_pf_in_flow_targets=bool(config.include_pf_in_flow_targets),
+        enable_possession_backbone=bool(getattr(config, "enable_possession_backbone", False)),
+        enable_three_pa_share=bool(getattr(config, "enable_three_pa_share", False)),
+        possession_head_hidden=int(getattr(config, "possession_head_hidden", 128)),
+        backbone_hidden=int(getattr(config, "backbone_hidden", 128)),
+        three_pa_share_hidden=int(getattr(config, "three_pa_share_hidden", 64)),
     )
