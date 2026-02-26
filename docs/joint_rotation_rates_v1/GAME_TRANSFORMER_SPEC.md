@@ -3442,3 +3442,43 @@ epoch=023 train_total=10.3880 val_total=nan val_minutes_mae=nan val_count_acc=na
 }
 
 ***we hit backoff at epoch 23 again, pick up here 2-25-26***
+
+***continued 2-26-26***
+
+  Implied Possessions Decomposition
+
+  Every single team is under-predicted. The possession error ranges from -15.3 to -30.3 with zero
+  positive outliers — this is a purely systematic bias, not noise.
+
+  Aggregate Component Breakdown
+
+  | Component   | Predicted | Actual | Bias  | Bias%  |
+  |-------------|-----------|--------|-------|--------|
+  | Possessions | 79.8      | 100.7  | -20.9 | -20.8% |
+  | FGA (total) | 70.4      | 88.6   | -18.3 | -20.6% |
+  | — FGA2      | 38.8      | 51.6   | -12.8 | -24.9% |
+  | — FGA3      | 31.6      | 37.0   | -5.4  | -14.6% |
+  | OREB        | 9.6       | 11.5   | -1.8  | -16.0% |
+  | TOV         | 11.9      | 13.4   | -1.5  | -11.2% |
+  | FTA         | 16.1      | 22.8   | -6.8  | -29.6% |
+
+  Where the -20.9 Possession Deficit Comes From
+
+  | Source                | Contribution         |
+  |-----------------------|----------------------|
+  | FGA deficit           | -18.3 (87% of total) |
+  | +OREB deficit (helps) | +1.8                 |
+  | TOV deficit           | -1.5                 |
+  | 0.44×FTA deficit      | -3.0                 |
+  | Total                 | -20.9                |
+
+  FGA is the dominant driver — the model is producing ~18 too few field goal attempts per team, which is
+  almost entirely the possession gap. FTA is also heavily compressed (-30%).
+
+  The FTM deficit (-44% bias!) is even worse than FTA, meaning the model isn't just under-counting free
+  throw attempts, it's also predicting an unrealistic FT% (62% vs 78% actual). FG3M is closest to reality
+   (-6.9%), suggesting the 3-point rate head is actually doing reasonable work — it's just operating on
+  too few total possessions.
+
+  The possession error distribution is extremely tight (p5=-39, p95=-7, zero positive), confirming this
+  is a systematic calibration issue in the backbone, not variance.
