@@ -49,7 +49,7 @@ def _default_transform_manifest(
     priors_mode = (
         str(training_rotation_priors_contract)
         if training_rotation_priors_contract
-        else "game_id_partitions_or_latest_by_entity_fallback"
+        else ROTATION_PRIORS_CONTRACT_GAME_ID_PLUS_PRE_GAME_ENTITY_FALLBACK
     )
     return {
         "builder": "gtv2_live_features_v1",
