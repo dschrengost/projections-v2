@@ -740,6 +740,7 @@ class GameTransformerV2(nn.Module):
         flow_targets: torch.Tensor | None = None,
         flow_observed_mask: torch.Tensor | None = None,
         sample_backbone: bool = False,
+        detach_backbone: bool = True,
     ) -> GameTransformerV2Outputs:
         """Forward pass for one batch of full-game tensors."""
 
@@ -849,10 +850,15 @@ class GameTransformerV2(nn.Module):
         poss_out: PossessionHeadOutputs | None = None
         backbone_out: TeamEventBackboneOutputs | None = None
         if self.enable_possession_backbone and self.possession_head is not None and self.event_backbone is not None:
-            # Detach shared encoder outputs so backbone head gradients don't
-            # destabilize the already-trained transformer during early epochs.
-            game_state_bb = game_state.detach()
-            team_states_bb = team_states.detach()
+            # Optionally detach encoder outputs to prevent backbone gradients
+            # from destabilizing the flow head during phase2 warmup.
+            # Set detach_backbone=False once the flow head is stable.
+            if detach_backbone:
+                game_state_bb = game_state.detach()
+                team_states_bb = team_states.detach()
+            else:
+                game_state_bb = game_state
+                team_states_bb = team_states
             poss_out = self.possession_head(game_state_bb, sample=bool(sample_backbone))
             if poss_out.sampled_poss is not None:
                 poss_for_backbone = poss_out.sampled_poss

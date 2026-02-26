@@ -633,6 +633,7 @@ def _run_epoch(
     w_backbone_nll: float = 0.0,
     w_three_pa_nll: float = 0.0,
     enable_possession_backbone: bool = False,
+    detach_backbone: bool = True,
     phase2_stability_config: Phase2StabilityConfig | None = None,
     phase2_stability_state: Phase2StabilityState | None = None,
 ) -> dict[str, float]:
@@ -711,6 +712,7 @@ def _run_epoch(
                 run_flow=bool(run_phase2_flow),
                 flow_targets=flow_targets if bool(run_phase2_flow) else None,
                 flow_observed_mask=flow_mask if bool(run_phase2_flow) else None,
+                detach_backbone=bool(detach_backbone),
             )
             active_losses = compute_active_set_losses(
                 count_logits=out.active.count_logits,
@@ -1080,6 +1082,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--w-poss-nll", type=float, default=1.0)
     parser.add_argument("--w-backbone-nll", type=float, default=1.0)
     parser.add_argument("--w-three-pa-nll", type=float, default=0.5)
+    parser.add_argument(
+        "--backbone-detach-until-epoch",
+        type=int,
+        default=0,
+        help="Detach backbone from encoder for the first N epochs (0=never detach). "
+        "Allows flow head to stabilize before backbone gradients flow into the encoder.",
+    )
 
     parser.add_argument(
         "--game-feature-cols",
@@ -1352,6 +1361,7 @@ def main() -> None:
             w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
             w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
             enable_possession_backbone=bool(args.enable_possession_backbone),
+            detach_backbone=bool(int(epoch) < int(args.backbone_detach_until_epoch)),
             phase2_stability_config=phase2_guard_cfg if bool(args.enable_phase2_flow) else None,
             phase2_stability_state=phase2_guard_state if bool(args.enable_phase2_flow) else None,
         )
@@ -1409,6 +1419,7 @@ def main() -> None:
                 w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
                 w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
                 enable_possession_backbone=bool(args.enable_possession_backbone),
+                detach_backbone=bool(int(epoch) < int(args.backbone_detach_until_epoch)),
             )
 
         metrics = EpochMetrics(
@@ -1468,10 +1479,12 @@ def main() -> None:
                 f"val_team_energy={metrics.val_team_energy:.4f}"
             )
         if bool(args.enable_possession_backbone):
+            bb_detached = int(epoch) < int(args.backbone_detach_until_epoch)
             msg = (
                 f"{msg} "
                 f"val_poss_nll={metrics.val_poss_nll:.4f} "
-                f"val_backbone_nll={metrics.val_backbone_nll:.4f}"
+                f"val_backbone_nll={metrics.val_backbone_nll:.4f} "
+                f"bb_detach={'Y' if bb_detached else 'N'}"
             )
             if bool(args.enable_three_pa_share):
                 msg = f"{msg} val_three_pa_nll={metrics.val_three_pa_nll:.4f}"

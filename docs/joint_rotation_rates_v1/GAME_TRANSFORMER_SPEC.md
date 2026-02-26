@@ -3233,20 +3233,30 @@ All structural components from the checklist (items 1–5, 7) are implemented an
 	•	`sample_worlds_for_batch` accumulates flow tensors across chunks, runs symmetry check, and logs diagnostics when backbone is enabled.
 	•	Hard validation gate via `--poss-symmetry-gate` CLI arg. Warns if p95 exceeds threshold; raises RuntimeError under `--strict-contracts`.
 
-15.12.2 Key design decision: detached backbone inputs
+15.12.2 Key design decision: staged backbone detach (`--backbone-detach-until-epoch`)
 
-Backbone heads receive `game_state.detach()` and `team_states.detach()` — gradients from backbone losses do **not** flow back through the shared transformer encoder. This prevents the randomly-initialized backbone heads from destabilizing already-trained minutes/flow heads during early epochs.
+The flow head is extremely fragile during phase2 warmup. Backbone gradients flowing through the shared encoder destabilize it, triggering the phase2 NLL guard rollback. This was confirmed empirically across three runs:
 
-Rationale: without detach, backbone NLL losses (large at initialization) generate large gradients through the shared encoder, which inflates the flow NLL and triggers the phase2 stability guard rollback.
+| Run | Detach | Backbone weights | Outcome |
+|-----|--------|-----------------|---------|
+| v1 (always detach) | Yes, all epochs | 1.0 / 1.0 / 0.5 | 22 stable epochs, best val_total=10.01. **But backbone NLLs completely flat** (poss_nll ~3.21, backbone_nll ~0.55, three_pa_nll ~0.30 — no movement across 22 epochs). Backbone MLPs converged immediately to what they could fit from frozen encoder outputs and plateaued. |
+| v2 (never detach) | No | 0.1 / 0.1 / 0.05 | **Rolled back at epoch 4.** Even at 10% weight, backbone gradients through the shared encoder destabilized the flow head. Backbone NLLs identical to v1 in the 3 epochs before death — not enough time to see improvement. |
+| v3 (staged detach) | Yes for epochs 0–9, No from epoch 10 | 0.1 / 0.1 / 0.05 | *(in progress)* |
 
-Consequence: the backbone heads train only their own MLP parameters. The shared encoder representation is frozen from the backbone's perspective. If end-to-end fine-tuning is desired later, remove the `.detach()` calls in `game_transformer_v2.py` and retrain with a low backbone loss weight warmup.
+The solution is `--backbone-detach-until-epoch N`:
+	•	Epochs 0 through N-1: backbone inputs are detached. Flow head stabilizes, backbone MLPs warm up on frozen encoder output.
+	•	Epoch N onward: detach removed. Backbone gradients flow into the shared encoder at low weight (0.1), nudging the encoder to learn possession-relevant representations.
+
+Implementation: `forward()` accepts `detach_backbone: bool` parameter. The training script computes `detach_backbone = (epoch < backbone_detach_until_epoch)` and passes it per-epoch. The epoch log line shows `bb_detach=Y/N` for visibility.
+
+The key insight: the flow head needs ~4–10 epochs to stabilize during phase2 warmup. Backbone gradients during this window — even at 10% weight — are enough to cause rollback. After warmup the flow head is more robust and can tolerate the additional gradient signal.
 
 15.12.3 Remaining work
 
-	1.	**Retrain with backbone enabled** — run full Phase 1/2/3 schedule with `--enable-possession-backbone --enable-three-pa-share`. See `docs/joint_rotation_rates_v1/BACKBONE_TRAINING_GUIDE.md` for commands.
+	1.	**Evaluate v3 staged-detach run** — check whether backbone NLLs decrease after epoch 10 when detach lifts. This is the critical test: if backbone metrics improve, the encoder is adapting.
 	2.	**Assess Student-t tail calibration** — check p90/p95 coverage for top-5 minutes players after retrain. If insufficient, escalate to spline coupling (section 15.10).
 	3.	**Tighten possession symmetry gate** — once stable at p95 <= 5, tighten to p95 <= 3.
-	4.	**Optional: end-to-end backbone fine-tuning** — remove detach, retrain with low backbone weight warmup, measure whether shared encoder adaptation improves backbone calibration.
+	4.	**Tune detach epoch** — if v3 still destabilizes when detach lifts at epoch 10, try epoch 15 or 20. If it stays stable, try epoch 5.
 
 15.12.4 Primary success criteria (unchanged)
 	1.	No impossible possession asymmetry in worlds.
@@ -3290,13 +3300,13 @@ What to look for:
 	•	`val_poss_nll` and `val_backbone_nll` should decrease across epochs.
 	•	`val_three_pa_nll` should decrease (if `--enable-three-pa-share`).
 
-15.13.3 Full training run (warm-start from existing checkpoint)
+15.13.3 Full training run (recommended: staged detach)
 
 ```bash
 PROJECTIONS_DATA_ROOT=/home/daniel/projections-data \
 uv run python scripts/rotation/train_game_transformer_v2.py \
   --dataset-dir $PROJECTIONS_DATA_ROOT/training/datasets/joint_rotation_rates_v1_priors_contract_livefill_overflowpol_20260224T200110Z \
-  --out-dir $PROJECTIONS_DATA_ROOT/training/runs/gtv2_poss_backbone_v1 \
+  --out-dir $PROJECTIONS_DATA_ROOT/training/runs/gtv2_poss_backbone_v3_staged \
   --init-model-pt $PROJECTIONS_DATA_ROOT/training/runs/gtv2_h1h2_phase23_20260225/model.pt \
   --val-days 14 \
   --batch-size 32 \
@@ -3309,14 +3319,19 @@ uv run python scripts/rotation/train_game_transformer_v2.py \
   --flow-scale-clip 3.0 \
   --enable-possession-backbone \
   --enable-three-pa-share \
-  --w-poss-nll 1.0 \
-  --w-backbone-nll 1.0 \
-  --w-three-pa-nll 0.5
+  --w-poss-nll 0.1 \
+  --w-backbone-nll 0.1 \
+  --w-three-pa-nll 0.05 \
+  --backbone-detach-until-epoch 10
 ```
 
 Notes:
 	•	`--init-model-pt` loads a prior checkpoint with `strict=False`. New backbone parameters (PossessionHead, TeamEventBackbone, ThreePAShareHead) appear as "missing" keys in the warm-start log — this is expected.
 	•	All existing training phases (Phase 1 minutes/active, Phase 2 flow, Phase 3 decision) continue to work as before; backbone losses are additive.
+	•	**`--backbone-detach-until-epoch 10`**: backbone inputs are detached from the encoder for epochs 0–9 (flow head stabilizes, backbone MLPs warm up). From epoch 10 onward, backbone gradients flow into the shared encoder at low weight (0.1). See section 15.12.2 for empirical justification.
+	•	**Low backbone weights (0.1/0.1/0.05)**: required when detach is off. Full weights (1.0/1.0/0.5) destabilize the flow head even with never-detach (confirmed in v2 run, rollback at epoch 4).
+
+**Do not use `--w-poss-nll 1.0` with `--backbone-detach-until-epoch 0`** — this will rollback within the first few epochs. Either keep detach on (weights don't matter) or use low weights (≤ 0.1) when detach is off.
 
 15.13.4 CLI args reference (backbone-specific)
 
@@ -3324,10 +3339,11 @@ Notes:
 |-----|---------|-------------|
 | `--enable-possession-backbone` | off | Enable PossessionHead + TeamEventBackbone |
 | `--enable-three-pa-share` | off | Enable ThreePAShareHead (requires backbone) |
-| `--w-poss-nll` | 1.0 | Weight for P_game NLL loss |
-| `--w-backbone-nll` | 1.0 | Weight for team event rate NLL loss |
-| `--w-three-pa-nll` | 0.5 | Weight for 3PA share NLL loss |
+| `--w-poss-nll` | 1.0 | Weight for P_game NLL loss. Use 0.1 with staged detach. |
+| `--w-backbone-nll` | 1.0 | Weight for team event rate NLL loss. Use 0.1 with staged detach. |
+| `--w-three-pa-nll` | 0.5 | Weight for 3PA share NLL loss. Use 0.05 with staged detach. |
 | `--backbone-grad-clip-norm` | 1.0 | Gradient clip for backbone parameters |
+| `--backbone-detach-until-epoch` | 0 | Detach backbone from encoder for first N epochs. **Recommended: 10.** 0=never detach (unsafe without very low weights). |
 
 15.13.5 World sampling with backbone
 
@@ -3380,16 +3396,49 @@ possession symmetry: home=97.2  away=97.0  |delta| mean=0.34  p95=1.12  max=3.45
 
 15.13.7 Architecture notes
 
-The backbone heads are **gradient-isolated** from the shared transformer encoder. During forward pass:
+The backbone detach is controlled per forward pass via the `detach_backbone` parameter:
 
+```python
+# In game_transformer_v2.py forward():
+if detach_backbone:
+    game_state_bb = game_state.detach()
+    team_states_bb = team_states.detach()
+else:
+    game_state_bb = game_state
+    team_states_bb = team_states
 ```
-game_state_bb = game_state.detach()
-team_states_bb = team_states.detach()
-```
 
-This means:
-	•	Backbone losses train only the PossessionHead, TeamEventBackbone, and ThreePAShareHead MLP weights.
-	•	The shared encoder (minutes, active, flow heads) is unaffected by backbone gradients.
-	•	This is intentional — it prevents the randomly-initialized backbone from destabilizing the already-trained encoder.
+The training script sets `detach_backbone = (epoch < backbone_detach_until_epoch)`, so:
+	•	**Early epochs** (`bb_detach=Y`): backbone MLPs train on frozen encoder output. Encoder is unaffected. This is equivalent to training auxiliary heads on a frozen pretrained backbone.
+	•	**Later epochs** (`bb_detach=N`): backbone gradients flow into the encoder at low weight. The encoder adapts to provide better signal for possession/rate prediction.
 
-To enable end-to-end fine-tuning (backbone gradients flow into encoder), remove the `.detach()` calls in `projections/rotation/game_transformer_v2.py` in the backbone forward block. If you do this, use a low backbone weight warmup to avoid destabilizing the encoder.
+The epoch log line includes `bb_detach=Y/N` for visibility. Watch for backbone NLL improvement after the detach lifts — that confirms the encoder is adapting.
+
+15.13.8 What failed and why (empirical record)
+
+**v1 — always detach, full weights (1.0/1.0/0.5)**
+	•	22 stable epochs, best val_total=10.01
+	•	Backbone NLLs completely flat: poss_nll=3.21±0.02, backbone_nll=0.55±0.01, three_pa_nll=0.30±0.01 across all 22 epochs
+	•	Conclusion: backbone MLPs converge immediately to best-fit on frozen encoder output and plateau. No further learning possible without encoder adaptation.
+
+**v2 — never detach, low weights (0.1/0.1/0.05)**
+	•	Rolled back at epoch 4 (phase2_instability_repeated_backoff_limit_reached)
+	•	Backbone NLLs identical to v1 in the 3 completed epochs
+	•	Conclusion: even at 10% weight, backbone gradients through the shared encoder destabilize the flow head during phase2 warmup. The flow NLL guard fires at gen_nll ~34 (threshold 25).
+
+**v3 — staged detach at epoch 10, low weights (0.1/0.1/0.05)**
+	•	*(in progress)* — expected to combine v1 stability (detached warmup) with eventual encoder adaptation (undetached fine-tuning).
+
+  epoch=022 train_total=4.1387 val_total=4.6126 val_minutes_mae=3.1495 val_count_acc=0.3189 phase2_warmup=1.000 anchor=0.500 a2=0.500 val_minutes_nll=3.2383 val_flow_nll=0.9168 skipped_batches=0 instability_events=0 val_poss_nll=3.2325 val_backbone_nll=0.5421 bb_detach=N val_three_pa_nll=0.2946
+[phase2][nll-guard] epoch=023 batch=0041 gen_nll=135.0402 threshold=25.0000 a2_scale=0.2500 backoff_count=2
+[phase2][nll-guard] epoch=023 batch=0043 gen_nll=106.2907 threshold=25.0000 a2_scale=0.1250 backoff_count=3
+[phase2][rollback] epoch=023 batch=0043 reason=phase2_instability_repeated_backoff_limit_reached(backoff_count=3)
+epoch=023 train_total=10.3880 val_total=nan val_minutes_mae=nan val_count_acc=nan phase2_warmup=1.000 anchor=0.500 a2=0.125 val_minutes_nll=nan val_flow_nll=nan skipped_batches=4 instability_events=4 val_poss_nll=nan val_backbone_nll=nan bb_detach=N val_three_pa_nll=nan
+[phase2][rollback] stopped_at_epoch=023 reason=phase2_instability_repeated_backoff_limit_reached(backoff_count=3) stable_checkpoint_epoch=022
+{
+  "out_dir": "/home/daniel/projections-data/training/runs/gtv2_poss_backbone_v3_staged",
+  "best_epoch": 20,
+  "best_val_total": 4.521759748458862
+}
+
+***we hit backoff at epoch 23 again, pick up here 2-25-26***
