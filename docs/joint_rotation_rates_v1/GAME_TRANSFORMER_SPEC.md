@@ -3482,3 +3482,183 @@ epoch=023 train_total=10.3880 val_total=nan val_minutes_mae=nan val_count_acc=na
 
   The possession error distribution is extremely tight (p5=-39, p95=-7, zero positive), confirming this
   is a systematic calibration issue in the backbone, not variance.
+
+
+
+15.14 Empirical Findings: Volume Suppression Regime (v3 Possession Backbone)
+
+Summary
+
+Evaluation of gtv2_poss_backbone_v3_staged (epoch 20, best_val_total=4.522) reveals a systematic ~−20% possession bias across all teams, leading to severe shot-volume suppression and unacceptable team total error.
+
+This is not a unit mismatch, identity bug, or arithmetic error in the possession formula. It is a training dynamics issue arising from loss competition and stability guards.
+
+⸻
+
+15.14.1 Observed Behavior
+
+Across 214 matched team-games:
+
+Component
+Pred
+True
+Bias
+Bias%
+Possessions
+79.8
+100.7
+−20.9
+−20.8%
+FGA
+70.4
+88.6
+−18.3
+−20.6%
+FTA
+16.1
+22.8
+−6.8
+−29.6%
+TOV
+11.9
+13.4
+−1.5
+−11.2%
+OREB
+9.6
+11.5
+−1.8
+−16.0%
+
+
+Possession bias distribution:
+	•	Mean: −20.9
+	•	Median: −20.2
+	•	p95: −7.1
+	•	No positive outliers
+
+This confirms a uniform downward calibration shift, not variance or noise.
+
+⸻
+
+15.14.2 Architectural Verification
+
+Inspection of possession_backbone.py confirms:
+	•	Possession identity is correctly enforced:
+
+P = FGA − OREB + TOV + 0.44 * FTA
+
+FGA = P + OREB − TOV − 0.44 * FTA
+
+	No unit mismatch exists:
+	•	compute_possession_truth() returns per-team mean.
+	•	PossessionHead predicts per-game possession mean (≈ per-team scale).
+	•	Initialization bias = 97.0 (reasonable NBA baseline).
+
+Therefore:
+
+The −20% bias is not caused by formula error or scaling mismatch.
+
+⸻
+
+15.14.3 Root Cause: Loss Competition and Stability Equilibrium
+
+The possession head is trained under:
+	•	w_poss_nll = 0.1
+	•	10-epoch backbone detach
+	•	dominant flow NLL objective
+	•	Phase2 instability guard (gen_nll backoff)
+
+Empirically, the system converges to a low-volume equilibrium because:
+	1.	Lower possessions → lower FGA/FTA
+	2.	Lower volume → reduced variance
+	3.	Reduced variance → fewer flow NLL spikes
+	4.	Fewer spikes → fewer backoffs
+
+Since possession NLL is weakly weighted, the optimizer prefers shrinking volume to stabilize the flow head.
+
+This creates a globally consistent solution:
+
+“Safer low-volume worlds are easier to model than realistic high-volume ones.”
+
+The training objective implicitly rewards this regime.
+
+⸻
+
+15.14.4 Secondary Effects
+	1.	Star suppression
+	•	Elite bias worsened from −11.6 to −17.0.
+	•	FPTS tails truncated due to reduced event mass.
+	2.	FT% collapse (62% vs 78%)
+	•	Downstream effect of suppressed FTA + flow calibration drift.
+	•	Not a possession identity issue.
+	3.	Improved p95 calibration
+	•	Fewer extreme worlds.
+	•	Structural coherence improved.
+	•	But mean bias worsened.
+
+⸻
+
+15.14.5 Conclusion
+
+The v3 backbone:
+	•	Correctly enforces structural constraints.
+	•	Improves joint calibration at high quantiles.
+	•	Fails to preserve realistic event volume.
+
+This checkpoint is not promotable.
+
+The issue is not mathematical — it is objective imbalance.
+
+⸻
+
+15.14.6 Required Architectural Adjustments (Next Iteration)
+
+Future agents implementing backbone refinements MUST address volume suppression explicitly.
+
+Recommended directions:
+	1.	Rebalance Loss Terms
+	•	Increase w_poss_nll meaningfully (≥ 0.5).
+	•	Optionally reduce flow NLL weight during early backbone coupling.
+	•	Ensure possession head gradients are not dominated by flow stabilization pressure.
+	2.	Add Explicit Team Total Supervision
+	•	Introduce team-level FPTS MSE or CRPS auxiliary loss.
+	•	Prevent optimizer from shrinking possessions to reduce instability.
+	3.	Separate Stability From Volume
+	•	Adjust Phase2 instability guard so high-volume worlds are not implicitly penalized.
+	•	Backoff logic should target scale explosion, not realistic variance.
+	4.	Optional Structural Enhancement
+	•	Reparameterize possession mean as:
+
+mu_P = P_baseline + delta_P
+
+with baseline initialized near 100.
+
+	•	This anchors scale while preserving learnable deviations.
+
+⸻
+
+15.14.7 Key Insight for Future Agents
+
+The backbone did not “fail.”
+
+It exposed a deeper property of the system:
+
+Without explicit pressure to match real-world volume, the model will trade event mass for stability.
+
+Future iterations must ensure that:
+	•	Possession realism is rewarded strongly enough to overcome stability shortcuts.
+	•	Volume preservation is a first-class training objective.
+	•	Flow stabilization does not implicitly incentivize underproduction.
+
+⸻
+
+Agent Handoff Note
+
+Before modifying backbone structure further:
+	1.	Do not assume unit mismatch.
+	2.	Do not rewrite identity math.
+	3.	Focus on objective weighting and stability guard interactions.
+	4.	Verify gradient magnitudes between flow head and possession head.
+
+The next iteration should prioritize volume calibration before expanding coupling complexity.
