@@ -41,7 +41,6 @@ from projections.rotation.joint_active_set import (
 )
 from projections.rotation.possession_backbone import (
     compute_possession_truth,
-    FTA_POSS_COEFF,
 )
 from projections.rotation.training_losses import compute_crps_loss, compute_team_energy_score
 from projections.rotation.set_model import zfill_game_id_series
@@ -130,6 +129,7 @@ class EpochMetrics:
     train_poss_nll: float = 0.0
     train_backbone_nll: float = 0.0
     train_three_pa_nll: float = 0.0
+    train_efficiency_nll: float = 0.0
     val_total: float = 0.0
     val_minutes_mae: float = 0.0
     val_count_loss: float = 0.0
@@ -142,6 +142,7 @@ class EpochMetrics:
     val_poss_nll: float = 0.0
     val_backbone_nll: float = 0.0
     val_three_pa_nll: float = 0.0
+    val_efficiency_nll: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -316,6 +317,36 @@ def _gaussian_nll(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, 
     per = 0.5 * ((residual * residual) / var + math.log(2.0 * math.pi * var))
     denom = mask_f.sum().clamp(min=1.0)
     return (per * mask_f).sum() / denom
+
+
+def _beta_binomial_nll(
+    *,
+    attempts: torch.Tensor,
+    makes: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    eps = 1e-6
+    mask_f = mask.to(dtype=attempts.dtype)
+    n = torch.clamp(torch.round(attempts), min=0.0)
+    k = torch.clamp(torch.round(makes), min=0.0)
+    k = torch.minimum(k, n)
+    a = torch.clamp(alpha, min=eps)
+    b = torch.clamp(beta, min=eps)
+
+    log_comb = torch.lgamma(n + 1.0) - torch.lgamma(k + 1.0) - torch.lgamma(n - k + 1.0)
+    log_beta_ratio = (
+        torch.lgamma(k + a)
+        + torch.lgamma(n - k + b)
+        + torch.lgamma(a + b)
+        - torch.lgamma(n + a + b)
+        - torch.lgamma(a)
+        - torch.lgamma(b)
+    )
+    nll = -(log_comb + log_beta_ratio)
+    denom = mask_f.sum().clamp(min=1.0)
+    return (nll * mask_f).sum() / denom
 
 
 def _flow_index(flow_target_columns: list[str], name: str) -> int:
@@ -599,6 +630,7 @@ def _stats_finite(stats: dict[str, float]) -> bool:
         "poss_nll",
         "backbone_nll",
         "three_pa_nll",
+        "efficiency_nll",
     ]
     return all(math.isfinite(float(stats.get(k, float("nan")))) for k in keys)
 
@@ -632,7 +664,9 @@ def _run_epoch(
     w_poss_nll: float = 0.0,
     w_backbone_nll: float = 0.0,
     w_three_pa_nll: float = 0.0,
+    w_efficiency_nll: float = 0.0,
     enable_possession_backbone: bool = False,
+    enable_efficiency_head: bool = False,
     detach_backbone: bool = True,
     phase2_stability_config: Phase2StabilityConfig | None = None,
     phase2_stability_state: Phase2StabilityState | None = None,
@@ -653,6 +687,7 @@ def _run_epoch(
         "poss_nll": 0.0,
         "backbone_nll": 0.0,
         "three_pa_nll": 0.0,
+        "efficiency_nll": 0.0,
         "steps": 0,
         "skipped_batches": 0,
         "instability_events": 0,
@@ -848,6 +883,55 @@ def _run_epoch(
                             three_pa_share_true=three_pa_share_true,
                         )
 
+            efficiency_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            if bool(enable_efficiency_head) and out.efficiency is not None:
+                ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
+                required_cols = ["fga2", "fg2m", "fga3", "fg3m", "fta", "ftm"]
+                missing_required_cols = [name for name in required_cols if name not in ftc]
+                if missing_required_cols:
+                    raise RuntimeError(
+                        f"Missing required flow target columns for efficiency head: {missing_required_cols}",
+                    )
+                fga2_i = _flow_index(ftc, "fga2")
+                fg2m_i = _flow_index(ftc, "fg2m")
+                fga3_i = _flow_index(ftc, "fga3")
+                fg3m_i = _flow_index(ftc, "fg3m")
+                fta_i = _flow_index(ftc, "fta")
+                ftm_i = _flow_index(ftc, "ftm")
+                max_required_idx = max(fga2_i, fg2m_i, fga3_i, fg3m_i, fta_i, ftm_i)
+                if flow_targets.ndim != 4 or int(flow_targets.shape[-1]) <= int(max_required_idx):
+                    raise RuntimeError(
+                        "Efficiency head loss requires populated flow_targets stats. "
+                        f"Got flow_targets shape={tuple(flow_targets.shape)} with required index={max_required_idx}. "
+                        "Use --enable-phase2-flow so labels_boxscore_counts are loaded.",
+                    )
+
+                def _obs_mask(a_idx: int, m_idx: int) -> torch.Tensor:
+                    return flow_observed_flat[..., a_idx] & flow_observed_flat[..., m_idx] & out.player_valid_mask
+
+                ft_nll = _beta_binomial_nll(
+                    attempts=flow_target_flat[..., fta_i],
+                    makes=flow_target_flat[..., ftm_i],
+                    alpha=out.efficiency.alpha_ft,
+                    beta=out.efficiency.beta_ft,
+                    mask=_obs_mask(fta_i, ftm_i),
+                )
+                fg2_nll = _beta_binomial_nll(
+                    attempts=flow_target_flat[..., fga2_i],
+                    makes=flow_target_flat[..., fg2m_i],
+                    alpha=out.efficiency.alpha_fg2,
+                    beta=out.efficiency.beta_fg2,
+                    mask=_obs_mask(fga2_i, fg2m_i),
+                )
+                fg3_nll = _beta_binomial_nll(
+                    attempts=flow_target_flat[..., fga3_i],
+                    makes=flow_target_flat[..., fg3m_i],
+                    alpha=out.efficiency.alpha_fg3,
+                    beta=out.efficiency.beta_fg3,
+                    mask=_obs_mask(fga3_i, fg3m_i),
+                )
+                efficiency_nll_loss = (ft_nll + fg2_nll + fg3_nll) / 3.0
+
             total_loss = (
                 float(w_minutes) * minutes_mae
                 + float(w_count) * active_losses["count_loss"]
@@ -859,6 +943,7 @@ def _run_epoch(
                 + float(w_poss_nll) * poss_nll_loss
                 + float(w_backbone_nll) * backbone_nll_loss
                 + float(w_three_pa_nll) * three_pa_nll_loss
+                + float(w_efficiency_nll) * efficiency_nll_loss
             )
 
             skip_step = False
@@ -942,6 +1027,7 @@ def _run_epoch(
             totals["poss_nll"] += float(poss_nll_loss.item())
             totals["backbone_nll"] += float(backbone_nll_loss.item())
             totals["three_pa_nll"] += float(three_pa_nll_loss.item())
+            totals["efficiency_nll"] += float(efficiency_nll_loss.item())
             totals["steps"] += 1
         if phase2_stability_state is not None and bool(phase2_stability_state.rollback_requested):
             break
@@ -960,6 +1046,7 @@ def _run_epoch(
         "poss_nll": totals["poss_nll"] / denom,
         "backbone_nll": totals["backbone_nll"] / denom,
         "three_pa_nll": totals["three_pa_nll"] / denom,
+        "efficiency_nll": totals["efficiency_nll"] / denom,
         "skipped_batches": float(totals["skipped_batches"]),
         "instability_events": float(totals["instability_events"]),
         "rollback_requested": 1.0 if (phase2_stability_state and phase2_stability_state.rollback_requested) else 0.0,
@@ -1075,6 +1162,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase3-num-samples", type=int, default=16)
     parser.add_argument("--phase3-active-temperature", type=float, default=1.0)
     parser.add_argument("--phase3-stop-grad", action="store_true")
+    parser.add_argument("--enable-efficiency-head", action="store_true")
+    parser.add_argument(
+        "--efficiency-head-only",
+        action="store_true",
+        help="Freeze all non-efficiency params and train only efficiency_head.* weights.",
+    )
+    parser.add_argument("--w-efficiency-nll", type=float, default=1.0)
+    parser.add_argument("--efficiency-head-hidden", type=int, default=128)
+    parser.add_argument("--efficiency-ft-prior-mean", type=float, default=0.77)
+    parser.add_argument("--efficiency-ft-prior-strength", type=float, default=6.0)
+    parser.add_argument("--efficiency-fg2-prior-mean", type=float, default=0.54)
+    parser.add_argument("--efficiency-fg2-prior-strength", type=float, default=8.0)
+    parser.add_argument("--efficiency-fg3-prior-mean", type=float, default=0.36)
+    parser.add_argument("--efficiency-fg3-prior-strength", type=float, default=8.0)
 
     # Possession backbone (section 15)
     parser.add_argument("--enable-possession-backbone", action="store_true")
@@ -1082,6 +1183,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--w-poss-nll", type=float, default=1.0)
     parser.add_argument("--w-backbone-nll", type=float, default=1.0)
     parser.add_argument("--w-three-pa-nll", type=float, default=0.5)
+    parser.add_argument(
+        "--possession-mu-mode",
+        type=str,
+        default="absolute",
+        choices=["absolute", "baseline_delta"],
+        help="Possession head mean parameterization: absolute mu or baseline + delta.",
+    )
+    parser.add_argument(
+        "--possession-mu-baseline",
+        type=float,
+        default=100.0,
+        help="Baseline possessions used when --possession-mu-mode=baseline_delta.",
+    )
     parser.add_argument(
         "--backbone-detach-until-epoch",
         type=int,
@@ -1110,6 +1224,10 @@ def main() -> None:
     _set_seed(int(args.seed))
     if bool(args.enable_phase3_decision) and not bool(args.enable_phase2_flow):
         raise ValueError("--enable-phase3-decision requires --enable-phase2-flow")
+    if bool(args.enable_efficiency_head) and not bool(args.enable_phase2_flow):
+        raise ValueError("--enable-efficiency-head requires --enable-phase2-flow")
+    if bool(args.efficiency_head_only) and not bool(args.enable_efficiency_head):
+        raise ValueError("--efficiency-head-only requires --enable-efficiency-head")
     if (bool(args.enable_possession_backbone) or bool(args.enable_three_pa_share)) and not bool(args.enable_phase2_flow):
         raise ValueError(
             "--enable-possession-backbone/--enable-three-pa-share require --enable-phase2-flow "
@@ -1121,6 +1239,22 @@ def main() -> None:
         raise ValueError("--phase3-num-samples must be > 0")
     if float(args.phase3_active_temperature) <= 0:
         raise ValueError("--phase3-active-temperature must be > 0")
+    if int(args.efficiency_head_hidden) <= 0:
+        raise ValueError("--efficiency-head-hidden must be > 0")
+    if float(args.efficiency_ft_prior_mean) <= 0.0 or float(args.efficiency_ft_prior_mean) >= 1.0:
+        raise ValueError("--efficiency-ft-prior-mean must be in (0, 1)")
+    if float(args.efficiency_fg2_prior_mean) <= 0.0 or float(args.efficiency_fg2_prior_mean) >= 1.0:
+        raise ValueError("--efficiency-fg2-prior-mean must be in (0, 1)")
+    if float(args.efficiency_fg3_prior_mean) <= 0.0 or float(args.efficiency_fg3_prior_mean) >= 1.0:
+        raise ValueError("--efficiency-fg3-prior-mean must be in (0, 1)")
+    if float(args.efficiency_ft_prior_strength) <= 0.0:
+        raise ValueError("--efficiency-ft-prior-strength must be > 0")
+    if float(args.efficiency_fg2_prior_strength) <= 0.0:
+        raise ValueError("--efficiency-fg2-prior-strength must be > 0")
+    if float(args.efficiency_fg3_prior_strength) <= 0.0:
+        raise ValueError("--efficiency-fg3-prior-strength must be > 0")
+    if float(args.w_efficiency_nll) < 0.0:
+        raise ValueError("--w-efficiency-nll must be >= 0")
     if float(args.overflow_protected_prior_play_prob_floor) < 0.0 or float(args.overflow_protected_prior_play_prob_floor) > 1.0:
         raise ValueError("--overflow-protected-prior-play-prob-floor must be within [0, 1]")
     if float(args.overflow_protected_prior_minutes_floor) < 0.0:
@@ -1258,8 +1392,18 @@ def main() -> None:
         flow_num_blocks=int(args.flow_num_blocks),
         flow_scale_clip=float(args.flow_scale_clip),
         flow_context_mode=str(args.flow_context_mode),
+        enable_efficiency_head=bool(args.enable_efficiency_head),
+        efficiency_head_hidden=int(args.efficiency_head_hidden),
+        efficiency_ft_prior_mean=float(args.efficiency_ft_prior_mean),
+        efficiency_ft_prior_strength=float(args.efficiency_ft_prior_strength),
+        efficiency_fg2_prior_mean=float(args.efficiency_fg2_prior_mean),
+        efficiency_fg2_prior_strength=float(args.efficiency_fg2_prior_strength),
+        efficiency_fg3_prior_mean=float(args.efficiency_fg3_prior_mean),
+        efficiency_fg3_prior_strength=float(args.efficiency_fg3_prior_strength),
         enable_possession_backbone=bool(args.enable_possession_backbone),
         enable_three_pa_share=bool(args.enable_three_pa_share),
+        possession_mu_mode=str(args.possession_mu_mode),
+        possession_mu_baseline=float(args.possession_mu_baseline),
         overflow_protected_prior_play_prob_floor=float(args.overflow_protected_prior_play_prob_floor),
         overflow_protected_prior_minutes_floor=float(args.overflow_protected_prior_minutes_floor),
         overflow_risk_weight_consecutive_active_dnp=float(args.overflow_risk_weight_consecutive_active_dnp),
@@ -1285,8 +1429,21 @@ def main() -> None:
                 flush=True,
             )
         print(f"[warm-start] loaded init checkpoint: {init_model_pt}", flush=True)
+    if bool(args.efficiency_head_only):
+        n_trainable = 0
+        n_total = 0
+        for name, param in model.named_parameters():
+            n_total += 1
+            is_eff = name.startswith("efficiency_head.")
+            param.requires_grad = bool(is_eff)
+            if param.requires_grad:
+                n_trainable += 1
+        print(
+            f"[efficiency-head-only] trainable_param_tensors={n_trainable} total_param_tensors={n_total}",
+            flush=True,
+        )
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        [p for p in model.parameters() if p.requires_grad],
         lr=float(args.lr),
         weight_decay=float(args.weight_decay),
     )
@@ -1360,7 +1517,9 @@ def main() -> None:
             w_poss_nll=float(args.w_poss_nll) if bool(args.enable_possession_backbone) else 0.0,
             w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
             w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
+            w_efficiency_nll=float(args.w_efficiency_nll) if bool(args.enable_efficiency_head) else 0.0,
             enable_possession_backbone=bool(args.enable_possession_backbone),
+            enable_efficiency_head=bool(args.enable_efficiency_head),
             detach_backbone=bool(int(epoch) < int(args.backbone_detach_until_epoch)),
             phase2_stability_config=phase2_guard_cfg if bool(args.enable_phase2_flow) else None,
             phase2_stability_state=phase2_guard_state if bool(args.enable_phase2_flow) else None,
@@ -1385,6 +1544,7 @@ def main() -> None:
                 "poss_nll": float("nan"),
                 "backbone_nll": float("nan"),
                 "three_pa_nll": float("nan"),
+                "efficiency_nll": float("nan"),
                 "skipped_batches": 0.0,
                 "instability_events": 0.0,
                 "rollback_requested": 1.0,
@@ -1418,7 +1578,9 @@ def main() -> None:
                 w_poss_nll=float(args.w_poss_nll) if bool(args.enable_possession_backbone) else 0.0,
                 w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
                 w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
+                w_efficiency_nll=float(args.w_efficiency_nll) if bool(args.enable_efficiency_head) else 0.0,
                 enable_possession_backbone=bool(args.enable_possession_backbone),
+                enable_efficiency_head=bool(args.enable_efficiency_head),
                 detach_backbone=bool(int(epoch) < int(args.backbone_detach_until_epoch)),
             )
 
@@ -1442,6 +1604,7 @@ def main() -> None:
             train_poss_nll=train_stats.get("poss_nll", 0.0),
             train_backbone_nll=train_stats.get("backbone_nll", 0.0),
             train_three_pa_nll=train_stats.get("three_pa_nll", 0.0),
+            train_efficiency_nll=train_stats.get("efficiency_nll", 0.0),
             val_total=val_stats["total"],
             val_minutes_mae=val_stats["minutes_mae"],
             val_count_loss=val_stats["count_loss"],
@@ -1454,6 +1617,7 @@ def main() -> None:
             val_poss_nll=val_stats.get("poss_nll", 0.0),
             val_backbone_nll=val_stats.get("backbone_nll", 0.0),
             val_three_pa_nll=val_stats.get("three_pa_nll", 0.0),
+            val_efficiency_nll=val_stats.get("efficiency_nll", 0.0),
         )
         history.append(metrics)
 
@@ -1478,6 +1642,8 @@ def main() -> None:
                 f"val_crps_fpts={metrics.val_crps_fpts:.4f} "
                 f"val_team_energy={metrics.val_team_energy:.4f}"
             )
+        if bool(args.enable_efficiency_head):
+            msg = f"{msg} val_efficiency_nll={metrics.val_efficiency_nll:.4f}"
         if bool(args.enable_possession_backbone):
             bb_detached = int(epoch) < int(args.backbone_detach_until_epoch)
             msg = (
@@ -1534,6 +1700,8 @@ def main() -> None:
         "num_feature_columns": int(len(feature_cols)),
         "flow_target_columns": flow_label_cols,
         "phase2_flow_enabled": bool(args.enable_phase2_flow),
+        "efficiency_head_enabled": bool(args.enable_efficiency_head),
+        "efficiency_head_only": bool(args.efficiency_head_only),
         "phase3_decision_enabled": bool(args.enable_phase3_decision),
         "phase2_schedule": {
             "flow_warmup_epochs": int(args.phase2_flow_warmup_epochs),

@@ -74,12 +74,18 @@ class PossessionHead(nn.Module):
         d_model: int,
         hidden_dim: int = 128,
         dropout: float = 0.1,
+        mu_mode: str = "absolute",
+        mu_baseline: float = 100.0,
         min_df: float = 2.5,
         max_df: float = 30.0,
         min_sigma: float = 0.5,
         max_sigma: float = 15.0,
     ) -> None:
         super().__init__()
+        if str(mu_mode) not in {"absolute", "baseline_delta"}:
+            raise ValueError("mu_mode must be one of: absolute, baseline_delta")
+        self.mu_mode = str(mu_mode)
+        self.mu_baseline = float(mu_baseline)
         self.min_df = float(min_df)
         self.max_df = float(max_df)
         self.min_sigma = float(min_sigma)
@@ -92,10 +98,12 @@ class PossessionHead(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, 3),  # mu, raw_sigma, raw_df
         )
-        # Initialize output bias for sensible defaults:
-        # mu ~ 97 (average NBA possessions), sigma ~ 5, df ~ 5
+        # Initialize output bias for sensible defaults.
+        # absolute mode: mu ~ 97 (legacy behavior)
+        # baseline_delta mode: delta_mu ~ 0, so mu starts near configured baseline
         with torch.no_grad():
-            self.net[-1].bias.copy_(torch.tensor([97.0, 0.0, 0.0]))
+            mu_bias = 97.0 if self.mu_mode == "absolute" else 0.0
+            self.net[-1].bias.copy_(torch.tensor([mu_bias, 0.0, 0.0]))
 
     def forward(
         self,
@@ -113,7 +121,10 @@ class PossessionHead(nn.Module):
             raise ValueError("game_state must have shape (B, D)")
 
         raw = self.net(game_state)  # (B, 3)
-        mu = raw[:, 0]
+        if self.mu_mode == "baseline_delta":
+            mu = self.mu_baseline + raw[:, 0]
+        else:
+            mu = raw[:, 0]
         # sigma: softplus then clamp to [min_sigma, max_sigma]
         sigma = torch.clamp(
             nn.functional.softplus(raw[:, 1]) + self.min_sigma,

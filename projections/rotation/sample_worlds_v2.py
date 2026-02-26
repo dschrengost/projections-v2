@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,33 @@ from projections.rotation.set_model import zfill_game_id_series
 logger = logging.getLogger(__name__)
 
 JOIN_KEYS = ["game_id", "team_id", "player_id", "game_date"]
+
+
+@dataclass(frozen=True)
+class MakeModelConfig:
+    mode: str = "legacy"
+    use_learned_efficiency: bool = True
+    bb_ft_prior_mean: float = 0.77
+    bb_ft_prior_strength: float = 6.0
+    bb_ft_concentration: float = 8.0
+    bb_fg2_prior_mean: float = 0.54
+    bb_fg2_prior_strength: float = 8.0
+    bb_fg2_concentration: float = 10.0
+    bb_fg3_prior_mean: float = 0.36
+    bb_fg3_prior_strength: float = 8.0
+    bb_fg3_concentration: float = 10.0
+
+
+def _assert_no_labels_in_forward_kwargs(kwargs: dict[str, Any]) -> None:
+    """Hard guard: sampling forward pass must not consume label/target tensors."""
+    forbidden_none = ["target_counts", "target_active_mask", "flow_targets", "flow_observed_mask"]
+    for key in forbidden_none:
+        if kwargs.get(key, None) is not None:
+            raise RuntimeError(f"label leakage guard failed: `{key}` must be None in sampler forward")
+    forbidden_false = ["use_target_counts", "use_target_active_mask", "minutes_use_target_active", "run_flow"]
+    for key in forbidden_false:
+        if bool(kwargs.get(key, False)):
+            raise RuntimeError(f"label leakage guard failed: `{key}` must be False in sampler forward")
 
 
 def _utc_now_compact() -> str:
@@ -112,6 +140,221 @@ def project_flow_stats_to_contract(flow_values: torch.Tensor, *, flow_target_col
     y[..., fg3m_idx] = torch.minimum(y[..., fg3m_idx], y[..., fga3_idx])
     y[..., ftm_idx] = torch.minimum(y[..., ftm_idx], y[..., fta_idx])
     return y
+
+
+def _normalize_alloc_weights(
+    weights: torch.Tensor,
+    *,
+    eligible_mask: torch.Tensor,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Normalize non-negative player weights within each world row.
+
+    Falls back to uniform distribution over eligible players when weight mass is zero.
+    """
+    elig = eligible_mask.to(dtype=torch.bool)
+    w = torch.where(elig, torch.clamp(weights, min=0.0), torch.zeros_like(weights))
+    denom = w.sum(dim=1, keepdim=True)
+    elig_count = elig.to(dtype=w.dtype).sum(dim=1, keepdim=True).clamp(min=1.0)
+    uniform = elig.to(dtype=w.dtype) / elig_count
+    return torch.where(denom > float(eps), w / denom.clamp(min=float(eps)), uniform)
+
+
+def _align_flow_to_backbone_budgets(
+    *,
+    flow_values: torch.Tensor,
+    valid_mask: torch.Tensor,
+    team_index: torch.Tensor,
+    active_mask: torch.Tensor,
+    flow_target_columns: list[str],
+    backbone_fga: torch.Tensor,
+    backbone_fta: torch.Tensor,
+    backbone_tov: torch.Tensor,
+    backbone_oreb: torch.Tensor,
+    backbone_three_pa_share: torch.Tensor | None,
+    eff_alpha_ft: torch.Tensor | None = None,
+    eff_beta_ft: torch.Tensor | None = None,
+    eff_alpha_fg2: torch.Tensor | None = None,
+    eff_beta_fg2: torch.Tensor | None = None,
+    eff_alpha_fg3: torch.Tensor | None = None,
+    eff_beta_fg3: torch.Tensor | None = None,
+    make_model_config: MakeModelConfig | None = None,
+) -> torch.Tensor:
+    """Align player-level flow outputs to sampled backbone team event budgets.
+
+    This enforces sampled per-team totals for FGA/FTA/TOV/OREB while preserving
+    player-level share patterns from the sampled flow output.
+    """
+    if flow_values.ndim != 3:
+        raise ValueError("flow_values must have shape (N, 30, S)")
+    if valid_mask.shape != team_index.shape or valid_mask.shape != active_mask.shape:
+        raise ValueError("valid_mask/team_index/active_mask must have shape (N, 30)")
+    if backbone_fga.ndim != 2 or backbone_fga.shape[1] != 2:
+        raise ValueError("backbone_fga/backbone_fta/backbone_tov/backbone_oreb must have shape (N, 2)")
+
+    out = flow_values.clone()
+    valid = valid_mask.to(dtype=torch.bool)
+    active = active_mask.to(dtype=torch.bool)
+    # Prefer active players for allocation; fallback to valid players if needed.
+    alloc_base = valid & active
+
+    fga2_idx = _flow_idx(flow_target_columns, "fga2")
+    fg2m_idx = _flow_idx(flow_target_columns, "fg2m")
+    fga3_idx = _flow_idx(flow_target_columns, "fga3")
+    fg3m_idx = _flow_idx(flow_target_columns, "fg3m")
+    fta_idx = _flow_idx(flow_target_columns, "fta")
+    ftm_idx = _flow_idx(flow_target_columns, "ftm")
+    oreb_idx = _flow_idx(flow_target_columns, "oreb")
+    tov_idx = _flow_idx(flow_target_columns, "tov")
+
+    old_fga2 = out[:, :, fga2_idx]
+    old_fga3 = out[:, :, fga3_idx]
+    old_fta = out[:, :, fta_idx]
+    old_fg2m = out[:, :, fg2m_idx]
+    old_fg3m = out[:, :, fg3m_idx]
+    old_ftm = out[:, :, ftm_idx]
+
+    fg2_pct = torch.where(old_fga2 > 1e-8, old_fg2m / old_fga2.clamp(min=1e-8), torch.zeros_like(old_fga2))
+    fg3_pct = torch.where(old_fga3 > 1e-8, old_fg3m / old_fga3.clamp(min=1e-8), torch.zeros_like(old_fga3))
+    ft_pct = torch.where(old_fta > 1e-8, old_ftm / old_fta.clamp(min=1e-8), torch.zeros_like(old_fta))
+    fg2_pct = torch.clamp(fg2_pct, min=0.0, max=1.0)
+    fg3_pct = torch.clamp(fg3_pct, min=0.0, max=1.0)
+    ft_pct = torch.clamp(ft_pct, min=0.0, max=1.0)
+
+    for side in (0, 1):
+        side_mask = team_index.eq(side)
+        elig = alloc_base & side_mask
+        valid_side = valid & side_mask
+
+        # If active mask is empty for a row, fallback to valid players for that row.
+        has_active = elig.any(dim=1, keepdim=True)
+        elig = torch.where(has_active, elig, valid_side)
+
+        budget_fga = torch.clamp(backbone_fga[:, side], min=0.0)
+        budget_fta = torch.clamp(backbone_fta[:, side], min=0.0)
+        budget_tov = torch.clamp(backbone_tov[:, side], min=0.0)
+        budget_oreb = torch.clamp(backbone_oreb[:, side], min=0.0)
+
+        if backbone_three_pa_share is not None:
+            share3 = torch.clamp(backbone_three_pa_share[:, side], min=0.0, max=1.0)
+        else:
+            team_fga2 = (old_fga2 * valid_side.to(dtype=old_fga2.dtype)).sum(dim=1)
+            team_fga3 = (old_fga3 * valid_side.to(dtype=old_fga3.dtype)).sum(dim=1)
+            share3 = torch.where(
+                (team_fga2 + team_fga3) > 1e-8,
+                team_fga3 / (team_fga2 + team_fga3).clamp(min=1e-8),
+                torch.full_like(team_fga2, 0.38),
+            )
+            share3 = torch.clamp(share3, min=0.0, max=1.0)
+
+        budget_fga3 = budget_fga * share3
+        budget_fga2 = budget_fga - budget_fga3
+
+        w_fga2 = _normalize_alloc_weights(old_fga2, eligible_mask=elig)
+        w_fga3 = _normalize_alloc_weights(old_fga3, eligible_mask=elig)
+        w_fta = _normalize_alloc_weights(old_fta, eligible_mask=elig)
+        w_tov = _normalize_alloc_weights(out[:, :, tov_idx], eligible_mask=elig)
+        w_oreb = _normalize_alloc_weights(out[:, :, oreb_idx], eligible_mask=elig)
+
+        new_fga2 = w_fga2 * budget_fga2.unsqueeze(1)
+        new_fga3 = w_fga3 * budget_fga3.unsqueeze(1)
+        new_fta = w_fta * budget_fta.unsqueeze(1)
+        new_tov = w_tov * budget_tov.unsqueeze(1)
+        new_oreb = w_oreb * budget_oreb.unsqueeze(1)
+
+        side_f = side_mask.to(dtype=out.dtype)
+        out[:, :, fga2_idx] = out[:, :, fga2_idx] * (1.0 - side_f) + new_fga2 * side_f
+        out[:, :, fga3_idx] = out[:, :, fga3_idx] * (1.0 - side_f) + new_fga3 * side_f
+        out[:, :, fta_idx] = out[:, :, fta_idx] * (1.0 - side_f) + new_fta * side_f
+        out[:, :, tov_idx] = out[:, :, tov_idx] * (1.0 - side_f) + new_tov * side_f
+        out[:, :, oreb_idx] = out[:, :, oreb_idx] * (1.0 - side_f) + new_oreb * side_f
+
+    cfg = make_model_config or MakeModelConfig()
+    mode = str(cfg.mode).strip().lower()
+    if mode not in {"legacy", "beta_binomial_ft", "beta_binomial_fg", "beta_binomial_all"}:
+        raise ValueError(f"unsupported make_model mode: {cfg.mode}")
+
+    def _legacy_makes(attempts: torch.Tensor, rates: torch.Tensor) -> torch.Tensor:
+        return torch.minimum(attempts, rates * attempts)
+
+    def _sample_beta_binomial_makes(
+        *,
+        attempts: torch.Tensor,
+        rates: torch.Tensor,
+        prior_mean: float,
+        prior_strength: float,
+        concentration: float,
+        alpha_pred: torch.Tensor | None = None,
+        beta_pred: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        eps = 1e-4
+        clipped_attempts = torch.clamp(attempts, min=0.0)
+        if alpha_pred is not None and beta_pred is not None and bool(cfg.use_learned_efficiency):
+            alpha = torch.clamp(alpha_pred, min=eps)
+            beta = torch.clamp(beta_pred, min=eps)
+        else:
+            clipped_rates = torch.clamp(rates, min=eps, max=1.0 - eps)
+            pm = float(np.clip(prior_mean, eps, 1.0 - eps))
+            ps = max(float(prior_strength), eps)
+            conc = max(float(concentration), eps)
+
+            prior_alpha = clipped_attempts.new_full(clipped_attempts.shape, pm * ps)
+            prior_beta = clipped_attempts.new_full(clipped_attempts.shape, (1.0 - pm) * ps)
+            alpha = torch.clamp(prior_alpha + clipped_rates * conc, min=eps)
+            beta = torch.clamp(prior_beta + (1.0 - clipped_rates) * conc, min=eps)
+
+        n_floor = torch.floor(clipped_attempts)
+        frac = torch.clamp(clipped_attempts - n_floor, min=0.0, max=1.0)
+        n_int = n_floor + torch.bernoulli(frac)
+
+        p = torch.distributions.Beta(alpha, beta).sample()
+        makes_int = torch.distributions.Binomial(total_count=n_int, probs=p).sample()
+        scale = torch.where(
+            n_int > 0.0,
+            clipped_attempts / n_int.clamp(min=1.0),
+            torch.zeros_like(clipped_attempts),
+        )
+        makes = makes_int * scale
+        return torch.minimum(clipped_attempts, torch.clamp(makes, min=0.0))
+
+    use_beta_ft = mode in {"beta_binomial_ft", "beta_binomial_all"}
+    use_beta_fg = mode in {"beta_binomial_fg", "beta_binomial_all"}
+    if use_beta_fg:
+        out[:, :, fg2m_idx] = _sample_beta_binomial_makes(
+            attempts=out[:, :, fga2_idx],
+            rates=fg2_pct,
+            prior_mean=float(cfg.bb_fg2_prior_mean),
+            prior_strength=float(cfg.bb_fg2_prior_strength),
+            concentration=float(cfg.bb_fg2_concentration),
+            alpha_pred=eff_alpha_fg2,
+            beta_pred=eff_beta_fg2,
+        )
+        out[:, :, fg3m_idx] = _sample_beta_binomial_makes(
+            attempts=out[:, :, fga3_idx],
+            rates=fg3_pct,
+            prior_mean=float(cfg.bb_fg3_prior_mean),
+            prior_strength=float(cfg.bb_fg3_prior_strength),
+            concentration=float(cfg.bb_fg3_concentration),
+            alpha_pred=eff_alpha_fg3,
+            beta_pred=eff_beta_fg3,
+        )
+    else:
+        out[:, :, fg2m_idx] = _legacy_makes(out[:, :, fga2_idx], fg2_pct)
+        out[:, :, fg3m_idx] = _legacy_makes(out[:, :, fga3_idx], fg3_pct)
+
+    if use_beta_ft:
+        out[:, :, ftm_idx] = _sample_beta_binomial_makes(
+            attempts=out[:, :, fta_idx],
+            rates=ft_pct,
+            prior_mean=float(cfg.bb_ft_prior_mean),
+            prior_strength=float(cfg.bb_ft_prior_strength),
+            concentration=float(cfg.bb_ft_concentration),
+            alpha_pred=eff_alpha_ft,
+            beta_pred=eff_beta_ft,
+        )
+    else:
+        out[:, :, ftm_idx] = _legacy_makes(out[:, :, fta_idx], ft_pct)
+    return torch.clamp(out, min=0.0)
 
 
 def check_world_contracts(
@@ -483,12 +726,20 @@ def sample_worlds_for_batch(
     active_temperature: float,
     strict_contracts: bool,
     poss_symmetry_gate: float | None = None,
+    attempt_conditioning_mode: str = "predicted_attempts",
+    make_model_config: MakeModelConfig | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     if not hasattr(model, "flow_head") or model.flow_head is None:  # type: ignore[attr-defined]
         raise RuntimeError("Model does not expose flow_head for inverse flow sampling")
 
     flow_target_columns = list(model.flow_target_columns)  # type: ignore[attr-defined]
     bsz = int(batch["player_features"].shape[0])  # type: ignore[index]
+    if str(attempt_conditioning_mode) == "predicted_attempts":
+        flow_targets_batch = batch.get("flow_targets")
+        if isinstance(flow_targets_batch, torch.Tensor) and int(flow_targets_batch.shape[-1]) > 0:
+            raise RuntimeError(
+                "label leakage guard failed: flow label tensors present in sampler batch under predicted_attempts mode",
+            )
 
     player_features = batch["player_features"].to(device=device)  # type: ignore[index]
     player_valid_mask = batch["player_valid_mask"].to(device=device)  # type: ignore[index]
@@ -512,16 +763,29 @@ def sample_worlds_for_batch(
         with torch.no_grad():
             # Enable backbone sampling when possession backbone is present
             has_backbone = getattr(model, "enable_possession_backbone", False)
+            forward_kwargs = {
+                "game_features": rep_game_features,
+                "team_features": rep_team_features,
+                "sample_active": True,
+                "active_temperature": float(active_temperature),
+                "run_flow": False,
+                "sample_backbone": bool(has_backbone),
+                "target_counts": None,
+                "use_target_counts": False,
+                "target_active_mask": None,
+                "use_target_active_mask": False,
+                "minutes_use_target_active": False,
+                "flow_targets": None,
+                "flow_observed_mask": None,
+            }
+            _assert_no_labels_in_forward_kwargs(forward_kwargs)
             out = model(
                 rep_player_features,
                 rep_player_valid_mask,
-                game_features=rep_game_features,
-                team_features=rep_team_features,
-                sample_active=True,
-                active_temperature=float(active_temperature),
-                run_flow=False,
-                sample_backbone=bool(has_backbone),
+                **forward_kwargs,
             )
+            if out.flow is not None:
+                raise RuntimeError("label leakage guard failed: sampler forward returned flow outputs")
             z = torch.randn(
                 (rep_player_features.shape[0], out.player_states.shape[1], len(flow_target_columns)),
                 device=device,
@@ -541,6 +805,63 @@ def sample_worlds_for_batch(
             )
             # Enforce DNP semantics: inactive players contribute zero counting stats.
             flow_projected = flow_projected * out.active.active_mask.unsqueeze(-1).to(dtype=flow_projected.dtype)
+            # Couple player-level outputs to sampled backbone team event budgets.
+            if has_backbone and out.backbone is not None:
+                budget_fga = out.backbone.fga
+                budget_fta = out.backbone.fta
+                budget_tov = out.backbone.tov
+                budget_oreb = out.backbone.oreb
+                budget_three_pa_share = out.backbone.three_pa_share
+                if str(attempt_conditioning_mode) == "true_attempts_upper_bound":
+                    if "flow_targets" not in batch:
+                        raise RuntimeError(
+                            "attempt_conditioning_mode=true_attempts_upper_bound requires flow_targets in batch",
+                        )
+                    flow_targets_true = batch["flow_targets"].to(device=device)  # type: ignore[index]
+                    if flow_targets_true.ndim != 4 or int(flow_targets_true.shape[-1]) < len(flow_target_columns):
+                        raise RuntimeError(
+                            "true_attempts_upper_bound requires observed flow_targets with expected stat columns",
+                        )
+                    fga2_idx = _flow_idx(flow_target_columns, "fga2")
+                    fga3_idx = _flow_idx(flow_target_columns, "fga3")
+                    fta_idx = _flow_idx(flow_target_columns, "fta")
+                    tov_idx = _flow_idx(flow_target_columns, "tov")
+                    oreb_idx = _flow_idx(flow_target_columns, "oreb")
+                    true_fga2 = flow_targets_true[:, :, :, fga2_idx].sum(dim=2)
+                    true_fga3 = flow_targets_true[:, :, :, fga3_idx].sum(dim=2)
+                    true_fta = flow_targets_true[:, :, :, fta_idx].sum(dim=2)
+                    true_tov = flow_targets_true[:, :, :, tov_idx].sum(dim=2)
+                    true_oreb = flow_targets_true[:, :, :, oreb_idx].sum(dim=2)
+                    true_fga = true_fga2 + true_fga3
+                    true_share3 = torch.where(
+                        true_fga > 1e-8,
+                        true_fga3 / true_fga.clamp(min=1e-8),
+                        torch.full_like(true_fga, 0.38),
+                    )
+                    budget_fga = true_fga.repeat_interleave(n_worlds_chunk, dim=0)
+                    budget_fta = true_fta.repeat_interleave(n_worlds_chunk, dim=0)
+                    budget_tov = true_tov.repeat_interleave(n_worlds_chunk, dim=0)
+                    budget_oreb = true_oreb.repeat_interleave(n_worlds_chunk, dim=0)
+                    budget_three_pa_share = true_share3.repeat_interleave(n_worlds_chunk, dim=0)
+                flow_projected = _align_flow_to_backbone_budgets(
+                    flow_values=flow_projected,
+                    valid_mask=out.player_valid_mask,
+                    team_index=out.player_team_index,
+                    active_mask=out.active.active_mask,
+                    flow_target_columns=flow_target_columns,
+                    backbone_fga=budget_fga,
+                    backbone_fta=budget_fta,
+                    backbone_tov=budget_tov,
+                    backbone_oreb=budget_oreb,
+                    backbone_three_pa_share=budget_three_pa_share,
+                    eff_alpha_ft=out.efficiency.alpha_ft if out.efficiency is not None else None,
+                    eff_beta_ft=out.efficiency.beta_ft if out.efficiency is not None else None,
+                    eff_alpha_fg2=out.efficiency.alpha_fg2 if out.efficiency is not None else None,
+                    eff_beta_fg2=out.efficiency.beta_fg2 if out.efficiency is not None else None,
+                    eff_alpha_fg3=out.efficiency.alpha_fg3 if out.efficiency is not None else None,
+                    eff_beta_fg3=out.efficiency.beta_fg3 if out.efficiency is not None else None,
+                    make_model_config=make_model_config,
+                )
 
         minutes = out.minutes.minutes.reshape(bsz, n_worlds_chunk, -1)
         active = out.active.active_mask.reshape(bsz, n_worlds_chunk, -1)
@@ -649,6 +970,46 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument(
+        "--attempt-conditioning-mode",
+        type=str,
+        default="predicted_attempts",
+        choices=["predicted_attempts", "true_attempts_upper_bound"],
+        help=(
+            "Make sampling attempt-conditioning source. "
+            "predicted_attempts: normal inference path. "
+            "true_attempts_upper_bound: audit-only upper bound using true team attempts post-forward."
+        ),
+    )
+    parser.add_argument(
+        "--make-model",
+        type=str,
+        default="legacy",
+        choices=["legacy", "beta_binomial_ft", "beta_binomial_fg", "beta_binomial_all"],
+        help=(
+            "Make reconstruction mode after backbone budget coupling. "
+            "legacy=attempts*pct clipping; beta_binomial_* applies discrete conditional sampling."
+        ),
+    )
+    parser.add_argument("--bb-ft-prior-mean", type=float, default=0.77)
+    parser.add_argument("--bb-ft-prior-strength", type=float, default=6.0)
+    parser.add_argument("--bb-ft-concentration", type=float, default=8.0)
+    parser.add_argument("--bb-fg2-prior-mean", type=float, default=0.54)
+    parser.add_argument("--bb-fg2-prior-strength", type=float, default=8.0)
+    parser.add_argument("--bb-fg2-concentration", type=float, default=10.0)
+    parser.add_argument("--bb-fg3-prior-mean", type=float, default=0.36)
+    parser.add_argument("--bb-fg3-prior-strength", type=float, default=8.0)
+    parser.add_argument("--bb-fg3-concentration", type=float, default=10.0)
+    parser.add_argument(
+        "--bb-use-learned-efficiency",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help=(
+            "When make-model is beta_binomial_*, use learned efficiency head alpha/beta if available "
+            "(1=yes, 0=no fallback to flow-derived rates + priors)."
+        ),
+    )
     parser.add_argument("--out-parquet", type=str, default=None)
     parser.add_argument("--out-summary-json", type=str, default=None)
     parser.add_argument("--out-projections-parquet", type=str, default=None)
@@ -688,6 +1049,19 @@ def main() -> None:
     device = torch.device(str(args.device))
     model = model.to(device=device)
     model.eval()
+    make_model_config = MakeModelConfig(
+        mode=str(args.make_model),
+        use_learned_efficiency=bool(int(args.bb_use_learned_efficiency)),
+        bb_ft_prior_mean=float(args.bb_ft_prior_mean),
+        bb_ft_prior_strength=float(args.bb_ft_prior_strength),
+        bb_ft_concentration=float(args.bb_ft_concentration),
+        bb_fg2_prior_mean=float(args.bb_fg2_prior_mean),
+        bb_fg2_prior_strength=float(args.bb_fg2_prior_strength),
+        bb_fg2_concentration=float(args.bb_fg2_concentration),
+        bb_fg3_prior_mean=float(args.bb_fg3_prior_mean),
+        bb_fg3_prior_strength=float(args.bb_fg3_prior_strength),
+        bb_fg3_concentration=float(args.bb_fg3_concentration),
+    )
 
     features_df = _coerce_join_keys(pd.read_parquet(dataset_dir / "features.parquet"), name="features")
     labels_minutes_df = _coerce_join_keys(pd.read_parquet(dataset_dir / "labels_minutes.parquet"), name="labels_minutes")
@@ -695,6 +1069,16 @@ def main() -> None:
     label_overlap = [c for c in labels_minutes_df.columns if c in features_df.columns and c not in JOIN_KEYS]
     labels_for_merge = labels_minutes_df.drop(columns=label_overlap)
     merged = features_df.merge(labels_for_merge, on=JOIN_KEYS, how="left", validate="one_to_one")
+    if str(args.attempt_conditioning_mode) == "true_attempts_upper_bound":
+        labels_counts_path = dataset_dir / "labels_boxscore_counts.parquet"
+        if not labels_counts_path.exists():
+            raise FileNotFoundError(
+                f"{labels_counts_path} is required for --attempt-conditioning-mode=true_attempts_upper_bound",
+            )
+        labels_counts_df = _coerce_join_keys(pd.read_parquet(labels_counts_path), name="labels_boxscore_counts")
+        count_overlap = [c for c in labels_counts_df.columns if c in merged.columns and c not in JOIN_KEYS]
+        labels_counts_for_merge = labels_counts_df.drop(columns=count_overlap)
+        merged = merged.merge(labels_counts_for_merge, on=JOIN_KEYS, how="left", validate="one_to_one")
     merged["game_id_norm"] = zfill_game_id_series(merged["game_id"])
     val_df = _split_val(merged, val_days=int(args.val_days))
 
@@ -705,6 +1089,7 @@ def main() -> None:
         feature_std=np.asarray(config.feature_std, dtype=np.float32),
         game_feature_columns=list(config.game_feature_columns),
         team_feature_columns=list(config.team_feature_columns),
+        flow_label_columns=list(model.flow_target_columns) if str(args.attempt_conditioning_mode) == "true_attempts_upper_bound" else None,  # type: ignore[attr-defined]
         minutes_label_col="minutes_label" if "minutes_label" in val_df.columns else "minutes",
         overflow_protected_prior_play_prob_floor=float(config.overflow_protected_prior_play_prob_floor),
         overflow_protected_prior_minutes_floor=float(config.overflow_protected_prior_minutes_floor),
@@ -736,6 +1121,8 @@ def main() -> None:
             active_temperature=float(args.active_temperature),
             strict_contracts=bool(args.strict_contracts),
             poss_symmetry_gate=getattr(args, "poss_symmetry_gate", None),
+            attempt_conditioning_mode=str(args.attempt_conditioning_mode),
+            make_model_config=make_model_config,
         )
         frames.append(df_batch)
         contract_counter.update(checks)
@@ -770,6 +1157,20 @@ def main() -> None:
         ),
         "rows": int(len(worlds_df)),
         "flow_target_columns": list(model.flow_target_columns),  # type: ignore[attr-defined]
+        "attempt_conditioning_mode": str(args.attempt_conditioning_mode),
+        "make_model": {
+            "mode": str(make_model_config.mode),
+            "use_learned_efficiency": bool(make_model_config.use_learned_efficiency),
+            "bb_ft_prior_mean": float(make_model_config.bb_ft_prior_mean),
+            "bb_ft_prior_strength": float(make_model_config.bb_ft_prior_strength),
+            "bb_ft_concentration": float(make_model_config.bb_ft_concentration),
+            "bb_fg2_prior_mean": float(make_model_config.bb_fg2_prior_mean),
+            "bb_fg2_prior_strength": float(make_model_config.bb_fg2_prior_strength),
+            "bb_fg2_concentration": float(make_model_config.bb_fg2_concentration),
+            "bb_fg3_prior_mean": float(make_model_config.bb_fg3_prior_mean),
+            "bb_fg3_prior_strength": float(make_model_config.bb_fg3_prior_strength),
+            "bb_fg3_concentration": float(make_model_config.bb_fg3_concentration),
+        },
         "contract_checks": dict(contract_counter),
         "out_parquet": str(out_parquet),
         "out_projections_parquet": str(out_projections),

@@ -67,6 +67,7 @@ from projections.rotation.game_transformer_v2 import (
     collate_game_level_examples,
 )
 from projections.rotation.sample_worlds_v2 import (
+    MakeModelConfig,
     sample_worlds_for_batch,
     summarize_worlds_to_projections,
 )
@@ -1362,6 +1363,8 @@ def generate_worlds_gtv2_live_task(
     random_seed: int = 42,
     strict_world_contracts: bool = True,
     flow_scale_clip_override: float | None = None,
+    make_model_mode: str = "beta_binomial_all",
+    make_model_use_learned_efficiency: bool = True,
 ) -> dict[str, str]:
     run_dir = data_root / "artifacts" / WORLDS_ROOT / f"game_date={game_date}" / f"run={run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1402,6 +1405,10 @@ def generate_worlds_gtv2_live_task(
         logger = get_run_logger()
         _set_inference_seed(int(random_seed))
         device = _resolve_torch_device(gtv2_device)
+        make_model_cfg = MakeModelConfig(
+            mode=str(make_model_mode),
+            use_learned_efficiency=bool(make_model_use_learned_efficiency),
+        )
 
         # Warn loudly if using scale_clip override (experimental mode)
         if flow_scale_clip_override is not None:
@@ -1441,6 +1448,7 @@ def generate_worlds_gtv2_live_task(
                 chunk_size=max(1, int(world_chunk_size)),
                 active_temperature=float(active_temperature),
                 strict_contracts=bool(strict_world_contracts),
+                make_model_config=make_model_cfg,
             )
             world_frames.append(df_batch)
             contract_counter.update(checks)
@@ -1462,6 +1470,10 @@ def generate_worlds_gtv2_live_task(
             "projection_rows": int(len(projections)),
             "bundle_dir": str(bundle_dir),
             "device": str(device),
+            "make_model": {
+                "mode": str(make_model_cfg.mode),
+                "use_learned_efficiency": bool(make_model_cfg.use_learned_efficiency),
+            },
             "created_at": _utc_now_iso(),
         }
 
@@ -1598,6 +1610,8 @@ def nba_live_pipeline_v3_flow(
     gtv2_seed: int = 42,
     gtv2_strict_world_contracts: bool = True,
     gtv2_flow_scale_clip_override: float | None = None,
+    gtv2_make_model_mode: str = "beta_binomial_all",
+    gtv2_make_model_use_learned_efficiency: bool = True,
     input_max_age_minutes: float = 360.0,
     require_action_props: bool = True,
     allow_rotowire_props_fallback: bool = True,
@@ -1747,6 +1761,8 @@ def nba_live_pipeline_v3_flow(
             random_seed=int(gtv2_seed),
             strict_world_contracts=bool(gtv2_strict_world_contracts),
             flow_scale_clip_override=resolved_flow_scale_clip_override,
+            make_model_mode=str(gtv2_make_model_mode),
+            make_model_use_learned_efficiency=bool(gtv2_make_model_use_learned_efficiency),
         )
 
         projections_dir = finalize_projections_live_task(

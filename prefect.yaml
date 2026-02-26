@@ -31,6 +31,8 @@ deployments:
     placeholder_mode: false
     promote_pointers: true
     replay_mode: false
+    gtv2_make_model_mode: beta_binomial_all
+    gtv2_make_model_use_learned_efficiency: true
     require_action_props: true
     allow_rotowire_props_fallback: true
   work_pool:

@@ -223,6 +223,53 @@ def test_game_transformer_v2_forward_with_flow_targets_returns_flow_outputs() ->
     assert out.flow.nll_mean.item() > 0.0
 
 
+def test_game_transformer_v2_forward_emits_efficiency_outputs_when_enabled() -> None:
+    df = _toy_frame()
+    flow_cols = ["fga2", "fg2m", "fga3", "fg3m", "fta", "ftm", "oreb", "dreb", "ast", "stl", "blk", "tov"]
+    for idx, col in enumerate(flow_cols):
+        df[col] = float(idx + 1)
+
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_efficiency_head=True,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        flow_label_columns=flow_cols,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+    )
+    assert out.efficiency is not None
+    assert out.efficiency.alpha_ft.shape == (1, 30)
+    assert out.efficiency.alpha_fg2.shape == (1, 30)
+    assert out.efficiency.alpha_fg3.shape == (1, 30)
+    assert float(out.efficiency.alpha_ft.min().item()) > 0.0
+    assert float(out.efficiency.beta_ft.min().item()) > 0.0
+
+
 def test_build_game_level_examples_skips_malformed_single_side_games() -> None:
     df = _toy_frame()
 

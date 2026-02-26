@@ -106,13 +106,22 @@ def _predict(
             game_features = batch["game_features"].to(device=device)
             team_features = batch["team_features"].to(device=device)
 
-            out = model(
-                player_features,
-                player_valid_mask,
-                game_features=game_features,
-                team_features=team_features,
-                sample_active=False,
-            )
+            forward_kwargs = {
+                "game_features": game_features,
+                "team_features": team_features,
+                "sample_active": False,
+                "run_flow": False,
+                "target_counts": None,
+                "use_target_counts": False,
+                "target_active_mask": None,
+                "use_target_active_mask": False,
+                "minutes_use_target_active": False,
+                "flow_targets": None,
+                "flow_observed_mask": None,
+            }
+            out = model(player_features, player_valid_mask, **forward_kwargs)
+            if out.flow is not None:
+                raise RuntimeError("label leakage guard failed: eval forward returned flow outputs")
 
             pred_minutes = out.minutes.minutes.detach().cpu().numpy().reshape(-1, 2, 15)
             pred_active = out.active.active_mask.detach().cpu().numpy().reshape(-1, 2, 15)

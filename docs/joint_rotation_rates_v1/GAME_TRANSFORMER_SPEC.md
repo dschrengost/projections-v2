@@ -3662,3 +3662,623 @@ Before modifying backbone structure further:
 	4.	Verify gradient magnitudes between flow head and possession head.
 
 The next iteration should prioritize volume calibration before expanding coupling complexity.
+
+
+15.15 Hypothesis: Volume Suppression Equilibrium
+
+Observed Behavior
+
+The v3 possession backbone converges to a stable but systematically suppressed volume regime:
+	•	Possessions: −20% bias (79.8 vs 100.7)
+	•	FGA: −20%
+	•	FTA: −30%
+	•	Uniform negative bias across all teams
+	•	Improved structural calibration (p95), worse means and team totals
+
+There is no arithmetic bug in the possession identity and no unit mismatch in supervision.
+
+⸻
+
+Working Hypothesis
+
+The model has converged to a low-volume stability equilibrium due to loss competition and instability guards:
+	1.	Flow NLL and Phase2 instability guard penalize high-variance regimes.
+	2.	Lower possessions → lower event volume → lower variance.
+	3.	Lower variance → fewer flow NLL spikes.
+	4.	Possession NLL is weakly weighted (w_poss_nll=0.1).
+	5.	Optimizer trades −20% volume to improve global stability.
+
+Therefore:
+
+The backbone did not fail structurally — it learned that shrinking possessions is the cheapest way to satisfy dominant training objectives.
+
+⸻
+
+Implication
+
+Possession realism is under-weighted relative to flow stability.
+The system currently rewards suppressed volume.
+
+Future iterations must ensure:
+	•	Possession calibration has sufficient gradient influence.
+	•	Flow stability does not implicitly incentivize volume reduction.
+	•	Event mass preservation is treated as a first-class objective.
+
+This is a training dynamics issue, not a formula or scaling error.
+
+
+## 15.16 Controlled Ablations (Feb 26, 2026) — Findings and Next Experiments
+
+### 15.16.1 Summary of Controlled Sweep
+
+Sweep root: `gtv2_poss_ctrl_ablate_20260226T190626Z`  
+Matrix: `matrix.csv`  
+Results: `ablation_summary.csv`  
+Evaluation slice: 214 matched team-games (world means vs actuals)
+
+| Run | w_poss | Guard | poss_bias | pts_bias | pts_mae |
+|------|--------|--------|------------|-----------|----------|
+| b00_baseline | 0.1 | default | -16.93 | -21.18 | 22.26 |
+| p05_guard_base | 0.5 | default | -13.24 | -23.56 | 24.15 |
+| p10_guard_base | 1.0 | default | -16.09 | -11.44 | **16.39** |
+| p05_guard_relax | 0.5 | relaxed | -21.58 | -29.15 | 29.25 |
+| p10_guard_relax | 1.0 | relaxed | ≈ same as p10_guard_base | | |
+
+### Key Observations
+
+1. Increasing `w_poss_nll` does **not** monotonically fix possession bias.
+2. `w_poss_nll = 1.0` with default guard produces the **best FPTS MAE by a wide margin**.
+3. Relaxing the guard destabilizes training (a2 collapse) and worsens all metrics.
+4. Possession bias remains ~−16% even in the best run.
+
+---
+
+### 15.16.2 Interpretation
+
+These results imply:
+
+- Volume suppression is **not purely a possession head weighting issue**.
+- Stronger possession supervision improves point calibration even without fully correcting possession mean.
+- Flow guard stability must remain intact; relaxing it degrades global calibration.
+- The system likely remains in a slightly low-volume equilibrium even under stronger possession loss.
+
+Therefore:
+
+> The next iteration should not simply increase `w_poss_nll` further.  
+> Instead, we must diagnose whether suppression occurs in `mu_P` itself or downstream during sampling and rate coupling.
+
+---
+
+## 15.17 Required Diagnostic Before Further Sweeps
+
+Before running new weight sweeps, the following diagnostics must be logged for `p10_guard_base`:
+
+### 15.17.1 Possession Head Diagnostics
+
+For the eval slice, log:
+
+- mean(mu_P)
+- mean(sampled_poss)
+- mean(poss_used in backbone outputs)
+- std(mu_P)
+- std(sampled_poss)
+
+Interpretation:
+
+- If `mu_P ≈ 95–100` but `poss_used ≈ 80`, suppression occurs downstream.
+- If `mu_P ≈ 80`, suppression is happening at the encoder → possession head interface.
+
+This distinction determines whether to modify architecture or coupling.
+
+---
+
+## 15.18 Follow-Up Experiments (Ordered)
+
+### Experiment A — Mu Anchoring (Low Risk, Recommended First)
+
+**Goal:** Prevent global scale drift without destabilizing encoder.
+
+Modify possession head output:
+
+mu_P = P_baseline + delta_mu
+
+Where:
+- `P_baseline = 100.0`
+- `delta_mu` is network output initialized to 0
+
+Rationale:
+- Anchors global scale near league average.
+- Prevents optimizer from collapsing to low-volume equilibrium.
+- Preserves learnability for game-to-game deviations.
+- Does not require large loss reweighting.
+
+Train with:
+- `w_poss_nll = 1.0`
+- default guard
+- same staged detach schedule
+
+Evaluate:
+- poss_bias
+- pts_mae
+- team_total_mae
+- tail calibration
+
+Proceed only if pts_mae remains ≤ 17 and poss_bias improves materially.
+
+---
+
+### Experiment B — Early-Phase Possession Emphasis (Controlled)
+
+If mu anchoring is insufficient:
+
+- Freeze encoder for 3–5 epochs.
+- Train only PossessionHead + TeamEventBackbone.
+- Use `w_poss_nll = 1.0`, `w_backbone_nll = 1.0`.
+- Flow loss reduced but not disabled.
+- After calibration stabilizes, unfreeze encoder with low LR (≤ 1e-4).
+
+Goal:
+- Correct global possession scale without disturbing rotation/minutes representation.
+
+---
+
+### Experiment C — Team Total Auxiliary Loss (Optional)
+
+Add auxiliary loss:
+
+L_team_points = MSE(team_fpts_mean, team_fpts_true)
+
+Low weight (e.g., 0.1–0.3).
+
+Purpose:
+- Prevent optimizer from trading event volume for stability.
+- Explicitly reward realistic team scoring levels.
+
+---
+
+## 15.19 Guard Policy
+
+Guard relaxation is **not recommended**.
+
+Empirical result:
+- Relaxed guard triggered repeated backoffs.
+- a2_scale collapsed to 0.0625.
+- Global calibration degraded severely.
+
+Conclusion:
+- Keep default guard.
+- Stabilize volume via objective design, not guard relaxation.
+
+---
+
+## 15.20 Working Hypothesis
+
+The backbone is structurally correct but converges to a slightly suppressed volume equilibrium because:
+
+- Flow stability objectives implicitly reward lower variance.
+- Possession realism is under-incentivized relative to flow stability.
+- Optimizer trades −15–20% volume for reduced instability.
+
+Future modifications must:
+
+- Preserve flow stability.
+- Strengthen volume calibration.
+- Avoid large shared-gradient shocks to encoder.
+
+Primary objective remains DFS outcome calibration (pts_mae, tails, team totals), not possession purity in isolation.
+
+
+## 15.21 Diagnostic + Experiment A Update (2026-02-26)
+
+### 15.21.1 Required Diagnostic (`15.17`) on `p10_guard_base`
+
+Run:
+
+- `/home/daniel/projections-data/training/runs/gtv2_poss_ctrl_ablate_20260226T190626Z/p10_guard_base`
+- diagnostic artifact:
+  `/home/daniel/projections-data/training/runs/gtv2_poss_ctrl_ablate_20260226T190626Z/p10_guard_base/possession_head_diagnostics_15_17.json`
+
+Key values (val_days=14, 107 games, 64 sampled worlds/game):
+
+- `mu_P.mean = 101.06`, `mu_P.std = 0.60`
+- `sampled_poss.mean = 101.00`, `sampled_poss.std = 5.96`
+- `poss_used.mean = 101.00`, `poss_used.std = 5.96`
+
+Interpretation:
+
+- Suppression is **not** in possession head mean prediction (`mu_P` is near NBA baseline).
+- Suppression is **not** in backbone `poss_used` either (also near 101).
+- Remaining volume deficit is therefore downstream of `P` generation (player/event realization path).
+
+### 15.21.2 Experiment A (`15.18`) — Mu Anchoring (`mu = baseline + delta`)
+
+Implementation:
+
+- Added optional possession-head parameterization mode:
+  - `absolute` (legacy)
+  - `baseline_delta` (new): `mu = possession_mu_baseline + delta_mu`
+- New train CLI args:
+  - `--possession-mu-mode {absolute,baseline_delta}`
+  - `--possession-mu-baseline <float>`
+
+Code paths:
+
+- `projections/rotation/possession_backbone.py`
+- `projections/rotation/game_transformer_v2.py`
+- `scripts/rotation/train_game_transformer_v2.py`
+
+Experiment run:
+
+- `/home/daniel/projections-data/training/runs/gtv2_poss_expA_muanchor_20260226T194628Z`
+- config: `w_poss_nll=1.0`, default guard, staged detach (`--backbone-detach-until-epoch 10`),
+  `--possession-mu-mode baseline_delta --possession-mu-baseline 100.0`
+- eval artifacts:
+  - `worlds_eval.parquet`
+  - `worlds_eval_summary.json`
+  - `ablation_metrics.json`
+  - `possession_head_diagnostics_15_17.json`
+
+Comparison vs `p10_guard_base`:
+
+| Metric | `p10_guard_base` | `expA_muanchor` | Delta |
+|---|---:|---:|---:|
+| poss_bias_mean | -16.09 | -15.62 | +0.47 |
+| fga_bias_mean | -14.93 | -11.51 | +3.42 |
+| fta_bias_mean | -7.55 | -4.78 | +2.77 |
+| pts_bias_mean | **-11.44** | **-25.28** | **-13.85** |
+| pts_mae | **16.39** | **25.72** | **+9.33** |
+| poss_sym_abs_p95 | 47.32 | 51.38 | +4.06 |
+
+Diagnostic comparison:
+
+- `mu_P.mean`: `101.06 -> 101.22` (anchoring did not materially change level)
+- `sampled_poss.mean`: `101.00 -> 101.25`
+- `poss_used.mean`: `101.00 -> 101.25`
+
+Decision:
+
+- **Experiment A did not improve DFS outcome calibration** despite slightly improving possession/FGA/FTA means.
+- Team/player scoring calibration regressed materially (`pts_bias_mean`, `pts_mae`).
+- Keep `p10_guard_base` as the stronger candidate among current variants.
+
+Recommended next step:
+
+- Move to Experiment B/C direction (early-phase calibration control and/or explicit team-total auxiliary objective),
+  not additional `mu` reparameterization tweaks.
+
+
+## 15.22 Backbone-Coupled World Generation Pilot (2026-02-26)
+
+Objective:
+
+- Execute point-1 coupling directly in world generation:
+  sampled player stats are aligned to sampled backbone team budgets (`FGA`, `FTA`, `TOV`, `OREB`)
+  before contract checks and parquet export.
+
+Implementation:
+
+- `projections/rotation/sample_worlds_v2.py`
+  - added `_align_flow_to_backbone_budgets(...)`
+  - allocation uses sampled player-level share weights with active/valid fallback
+  - optional `three_pa_share` controls `fga3/fga2` team split
+  - makes (`fg2m`, `fg3m`, `ftm`) rebuilt from sampled per-player percentages and clipped to attempts
+  - coupling runs only when possession backbone outputs are present
+
+Pilot reruns:
+
+1. `p10_guard_base` with coupled sampler
+   - run:
+     `/home/daniel/projections-data/training/runs/gtv2_poss_ctrl_ablate_20260226T190626Z/p10_guard_base`
+   - outputs:
+     - `worlds_eval_backbone_coupled.parquet`
+     - `ablation_metrics_backbone_coupled.json`
+
+2. `expA_muanchor` with coupled sampler
+   - run:
+     `/home/daniel/projections-data/training/runs/gtv2_poss_expA_muanchor_20260226T194628Z`
+   - outputs:
+     - `worlds_eval_backbone_coupled.parquet`
+     - `ablation_metrics_backbone_coupled.json`
+
+### Key before/after metrics
+
+| Run | Sampler | poss_bias | fga_bias | fta_bias | pts_bias | pts_mae | poss_sym_p95 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| p10_guard_base | uncoupled | -16.09 | -14.93 | -7.55 | -11.44 | 16.39 | 47.32 |
+| p10_guard_base | **coupled** | **+0.43** | **+1.71** | **-1.44** | +13.51 | 15.73 | **~0.00001** |
+| expA_muanchor | uncoupled | -15.62 | -11.51 | -4.78 | -25.28 | 25.72 | 51.38 |
+| expA_muanchor | **coupled** | **+0.49** | **+0.76** | **-0.94** | -10.45 | **14.02** | **~0.00001** |
+
+Interpretation:
+
+1. Backbone coupling **successfully fixes volume and symmetry** by construction.
+2. Remaining error is now mainly **scoring efficiency / makes calibration**:
+   - points can overshoot or undershoot depending on checkpoint (sign flip observed).
+3. This confirms the current bottleneck moved from possession volume to
+   downstream shot-making calibration under constrained attempts.
+
+Action implication:
+
+- Keep backbone-coupled sampling path.
+- Next objective work should target team/player scoring efficiency calibration
+  (for example explicit team-points auxiliary loss or efficiency latent), rather than
+  additional possession-mean tuning.
+
+
+## 15.23 Iteration Candidate Decision (2026-02-26)
+
+Decision context:
+
+- This phase is experimental/observation-first.
+- Candidate selection here is for iterative dashboard observation, not production promotion.
+
+Decision:
+
+- Advance **`expA_muanchor` + backbone-coupled world sampler** as the current iteration candidate.
+
+Why this candidate:
+
+1. Possession alignment and symmetry are now structurally strong under coupled sampling:
+   - possession symmetry p95 effectively zero (`~1e-5`)
+   - mean possessions closely aligned to actuals (~`+0.4 to +0.5` bias).
+2. Among coupled variants tested, `expA_muanchor` has stronger point calibration than
+   `p10_guard_base`:
+   - `pts_bias_mean`: `-10.45` vs `+13.51`
+   - `pts_mae`: `14.02` vs `15.73`.
+
+Current known gap (explicitly accepted for this iteration stage):
+
+- scoring efficiency / make-rate calibration still drives residual points bias;
+  this is now the primary modeling target.
+
+Next iteration objective (immediately after this candidate freeze):
+
+- keep this candidate fixed for observation while testing objective-side fixes
+  (team-points auxiliary target and/or efficiency latent) on top of the coupled sampler path.
+
+
+## 15.24 Eval-Only Accounting Report (2026-02-26)
+
+Scope:
+
+- Controlled accounting pass on:
+  - `p10_guard_base`
+  - `expA_muanchor`
+- Coupled sampler path (backbone budgets enforced in player allocations).
+
+Artifacts:
+
+- root:
+  `/home/daniel/projections-data/training/runs/accounting_report_15_17_15_18_20260226T201733Z`
+- per-team reports:
+  - `p10_guard_base_team_accounting_report.csv`
+  - `expA_muanchor_team_accounting_report.csv`
+- summaries:
+  - `combined_summary.csv`
+  - `combined_summary.json`
+
+Tracked per team-game:
+
+- `latent_poss`
+- `poss_from_events` (backbone event identity)
+- `poss_from_players` (sum over player totals)
+- `bb_fga/fta/tov/oreb` vs `player_fga/fta/tov/oreb`
+- `pred_fg_pct`, `pred_ft_pct` vs actual rates
+
+### Core findings
+
+1. **Backbone identity is not being violated downstream**
+   - `mean_abs_delta_latent_vs_events_poss` ~ `3e-7`
+   - `mean_abs_delta_events_vs_players_poss` ~ `5e-7` to `7e-7`
+   - event-mass deltas (`FGA/FTA/TOV/OREB`) backbone vs player sums are all ~`1e-7` to `6e-7`.
+
+2. **Allocation is not losing mass**
+   - team event budgets are conserved to numerical precision after allocation.
+
+3. **Scoring efficiency / make rates are the dominant error source**
+   - `p10_guard_base`:
+     - `pred_fg_pct_mean=0.532` vs `act_fg_pct_mean=0.471` (`+0.061`)
+     - `pred_ft_pct_mean=0.667` vs `act_ft_pct_mean=0.776` (`-0.108`)
+   - `expA_muanchor`:
+     - `pred_fg_pct_mean=0.433` vs `act_fg_pct_mean=0.471` (`-0.038`)
+     - `pred_ft_pct_mean=0.632` vs `act_ft_pct_mean=0.776` (`-0.143`)
+
+4. **DK/points mapping is numerically consistent**
+   - recomputation checks on world outputs show negligible floating error:
+     - `pts` from makes and `dk_fpts` from scoring formula both match stored values (max abs diff ~`1e-5`).
+
+Conclusion:
+
+- The current bottleneck is **not** possession accounting, identity, or mass conservation.
+- The bottleneck is **shot/FT make-rate calibration (efficiency layer)** under the new constrained attempt budgets.
+
+
+15.25 Next Workstream: Efficiency / Make-Rate Calibration
+
+Goal
+
+Fix FPTS bias primarily by correcting:
+	•	FT% (FTM | FTA)
+	•	FG% (FGM2 | FGA2, FGM3 | FGA3)
+
+Possessions and event volume are now validated.
+
+Required invariants (must hold)
+	•	FTM ≤ FTA, FG2M ≤ FGA2, FG3M ≤ FGA3 (hard constraints)
+	•	Team totals conserve exactly (already validated)
+	•	Efficiency metrics match historical baselines by tier/team (new)
+
+Proposed modeling change (recommended)
+
+Replace continuous make modeling with discrete conditional likelihoods:
+	•	FTM ~ Beta-Binomial(FTA, α_ft, β_ft)
+	•	FG2M ~ Beta-Binomial(FGA2, α_2, β_2)
+	•	FG3M ~ Beta-Binomial(FGA3, α_3, β_3)
+
+Where α,β are predicted from team/player context with:
+	•	α = softplus(a) + α0, β = softplus(b) + β0
+	•	priors α0,β0 set to encode league-average % and reasonable dispersion
+
+Why Beta-Binomial:
+	•	handles overdispersion
+	•	enforces bounds
+	•	avoids weird rounding/clamp bias
+	•	lets you encode a strong prior for FT% (~0.77) while still allowing context variation
+
+Controlled experiments (eval-only and short train)
+	1.	FT-only swap: change only FTM modeling to Beta-Binomial; keep FG as-is.
+	•	Expected: pts_bias improves materially with minimal collateral.
+	2.	FG-only swap: change FG2M/FG3M modeling similarly.
+	3.	Full swap: all makes use Beta-Binomial.
+
+Metrics to track
+	•	mean FT% bias and MAE per team-game
+	•	mean FG% bias and MAE
+	•	pts_bias / pts_mae
+	•	tail cal errors (p90/p95)
+	•	tier sliced elite/star bias
+
+“Do not”
+	•	do not increase w_poss further
+	•	do not relax guard
+	•	do not rewrite possession identity (already verified correct)
+
+### Status Update (2026-02-26, implemented + audited)
+
+Scope completed:
+
+- Implemented Beta-Binomial make-rate path in coupled sampler with modes:
+  - `legacy`
+  - `beta_binomial_ft`
+  - `beta_binomial_fg`
+  - `beta_binomial_all`
+- Added learned efficiency head (`alpha/beta` for FT/FG2/FG3) and training objective:
+  - `projections/rotation/efficiency_head.py`
+  - `projections/rotation/game_transformer_v2.py`
+  - `scripts/rotation/train_game_transformer_v2.py` (`efficiency_nll`)
+- Added dedicated 15.25 evaluator:
+  - `scripts/rotation/eval_make_rate_calibration.py`
+- Added leak-audit protections in sampler/eval forwards:
+  - hard no-label-forward assertions in:
+    - `projections/rotation/sample_worlds_v2.py`
+    - `scripts/rotation/eval_game_transformer_v2.py`
+
+### 15.25.A Date-split validation (non-overlapping train/eval)
+
+Train window:
+
+- `2024-10-23` to `2026-01-15`
+- train dataset slice:
+  - `/tmp/joint_rr_effleak_train_to_2026_01_15`
+
+Eval window:
+
+- `2026-01-29` to `2026-02-11` (`107` games)
+- eval dataset slice:
+  - `/tmp/joint_rr_effleak_eval_2026_01_29_to_2026_02_11`
+
+Date-split trained run (head-only efficiency fine-tune; muanchor preserved):
+
+- `/home/daniel/projections-data/training/runs/gtv2_effhead_datesplit_train_to_2026_01_15_20260226T214515Z`
+
+Date-split comparison table artifact:
+
+- `/home/daniel/projections-data/training/runs/gtv2_effhead_datesplit_train_to_2026_01_15_20260226T214515Z/datesplit_A_table.csv`
+
+Key table (same metrics as 15.25):
+
+| variant | fg_pct_bias | ft_pct_bias | pts_bias | pts_mae | p90_err | p95_err | elite_bias | star_bias |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `baseline_legacy_datesplit` | `-0.0382` | `-0.1419` | `-10.2310` | `13.9481` | `0.0109` | `0.0107` | `-21.5892` | `-12.5696` |
+| `baseline_bb_all_datesplit` | `-0.0268` | `-0.0886` | `-6.6068` | `12.2601` | `0.0053` | `0.0092` | `-20.8864` | `-11.8986` |
+| `learned_head_pred_attempts_datesplit` | `-0.0114` | `-0.0160` | `-2.1274` | `10.4729` | `0.0031` | `0.0086` | `-21.7179` | `-12.7478` |
+
+### 15.25.B No-labels-in-forward audit
+
+Implemented hard assertions so sampler/eval forwards fail if labels are passed:
+
+- Sampler:
+  - `target_counts`, `target_active_mask`, `flow_targets`, `flow_observed_mask` must be `None`
+  - `use_target_*`, `minutes_use_target_active`, `run_flow` must be `False`
+  - `out.flow` must be `None`
+- Eval:
+  - identical no-label forward constraints
+  - `out.flow` must be `None`
+
+This enforces:
+
+- no label tensors passed into model forward in sampler/eval paths
+- no ground-truth counts used except in post-forward metric computation
+
+### 15.25.C Attempt-conditioning consistency test
+
+Implemented explicit audit mode in sampler:
+
+- `--attempt-conditioning-mode predicted_attempts` (true inference path)
+- `--attempt-conditioning-mode true_attempts_upper_bound` (audit-only upper bound; true attempts injected post-forward only)
+
+Attempt-conditioning comparison artifact:
+
+- `/home/daniel/projections-data/training/runs/gtv2_effhead_datesplit_train_to_2026_01_15_20260226T214515Z/datesplit_C_attempt_conditioning_table.csv`
+
+Observed `true - predicted` deltas:
+
+- `fg_pct_bias`: `+0.00243`
+- `ft_pct_bias`: `-0.00339`
+- `pts_bias`: `-0.16244`
+- `pts_mae`: `-1.44412`
+- `p90_err`: `0.00000`
+- `p95_err`: `0.00000`
+- `elite_bias`: `+0.36748`
+- `star_bias`: `+0.24942`
+
+Interpretation:
+
+- make-rate/tail calibration is close between modes
+- primary difference is expected attempt-volume lock effect in upper-bound mode
+- no large make-rate dependency mismatch signal from conditioning mode gap
+
+### 15.25.D Longer learned-head fine-tune stability check (2026-02-26)
+
+Objective:
+
+- Run a longer head-only efficiency fine-tune (muanchor-preserving) and regenerate
+  the same date-split comparison table from 15.25.A.
+
+Run:
+
+- `/home/daniel/projections-data/training/runs/gtv2_effhead_datesplit_long_train_to_2026_01_15_20260226T220008Z`
+- config delta vs 15.25.A:
+  - `epochs: 12` (from `2`)
+  - all other key head-only/muanchor-preserving settings unchanged
+
+Artifacts:
+
+- comparison table:
+  `/home/daniel/projections-data/training/runs/gtv2_effhead_datesplit_long_train_to_2026_01_15_20260226T220008Z/datesplit_A_table_long.csv`
+- learned-head calibration json:
+  `/home/daniel/projections-data/training/runs/gtv2_effhead_datesplit_long_train_to_2026_01_15_20260226T220008Z/make_rate_calibration_datesplit_learned_predicted_long.json`
+
+Key table (same schema as 15.25.A):
+
+| variant | fg_pct_bias | ft_pct_bias | pts_bias | pts_mae | p90_err | p95_err | elite_bias | star_bias |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `baseline_legacy_datesplit` | `-0.0382` | `-0.1419` | `-10.2310` | `13.9481` | `0.0109` | `0.0107` | `-21.5892` | `-12.5696` |
+| `baseline_bb_all_datesplit` | `-0.0268` | `-0.0886` | `-6.6068` | `12.2601` | `0.0053` | `0.0092` | `-20.8864` | `-11.8986` |
+| `learned_head_pred_attempts_datesplit_long` | `-0.0160` | `-0.0027` | `-2.7313` | `10.7799` | `0.0084` | `0.0079` | `-21.8576` | `-12.5850` |
+
+Stability note (vs 15.25.A short 2-epoch learned-head run):
+
+- Similar overall regime (still materially better than both baselines on `pts_bias`/`pts_mae`)
+- Slight degradation vs short run on:
+  - `pts_bias`: `-2.73` vs `-2.13`
+  - `pts_mae`: `10.78` vs `10.47`
+  - `p90_err`: `0.0084` vs `0.0031`
+- Improvement on:
+  - `ft_pct_bias`: `-0.0027` vs `-0.0160`
+  - `p95_err`: `0.0079` vs `0.0086`
+
+### Agent Handoff Next Items
+
+1. Longer learned-head fine-tune stability check completed in 15.25.D.
+2. I can also add a dedicated training profile/CLI preset for this (`efficiency_head_only_muanchor`) so future reruns are one command.

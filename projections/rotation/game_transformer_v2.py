@@ -14,6 +14,7 @@ from torch import nn
 from torch.utils.data import Dataset
 
 from projections.rotation.joint_active_set import JointActiveSetHead, JointActiveSetOutputs
+from projections.rotation.efficiency_head import EfficiencyHead, EfficiencyHeadOutputs
 from projections.rotation.joint_game_flow import JointGameFlow, JointGameFlowOutputs
 from projections.rotation.joint_minutes import JointMinutesHead, JointMinutesOutputs
 from projections.rotation.possession_backbone import (
@@ -81,10 +82,20 @@ class GameTransformerV2Config:
     flow_mean_ctx_weight: float = 1.0
     flow_context_mode: str = "attention"  # H2 fix: "attention" instead of "mean" for star concentration
     include_pf_in_flow_targets: bool = False
+    enable_efficiency_head: bool = False
+    efficiency_head_hidden: int = 128
+    efficiency_ft_prior_mean: float = 0.77
+    efficiency_ft_prior_strength: float = 6.0
+    efficiency_fg2_prior_mean: float = 0.54
+    efficiency_fg2_prior_strength: float = 8.0
+    efficiency_fg3_prior_mean: float = 0.36
+    efficiency_fg3_prior_strength: float = 8.0
     # Possession backbone (section 15 refactor)
     enable_possession_backbone: bool = False
     enable_three_pa_share: bool = False
     possession_head_hidden: int = 128
+    possession_mu_mode: str = "absolute"
+    possession_mu_baseline: float = 100.0
     backbone_hidden: int = 128
     three_pa_share_hidden: int = 64
     overflow_protected_prior_play_prob_floor: float = PROTECTED_PRIOR_PLAY_PROB_FLOOR
@@ -110,11 +121,31 @@ class GameTransformerV2Config:
         # If config doesn't have flow_scale_clip, use 2.0 (original default)
         if "flow_scale_clip" not in filtered:
             filtered["flow_scale_clip"] = 2.0
+        if "enable_efficiency_head" not in filtered:
+            filtered["enable_efficiency_head"] = False
+        if "efficiency_head_hidden" not in filtered:
+            filtered["efficiency_head_hidden"] = 128
+        if "efficiency_ft_prior_mean" not in filtered:
+            filtered["efficiency_ft_prior_mean"] = 0.77
+        if "efficiency_ft_prior_strength" not in filtered:
+            filtered["efficiency_ft_prior_strength"] = 6.0
+        if "efficiency_fg2_prior_mean" not in filtered:
+            filtered["efficiency_fg2_prior_mean"] = 0.54
+        if "efficiency_fg2_prior_strength" not in filtered:
+            filtered["efficiency_fg2_prior_strength"] = 8.0
+        if "efficiency_fg3_prior_mean" not in filtered:
+            filtered["efficiency_fg3_prior_mean"] = 0.36
+        if "efficiency_fg3_prior_strength" not in filtered:
+            filtered["efficiency_fg3_prior_strength"] = 8.0
         # Backbone defaults for models trained before possession refactor
         if "enable_possession_backbone" not in filtered:
             filtered["enable_possession_backbone"] = False
         if "enable_three_pa_share" not in filtered:
             filtered["enable_three_pa_share"] = False
+        if "possession_mu_mode" not in filtered:
+            filtered["possession_mu_mode"] = "absolute"
+        if "possession_mu_baseline" not in filtered:
+            filtered["possession_mu_baseline"] = 100.0
         return cls(**filtered)
 
     def save(self, path: Path) -> None:
@@ -165,6 +196,7 @@ class GameTransformerV2Outputs:
     active: JointActiveSetOutputs
     minutes: JointMinutesOutputs
     flow: JointGameFlowOutputs | None
+    efficiency: EfficiencyHeadOutputs | None = None
     possession: PossessionHeadOutputs | None = None
     backbone: TeamEventBackboneOutputs | None = None
 
@@ -570,9 +602,19 @@ class GameTransformerV2(nn.Module):
         flow_mean_ctx_weight: float = 1.0,
         flow_context_mode: str = "attention",
         include_pf_in_flow_targets: bool = False,
+        enable_efficiency_head: bool = False,
+        efficiency_head_hidden: int = 128,
+        efficiency_ft_prior_mean: float = 0.77,
+        efficiency_ft_prior_strength: float = 6.0,
+        efficiency_fg2_prior_mean: float = 0.54,
+        efficiency_fg2_prior_strength: float = 8.0,
+        efficiency_fg3_prior_mean: float = 0.36,
+        efficiency_fg3_prior_strength: float = 8.0,
         enable_possession_backbone: bool = False,
         enable_three_pa_share: bool = False,
         possession_head_hidden: int = 128,
+        possession_mu_mode: str = "absolute",
+        possession_mu_baseline: float = 100.0,
         backbone_hidden: int = 128,
         three_pa_share_hidden: int = 64,
     ) -> None:
@@ -639,6 +681,20 @@ class GameTransformerV2(nn.Module):
             mean_ctx_weight=float(flow_mean_ctx_weight),
             context_mode=str(flow_context_mode),
         )
+        self.enable_efficiency_head = bool(enable_efficiency_head)
+        self.efficiency_head: EfficiencyHead | None = None
+        if self.enable_efficiency_head:
+            self.efficiency_head = EfficiencyHead(
+                d_model=int(d_model),
+                hidden_dim=int(efficiency_head_hidden),
+                dropout=float(dropout),
+                ft_prior_mean=float(efficiency_ft_prior_mean),
+                ft_prior_strength=float(efficiency_ft_prior_strength),
+                fg2_prior_mean=float(efficiency_fg2_prior_mean),
+                fg2_prior_strength=float(efficiency_fg2_prior_strength),
+                fg3_prior_mean=float(efficiency_fg3_prior_mean),
+                fg3_prior_strength=float(efficiency_fg3_prior_strength),
+            )
 
         # Possession-coupled event backbone (section 15 refactor)
         self.enable_possession_backbone = bool(enable_possession_backbone)
@@ -651,6 +707,8 @@ class GameTransformerV2(nn.Module):
                 d_model=int(d_model),
                 hidden_dim=int(possession_head_hidden),
                 dropout=float(dropout),
+                mu_mode=str(possession_mu_mode),
+                mu_baseline=float(possession_mu_baseline),
             )
             self.event_backbone = TeamEventBackbone(
                 d_model=int(d_model),
@@ -846,6 +904,16 @@ class GameTransformerV2(nn.Module):
                 observed_mask=flow_obs_flat,
             )
 
+        efficiency_out: EfficiencyHeadOutputs | None = None
+        if self.enable_efficiency_head and self.efficiency_head is not None:
+            efficiency_out = self.efficiency_head(
+                player_states=player_states,
+                team_states=team_states,
+                game_state=game_state,
+                player_team_index=player_team_index,
+                valid_mask=valid_flat,
+            )
+
         # Possession-coupled event backbone (runs when backbone is enabled)
         poss_out: PossessionHeadOutputs | None = None
         backbone_out: TeamEventBackboneOutputs | None = None
@@ -891,6 +959,7 @@ class GameTransformerV2(nn.Module):
             active=active_out,
             minutes=minutes_out,
             flow=flow_out,
+            efficiency=efficiency_out,
             possession=poss_out,
             backbone=backbone_out,
         )
@@ -917,9 +986,19 @@ def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransforme
         flow_mean_ctx_weight=float(config.flow_mean_ctx_weight),
         flow_context_mode=str(getattr(config, "flow_context_mode", "mean")),
         include_pf_in_flow_targets=bool(config.include_pf_in_flow_targets),
+        enable_efficiency_head=bool(getattr(config, "enable_efficiency_head", False)),
+        efficiency_head_hidden=int(getattr(config, "efficiency_head_hidden", 128)),
+        efficiency_ft_prior_mean=float(getattr(config, "efficiency_ft_prior_mean", 0.77)),
+        efficiency_ft_prior_strength=float(getattr(config, "efficiency_ft_prior_strength", 6.0)),
+        efficiency_fg2_prior_mean=float(getattr(config, "efficiency_fg2_prior_mean", 0.54)),
+        efficiency_fg2_prior_strength=float(getattr(config, "efficiency_fg2_prior_strength", 8.0)),
+        efficiency_fg3_prior_mean=float(getattr(config, "efficiency_fg3_prior_mean", 0.36)),
+        efficiency_fg3_prior_strength=float(getattr(config, "efficiency_fg3_prior_strength", 8.0)),
         enable_possession_backbone=bool(getattr(config, "enable_possession_backbone", False)),
         enable_three_pa_share=bool(getattr(config, "enable_three_pa_share", False)),
         possession_head_hidden=int(getattr(config, "possession_head_hidden", 128)),
+        possession_mu_mode=str(getattr(config, "possession_mu_mode", "absolute")),
+        possession_mu_baseline=float(getattr(config, "possession_mu_baseline", 100.0)),
         backbone_hidden=int(getattr(config, "backbone_hidden", 128)),
         three_pa_share_hidden=int(getattr(config, "three_pa_share_hidden", 64)),
     )
