@@ -4355,3 +4355,73 @@ Next improvement items:
 1. Add explicit early-stopping/patience in Stage B to avoid unnecessary overtraining when `best_val_total` occurs early.
 2. Run a short multi-seed confirm (`3` seeds) on the shortened Stage B recipe and keep `seed_123` as tie-break reference.
 3. Evaluate `allocation-source=blend` (`alpha` sweep) for potential correlation lift while preserving the star-share gains from usage-head supervision.
+
+### Status Update (2026-02-27, first live run variance audit on promoted usage-share bundle)
+
+Run audited:
+
+- `run_id`: `20260227T035959Z`
+- `game_date`: `2026-02-26`
+- worlds path:
+  - `/home/daniel/projections-data/artifacts/gtv2_worlds/game_date=2026-02-26/run=20260227T035959Z/worlds.parquet`
+- projections path:
+  - `/home/daniel/projections-data/artifacts/projections/2026-02-26/run=20260227T035959Z/projections.parquet`
+- preflight parity manifest path:
+  - `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/phase3_game_transformer_v2_usage_share_retrain_confirm_20260227T034905Z_seed_123_20260227T035414Z/parity_manifest.json`
+
+Variance audit artifacts:
+
+- summary:
+  - `/home/daniel/projections-data/reports/experiments/live_worlds_variance_20260227T035959Z/variance_summary.json`
+- star tail probabilities:
+  - `/home/daniel/projections-data/reports/experiments/live_worlds_variance_20260227T035959Z/star_tail_probs.csv`
+- star boards:
+  - `/home/daniel/projections-data/reports/experiments/live_worlds_variance_20260227T035959Z/star_board_top40.csv`
+  - `/home/daniel/projections-data/reports/experiments/live_worlds_variance_20260227T035959Z/star_low_var_top15.csv`
+  - `/home/daniel/projections-data/reports/experiments/live_worlds_variance_20260227T035959Z/star_high_var_top15.csv`
+- team share volatility:
+  - `/home/daniel/projections-data/reports/experiments/live_worlds_variance_20260227T035959Z/team_share_volatility.csv`
+
+Core findings:
+
+1. World generation volume and contracts are healthy.
+   - `n_worlds=25,000`, `world_rows=7,500,000`, `players=300`, `teams=20`.
+   - world contract checks remain clean (`total_violations=0`; no minutes > 48 contract violations).
+
+2. Star FPTS tails are present and non-trivial.
+   - top-24 stars (by `dk_fpts_mean_uncond`):
+     - `dk_std_avg=12.84`
+     - `dk_p90_minus_p10_avg=32.82`
+     - `dk_p95_uplift_avg=0.543`
+   - star hit rates:
+     - average top-24: `P(45+)=0.357`, `P(55+)=0.153`, `P(65+)=0.051`
+     - top-6 average: `P(55+)=0.324`, `P(65+)=0.137`
+
+3. Stars remain tighter on minutes tails than on rates/usage tails.
+   - top-24 stars:
+     - `minutes_std_avg=1.50`
+     - `minutes_p90_minus_p10_avg=3.60`
+   - variance attribution proxy (`R^2(minutes, pts)`):
+     - stars: `0.012`
+     - non-stars: `0.154`
+   Interpretation: this run’s star upside is primarily rates/usage-driven; minutes-driven star tail appears comparatively constrained.
+
+4. Team-level share volatility is moderate and not collapsed.
+   - `top3_share_mean_avg=0.540`
+   - `top3_share_std_avg=0.0627`
+   - `top3_share_std_p90=0.0682`
+
+Numerical sanity snapshot (trusted keyed per-column parquet reads):
+
+- `minutes_max=45.23`, `pts_max=88.61`, `dk_fpts_max=127.24`, `fga_max=58.73`, `fta_max=62.25`
+- no rows with `minutes>100`, `fga>100`, `fta>100`, `pts>150`, or `dk_fpts>200`
+
+Implementation note (analysis tooling):
+
+- During exploratory analysis, reading many numeric columns simultaneously from `worlds.parquet` produced non-deterministic garbage values in different columns depending on read-column combination.
+- Re-running with keyed per-column reads (`world_idx/game_id/team_id/player_id` + one metric column at a time) produced stable and sane statistics.
+- Treat this as an analytics read-path caveat; model world-contract checks for the run remained clean.
+
+Next decision implication:
+
+- If live stars still look conservative at mean level, first knob to test should be star minutes-upside shape (minutes-tail broadening) rather than only increasing usage/rate dispersion, since usage-driven tails are already materially present in this run.
