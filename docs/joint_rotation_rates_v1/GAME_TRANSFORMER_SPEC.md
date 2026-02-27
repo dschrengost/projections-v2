@@ -1155,7 +1155,7 @@ Current state:
   - latest quality-optimized Phase 2 checkpoint:
     `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z/trials/opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18/run`
 
-Recommended next step:
+Recommended next step at time of this confirm:
 
 1. Start Phase 3 (`L_decision`) from:
    `/home/daniel/projections-data/training/runs/game_transformer_v2_phase2_sweep_20260224T024637Z/trials/opt_lr3e4_wd1e4_bs32_clip075_flow4_scale18/run`
@@ -4425,3 +4425,298 @@ Implementation note (analysis tooling):
 Next decision implication:
 
 - If live stars still look conservative at mean level, first knob to test should be star minutes-upside shape (minutes-tail broadening) rather than only increasing usage/rate dispersion, since usage-driven tails are already materially present in this run.
+
+### Status Update (2026-02-27, Stage B patience implementation + 3-seed confirm)
+
+Completed the next two improvement items from the prior handoff:
+
+1. Added explicit Stage B early stopping / patience to `scripts/rotation/train_game_transformer_v2.py`:
+   - new CLI knobs:
+     - `--early-stop-patience`
+     - `--early-stop-min-delta`
+     - `--early-stop-min-epochs`
+   - summary metadata written under `summary.json -> early_stopping`
+   - targeted tests added in:
+     - `tests/rotation/test_train_game_transformer_v2_phase2_stability.py`
+2. Ran a short 3-seed confirm on the shortened Stage B recipe and kept `seed_123` as the tie-break reference.
+
+Confirm run root:
+
+- `/home/daniel/projections-data/training/runs/game_transformer_v2_usage_share_multiseed_confirm_20260227T171415Z`
+
+Recipe used:
+
+- Stage A:
+  - same usage-head-only recipe as the promoted confirm run
+  - `epochs=8`, `lr=1e-3`, `w_usage_share_nll=3.0`
+  - all anchor/flow/backbone aux losses kept at `0.0`
+- Stage B:
+  - same joint flow + share recipe as promoted confirm run
+  - `epochs=8`, `lr=3e-4`
+  - `w_flow_nll=0.5`, `w_usage_share_nll=1.75`, `w_emergent_share_aux=0.75`
+  - `backbone_detach_until_epoch=4`
+  - patience overlay:
+    - `early_stop_patience=2`
+    - `early_stop_min_delta=0.001`
+    - `early_stop_min_epochs=4`
+
+Training behavior:
+
+- all 3 seeds (`42`, `77`, `123`) stopped early at `epoch=5`
+- all 3 retained `best_epoch=1`
+- this shortened Stage B from `8` to `5` epochs while still allowing post-detach epochs (`4-5`) to run
+
+Important eval note:
+
+- initial eval-only pass accidentally used sampler default `val_days=14`
+- final decision metrics below come from the corrected `val_days=30` rerun:
+  - summary:
+    - `/home/daniel/projections-data/training/runs/game_transformer_v2_usage_share_multiseed_confirm_20260227T171415Z/multiseed_summary_eval30.json`
+  - per-seed eval dirs:
+    - `seed_42_eval30/`
+    - `seed_77_eval30/`
+    - `seed_123_eval30/`
+
+Reference bundle for comparison:
+
+- prior promoted `seed_123` confirm eval:
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_usage_share_retrain_confirm_20260227T034905Z/seed_123_eval/`
+
+Key `eval30` results vs prior promoted `seed_123` reference:
+
+| seed | elite_bias | star_bias | pts_mae | pair_corr_rmse | top3_share_gap | fga_share_mae | contracts |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `42` | `-15.34` | `-8.06` | `9.6786` | `0.22089` | `-0.03497` | `0.02657` | `0` |
+| `77` | `-13.43` | `-6.53` | `10.0500` | `0.21833` | `-0.00696` | `0.02687` | `0` |
+| `123` | `-13.81` | `-6.83` | `9.7576` | `0.22121` | `-0.01145` | `0.02675` | `0` |
+
+Interpretation:
+
+- `seed_123` reproduces the currently promoted profile almost exactly under the shortened Stage B recipe:
+  - `elite_bias`: `-13.79 -> -13.81`
+  - `pts_mae`: `9.8219 -> 9.7576`
+  - `top3_share_gap`: `-0.01152 -> -0.01145`
+- `seed_77` gives the best correlation metric of the 3-seed confirm (`pair_corr_rmse=0.21833`) and slightly better star/elite bias than current `seed_123`, but pays for it with worse `pts_mae` and slightly less concentrated top-3 share.
+- `seed_42` improves `pts_mae` the most, but clearly regresses star concentration / share shape versus the current promoted `seed_123`.
+- strict world contracts remained clean for every `eval30` candidate (`total_violations=0`).
+
+Decision from this confirm:
+
+- Stage B patience is safe to keep; it materially shortens the recipe without harming the `seed_123` reproduction.
+- The 3-seed confirm does **not** justify replacing the current promoted `seed_123` bundle based on this pass alone.
+- Keep `seed_123` as the active tie-break / promotion reference.
+
+Recommended next step:
+
+1. Proceed to improvement item 3 from the prior handoff:
+   - evaluate `allocation-source=blend` with an `alpha` sweep
+   - use the current promoted `seed_123` recipe as the primary reference
+   - keep `seed_77` as a secondary comparison point if the goal is modest correlation lift without disturbing share concentration too much
+   - this was completed later the same day and is superseded by the assist/rebound modeling handoff below
+
+### Status Update (2026-02-27, assist/rebound structure audit after usage-share + blend iteration)
+
+Context:
+
+- After the Stage B patience confirm and follow-up `allocation-source=blend` sweep, the next open modeling question is whether current GTv2 structure is missing explicit assist/rebound allocation mechanics.
+- Current answer: **yes**. `pts/reb/ast` are generated jointly, but only shot/FTA/TOV allocation currently has an explicit share head.
+
+Confirmed current architecture state:
+
+- `projections/rotation/usage_share_head.py` only emits per-player logits for:
+  - `fga_logits`
+  - `fta_logits`
+  - `tov_logits`
+- `scripts/rotation/train_game_transformer_v2.py` applies explicit team-share CE losses only for:
+  - `FGA`
+  - `FTA`
+  - `TOV`
+- `projections/rotation/sample_worlds_v2.py::_align_flow_to_backbone_budgets(...)` hard-aligns sampled player totals only to team budgets for:
+  - `FGA`
+  - `FTA`
+  - `TOV`
+  - `OREB`
+- `AST` and `DREB` remain plain joint-flow output dimensions with no dedicated share head, no dedicated allocation loss, and no sampler budget reconciliation path.
+
+Implication for correlation structure:
+
+- There is **no explicit player-level missed-FG -> rebound-opportunity model** today.
+- There is **no explicit scorer -> teammate-assist linkage** today.
+- The only hard event-identity coupling in the current backbone is the team-level possession equation:
+  - `P = FGA - OREB + TOV + 0.44 * FTA`
+- As a result:
+  - `OREB` has some team-level structural coupling through the backbone and sampler budget alignment.
+  - `DREB` does not have equivalent explicit budget coupling.
+  - `AST` does not have equivalent explicit share/correlation structure.
+  - any player scoring / teammate assists relationship or missed-shot / rebound relationship can only be learned **implicitly** through the joint flow and shared context, not enforced directly.
+
+Interpretation:
+
+- This is a plausible reason we can still look off-market on `reb` and `ast` even after usage-share improvements for `pts`.
+- The blend sweep does not change this conclusion; interpolating between emergent and usage-head allocation only moves `FGA/FTA/TOV` allocation behavior and does not introduce new `ast/reb` structure.
+
+### Agent Handoff Next Items (post usage-share / blend branch)
+
+1. Treat `allocation-source=blend` as de-prioritized unless a future correlation-first branch is explicitly requested again.
+2. Prioritize a **soft-structure** implementation for `AST` and `REB`, not a hard replacement-generator approach.
+   - Goal: improve `ast/reb` calibration while keeping `JointGameFlow` as the primary generator of cross-player dependence.
+   - Non-goal: do **not** turn `AST` or `REB` into independent sampled heads that can drift into tree-model-style marginal forecasts plus post-hoc reconciliation.
+3. For `AST`, start with weak structural guidance rather than hard equality constraints:
+   - add optional auxiliary supervision for player/team assist concentration or share shape
+   - if sampler intervention is needed, prefer soft blend-to-budget or soft reweighting instead of exact forced team-assist equality on day one
+   - keep any new `AST` path opt-in behind flags and low-weighted at first
+4. For `REB`, start with a soft rebound-opportunity path:
+   - derive team rebound opportunity from missed-shot mass (`FGA - FGM`, with explicit choice on whether/how missed FT enters the opportunity budget)
+   - use that signal to softly steer `OREB/DREB` allocation or concentration rather than forcing hard exact totals immediately
+   - prefer a blended or penalty-based path first, especially for `DREB`, since `OREB` already has partial backbone support
+5. Main implementation risks to guard against:
+   - **fragmented-head risk**: separate `AST/REB` heads becoming de facto independent generators instead of structural priors on one shared latent game model
+   - **covariance washout**: post-sample rescaling making team/player means look cleaner while weakening scorer-assister and miss-rebound dependence
+   - **gradient conflict**: new auxiliary losses destabilizing the flow head or shared encoder during phase 2, similar to earlier backbone-gradient issues
+   - **overconstraint**: suppressing tails or realistic within-game variance by enforcing too many exact relationships too early
+6. Add explicit metrics to quantify whether soft structure helps or hurts:
+   - player-level `ast` / `reb` mean bias vs market or props
+   - team total rebounds vs total missed shots calibration
+   - player scoring vs teammate assists correlation diagnostic:
+     - compare predicted within-world correlation against `sim_v2` or realized holdout reference
+   - missed-shot vs rebound-opportunity utilization diagnostic:
+     - compare predicted team rebound totals against implied missed-shot opportunity at world and aggregate levels
+   - concentration diagnostics:
+     - top-2 / top-3 assist-share gap
+     - top-2 / top-3 rebound-share gap
+   - joint-structure preservation metric:
+     - report deltas in pairwise correlation RMSE vs `sim_v2`
+     - report delta in star-tail / variance metrics so we can detect covariance washout
+7. Suggested implementation order:
+   - first: diagnostics-only pass to establish baseline `ast/reb` structure metrics on the current promoted `seed_123`
+   - second: low-weight soft `AST` structure experiment
+   - third: low-weight soft rebound-opportunity experiment
+   - fourth: combined soft-structure experiment only if the first two do not destabilize flow or degrade joint metrics
+8. Promotion bar for any `AST/REB` experiment:
+   - preserve current clean world contracts
+   - no material regression in `pts_mae`, `pair_corr_rmse_vs_sim_v2`, or star/share concentration
+   - show measurable improvement in at least one `ast/reb` bias metric **without** obvious covariance washout
+
+### Status Update (2026-02-27, initial AST/REB soft-structure loss scaffolding)
+
+Implemented the first code slice for `AST/REB` soft structure in `scripts/rotation/train_game_transformer_v2.py`.
+
+- Scope:
+  - training-only auxiliary losses
+  - default-off / opt-in by CLI weight
+  - no new sampler reconciliation path
+  - no inference-time replacement head
+- New aux knobs:
+  - `--w-ast-share-aux`
+  - `--w-reb-share-aux`
+  - `--w-ast-team-rate-aux`
+  - `--w-reb-opportunity-rate-aux`
+- Implementation detail:
+  - all four losses supervise the **emergent zero-latent flow path**, so the flow remains the generator
+  - `AST` team-rate uses `team_ast / team_fgm`
+  - rebound opportunity uses missed FGs only in this first slice (`FGA - FGM`), excluding missed FT opportunities for now
+  - rebound rate loss covers both `OREB / own_missed_fg` and `DREB / opp_missed_fg`
+- Explicit non-goal of this slice:
+  - this does **not** add hard `AST`/`REB` team equality constraints or any sampler-side rescaling
+
+### Status Update (2026-02-27, AST/REB research findings after ablations)
+
+Baseline was established on the canonical 30-day holdout window from **2026-01-12** through **2026-02-11** using the promoted usage-share branch (`game_transformer_v2_usage_share_retrain_confirm_20260227T034905Z/seed_123_eval`).
+
+Key baseline structure findings:
+
+- player rotation (`>= 20m`) bias:
+  - `REB`: `-0.63`
+  - `AST`: `-0.35`
+- team bias:
+  - `REB`: `+1.43`
+  - `AST`: `+0.88`
+- world-structure diagnostics:
+  - `team DREB` vs opponent missed FGs corr: `-0.021` vs realized `0.606`
+  - `team REB` vs total missed FGs corr: `0.129` vs realized `0.548`
+  - `team AST` vs team FGM corr: `0.061` vs realized `0.705`
+  - ordered scorer `pts_i` -> teammate `ast_j` corr: `-0.004`
+
+#### Round 1: blunt soft-structure auxiliaries
+
+Tested `reb_only`, `ast_only`, and `ast_reb_combined` branches with:
+
+- share auxiliaries:
+  - `AST` share CE
+  - `OREB/DREB` share CE
+- team-rate auxiliaries:
+  - `AST / FGM`
+  - `OREB / own_missed_fg`
+  - `DREB / opp_missed_fg`
+- all losses applied to the emergent zero-latent flow path
+
+Result:
+
+- no branch produced an offline win
+- some branches improved local mean bias, but did **not** improve the target covariance structure in a meaningful way
+- all three materially worsened `pair_corr_rmse_vs_sim_v2`
+- the `reb_only` branch was the clearest failure mode:
+  - rotation-player `REB` bias improved, but team `REB` bias inflated sharply
+  - missed-shot / rebound coupling did not improve
+
+Interpretation:
+
+- these losses were able to move marginal means and concentration
+- they were **not** sufficient to teach the intended `missed shots -> rebounds` or `made shots -> assists` dependence
+- the objective could still improve by redistributing mass without learning the right joint event structure
+
+#### Round 2: fixed-budget rate auxiliaries
+
+To remove the most obvious loophole from Round 1, team-rate auxiliaries were rewritten to score against **observed opportunity budgets** instead of self-generated denominators:
+
+- `AST` aux scored `team_ast` against observed `team_fgm`
+- rebound aux scored:
+  - `OREB` against observed own missed FGs
+  - `DREB` against observed opponent missed FGs
+- this remained training-only and flow-first:
+  - no new sampled head
+  - no hard sampler reconciliation
+  - no post-hoc rescaling
+
+This rewrite did improve several intended structure diagnostics:
+
+- `OREB` vs own-missed-FG corr increased from baseline `0.410` up to about `0.56-0.59`
+- total `REB` vs total missed-FG corr increased from baseline `0.129` up to about `0.27-0.30`
+- predicted mean `DREB` capture rate moved from `0.584` toward the realized `0.691`, landing around `0.66-0.67`
+- scorer / teammate-assist ordered-pair correlation moved closer to zero in magnitude
+
+However, this branch introduced a much larger failure:
+
+- the offensive environment collapsed badly on sampled worlds
+- representative outcomes from the fixed-budget branches:
+  - `pts_mae` worsened from `9.82` to about `13.9-15.0`
+  - `fga_bias_mean` moved from `+0.84` to about `-5.8` through `-7.3`
+  - `poss_bias_mean` moved from `+0.56` to about `-7.0` through `-9.1`
+  - `pair_corr_rmse_vs_sim_v2` worsened from `0.220` to about `0.250-0.258`
+- even a micro-weight sweep (`0.01`, `0.005`) did not change the qualitative outcome enough to justify promotion
+
+Interpretation:
+
+- the fixed-budget form is directionally better than Round 1 for the targeted AST/REB structure metrics
+- but it still couples too strongly into the offensive attempt / possession environment
+- in practice, the current aux path is not isolated enough: it can improve rebound / assist opportunity diagnostics while damaging the core point-generation process
+
+#### Conclusion
+
+As of **2026-02-27**, the current AST/REB aux-only approach is **not promotable**.
+
+What we learned:
+
+- the baseline model really does have missing `AST/REB` structure
+- naive share/rate auxiliaries are too blunt
+- fixed-budget auxiliaries are more principled, but still destabilize the broader offensive environment
+
+Recommended direction if this work is resumed:
+
+- keep `JointGameFlow` as the generator
+- do **not** add independent AST/REB generators
+- attach AST/REB structure closer to event identity inside the existing game process:
+  - assist structure should likely be conditioned on made-shot identity or scorer-side offensive events
+  - rebound structure should likely be coupled to sampled missed-shot opportunity at the same game-event layer
+- add stronger invariance / guardrail diagnostics before promotion:
+  - `FGA`, `PTS`, possession, and team-total drift checks must remain first-class promotion blockers for any future AST/REB branch

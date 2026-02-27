@@ -132,6 +132,10 @@ class EpochMetrics:
     train_efficiency_nll: float = 0.0
     train_usage_share_nll: float = 0.0
     train_emergent_share_aux: float = 0.0
+    train_ast_share_aux: float = 0.0
+    train_reb_share_aux: float = 0.0
+    train_ast_team_rate_aux: float = 0.0
+    train_reb_opportunity_rate_aux: float = 0.0
     val_total: float = 0.0
     val_minutes_mae: float = 0.0
     val_count_loss: float = 0.0
@@ -147,6 +151,10 @@ class EpochMetrics:
     val_efficiency_nll: float = 0.0
     val_usage_share_nll: float = 0.0
     val_emergent_share_aux: float = 0.0
+    val_ast_share_aux: float = 0.0
+    val_reb_share_aux: float = 0.0
+    val_ast_team_rate_aux: float = 0.0
+    val_reb_opportunity_rate_aux: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -183,6 +191,23 @@ class Phase2StabilityState:
     rollback_requested: bool = False
     rollback_reason: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class EarlyStopConfig:
+    patience: int = 0
+    min_delta: float = 0.0
+    min_epochs: int = 0
+
+
+@dataclass
+class EarlyStopState:
+    best_metric: float = float("inf")
+    best_epoch: int = 0
+    bad_epochs: int = 0
+    stop_requested: bool = False
+    stop_epoch: int | None = None
+    stop_reason: str | None = None
 
 
 def _utc_now_compact() -> str:
@@ -396,6 +421,96 @@ def _team_share_ce_loss(
         n_rows = n_rows + has_f.sum()
 
     return loss_sum / n_rows.clamp(min=1.0)
+
+
+def _team_sum_by_side(
+    *,
+    values: torch.Tensor,
+    valid_mask: torch.Tensor,
+    team_index: torch.Tensor,
+    observed_mask: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Sum flattened player values to (B, 2) team totals with a side-level observed mask."""
+    if values.ndim != 2:
+        raise ValueError("values must have shape (B,P)")
+    if valid_mask.shape != values.shape or team_index.shape != values.shape:
+        raise ValueError("valid_mask/team_index must match values shape")
+    if observed_mask is not None and observed_mask.shape != values.shape:
+        raise ValueError("observed_mask must match values shape")
+
+    valid = valid_mask.to(dtype=torch.bool)
+    obs = observed_mask.to(dtype=torch.bool) if observed_mask is not None else valid
+    totals: list[torch.Tensor] = []
+    seen: list[torch.Tensor] = []
+    for side in (0, 1):
+        elig = valid & team_index.eq(side)
+        label_mask = elig & obs
+        totals.append(torch.where(label_mask, values, torch.zeros_like(values)).sum(dim=1))
+        seen.append(label_mask.any(dim=1))
+    return torch.stack(totals, dim=1), torch.stack(seen, dim=1)
+
+
+def _team_ratio_mse_loss(
+    *,
+    pred_numerator: torch.Tensor,
+    pred_denominator: torch.Tensor,
+    true_numerator: torch.Tensor,
+    true_denominator: torch.Tensor,
+    observed_mask: torch.Tensor,
+    detach_pred_denominator: bool = True,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Squared-error loss on team-level rates, optionally detaching the predicted denominator."""
+    if pred_numerator.ndim != 2:
+        raise ValueError("pred_numerator must have shape (B,2)")
+    if pred_denominator.shape != pred_numerator.shape:
+        raise ValueError("pred_denominator must match pred_numerator shape")
+    if true_numerator.shape != pred_numerator.shape or true_denominator.shape != pred_numerator.shape:
+        raise ValueError("true numerator/denominator must match pred_numerator shape")
+    if observed_mask.shape != pred_numerator.shape:
+        raise ValueError("observed_mask must match pred_numerator shape")
+
+    denom_pred = pred_denominator.detach() if detach_pred_denominator else pred_denominator
+    pred_rate = pred_numerator / denom_pred.clamp(min=1.0)
+    true_rate = true_numerator / true_denominator.clamp(min=1.0)
+    pred_rate = torch.clamp(torch.nan_to_num(pred_rate, nan=0.0, posinf=2.0, neginf=0.0), min=0.0, max=2.0)
+    true_rate = torch.clamp(torch.nan_to_num(true_rate, nan=0.0, posinf=1.0, neginf=0.0), min=0.0, max=1.0)
+    mask = observed_mask.to(dtype=torch.bool) & (true_denominator > float(eps))
+    if not bool(mask.any()):
+        return pred_numerator.new_zeros(())
+    sq = torch.square(pred_rate - true_rate)
+    mask_f = mask.to(dtype=sq.dtype)
+    return (sq * mask_f).sum() / mask_f.sum().clamp(min=1.0)
+
+
+def _team_fixed_opportunity_rate_mse_loss(
+    *,
+    pred_numerator: torch.Tensor,
+    true_numerator: torch.Tensor,
+    true_denominator: torch.Tensor,
+    observed_mask: torch.Tensor,
+    max_rate: float = 1.0,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Bound a predicted team total by the observed opportunity budget before scoring rate error."""
+    if pred_numerator.ndim != 2:
+        raise ValueError("pred_numerator must have shape (B,2)")
+    if true_numerator.shape != pred_numerator.shape or true_denominator.shape != pred_numerator.shape:
+        raise ValueError("true numerator/denominator must match pred_numerator shape")
+    if observed_mask.shape != pred_numerator.shape:
+        raise ValueError("observed_mask must match pred_numerator shape")
+
+    denom = true_denominator.clamp(min=1.0)
+    pred_rate = pred_numerator / denom
+    pred_rate = torch.clamp(torch.nan_to_num(pred_rate, nan=0.0, posinf=max_rate, neginf=0.0), min=0.0, max=max_rate)
+    true_rate = true_numerator / denom
+    true_rate = torch.clamp(torch.nan_to_num(true_rate, nan=0.0, posinf=max_rate, neginf=0.0), min=0.0, max=max_rate)
+    mask = observed_mask.to(dtype=torch.bool) & (true_denominator > float(eps))
+    if not bool(mask.any()):
+        return pred_numerator.new_zeros(())
+    sq = torch.square(pred_rate - true_rate)
+    mask_f = mask.to(dtype=sq.dtype)
+    return (sq * mask_f).sum() / mask_f.sum().clamp(min=1.0)
 
 
 def _flow_index(flow_target_columns: list[str], name: str) -> int:
@@ -682,8 +797,42 @@ def _stats_finite(stats: dict[str, float]) -> bool:
         "efficiency_nll",
         "usage_share_nll",
         "emergent_share_aux",
+        "ast_share_aux",
+        "reb_share_aux",
+        "ast_team_rate_aux",
+        "reb_opportunity_rate_aux",
     ]
     return all(math.isfinite(float(stats.get(k, float("nan")))) for k in keys)
+
+
+def _update_early_stop(
+    *,
+    epoch: int,
+    metric_value: float,
+    config: EarlyStopConfig,
+    state: EarlyStopState,
+) -> bool:
+    if int(config.patience) <= 0:
+        return False
+    if math.isfinite(float(metric_value)) and float(metric_value) < (float(state.best_metric) - float(config.min_delta)):
+        state.best_metric = float(metric_value)
+        state.best_epoch = int(epoch)
+        state.bad_epochs = 0
+        return False
+    if int(epoch) < int(config.min_epochs):
+        return False
+    if state.best_epoch <= 0:
+        return False
+    state.bad_epochs += 1
+    if int(state.bad_epochs) < int(config.patience):
+        return False
+    state.stop_requested = True
+    state.stop_epoch = int(epoch)
+    state.stop_reason = (
+        f"no val_total improvement >= {float(config.min_delta):.6f} "
+        f"for {int(config.patience)} epoch(s)"
+    )
+    return True
 
 
 def _run_epoch(
@@ -718,6 +867,10 @@ def _run_epoch(
     w_efficiency_nll: float = 0.0,
     w_usage_share_nll: float = 0.0,
     w_emergent_share_aux: float = 0.0,
+    w_ast_share_aux: float = 0.0,
+    w_reb_share_aux: float = 0.0,
+    w_ast_team_rate_aux: float = 0.0,
+    w_reb_opportunity_rate_aux: float = 0.0,
     enable_possession_backbone: bool = False,
     enable_efficiency_head: bool = False,
     enable_usage_share_head: bool = False,
@@ -744,6 +897,10 @@ def _run_epoch(
         "efficiency_nll": 0.0,
         "usage_share_nll": 0.0,
         "emergent_share_aux": 0.0,
+        "ast_share_aux": 0.0,
+        "reb_share_aux": 0.0,
+        "ast_team_rate_aux": 0.0,
+        "reb_opportunity_rate_aux": 0.0,
         "steps": 0,
         "skipped_batches": 0,
         "instability_events": 0,
@@ -990,19 +1147,43 @@ def _run_epoch(
 
             usage_share_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             emergent_share_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            ast_share_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            reb_share_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            ast_team_rate_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            reb_opportunity_rate_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             if bool(run_phase2_flow):
                 ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
                 fga2_i = _flow_index(ftc, "fga2")
+                fg2m_i = _flow_index(ftc, "fg2m")
                 fga3_i = _flow_index(ftc, "fga3")
+                fg3m_i = _flow_index(ftc, "fg3m")
                 fta_i = _flow_index(ftc, "fta")
+                oreb_i = _flow_index(ftc, "oreb")
+                dreb_i = _flow_index(ftc, "dreb")
+                ast_i = _flow_index(ftc, "ast")
                 tov_i = _flow_index(ftc, "tov")
 
                 fga_true = flow_target_flat[..., fga2_i] + flow_target_flat[..., fga3_i]
+                fgm_true = flow_target_flat[..., fg2m_i] + flow_target_flat[..., fg3m_i]
+                missed_fg_true = torch.clamp(fga_true - fgm_true, min=0.0)
                 fta_true = flow_target_flat[..., fta_i]
+                oreb_true = flow_target_flat[..., oreb_i]
+                dreb_true = flow_target_flat[..., dreb_i]
+                ast_true = flow_target_flat[..., ast_i]
                 tov_true = flow_target_flat[..., tov_i]
 
                 fga_obs = flow_observed_flat[..., fga2_i] & flow_observed_flat[..., fga3_i]
+                fgm_obs = flow_observed_flat[..., fg2m_i] & flow_observed_flat[..., fg3m_i]
+                missed_fg_obs = (
+                    flow_observed_flat[..., fga2_i]
+                    & flow_observed_flat[..., fga3_i]
+                    & flow_observed_flat[..., fg2m_i]
+                    & flow_observed_flat[..., fg3m_i]
+                )
                 fta_obs = flow_observed_flat[..., fta_i]
+                oreb_obs = flow_observed_flat[..., oreb_i]
+                dreb_obs = flow_observed_flat[..., dreb_i]
+                ast_obs = flow_observed_flat[..., ast_i]
                 tov_obs = flow_observed_flat[..., tov_i]
 
                 if bool(enable_usage_share_head) and out.usage_share is not None:
@@ -1029,7 +1210,13 @@ def _run_epoch(
                     )
                     usage_share_nll_loss = (loss_fga + loss_fta + loss_tov) / 3.0
 
-                if float(w_emergent_share_aux) > 0.0:
+                if (
+                    float(w_emergent_share_aux) > 0.0
+                    or float(w_ast_share_aux) > 0.0
+                    or float(w_reb_share_aux) > 0.0
+                    or float(w_ast_team_rate_aux) > 0.0
+                    or float(w_reb_opportunity_rate_aux) > 0.0
+                ):
                     z0 = torch.zeros(
                         (
                             out.player_states.shape[0],
@@ -1053,30 +1240,150 @@ def _run_epoch(
                         flow_target_columns=ftc,
                     )
                     fga_em = emergent_flow[..., fga2_i] + emergent_flow[..., fga3_i]
+                    fgm_em = emergent_flow[..., fg2m_i] + emergent_flow[..., fg3m_i]
+                    missed_fg_em = torch.clamp(fga_em - fgm_em, min=0.0)
                     fta_em = emergent_flow[..., fta_i]
+                    oreb_em = emergent_flow[..., oreb_i]
+                    dreb_em = emergent_flow[..., dreb_i]
+                    ast_em = emergent_flow[..., ast_i]
                     tov_em = emergent_flow[..., tov_i]
-                    loss_fga_em = _team_share_ce_loss(
-                        logits=torch.log(torch.clamp(fga_em, min=1e-6)),
-                        attempts_true=fga_true,
-                        valid_mask=out.player_valid_mask,
-                        team_index=out.player_team_index,
-                        observed_mask=fga_obs,
-                    )
-                    loss_fta_em = _team_share_ce_loss(
-                        logits=torch.log(torch.clamp(fta_em, min=1e-6)),
-                        attempts_true=fta_true,
-                        valid_mask=out.player_valid_mask,
-                        team_index=out.player_team_index,
-                        observed_mask=fta_obs,
-                    )
-                    loss_tov_em = _team_share_ce_loss(
-                        logits=torch.log(torch.clamp(tov_em, min=1e-6)),
-                        attempts_true=tov_true,
-                        valid_mask=out.player_valid_mask,
-                        team_index=out.player_team_index,
-                        observed_mask=tov_obs,
-                    )
-                    emergent_share_aux_loss = (loss_fga_em + loss_fta_em + loss_tov_em) / 3.0
+                    if float(w_emergent_share_aux) > 0.0:
+                        loss_fga_em = _team_share_ce_loss(
+                            logits=torch.log(torch.clamp(fga_em, min=1e-6)),
+                            attempts_true=fga_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=fga_obs,
+                        )
+                        loss_fta_em = _team_share_ce_loss(
+                            logits=torch.log(torch.clamp(fta_em, min=1e-6)),
+                            attempts_true=fta_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=fta_obs,
+                        )
+                        loss_tov_em = _team_share_ce_loss(
+                            logits=torch.log(torch.clamp(tov_em, min=1e-6)),
+                            attempts_true=tov_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=tov_obs,
+                        )
+                        emergent_share_aux_loss = (loss_fga_em + loss_fta_em + loss_tov_em) / 3.0
+
+                    if float(w_ast_share_aux) > 0.0:
+                        ast_share_aux_loss = _team_share_ce_loss(
+                            logits=torch.log(torch.clamp(ast_em, min=1e-6)),
+                            attempts_true=ast_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=ast_obs,
+                        )
+
+                    if (
+                        float(w_reb_share_aux) > 0.0
+                        or float(w_ast_team_rate_aux) > 0.0
+                        or float(w_reb_opportunity_rate_aux) > 0.0
+                    ):
+                        oreb_true_team, oreb_true_seen = _team_sum_by_side(
+                            values=oreb_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=oreb_obs,
+                        )
+                        dreb_true_team, dreb_true_seen = _team_sum_by_side(
+                            values=dreb_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=dreb_obs,
+                        )
+                        ast_true_team, ast_true_seen = _team_sum_by_side(
+                            values=ast_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=ast_obs,
+                        )
+                        fgm_true_team, fgm_true_seen = _team_sum_by_side(
+                            values=fgm_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=fgm_obs,
+                        )
+                        # First soft-structure slice uses missed FGs only; missed FTs stay out of the opportunity budget.
+                        own_missed_true_team, own_missed_true_seen = _team_sum_by_side(
+                            values=missed_fg_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=missed_fg_obs,
+                        )
+                        opp_missed_true_team = torch.stack(
+                            [own_missed_true_team[:, 1], own_missed_true_team[:, 0]],
+                            dim=1,
+                        )
+                        opp_missed_true_seen = torch.stack(
+                            [own_missed_true_seen[:, 1], own_missed_true_seen[:, 0]],
+                            dim=1,
+                        )
+
+                        oreb_em_team, _ = _team_sum_by_side(
+                            values=oreb_em,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                        )
+                        dreb_em_team, _ = _team_sum_by_side(
+                            values=dreb_em,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                        )
+                        ast_em_team, _ = _team_sum_by_side(
+                            values=ast_em,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                        )
+
+                    if float(w_reb_share_aux) > 0.0:
+                        loss_oreb_em = _team_share_ce_loss(
+                            logits=torch.log(torch.clamp(oreb_em, min=1e-6)),
+                            attempts_true=oreb_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=oreb_obs,
+                        )
+                        loss_dreb_em = _team_share_ce_loss(
+                            logits=torch.log(torch.clamp(dreb_em, min=1e-6)),
+                            attempts_true=dreb_true,
+                            valid_mask=out.player_valid_mask,
+                            team_index=out.player_team_index,
+                            observed_mask=dreb_obs,
+                        )
+                        reb_share_aux_loss = (loss_oreb_em + loss_dreb_em) / 2.0
+
+                    if float(w_ast_team_rate_aux) > 0.0:
+                        # Score AST against the observed made-shot budget so the aux path cannot
+                        # improve by co-moving the predicted denominator.
+                        ast_team_rate_aux_loss = _team_fixed_opportunity_rate_mse_loss(
+                            pred_numerator=ast_em_team,
+                            true_numerator=ast_true_team,
+                            true_denominator=fgm_true_team,
+                            observed_mask=ast_true_seen & fgm_true_seen,
+                        )
+
+                    if float(w_reb_opportunity_rate_aux) > 0.0:
+                        # Use observed miss budgets so rebound auxiliaries cannot inflate team totals
+                        # by shrinking or expanding a self-generated opportunity denominator.
+                        loss_oreb_rate = _team_fixed_opportunity_rate_mse_loss(
+                            pred_numerator=oreb_em_team,
+                            true_numerator=oreb_true_team,
+                            true_denominator=own_missed_true_team,
+                            observed_mask=oreb_true_seen & own_missed_true_seen,
+                        )
+                        loss_dreb_rate = _team_fixed_opportunity_rate_mse_loss(
+                            pred_numerator=dreb_em_team,
+                            true_numerator=dreb_true_team,
+                            true_denominator=opp_missed_true_team,
+                            observed_mask=dreb_true_seen & opp_missed_true_seen,
+                        )
+                        reb_opportunity_rate_aux_loss = (loss_oreb_rate + loss_dreb_rate) / 2.0
 
             total_loss = (
                 float(w_minutes) * minutes_mae
@@ -1092,6 +1399,10 @@ def _run_epoch(
                 + float(w_efficiency_nll) * efficiency_nll_loss
                 + float(w_usage_share_nll) * usage_share_nll_loss
                 + float(w_emergent_share_aux) * emergent_share_aux_loss
+                + float(w_ast_share_aux) * ast_share_aux_loss
+                + float(w_reb_share_aux) * reb_share_aux_loss
+                + float(w_ast_team_rate_aux) * ast_team_rate_aux_loss
+                + float(w_reb_opportunity_rate_aux) * reb_opportunity_rate_aux_loss
             )
 
             skip_step = False
@@ -1178,6 +1489,10 @@ def _run_epoch(
             totals["efficiency_nll"] += float(efficiency_nll_loss.item())
             totals["usage_share_nll"] += float(usage_share_nll_loss.item())
             totals["emergent_share_aux"] += float(emergent_share_aux_loss.item())
+            totals["ast_share_aux"] += float(ast_share_aux_loss.item())
+            totals["reb_share_aux"] += float(reb_share_aux_loss.item())
+            totals["ast_team_rate_aux"] += float(ast_team_rate_aux_loss.item())
+            totals["reb_opportunity_rate_aux"] += float(reb_opportunity_rate_aux_loss.item())
             totals["steps"] += 1
         if phase2_stability_state is not None and bool(phase2_stability_state.rollback_requested):
             break
@@ -1199,6 +1514,10 @@ def _run_epoch(
         "efficiency_nll": totals["efficiency_nll"] / denom,
         "usage_share_nll": totals["usage_share_nll"] / denom,
         "emergent_share_aux": totals["emergent_share_aux"] / denom,
+        "ast_share_aux": totals["ast_share_aux"] / denom,
+        "reb_share_aux": totals["reb_share_aux"] / denom,
+        "ast_team_rate_aux": totals["ast_team_rate_aux"] / denom,
+        "reb_opportunity_rate_aux": totals["reb_opportunity_rate_aux"] / denom,
         "skipped_batches": float(totals["skipped_batches"]),
         "instability_events": float(totals["instability_events"]),
         "rollback_requested": 1.0 if (phase2_stability_state and phase2_stability_state.rollback_requested) else 0.0,
@@ -1303,6 +1622,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase2-nll-guard-consecutive-batches", type=int, default=2)
     parser.add_argument("--phase2-max-backoffs-before-rollback", type=int, default=3)
     parser.add_argument("--phase2-min-a2-scale", type=float, default=0.125)
+    parser.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=0,
+        help="Stop after N consecutive non-improving validation epochs (0 disables).",
+    )
+    parser.add_argument(
+        "--early-stop-min-delta",
+        type=float,
+        default=0.0,
+        help="Minimum val_total improvement required to reset patience.",
+    )
+    parser.add_argument(
+        "--early-stop-min-epochs",
+        type=int,
+        default=0,
+        help="Do not trigger early stopping before this epoch.",
+    )
     parser.add_argument("--flow-num-blocks", type=int, default=4)
     parser.add_argument("--flow-scale-clip", type=float, default=3.0)  # H1 fix: 2.0 → 3.0
     parser.add_argument("--flow-context-mode", type=str, default="attention", choices=["mean", "attention"])  # H2 fix
@@ -1341,6 +1678,30 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Auxiliary emergent-share CE loss using zero-latent flow samples.",
+    )
+    parser.add_argument(
+        "--w-ast-share-aux",
+        type=float,
+        default=0.0,
+        help="Auxiliary AST share CE loss using the emergent zero-latent flow path.",
+    )
+    parser.add_argument(
+        "--w-reb-share-aux",
+        type=float,
+        default=0.0,
+        help="Auxiliary OREB/DREB share CE loss using the emergent zero-latent flow path.",
+    )
+    parser.add_argument(
+        "--w-ast-team-rate-aux",
+        type=float,
+        default=0.0,
+        help="Auxiliary team AST-to-FGM rate loss on the emergent zero-latent flow path.",
+    )
+    parser.add_argument(
+        "--w-reb-opportunity-rate-aux",
+        type=float,
+        default=0.0,
+        help="Auxiliary OREB/DREB capture-rate loss against missed-FG opportunity on the emergent zero-latent flow path.",
     )
 
     # Possession backbone (section 15)
@@ -1411,6 +1772,12 @@ def main() -> None:
         raise ValueError("--phase3-num-samples must be > 0")
     if float(args.phase3_active_temperature) <= 0:
         raise ValueError("--phase3-active-temperature must be > 0")
+    if int(args.early_stop_patience) < 0:
+        raise ValueError("--early-stop-patience must be >= 0")
+    if float(args.early_stop_min_delta) < 0.0:
+        raise ValueError("--early-stop-min-delta must be >= 0")
+    if int(args.early_stop_min_epochs) < 0:
+        raise ValueError("--early-stop-min-epochs must be >= 0")
     if int(args.efficiency_head_hidden) <= 0:
         raise ValueError("--efficiency-head-hidden must be > 0")
     if int(args.usage_share_head_hidden) <= 0:
@@ -1433,8 +1800,23 @@ def main() -> None:
         raise ValueError("--w-usage-share-nll must be >= 0")
     if float(args.w_emergent_share_aux) < 0.0:
         raise ValueError("--w-emergent-share-aux must be >= 0")
+    if float(args.w_ast_share_aux) < 0.0:
+        raise ValueError("--w-ast-share-aux must be >= 0")
+    if float(args.w_reb_share_aux) < 0.0:
+        raise ValueError("--w-reb-share-aux must be >= 0")
+    if float(args.w_ast_team_rate_aux) < 0.0:
+        raise ValueError("--w-ast-team-rate-aux must be >= 0")
+    if float(args.w_reb_opportunity_rate_aux) < 0.0:
+        raise ValueError("--w-reb-opportunity-rate-aux must be >= 0")
     if float(args.w_emergent_share_aux) > 0.0 and not bool(args.enable_phase2_flow):
         raise ValueError("--w-emergent-share-aux > 0 requires --enable-phase2-flow")
+    if (
+        float(args.w_ast_share_aux) > 0.0
+        or float(args.w_reb_share_aux) > 0.0
+        or float(args.w_ast_team_rate_aux) > 0.0
+        or float(args.w_reb_opportunity_rate_aux) > 0.0
+    ) and not bool(args.enable_phase2_flow):
+        raise ValueError("AST/REB structure auxiliary losses require --enable-phase2-flow")
     if float(args.overflow_protected_prior_play_prob_floor) < 0.0 or float(args.overflow_protected_prior_play_prob_floor) > 1.0:
         raise ValueError("--overflow-protected-prior-play-prob-floor must be within [0, 1]")
     if float(args.overflow_protected_prior_minutes_floor) < 0.0:
@@ -1655,6 +2037,12 @@ def main() -> None:
     stable_checkpoint_path = out_dir / "checkpoint_stable.pt"
     torch.save(model.state_dict(), stable_checkpoint_path)
     stable_checkpoint_epoch = 0
+    early_stop_cfg = EarlyStopConfig(
+        patience=int(args.early_stop_patience),
+        min_delta=float(args.early_stop_min_delta),
+        min_epochs=int(args.early_stop_min_epochs),
+    )
+    early_stop_state = EarlyStopState()
 
     phase2_guard_cfg = Phase2StabilityConfig(
         nll_explosion_ratio=float(args.phase2_nll_guard_ratio),
@@ -1715,6 +2103,10 @@ def main() -> None:
             w_efficiency_nll=float(args.w_efficiency_nll) if bool(args.enable_efficiency_head) else 0.0,
             w_usage_share_nll=float(args.w_usage_share_nll) if bool(args.enable_usage_share_head) else 0.0,
             w_emergent_share_aux=float(args.w_emergent_share_aux),
+            w_ast_share_aux=float(args.w_ast_share_aux),
+            w_reb_share_aux=float(args.w_reb_share_aux),
+            w_ast_team_rate_aux=float(args.w_ast_team_rate_aux),
+            w_reb_opportunity_rate_aux=float(args.w_reb_opportunity_rate_aux),
             enable_possession_backbone=bool(args.enable_possession_backbone),
             enable_efficiency_head=bool(args.enable_efficiency_head),
             enable_usage_share_head=bool(args.enable_usage_share_head),
@@ -1745,6 +2137,10 @@ def main() -> None:
                 "efficiency_nll": float("nan"),
                 "usage_share_nll": float("nan"),
                 "emergent_share_aux": float("nan"),
+                "ast_share_aux": float("nan"),
+                "reb_share_aux": float("nan"),
+                "ast_team_rate_aux": float("nan"),
+                "reb_opportunity_rate_aux": float("nan"),
                 "skipped_batches": 0.0,
                 "instability_events": 0.0,
                 "rollback_requested": 1.0,
@@ -1781,6 +2177,10 @@ def main() -> None:
                 w_efficiency_nll=float(args.w_efficiency_nll) if bool(args.enable_efficiency_head) else 0.0,
                 w_usage_share_nll=float(args.w_usage_share_nll) if bool(args.enable_usage_share_head) else 0.0,
                 w_emergent_share_aux=float(args.w_emergent_share_aux),
+                w_ast_share_aux=float(args.w_ast_share_aux),
+                w_reb_share_aux=float(args.w_reb_share_aux),
+                w_ast_team_rate_aux=float(args.w_ast_team_rate_aux),
+                w_reb_opportunity_rate_aux=float(args.w_reb_opportunity_rate_aux),
                 enable_possession_backbone=bool(args.enable_possession_backbone),
                 enable_efficiency_head=bool(args.enable_efficiency_head),
                 enable_usage_share_head=bool(args.enable_usage_share_head),
@@ -1810,6 +2210,10 @@ def main() -> None:
             train_efficiency_nll=train_stats.get("efficiency_nll", 0.0),
             train_usage_share_nll=train_stats.get("usage_share_nll", 0.0),
             train_emergent_share_aux=train_stats.get("emergent_share_aux", 0.0),
+            train_ast_share_aux=train_stats.get("ast_share_aux", 0.0),
+            train_reb_share_aux=train_stats.get("reb_share_aux", 0.0),
+            train_ast_team_rate_aux=train_stats.get("ast_team_rate_aux", 0.0),
+            train_reb_opportunity_rate_aux=train_stats.get("reb_opportunity_rate_aux", 0.0),
             val_total=val_stats["total"],
             val_minutes_mae=val_stats["minutes_mae"],
             val_count_loss=val_stats["count_loss"],
@@ -1825,6 +2229,10 @@ def main() -> None:
             val_efficiency_nll=val_stats.get("efficiency_nll", 0.0),
             val_usage_share_nll=val_stats.get("usage_share_nll", 0.0),
             val_emergent_share_aux=val_stats.get("emergent_share_aux", 0.0),
+            val_ast_share_aux=val_stats.get("ast_share_aux", 0.0),
+            val_reb_share_aux=val_stats.get("reb_share_aux", 0.0),
+            val_ast_team_rate_aux=val_stats.get("ast_team_rate_aux", 0.0),
+            val_reb_opportunity_rate_aux=val_stats.get("reb_opportunity_rate_aux", 0.0),
         )
         history.append(metrics)
 
@@ -1855,6 +2263,14 @@ def main() -> None:
             msg = f"{msg} val_usage_share_nll={metrics.val_usage_share_nll:.4f}"
         if float(args.w_emergent_share_aux) > 0.0:
             msg = f"{msg} val_emergent_share_aux={metrics.val_emergent_share_aux:.4f}"
+        if float(args.w_ast_share_aux) > 0.0:
+            msg = f"{msg} val_ast_share_aux={metrics.val_ast_share_aux:.4f}"
+        if float(args.w_reb_share_aux) > 0.0:
+            msg = f"{msg} val_reb_share_aux={metrics.val_reb_share_aux:.4f}"
+        if float(args.w_ast_team_rate_aux) > 0.0:
+            msg = f"{msg} val_ast_team_rate_aux={metrics.val_ast_team_rate_aux:.4f}"
+        if float(args.w_reb_opportunity_rate_aux) > 0.0:
+            msg = f"{msg} val_reb_opp_rate_aux={metrics.val_reb_opportunity_rate_aux:.4f}"
         if bool(args.enable_possession_backbone):
             bb_detached = int(epoch) < int(args.backbone_detach_until_epoch)
             msg = (
@@ -1883,6 +2299,29 @@ def main() -> None:
                 flush=True,
             )
             break
+
+        if (
+            int(early_stop_cfg.patience) > 0
+            and int(train_stats.get("instability_events", 0.0)) <= 0
+        ):
+            should_stop = _update_early_stop(
+                epoch=int(epoch),
+                metric_value=float(metrics.val_total),
+                config=early_stop_cfg,
+                state=early_stop_state,
+            )
+            if should_stop:
+                print(
+                    (
+                        "[early-stop] "
+                        f"stopped_at_epoch={epoch:03d} "
+                        f"best_epoch={early_stop_state.best_epoch:03d} "
+                        f"best_val_total={early_stop_state.best_metric:.6f} "
+                        f"reason={early_stop_state.stop_reason}"
+                    ),
+                    flush=True,
+                )
+                break
 
         if (
             bool(args.enable_phase2_flow)
@@ -1915,6 +2354,12 @@ def main() -> None:
         "efficiency_head_only": bool(args.efficiency_head_only),
         "usage_share_head_enabled": bool(args.enable_usage_share_head),
         "usage_share_head_only": bool(args.usage_share_head_only),
+        "ast_reb_structure_aux": {
+            "w_ast_share_aux": float(args.w_ast_share_aux),
+            "w_reb_share_aux": float(args.w_reb_share_aux),
+            "w_ast_team_rate_aux": float(args.w_ast_team_rate_aux),
+            "w_reb_opportunity_rate_aux": float(args.w_reb_opportunity_rate_aux),
+        },
         "phase3_decision_enabled": bool(args.enable_phase3_decision),
         "phase2_schedule": {
             "flow_warmup_epochs": int(args.phase2_flow_warmup_epochs),
@@ -1936,6 +2381,16 @@ def main() -> None:
             "backoff_count": int(phase2_guard_state.backoff_count),
             "events": phase2_guard_state.events[-50:],
             "config": asdict(phase2_guard_cfg),
+        },
+        "early_stopping": {
+            "enabled": bool(int(early_stop_cfg.patience) > 0),
+            "config": asdict(early_stop_cfg),
+            "best_epoch": int(early_stop_state.best_epoch),
+            "best_metric": float(early_stop_state.best_metric),
+            "bad_epochs": int(early_stop_state.bad_epochs),
+            "stopped_early": bool(early_stop_state.stop_requested),
+            "stop_epoch": int(early_stop_state.stop_epoch) if early_stop_state.stop_epoch is not None else None,
+            "stop_reason": str(early_stop_state.stop_reason) if early_stop_state.stop_reason is not None else None,
         },
         "split": split_meta,
         "train_examples": int(len(train_examples)),

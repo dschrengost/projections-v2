@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import pytest
+import torch
 
 from scripts.rotation.train_game_transformer_v2 import (
+    EarlyStopConfig,
+    EarlyStopState,
     Phase2StabilityConfig,
     Phase2StabilityState,
     _resolve_phase2_epoch_weights,
+    _team_fixed_opportunity_rate_mse_loss,
+    _team_ratio_mse_loss,
+    _team_sum_by_side,
+    _update_early_stop,
     _update_phase2_nll_guard,
 )
 
@@ -127,3 +134,93 @@ def test_resolve_phase2_epoch_weights_enables_phase3_decision_weights() -> None:
     assert weights.run_phase3_decision is True
     assert weights.w_crps_fpts == pytest.approx(0.8)
     assert weights.w_team_energy == pytest.approx(0.2)
+
+
+def test_update_early_stop_requests_stop_after_patience_exhausted() -> None:
+    cfg = EarlyStopConfig(patience=2, min_delta=0.01, min_epochs=2)
+    state = EarlyStopState()
+
+    assert _update_early_stop(epoch=1, metric_value=5.0, config=cfg, state=state) is False
+    assert state.best_epoch == 1
+    assert state.best_metric == pytest.approx(5.0)
+
+    assert _update_early_stop(epoch=2, metric_value=4.95, config=cfg, state=state) is False
+    assert state.best_epoch == 2
+    assert state.best_metric == pytest.approx(4.95)
+
+    assert _update_early_stop(epoch=3, metric_value=4.955, config=cfg, state=state) is False
+    assert state.bad_epochs == 1
+    assert state.stop_requested is False
+
+    assert _update_early_stop(epoch=4, metric_value=4.958, config=cfg, state=state) is True
+    assert state.bad_epochs == 2
+    assert state.stop_requested is True
+    assert state.stop_epoch == 4
+    assert state.best_epoch == 2
+    assert state.stop_reason is not None
+
+
+def test_update_early_stop_respects_min_epochs_gate() -> None:
+    cfg = EarlyStopConfig(patience=1, min_delta=0.01, min_epochs=3)
+    state = EarlyStopState(best_metric=5.0, best_epoch=1)
+
+    assert _update_early_stop(epoch=2, metric_value=5.02, config=cfg, state=state) is False
+    assert state.bad_epochs == 0
+    assert state.stop_requested is False
+
+
+def test_team_sum_by_side_respects_observed_mask() -> None:
+    values = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+    valid_mask = torch.tensor([[True, True, True, True]])
+    team_index = torch.tensor([[0, 0, 1, 1]])
+    observed_mask = torch.tensor([[True, False, True, True]])
+
+    totals, seen = _team_sum_by_side(
+        values=values,
+        valid_mask=valid_mask,
+        team_index=team_index,
+        observed_mask=observed_mask,
+    )
+
+    assert totals.shape == (1, 2)
+    assert seen.shape == (1, 2)
+    assert totals.tolist() == [[1.0, 7.0]]
+    assert seen.tolist() == [[True, True]]
+
+
+def test_team_ratio_mse_loss_detaches_pred_denominator_and_masks_missing_rows() -> None:
+    pred_num = torch.tensor([[8.0, 3.0], [5.0, 2.0]])
+    pred_den = torch.tensor([[10.0, 6.0], [0.0, 0.0]], requires_grad=True)
+    true_num = torch.tensor([[7.0, 4.0], [1.0, 1.0]])
+    true_den = torch.tensor([[10.0, 8.0], [0.0, 0.0]])
+    observed_mask = torch.tensor([[True, True], [True, True]])
+
+    loss = _team_ratio_mse_loss(
+        pred_numerator=pred_num,
+        pred_denominator=pred_den,
+        true_numerator=true_num,
+        true_denominator=true_den,
+        observed_mask=observed_mask,
+    )
+
+    # Row 2 should be ignored because the true denominator is zero.
+    expected = (((0.8 - 0.7) ** 2) + ((0.5 - 0.5) ** 2)) / 2.0
+    assert loss.item() == pytest.approx(expected)
+
+
+def test_team_fixed_opportunity_rate_mse_loss_uses_true_budget_and_caps_overflow() -> None:
+    pred_num = torch.tensor([[12.0, 3.0], [5.0, 1.0]])
+    true_num = torch.tensor([[7.0, 4.0], [0.0, 0.0]])
+    true_den = torch.tensor([[10.0, 8.0], [0.0, 0.0]])
+    observed_mask = torch.tensor([[True, True], [True, True]])
+
+    loss = _team_fixed_opportunity_rate_mse_loss(
+        pred_numerator=pred_num,
+        true_numerator=true_num,
+        true_denominator=true_den,
+        observed_mask=observed_mask,
+    )
+
+    # Row 1 side 0 clips from 1.2 to 1.0 against a true rate of 0.7.
+    expected = (((1.0 - 0.7) ** 2) + ((3.0 / 8.0 - 4.0 / 8.0) ** 2)) / 2.0
+    assert loss.item() == pytest.approx(expected)
