@@ -160,6 +160,22 @@ def _normalize_alloc_weights(
     return torch.where(denom > float(eps), w / denom.clamp(min=float(eps)), uniform)
 
 
+def _softmax_alloc_weights(
+    logits: torch.Tensor,
+    *,
+    eligible_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Softmax allocation over eligible players with uniform fallback."""
+    elig = eligible_mask.to(dtype=torch.bool)
+    masked_logits = logits.masked_fill(~elig, -1e9)
+    probs = torch.softmax(masked_logits, dim=1)
+    probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+    denom = probs.sum(dim=1, keepdim=True)
+    elig_count = elig.to(dtype=probs.dtype).sum(dim=1, keepdim=True).clamp(min=1.0)
+    uniform = elig.to(dtype=probs.dtype) / elig_count
+    return torch.where(denom > 1e-8, probs / denom.clamp(min=1e-8), uniform)
+
+
 def _align_flow_to_backbone_budgets(
     *,
     flow_values: torch.Tensor,
@@ -179,6 +195,9 @@ def _align_flow_to_backbone_budgets(
     eff_alpha_fg3: torch.Tensor | None = None,
     eff_beta_fg3: torch.Tensor | None = None,
     make_model_config: MakeModelConfig | None = None,
+    usage_share_logits: torch.Tensor | None = None,
+    allocation_source: str = "emergent",
+    allocation_blend_alpha: float = 0.5,
 ) -> torch.Tensor:
     """Align player-level flow outputs to sampled backbone team event budgets.
 
@@ -191,6 +210,15 @@ def _align_flow_to_backbone_budgets(
         raise ValueError("valid_mask/team_index/active_mask must have shape (N, 30)")
     if backbone_fga.ndim != 2 or backbone_fga.shape[1] != 2:
         raise ValueError("backbone_fga/backbone_fta/backbone_tov/backbone_oreb must have shape (N, 2)")
+    alloc_source = str(allocation_source).strip().lower()
+    if alloc_source not in {"emergent", "usage_head", "blend"}:
+        raise ValueError(f"unsupported allocation_source: {allocation_source}")
+    if usage_share_logits is not None and usage_share_logits.shape[:2] != flow_values.shape[:2]:
+        raise ValueError("usage_share_logits must have shape (N, 30, K)")
+    if usage_share_logits is not None and usage_share_logits.shape[2] < 3:
+        raise ValueError("usage_share_logits must include at least 3 targets: fga/fta/tov")
+    blend_alpha = float(np.clip(float(allocation_blend_alpha), 0.0, 1.0))
+    use_usage = alloc_source in {"usage_head", "blend"} and usage_share_logits is not None
 
     out = flow_values.clone()
     valid = valid_mask.to(dtype=torch.bool)
@@ -255,6 +283,25 @@ def _align_flow_to_backbone_budgets(
         w_fta = _normalize_alloc_weights(old_fta, eligible_mask=elig)
         w_tov = _normalize_alloc_weights(out[:, :, tov_idx], eligible_mask=elig)
         w_oreb = _normalize_alloc_weights(out[:, :, oreb_idx], eligible_mask=elig)
+
+        if use_usage and usage_share_logits is not None:
+            w_usage_fga = _softmax_alloc_weights(usage_share_logits[:, :, 0], eligible_mask=elig)
+            w_usage_fta = _softmax_alloc_weights(usage_share_logits[:, :, 1], eligible_mask=elig)
+            w_usage_tov = _softmax_alloc_weights(usage_share_logits[:, :, 2], eligible_mask=elig)
+            if alloc_source == "usage_head":
+                w_fga2 = w_usage_fga
+                w_fga3 = w_usage_fga
+                w_fta = w_usage_fta
+                w_tov = w_usage_tov
+            else:
+                w_fga2 = (1.0 - blend_alpha) * w_fga2 + blend_alpha * w_usage_fga
+                w_fga3 = (1.0 - blend_alpha) * w_fga3 + blend_alpha * w_usage_fga
+                w_fta = (1.0 - blend_alpha) * w_fta + blend_alpha * w_usage_fta
+                w_tov = (1.0 - blend_alpha) * w_tov + blend_alpha * w_usage_tov
+                w_fga2 = _normalize_alloc_weights(w_fga2, eligible_mask=elig)
+                w_fga3 = _normalize_alloc_weights(w_fga3, eligible_mask=elig)
+                w_fta = _normalize_alloc_weights(w_fta, eligible_mask=elig)
+                w_tov = _normalize_alloc_weights(w_tov, eligible_mask=elig)
 
         new_fga2 = w_fga2 * budget_fga2.unsqueeze(1)
         new_fga3 = w_fga3 * budget_fga3.unsqueeze(1)
@@ -728,6 +775,8 @@ def sample_worlds_for_batch(
     poss_symmetry_gate: float | None = None,
     attempt_conditioning_mode: str = "predicted_attempts",
     make_model_config: MakeModelConfig | None = None,
+    allocation_source: str = "emergent",
+    allocation_blend_alpha: float = 0.5,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     if not hasattr(model, "flow_head") or model.flow_head is None:  # type: ignore[attr-defined]
         raise RuntimeError("Model does not expose flow_head for inverse flow sampling")
@@ -805,6 +854,21 @@ def sample_worlds_for_batch(
             )
             # Enforce DNP semantics: inactive players contribute zero counting stats.
             flow_projected = flow_projected * out.active.active_mask.unsqueeze(-1).to(dtype=flow_projected.dtype)
+            usage_share_logits: torch.Tensor | None = None
+            if getattr(out, "usage_share", None) is not None:
+                usage_share_logits = torch.stack(
+                    [
+                        out.usage_share.fga_logits,
+                        out.usage_share.fta_logits,
+                        out.usage_share.tov_logits,
+                    ],
+                    dim=-1,
+                )
+            alloc_source = str(allocation_source).strip().lower()
+            if alloc_source in {"usage_head", "blend"} and usage_share_logits is None:
+                if alloc_source == "usage_head":
+                    raise RuntimeError("allocation_source=usage_head requires model.enable_usage_share_head")
+                alloc_source = "emergent"
             # Couple player-level outputs to sampled backbone team event budgets.
             if has_backbone and out.backbone is not None:
                 budget_fga = out.backbone.fga
@@ -861,6 +925,9 @@ def sample_worlds_for_batch(
                     eff_alpha_fg3=out.efficiency.alpha_fg3 if out.efficiency is not None else None,
                     eff_beta_fg3=out.efficiency.beta_fg3 if out.efficiency is not None else None,
                     make_model_config=make_model_config,
+                    usage_share_logits=usage_share_logits,
+                    allocation_source=alloc_source,
+                    allocation_blend_alpha=float(allocation_blend_alpha),
                 )
 
         minutes = out.minutes.minutes.reshape(bsz, n_worlds_chunk, -1)
@@ -990,6 +1057,23 @@ def parse_args() -> argparse.Namespace:
             "Make reconstruction mode after backbone budget coupling. "
             "legacy=attempts*pct clipping; beta_binomial_* applies discrete conditional sampling."
         ),
+    )
+    parser.add_argument(
+        "--allocation-source",
+        type=str,
+        default="emergent",
+        choices=["emergent", "usage_head", "blend"],
+        help=(
+            "Player allocation source after backbone team budgets. "
+            "emergent=use sampled flow masses; usage_head=use explicit usage-share logits; "
+            "blend=convex blend of emergent and usage_head."
+        ),
+    )
+    parser.add_argument(
+        "--allocation-blend-alpha",
+        type=float,
+        default=0.5,
+        help="Blend weight for usage_head when --allocation-source=blend.",
     )
     parser.add_argument("--bb-ft-prior-mean", type=float, default=0.77)
     parser.add_argument("--bb-ft-prior-strength", type=float, default=6.0)
@@ -1123,6 +1207,8 @@ def main() -> None:
             poss_symmetry_gate=getattr(args, "poss_symmetry_gate", None),
             attempt_conditioning_mode=str(args.attempt_conditioning_mode),
             make_model_config=make_model_config,
+            allocation_source=str(args.allocation_source),
+            allocation_blend_alpha=float(args.allocation_blend_alpha),
         )
         frames.append(df_batch)
         contract_counter.update(checks)
@@ -1158,6 +1244,10 @@ def main() -> None:
         "rows": int(len(worlds_df)),
         "flow_target_columns": list(model.flow_target_columns),  # type: ignore[attr-defined]
         "attempt_conditioning_mode": str(args.attempt_conditioning_mode),
+        "allocation": {
+            "source": str(args.allocation_source),
+            "blend_alpha": float(args.allocation_blend_alpha),
+        },
         "make_model": {
             "mode": str(make_model_config.mode),
             "use_learned_efficiency": bool(make_model_config.use_learned_efficiency),

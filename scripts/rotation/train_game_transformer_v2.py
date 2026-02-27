@@ -130,6 +130,8 @@ class EpochMetrics:
     train_backbone_nll: float = 0.0
     train_three_pa_nll: float = 0.0
     train_efficiency_nll: float = 0.0
+    train_usage_share_nll: float = 0.0
+    train_emergent_share_aux: float = 0.0
     val_total: float = 0.0
     val_minutes_mae: float = 0.0
     val_count_loss: float = 0.0
@@ -143,6 +145,8 @@ class EpochMetrics:
     val_backbone_nll: float = 0.0
     val_three_pa_nll: float = 0.0
     val_efficiency_nll: float = 0.0
+    val_usage_share_nll: float = 0.0
+    val_emergent_share_aux: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -347,6 +351,51 @@ def _beta_binomial_nll(
     nll = -(log_comb + log_beta_ratio)
     denom = mask_f.sum().clamp(min=1.0)
     return (nll * mask_f).sum() / denom
+
+
+def _team_share_ce_loss(
+    *,
+    logits: torch.Tensor,
+    attempts_true: torch.Tensor,
+    valid_mask: torch.Tensor,
+    team_index: torch.Tensor,
+    observed_mask: torch.Tensor | None = None,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Cross-entropy between true within-team shares and model logits."""
+    if logits.ndim != 2:
+        raise ValueError("logits must have shape (B,P)")
+    if attempts_true.shape != logits.shape:
+        raise ValueError("attempts_true must match logits shape")
+    if valid_mask.shape != logits.shape or team_index.shape != logits.shape:
+        raise ValueError("valid_mask/team_index must match logits shape")
+    if observed_mask is not None and observed_mask.shape != logits.shape:
+        raise ValueError("observed_mask must match logits shape")
+
+    valid = valid_mask.to(dtype=torch.bool)
+    obs = observed_mask.to(dtype=torch.bool) if observed_mask is not None else valid
+    attempts = torch.clamp(attempts_true, min=0.0)
+
+    loss_sum = logits.new_zeros(())
+    n_rows = logits.new_zeros(())
+    for side in (0, 1):
+        elig = valid & team_index.eq(side)
+        label_mask = elig & obs
+        target_mass = torch.where(label_mask, attempts, torch.zeros_like(attempts))
+        team_total = target_mass.sum(dim=1)
+        has_labels = team_total > float(eps)
+        if not bool(has_labels.any()):
+            continue
+
+        masked_logits = logits.masked_fill(~elig, -1e9)
+        log_probs = torch.log_softmax(masked_logits, dim=1)
+        target_share = target_mass / team_total.unsqueeze(1).clamp(min=float(eps))
+        loss_row = -(target_share * log_probs).sum(dim=1)
+        has_f = has_labels.to(dtype=loss_row.dtype)
+        loss_sum = loss_sum + (loss_row * has_f).sum()
+        n_rows = n_rows + has_f.sum()
+
+    return loss_sum / n_rows.clamp(min=1.0)
 
 
 def _flow_index(flow_target_columns: list[str], name: str) -> int:
@@ -631,6 +680,8 @@ def _stats_finite(stats: dict[str, float]) -> bool:
         "backbone_nll",
         "three_pa_nll",
         "efficiency_nll",
+        "usage_share_nll",
+        "emergent_share_aux",
     ]
     return all(math.isfinite(float(stats.get(k, float("nan")))) for k in keys)
 
@@ -665,8 +716,11 @@ def _run_epoch(
     w_backbone_nll: float = 0.0,
     w_three_pa_nll: float = 0.0,
     w_efficiency_nll: float = 0.0,
+    w_usage_share_nll: float = 0.0,
+    w_emergent_share_aux: float = 0.0,
     enable_possession_backbone: bool = False,
     enable_efficiency_head: bool = False,
+    enable_usage_share_head: bool = False,
     detach_backbone: bool = True,
     phase2_stability_config: Phase2StabilityConfig | None = None,
     phase2_stability_state: Phase2StabilityState | None = None,
@@ -688,6 +742,8 @@ def _run_epoch(
         "backbone_nll": 0.0,
         "three_pa_nll": 0.0,
         "efficiency_nll": 0.0,
+        "usage_share_nll": 0.0,
+        "emergent_share_aux": 0.0,
         "steps": 0,
         "skipped_batches": 0,
         "instability_events": 0,
@@ -932,6 +988,96 @@ def _run_epoch(
                 )
                 efficiency_nll_loss = (ft_nll + fg2_nll + fg3_nll) / 3.0
 
+            usage_share_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            emergent_share_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            if bool(run_phase2_flow):
+                ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
+                fga2_i = _flow_index(ftc, "fga2")
+                fga3_i = _flow_index(ftc, "fga3")
+                fta_i = _flow_index(ftc, "fta")
+                tov_i = _flow_index(ftc, "tov")
+
+                fga_true = flow_target_flat[..., fga2_i] + flow_target_flat[..., fga3_i]
+                fta_true = flow_target_flat[..., fta_i]
+                tov_true = flow_target_flat[..., tov_i]
+
+                fga_obs = flow_observed_flat[..., fga2_i] & flow_observed_flat[..., fga3_i]
+                fta_obs = flow_observed_flat[..., fta_i]
+                tov_obs = flow_observed_flat[..., tov_i]
+
+                if bool(enable_usage_share_head) and out.usage_share is not None:
+                    loss_fga = _team_share_ce_loss(
+                        logits=out.usage_share.fga_logits,
+                        attempts_true=fga_true,
+                        valid_mask=out.player_valid_mask,
+                        team_index=out.player_team_index,
+                        observed_mask=fga_obs,
+                    )
+                    loss_fta = _team_share_ce_loss(
+                        logits=out.usage_share.fta_logits,
+                        attempts_true=fta_true,
+                        valid_mask=out.player_valid_mask,
+                        team_index=out.player_team_index,
+                        observed_mask=fta_obs,
+                    )
+                    loss_tov = _team_share_ce_loss(
+                        logits=out.usage_share.tov_logits,
+                        attempts_true=tov_true,
+                        valid_mask=out.player_valid_mask,
+                        team_index=out.player_team_index,
+                        observed_mask=tov_obs,
+                    )
+                    usage_share_nll_loss = (loss_fga + loss_fta + loss_tov) / 3.0
+
+                if float(w_emergent_share_aux) > 0.0:
+                    z0 = torch.zeros(
+                        (
+                            out.player_states.shape[0],
+                            out.player_states.shape[1],
+                            len(ftc),
+                        ),
+                        dtype=out.player_states.dtype,
+                        device=out.player_states.device,
+                    )
+                    emergent_flow = model.flow_head.sample(  # type: ignore[attr-defined]
+                        z0,
+                        player_states=out.player_states,
+                        team_states=out.team_states,
+                        game_state=out.game_state,
+                        player_team_index=out.player_team_index,
+                        valid_mask=out.player_valid_mask,
+                        observed_mask=out.player_valid_mask.unsqueeze(-1).expand_as(z0),
+                    )
+                    emergent_flow = _project_flow_stats_to_contract(
+                        emergent_flow,
+                        flow_target_columns=ftc,
+                    )
+                    fga_em = emergent_flow[..., fga2_i] + emergent_flow[..., fga3_i]
+                    fta_em = emergent_flow[..., fta_i]
+                    tov_em = emergent_flow[..., tov_i]
+                    loss_fga_em = _team_share_ce_loss(
+                        logits=torch.log(torch.clamp(fga_em, min=1e-6)),
+                        attempts_true=fga_true,
+                        valid_mask=out.player_valid_mask,
+                        team_index=out.player_team_index,
+                        observed_mask=fga_obs,
+                    )
+                    loss_fta_em = _team_share_ce_loss(
+                        logits=torch.log(torch.clamp(fta_em, min=1e-6)),
+                        attempts_true=fta_true,
+                        valid_mask=out.player_valid_mask,
+                        team_index=out.player_team_index,
+                        observed_mask=fta_obs,
+                    )
+                    loss_tov_em = _team_share_ce_loss(
+                        logits=torch.log(torch.clamp(tov_em, min=1e-6)),
+                        attempts_true=tov_true,
+                        valid_mask=out.player_valid_mask,
+                        team_index=out.player_team_index,
+                        observed_mask=tov_obs,
+                    )
+                    emergent_share_aux_loss = (loss_fga_em + loss_fta_em + loss_tov_em) / 3.0
+
             total_loss = (
                 float(w_minutes) * minutes_mae
                 + float(w_count) * active_losses["count_loss"]
@@ -944,6 +1090,8 @@ def _run_epoch(
                 + float(w_backbone_nll) * backbone_nll_loss
                 + float(w_three_pa_nll) * three_pa_nll_loss
                 + float(w_efficiency_nll) * efficiency_nll_loss
+                + float(w_usage_share_nll) * usage_share_nll_loss
+                + float(w_emergent_share_aux) * emergent_share_aux_loss
             )
 
             skip_step = False
@@ -1028,6 +1176,8 @@ def _run_epoch(
             totals["backbone_nll"] += float(backbone_nll_loss.item())
             totals["three_pa_nll"] += float(three_pa_nll_loss.item())
             totals["efficiency_nll"] += float(efficiency_nll_loss.item())
+            totals["usage_share_nll"] += float(usage_share_nll_loss.item())
+            totals["emergent_share_aux"] += float(emergent_share_aux_loss.item())
             totals["steps"] += 1
         if phase2_stability_state is not None and bool(phase2_stability_state.rollback_requested):
             break
@@ -1047,6 +1197,8 @@ def _run_epoch(
         "backbone_nll": totals["backbone_nll"] / denom,
         "three_pa_nll": totals["three_pa_nll"] / denom,
         "efficiency_nll": totals["efficiency_nll"] / denom,
+        "usage_share_nll": totals["usage_share_nll"] / denom,
+        "emergent_share_aux": totals["emergent_share_aux"] / denom,
         "skipped_batches": float(totals["skipped_batches"]),
         "instability_events": float(totals["instability_events"]),
         "rollback_requested": 1.0 if (phase2_stability_state and phase2_stability_state.rollback_requested) else 0.0,
@@ -1176,6 +1328,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--efficiency-fg2-prior-strength", type=float, default=8.0)
     parser.add_argument("--efficiency-fg3-prior-mean", type=float, default=0.36)
     parser.add_argument("--efficiency-fg3-prior-strength", type=float, default=8.0)
+    parser.add_argument("--enable-usage-share-head", action="store_true")
+    parser.add_argument(
+        "--usage-share-head-only",
+        action="store_true",
+        help="Freeze all non-usage-share params and train only usage_share_head.* weights.",
+    )
+    parser.add_argument("--usage-share-head-hidden", type=int, default=128)
+    parser.add_argument("--w-usage-share-nll", type=float, default=0.0)
+    parser.add_argument(
+        "--w-emergent-share-aux",
+        type=float,
+        default=0.0,
+        help="Auxiliary emergent-share CE loss using zero-latent flow samples.",
+    )
 
     # Possession backbone (section 15)
     parser.add_argument("--enable-possession-backbone", action="store_true")
@@ -1228,6 +1394,12 @@ def main() -> None:
         raise ValueError("--enable-efficiency-head requires --enable-phase2-flow")
     if bool(args.efficiency_head_only) and not bool(args.enable_efficiency_head):
         raise ValueError("--efficiency-head-only requires --enable-efficiency-head")
+    if bool(args.enable_usage_share_head) and not bool(args.enable_phase2_flow):
+        raise ValueError("--enable-usage-share-head requires --enable-phase2-flow")
+    if bool(args.usage_share_head_only) and not bool(args.enable_usage_share_head):
+        raise ValueError("--usage-share-head-only requires --enable-usage-share-head")
+    if bool(args.efficiency_head_only) and bool(args.usage_share_head_only):
+        raise ValueError("--efficiency-head-only and --usage-share-head-only are mutually exclusive")
     if (bool(args.enable_possession_backbone) or bool(args.enable_three_pa_share)) and not bool(args.enable_phase2_flow):
         raise ValueError(
             "--enable-possession-backbone/--enable-three-pa-share require --enable-phase2-flow "
@@ -1241,6 +1413,8 @@ def main() -> None:
         raise ValueError("--phase3-active-temperature must be > 0")
     if int(args.efficiency_head_hidden) <= 0:
         raise ValueError("--efficiency-head-hidden must be > 0")
+    if int(args.usage_share_head_hidden) <= 0:
+        raise ValueError("--usage-share-head-hidden must be > 0")
     if float(args.efficiency_ft_prior_mean) <= 0.0 or float(args.efficiency_ft_prior_mean) >= 1.0:
         raise ValueError("--efficiency-ft-prior-mean must be in (0, 1)")
     if float(args.efficiency_fg2_prior_mean) <= 0.0 or float(args.efficiency_fg2_prior_mean) >= 1.0:
@@ -1255,6 +1429,12 @@ def main() -> None:
         raise ValueError("--efficiency-fg3-prior-strength must be > 0")
     if float(args.w_efficiency_nll) < 0.0:
         raise ValueError("--w-efficiency-nll must be >= 0")
+    if float(args.w_usage_share_nll) < 0.0:
+        raise ValueError("--w-usage-share-nll must be >= 0")
+    if float(args.w_emergent_share_aux) < 0.0:
+        raise ValueError("--w-emergent-share-aux must be >= 0")
+    if float(args.w_emergent_share_aux) > 0.0 and not bool(args.enable_phase2_flow):
+        raise ValueError("--w-emergent-share-aux > 0 requires --enable-phase2-flow")
     if float(args.overflow_protected_prior_play_prob_floor) < 0.0 or float(args.overflow_protected_prior_play_prob_floor) > 1.0:
         raise ValueError("--overflow-protected-prior-play-prob-floor must be within [0, 1]")
     if float(args.overflow_protected_prior_minutes_floor) < 0.0:
@@ -1400,6 +1580,8 @@ def main() -> None:
         efficiency_fg2_prior_strength=float(args.efficiency_fg2_prior_strength),
         efficiency_fg3_prior_mean=float(args.efficiency_fg3_prior_mean),
         efficiency_fg3_prior_strength=float(args.efficiency_fg3_prior_strength),
+        enable_usage_share_head=bool(args.enable_usage_share_head),
+        usage_share_head_hidden=int(args.usage_share_head_hidden),
         enable_possession_backbone=bool(args.enable_possession_backbone),
         enable_three_pa_share=bool(args.enable_three_pa_share),
         possession_mu_mode=str(args.possession_mu_mode),
@@ -1440,6 +1622,19 @@ def main() -> None:
                 n_trainable += 1
         print(
             f"[efficiency-head-only] trainable_param_tensors={n_trainable} total_param_tensors={n_total}",
+            flush=True,
+        )
+    if bool(args.usage_share_head_only):
+        n_trainable = 0
+        n_total = 0
+        for name, param in model.named_parameters():
+            n_total += 1
+            is_usage = name.startswith("usage_share_head.")
+            param.requires_grad = bool(is_usage)
+            if param.requires_grad:
+                n_trainable += 1
+        print(
+            f"[usage-share-head-only] trainable_param_tensors={n_trainable} total_param_tensors={n_total}",
             flush=True,
         )
     optimizer = torch.optim.AdamW(
@@ -1518,8 +1713,11 @@ def main() -> None:
             w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
             w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
             w_efficiency_nll=float(args.w_efficiency_nll) if bool(args.enable_efficiency_head) else 0.0,
+            w_usage_share_nll=float(args.w_usage_share_nll) if bool(args.enable_usage_share_head) else 0.0,
+            w_emergent_share_aux=float(args.w_emergent_share_aux),
             enable_possession_backbone=bool(args.enable_possession_backbone),
             enable_efficiency_head=bool(args.enable_efficiency_head),
+            enable_usage_share_head=bool(args.enable_usage_share_head),
             detach_backbone=bool(int(epoch) < int(args.backbone_detach_until_epoch)),
             phase2_stability_config=phase2_guard_cfg if bool(args.enable_phase2_flow) else None,
             phase2_stability_state=phase2_guard_state if bool(args.enable_phase2_flow) else None,
@@ -1545,6 +1743,8 @@ def main() -> None:
                 "backbone_nll": float("nan"),
                 "three_pa_nll": float("nan"),
                 "efficiency_nll": float("nan"),
+                "usage_share_nll": float("nan"),
+                "emergent_share_aux": float("nan"),
                 "skipped_batches": 0.0,
                 "instability_events": 0.0,
                 "rollback_requested": 1.0,
@@ -1579,8 +1779,11 @@ def main() -> None:
                 w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
                 w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
                 w_efficiency_nll=float(args.w_efficiency_nll) if bool(args.enable_efficiency_head) else 0.0,
+                w_usage_share_nll=float(args.w_usage_share_nll) if bool(args.enable_usage_share_head) else 0.0,
+                w_emergent_share_aux=float(args.w_emergent_share_aux),
                 enable_possession_backbone=bool(args.enable_possession_backbone),
                 enable_efficiency_head=bool(args.enable_efficiency_head),
+                enable_usage_share_head=bool(args.enable_usage_share_head),
                 detach_backbone=bool(int(epoch) < int(args.backbone_detach_until_epoch)),
             )
 
@@ -1605,6 +1808,8 @@ def main() -> None:
             train_backbone_nll=train_stats.get("backbone_nll", 0.0),
             train_three_pa_nll=train_stats.get("three_pa_nll", 0.0),
             train_efficiency_nll=train_stats.get("efficiency_nll", 0.0),
+            train_usage_share_nll=train_stats.get("usage_share_nll", 0.0),
+            train_emergent_share_aux=train_stats.get("emergent_share_aux", 0.0),
             val_total=val_stats["total"],
             val_minutes_mae=val_stats["minutes_mae"],
             val_count_loss=val_stats["count_loss"],
@@ -1618,6 +1823,8 @@ def main() -> None:
             val_backbone_nll=val_stats.get("backbone_nll", 0.0),
             val_three_pa_nll=val_stats.get("three_pa_nll", 0.0),
             val_efficiency_nll=val_stats.get("efficiency_nll", 0.0),
+            val_usage_share_nll=val_stats.get("usage_share_nll", 0.0),
+            val_emergent_share_aux=val_stats.get("emergent_share_aux", 0.0),
         )
         history.append(metrics)
 
@@ -1644,6 +1851,10 @@ def main() -> None:
             )
         if bool(args.enable_efficiency_head):
             msg = f"{msg} val_efficiency_nll={metrics.val_efficiency_nll:.4f}"
+        if bool(args.enable_usage_share_head):
+            msg = f"{msg} val_usage_share_nll={metrics.val_usage_share_nll:.4f}"
+        if float(args.w_emergent_share_aux) > 0.0:
+            msg = f"{msg} val_emergent_share_aux={metrics.val_emergent_share_aux:.4f}"
         if bool(args.enable_possession_backbone):
             bb_detached = int(epoch) < int(args.backbone_detach_until_epoch)
             msg = (
@@ -1702,6 +1913,8 @@ def main() -> None:
         "phase2_flow_enabled": bool(args.enable_phase2_flow),
         "efficiency_head_enabled": bool(args.enable_efficiency_head),
         "efficiency_head_only": bool(args.efficiency_head_only),
+        "usage_share_head_enabled": bool(args.enable_usage_share_head),
+        "usage_share_head_only": bool(args.usage_share_head_only),
         "phase3_decision_enabled": bool(args.enable_phase3_decision),
         "phase2_schedule": {
             "flow_warmup_epochs": int(args.phase2_flow_warmup_epochs),

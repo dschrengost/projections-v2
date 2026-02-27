@@ -24,6 +24,7 @@ from projections.rotation.possession_backbone import (
     TeamEventBackboneOutputs,
     ThreePAShareHead,
 )
+from projections.rotation.usage_share_head import UsageShareHead, UsageShareHeadOutputs
 from projections.rotation.set_model import zfill_game_id_series
 
 MAX_PLAYERS_PER_TEAM = 15
@@ -98,6 +99,8 @@ class GameTransformerV2Config:
     possession_mu_baseline: float = 100.0
     backbone_hidden: int = 128
     three_pa_share_hidden: int = 64
+    enable_usage_share_head: bool = False
+    usage_share_head_hidden: int = 128
     overflow_protected_prior_play_prob_floor: float = PROTECTED_PRIOR_PLAY_PROB_FLOOR
     overflow_protected_prior_minutes_floor: float = PROTECTED_PRIOR_MINUTES_FLOOR
     overflow_risk_weight_consecutive_active_dnp: float = OVERFLOW_RISK_WEIGHT_CONSECUTIVE_ACTIVE_DNP
@@ -146,6 +149,10 @@ class GameTransformerV2Config:
             filtered["possession_mu_mode"] = "absolute"
         if "possession_mu_baseline" not in filtered:
             filtered["possession_mu_baseline"] = 100.0
+        if "enable_usage_share_head" not in filtered:
+            filtered["enable_usage_share_head"] = False
+        if "usage_share_head_hidden" not in filtered:
+            filtered["usage_share_head_hidden"] = 128
         return cls(**filtered)
 
     def save(self, path: Path) -> None:
@@ -199,6 +206,7 @@ class GameTransformerV2Outputs:
     efficiency: EfficiencyHeadOutputs | None = None
     possession: PossessionHeadOutputs | None = None
     backbone: TeamEventBackboneOutputs | None = None
+    usage_share: UsageShareHeadOutputs | None = None
 
 
 def _numeric_frame(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -617,6 +625,8 @@ class GameTransformerV2(nn.Module):
         possession_mu_baseline: float = 100.0,
         backbone_hidden: int = 128,
         three_pa_share_hidden: int = 64,
+        enable_usage_share_head: bool = False,
+        usage_share_head_hidden: int = 128,
     ) -> None:
         super().__init__()
         if num_player_features <= 0:
@@ -721,6 +731,15 @@ class GameTransformerV2(nn.Module):
                     hidden_dim=int(three_pa_share_hidden),
                     dropout=float(dropout),
                 )
+
+        self.enable_usage_share_head = bool(enable_usage_share_head)
+        self.usage_share_head: UsageShareHead | None = None
+        if self.enable_usage_share_head:
+            self.usage_share_head = UsageShareHead(
+                d_model=int(d_model),
+                hidden_dim=int(usage_share_head_hidden),
+                dropout=float(dropout),
+            )
 
         token_type_ids = [0, 1, *([2] * MAX_PLAYERS_PER_TEAM), 1, *([2] * MAX_PLAYERS_PER_TEAM)]
         side_ids = [2, 0, *([0] * MAX_PLAYERS_PER_TEAM), 1, *([1] * MAX_PLAYERS_PER_TEAM)]
@@ -950,6 +969,15 @@ class GameTransformerV2(nn.Module):
                     poss_used=backbone_out.poss_used,
                 )
 
+        usage_share_out: UsageShareHeadOutputs | None = None
+        if self.enable_usage_share_head and self.usage_share_head is not None:
+            usage_share_out = self.usage_share_head(
+                player_states=player_states,
+                team_states=team_states,
+                game_state=game_state,
+                player_team_index=player_team_index,
+            )
+
         return GameTransformerV2Outputs(
             game_state=game_state,
             team_states=team_states,
@@ -962,6 +990,7 @@ class GameTransformerV2(nn.Module):
             efficiency=efficiency_out,
             possession=poss_out,
             backbone=backbone_out,
+            usage_share=usage_share_out,
         )
 
 
@@ -1001,4 +1030,6 @@ def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransforme
         possession_mu_baseline=float(getattr(config, "possession_mu_baseline", 100.0)),
         backbone_hidden=int(getattr(config, "backbone_hidden", 128)),
         three_pa_share_hidden=int(getattr(config, "three_pa_share_hidden", 64)),
+        enable_usage_share_head=bool(getattr(config, "enable_usage_share_head", False)),
+        usage_share_head_hidden=int(getattr(config, "usage_share_head_hidden", 128)),
     )

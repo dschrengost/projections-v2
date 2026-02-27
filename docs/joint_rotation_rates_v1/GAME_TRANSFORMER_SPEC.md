@@ -4282,3 +4282,76 @@ Stability note (vs 15.25.A short 2-epoch learned-head run):
 
 1. Longer learned-head fine-tune stability check completed in 15.25.D.
 2. I can also add a dedicated training profile/CLI preset for this (`efficiency_head_only_muanchor`) so future reruns are one command.
+
+### Status Update (2026-02-27, usage-share supervision confirm retrain + live promotion)
+
+Scope completed:
+
+- Added explicit usage-share supervision path (FGA/FTA/TOV logits) with optional emergent-share auxiliary loss and sampler allocation source controls:
+  - `projections/rotation/usage_share_head.py` (new)
+  - `projections/rotation/game_transformer_v2.py`
+  - `scripts/rotation/train_game_transformer_v2.py`
+  - `projections/rotation/sample_worlds_v2.py`
+
+Confirmatory retrain (single-seed short run):
+
+- Run root:
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_usage_share_retrain_confirm_20260227T034905Z`
+- Dataset:
+  - `/home/daniel/projections-data/training/datasets/joint_rotation_rates_v1_priors_contract_livefill_overflowpol_20260224T200110Z`
+- Seed:
+  - `123`
+- Stage A (usage-head-only):
+  - 8 epochs, `lr=1e-3`, `w_usage_share_nll=3.0`, all other losses disabled
+- Stage B (joint flow+share):
+  - 8 epochs, `lr=3e-4`
+  - `w_flow_nll=0.5`, `w_usage_share_nll=1.75`, `w_emergent_share_aux=0.75`
+  - `backbone_detach_until_epoch=4`
+- Eval worlds:
+  - 200 games x 64 worlds
+  - candidate allocation source: `usage_head`
+
+Baseline vs candidate (same eval slice and settings):
+
+| metric | baseline (current bundle pre-promotion) | candidate (seed_123 retrain short) | delta (cand - base) |
+|---|---:|---:|---:|
+| `elite_bias_pts_35plus` | `-21.1249` | `-13.7918` | `+7.3332` |
+| `star_bias_pts_25_34` | `-12.3334` | `-6.7728` | `+5.5606` |
+| `pts_mae` | `9.9740` | `9.8219` | `-0.1521` |
+| `pair_corr_rmse_vs_sim_v2` | `0.2410` | `0.2202` | `-0.0208` |
+| `top3_share_gap_pred_minus_actual` | `-0.0963` | `-0.0115` | `+0.0848` |
+| `fga_share_mae` | `0.02856` | `0.02678` | `-0.00178` |
+
+Artifacts:
+
+- baseline comparison json:
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_usage_share_retrain_confirm_20260227T034905Z/comparison.json`
+- candidate worlds/eval:
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_usage_share_retrain_confirm_20260227T034905Z/seed_123_eval/`
+
+Quality/stability notes:
+
+- No NaN/Inf detected in retrain/eval logs.
+- World contract checks clean (`total_violations=0`) for baseline and candidate generation.
+- Candidate retained the same directional gains seen in the earlier multi-seed sweep.
+
+Promotion completed (live pointer updated):
+
+- Promotion record:
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_usage_share_retrain_confirm_20260227T034905Z/promoted_phase3.json`
+- New bundle:
+  - `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/phase3_game_transformer_v2_usage_share_retrain_confirm_20260227T034905Z_seed_123_20260227T035414Z`
+- Live pointer (`bundle_current`) now targets this bundle.
+- Parity manifest:
+  - `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/phase3_game_transformer_v2_usage_share_retrain_confirm_20260227T034905Z_seed_123_20260227T035414Z/parity_manifest.json`
+  - `parity_manifest_hash = 751506985b58ca96918aacd8438c57819cd5e7538b19a6679348f59826dbd0fc`
+
+Operational note:
+
+- Promotion used explicit waiver rationale because this confirm run did not write the optional strict `offline_eval_vs_sim_v2_60d_64w_strict.json` go/no-go file expected by the generic promotion selector; bundle parity/manifest integrity checks still pass and live preflight requirements remain satisfied.
+
+Next improvement items:
+
+1. Add explicit early-stopping/patience in Stage B to avoid unnecessary overtraining when `best_val_total` occurs early.
+2. Run a short multi-seed confirm (`3` seeds) on the shortened Stage B recipe and keep `seed_123` as tie-break reference.
+3. Evaluate `allocation-source=blend` (`alpha` sweep) for potential correlation lift while preserving the star-share gains from usage-head supervision.
