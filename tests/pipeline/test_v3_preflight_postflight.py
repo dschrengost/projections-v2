@@ -6,7 +6,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from projections.pipeline.parity_manifest import build_parity_manifest, write_parity_manifest
+from projections.pipeline.parity_manifest import (
+    build_parity_manifest,
+    write_parity_manifest,
+)
 from projections.pipeline.v3_postflight import V3PostflightError, run_postflight_gate
 from projections.pipeline.v3_preflight import V3PreflightError, run_preflight_gate
 from projections.pipeline import writer_guard
@@ -30,25 +33,44 @@ def _write_parquet(path: Path, df: pd.DataFrame) -> None:
 
 def test_v3_preflight_pass_and_fail_cases(tmp_path: Path) -> None:
     features = _features_df()
-    features_path = tmp_path / "live" / "features_gtv2_v1" / "2026-01-18" / "run=test" / "features.parquet"
+    features_path = (
+        tmp_path
+        / "live"
+        / "features_gtv2_v1"
+        / "2026-01-18"
+        / "run=test"
+        / "features.parquet"
+    )
     _write_parquet(features_path, features)
 
     manifest = build_parity_manifest(
         model_id="gtv2_test",
         features_df=features,
         transform_manifest={"builder": "unit", "scale": "none"},
-        output_manifest={"projection_columns": ["game_id", "team_id", "player_id", "dk_fpts_mean"]},
+        output_manifest={
+            "projection_columns": ["game_id", "team_id", "player_id", "dk_fpts_mean"]
+        },
         integrity={"git_sha": "abc", "config_hash": "cfg", "artifact_hash": "art"},
     )
     parity_manifest_path = tmp_path / "bundle" / "parity_manifest.json"
     write_parity_manifest(parity_manifest_path, manifest)
 
-    required_input = tmp_path / "bronze" / "v3_core_inputs" / "date=2026-01-18" / "core_inputs_ready.json"
+    required_input = (
+        tmp_path
+        / "bronze"
+        / "v3_core_inputs"
+        / "date=2026-01-18"
+        / "core_inputs_ready.json"
+    )
     required_input.parent.mkdir(parents=True, exist_ok=True)
     required_input.write_text("{}", encoding="utf-8")
 
-    score_run_dir = tmp_path / "artifacts" / "gtv2_scores" / "game_date=2026-01-18" / "run=test"
-    worlds_run_dir = tmp_path / "artifacts" / "gtv2_worlds" / "game_date=2026-01-18" / "run=test"
+    score_run_dir = (
+        tmp_path / "artifacts" / "gtv2_scores" / "game_date=2026-01-18" / "run=test"
+    )
+    worlds_run_dir = (
+        tmp_path / "artifacts" / "gtv2_worlds" / "game_date=2026-01-18" / "run=test"
+    )
 
     as_of_ts = pd.Timestamp.utcnow().isoformat()
 
@@ -59,7 +81,11 @@ def test_v3_preflight_pass_and_fail_cases(tmp_path: Path) -> None:
         features_path=features_path,
         parity_manifest_path=parity_manifest_path,
         observed_transform_manifest={"builder": "unit", "scale": "none"},
-        observed_integrity={"git_sha": "abc", "config_hash": "cfg", "artifact_hash": "art"},
+        observed_integrity={
+            "git_sha": "abc",
+            "config_hash": "cfg",
+            "artifact_hash": "art",
+        },
         input_max_age_minutes=1_000_000.0,
     )
     assert "feature_report" in report
@@ -76,8 +102,34 @@ def test_v3_preflight_pass_and_fail_cases(tmp_path: Path) -> None:
             features_path=features_path,
             parity_manifest_path=parity_manifest_path,
             observed_transform_manifest={"builder": "unit", "scale": "none"},
-            observed_integrity={"git_sha": "abc", "config_hash": "cfg", "artifact_hash": "art"},
+            observed_integrity={
+                "git_sha": "abc",
+                "config_hash": "cfg",
+                "artifact_hash": "art",
+            },
             input_max_age_minutes=1_000_000.0,
+        )
+
+    with pytest.raises(V3PreflightError):
+        run_preflight_gate(
+            as_of_ts=as_of_ts,
+            required_inputs={"core_inputs": required_input, "features": features_path},
+            run_dirs=[score_run_dir, worlds_run_dir],
+            features_path=features_path,
+            parity_manifest_path=parity_manifest_path,
+            observed_transform_manifest={"builder": "unit", "scale": "none"},
+            observed_integrity={
+                "git_sha": "abc",
+                "config_hash": "cfg",
+                "artifact_hash": "art",
+            },
+            input_max_age_minutes=1_000_000.0,
+            frozen_freshness_gates={
+                "lock_window": {
+                    "ok": False,
+                    "failures": [{"game_id": 1, "window": "last_30"}],
+                }
+            },
         )
 
 
@@ -91,7 +143,14 @@ def test_v3_postflight_pass_and_fail_cases(tmp_path: Path) -> None:
             "dk_fpts_mean": [30.0, 32.0],
         }
     )
-    projections_path = tmp_path / "artifacts" / "projections" / "2026-01-18" / "run=test" / "projections.parquet"
+    projections_path = (
+        tmp_path
+        / "artifacts"
+        / "projections"
+        / "2026-01-18"
+        / "run=test"
+        / "projections.parquet"
+    )
     _write_parquet(projections_path, projections)
 
     feature_df = pd.DataFrame(
@@ -106,14 +165,27 @@ def test_v3_postflight_pass_and_fail_cases(tmp_path: Path) -> None:
         features_df=feature_df,
         transform_manifest={"builder": "unit"},
         output_manifest={
-            "projection_columns": ["game_date", "game_id", "team_id", "player_id", "dk_fpts_mean"]
+            "projection_columns": [
+                "game_date",
+                "game_id",
+                "team_id",
+                "player_id",
+                "dk_fpts_mean",
+            ]
         },
         integrity={"git_sha": "abc", "config_hash": "cfg", "artifact_hash": "art"},
     )
     parity_manifest_path = tmp_path / "bundle" / "parity_manifest.json"
     write_parity_manifest(parity_manifest_path, parity_manifest)
 
-    world_summary_path = tmp_path / "artifacts" / "gtv2_worlds" / "game_date=2026-01-18" / "run=test" / "world_contracts_summary.json"
+    world_summary_path = (
+        tmp_path
+        / "artifacts"
+        / "gtv2_worlds"
+        / "game_date=2026-01-18"
+        / "run=test"
+        / "world_contracts_summary.json"
+    )
     world_summary_path.parent.mkdir(parents=True, exist_ok=True)
     world_summary_path.write_text(
         json.dumps(

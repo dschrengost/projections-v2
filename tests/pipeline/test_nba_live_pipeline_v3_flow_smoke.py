@@ -31,6 +31,8 @@ def test_nba_live_pipeline_v3_flow_smoke(
 
     manifest_path = Path(result["manifest_path"])
     assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "input_change_set" in manifest
 
     projections_path = Path(result["projections_path"])
     assert projections_path.exists()
@@ -45,6 +47,8 @@ def test_nba_live_pipeline_v3_flow_smoke(
     )
     assert (v3_run_dir / "preflight_report.json").exists()
     assert (v3_run_dir / "postflight_report.json").exists()
+    assert (v3_run_dir / "stale_publish_report.json").exists()
+    assert (v3_run_dir / "input_change_set.json").exists()
 
     promoted_pointer = (
         tmp_path
@@ -57,3 +61,4 @@ def test_nba_live_pipeline_v3_flow_smoke(
     assert promoted_pointer.exists()
     payload = json.loads(promoted_pointer.read_text(encoding="utf-8"))
     assert payload["run_id"] == run_id
+    assert "source_freshness_summary" in payload

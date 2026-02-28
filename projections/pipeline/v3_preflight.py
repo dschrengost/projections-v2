@@ -77,6 +77,8 @@ def run_preflight_gate(
     observed_integrity: Mapping[str, Any],
     input_max_age_minutes: float = 360.0,
     bundle_config_path: Path | None = None,
+    frozen_source_freshness: Mapping[str, Any] | None = None,
+    frozen_freshness_gates: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute strict v3 preflight checks before model scoring."""
     ts = _coerce_ts(as_of_ts)
@@ -86,6 +88,12 @@ def run_preflight_gate(
         as_of_ts=ts,
         input_max_age_minutes=float(input_max_age_minutes),
     )
+    freshness_gates = dict(frozen_freshness_gates or {})
+    lock_window_gate = dict(freshness_gates.get("lock_window", {}))
+    if lock_window_gate and not bool(lock_window_gate.get("ok", True)):
+        raise V3PreflightError(
+            f"lock-window freshness gate failed: {lock_window_gate.get('failures', [])}"
+        )
     run_dirs_checked = _check_run_dirs_clean_writable(run_dirs)
 
     if not Path(features_path).exists():
@@ -116,6 +124,8 @@ def run_preflight_gate(
     return {
         "as_of_ts": ts.isoformat(),
         "required_inputs_age_minutes": freshness,
+        "source_freshness": dict(frozen_source_freshness or {}),
+        "freshness_gates": freshness_gates,
         "run_dirs_checked": run_dirs_checked,
         "feature_report": feature_report,
         "transform_report": transform_report,

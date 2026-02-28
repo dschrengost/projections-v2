@@ -3,6 +3,8 @@
 Canonical spec:
 
 - See [LIVE_PIPELINE_PRODUCTION_SPEC.md](./LIVE_PIPELINE_PRODUCTION_SPEC.md) for the living production-readiness spec.
+- See [MANUAL_OVERRIDE_CONTRACT.md](./MANUAL_OVERRIDE_CONTRACT.md) for the concrete live manual override contract.
+- See [LIVE_OPERATIONS_UX_REQUIREMENTS.md](./LIVE_OPERATIONS_UX_REQUIREMENTS.md) for operator-facing UX requirements.
 - This file should remain the lightweight parking lot for ideas and incidents that may later be promoted into the canonical spec.
 
 ## Current High-Priority Problems
@@ -82,6 +84,7 @@ We should add:
 - Add a bounded wait loop near scheduled report windows so we prefer a slightly later fresh input over an immediate stale run.
 - Stamp every published game with the exact injury snapshot ts, lineup snapshot ts, odds ts, and props ts used.
 - Surface this freshness data in the dashboard/API so we can see stale-input situations immediately.
+- When the next run is blocked or still in progress, keep the latest published run available for lineup building and show the blocker reason clearly.
 
 ### Event-driven / delta-driven execution
 
@@ -89,6 +92,7 @@ We should add:
 - Define a "material change" contract instead of treating all input changes equally.
 - Separate cheap change detection from expensive model inference.
 - Add a hot-path "late news" scorer that can rebuild a single game quickly.
+- Give operators a single-game rebuild trigger in the control surface.
 
 ### Source redundancy and cross-checking
 
@@ -97,12 +101,20 @@ We should add:
 - If lineup source says player is `out` and official injury source still says `Q`, flag and optionally force conservative handling until rerun completes.
 - Add a source disagreement monitor for players whose status materially affects minutes allocation.
 
+### Manual override policy
+
+- Allow only audited manual `IN` / `OUT` overrides to affect canonical live projections.
+- Do not allow minute boosts, direct fantasy-point boosts, or arbitrary feature edits in the live projection path.
+- Keep boost/preference logic in optimizer / contest sim surfaces instead.
+- Reuse the current GameView / ops override surface first, but narrow its live effect to availability-only semantics.
+- Add manual override metadata to run manifests and published outputs so operators can see when a projection was manually forced.
+
 ### Model/runtime architecture
 
 - The new production inference path is still experimental and appears to be too slow for live operations.
 - We should define a latency budget for each stage: scrape, feature build, score, finalize, publish.
 - Add per-stage timing breakdowns to every run artifact.
-- Consider a fallback "fast conservative mode" for late news windows if the full model path is too slow.
+- Prefer game-scoped reruns, warm transformer processes, and operator-visible blocked states rather than publishing from an alternate late-news scorer.
 
 ### Storage and operational resilience
 
@@ -143,5 +155,7 @@ Longer term:
 - Add an alert when published artifacts are older than the newest authoritative input for a live game.
 - Add source disagreement diagnostics between official injury feed, Rotowire lineups, and ESPN injuries.
 - Add per-stage latency instrumentation to every live run.
-- Add a fast late-news fallback inference path.
+- Add a safe late-news blocked-state path instead of publishing from an alternate model.
+- Add audited manual `IN` / `OUT` override support to the v3 live path.
+- Add operator UX for per-game freshness, source provenance, blocked states, and single-game rebuilds.
 - Add redundant storage and tested backup/restore for `projections-data`.

@@ -111,10 +111,15 @@ This is more important than reducing the number of files on disk.
 Late-news updates should trigger the minimum work necessary. Per-game and
 per-slate digests should determine what gets rebuilt.
 
-### 4.5 Every production path needs a fallback
+### 4.5 Every production path needs a safe failure mode
 
 If the preferred path is too slow or unavailable, the system should degrade to
-a clearly defined conservative mode rather than publish stale or partial data.
+a clearly defined safe mode rather than publish stale or partial data.
+
+For this project, "safe mode" does not mean publishing from an alternate
+minutes model. It means bounded waits, game-scoped reruns, operator-visible
+blocking states, and explicit non-publish behavior when the transformer path
+cannot complete in time.
 
 ## 5. Canonical Production Architecture
 
@@ -131,7 +136,7 @@ The production live path should be organized into these logical stages:
 4. `build_features`
    - build only affected game features
 5. `score_models`
-   - run primary model path or fallback path
+   - run transformer scoring path
 6. `finalize_outputs`
    - generate unified published artifacts
 7. `postflight_validate`
@@ -194,7 +199,7 @@ Published artifacts should expose, per game:
 - odds snapshot ts used
 - props snapshot ts used
 - freshness age in minutes at publish time
-- whether fallback logic was used
+- whether manual override logic was used
 
 ### 6.4 Stale-input guard
 
@@ -208,7 +213,20 @@ live game, the system should either:
 
 ### 7.1 Material-change detection
 
-We should define a per-game digest and a material-change contract.
+Baseline production policy:
+
+1. Compute a per-game digest from frozen `source_freshness` using source-local
+   `content_digest` values when available.
+2. Ignore pure timestamp churn when `content_digest` and `source_used` are
+   unchanged.
+3. Treat changes in `injuries`, `lineups`, and `roster` as material for pre-tip
+   games.
+4. Treat `odds` changes as material only within 180 minutes of tip.
+5. Do not auto-trigger from `props` yet; persist the delta for diagnostics only
+   until a cleaner contract is defined.
+6. Ignore changes for games that are already at or past tip.
+7. Fall back to a full-slate rerun when the model bundle, selector config, or
+   slate composition changes.
 
 Material examples:
 
@@ -250,10 +268,20 @@ Full-slate rebuilds remain valid for:
 For core availability:
 
 1. official NBA injury report
-2. confirmed lineup `out` signals from trusted lineup source
-3. ESPN injuries as supporting fallback
-4. model priors and props only as secondary context, never as authoritative
+2. confirmed lineup `out` signals from Rotowire
+3. operator manual `OUT` overrides, when explicitly entered and audited
+4. ESPN injuries only as an early-day planning/context source, not as a live
+   authoritative source
+5. model priors and props only as secondary context, never as authoritative
    availability
+
+Policy note:
+
+- Rotowire is trusted to zero a player pre-lock when it explicitly marks the
+  player `out`, even if the official NBA report feed is lagging.
+- ESPN should not be used to zero or activate players in the live pipeline.
+  ESPN remains useful for early-day expectation-setting, longer-term injuries,
+  and operator context.
 
 ### 8.2 Disagreement handling
 
@@ -311,17 +339,18 @@ Keep the current layered concept, but make the contracts stricter:
 
 ## 10. Model Runtime Architecture
 
-### 10.1 Primary and fallback scoring paths
+### 10.1 Primary scoring path
 
-For live production, define two scoring modes:
+For live production, define one canonical scoring mode:
 
-1. primary path
+1. transformer path
    - transformer-based path
-   - GPU-backed when available
-2. fallback path
-   - faster conservative scorer
-   - CPU-safe
-   - lower quality but bounded latency
+   - CPU-backed today
+   - GPU-backed once hardware is installed and validated
+
+As of February 27, 2026, GPU inference is not yet available in production.
+The near-term plan is to continue using CPU inference while preparing the
+runtime, packaging, and observability needed for GPU cutover.
 
 ### 10.2 Latency budgets
 
@@ -337,6 +366,11 @@ Set explicit latency budgets per stage:
 The end-to-end budget for a late-news single-game update should be materially
 smaller than the current full-slate path.
 
+Initial target:
+
+- single-game late-news rebuild target: under 2 minutes, subject to what the
+  transformer path can reliably sustain in production
+
 ### 10.3 GPU integration requirements
 
 When the NVIDIA GPU is added:
@@ -344,12 +378,26 @@ When the NVIDIA GPU is added:
 - benchmark CPU vs GPU by stage
 - avoid cold-start cost near lock
 - keep exact runtime/env manifests for CUDA and model serving
-- make GPU failure non-fatal by preserving the fallback scorer
+- fail closed if the GPU path is unavailable and CPU inference cannot satisfy
+  the live SLA
 
 ### 10.4 Warm process / serving model
 
 We should strongly consider a warm scoring process for the transformer model so
 late-news updates do not pay repeated model load overhead.
+
+### 10.5 No alternate-model fallback
+
+We should not automatically publish from a second minutes model if the
+transformer path misses SLA.
+
+Production behavior should instead be:
+
+1. prefer game-scoped reruns so the transformer only recomputes what changed
+2. keep the transformer process warm
+3. block publish or hold prior projections if the required transformer update
+   cannot complete safely
+4. expose the blocked state to the operator with clear freshness diagnostics
 
 ## 11. MLOps Spec
 
@@ -429,6 +477,18 @@ We should expose a lightweight operational view showing:
 - stale-game detection
 - current model path
 - warnings/blockers
+- whether lineup building is currently using the latest published run because a
+  newer run is blocked or still in progress
+
+### 12.2.1 Blocked/in-progress behavior
+
+If a new run is blocked or still executing:
+
+1. the latest published run remains available for lineup building
+2. the operator must be notified that the next run is blocked, waiting, or in
+   progress
+3. the UI should clearly show the blocker reason at the game or slate level
+4. the system should not present the blocked run as published data
 
 ### 12.3 Incident bundle
 
@@ -473,7 +533,7 @@ following are true:
 1. freshness gates exist and are enforced
 2. stale published runs are detectable automatically
 3. per-game rebuilds exist
-4. primary/fallback scoring modes exist
+4. transformer runtime behavior and safe failure modes exist
 5. latency budgets are measured and monitored
 6. model promotion/rollback policy is documented and used
 7. backup/restore is operational and tested
@@ -490,16 +550,18 @@ following are true:
 ### 15.2 Phase 2: Incremental execution
 
 1. Define per-game digest format.
-2. Implement material-change detection.
+2. Implement material-change detection with an explicit baseline policy.
 3. Add per-game feature rebuild and scoring path.
-4. Keep full-slate rebuild as fallback/operator mode.
+4. Merge partial reruns back into unified full-slate artifacts before publish.
+5. Keep full-slate rebuild as operator mode.
 
 ### 15.3 Phase 3: Runtime architecture
 
 1. Benchmark transformer latency on CPU.
 2. Introduce GPU-backed primary scoring path.
 3. Add warm-process inference path.
-4. Add conservative CPU fallback scorer.
+4. Add fail-closed handling and operator-visible blocked states instead of an
+   alternate-model fallback.
 
 ### 15.4 Phase 4: MLOps formalization
 
@@ -525,10 +587,11 @@ following are true:
 
 ### B. Incremental pipeline execution
 
-- [ ] Define per-game input digest contract
-- [ ] Implement material-change detection
-- [ ] Add per-game feature rebuild
-- [ ] Add per-game scorer/finalizer path
+- [x] Define per-game input digest contract
+- [x] Implement material-change detection
+- [x] Add per-game feature rebuild
+- [x] Add per-game scorer/finalizer path
+- [x] Merge game-scoped reruns back into unified publish artifacts
 
 ### C. Runtime and inference
 
@@ -536,7 +599,7 @@ following are true:
 - [ ] Benchmark transformer CPU latency
 - [ ] Integrate GPU-backed primary inference path
 - [ ] Add warm-process inference
-- [ ] Implement conservative fallback scorer
+- [ ] Add fail-closed runtime handling when transformer SLA is missed
 
 ### D. Source quality and disagreements
 
@@ -558,18 +621,61 @@ following are true:
 - [ ] Document restore procedure
 - [ ] Run restore drill and record result
 
-## 17. Open Questions
+## 17. Decisions And Remaining Questions
 
-1. Which source should be allowed to hard-zero a player pre-lock if the
-   official injury feed is lagging but trusted lineup data marks the player
-   out?
-2. What is the acceptable late-news end-to-end SLA for a single-game rebuild?
-3. Should the fallback scorer publish automatically if the transformer misses
-   latency budget, or require operator approval?
-4. Should we keep the current bronze/silver/gold layout exactly as-is, or add a
-   DuckDB-powered operational layer for summaries and change detection?
-5. How much of the live path should move to a long-running service versus
-   remaining Prefect task-based?
+### 17.1 Resolved decisions
+
+1. Rotowire is allowed to hard-zero a player pre-lock when it explicitly marks
+   the player `out`.
+2. ESPN is not a live authoritative source for player availability. It is
+   useful for early-day planning, long-term injuries, and operator context.
+3. The target SLA for a single-game late-news rebuild is under 2 minutes, with
+   final enforcement to be set after transformer benchmarking.
+4. We will keep the current bronze/silver/gold layout. DuckDB remains a
+   possible future addition for operational summaries, debugging, and change
+   detection, but not as the core mutable live-state store.
+5. We will not add an alternate-model fallback for live minutes scoring. If the
+   transformer path cannot complete safely, the system should fail closed and
+   surface the blockage.
+6. When a run is blocked or still in progress, operators continue to build from
+   the latest published run and are explicitly notified about the blocked or
+   in-progress state.
+7. Operators should be able to trigger single-game pipeline / inference runs.
+8. Rotowire takes precedence for explicit `OUT` signals in the live pipeline.
+
+### 17.2 Long-running service options
+
+The live path does not need to move entirely out of Prefect. The practical
+options are:
+
+1. Keep the current Prefect-first architecture and optimize within it.
+   - Best when orchestration, auditability, and simple operator control are the
+     priority.
+   - Add bounded waits, better freshness gates, game-scoped reruns, and a warm
+     transformer subprocess.
+2. Hybrid model: Prefect for orchestration, long-running local inference
+   service for transformer scoring only.
+   - Best if model load/warmup dominates late-news latency.
+   - Prefect still owns scrape, freeze, build, finalize, and publish.
+   - A local service owns loaded model weights, batching, and health checks.
+3. Larger service-oriented cutover.
+   - Move more of the live path into always-on services and use Prefect mainly
+     for supervision.
+   - Highest complexity and least justified near-term.
+
+Recommendation:
+
+- Use option 2 once the GPU arrives if transformer warmup/model load is a
+  significant part of the critical path.
+- Until then, keep Prefect as the control plane and focus on game-scoped work,
+  freshness gates, and eliminating unnecessary backfills during lock windows.
+
+### 17.3 Remaining open questions
+
+1. Which stages should be allowed to skip or defer non-critical enrichments
+   during the final lock window to preserve the late-news SLA?
+2. Do we need a hard UX decision now on override expiry/clearing behavior
+   beyond the current requirement for auditability and visibility?
 
 ## 18. Immediate Recommendations
 
@@ -581,3 +687,329 @@ If only a few items are tackled first, prioritize these:
 4. latency instrumentation
 5. backup and restore for `projections-data`
 
+## 19. Manual Override Spec
+
+### 19.1 Recommendation
+
+Do not support arbitrary operator minute boosts or direct edits to model output
+in the live projection pipeline.
+
+Those overrides tend to create incoherent downstream values, are easy to
+overwrite accidentally, and make run replay harder to reason about.
+
+Instead:
+
+1. allow only audited manual `IN` / `OUT` status overrides in the live pipeline
+2. keep any exposure, boost, or preference logic in the optimizer / contest sim
+   layer, not in the canonical minutes projection layer
+
+### 19.2 Supported override types
+
+Allowed in live pipeline:
+
+- manual `OUT`
+- manual `IN` / clear-out, when explicitly entered by operator
+
+Not allowed in live pipeline:
+
+- direct minute boosts
+- direct usage boosts
+- direct fantasy-point overrides
+- arbitrary feature edits
+
+### 19.3 Why `IN` / `OUT` only
+
+An `OUT` signal is qualitatively different from a minute boost. It changes the
+availability state of the slate and should propagate through minutes,
+downstream scoring, and optimizer eligibility in a coherent way.
+
+A manual boost is usually an opinion layered on top of the model. That belongs
+in downstream decision support, not in the source-of-truth live model output.
+
+### 19.4 Override data model
+
+Add an append-only manual overrides table, for example:
+
+`$PROJECTIONS_DATA_ROOT/live/manual_overrides/game_date=<DATE>/manual_overrides.parquet`
+
+This is the logical target contract. The short-term implementation may reuse
+the existing ops/GameView override path documented in
+`docs/pipeline/MANUAL_OVERRIDE_CONTRACT.md`.
+
+Required fields:
+
+- `override_id`
+- `created_ts`
+- `expires_ts` or `game_lock_ts`
+- `game_date`
+- `game_id`
+- `player_id`
+- `player_name`
+- `team_id`
+- `team_tricode`
+- `override_type` with enum `force_out`, `force_in`
+- `reason_code`
+- `reason_text`
+- `source_label`
+- `entered_by`
+- `active`
+- `cleared_ts`
+- `cleared_by`
+
+### 19.5 Override application order
+
+For live availability, apply in this order:
+
+1. official NBA injury report
+2. Rotowire `out` signal
+3. active manual override layer
+
+The manual layer should be explicit and operator-visible. It is not a hidden
+mutation of raw source data.
+
+Recommended rule:
+
+- `force_out` can zero a player immediately, even before official/Rotowire
+  confirmation
+- `force_in` should be used sparingly and should clear only a prior manual
+  `force_out` unless the operator explicitly confirms an override against source
+
+## 20. Validation Notes
+
+### 20.1 2026-02-28 non-publishing dry run
+
+On February 28, 2026 at approximately 00:03 ET / 2026-02-28T05:03:37Z, we ran
+the canonical v3 flow as a non-publishing dry run against the February 27, 2026
+slate after all five games had already tipped.
+
+Command shape:
+
+- `game_date=2026-02-27`
+- `placeholder_mode=false`
+- `replay_mode=true`
+- `promote_pointers=false`
+- `sim_worlds=512`
+
+Observed result:
+
+- the flow completed end-to-end successfully
+- run manifest freeze succeeded with populated `source_freshness`,
+  `freshness_gates`, and `bounded_wait` fields
+- preflight passed and carried the frozen freshness metadata forward
+- scoring, worlds generation, finalization, and postflight all passed
+- no pointers were promoted, as intended for the dry run
+
+Important interpretation:
+
+- because all February 27, 2026 games had already started, this run recorded
+  `live_game_count=0`
+- accordingly, `lock_window.checked_games=0` and the report-window wait logic
+  was inactive
+- this dry run validated the plumbing, manifest contract, and non-publishing
+  control-plane behavior, but it did not validate the pre-lock freshness gate
+  path on truly live games
+
+Remaining validation needed:
+
+- run the same canonical v3 flow on the next pre-lock slate and confirm:
+  - lock-window freshness checks activate for games with `minutes_to_tip > 0`
+  - bounded wait behavior triggers correctly around the 1 PM / 5 PM ET report
+    windows when inputs are lagging
+  - stale-publish blocking behaves correctly when newer injuries or lineups
+    arrive after freeze and before publish
+
+### 20.2 2026-02-28 Phase 2 baseline policy and execution status
+
+As of February 28, 2026, the canonical v3 live flow implements the baseline
+incremental execution policy described in Section 7:
+
+- per-game digests are computed from frozen source freshness metadata
+- timestamp-only refreshes do not trigger reruns when source content is
+  unchanged
+- `injuries`, `lineups`, and `roster` changes are material for pre-tip games
+- `odds` changes are material only within 180 minutes of tip
+- `props` changes are tracked in diagnostics but do not yet auto-trigger
+  reruns
+- selector, bundle, and slate-composition changes force a full-slate rebuild
+
+Execution behavior now supports:
+
+- `skip` when no material pre-tip change exists
+- `game_scoped` reruns for only the affected games
+- merge-back of partial feature, score, worlds, and finalized projection
+  artifacts into unified full-slate outputs before publish
+
+### 20.3 Agent handoff (next implementation pass)
+
+This section is the authoritative handoff for the next live-pipeline
+implementation pass after the Phase 2 baseline landed on February 28, 2026.
+
+What is already done:
+
+- Phase 1 control-plane hardening is in the canonical v3 flow
+- Phase 2 baseline digests, rerun policy, game-scoped execution, and merge-back
+  are implemented
+- focused tests for control-plane and incremental execution behavior are
+  passing
+
+What still needs to be done next:
+
+1. Pre-lock live validation on a real slate.
+   - run the canonical v3 flow before first tip with `promote_pointers=false`
+   - confirm `rerun_plan` resolves sensibly as `skip`, `game_scoped`, or
+     `full_slate`
+   - inspect `input_change_set.json`, `preflight_report.json`,
+     `postflight_report.json`, and, when applicable,
+     `unified_artifacts_report.json`
+   - do not treat the February 28, 2026 post-tip dry run as sufficient
+     validation for lock-window behavior
+2. Manual availability override integration in v3.
+   - merge active `force_out` / `force_in` overrides into the live build path
+     before final availability flags are computed
+   - treat override-driven changes as material game deltas
+   - stamp run artifacts with override diagnostics and
+     `manual_override_used=true` when applicable
+3. Operator-visible diagnostics.
+   - surface `source_freshness`, `freshness_gates`, `input_change_set`, and
+     `rerun_plan` in the operator-facing API / dashboard so blocked or skipped
+     states are understandable without opening manifest JSON files
+4. Materiality policy refinement after real-slate observation.
+   - review whether the 180-minute odds threshold is too permissive or too
+     conservative
+   - decide whether `props` should become an auto-trigger source or remain
+     diagnostic-only
+   - keep timestamp-only churn suppression unless a concrete replay shows it is
+     masking a real upstream change
+
+Guardrails for the next pass:
+
+- preserve full-slate publish artifacts even when only one game is rerun
+- fail closed rather than publish partial or stale outputs
+- keep the canonical implementation in
+  `prefect_flows/live_nba_pipeline_v3.py` unless there is a documented reason
+  to move shared logic into `projections/pipeline/`
+- update this spec and targeted tests in the same change set as any policy
+  change
+
+### 19.6 Runtime behavior
+
+When an active `force_out` exists:
+
+- set availability status to `OUT`
+- set `is_out=1`
+- set play probability to `0`
+- zero minutes distributions downstream
+- mark published artifacts with `manual_override_used=true`
+- include override metadata in run manifest and diagnostics
+
+When an active `force_in` exists:
+
+- clear a prior manual `force_out`
+- rerun normal source precedence
+- require explicit audit trail in diagnostics
+
+### 19.7 UX / operator flow
+
+Recommended operator flow:
+
+1. operator enters `force_out` for player X with reason/source
+2. pipeline detects manual override as a material change
+3. affected game is rebuilt immediately
+4. published output clearly shows "manual override active"
+5. once official/Rotowire confirmation arrives, operator can clear the manual
+   override or let it expire automatically at game lock
+
+### 19.8 Overwrite protection
+
+Manual overrides must not be silently lost on the next run.
+
+Implementation rules:
+
+1. store overrides outside run-scoped feature artifacts
+2. merge active overrides into every live rebuild before scoring
+3. preserve override records after run completion for audit
+4. expire or clear overrides explicitly; never drop them implicitly because a
+   new run started
+
+### 19.9 Optimizer and contest sim policy
+
+Keep "boost" style operator judgment in the optimizer / contest sim surface.
+
+Examples:
+
+- exposure caps
+- exposure boosts
+- preferred plays
+- lineup group rules
+- portfolio constraints
+
+Recommended UX control:
+
+- provide a single reset action for manual strategy inputs that are not manual
+  `OUT` overrides
+- do not let that reset silently clear active manual `OUT` states
+
+These are user strategy controls, not canonical model-state edits.
+
+### 19.10 Implementation plan
+
+1. Add `manual_overrides` storage contract and schema.
+2. Add CLI/API commands to create, clear, and list overrides.
+3. Merge active overrides into `build_minutes_live` before availability flags
+   are finalized.
+4. Mark override-driven rebuilds as material game changes.
+5. Surface active overrides in dashboard/operator tooling.
+6. Add tests for:
+   - `force_out` zeroing a player
+   - override persistence across reruns
+   - override expiry at lock
+   - official-source confirmation after manual override
+
+### 19.11 Implementation mapping to current code
+
+Current repo surfaces already related to overrides:
+
+- API surface: `projections/api/ops_api.py`
+- persistence and application helpers: `projections/ops/overrides.py`
+- effective-inputs materialization: `projections/pipeline/effective_inputs.py`
+- legacy canonical live flow with effective inputs stage:
+  `prefect_flows/live_nba_pipeline.py`
+- v3 live flow that still needs a manual-availability hook:
+  `prefect_flows/live_nba_pipeline_v3.py`
+- live minutes feature build entry point:
+  `projections/cli/build_minutes_live.py`
+- downstream projection readers:
+  `projections/cli/finalize_projections.py` and
+  `projections/api/optimizer_service.py`
+
+Recommended implementation path:
+
+1. Reuse the existing GameView / ops override storage and API surfaces first,
+   but restrict the live projection effect to manual `IN` / `OUT` semantics.
+2. Add the manual-availability merge in `build_minutes_live` so the override
+   participates in v3 before minutes features are finalized.
+3. Preserve the existing effective-inputs path for legacy flow compatibility
+   while narrowing or disabling minute/fpts delta behavior for production live
+   runs.
+4. Ensure finalize/API layers expose override metadata but do not re-apply the
+   override a second time.
+
+### 19.12 Shipping sequence
+
+Recommended order of work:
+
+1. Narrow the live policy first:
+   - reject or ignore non-availability override fields in the live production
+     path
+   - keep boost-style controls only in optimizer / contest sim surfaces
+2. Add manual availability support to v3:
+   - load active ops overrides during `build_minutes_live`
+   - translate them into `force_out` / `force_in` semantics before final
+     availability flags are computed
+3. Expose diagnostics:
+   - write active override rows into run manifest / summary
+   - surface `manual_override_used` in projections metadata and operator UI
+4. Clean up the API and storage contract:
+   - once the v3 path is stable, consider a dedicated
+     `manual_availability_overrides` endpoint/storage layer if the broader
+     `overrides_v1` payload remains too permissive
