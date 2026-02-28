@@ -32,6 +32,89 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _resolve_worlds_root(
+    game_date: str,
+    *,
+    data_root: Path,
+) -> Path:
+    sim_v2_root = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2" / f"game_date={game_date}"
+    if sim_v2_root.exists():
+        return sim_v2_root
+
+    gtv2_root = data_root / "artifacts" / "gtv2_worlds" / f"game_date={game_date}"
+    if gtv2_root.exists():
+        return gtv2_root
+
+    raise FileNotFoundError(
+        f"No worlds data for {game_date} at {sim_v2_root} or {gtv2_root}"
+    )
+
+
+def _resolve_worlds_dir(root_dir: Path, run_id: str | None) -> Path:
+    import json
+
+    if run_id:
+        candidate = root_dir / f"run={run_id}"
+        if candidate.exists():
+            return candidate
+
+    pointer = root_dir / "latest_run.json"
+    if pointer.exists():
+        try:
+            payload = json.loads(pointer.read_text(encoding="utf-8"))
+            latest = payload.get("run_id")
+        except Exception:
+            latest = None
+        if latest:
+            candidate = root_dir / f"run={latest}"
+            if candidate.exists():
+                return candidate
+
+    run_dirs = sorted(
+        [p for p in root_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
+        reverse=True,
+    )
+    if run_dirs:
+        return run_dirs[0]
+    return root_dir
+
+
+def _load_gtv2_worlds_matrix(worlds_dir: Path) -> Tuple[np.ndarray, Dict[str, int]]:
+    worlds_path = worlds_dir / "worlds.parquet"
+    if not worlds_path.exists():
+        raise FileNotFoundError(f"No worlds.parquet found in {worlds_dir}")
+
+    logger.info("Loading GTV2 worlds from %s", worlds_path)
+    df = pd.read_parquet(worlds_path, columns=["world_idx", "player_id", "dk_fpts"])
+    if df.empty:
+        raise ValueError(f"GTV2 worlds parquet is empty: {worlds_path}")
+
+    df["world_idx"] = pd.to_numeric(df["world_idx"], errors="coerce").astype("Int64")
+    df["player_id"] = df["player_id"].astype(str)
+    df["dk_fpts"] = pd.to_numeric(df["dk_fpts"], errors="coerce").fillna(0.0)
+    df = df.dropna(subset=["world_idx"])
+    if df.empty:
+        raise ValueError(f"GTV2 worlds parquet has no valid world_idx rows: {worlds_path}")
+
+    try:
+        player_ids = [str(pid) for pid in sorted(df["player_id"].astype(int).unique().tolist())]
+    except Exception:
+        player_ids = sorted(df["player_id"].unique().tolist())
+
+    world_ids = sorted(df["world_idx"].astype(int).unique().tolist())
+    player_index = {pid: idx for idx, pid in enumerate(player_ids)}
+    world_index = {wid: idx for idx, wid in enumerate(world_ids)}
+    worlds_matrix = np.zeros((len(world_ids), len(player_ids)), dtype=np.float64)
+
+    row_idx = df["world_idx"].astype(int).map(world_index).to_numpy(dtype=np.int64, copy=False)
+    col_idx = df["player_id"].map(player_index).to_numpy(dtype=np.int64, copy=False)
+    values = df["dk_fpts"].to_numpy(dtype=np.float64, copy=False)
+    worlds_matrix[row_idx, col_idx] = values
+
+    logger.info("Loaded GTV2 worlds matrix shape=%s from %s", worlds_matrix.shape, worlds_path)
+    return worlds_matrix, player_index
+
+
 def load_worlds_matrix(
     game_date: str,
     data_root: Path | None = None,
@@ -66,39 +149,11 @@ def load_worlds_matrix(
     if data_root is None:
         data_root = data_path()
 
-    base_dir = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2" / f"game_date={game_date}"
-    if not base_dir.exists():
-        raise FileNotFoundError(f"No worlds data for {game_date} at {base_dir}")
-
-    def _resolve_worlds_dir(root_dir: Path, run_id: str | None) -> Path:
-        import json
-
-        if run_id:
-            candidate = root_dir / f"run={run_id}"
-            if candidate.exists():
-                return candidate
-
-        pointer = root_dir / "latest_run.json"
-        if pointer.exists():
-            try:
-                payload = json.loads(pointer.read_text(encoding="utf-8"))
-                latest = payload.get("run_id")
-            except Exception:
-                latest = None
-            if latest:
-                candidate = root_dir / f"run={latest}"
-                if candidate.exists():
-                    return candidate
-
-        run_dirs = sorted(
-            [p for p in root_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],
-            reverse=True,
-        )
-        if run_dirs:
-            return run_dirs[0]
-        return root_dir
-
+    base_dir = _resolve_worlds_root(game_date, data_root=data_root)
     worlds_dir = _resolve_worlds_dir(base_dir, run_id)
+
+    if "gtv2_worlds" in base_dir.parts or (worlds_dir / "worlds.parquet").exists():
+        return _load_gtv2_worlds_matrix(worlds_dir)
 
     # Try consolidated matrix first
     matrix_path = worlds_dir / "worlds_matrix.parquet"

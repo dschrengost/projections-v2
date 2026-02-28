@@ -282,14 +282,22 @@ def _safe_git_sha() -> str | None:
 
 
 def _resolve_latest_sim_v2_worlds(*, game_date: str) -> dict[str, object]:
-    """Best-effort resolve of the base sim_v2 worlds run for this date."""
+    """Best-effort resolve of the current base worlds run for this date."""
     base_dir = paths.data_path("artifacts", "sim_v2", "worlds_fpts_v2", f"game_date={game_date}")
+    worlds_variant = "sim_v2"
+    if not base_dir.exists():
+        gtv2_dir = paths.data_path("artifacts", "gtv2_worlds", f"game_date={game_date}")
+        if gtv2_dir.exists():
+            base_dir = gtv2_dir
+            worlds_variant = "gtv2"
+
     out: dict[str, object] = {
         "base_worlds_run_id": None,
         "base_worlds_path": None,
         "base_sim_manifest_path": None,
         "base_sim_manifest_sha256": None,
         "sim_profile": None,
+        "worlds_variant": worlds_variant,
     }
     if not base_dir.exists():
         return out
@@ -323,7 +331,8 @@ def _resolve_latest_sim_v2_worlds(*, game_date: str) -> dict[str, object]:
         return out
 
     worlds_matrix = run_dir / "worlds_matrix.parquet"
-    base_worlds_path = worlds_matrix if worlds_matrix.exists() else run_dir
+    gtv2_worlds = run_dir / "worlds.parquet"
+    base_worlds_path = worlds_matrix if worlds_matrix.exists() else gtv2_worlds if gtv2_worlds.exists() else run_dir
 
     out["base_worlds_run_id"] = run_id
     out["base_worlds_path"] = str(base_worlds_path.resolve())
