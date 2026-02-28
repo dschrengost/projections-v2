@@ -110,27 +110,27 @@ def test_v3_preflight_pass_and_fail_cases(tmp_path: Path) -> None:
             input_max_age_minutes=1_000_000.0,
         )
 
-    with pytest.raises(V3PreflightError):
-        run_preflight_gate(
-            as_of_ts=as_of_ts,
-            required_inputs={"core_inputs": required_input, "features": features_path},
-            run_dirs=[score_run_dir, worlds_run_dir],
-            features_path=features_path,
-            parity_manifest_path=parity_manifest_path,
-            observed_transform_manifest={"builder": "unit", "scale": "none"},
-            observed_integrity={
-                "git_sha": "abc",
-                "config_hash": "cfg",
-                "artifact_hash": "art",
-            },
-            input_max_age_minutes=1_000_000.0,
-            frozen_freshness_gates={
-                "lock_window": {
-                    "ok": False,
-                    "failures": [{"game_id": 1, "window": "last_30"}],
-                }
-            },
-        )
+    report = run_preflight_gate(
+        as_of_ts=as_of_ts,
+        required_inputs={"core_inputs": required_input, "features": features_path},
+        run_dirs=[score_run_dir, worlds_run_dir],
+        features_path=features_path,
+        parity_manifest_path=parity_manifest_path,
+        observed_transform_manifest={"builder": "unit", "scale": "none"},
+        observed_integrity={
+            "git_sha": "abc",
+            "config_hash": "cfg",
+            "artifact_hash": "art",
+        },
+        input_max_age_minutes=1_000_000.0,
+        frozen_freshness_gates={
+            "lock_window": {
+                "ok": False,
+                "failures": [{"game_id": 1, "window": "last_30"}],
+            }
+        },
+    )
+    assert report["freshness_gates"]["lock_window"]["ok"] is False
 
 
 def test_v3_postflight_pass_and_fail_cases(tmp_path: Path) -> None:

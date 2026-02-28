@@ -586,8 +586,9 @@ following are true:
 - [x] Add stale-publish detection and alerting
 
 Status note:
-- implemented in canonical v3; continue real-slate validation for lock-window
-  behavior and report-window waits
+- implemented in canonical v3; lock-window freshness is now diagnostic/advisory
+  rather than publish-blocking, and continue real-slate validation for
+  report-window waits
 
 ### B. Incremental pipeline execution
 

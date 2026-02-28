@@ -89,11 +89,6 @@ def run_preflight_gate(
         input_max_age_minutes=float(input_max_age_minutes),
     )
     freshness_gates = dict(frozen_freshness_gates or {})
-    lock_window_gate = dict(freshness_gates.get("lock_window", {}))
-    if lock_window_gate and not bool(lock_window_gate.get("ok", True)):
-        raise V3PreflightError(
-            f"lock-window freshness gate failed: {lock_window_gate.get('failures', [])}"
-        )
     run_dirs_checked = _check_run_dirs_clean_writable(run_dirs)
 
     if not Path(features_path).exists():
