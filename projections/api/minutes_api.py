@@ -471,12 +471,21 @@ def _load_ownership_predictions(
     data_root: Path,
     *,
     run_id: str | None = None,
+    draft_group_id: str | None = None,
 ) -> pd.DataFrame | None:
     """Load ownership predictions for a date, returning the main slate."""
     base_dir = data_root / "silver" / "ownership_predictions" / str(day)
     slate_dir = _resolve_ownership_run_dir(base_dir, run_id) or base_dir
 
     if slate_dir.exists():
+        if draft_group_id:
+            own_path = slate_dir / f"{draft_group_id}.parquet"
+            if own_path.exists():
+                try:
+                    return pd.read_parquet(own_path)
+                except Exception:
+                    pass
+            return None
         slate_files = list(slate_dir.glob("*.parquet"))
         slate_files = [f for f in slate_files if not f.name.endswith("_locked.parquet")]
         if slate_files:
@@ -501,9 +510,99 @@ def _load_ownership_predictions(
     return None
 
 
+def _load_slate_salaries(
+    day: date,
+    data_root: Path,
+    *,
+    draft_group_id: str,
+) -> pd.DataFrame | None:
+    salaries_path = (
+        data_root
+        / "gold"
+        / "dk_salaries"
+        / "site=dk"
+        / f"game_date={day}"
+        / f"draft_group_id={draft_group_id}"
+        / "salaries.parquet"
+    )
+    if not salaries_path.exists():
+        return None
+
+    try:
+        df = pd.read_parquet(salaries_path)
+    except Exception:
+        return None
+
+    if df.empty:
+        return None
+    if "display_name" in df.columns and "player_name" not in df.columns:
+        df["player_name"] = df["display_name"]
+    if "team_abbrev" in df.columns and "team" not in df.columns:
+        df["team"] = df["team_abbrev"]
+    if "draft_group_id" not in df.columns:
+        df["draft_group_id"] = draft_group_id
+    if "salary" in df.columns:
+        df["salary"] = pd.to_numeric(df["salary"], errors="coerce")
+
+    keep_cols = [
+        col for col in ("player_name", "team", "salary", "draft_group_id") if col in df.columns
+    ]
+    if "player_name" not in keep_cols:
+        return None
+    return df[keep_cols].copy()
+
+
+def _filter_projections_to_slate(
+    projections_df: pd.DataFrame,
+    salaries_df: pd.DataFrame | None,
+) -> pd.DataFrame:
+    if (
+        salaries_df is None
+        or salaries_df.empty
+        or "player_name" not in salaries_df.columns
+        or "player_name" not in projections_df.columns
+    ):
+        return projections_df
+
+    base = projections_df.copy()
+    salaries = salaries_df.copy()
+    base["_join_name"] = base["player_name"].apply(normalize_player_name)
+    salaries["_join_name"] = salaries["player_name"].apply(normalize_player_name)
+
+    join_cols = ["_join_name"]
+    if "team_tricode" in base.columns and "team" in salaries.columns:
+        base["_join_team"] = base["team_tricode"].astype(str).str.upper()
+        salaries["_join_team"] = salaries["team"].astype(str).str.upper()
+        join_cols.append("_join_team")
+
+    if "salary" in salaries.columns:
+        salaries = salaries.sort_values("salary", na_position="last")
+    salaries["_in_slate"] = True
+    salary_cols = join_cols + [
+        col for col in ("salary", "draft_group_id", "_in_slate") if col in salaries.columns
+    ]
+    merged = base.merge(
+        salaries[salary_cols].drop_duplicates(subset=join_cols, keep="first"),
+        on=join_cols,
+        how="left",
+        suffixes=("", "__slate"),
+    )
+    merged = merged[merged["_in_slate"].eq(True)].copy()
+    for col in ("salary", "draft_group_id"):
+        slate_col = f"{col}__slate"
+        if slate_col not in merged.columns:
+            continue
+        merged[col] = merged[slate_col].where(pd.notna(merged[slate_col]), merged.get(col))
+        merged = merged.drop(columns=[slate_col])
+
+    return merged.drop(columns=["_join_name", "_join_team", "_in_slate"], errors="ignore")
+
+
 def _overlay_ownership_columns(
     projections_df: pd.DataFrame,
     ownership_df: pd.DataFrame | None,
+    *,
+    overwrite_existing: bool = False,
 ) -> pd.DataFrame:
     if ownership_df is None or ownership_df.empty:
         return projections_df
@@ -532,8 +631,19 @@ def _overlay_ownership_columns(
     if len(own_cols) == len(join_cols):
         return projections_df
 
+    sort_cols: list[str] = []
+    ascending: list[bool] = []
+    if "pred_own_pct" in own.columns:
+        sort_cols.append("pred_own_pct")
+        ascending.append(False)
+    if "salary" in own.columns:
+        sort_cols.append("salary")
+        ascending.append(True)
+    if sort_cols:
+        own = own.sort_values(sort_cols, ascending=ascending, na_position="last")
+
     merged = base.merge(
-        own[own_cols].drop_duplicates(subset=join_cols, keep="last"),
+        own[own_cols].drop_duplicates(subset=join_cols, keep="first"),
         on=join_cols,
         how="left",
         suffixes=("", "__own"),
@@ -542,7 +652,10 @@ def _overlay_ownership_columns(
         own_col = f"{col}__own"
         if own_col not in merged.columns:
             continue
-        merged[col] = merged[col].where(pd.notna(merged[col]), merged[own_col])
+        if overwrite_existing:
+            merged[col] = merged[own_col].where(pd.notna(merged[own_col]), merged.get(col))
+        else:
+            merged[col] = merged[col].where(pd.notna(merged[col]), merged[own_col])
         merged = merged.drop(columns=[own_col])
 
     return merged.drop(columns=["_join_name", "_join_team"], errors="ignore")
@@ -797,7 +910,12 @@ def create_app(
         return JSONResponse(models)
 
     @app.get("/api/minutes")
-    def get_minutes(date: str | None = None, run_id: str | None = None, model_id: str | None = None) -> JSONResponse:
+    def get_minutes(
+        date: str | None = None,
+        run_id: str | None = None,
+        model_id: str | None = None,
+        draft_group_id: str | None = None,
+    ) -> JSONResponse:
         slate_day = _parse_date(date)
         resolved_model_id = minutes_models_store.normalize_model_id(model_id)
         if resolved_model_id not in {
@@ -941,8 +1059,17 @@ def create_app(
             else:
                 unified_df = canonical_df
 
+            if draft_group_id:
+                slate_salaries = _load_slate_salaries(
+                    slate_day,
+                    data_root,
+                    draft_group_id=draft_group_id,
+                )
+                unified_df = _filter_projections_to_slate(unified_df, slate_salaries)
+
             needs_ownership_overlay = (
-                "pred_own_pct" not in unified_df.columns
+                draft_group_id is not None
+                or "pred_own_pct" not in unified_df.columns
                 or unified_df["pred_own_pct"].isna().all()
                 or "salary" not in unified_df.columns
                 or unified_df["salary"].isna().all()
@@ -952,8 +1079,13 @@ def create_app(
                     slate_day,
                     data_root,
                     run_id=resolved_run_id,
+                    draft_group_id=draft_group_id,
                 )
-                unified_df = _overlay_ownership_columns(unified_df, own_df)
+                unified_df = _overlay_ownership_columns(
+                    unified_df,
+                    own_df,
+                    overwrite_existing=bool(draft_group_id),
+                )
                 if "dk_fpts_mean" in unified_df.columns and "salary" in unified_df.columns:
                     salary = pd.to_numeric(unified_df["salary"], errors="coerce")
                     computed_value = (
@@ -980,6 +1112,7 @@ def create_app(
                 "count": len(players),
                 "players": players,
                 "run_id": resolved_run_id,
+                "draft_group_id": draft_group_id,
                 "last_updated": updated_at,
                 "latest_run_id": latest_run_id,
                 "blessed_run_id": blessed_run_id,
@@ -1046,20 +1179,40 @@ def create_app(
                 df = df.merge(sim_df.rename(columns=rename_map), on=join_keys, how="left")
 
         # Merge ownership predictions (includes salary)
-        own_df = _load_ownership_predictions(slate_day, data_root, run_id=_extract_run_name(run_dir))
-        df = _overlay_ownership_columns(df, own_df)
+        if draft_group_id:
+            slate_salaries = _load_slate_salaries(
+                slate_day,
+                data_root,
+                draft_group_id=draft_group_id,
+            )
+            df = _filter_projections_to_slate(df, slate_salaries)
+        own_df = _load_ownership_predictions(
+            slate_day,
+            data_root,
+            run_id=_extract_run_name(run_dir),
+            draft_group_id=draft_group_id,
+        )
+        df = _overlay_ownership_columns(df, own_df, overwrite_existing=bool(draft_group_id))
 
         # Even in the legacy (minutes + sim joins) path, attach canonical fields so the
         # UI can display the same decision metrics the optimizer/sim consume.
         df = add_canonical_projection_fields(df)
 
         players = _serialize_players(df)
-        payload = {"date": slate_day.isoformat(), "count": len(players), "players": players}
+        payload = {
+            "date": slate_day.isoformat(),
+            "count": len(players),
+            "players": players,
+            "draft_group_id": draft_group_id,
+        }
         return JSONResponse(payload)
 
     @app.get("/api/minutes/meta")
     def get_minutes_meta(
-        date: str | None = None, run_id: str | None = None, model_id: str | None = None
+        date: str | None = None,
+        run_id: str | None = None,
+        model_id: str | None = None,
+        draft_group_id: str | None = None,
     ) -> JSONResponse:
         slate_day = _parse_date(date)
         resolved_model_id = minutes_models_store.normalize_model_id(model_id)
@@ -1106,7 +1259,17 @@ def create_app(
             counts = {"rows": int(summary.get("rows", 0)), "players": 0, "teams": 0}
             if parquet_path.exists():
                 try:
-                    df_keys = pd.read_parquet(parquet_path, columns=["player_id", "team_id"])
+                    count_cols = ["player_id", "team_id"]
+                    if draft_group_id:
+                        count_cols.extend(["player_name", "team_tricode"])
+                    df_keys = pd.read_parquet(parquet_path, columns=count_cols)
+                    if draft_group_id:
+                        slate_salaries = _load_slate_salaries(
+                            slate_day,
+                            data_root,
+                            draft_group_id=draft_group_id,
+                        )
+                        df_keys = _filter_projections_to_slate(df_keys, slate_salaries)
                     counts = _build_counts(df_keys)
                 except Exception:
                     pass
@@ -1121,6 +1284,7 @@ def create_app(
             payload: dict[str, Any] = {
                 "date": slate_day.isoformat(),
                 "counts": counts,
+                "draft_group_id": draft_group_id,
                 # Mirror legacy key names expected by the UI.
                 "run_id": resolved_projections_run_id,
                 "run_as_of_ts": generated_at,

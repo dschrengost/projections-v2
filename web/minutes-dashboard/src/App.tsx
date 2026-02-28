@@ -18,6 +18,7 @@ import DiagnosticsPage from './pages/DiagnosticsPage'
 import EntryManagerPage from './pages/EntryManagerPage'
 import LivePage from './pages/LivePage'
 import PropsPage from './pages/PropsPage'
+import { getSlates, Slate } from './api/optimizer'
 import { MinutesResponse, PlayerRow } from './types'
 import {
   formatFpts,
@@ -34,6 +35,7 @@ import {
   getStatusBadge,
   StatusBadge,
 } from './utils'
+import { formatSlateLabel } from './utils/slateFormat'
 import { GameView } from './components/GameView'
 import { PlayerChangeAlerts } from './components/PlayerChangeAlerts'
 
@@ -141,9 +143,7 @@ type ModelOption = {
   }
 }
 
-
-
-import { useSlateDate } from './hooks/useSlateDate'
+import { useSlateDateAndSlate } from './hooks/useSlateDate'
 
 type TabKey =
   | 'live'
@@ -189,7 +189,7 @@ const initialLiveGameId = (): string | null => {
 function App() {
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab)
   const [liveGameId, setLiveGameId] = useState<string | null>(initialLiveGameId)
-  const [selectedDate, setSelectedDate] = useSlateDate()
+  const [selectedDate, setSelectedDate, selectedSlate, setSelectedSlate] = useSlateDateAndSlate()
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -203,6 +203,8 @@ function App() {
   const [latestRunId, setLatestRunId] = useState<string | null>(null)
   const [pinnedRunId, setPinnedRunId] = useState<string | null>(null)
   const [blessedRunId, setBlessedRunId] = useState<string | null>(null)
+  const [slates, setSlates] = useState<Slate[]>([])
+  const [slatesLoading, setSlatesLoading] = useState(false)
   const pinnedRunRef = useRef<string | null>(null)
 
   const [modelId, setModelId] = useState<string>('prod')
@@ -264,7 +266,12 @@ function App() {
   }, [activeTab, liveGameId])
 
   const fetchData = useCallback(
-    async (date: string, currentRunId: string | null, currentModelId: string) => {
+    async (
+      date: string,
+      currentRunId: string | null,
+      currentModelId: string,
+      currentDraftGroupId: number | null,
+    ) => {
       setLoading(true)
       setError(null)
       setStatusMessage(null)
@@ -273,8 +280,11 @@ function App() {
         const modelParam = currentModelId && currentModelId !== 'prod'
           ? `&model_id=${encodeURIComponent(currentModelId)}`
           : ''
+        const slateParam = currentDraftGroupId != null
+          ? `&draft_group_id=${encodeURIComponent(String(currentDraftGroupId))}`
+          : ''
         const minutesRes = await fetch(
-          apiUrl(`/api/minutes?date=${date}${runParam}${modelParam}`),
+          apiUrl(`/api/minutes?date=${date}${runParam}${modelParam}${slateParam}`),
         )
         if (minutesRes.status === 404) {
           let detail = 'No artifact for selected date.'
@@ -296,7 +306,7 @@ function App() {
         }
 
         const summaryRes = await fetch(
-          apiUrl(`/api/minutes/meta?date=${date}${runParam}${modelParam}`),
+          apiUrl(`/api/minutes/meta?date=${date}${runParam}${modelParam}${slateParam}`),
         )
         if (summaryRes.status === 404) {
           setSummary(null)
@@ -398,11 +408,42 @@ function App() {
   }, [selectedDate])
 
   useEffect(() => {
+    const loadSlates = async () => {
+      setSlatesLoading(true)
+      try {
+        const data = await getSlates(selectedDate)
+        setSlates(data)
+        const urlSlateExists = selectedSlate && data.some((slate) => slate.draft_group_id === selectedSlate)
+        if (!urlSlateExists) {
+          const mainSlates = data.filter((slate) => slate.slate_type === 'main')
+          const bestMain = [...mainSlates].sort((a, b) => {
+            const aContests = a.n_contests ?? 0
+            const bContests = b.n_contests ?? 0
+            if (aContests !== bContests) return bContests - aContests
+            const aGames = a.games?.length ?? 0
+            const bGames = b.games?.length ?? 0
+            if (aGames !== bGames) return bGames - aGames
+            return b.draft_group_id - a.draft_group_id
+          })[0]
+          const fallback = data[0]
+          setSelectedSlate(bestMain?.draft_group_id ?? fallback?.draft_group_id ?? null)
+        }
+      } catch {
+        setSlates([])
+        setSelectedSlate(null)
+      } finally {
+        setSlatesLoading(false)
+      }
+    }
+    void loadSlates()
+  }, [selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (activeTab !== 'minutes') {
       return
     }
-    void fetchData(selectedDate, runId, modelId)
-  }, [activeTab, selectedDate, runId, modelId, fetchData])
+    void fetchData(selectedDate, runId, modelId, selectedSlate)
+  }, [activeTab, selectedDate, runId, modelId, selectedSlate, fetchData])
 
   useEffect(() => {
     setSortKey((prev) => {
@@ -411,6 +452,10 @@ function App() {
       return prev
     })
   }, [modelId])
+
+  useEffect(() => {
+    setSelectedGameId(null)
+  }, [selectedDate, selectedSlate])
 
   const matchups = useMemo(() => {
     const games = new Map<string, { home: string; away: string; id: string }>()
@@ -509,6 +554,10 @@ function App() {
   const selectedModel = useMemo(
     () => modelOptions.find((m) => m.model_id === modelId),
     [modelOptions, modelId],
+  )
+  const selectedSlateInfo = useMemo(
+    () => slates.find((slate) => slate.draft_group_id === selectedSlate) ?? null,
+    [slates, selectedSlate],
   )
 
 
@@ -705,6 +754,24 @@ function App() {
             />
           </label>
           <label>
+            Slate
+            <select
+              value={selectedSlate ?? ''}
+              onChange={(event) => {
+                const value = event.target.value
+                setSelectedSlate(value ? parseInt(value, 10) : null)
+              }}
+              disabled={slatesLoading || slates.length === 0}
+            >
+              {slates.map((slate) => (
+                <option key={slate.draft_group_id} value={slate.draft_group_id}>
+                  {formatSlateLabel(slate)} (DG{slate.draft_group_id})
+                </option>
+              ))}
+              {!slates.length && <option value="">Main slate</option>}
+            </select>
+          </label>
+          <label>
             Run
             <select
               value={runId ?? blessedRunId ?? pinnedRunId ?? latestRunId ?? ''}
@@ -766,7 +833,7 @@ function App() {
               )}
             </label>
           )}
-          <button onClick={() => fetchData(selectedDate, runId, modelId)} disabled={loading}>
+          <button onClick={() => fetchData(selectedDate, runId, modelId, selectedSlate)} disabled={loading}>
             Refresh
           </button>
           <button
@@ -800,6 +867,7 @@ function App() {
           <span>
             Rows: {summary.counts.rows} · Players: {summary.counts.players} ·
             Teams: {summary.counts.teams}{' '}
+            {selectedSlateInfo && `· Slate: ${formatSlateLabel(selectedSlateInfo)} (DG${selectedSlateInfo.draft_group_id})`}{' '}
             {summary.model_run_id && `· Model run: ${summary.model_run_id}`}{' '}
             {summary.run_id && `· Run: ${summary.run_id}`}{' '}
             {summary.n_worlds != null && `· Worlds: ${summary.n_worlds}`}{' '}
@@ -874,10 +942,10 @@ function App() {
               if (nextRunId) {
                 setRunId(nextRunId)
               }
-              void fetchData(selectedDate, nextRunId ?? runId, modelId)
+              void fetchData(selectedDate, nextRunId ?? runId, modelId, selectedSlate)
             }}
             onOverridesSaved={() => {
-              void fetchData(selectedDate, runId, modelId)
+              void fetchData(selectedDate, runId, modelId, selectedSlate)
             }}
           />
         ) : (

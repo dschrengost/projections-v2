@@ -153,6 +153,77 @@ def _select_main_linestar_slate(
     return ls_df[ls_df["ls_slate_id"] == main_slate].copy(), str(main_slate)
 
 
+def _map_linestar_slates_to_dk(
+    ls_df: pd.DataFrame,
+    dk_slates: dict[str, pd.DataFrame],
+) -> dict[str, str]:
+    """Map each DK draft group to the best matching LineStar slate."""
+    if ls_df.empty or "ls_slate_id" not in ls_df.columns or not dk_slates:
+        return {}
+
+    ls = ls_df.copy()
+    ls["_name_norm"] = ls["player_name"].apply(_normalize_name)
+    ls_groups: list[tuple[str, set[str], set[str]]] = []
+    for slate_id, group in ls.groupby("ls_slate_id", sort=False):
+        player_set = set(group["_name_norm"].dropna().astype(str))
+        team_set = set(group["team"].dropna().astype(str).str.strip()) if "team" in group.columns else set()
+        if player_set:
+            ls_groups.append((str(slate_id), player_set, team_set))
+
+    matches: dict[str, tuple[float, float, int, int, float, str]] = {}
+    # (team_match, overlap, intersection, team_intersection, jaccard, ls_slate_id)
+    for dg_id, dk_df in dk_slates.items():
+        dk_set = set(dk_df["_name_norm"].dropna().astype(str))
+        dk_teams = set(dk_df["team"].dropna().astype(str).str.strip()) if "team" in dk_df.columns else set()
+        if not dk_set:
+            continue
+
+        best: tuple[float, float, int, int, float, str] | None = None
+        for ls_slate_id, ls_set, ls_teams in ls_groups:
+            inter = len(dk_set & ls_set)
+            if inter == 0:
+                continue
+            union = len(dk_set | ls_set)
+            overlap = inter / min(len(dk_set), len(ls_set))
+            jaccard = inter / union if union else 0.0
+            team_match = 1.0 if dk_teams and dk_teams == ls_teams else 0.0
+            team_inter = len(dk_teams & ls_teams)
+            score = (team_match, overlap, inter, team_inter, jaccard, ls_slate_id)
+            if best is None or score[:5] > best[:5]:
+                best = score
+
+        if best is None:
+            continue
+
+        _, overlap, inter, _, jaccard, ls_slate_id = best
+        required_intersection = min(20, max(2, len(dk_set) // 2))
+        if overlap < 0.85 or inter < required_intersection:
+            continue
+        matches[dg_id] = best
+
+    # Avoid assigning the same LineStar slate to multiple DK draft groups.
+    best_for_ls: dict[str, tuple[str, tuple[float, float, int, int, float, str]]] = {}
+    for dg_id, score in matches.items():
+        ls_slate_id = score[5]
+        prev = best_for_ls.get(ls_slate_id)
+        if prev is None or score[:5] > prev[1][:5]:
+            best_for_ls[ls_slate_id] = (dg_id, score)
+
+    mapping = {dg_id: score[5] for _, (dg_id, score) in best_for_ls.items()}
+    if mapping:
+        print("[linestar-own] DK → LineStar slate mapping:")
+        for dg_id, ls_slate_id in sorted(mapping.items()):
+            score = matches[dg_id]
+            print(
+                f"  - DK {dg_id} -> LS {ls_slate_id} "
+                f"(team_match={int(score[0])}, overlap={score[1]:.3f}, inter={score[2]}, jacc={score[4]:.3f})"
+            )
+    else:
+        print("[linestar-own] No DK slates matched to LineStar slates")
+
+    return mapping
+
+
 def _match_linestar_to_dk(
     ls_df: pd.DataFrame,
     dk_df: pd.DataFrame,
@@ -260,9 +331,6 @@ def fetch_and_match_ownership(
     if not dk_slates:
         return {}
 
-    main_dg_id, main_dk_df = _select_main_dk_slate(dk_slates)
-    print(f"[linestar-own] Using DK main slate {main_dg_id} ({len(main_dk_df)} players)")
-
     # Fetch LineStar ownership
     print(f"[linestar-own] Fetching LineStar ownership for {game_date}...")
     try:
@@ -277,29 +345,40 @@ def fetch_and_match_ownership(
 
     print(f"[linestar-own] Got {len(ls_df)} LineStar rows across {ls_df['ls_slate_id'].nunique()} slates")
 
-    ls_main, ls_slate_id = _select_main_linestar_slate(ls_df, main_dk_df)
-    if ls_slate_id:
-        print(f"[linestar-own] Using LineStar slate {ls_slate_id} for main-slate matching")
-
-    print(f"[linestar-own] Matching DK main slate {main_dg_id}...")
-    matched = _match_linestar_to_dk(ls_main, main_dk_df, main_dg_id)
-    if matched.empty:
-        print(f"    Skipping empty slate {main_dg_id}")
+    slate_mapping = _map_linestar_slates_to_dk(ls_df, dk_slates)
+    if not slate_mapping:
         return {}
 
-    # Add metadata columns expected by downstream
-    matched["game_date"] = game_date
-    matched["run_id"] = run_id
-    matched["model_run"] = "linestar"
-    matched["is_locked"] = False
-    matched["source"] = "linestar"
-    matched["scraped_at"] = datetime.now(UTC).isoformat()
+    results: dict[str, pd.DataFrame] = {}
+    scraped_at = datetime.now(UTC).isoformat()
+    for dg_id, dk_df in dk_slates.items():
+        ls_slate_id = slate_mapping.get(dg_id)
+        if not ls_slate_id:
+            print(f"[linestar-own] Skipping unmatched DK slate {dg_id}")
+            continue
 
-    results = {main_dg_id: matched}
+        ls_slate = ls_df[ls_df["ls_slate_id"].astype(str) == str(ls_slate_id)].copy()
+        if ls_slate.empty:
+            print(f"[linestar-own] LineStar slate {ls_slate_id} empty for DK slate {dg_id}")
+            continue
 
-    # Log top ownership for verification
-    top = matched.nlargest(3, "pred_own_pct")[["player_name", "salary", "pred_own_pct"]]
-    print(f"    Top 3: {top.values.tolist()}")
+        print(f"[linestar-own] Matching DK slate {dg_id} with LineStar slate {ls_slate_id}...")
+        matched = _match_linestar_to_dk(ls_slate, dk_df, dg_id)
+        if matched.empty:
+            print(f"    Skipping empty slate {dg_id}")
+            continue
+
+        matched["game_date"] = game_date
+        matched["run_id"] = run_id
+        matched["model_run"] = "linestar"
+        matched["is_locked"] = False
+        matched["source"] = "linestar"
+        matched["scraped_at"] = scraped_at
+        matched["ls_slate_id"] = str(ls_slate_id)
+        results[dg_id] = matched
+
+        top = matched.nlargest(3, "pred_own_pct")[["player_name", "salary", "pred_own_pct"]]
+        print(f"    Top 3: {top.values.tolist()}")
 
     return results
 
