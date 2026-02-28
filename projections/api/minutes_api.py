@@ -38,6 +38,7 @@ from projections.api.diagnostics_api import router as diagnostics_router
 from projections.api.live_status_api import router as live_status_router
 from projections.api.ops_api import router as ops_router
 from projections.api.props_api import router as props_router
+from projections.names import normalize_player_name
 from projections.pipeline import control_plane
 from projections.pipeline import minutes_models as minutes_models_store
 from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
@@ -500,6 +501,53 @@ def _load_ownership_predictions(
     return None
 
 
+def _overlay_ownership_columns(
+    projections_df: pd.DataFrame,
+    ownership_df: pd.DataFrame | None,
+) -> pd.DataFrame:
+    if ownership_df is None or ownership_df.empty:
+        return projections_df
+
+    base = projections_df.copy()
+    own = ownership_df.copy()
+    if "player_name" in own.columns and "player_name" in base.columns:
+        base["_join_name"] = base["player_name"].apply(normalize_player_name)
+        own["_join_name"] = own["player_name"].apply(normalize_player_name)
+
+        join_cols = ["_join_name"]
+        if "team_tricode" in base.columns and "team" in own.columns:
+            base["_join_team"] = base["team_tricode"].astype(str).str.upper()
+            own["_join_team"] = own["team"].astype(str).str.upper()
+            join_cols.append("_join_team")
+    elif "player_id" in own.columns and "player_id" in base.columns:
+        base["player_id"] = pd.to_numeric(base["player_id"], errors="coerce").astype("Int64")
+        own["player_id"] = pd.to_numeric(own["player_id"], errors="coerce").astype("Int64")
+        join_cols = ["player_id"]
+    else:
+        return projections_df
+
+    own_cols = join_cols + [
+        col for col in ("salary", "pred_own_pct", "draft_group_id") if col in own.columns
+    ]
+    if len(own_cols) == len(join_cols):
+        return projections_df
+
+    merged = base.merge(
+        own[own_cols].drop_duplicates(subset=join_cols, keep="last"),
+        on=join_cols,
+        how="left",
+        suffixes=("", "__own"),
+    )
+    for col in ("salary", "pred_own_pct", "draft_group_id"):
+        own_col = f"{col}__own"
+        if own_col not in merged.columns:
+            continue
+        merged[col] = merged[col].where(pd.notna(merged[col]), merged[own_col])
+        merged = merged.drop(columns=[own_col])
+
+    return merged.drop(columns=["_join_name", "_join_team"], errors="ignore")
+
+
 def _load_sim_projections(day: date, root: Path, *, minutes_run_id: str | None = None) -> pd.DataFrame | None:
     candidates = [
         root / f"game_date={day.isoformat()}",  # New format (run_sim_live.py)
@@ -892,6 +940,35 @@ def create_app(
                         unified_df[col] = canonical_df[col]
             else:
                 unified_df = canonical_df
+
+            needs_ownership_overlay = (
+                "pred_own_pct" not in unified_df.columns
+                or unified_df["pred_own_pct"].isna().all()
+                or "salary" not in unified_df.columns
+                or unified_df["salary"].isna().all()
+            )
+            if needs_ownership_overlay:
+                own_df = _load_ownership_predictions(
+                    slate_day,
+                    data_root,
+                    run_id=resolved_run_id,
+                )
+                unified_df = _overlay_ownership_columns(unified_df, own_df)
+                if "dk_fpts_mean" in unified_df.columns and "salary" in unified_df.columns:
+                    salary = pd.to_numeric(unified_df["salary"], errors="coerce")
+                    computed_value = (
+                        pd.to_numeric(unified_df["dk_fpts_mean"], errors="coerce")
+                        .div(salary.where(salary > 0))
+                        .mul(1000)
+                        .round(2)
+                    )
+                    if "value" in unified_df.columns:
+                        unified_df["value"] = unified_df["value"].where(
+                            pd.notna(unified_df["value"]),
+                            computed_value,
+                        )
+                    else:
+                        unified_df["value"] = computed_value
             
             players = _serialize_players(unified_df)
             run_summary = None
@@ -969,38 +1046,8 @@ def create_app(
                 df = df.merge(sim_df.rename(columns=rename_map), on=join_keys, how="left")
 
         # Merge ownership predictions (includes salary)
-        # Note: ownership uses DK player_ids, minutes uses NBA player_ids, so join on normalized name+team
         own_df = _load_ownership_predictions(slate_day, data_root, run_id=_extract_run_name(run_dir))
-        if own_df is not None and "player_name" in own_df.columns and "player_name" in df.columns:
-            import unicodedata
-            def _norm_name(s: str) -> str:
-                if not s:
-                    return ""
-                normalized = unicodedata.normalize("NFKD", str(s))
-                return normalized.encode("ascii", "ignore").decode("ascii").lower().strip()
-
-            # Create normalized join keys
-            own_df = own_df.copy()
-            own_df["_join_name"] = own_df["player_name"].apply(_norm_name)
-            if "team" in own_df.columns:
-                own_df["_join_team"] = own_df["team"].str.upper()
-            df["_join_name"] = df["player_name"].apply(_norm_name)
-            if "team_tricode" in df.columns:
-                df["_join_team"] = df["team_tricode"].str.upper()
-
-            # Select columns for merge
-            own_merge_cols = ["_join_name", "_join_team", "salary", "pred_own_pct"]
-            if "is_locked" in own_df.columns:
-                own_merge_cols.append("is_locked")
-            own_merge_cols = [c for c in own_merge_cols if c in own_df.columns]
-
-            join_cols = ["_join_name", "_join_team"] if "_join_team" in df.columns else ["_join_name"]
-            join_cols = [c for c in join_cols if c in own_df.columns]
-
-            if join_cols:
-                df = df.merge(own_df[own_merge_cols].drop_duplicates(subset=join_cols), on=join_cols, how="left")
-                # Clean up temp columns
-                df = df.drop(columns=["_join_name", "_join_team"], errors="ignore")
+        df = _overlay_ownership_columns(df, own_df)
 
         # Even in the legacy (minutes + sim joins) path, attach canonical fields so the
         # UI can display the same decision metrics the optimizer/sim consume.

@@ -45,6 +45,7 @@ from projections.features.action_props import (
     build_action_props_feature_snapshots,
     load_rotowire_props_long_from_bronze,
 )
+from projections.names import normalize_player_name
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline.gtv2_live_features import (
     build_gtv2_live_features,
@@ -2760,6 +2761,74 @@ def generate_worlds_gtv2_live_task(
     }
 
 
+def _merge_live_ownership_into_projections(
+    df: pd.DataFrame,
+    *,
+    game_date: str,
+    run_id: str,
+    data_root: Path,
+) -> pd.DataFrame:
+    own_dir = data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}"
+    if not own_dir.exists():
+        return df
+
+    slate_files = [
+        path
+        for path in own_dir.glob("*.parquet")
+        if not path.name.endswith("_locked.parquet")
+    ]
+    if not slate_files:
+        return df
+
+    own_path = max(slate_files, key=lambda path: path.stat().st_size)
+    own_df = pd.read_parquet(own_path)
+    if own_df.empty or "player_name" not in own_df.columns:
+        return df
+
+    merged = df.copy()
+    own = own_df.copy()
+    if "player_name" in merged.columns and "player_name" in own.columns:
+        merged["_join_name"] = merged["player_name"].apply(normalize_player_name)
+        own["_join_name"] = own["player_name"].apply(normalize_player_name)
+
+        join_cols = ["_join_name"]
+        if "team_tricode" in merged.columns and "team" in own.columns:
+            merged["_join_team"] = merged["team_tricode"].astype(str).str.upper()
+            own["_join_team"] = own["team"].astype(str).str.upper()
+            join_cols.append("_join_team")
+    elif "player_id" in merged.columns and "player_id" in own.columns:
+        merged["player_id"] = pd.to_numeric(merged["player_id"], errors="coerce").astype(
+            "Int64"
+        )
+        own["player_id"] = pd.to_numeric(own["player_id"], errors="coerce").astype(
+            "Int64"
+        )
+        join_cols = ["player_id"]
+    else:
+        return df
+
+    own_cols = join_cols + [
+        col for col in ("salary", "pred_own_pct", "draft_group_id") if col in own.columns
+    ]
+    if len(own_cols) == len(join_cols):
+        return df
+
+    merged = merged.merge(
+        own[own_cols].drop_duplicates(subset=join_cols, keep="last"),
+        on=join_cols,
+        how="left",
+        suffixes=("", "__own"),
+    )
+    for col in ("salary", "pred_own_pct", "draft_group_id"):
+        own_col = f"{col}__own"
+        if own_col not in merged.columns:
+            continue
+        merged[col] = merged[col].where(pd.notna(merged[col]), merged[own_col])
+        merged = merged.drop(columns=[own_col])
+
+    return merged.drop(columns=["_join_name", "_join_team"], errors="ignore")
+
+
 @task(name="finalize-projections-live", retries=0)
 def finalize_projections_live_task(
     *,
@@ -2836,6 +2905,21 @@ def finalize_projections_live_task(
             df = df.drop(
                 columns=[c for c in df.columns if c.endswith("__src")], errors="ignore"
             )
+
+    df = _merge_live_ownership_into_projections(
+        df,
+        game_date=game_date,
+        run_id=run_id,
+        data_root=data_root,
+    )
+    if "dk_fpts_mean" in df.columns and "salary" in df.columns:
+        salary = pd.to_numeric(df["salary"], errors="coerce")
+        df["value"] = (
+            pd.to_numeric(df["dk_fpts_mean"], errors="coerce")
+            .div(salary.where(salary > 0))
+            .mul(1000)
+            .round(2)
+        )
 
     df.to_parquet(out_path, index=False)
     return out_dir
@@ -3364,6 +3448,15 @@ def nba_live_pipeline_v3_flow(
             ),
         )
 
+        ownership_dir = score_ownership_linestar_task(
+            game_date=resolved_game_date,
+            run_id=run_id,
+            data_root=data_root,
+            placeholder_mode=bool(placeholder_mode),
+        )
+        if ownership_dir.exists():
+            control_plane.copy_manifest_to_dir(manifest_path, ownership_dir)
+
         projections_dir = finalize_projections_live_task(
             game_date=resolved_game_date,
             run_id=run_id,
@@ -3402,14 +3495,6 @@ def nba_live_pipeline_v3_flow(
             json.dumps(postflight_report, indent=2, sort_keys=True),
             encoding="utf-8",
         )
-        ownership_dir = score_ownership_linestar_task(
-            game_date=resolved_game_date,
-            run_id=run_id,
-            data_root=data_root,
-            placeholder_mode=bool(placeholder_mode),
-        )
-        if ownership_dir.exists():
-            control_plane.copy_manifest_to_dir(manifest_path, ownership_dir)
 
         pointer_payload: dict[str, str] = {}
         publish_status = "not_requested" if not promote_pointers else "pending"

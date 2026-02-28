@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from projections.pipeline import control_plane
@@ -37,6 +38,9 @@ def test_nba_live_pipeline_v3_flow_smoke(
 
     projections_path = Path(result["projections_path"])
     assert projections_path.exists()
+    projections_df = pd.read_parquet(projections_path)
+    assert "pred_own_pct" in projections_df.columns
+    assert projections_df["pred_own_pct"].notna().any()
 
     v3_run_dir = (
         tmp_path
