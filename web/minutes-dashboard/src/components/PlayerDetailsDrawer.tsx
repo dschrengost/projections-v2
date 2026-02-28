@@ -46,6 +46,18 @@ type PlayerDetailsDrawerProps = {
     onOverrideChange: (playerId: string, next: PlayerOverrideState) => void
 }
 
+const describeOverride = (override: PlayerOverrideState): string | null => {
+    const mode = override.mode ?? 'none'
+    if (mode === 'none') return null
+    if (mode === 'zero' || mode === 'force_inactive') return 'Manual OUT'
+    if (mode === 'force_active') return 'Manual IN'
+    if (mode === 'lock' && override.lock_value != null) return `Locked to ${override.lock_value.toFixed(1)} minutes`
+    if (mode === 'band' && override.min_value != null && override.max_value != null) {
+        return `Band ${override.min_value.toFixed(1)} to ${override.max_value.toFixed(1)} minutes`
+    }
+    return `Override mode: ${mode}`
+}
+
 const MetricRow: React.FC<{ label: string; metric: DrawerMetric }> = ({ label, metric }) => {
     const hasQuantiles = metric.p10 != null || metric.p50 != null || metric.p90 != null
     return (
@@ -109,6 +121,11 @@ export const PlayerDetailsDrawer: React.FC<PlayerDetailsDrawerProps> = ({
                             resolvedMinutes={player.resolvedMinutes}
                             onChange={(next) => onOverrideChange(player.player_id, next)}
                         />
+                    </section>
+                ) : describeOverride(player.override) ? (
+                    <section className="gv2-drawer-section">
+                        <h4>Active Override</h4>
+                        <div className="gv2-why-changed">{describeOverride(player.override)}</div>
                     </section>
                 ) : null}
 

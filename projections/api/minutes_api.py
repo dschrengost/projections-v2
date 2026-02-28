@@ -35,6 +35,7 @@ from projections.api.contest_api import router as contest_router
 from projections.api.contest_sim_api import router as contest_sim_router
 from projections.api.entry_manager_api import router as entry_manager_router
 from projections.api.diagnostics_api import router as diagnostics_router
+from projections.api.live_status_api import router as live_status_router
 from projections.api.ops_api import router as ops_router
 from projections.api.props_api import router as props_router
 from projections.pipeline import control_plane
@@ -696,6 +697,7 @@ def create_app(
     app.include_router(contest_sim_router, prefix="/api/contest-sim", tags=["contest-sim"])
     app.include_router(entry_manager_router, prefix="/api/entry-manager", tags=["entry-manager"])
     app.include_router(diagnostics_router)
+    app.include_router(live_status_router)
     app.include_router(ops_router)
     app.include_router(props_router, prefix="/api")
 

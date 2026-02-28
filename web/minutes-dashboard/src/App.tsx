@@ -16,6 +16,7 @@ import ContestPage from './pages/ContestPage'
 import ContestSimPage from './pages/ContestSimPage'
 import DiagnosticsPage from './pages/DiagnosticsPage'
 import EntryManagerPage from './pages/EntryManagerPage'
+import LivePage from './pages/LivePage'
 import PropsPage from './pages/PropsPage'
 import { MinutesResponse, PlayerRow } from './types'
 import {
@@ -144,10 +145,26 @@ type ModelOption = {
 
 import { useSlateDate } from './hooks/useSlateDate'
 
-const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics' | 'props' => {
+type TabKey =
+  | 'live'
+  | 'minutes'
+  | 'pipeline'
+  | 'evaluation'
+  | 'optimizer'
+  | 'entry-manager'
+  | 'contest'
+  | 'contest-sim'
+  | 'diagnostics'
+  | 'props'
+
+const initialTab = (): TabKey => {
   if (typeof window === 'undefined') {
-    return 'minutes'
+    return 'live'
   }
+  if (window.location.pathname.includes('/live/game/')) return 'live'
+  if (window.location.pathname === '/' || window.location.pathname.includes('/live')) return 'live'
+  if (window.location.pathname.includes('/projections')) return 'minutes'
+  if (window.location.pathname.includes('/runs')) return 'pipeline'
   if (window.location.pathname.includes('props')) return 'props'
   if (window.location.pathname.includes('diagnostics')) return 'diagnostics'
   if (window.location.pathname.includes('contest-sim')) return 'contest-sim'
@@ -156,13 +173,22 @@ const initialTab = (): 'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'en
   if (window.location.pathname.includes('optimizer')) return 'optimizer'
   if (window.location.pathname.includes('pipeline')) return 'pipeline'
   if (window.location.pathname.includes('evaluation')) return 'evaluation'
-  return 'minutes'
+  return 'live'
+}
+
+const initialLiveGameId = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  const match = window.location.pathname.match(/\/live\/game\/([^/]+)/)
+  return match?.[1] ? decodeURIComponent(match[1]) : null
 }
 
 
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'minutes' | 'pipeline' | 'evaluation' | 'optimizer' | 'entry-manager' | 'contest' | 'contest-sim' | 'diagnostics' | 'props'>(initialTab)
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab)
+  const [liveGameId, setLiveGameId] = useState<string | null>(initialLiveGameId)
   const [selectedDate, setSelectedDate] = useSlateDate()
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
@@ -216,9 +242,26 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const pathMap = { minutes: '/', pipeline: '/pipeline', evaluation: '/evaluation', optimizer: '/optimizer', 'entry-manager': '/entry-manager', contest: '/contest', 'contest-sim': '/contest-sim', diagnostics: '/diagnostics', props: '/props' }
-    window.history.replaceState({}, '', pathMap[activeTab])
-  }, [activeTab])
+    const pathMap = {
+      live: '/live',
+      minutes: '/projections',
+      pipeline: '/runs',
+      evaluation: '/evaluation',
+      optimizer: '/optimizer',
+      'entry-manager': '/entry-manager',
+      contest: '/contest',
+      'contest-sim': '/contest-sim',
+      diagnostics: '/diagnostics',
+      props: '/props',
+    }
+    const nextPath =
+      activeTab === 'live'
+        ? liveGameId
+          ? `/live/game/${encodeURIComponent(liveGameId)}`
+          : '/'
+        : pathMap[activeTab]
+    window.history.replaceState({}, '', nextPath)
+  }, [activeTab, liveGameId])
 
   const fetchData = useCallback(
     async (date: string, currentRunId: string | null, currentModelId: string) => {
@@ -355,8 +398,11 @@ function App() {
   }, [selectedDate])
 
   useEffect(() => {
+    if (activeTab !== 'minutes') {
+      return
+    }
     void fetchData(selectedDate, runId, modelId)
-  }, [selectedDate, runId, modelId, fetchData])
+  }, [activeTab, selectedDate, runId, modelId, fetchData])
 
   useEffect(() => {
     setSortKey((prev) => {
@@ -483,16 +529,25 @@ function App() {
   const nav = (
     <nav className="app-nav">
       <button
+        className={activeTab === 'live' ? 'active' : ''}
+        onClick={() => {
+          setLiveGameId(null)
+          setActiveTab('live')
+        }}
+      >
+        Live
+      </button>
+      <button
         className={activeTab === 'minutes' ? 'active' : ''}
         onClick={() => setActiveTab('minutes')}
       >
-        Minutes
+        Projections
       </button>
       <button
         className={activeTab === 'pipeline' ? 'active' : ''}
         onClick={() => setActiveTab('pipeline')}
       >
-        Pipeline
+        Runs
       </button>
       <button
         className={activeTab === 'evaluation' ? 'active' : ''}
@@ -538,6 +593,25 @@ function App() {
       </button>
     </nav>
   )
+
+  if (activeTab === 'live') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <LivePage
+          date={selectedDate}
+          onDateChange={setSelectedDate}
+          selectedGameId={liveGameId}
+          onOpenGame={(gameId) => {
+            setLiveGameId(gameId)
+            setActiveTab('live')
+          }}
+          onCloseGame={() => setLiveGameId(null)}
+          onOpenLateSwap={() => setActiveTab('entry-manager')}
+        />
+      </div>
+    )
+  }
 
   if (activeTab === 'pipeline') {
     return (
@@ -616,9 +690,9 @@ function App() {
       {nav}
       <header className="app-header">
         <div>
-          <h1>Minutes Dashboard</h1>
+          <h1>Projections</h1>
           <p className="subtitle">
-            Two-stage minutes_v1 predictions with conformal intervals.
+            Player-level projections and run comparison for the selected slate.
           </p>
         </div>
         <div className="controls">

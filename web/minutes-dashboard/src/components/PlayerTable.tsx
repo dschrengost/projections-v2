@@ -28,6 +28,18 @@ type PlayerTableProps = {
     onOverrideChange: (playerId: string, next: PlayerOverrideState) => void
 }
 
+const overrideLabel = (override: PlayerOverrideState): string | null => {
+    const mode = override.mode ?? 'none'
+    if (mode === 'none') return null
+    if (mode === 'zero' || mode === 'force_inactive') return 'Manual OUT'
+    if (mode === 'force_active') return 'Manual IN'
+    if (mode === 'lock' && override.lock_value != null) return `Locked ${override.lock_value.toFixed(1)}`
+    if (mode === 'band' && override.min_value != null && override.max_value != null) {
+        return `Band ${override.min_value.toFixed(1)}-${override.max_value.toFixed(1)}`
+    }
+    return `Override ${mode}`
+}
+
 export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, readOnly = false, onSelectPlayer, onOverrideChange }) => {
     if (!rows.length) {
         return <div className="muted">No players found.</div>
@@ -67,6 +79,9 @@ export const PlayerTable: React.FC<PlayerTableProps> = ({ rows, readOnly = false
                                             </span>
                                         ) : null}
                                     </div>
+                                    {overrideLabel(row.override) ? (
+                                        <div className="muted">{overrideLabel(row.override)}</div>
+                                    ) : null}
                                     {row.pos ? <span className="muted">{row.pos}</span> : null}
                                 </div>
                             </td>

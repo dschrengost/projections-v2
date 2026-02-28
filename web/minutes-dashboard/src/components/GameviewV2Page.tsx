@@ -325,7 +325,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
     }, [games, initialGameId, activeGameId])
 
     useEffect(() => {
-        if (readOnly || !activeGameId || hydratedGames.current.has(activeGameId)) return
+        if (!activeGameId || hydratedGames.current.has(activeGameId)) return
         let cancelled = false
 
         const load = async () => {
@@ -361,7 +361,7 @@ export const GameviewV2Page: React.FC<GameviewV2PageProps> = ({
         return () => {
             cancelled = true
         }
-    }, [activeGameId, date, readOnly])
+    }, [activeGameId, date])
 
     useEffect(() => {
         if (!selectedPlayerId) return
