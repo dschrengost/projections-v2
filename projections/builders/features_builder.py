@@ -610,13 +610,13 @@ class SharedFeaturesBuilder:
         *,
         warnings: list[str],
     ) -> pd.DataFrame:
-        """Load Rotowire lineups and merge starter flags into roster.
+        """Load Rotowire lineups and merge lineup-state flags into roster.
 
         Rotowire provides faster lineup confirmations than stats.nba.com.
         This method:
         1. Loads Rotowire lineups for the target date
-        2. Extracts confirmed and projected starters
-        3. Upgrades is_projected_starter and is_confirmed_starter flags in roster
+        2. Extracts confirmed starters, projected starters, and explicit outs
+        3. Upgrades starter flags / lineup_role in roster
 
         Args:
             roster: Roster DataFrame to augment with starter signals.
@@ -659,32 +659,40 @@ class SharedFeaturesBuilder:
                 logger.debug("Rotowire lineups file is empty or missing lineup_role column")
                 return roster
 
-            # Filter to starters (both confirmed and projected)
-            starter_roles = rotowire_df["lineup_role"].isin(["confirmed_starter", "projected_starter"])
-            rotowire_starters = rotowire_df[starter_roles]
+            tracked_roles = rotowire_df["lineup_role"].isin(["confirmed_starter", "projected_starter", "out"])
+            rotowire_status = rotowire_df[tracked_roles]
 
-            if rotowire_starters.empty:
-                logger.debug("No starters found in Rotowire lineups")
+            if rotowire_status.empty:
+                logger.debug("No tracked lineup states found in Rotowire lineups")
                 return roster
 
-            # Separate confirmed from projected
-            confirmed_mask = rotowire_starters["lineup_role"] == "confirmed_starter"
+            # Separate confirmed/projected starters from explicit outs.
+            confirmed_mask = rotowire_status["lineup_role"] == "confirmed_starter"
+            projected_mask = rotowire_status["lineup_role"] == "projected_starter"
+            out_mask = rotowire_status["lineup_role"] == "out"
             rotowire_confirmed_names = set(
-                rotowire_starters.loc[confirmed_mask, "player_name"]
+                rotowire_status.loc[confirmed_mask, "player_name"]
                 .astype(str)
                 .map(_normalize_name_for_matching)
                 .unique()
             )
             rotowire_projected_names = set(
-                rotowire_starters.loc[~confirmed_mask, "player_name"]
+                rotowire_status.loc[projected_mask, "player_name"]
+                .astype(str)
+                .map(_normalize_name_for_matching)
+                .unique()
+            )
+            rotowire_out_names = set(
+                rotowire_status.loc[out_mask, "player_name"]
                 .astype(str)
                 .map(_normalize_name_for_matching)
                 .unique()
             )
 
             logger.info(
-                f"Loaded {len(rotowire_starters)} starters from Rotowire "
-                f"({len(rotowire_confirmed_names)} confirmed, {len(rotowire_projected_names)} projected)"
+                f"Loaded {len(rotowire_status)} lineup rows from Rotowire "
+                f"({len(rotowire_confirmed_names)} confirmed, {len(rotowire_projected_names)} projected, "
+                f"{len(rotowire_out_names)} out)"
             )
 
             # Upgrade starter flags in roster
@@ -693,13 +701,15 @@ class SharedFeaturesBuilder:
                 return roster
 
             name_normalized = roster["player_name"].map(_normalize_name_for_matching)
-            all_starter_names = rotowire_confirmed_names | rotowire_projected_names
-            rotowire_match = name_normalized.isin(all_starter_names)
+            tracked_names = rotowire_confirmed_names | rotowire_projected_names | rotowire_out_names
+            rotowire_match = name_normalized.isin(tracked_names)
 
             # Avoid conflicts: do not mark players as starters if they're already marked out
             eligible = rotowire_match.copy()
             if "active_flag" in roster.columns:
-                eligible = eligible & roster["active_flag"].fillna(False).astype(bool)
+                starter_eligible = eligible & roster["active_flag"].fillna(False).astype(bool)
+            else:
+                starter_eligible = eligible.copy()
             if "lineup_role" in roster.columns:
                 role_norm = (
                     roster["lineup_role"]
@@ -708,7 +718,7 @@ class SharedFeaturesBuilder:
                     .str.lower()
                     .fillna("")
                 )
-                eligible = eligible & ~role_norm.eq("out")
+                starter_eligible = starter_eligible & ~role_norm.eq("out")
 
             if eligible.any():
                 # Initialize columns if missing
@@ -719,20 +729,30 @@ class SharedFeaturesBuilder:
                 if "lineup_role" not in roster.columns:
                     roster["lineup_role"] = pd.NA
 
+                out_eligible = eligible & name_normalized.isin(rotowire_out_names)
+                projected_eligible = starter_eligible & name_normalized.isin(rotowire_projected_names)
+                confirmed_eligible = starter_eligible & name_normalized.isin(rotowire_confirmed_names)
+                any_starter_eligible = projected_eligible | confirmed_eligible
+
+                if out_eligible.any():
+                    roster.loc[out_eligible, "is_projected_starter"] = False
+                    roster.loc[out_eligible, "is_confirmed_starter"] = False
+                    roster.loc[out_eligible, "lineup_role"] = "out"
+
                 # Upgrade is_projected_starter for all starters (confirmed or projected)
-                roster.loc[eligible, "is_projected_starter"] = True
+                roster.loc[any_starter_eligible, "is_projected_starter"] = True
 
                 # Upgrade is_confirmed_starter only for confirmed starters
-                confirmed_eligible = eligible & name_normalized.isin(rotowire_confirmed_names)
                 roster.loc[confirmed_eligible, "is_confirmed_starter"] = True
-                roster.loc[eligible, "lineup_role"] = "projected_starter"
+                roster.loc[projected_eligible, "lineup_role"] = "projected_starter"
                 roster.loc[confirmed_eligible, "lineup_role"] = "confirmed_starter"
 
-                projected_count = int(eligible.sum())
+                projected_count = int(any_starter_eligible.sum())
                 confirmed_count = int(confirmed_eligible.sum())
+                out_count = int(out_eligible.sum())
                 logger.info(
-                    f"Upgraded {projected_count} players to projected starters, "
-                    f"{confirmed_count} to confirmed based on Rotowire"
+                    f"Applied Rotowire lineup states to {int(eligible.sum())} players "
+                    f"({projected_count} starters, {confirmed_count} confirmed, {out_count} out)"
                 )
 
             return roster

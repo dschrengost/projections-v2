@@ -38,6 +38,7 @@ from projections.minutes_v1.schemas import (
     enforce_schema,
     validate_with_pandera,
 )
+from projections.minutes_v1.snapshots import select_injury_snapshot
 from projections.minutes_v1.starter_flags import (
     StarterFlagResult,
     derive_starter_flag_label,
@@ -1171,6 +1172,21 @@ def _build_minutes_live_logic(
         injuries_df = _load_table(injuries_default, injuries_path)
         injuries_source = "override"
 
+    injuries_raw_row_count = len(injuries_df)
+    if injuries_source == "bronze" and not injuries_df.empty and {"game_id", "player_id"}.issubset(injuries_df.columns):
+        tip_frame = schedule_df.loc[:, ["game_id", "tip_ts"]].drop_duplicates().copy()
+        tip_frame["tip_ts"] = pd.to_datetime(tip_frame["tip_ts"], utc=True, errors="coerce")
+        injuries_merged = injuries_df.merge(tip_frame, on="game_id", how="left")
+        if {"status", "restriction_flag", "ramp_flag"}.issubset(injuries_merged.columns):
+            injuries_df = select_injury_snapshot(injuries_merged)
+        else:
+            warnings.append(
+                "[live] bronze injuries_raw missing required columns for snapshot selection; "
+                "continuing with raw rows."
+            )
+    else:
+        injuries_raw_row_count = len(injuries_df)
+
     odds_df = _load_table(odds_default, odds_path)
     roster_df = _load_table(roster_default, roster_path)
 
@@ -1203,31 +1219,33 @@ def _build_minutes_live_logic(
                 "[minutes-live] Backfill mode: preserving roster_nightly lineup/starter fields when Rotowire is missing."
             )
 
-    # Load Rotowire lineups for starter updates (both projected and confirmed)
-    # Rotowire is prioritized over NBA.com because it typically updates faster
+    # Load Rotowire lineups for lineup-status updates.
+    # Rotowire is prioritized over NBA.com because it typically updates faster.
     rotowire_confirmed_names: set[str] = set()  # Players with confirmed_starter role
     rotowire_projected_names: set[str] = set()  # Players with projected_starter role
+    rotowire_out_names: set[str] = set()  # Players explicitly marked out
     rotowire_lineups_path = data_root / "silver" / "rotowire_lineups" / f"date={target_day.date()}" / "lineups.parquet"
     if rotowire_lineups_path.exists():
         try:
             rotowire_df = pd.read_parquet(rotowire_lineups_path)
             if not rotowire_df.empty and "lineup_role" in rotowire_df.columns:
-                # Filter to starters (both confirmed and projected) - lineup_role encodes status
-                starter_roles = rotowire_df["lineup_role"].isin(["confirmed_starter", "projected_starter"])
-                rotowire_starters = rotowire_df[starter_roles].copy()
+                # Carry through starters and explicit outs. These are the
+                # lineup-state signals that should affect live availability.
+                tracked_roles = rotowire_df["lineup_role"].isin(["confirmed_starter", "projected_starter", "out"])
+                rotowire_status = rotowire_df[tracked_roles].copy()
 
-                if not rotowire_starters.empty:
+                if not rotowire_status.empty:
                     # Keep a per-player scrape timestamp so downstream lineup_available
                     # contract can treat Rotowire-provided starter rows as lineup-present.
                     name_norm_series = (
-                        rotowire_starters["player_name"]
+                        rotowire_status["player_name"]
                         .astype(str)
                         .map(_normalize_name_for_matching)
                     )
-                    if "ingested_ts" in rotowire_starters.columns:
-                        ingested_ts = pd.to_datetime(rotowire_starters["ingested_ts"], utc=True, errors="coerce")
+                    if "ingested_ts" in rotowire_status.columns:
+                        ingested_ts = pd.to_datetime(rotowire_status["ingested_ts"], utc=True, errors="coerce")
                     else:
-                        ingested_ts = pd.Series(pd.NaT, index=rotowire_starters.index, dtype="datetime64[ns, UTC]")
+                        ingested_ts = pd.Series(pd.NaT, index=rotowire_status.index, dtype="datetime64[ns, UTC]")
                     starter_ts_by_name = (
                         pd.DataFrame({"name_norm": name_norm_series, "ingested_ts": ingested_ts})
                         .dropna(subset=["name_norm"])
@@ -1235,31 +1253,40 @@ def _build_minutes_live_logic(
                         .max()
                     )
 
-                    # Separate confirmed from projected
-                    confirmed_mask = rotowire_starters["lineup_role"] == "confirmed_starter"
+                    # Separate confirmed/projected starters from explicit outs.
+                    confirmed_mask = rotowire_status["lineup_role"] == "confirmed_starter"
+                    projected_mask = rotowire_status["lineup_role"] == "projected_starter"
+                    out_mask = rotowire_status["lineup_role"] == "out"
                     rotowire_confirmed_names = set(
-                        rotowire_starters.loc[confirmed_mask, "player_name"]
+                        rotowire_status.loc[confirmed_mask, "player_name"]
                         .astype(str)
                         .map(_normalize_name_for_matching)
                         .unique()
                     )
                     rotowire_projected_names = set(
-                        rotowire_starters.loc[~confirmed_mask, "player_name"]
+                        rotowire_status.loc[projected_mask, "player_name"]
+                        .astype(str)
+                        .map(_normalize_name_for_matching)
+                        .unique()
+                    )
+                    rotowire_out_names = set(
+                        rotowire_status.loc[out_mask, "player_name"]
                         .astype(str)
                         .map(_normalize_name_for_matching)
                         .unique()
                     )
                     typer.echo(
-                        f"[minutes-live] Loaded {len(rotowire_starters)} starters from Rotowire "
-                        f"({len(rotowire_confirmed_names)} confirmed, {len(rotowire_projected_names)} projected)."
+                        f"[minutes-live] Loaded {len(rotowire_status)} lineup rows from Rotowire "
+                        f"({len(rotowire_confirmed_names)} confirmed, {len(rotowire_projected_names)} projected, "
+                        f"{len(rotowire_out_names)} out)."
                     )
 
-                    # Upgrade starter flags in roster_df based on Rotowire
+                    # Apply lineup status in roster_df based on Rotowire.
                     if not roster_df.empty and "player_name" in roster_df.columns:
                         roster_df = roster_df.copy()
                         name_normalized = roster_df["player_name"].map(_normalize_name_for_matching)
-                        all_starter_names = rotowire_confirmed_names | rotowire_projected_names
-                        rotowire_match = name_normalized.isin(all_starter_names)
+                        tracked_names = rotowire_confirmed_names | rotowire_projected_names | rotowire_out_names
+                        rotowire_match = name_normalized.isin(tracked_names)
                         slate_mask = pd.Series(True, index=roster_df.index, dtype=bool)
                         if slate_game_ids and "game_id" in roster_df.columns:
                             roster_game_ids = pd.to_numeric(roster_df["game_id"], errors="coerce").astype("Int64")
@@ -1268,11 +1295,26 @@ def _build_minutes_live_logic(
                             roster_days = pd.to_datetime(roster_df["game_date"], errors="coerce").dt.normalize()
                             slate_mask = (roster_days == target_day).fillna(False)
 
+                        # Respect anti-leak semantics: only consume Rotowire rows that
+                        # were ingested by tip time for the player's game.
+                        eligible = rotowire_match & slate_mask
+                        rotowire_ts = pd.to_datetime(
+                            name_normalized.map(starter_ts_by_name),
+                            utc=True,
+                            errors="coerce",
+                        )
+                        if "tip_ts" in roster_df.columns:
+                            tip_ts = pd.to_datetime(roster_df["tip_ts"], utc=True, errors="coerce")
+                            eligible = eligible & (rotowire_ts.isna() | (rotowire_ts <= tip_ts))
+                        else:
+                            eligible = eligible & (rotowire_ts.isna() | (rotowire_ts <= run_ts))
+
                         # Avoid conflicts: do not mark players as starters if our other feeds already
                         # consider them inactive/out for the slate.
-                        eligible = rotowire_match & slate_mask
                         if "active_flag" in roster_df.columns:
-                            eligible = eligible & roster_df["active_flag"].fillna(False).astype(bool)
+                            starter_eligible = eligible & roster_df["active_flag"].fillna(False).astype(bool)
+                        else:
+                            starter_eligible = eligible.copy()
                         if "lineup_role" in roster_df.columns:
                             role_norm = (
                                 roster_df["lineup_role"]
@@ -1281,7 +1323,7 @@ def _build_minutes_live_logic(
                                 .str.lower()
                                 .fillna("")
                             )
-                            eligible = eligible & ~role_norm.eq("out")
+                            starter_eligible = starter_eligible & ~role_norm.eq("out")
 
                         if eligible.any():
                             # Initialize columns if missing
@@ -1294,30 +1336,36 @@ def _build_minutes_live_logic(
                             if "lineup_timestamp" not in roster_df.columns:
                                 roster_df["lineup_timestamp"] = pd.NaT
 
-                            # Upgrade is_projected_starter for all starters (confirmed or projected)
-                            roster_df.loc[eligible, "is_projected_starter"] = True
+                            out_eligible = eligible & name_normalized.isin(rotowire_out_names)
+                            projected_eligible = starter_eligible & name_normalized.isin(rotowire_projected_names)
+                            confirmed_eligible = starter_eligible & name_normalized.isin(rotowire_confirmed_names)
+                            any_starter_eligible = projected_eligible | confirmed_eligible
+
+                            # Explicit Rotowire out rows should clear starter flags.
+                            if out_eligible.any():
+                                roster_df.loc[out_eligible, "is_projected_starter"] = False
+                                roster_df.loc[out_eligible, "is_confirmed_starter"] = False
+                                roster_df.loc[out_eligible, "lineup_role"] = "out"
+
+                            # Upgrade is_projected_starter for all eligible starters (confirmed or projected)
+                            roster_df.loc[any_starter_eligible, "is_projected_starter"] = True
 
                             # Upgrade is_confirmed_starter only for confirmed starters
-                            confirmed_eligible = eligible & name_normalized.isin(rotowire_confirmed_names)
                             roster_df.loc[confirmed_eligible, "is_confirmed_starter"] = True
-                            roster_df.loc[eligible, "lineup_role"] = "projected_starter"
+                            roster_df.loc[projected_eligible, "lineup_role"] = "projected_starter"
                             roster_df.loc[confirmed_eligible, "lineup_role"] = "confirmed_starter"
 
-                            # Stamp lineup_timestamp for Rotowire starter rows so
-                            # lineup_available contract remains consistent in live builds.
-                            rotowire_ts = pd.to_datetime(
-                                name_normalized.map(starter_ts_by_name),
-                                utc=True,
-                                errors="coerce",
-                            )
+                            # Stamp lineup_timestamp for all eligible Rotowire rows
+                            # so lineup_available contract remains consistent.
                             rotowire_ts = rotowire_ts.fillna(run_ts)
                             roster_df.loc[eligible, "lineup_timestamp"] = rotowire_ts.loc[eligible].values
 
-                            projected_count = int(eligible.sum())
+                            projected_count = int(any_starter_eligible.sum())
                             confirmed_count = int(confirmed_eligible.sum())
+                            out_count = int(out_eligible.sum())
                             typer.echo(
-                                f"[minutes-live] Upgraded {projected_count} players to projected starters, "
-                                f"{confirmed_count} to confirmed based on Rotowire."
+                                f"[minutes-live] Applied Rotowire lineup states to {int(eligible.sum())} players "
+                                f"({projected_count} starters, {confirmed_count} confirmed, {out_count} out)."
                             )
             else:
                 typer.echo("[minutes-live] Rotowire lineups file exists but is empty or missing lineup_role column.")
@@ -2118,7 +2166,7 @@ def _build_minutes_live_logic(
     snapshot_meta = {
         "injuries": _snapshot_stats(injuries_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
         "injuries_source": injuries_source,
-        "injuries_raw_rows": len(injuries_df),
+        "injuries_raw_rows": injuries_raw_row_count,
         "injuries_filtered_rows": len(injuries_slice),
         "odds": _snapshot_stats(odds_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
         "roster": _snapshot_stats(roster_builder_slice, time_col="as_of_ts", run_as_of_ts=run_ts),

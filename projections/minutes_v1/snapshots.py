@@ -190,30 +190,28 @@ def select_injury_snapshot(
     working[tip_ts_col] = pd.to_datetime(working[tip_ts_col], utc=True)
     working[as_of_col] = pd.to_datetime(working[as_of_col], utc=True, errors="coerce")
     
-    # Use report_ts for ordering if available, else try to derive from source URL
+    # Use report_ts for ordering and pre-tip eligibility if available, else try to
+    # derive it from the source URL. The raw injuries feed may be ingested after
+    # tip even when the underlying PDF report was published on time.
+    working["_effective_as_of_ts"] = working[as_of_col]
     has_report_ts = report_ts_col in working.columns and working[report_ts_col].notna().any()
     if has_report_ts:
         working[report_ts_col] = pd.to_datetime(working[report_ts_col], utc=True, errors="coerce")
-        order_col = report_ts_col
+        working["_effective_as_of_ts"] = working[report_ts_col].fillna(working["_effective_as_of_ts"])
     elif "source" in working.columns:
-        # Derive report_ts from source URL for backwards compatibility
-        # URL format: Injury-Report_2026-01-19_05_00PM.pdf
+        # Derive report_ts from source URL for backwards compatibility.
         working["_derived_report_ts"] = working["source"].apply(_parse_report_ts_from_source)
-        if working["_derived_report_ts"].notna().any():
-            order_col = "_derived_report_ts"
-        else:
-            order_col = as_of_col
-    else:
-        order_col = as_of_col
+        working["_effective_as_of_ts"] = working["_derived_report_ts"].fillna(working["_effective_as_of_ts"])
 
-    valid_mask = working[as_of_col].notna() & (working[as_of_col] <= working[tip_ts_col])
+    valid_mask = working["_effective_as_of_ts"].notna() & (working["_effective_as_of_ts"] <= working[tip_ts_col])
     valid = working.loc[valid_mask].copy()
 
     latest = pd.DataFrame(columns=working.columns)
     if not valid.empty:
-        # Select the entry with the latest report_ts (or as_of_ts) per player/game
-        latest_idx = valid.groupby(list(group_cols))[order_col].idxmax()
+        # Select the entry with the latest effective report/as-of time per player/game.
+        latest_idx = valid.groupby(list(group_cols))["_effective_as_of_ts"].idxmax()
         latest = valid.loc[latest_idx].copy()
+        latest[as_of_col] = latest["_effective_as_of_ts"]
         latest["selection_rule"] = "latest_leq_tip"
         latest["snapshot_missing"] = 0
 
@@ -263,5 +261,4 @@ def select_injury_snapshot(
     if (combined[as_of_col].notna() & (combined[as_of_col] > combined[tip_ts_col])).any():
         raise AssertionError("Detected injury snapshots with as_of_ts after tip_ts")
 
-    return combined.drop(columns=[tip_ts_col])
-
+    return combined.drop(columns=[tip_ts_col, "_effective_as_of_ts", "_derived_report_ts"], errors="ignore")
