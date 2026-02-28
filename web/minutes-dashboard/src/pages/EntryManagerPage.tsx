@@ -385,7 +385,7 @@ export default function EntryManagerPage() {
                 buildDraftGroupId = build.draft_group_id ?? null
             }
             let offset = 0
-            for (const contestId of targetIds) {
+            const applyRequests = targetIds.flatMap(contestId => {
                 const entrySummary = entryFiles.find(entry => entry.contest_id === contestId)
                 const entryCount = entrySummary?.entry_count ?? 0
                 if (
@@ -397,29 +397,51 @@ export default function EntryManagerPage() {
                         `Build slate DG${buildDraftGroupId} does not match contest slate DG${entrySummary.draft_group_id} (${entrySummary.contest_name})`,
                     )
                 }
-                if (entryCount <= 0) continue
+                if (entryCount <= 0) return []
                 const slice = lineups.slice(offset, offset + entryCount)
                 if (slice.length < entryCount) {
                     throw new Error('Not enough lineups to cover selected contests')
                 }
-                const updated = await applyBuildToEntries(
-                    selectedDate,
-                    contestId,
-                    buildSource,
-                    selectedBuildId,
-                    slice,
-                )
-                results.push({
+                const request = {
                     contestId,
                     contestName: entrySummary?.contest_name || contestId,
-                    lineupsApplied: entryCount,
+                    entryCount,
                     lineupRangeStart: offset + 1,
                     lineupRangeEnd: offset + entryCount,
-                })
-                if (contestId === selectedContestId) {
-                    setEntryFile(updated)
+                    promise: applyBuildToEntries(
+                        selectedDate,
+                        contestId,
+                        buildSource,
+                        selectedBuildId,
+                        slice,
+                    ),
                 }
                 offset += entryCount
+                return [request]
+            })
+
+            const updates = await Promise.all(
+                applyRequests.map(async request => ({
+                    contestId: request.contestId,
+                    contestName: request.contestName,
+                    entryCount: request.entryCount,
+                    lineupRangeStart: request.lineupRangeStart,
+                    lineupRangeEnd: request.lineupRangeEnd,
+                    updated: await request.promise,
+                })),
+            )
+
+            for (const update of updates) {
+                results.push({
+                    contestId: update.contestId,
+                    contestName: update.contestName,
+                    lineupsApplied: update.entryCount,
+                    lineupRangeStart: update.lineupRangeStart,
+                    lineupRangeEnd: update.lineupRangeEnd,
+                })
+                if (update.contestId === selectedContestId) {
+                    setEntryFile(update.updated)
+                }
             }
             setApplyBuildResults(results)
             if (results.length > 0) {

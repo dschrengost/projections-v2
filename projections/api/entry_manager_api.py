@@ -176,17 +176,38 @@ def _assign_lineup_to_slots_with_maps(
     internal_to_name: Dict[str, str],
     draftable_ids_by_player: Dict[int, Dict[str, int]],
     dk_names_by_player: Dict[int, str],
+    draftable_to_dk_player_id: Optional[Dict[int, int]] = None,
 ) -> Dict[str, str]:
     pids = [str(pid) for pid in lineups]
     if len(pids) != len(DK_NBA_SLOTS):
         return {}
 
+    resolved_dk_player_ids: Dict[str, int] = {}
+    if draftable_to_dk_player_id is None:
+        draftable_to_dk_player_id = {}
+        for dk_player_id, slot_map in draftable_ids_by_player.items():
+            for draftable_id in slot_map.values():
+                draftable_to_dk_player_id.setdefault(int(draftable_id), int(dk_player_id))
+
+    def resolve_dk_player_id(pid: str) -> Optional[int]:
+        dk_pid = internal_to_dk_player_id.get(pid)
+        if dk_pid is not None:
+            return dk_pid
+        try:
+            numeric_pid = int(pid)
+        except (TypeError, ValueError):
+            return None
+        if numeric_pid in draftable_ids_by_player:
+            return numeric_pid
+        return draftable_to_dk_player_id.get(numeric_pid)
+
     adj: Dict[str, List[str]] = {}
     for pid in pids:
-        dk_pid = internal_to_dk_player_id.get(pid)
+        dk_pid = resolve_dk_player_id(pid)
         if dk_pid is None:
             adj[pid] = []
             continue
+        resolved_dk_player_ids[pid] = dk_pid
         adj[pid] = list(draftable_ids_by_player.get(dk_pid, {}).keys())
 
     match_r: Dict[str, Optional[str]] = {s: None for s in DK_NBA_SLOTS}
@@ -217,7 +238,7 @@ def _assign_lineup_to_slots_with_maps(
         if not internal_pid:
             slot_values[slot] = ""
             continue
-        dk_player_id = internal_to_dk_player_id.get(internal_pid)
+        dk_player_id = resolved_dk_player_ids.get(internal_pid)
         if dk_player_id is None:
             slot_values[slot] = ""
             continue
@@ -1216,6 +1237,10 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
     try:
         maps = _build_dk_maps(entry_state.game_date, entry_state.draft_group_id)
         internal_to_dk, internal_to_name, draftable_ids_by_player, dk_names = maps
+        draftable_to_dk_player_id: Dict[int, int] = {}
+        for dk_player_id, slot_map in draftable_ids_by_player.items():
+            for draftable_id in slot_map.values():
+                draftable_to_dk_player_id.setdefault(int(draftable_id), int(dk_player_id))
     except Exception as exc:
         logger.exception("Failed to build DK maps for apply_build")
         raise HTTPException(status_code=500, detail=f"Failed to map players to DK IDs: {exc}")
@@ -1230,16 +1255,26 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
             internal_to_name,
             draftable_ids_by_player,
             dk_names,
+            draftable_to_dk_player_id,
         )
         # Track players that couldn't be mapped
         for pid in lineups[idx]:
             pid_str = str(pid)
-            if pid_str not in internal_to_dk:
+            dk_id = internal_to_dk.get(pid_str)
+            if dk_id is None:
+                try:
+                    numeric_pid = int(pid_str)
+                except (TypeError, ValueError):
+                    numeric_pid = None
+                if numeric_pid is not None and numeric_pid in draftable_ids_by_player:
+                    dk_id = numeric_pid
+                elif numeric_pid is not None:
+                    dk_id = draftable_to_dk_player_id.get(numeric_pid)
+            if dk_id is None:
                 unmapped_players.add(pid_str)
-            else:
-                dk_id = internal_to_dk[pid_str]
-                if dk_id not in draftable_ids_by_player:
-                    unmapped_players.add(f"{pid_str}(dk={dk_id})")
+                continue
+            if dk_id not in draftable_ids_by_player:
+                unmapped_players.add(f"{pid_str}(dk={dk_id})")
         updated_entries.append(
             {
                 "entry_id": entry.get("entry_id", ""),
