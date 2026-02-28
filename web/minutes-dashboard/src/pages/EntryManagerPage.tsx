@@ -455,6 +455,26 @@ export default function EntryManagerPage() {
     }
 
     const handleExport = async () => {
+        const targetIds = applyBuildTargetInfo.targetIds
+        if (targetIds.length === 0) return
+        try {
+            const blob = targetIds.length === 1
+                ? await exportEntryFile(selectedDate, targetIds[0])
+                : await exportEntriesBatch(selectedDate, targetIds)
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = targetIds.length === 1
+                ? `entries_${selectedDate}_${targetIds[0]}.csv`
+                : `entries_${selectedDate}_combined.csv`
+            a.click()
+            URL.revokeObjectURL(url)
+        } catch (err) {
+            alert('Export failed: ' + (err as Error).message)
+        }
+    }
+
+    const handleExportCurrentContest = async () => {
         if (!selectedContestId) return
         try {
             const blob = await exportEntryFile(selectedDate, selectedContestId)
@@ -478,24 +498,6 @@ export default function EntryManagerPage() {
             const a = document.createElement('a')
             a.href = url
             a.download = `entries_${selectedDate}_${entryFile.contest_id}_selected.csv`
-            a.click()
-            URL.revokeObjectURL(url)
-        } catch (err) {
-            alert('Export failed: ' + (err as Error).message)
-        }
-    }
-
-    const handleExportSelectedContests = async () => {
-        const targetIds = selectedContestIds.size > 0
-            ? contestOrder.filter(id => selectedContestIds.has(id))
-            : entryFiles.map(entry => entry.contest_id)
-        if (targetIds.length === 0) return
-        try {
-            const blob = await exportEntriesBatch(selectedDate, targetIds)
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `entries_${selectedDate}_combined.csv`
             a.click()
             URL.revokeObjectURL(url)
         } catch (err) {
@@ -1000,10 +1002,17 @@ export default function EntryManagerPage() {
                     <button
                         className="export-btn"
                         onClick={handleExport}
-                        disabled={!selectedContestId || currentEntriesCount === 0}
+                        disabled={applyBuildTargetInfo.contestCount === 0 || applyBuildTargetInfo.totalEntries === 0}
                     >
-                        Export All Lineups
+                        {applyBuildTargetInfo.contestCount > 1
+                            ? applyBuildTargetInfo.applyingAllByDefault
+                                ? `Export All Contests (${applyBuildTargetInfo.totalEntries} lineups)`
+                                : `Export ${applyBuildTargetInfo.contestCount} Contests (${applyBuildTargetInfo.totalEntries} lineups)`
+                            : 'Export All Lineups'}
                     </button>
+                    {applyBuildTargetInfo.applyingAllByDefault && (
+                        <div className="muted">No contests selected; exporting all uploaded contests.</div>
+                    )}
                     <div className="lineup-export-actions">
                         <button
                             className="lineups-action-btn"
@@ -1023,10 +1032,10 @@ export default function EntryManagerPage() {
                     </div>
                     <button
                         className="export-btn"
-                        onClick={handleExportSelectedContests}
-                        disabled={entryFiles.length === 0}
+                        onClick={handleExportCurrentContest}
+                        disabled={!selectedContestId || currentEntriesCount === 0}
                     >
-                        Export Selected Contests
+                        Export Current Contest
                     </button>
                 </aside>
 
