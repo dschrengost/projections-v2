@@ -1,5 +1,8 @@
 # Minutes Dashboard (Local Workflow)
 
+For live operator redesign direction, see
+`docs/pipeline/LIVE_OPERATIONS_UI_SPEC.md`.
+
 This describes the minimal commands for scoring a slate, starting the FastAPI backend,
 and running the React dashboard (dev + production modes).
 

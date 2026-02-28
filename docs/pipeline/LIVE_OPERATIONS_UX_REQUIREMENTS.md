@@ -6,6 +6,7 @@ requirements for the live pipeline and control plane.
 It complements:
 
 - `docs/pipeline/LIVE_PIPELINE_PRODUCTION_SPEC.md`
+- `docs/pipeline/LIVE_OPERATIONS_UI_SPEC.md`
 - `docs/pipeline/MANUAL_OVERRIDE_CONTRACT.md`
 
 ## 1. Core Principles
