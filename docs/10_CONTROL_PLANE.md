@@ -48,7 +48,7 @@ uv run prefect deployment ls
 
 | Flow | Schedule | Purpose |
 |------|----------|---------|
-| `nba-live-pipeline` | Every 5 min (game days) | Canonical v3 prediction pipeline |
+| `nba-live-pipeline` | Every 15 min from 8-10 AM ET, every 5 min from 11 AM-10:30 PM ET | Canonical v3 prediction pipeline |
 | `nba-live-pipeline-legacy` | Manual only (no schedule) | Rollback deployment (pre-v3 flow) |
 | `boxscores-etl` | 3:30 AM daily | Scrape previous-day boxscores to bronze + legacy labels |
 | `minutes-labels-refresh` | 3:40 AM daily | Materialize `gold/labels_minutes_v1` from boxscore raw partitions |

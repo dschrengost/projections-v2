@@ -49,7 +49,11 @@ deployments:
         NUMEXPR_NUM_THREADS: "1"
         MALLOC_ARENA_MAX: "2"
   schedules:
-    - cron: "*/15 8-23 * * *"
+    - cron: "*/15 8-10 * * *"
+      timezone: "America/New_York"
+    - cron: "*/5 11-21 * * *"
+      timezone: "America/New_York"
+    - cron: "0,5,10,15,20,25,30 22 * * *"
       timezone: "America/New_York"
 
 - name: nba-live-pipeline-legacy
