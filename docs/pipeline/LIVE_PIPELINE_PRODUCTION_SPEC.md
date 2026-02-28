@@ -813,8 +813,8 @@ Remaining validation needed:
 
 - run the same canonical v3 flow on the next pre-lock slate and confirm:
   - lock-window freshness checks activate for games with `minutes_to_tip > 0`
-  - bounded wait behavior triggers correctly around the 1 PM / 5 PM ET report
-    windows when inputs are lagging
+  - bounded wait behavior triggers correctly around the 1 PM / 2:30 PM / 5 PM
+    ET report windows when inputs are lagging
   - stale-publish blocking behaves correctly when newer injuries or lineups
     arrive after freeze and before publish
 

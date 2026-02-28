@@ -11,6 +11,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _compute_per_game_input_digests,
     _detect_stale_authoritative_inputs,
     _merge_parquet_for_target_games,
+    _report_window_status,
     _summarize_world_contracts_from_frame,
     _resolve_season_month,
 )
@@ -287,6 +288,29 @@ def test_detect_stale_authoritative_inputs_flags_newer_injuries_and_lineups() ->
     )
     assert report["stale"] is True
     assert report["stale_games"][0]["game_id"] == 22500831
+
+
+def test_report_window_status_activates_for_230pm_et_boundary() -> None:
+    report = _report_window_status(
+        run_ts=pd.Timestamp("2026-02-28T19:33:00Z"),
+        per_game_freshness={
+            "22500863": {
+                "game_id": 22500863,
+                "tip_ts": "2026-02-28T23:00:00Z",
+                "is_live_game": True,
+                "sources": {
+                    "injuries": {
+                        "latest_as_of_ts": "2026-02-28T19:10:00Z",
+                        "source_used": "bronze",
+                    }
+                },
+            }
+        },
+    )
+    assert report["active"] is True
+    assert report["label"] == "nba_injury_report_230pm_et"
+    assert report["needs_wait"] is True
+    assert report["blocking_games"][0]["game_id"] == 22500863
 
 
 def test_input_change_set_detects_changed_and_new_games() -> None:

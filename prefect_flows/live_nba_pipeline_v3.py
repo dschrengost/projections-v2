@@ -132,6 +132,13 @@ _REPORT_WINDOWS = (
         "post_minutes": 15,
     },
     {
+        "label": "nba_injury_report_230pm_et",
+        "hour": 14,
+        "minute": 30,
+        "pre_minutes": 10,
+        "post_minutes": 15,
+    },
+    {
         "label": "nba_injury_report_5pm_et",
         "hour": 17,
         "minute": 0,
