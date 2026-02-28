@@ -2067,6 +2067,90 @@ def scrape_core_inputs_task(
     return marker
 
 
+@task(name="score-ownership-linestar", retries=2, retry_delay_seconds=120)
+def score_ownership_linestar_task(
+    *,
+    game_date: str,
+    run_id: str,
+    data_root: Path,
+    placeholder_mode: bool,
+) -> Path:
+    out_dir = data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if placeholder_mode:
+        features_path = (
+            data_root
+            / "live"
+            / FEATURES_ROOT
+            / game_date
+            / f"run={run_id}"
+            / "features.parquet"
+        )
+        if features_path.exists():
+            features_df = pd.read_parquet(features_path)
+            placeholder_df = features_df.copy()
+            if "player_id" not in placeholder_df.columns:
+                placeholder_df["player_id"] = np.arange(len(placeholder_df)) + 1
+            if "player_name" not in placeholder_df.columns:
+                placeholder_df["player_name"] = placeholder_df["player_id"].map(
+                    lambda value: f"Player {value}"
+                )
+            keep_cols = [
+                column
+                for column in ["player_id", "player_name", "team_id", "game_id"]
+                if column in placeholder_df.columns
+            ]
+            placeholder_df = (
+                placeholder_df.loc[:, keep_cols]
+                .drop_duplicates(subset=["player_id"], keep="last")
+                .reset_index(drop=True)
+            )
+        else:
+            placeholder_df = pd.DataFrame(
+                {
+                    "player_id": list(range(1, 21)),
+                    "player_name": [f"Player {idx}" for idx in range(1, 21)],
+                }
+            )
+        placeholder_df["pred_own_pct"] = 0.05
+        placeholder_df["source"] = "linestar"
+        placeholder_df["model_run"] = "linestar_placeholder"
+        placeholder_df.to_parquet(out_dir / "123.parquet", index=False)
+        (out_dir / "slates.json").write_text(
+            json.dumps(
+                {
+                    "123": {
+                        "player_count": int(len(placeholder_df)),
+                        "teams": [],
+                        "first_game_time": None,
+                        "is_locked": False,
+                        "source": "linestar",
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        return out_dir
+
+    _run_python_module(
+        "projections.cli.score_ownership_linestar",
+        [
+            "--date",
+            game_date,
+            "--run-id",
+            run_id,
+            "--data-root",
+            str(data_root),
+        ],
+        data_root=data_root,
+        timeout_s=1200,
+    )
+    return out_dir
+
+
 @task(name="freeze-run-inputs", retries=0)
 def freeze_run_inputs_task(
     *,
@@ -2855,6 +2939,7 @@ def publish_atomic_task(
         "features_gtv2_v1": data_root / "live" / FEATURES_ROOT / game_date,
         "scores_gtv2": data_root / "artifacts" / SCORES_ROOT / f"game_date={game_date}",
         "worlds_gtv2": data_root / "artifacts" / WORLDS_ROOT / f"game_date={game_date}",
+        "ownership_predictions": data_root / "silver" / "ownership_predictions" / game_date,
         "unified_projections": data_root / "artifacts" / "projections" / game_date,
     }
     for stage, dataset_dir in targets.items():
@@ -3305,6 +3390,14 @@ def nba_live_pipeline_v3_flow(
             json.dumps(postflight_report, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        ownership_dir = score_ownership_linestar_task(
+            game_date=resolved_game_date,
+            run_id=run_id,
+            data_root=data_root,
+            placeholder_mode=bool(placeholder_mode),
+        )
+        if ownership_dir.exists():
+            control_plane.copy_manifest_to_dir(manifest_path, ownership_dir)
 
         pointer_payload: dict[str, str] = {}
         publish_status = "not_requested" if not promote_pointers else "pending"

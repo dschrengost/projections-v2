@@ -859,6 +859,9 @@ What is already done:
 - Phase 1 control-plane hardening is in the canonical v3 flow
 - Phase 2 baseline digests, rerun policy, game-scoped execution, and merge-back
   are implemented
+- LineStar ownership scoring runs on every canonical v3 execution and publishes
+  run-scoped ownership artifacts, but it does not participate in delta
+  detection or rerun policy
 - focused tests for control-plane and incremental execution behavior are
   passing
 

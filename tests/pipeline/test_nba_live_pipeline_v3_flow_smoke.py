@@ -50,6 +50,15 @@ def test_nba_live_pipeline_v3_flow_smoke(
     assert (v3_run_dir / "postflight_report.json").exists()
     assert (v3_run_dir / "stale_publish_report.json").exists()
     assert (v3_run_dir / "input_change_set.json").exists()
+    ownership_run_dir = (
+        tmp_path
+        / "silver"
+        / "ownership_predictions"
+        / game_date
+        / f"run={run_id}"
+    )
+    assert ownership_run_dir.exists()
+    assert list(ownership_run_dir.glob("*.parquet"))
 
     promoted_pointer = (
         tmp_path
@@ -63,6 +72,18 @@ def test_nba_live_pipeline_v3_flow_smoke(
     payload = json.loads(promoted_pointer.read_text(encoding="utf-8"))
     assert payload["run_id"] == run_id
     assert "source_freshness_summary" in payload
+
+    ownership_pointer = (
+        tmp_path
+        / "silver"
+        / "ownership_predictions"
+        / game_date
+        / control_plane.LATEST_DIRNAME
+        / control_plane.CURRENT_POINTER_NAME
+    )
+    assert ownership_pointer.exists()
+    ownership_payload = json.loads(ownership_pointer.read_text(encoding="utf-8"))
+    assert ownership_payload["run_id"] == run_id
 
 
 def test_nba_live_pipeline_v3_flow_skips_gracefully_when_writer_active(
