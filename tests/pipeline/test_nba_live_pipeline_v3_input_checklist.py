@@ -756,7 +756,7 @@ def test_feature_input_checklist_fails_when_action_props_required_and_missing(
     assert "props_source_policy_satisfied" in report["failed_required_checks"]
 
 
-def test_feature_input_checklist_passes_with_rotowire_fallback(tmp_path: Path) -> None:
+def test_feature_input_checklist_passes_with_rotowire_live_props(tmp_path: Path) -> None:
     game_date = "2026-02-24"
     season, month = _resolve_season_month(game_date)
     game_id = 22500831
@@ -871,3 +871,9 @@ def test_feature_input_checklist_passes_with_rotowire_fallback(tmp_path: Path) -
         require_action_props=True,
     )
     assert report["failed_required_checks"] == []
+    props_check = next(
+        item
+        for item in report["checks"]
+        if item["name"] == "props_source_policy_satisfied"
+    )
+    assert props_check["details"]["selected_source"] == "rotowire"

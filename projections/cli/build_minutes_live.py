@@ -50,9 +50,7 @@ from projections.pipeline.status import JobStatus, write_status
 from projections.features.action_props import (
     ACTION_MARKET_FEATURE_COLUMNS,
     attach_action_props_features,
-    build_action_props_feature_snapshots,
     load_action_props_feature_snapshots_for_date_live,
-    load_rotowire_props_long_from_bronze,
 )
 from scrapers.nba_players import NbaPlayersScraper, PlayerProfile
 
@@ -1063,7 +1061,7 @@ def _build_minutes_live_logic(
         False,
         "--allow-rotowire-props-fallback/--no-allow-rotowire-props-fallback",
         help=(
-            "If Action Network props snapshots are missing, fallback to Rotowire bronze props "
+            "Deprecated. Live props now resolve from Rotowire bronze props "
             "converted into the same action-props feature schema."
         ),
     ),
@@ -1903,7 +1901,6 @@ def _build_minutes_live_logic(
         mean_val = float(values.mean(skipna=True)) if not values.dropna().empty else 100.0
         live_slice[col] = values.fillna(mean_val).astype(float)
 
-    action_props_dir = data_root / "bronze" / "action_network" / "props"
     action_props_snapshot_rows = 0
     action_props_matched_rows = 0
     action_props_snapshots = pd.DataFrame()
@@ -1914,12 +1911,12 @@ def _build_minutes_live_logic(
         if str(team).strip()
     }
     rotowire_props_root = data_root / "bronze" / "props"
-    if action_props_dir.exists():
+    if rotowire_props_root.exists():
         try:
             snapshot_frames: list[pd.DataFrame] = []
             source_modes: list[str] = []
             day_snapshots, day_source = load_action_props_feature_snapshots_for_date_live(
-                action_props_dir=action_props_dir,
+                action_props_dir=rotowire_props_root,
                 game_date=target_day,
                 allow_rotowire_fallback=allow_rotowire_props_fallback,
                 rotowire_props_root=rotowire_props_root,
@@ -1931,7 +1928,7 @@ def _build_minutes_live_logic(
                 source_modes.append(day_source)
 
             next_day_snapshots, next_day_source = load_action_props_feature_snapshots_for_date_live(
-                action_props_dir=action_props_dir,
+                action_props_dir=rotowire_props_root,
                 game_date=target_day + pd.Timedelta(days=1),
                 allow_rotowire_fallback=allow_rotowire_props_fallback,
                 rotowire_props_root=rotowire_props_root,
@@ -1949,16 +1946,8 @@ def _build_minutes_live_logic(
             )
             action_props_snapshot_rows = int(len(action_props_snapshots))
             action_props_source = "+".join(sorted(set(source_modes))) if source_modes else "none"
-            if "rotowire_fallback" in action_props_source:
-                msg = (
-                    "Action props fallback: using Rotowire-derived snapshots "
-                    "because Action Network snapshots were unavailable or "
-                    "did not align with slate teams."
-                )
-                warnings.append(msg)
-                typer.echo(f"[minutes-live] WARNING: {msg}")
         except Exception as exc:  # noqa: BLE001
-            warnings.append(f"Action props load failed: {exc}")
+            warnings.append(f"Live props load failed: {exc}")
 
     live_slice = attach_action_props_features(
         live_slice,
@@ -1976,63 +1965,16 @@ def _build_minutes_live_logic(
             .gt(0.0)
             .sum()
         )
-    if (
-        allow_rotowire_props_fallback
-        and action_props_matched_rows == 0
-        and "action_network" in action_props_source
-        and "rotowire_fallback" not in action_props_source
-    ):
-        fallback_frames: list[pd.DataFrame] = []
-        for fallback_day in (target_day, target_day + pd.Timedelta(days=1)):
-            rotowire_long = load_rotowire_props_long_from_bronze(
-                rotowire_props_root=rotowire_props_root,
-                game_date=fallback_day,
-            )
-            if rotowire_long.empty:
-                continue
-            fallback_frames.append(build_action_props_feature_snapshots(rotowire_long))
-        if fallback_frames:
-            fallback_snapshots = pd.concat(fallback_frames, ignore_index=True)
-            live_slice = attach_action_props_features(
-                live_slice,
-                fallback_snapshots,
-                strict_asof=True,
-                as_of_col="feature_as_of_ts",
-                tip_col="tip_ts",
-                game_date_offsets=(0, -1),
-                clamp_late_asof_to_game_date=True,
-            )
-            fallback_matched_rows = int(
-                pd.to_numeric(live_slice.get("an_has_any_props", 0), errors="coerce")
-                .fillna(0.0)
-                .gt(0.0)
-                .sum()
-            )
-            if fallback_matched_rows > 0:
-                action_props_snapshots = fallback_snapshots
-                action_props_snapshot_rows = int(len(fallback_snapshots))
-                action_props_matched_rows = fallback_matched_rows
-                action_props_source = "rotowire_fallback_zero_match"
-                msg = (
-                    "Action props fallback: switched to Rotowire-derived snapshots "
-                    "because Action Network snapshots produced zero matched rows."
-                )
-                warnings.append(msg)
-                typer.echo(f"[minutes-live] WARNING: {msg}")
-            else:
-                msg = (
-                    "Action props fallback attempted after zero Action matches, "
-                    "but Rotowire snapshots also produced zero matches."
-                )
-                warnings.append(msg)
-                typer.echo(f"[minutes-live] WARNING: {msg}")
-        else:
-            msg = (
-                "Action props fallback attempted after zero Action matches, "
-                "but no Rotowire snapshots were found."
-            )
-            warnings.append(msg)
-            typer.echo(f"[minutes-live] WARNING: {msg}")
+    if action_props_source == "none":
+        msg = "Live props unavailable: no Rotowire-derived snapshots were found for the slate."
+        warnings.append(msg)
+        typer.echo(f"[minutes-live] WARNING: {msg}")
+    elif action_props_matched_rows == 0:
+        msg = (
+            "Live props loaded from Rotowire, but zero rows matched the current live slice."
+        )
+        warnings.append(msg)
+        typer.echo(f"[minutes-live] WARNING: {msg}")
     typer.echo(
         f"[minutes-live] Action props: source={action_props_source}, snapshots={action_props_snapshot_rows}, "
         f"matched_rows={action_props_matched_rows}, total_rows={len(live_slice)}"
@@ -2171,7 +2113,7 @@ def _build_minutes_live_logic(
         "odds": _snapshot_stats(odds_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
         "roster": _snapshot_stats(roster_builder_slice, time_col="as_of_ts", run_as_of_ts=run_ts),
         "action_props": {
-            "source_dir": str(action_props_dir),
+            "source_dir": str(rotowire_props_root),
             "source": action_props_source,
             "allow_rotowire_fallback": bool(allow_rotowire_props_fallback),
             "snapshot_rows": action_props_snapshot_rows,
@@ -2319,7 +2261,7 @@ def main(
         False,
         "--allow-rotowire-props-fallback/--no-allow-rotowire-props-fallback",
         help=(
-            "If Action Network props snapshots are missing, fallback to Rotowire bronze props "
+            "Deprecated. Live props now resolve from Rotowire bronze props "
             "converted into the same action-props feature schema."
         ),
     ),

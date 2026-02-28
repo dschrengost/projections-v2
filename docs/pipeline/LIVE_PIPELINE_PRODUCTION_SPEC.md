@@ -830,6 +830,8 @@ incremental execution policy described in Section 7:
 - `odds` changes are material only within 180 minutes of tip
 - `props` changes are tracked in diagnostics but do not yet auto-trigger
   reruns
+- live props now resolve from Rotowire only; Action Network is no longer part
+  of the live critical path
 - selector, bundle, and slate-composition changes force a full-slate rebuild
 
 Execution behavior now supports:

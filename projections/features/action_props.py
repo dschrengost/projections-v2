@@ -646,38 +646,21 @@ def load_action_props_feature_snapshots_for_date_live(
     rotowire_props_root: Path | None = None,
     expected_team_tricodes: Iterable[object] | None = None,
 ) -> tuple[pd.DataFrame, str]:
-    """Load live action-props snapshots with optional Rotowire fallback.
+    """Load live props snapshots from Rotowire using the action-props schema.
 
     Returns (snapshots, source), where source is one of:
-    - "action_network"
-    - "rotowire_fallback"
+    - "rotowire"
     - "none"
+
+    The ``action_props_dir`` and ``allow_rotowire_fallback`` parameters are
+    retained for interface compatibility with older live callers, but live
+    props now resolve from Rotowire only.
     """
-    action_long = load_action_props_long_from_bronze(
-        props_dir=Path(action_props_dir),
-        game_date=game_date,
-    )
-    action_snapshots = build_action_props_feature_snapshots(action_long)
     expected_teams_norm = {
         _normalize_team_abbr(team)
         for team in (expected_team_tricodes or [])
         if str(team or "").strip()
     }
-    if not action_snapshots.empty:
-        if expected_teams_norm:
-            action_teams = {
-                _normalize_team_abbr(team)
-                for team in action_snapshots["team_tricode"].tolist()
-                if str(team or "").strip()
-            }
-            if action_teams and not action_teams.isdisjoint(expected_teams_norm):
-                return action_snapshots, "action_network"
-            action_snapshots = action_snapshots.iloc[0:0].copy()
-        else:
-            return action_snapshots, "action_network"
-
-    if not allow_rotowire_fallback:
-        return action_snapshots, "none"
 
     root = (
         Path(rotowire_props_root)
@@ -689,8 +672,19 @@ def load_action_props_feature_snapshots_for_date_live(
         game_date=game_date,
     )
     if rotowire_long.empty:
-        return action_snapshots, "none"
-    return build_action_props_feature_snapshots(rotowire_long), "rotowire_fallback"
+        return pd.DataFrame(), "none"
+    rotowire_snapshots = build_action_props_feature_snapshots(rotowire_long)
+    if rotowire_snapshots.empty:
+        return rotowire_snapshots, "none"
+    if expected_teams_norm:
+        rotowire_teams = {
+            _normalize_team_abbr(team)
+            for team in rotowire_snapshots["team_tricode"].tolist()
+            if str(team or "").strip()
+        }
+        if rotowire_teams and rotowire_teams.isdisjoint(expected_teams_norm):
+            return rotowire_snapshots.iloc[0:0].copy(), "none"
+    return rotowire_snapshots, "rotowire"
 
 
 def attach_action_props_features(

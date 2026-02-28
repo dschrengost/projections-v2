@@ -30,7 +30,7 @@ import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -43,7 +43,6 @@ from projections import model_selectors, paths
 from projections.etl import storage as bronze_storage
 from projections.features.action_props import (
     build_action_props_feature_snapshots,
-    load_action_props_feature_snapshots_for_date,
     load_rotowire_props_long_from_bronze,
 )
 from projections.pipeline import control_plane, writer_guard
@@ -1314,9 +1313,6 @@ def _build_feature_input_checklist(
     allow_priors_fallback: bool,
     allow_rotowire_props_fallback: bool = False,
     require_action_props: bool = True,
-    action_props_loader: Callable[
-        ..., pd.DataFrame
-    ] = load_action_props_feature_snapshots_for_date,
 ) -> dict[str, Any]:
     day = pd.Timestamp(game_date).normalize()
     run_ts = pd.to_datetime(run_as_of_ts, utc=True, errors="coerce")
@@ -1526,32 +1522,9 @@ def _build_feature_input_checklist(
         }
     )
 
-    action_props_dir = data_root / "bronze" / "action_network" / "props"
     rotowire_props_root = data_root / "bronze" / "props"
     action_props_day = day.date().isoformat()
     action_props_next_day = (day + pd.Timedelta(days=1)).date().isoformat()
-    raw_action_props_files = sorted(
-        action_props_dir.glob(f"{action_props_day}_*.json")
-    ) + sorted(action_props_dir.glob(f"{action_props_next_day}_*.json"))
-    action_props_snapshots = pd.DataFrame()
-    action_props_parse_error: str | None = None
-    if action_props_dir.exists():
-        try:
-            day_snap = action_props_loader(props_dir=action_props_dir, game_date=day)
-            next_snap = action_props_loader(
-                props_dir=action_props_dir, game_date=day + pd.Timedelta(days=1)
-            )
-            frames = [
-                df
-                for df in (day_snap, next_snap)
-                if isinstance(df, pd.DataFrame) and not df.empty
-            ]
-            action_props_snapshots = (
-                pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-            )
-        except Exception as exc:  # noqa: BLE001
-            action_props_parse_error = str(exc)
-
     rotowire_raw_files = sorted(
         (rotowire_props_root / f"game_date={action_props_day}").glob("*.parquet")
     ) + sorted(
@@ -1582,67 +1555,6 @@ def _build_feature_input_checklist(
         except Exception as exc:  # noqa: BLE001
             rotowire_parse_error = str(exc)
 
-    checks.append(
-        {
-            "name": "action_network_props_raw_files",
-            "required": False,
-            "ok": bool(len(raw_action_props_files) > 0),
-            "details": {
-                "dir": str(action_props_dir),
-                "day_file_glob": f"{action_props_day}_*.json",
-                "next_day_file_glob": f"{action_props_next_day}_*.json",
-                "raw_file_count": int(len(raw_action_props_files)),
-            },
-        }
-    )
-    latest_action_props_ts = _latest_ts(
-        action_props_snapshots, time_col="action_props_as_of_ts"
-    )
-    checks.append(
-        {
-            "name": "action_network_props_parsed_snapshots",
-            "required": False,
-            "ok": bool(
-                not action_props_snapshots.empty and action_props_parse_error is None
-            ),
-            "details": {
-                "parsed_rows": int(len(action_props_snapshots)),
-                "latest_action_props_as_of_ts": None
-                if latest_action_props_ts is None
-                else latest_action_props_ts.isoformat(),
-                "parse_error": action_props_parse_error,
-            },
-        }
-    )
-    action_props_teams = (
-        {
-            _normalize_props_team_abbr(team)
-            for team in action_props_snapshots.get(
-                "team_tricode", pd.Series(dtype="object")
-            )
-            .dropna()
-            .tolist()
-            if str(team).strip()
-        }
-        if not action_props_snapshots.empty
-        else set()
-    )
-    action_props_team_overlap = action_props_teams.intersection(expected_props_teams)
-    action_overlap_ok = bool((not expected_props_teams) or action_props_team_overlap)
-    checks.append(
-        {
-            "name": "action_network_props_team_overlap",
-            "required": False,
-            "ok": bool(action_overlap_ok),
-            "details": {
-                "expected_slate_team_count": int(len(expected_props_teams)),
-                "snapshot_team_count": int(len(action_props_teams)),
-                "overlap_team_count": int(len(action_props_team_overlap)),
-                "expected_slate_teams": sorted(expected_props_teams),
-                "overlap_teams": sorted(action_props_team_overlap),
-            },
-        }
-    )
     checks.append(
         {
             "name": "rotowire_props_raw_files",
@@ -1710,21 +1622,12 @@ def _build_feature_input_checklist(
             },
         }
     )
-    action_ok = bool(
-        not action_props_snapshots.empty
-        and action_props_parse_error is None
-        and action_overlap_ok
-    )
     rotowire_ok = bool(
         not rotowire_snapshots.empty
         and rotowire_parse_error is None
         and rotowire_overlap_ok
     )
-    policy_ok = (
-        (not require_action_props)
-        or action_ok
-        or (allow_rotowire_props_fallback and rotowire_ok)
-    )
+    policy_ok = (not require_action_props) or rotowire_ok
     checks.append(
         {
             "name": "props_source_policy_satisfied",
@@ -1733,17 +1636,9 @@ def _build_feature_input_checklist(
             "details": {
                 "require_action_props": bool(require_action_props),
                 "allow_rotowire_props_fallback": bool(allow_rotowire_props_fallback),
-                "action_network_ok": bool(action_ok),
+                "live_props_source": "rotowire",
                 "rotowire_ok": bool(rotowire_ok),
-                "selected_source": (
-                    "action_network"
-                    if action_ok
-                    else (
-                        "rotowire_fallback"
-                        if allow_rotowire_props_fallback and rotowire_ok
-                        else "none"
-                    )
-                ),
+                "selected_source": "rotowire" if rotowire_ok else "none",
             },
         }
     )
@@ -1836,15 +1731,7 @@ def _build_feature_input_checklist(
         }
     )
 
-    selected_props_source = (
-        "action_network"
-        if action_ok
-        else (
-            "rotowire_fallback"
-            if allow_rotowire_props_fallback and rotowire_ok
-            else "none"
-        )
-    )
+    selected_props_source = "rotowire" if rotowire_ok else "none"
     schedule_tip_by_game = _latest_ts_by_game(slate_df, time_col="tip_ts")
     odds_latest_by_game = _latest_ts_by_game(odds_slate, time_col="as_of_ts")
     roster_latest_by_game = _latest_ts_by_game(roster_slate, time_col="as_of_ts")
@@ -1880,11 +1767,6 @@ def _build_feature_input_checklist(
         slate_game_ids,
         exclude_columns={"ingested_ts", "lineup_timestamp", "created_at", "updated_at"},
     )
-    action_props_latest_by_game = _latest_ts_by_game_from_teams(
-        slate_df,
-        action_props_snapshots,
-        time_col="action_props_as_of_ts",
-    )
     rotowire_props_latest_by_game = _latest_ts_by_game_from_teams(
         slate_df,
         rotowire_snapshots,
@@ -1912,14 +1794,8 @@ def _build_feature_input_checklist(
             injuries_source_used = "none"
             injuries_latest = None
             injuries_digest = None
-        action_props_ts = action_props_latest_by_game.get(int(gid))
         rotowire_props_ts = rotowire_props_latest_by_game.get(int(gid))
-        if selected_props_source == "action_network":
-            props_latest = action_props_ts
-        elif selected_props_source == "rotowire_fallback":
-            props_latest = rotowire_props_ts
-        else:
-            props_latest = action_props_ts or rotowire_props_ts
+        props_latest = rotowire_props_ts
         per_game_freshness[str(int(gid))] = {
             "game_id": int(gid),
             "tip_ts": _ts_to_iso(tip_ts),
@@ -1970,7 +1846,6 @@ def _build_feature_input_checklist(
                     "source_used": selected_props_source,
                     "latest_as_of_ts": _ts_to_iso(props_latest),
                     "age_minutes": _age_minutes(run_ts, props_latest),
-                    "action_network_latest_as_of_ts": _ts_to_iso(action_props_ts),
                     "rotowire_latest_as_of_ts": _ts_to_iso(rotowire_props_ts),
                 },
             },
@@ -2050,7 +1925,8 @@ def scrape_core_inputs_task(
             "placeholder_mode": False,
             "replay_mode": True,
             "completed_at": _utc_now_iso(),
-            "action_props_required": bool(require_action_props),
+            "props_required": bool(require_action_props),
+            "live_props_source": "rotowire",
             "allow_rotowire_props_fallback": bool(allow_rotowire_props_fallback),
             "note": "scrape step skipped in replay_mode; existing snapshots are used",
         }
@@ -2089,9 +1965,8 @@ def scrape_core_inputs_task(
         timeout_s=900,
     )
 
-    action_props_status: dict[str, str] = {
+    props_status: dict[str, str] = {
         "scrape_props_cli": "not_run",
-        "action_network_backfill": "not_run",
     }
     try:
         _run_python_module(
@@ -2100,44 +1975,18 @@ def scrape_core_inputs_task(
             data_root=data_root,
             timeout_s=300,
         )
-        action_props_status["scrape_props_cli"] = "ok"
+        props_status["scrape_props_cli"] = "ok"
     except Exception as exc:  # noqa: BLE001
-        action_props_status["scrape_props_cli"] = f"failed: {exc}"
-        if require_action_props and not allow_rotowire_props_fallback:
+        props_status["scrape_props_cli"] = f"failed: {exc}"
+        if require_action_props:
             raise RuntimeError(
-                "action props scrape failed and require_action_props=True with no Rotowire fallback: "
-                f"{exc}"
+                "live props scrape failed while require_action_props=True: " f"{exc}"
             ) from exc
-
-    try:
-        action_backfill_timeout_s = 240 if allow_rotowire_props_fallback else 1200
-        _run_python_module(
-            "scrapers.action_network.props_backfill",
-            [
-                "--start-date",
-                game_date,
-                "--end-date",
-                game_date,
-                "--workers",
-                "40",
-                "--refresh-older-than-minutes",
-                "20",
-            ],
-            data_root=data_root,
-            timeout_s=action_backfill_timeout_s,
-        )
-        action_props_status["action_network_backfill"] = "ok"
-    except Exception as exc:  # noqa: BLE001
-        action_props_status["action_network_backfill"] = f"failed: {exc}"
-        if require_action_props and not allow_rotowire_props_fallback:
-            raise RuntimeError(
-                "Action Network props backfill failed and require_action_props=True with no Rotowire fallback: "
-                f"{exc}"
-            ) from exc
-
-    props_dir = data_root / "bronze" / "action_network" / "props"
+    props_dir = data_root / "bronze" / "props"
     day = pd.Timestamp(game_date).normalize()
-    raw_props_files = sorted(props_dir.glob(f"{day.date().isoformat()}_*.json"))
+    raw_props_files = sorted(
+        (props_dir / f"game_date={day.date().isoformat()}").glob("*.parquet")
+    )
     _run_python_module(
         "scripts.dk.run_daily_salaries",
         ["--game-date", game_date],
@@ -2148,10 +1997,11 @@ def scrape_core_inputs_task(
         "game_date": game_date,
         "placeholder_mode": False,
         "completed_at": _utc_now_iso(),
-        "action_props_required": bool(require_action_props),
+        "props_required": bool(require_action_props),
+        "live_props_source": "rotowire",
         "allow_rotowire_props_fallback": bool(allow_rotowire_props_fallback),
-        "action_props_status": action_props_status,
-        "action_props_raw_file_count": int(len(raw_props_files)),
+        "props_status": props_status,
+        "rotowire_props_raw_file_count": int(len(raw_props_files)),
     }
     marker.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return marker
@@ -2300,11 +2150,6 @@ def build_features_gtv2_live_task(
                 f"{failed}. See {input_checklist_path}"
             )
         selected_props_source = _selected_props_source_from_checklist(checklist)
-        if selected_props_source == "rotowire_fallback":
-            print(
-                "[v3][props] WARNING: Rotowire fallback source selected; "
-                "source-distribution parity drift risk is elevated."
-            )
         props_source_report_path = run_dir / "props_source_report.json"
         props_source_report_path.write_text(
             json.dumps(
@@ -2313,6 +2158,7 @@ def build_features_gtv2_live_task(
                     "run_id": run_id,
                     "run_as_of_ts": run_as_of_ts,
                     "selected_source": selected_props_source,
+                    "live_props_source": "rotowire",
                     "require_action_props": bool(require_action_props),
                     "allow_rotowire_props_fallback": bool(allow_rotowire_fallback_cfg),
                 },

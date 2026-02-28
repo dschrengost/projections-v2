@@ -382,7 +382,7 @@ def test_live_action_props_loader_falls_back_to_rotowire(tmp_path) -> None:
         allow_rotowire_fallback=True,
         rotowire_props_root=tmp_path / "bronze" / "props",
     )
-    assert source == "rotowire_fallback"
+    assert source == "rotowire"
     assert len(snapshots) == 1
     assert int(snapshots.iloc[0]["an_has_any_props"]) == 1
 
@@ -452,7 +452,7 @@ def test_live_action_props_loader_falls_back_when_action_teams_off_slate(tmp_pat
         expected_team_tricodes={"NYK"},
     )
 
-    assert source == "rotowire_fallback"
+    assert source == "rotowire"
     assert len(snapshots) == 1
     row = snapshots.iloc[0]
     assert row["team_tricode"] == "NYK"
