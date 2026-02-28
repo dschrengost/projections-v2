@@ -528,10 +528,18 @@ def _latest_ts_by_game_from_teams(
 ) -> dict[int, pd.Timestamp]:
     if slate_df.empty or source_df.empty or time_col not in source_df.columns:
         return {}
-    if "team_tricode" not in source_df.columns:
+    team_col = next(
+        (
+            candidate
+            for candidate in ("team_tricode", "team_abbreviation", "team")
+            if candidate in source_df.columns
+        ),
+        None,
+    )
+    if team_col is None:
         return {}
-    working = source_df.loc[:, ["team_tricode", time_col]].copy()
-    working["team_tricode"] = working["team_tricode"].map(_normalize_props_team_abbr)
+    working = source_df.loc[:, [team_col, time_col]].copy()
+    working["team_tricode"] = working[team_col].map(_normalize_props_team_abbr)
     working[time_col] = pd.to_datetime(working[time_col], utc=True, errors="coerce")
     working = working.dropna(subset=["team_tricode", time_col])
     if working.empty:
@@ -552,6 +560,46 @@ def _latest_ts_by_game_from_teams(
                 ts_values.append(pd.Timestamp(ts))
         if ts_values:
             out[int(game_id)] = max(ts_values)
+    return out
+
+
+def _content_digest_by_game_from_teams(
+    slate_df: pd.DataFrame,
+    source_df: pd.DataFrame,
+    *,
+    exclude_columns: set[str] | None = None,
+) -> dict[int, str | None]:
+    if slate_df.empty or source_df.empty:
+        return {}
+    team_col = next(
+        (
+            candidate
+            for candidate in ("team_tricode", "team_abbreviation", "team")
+            if candidate in source_df.columns
+        ),
+        None,
+    )
+    if team_col is None:
+        return {}
+    working = source_df.copy()
+    working["_team_tricode"] = working[team_col].map(_normalize_props_team_abbr)
+    working = working.loc[working["_team_tricode"].astype(str).str.len() > 0].copy()
+    if working.empty:
+        return {}
+    out: dict[int, str | None] = {}
+    for row in slate_df.itertuples(index=False):
+        game_id = pd.to_numeric(getattr(row, "game_id", None), errors="coerce")
+        if pd.isna(game_id):
+            continue
+        teams = {
+            _normalize_props_team_abbr(getattr(row, attr, None))
+            for attr in ("home_team_tricode", "away_team_tricode")
+        }
+        teams = {team for team in teams if team}
+        game_df = working.loc[working["_team_tricode"].isin(teams)].copy()
+        out[int(game_id)] = _frame_content_digest(
+            game_df, exclude_columns=set(exclude_columns or set()) | {"_team_tricode"}
+        )
     return out
 
 
@@ -1834,11 +1882,35 @@ def _build_feature_input_checklist(
         slate_game_ids,
         exclude_columns={"as_of_ts", "ingested_ts", "created_at", "updated_at"},
     )
-    rotowire_latest_by_game = _latest_ts_by_game(rotowire_slate, time_col="ingested_ts")
-    rotowire_digest_by_game = _content_digest_by_game(
-        rotowire_slate,
-        slate_game_ids,
-        exclude_columns={"ingested_ts", "lineup_timestamp", "created_at", "updated_at"},
+    rotowire_latest_by_game = (
+        _latest_ts_by_game(rotowire_slate, time_col="ingested_ts")
+        if not rotowire_slate.empty
+        else _latest_ts_by_game_from_teams(
+            slate_df, rotowire_df, time_col="ingested_ts"
+        )
+    )
+    rotowire_digest_by_game = (
+        _content_digest_by_game(
+            rotowire_slate,
+            slate_game_ids,
+            exclude_columns={
+                "ingested_ts",
+                "lineup_timestamp",
+                "created_at",
+                "updated_at",
+            },
+        )
+        if not rotowire_slate.empty
+        else _content_digest_by_game_from_teams(
+            slate_df,
+            rotowire_df,
+            exclude_columns={
+                "ingested_ts",
+                "lineup_timestamp",
+                "created_at",
+                "updated_at",
+            },
+        )
     )
     rotowire_props_latest_by_game = _latest_ts_by_game_from_teams(
         slate_df,

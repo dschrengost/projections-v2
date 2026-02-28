@@ -242,6 +242,132 @@ def test_feature_input_checklist_emits_lock_window_failures(tmp_path: Path) -> N
     assert lock_window["failures"][0]["game_id"] == game_id
 
 
+def test_feature_input_checklist_maps_rotowire_lineups_by_team_without_game_id(
+    tmp_path: Path,
+) -> None:
+    game_date = "2026-02-28"
+    season, month = _resolve_season_month(game_date)
+    game_id = 22500865
+
+    _write(
+        tmp_path
+        / "silver"
+        / "schedule"
+        / f"season={season}"
+        / f"month={month:02d}"
+        / "schedule.parquet",
+        pd.DataFrame(
+            {
+                "game_id": [game_id],
+                "game_date": [game_date],
+                "tip_ts": ["2026-03-01T00:00:00Z"],
+                "home_team_tricode": ["HOU"],
+                "away_team_tricode": ["MIA"],
+            }
+        ),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "roster_nightly"
+        / f"season={season}"
+        / f"month={month:02d}"
+        / "roster.parquet",
+        pd.DataFrame(
+            {
+                "game_id": [game_id, game_id],
+                "player_id": [1, 2],
+                "team_id": [10, 20],
+                "game_date": [game_date, game_date],
+                "as_of_ts": ["2026-02-28T20:00:00Z", "2026-02-28T20:00:00Z"],
+            }
+        ),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "odds_snapshot"
+        / f"season={season}"
+        / f"month={month:02d}"
+        / "odds_snapshot.parquet",
+        pd.DataFrame({"game_id": [game_id], "as_of_ts": ["2026-02-28T20:00:00Z"]}),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "injuries_snapshot"
+        / f"season={season}"
+        / f"month={month:02d}"
+        / "injuries_snapshot.parquet",
+        pd.DataFrame(
+            {
+                "game_id": [game_id],
+                "player_id": [1],
+                "as_of_ts": ["2026-02-28T20:00:00Z"],
+            }
+        ),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "rotowire_lineups"
+        / f"date={game_date}"
+        / "lineups.parquet",
+        pd.DataFrame(
+            {
+                "team_abbreviation": ["HOU", "MIA"],
+                "opponent_abbreviation": ["MIA", "HOU"],
+                "player_name": ["Amen Thompson", "Kevin Love"],
+                "lineup_role": ["confirmed_starter", "confirmed_starter"],
+                "ingested_ts": ["2026-02-28T20:30:05Z", "2026-02-28T20:30:05Z"],
+            }
+        ),
+    )
+    _write(
+        tmp_path / "labels" / f"season={season}" / "boxscore_labels.parquet",
+        pd.DataFrame(
+            {
+                "game_id": [123],
+                "player_id": [1],
+                "team_id": [10],
+                "game_date": ["2026-02-27"],
+                "minutes": [20.0],
+            }
+        ),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "rotation_priors_v1"
+        / "team_game_priors"
+        / f"season={season}"
+        / f"game_id={str(game_id).zfill(10)}.parquet",
+        pd.DataFrame({"game_id": [str(game_id).zfill(10)], "team_id": [10]}),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "rotation_priors_v1"
+        / "player_game_priors"
+        / f"season={season}"
+        / f"game_id={str(game_id).zfill(10)}.parquet",
+        pd.DataFrame({"game_id": [str(game_id).zfill(10)], "person_id": [1]}),
+    )
+
+    report = _build_feature_input_checklist(
+        game_date=game_date,
+        run_as_of_ts="2026-02-28T20:30:20Z",
+        data_root=tmp_path,
+        allow_priors_fallback=False,
+        require_action_props=False,
+    )
+    lineup_info = report["source_freshness"]["per_game"][str(game_id)]["sources"][
+        "lineups"
+    ]
+    assert lineup_info["latest_as_of_ts"] == "2026-02-28T20:30:05+00:00"
+    assert lineup_info["content_digest"] is not None
+
+
 def test_detect_stale_authoritative_inputs_flags_newer_injuries_and_lineups() -> None:
     frozen = {
         "per_game": {
