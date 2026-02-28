@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from projections import paths
+from projections.api.optimizer_service import build_player_pool, load_projections_for_date
 from projections.contest_sim.contest_sim_service import run_contest_simulation
 from projections.contest_sim.field_library_manager import load_or_build_field_library
 from projections.contest_sim.field_library import load_field_library, list_field_library_paths
@@ -106,60 +106,56 @@ def _list_sim_builds(game_date: str) -> List[Dict[str, object]]:
     return builds
 
 
-def _load_player_ownership(game_date: str) -> Dict[str, float]:
-    """Load player_id -> ownership % mapping from projections or ownership predictions.
-    
-    Tries unified projections first, falls back to silver/ownership_predictions.
-    Returns empty dict if not available (dupe penalties disabled).
-    """
-    data_root = paths.data_path()
-    
-    # Try unified projections artifact first
-    unified_root = data_root / "artifacts" / "projections" / game_date
-    for run_dir in sorted(unified_root.glob("run=*"), reverse=True) if unified_root.exists() else []:
-        proj_path = run_dir / "projections.parquet"
-        if proj_path.exists():
-            try:
-                df = pd.read_parquet(proj_path)
-                if "player_id" in df.columns and "pred_own_pct" in df.columns:
-                    ownership = df.dropna(subset=["pred_own_pct"])
-                    result = dict(zip(ownership["player_id"].astype(str), ownership["pred_own_pct"]))
-                    logger.info(f"Loaded ownership for {len(result)} players from unified projections")
-                    return result
-            except Exception as e:
-                logger.warning(f"Failed to load unified projections: {e}")
-                continue
-    
-    # Fall back to silver/ownership_predictions
-    slate_dir = data_root / "silver" / "ownership_predictions" / game_date
-    if slate_dir.exists():
-        slate_files = [p for p in slate_dir.glob("*.parquet") if not p.name.endswith("_locked.parquet")]
-        if slate_files:
-            own_path = max(slate_files, key=lambda p: p.stat().st_size)
-            try:
-                df = pd.read_parquet(own_path)
-                if "player_id" in df.columns and "pred_own_pct" in df.columns:
-                    ownership = df.dropna(subset=["pred_own_pct"])
-                    result = dict(zip(ownership["player_id"].astype(str), ownership["pred_own_pct"]))
-                    logger.info(
-                        f"Loaded ownership for {len(result)} players from silver/ownership_predictions/{game_date}/"
-                    )
-                    return result
-            except Exception as e:
-                logger.warning(f"Failed to load per-slate ownership predictions: {e}")
-
-    own_path = data_root / "silver" / "ownership_predictions" / f"{game_date}.parquet"
-    if own_path.exists():
+def _load_player_ownership(
+    game_date: str,
+    *,
+    run_id: str | None = None,
+    draft_group_id: int | None = None,
+) -> Dict[str, float]:
+    """Load player_id -> ownership % mapping for contest-sim dupe penalties."""
+    if draft_group_id is not None:
         try:
-            df = pd.read_parquet(own_path)
-            if "player_id" in df.columns and "pred_own_pct" in df.columns:
-                ownership = df.dropna(subset=["pred_own_pct"])
-                result = dict(zip(ownership["player_id"].astype(str), ownership["pred_own_pct"]))
-                logger.info(f"Loaded ownership for {len(result)} players from silver/ownership_predictions")
+            pool = build_player_pool(
+                game_date=game_date,
+                draft_group_id=int(draft_group_id),
+                site="dk",
+                run_id=run_id,
+                data_root=paths.data_path(),
+                use_user_overrides=False,
+                ownership_mode="renormalize",
+            )
+            result = {
+                str(player["player_id"]): float(player["own_proj"])
+                for player in pool
+                if player.get("own_proj") is not None
+            }
+            if result:
+                logger.info(
+                    "Loaded ownership for %d players from optimizer pool (%s dg=%s)",
+                    len(result),
+                    game_date,
+                    draft_group_id,
+                )
                 return result
-        except Exception as e:
-            logger.warning(f"Failed to load ownership predictions: {e}")
-    
+        except Exception as exc:
+            logger.warning(
+                "Failed to load slate-specific ownership from optimizer pool for %s dg=%s: %s",
+                game_date,
+                draft_group_id,
+                exc,
+            )
+
+    try:
+        df = load_projections_for_date(game_date, run_id=run_id, data_root=paths.data_path())
+        if "player_id" in df.columns and "pred_own_pct" in df.columns:
+            ownership = df.dropna(subset=["pred_own_pct"])
+            result = dict(zip(ownership["player_id"].astype(str), ownership["pred_own_pct"]))
+            if result:
+                logger.info("Loaded ownership for %d players from projections bundle", len(result))
+                return result
+    except Exception as exc:
+        logger.warning("Failed to load ownership from projections bundle for %s: %s", game_date, exc)
+
     logger.info("No ownership data available, dupe penalties disabled")
     return {}
 
@@ -403,7 +399,15 @@ async def run_simulation(request: ContestSimRequest):
         use_field_ownership = ownership_mode in {"full", "field_only"}
 
         # Load ownership data for dupe penalty calculation (only when enabled)
-        player_ownership = _load_player_ownership(request.game_date) if use_dupe_ownership else {}
+        player_ownership = (
+            _load_player_ownership(
+                request.game_date,
+                run_id=request.run_id,
+                draft_group_id=request.draft_group_id,
+            )
+            if use_dupe_ownership
+            else {}
+        )
 
         field_lineups = None
         field_weights = None

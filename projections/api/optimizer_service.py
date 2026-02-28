@@ -90,6 +90,49 @@ def _latest_minutes_run_id(game_date: str, minutes_root: Path) -> str | None:
     return control_plane.read_promoted_run_id(minutes_root / game_date)
 
 
+def load_ownership_for_date(
+    game_date: str,
+    *,
+    draft_group_id: int | str | None = None,
+    run_id: str | None = None,
+    data_root: Path | None = None,
+) -> pd.DataFrame | None:
+    """Load ownership predictions for a slate, preferring the resolved projections run."""
+    root = data_root or get_data_root()
+    base_dir = root / "silver" / "ownership_predictions" / str(game_date)
+    draft_group_str = str(draft_group_id) if draft_group_id is not None else None
+
+    resolved_run = resolve_unified_projections_run(game_date, run_id=run_id, data_root=root)
+    candidate_dirs: list[Path] = []
+    if resolved_run.run_id:
+        candidate_dirs.append(base_dir / f"run={resolved_run.run_id}")
+    candidate_dirs.append(base_dir)
+
+    seen: set[Path] = set()
+    for slate_dir in candidate_dirs:
+        if slate_dir in seen or not slate_dir.exists():
+            continue
+        seen.add(slate_dir)
+
+        if draft_group_str:
+            own_path = slate_dir / f"{draft_group_str}.parquet"
+            if own_path.exists():
+                return pd.read_parquet(own_path)
+            continue
+
+        slate_files = [p for p in slate_dir.glob("*.parquet") if not p.name.endswith("_locked.parquet")]
+        if slate_files:
+            own_path = max(slate_files, key=lambda p: p.stat().st_size)
+            return pd.read_parquet(own_path)
+
+    if draft_group_str is None and run_id is None and control_plane.allow_unpromoted_run_reads():
+        legacy_path = root / "silver" / "ownership_predictions" / f"{game_date}.parquet"
+        if legacy_path.exists():
+            return pd.read_parquet(legacy_path)
+
+    return None
+
+
 def _load_rates_v1_live(
     game_date: str,
     root: Path,
@@ -656,6 +699,75 @@ def _is_out_status(status: object) -> bool:
     return _normalize_status(status) in {"OUT", "O", "INACTIVE"}
 
 
+def _overlay_ownership_columns(
+    pool_df: pd.DataFrame,
+    ownership_df: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Overlay slate-specific ownership onto a merged projections/salaries frame."""
+    if ownership_df is None or ownership_df.empty:
+        return pool_df
+
+    base = pool_df.copy()
+    own = ownership_df.copy()
+
+    if "dk_player_id" in base.columns and "player_id" in own.columns:
+        base["_own_join_dk_player_id"] = pd.to_numeric(base["dk_player_id"], errors="coerce").astype("Int64")
+        own["_own_join_dk_player_id"] = pd.to_numeric(own["player_id"], errors="coerce").astype("Int64")
+        join_cols = ["_own_join_dk_player_id"]
+    else:
+        base_name_col = next((c for c in ["player_name", "display_name", "name"] if c in base.columns), None)
+        own_name_col = next((c for c in ["player_name", "display_name", "name"] if c in own.columns), None)
+        base_team_col = next((c for c in ["team_tricode", "team_abbrev", "team"] if c in base.columns), None)
+        own_team_col = next((c for c in ["team", "team_abbrev", "team_tricode"] if c in own.columns), None)
+        if base_name_col is not None and own_name_col is not None:
+            base["_own_join_name"] = base[base_name_col].apply(_normalize_name)
+            own["_own_join_name"] = own[own_name_col].apply(_normalize_name)
+            join_cols = ["_own_join_name"]
+            if base_team_col and own_team_col:
+                base["_own_join_team"] = base[base_team_col].apply(_normalize_team)
+                own["_own_join_team"] = own[own_team_col].apply(_normalize_team)
+                join_cols.append("_own_join_team")
+        elif "player_id" in base.columns and "player_id" in own.columns:
+            base["player_id"] = base["player_id"].astype(str)
+            own["player_id"] = own["player_id"].astype(str)
+            join_cols = ["player_id"]
+        else:
+            return pool_df
+
+    own_cols = join_cols + [col for col in ("pred_own_pct",) if col in own.columns]
+    if len(own_cols) == len(join_cols):
+        return pool_df
+
+    sort_cols: list[str] = []
+    ascending: list[bool] = []
+    if "pred_own_pct" in own.columns:
+        sort_cols.append("pred_own_pct")
+        ascending.append(False)
+    if "salary" in own.columns:
+        sort_cols.append("salary")
+        ascending.append(True)
+    if sort_cols:
+        own = own.sort_values(sort_cols, ascending=ascending, na_position="last")
+
+    merged = base.merge(
+        own[own_cols].drop_duplicates(subset=join_cols, keep="first"),
+        on=join_cols,
+        how="left",
+        suffixes=("", "__own"),
+    )
+    if "pred_own_pct__own" in merged.columns:
+        merged["pred_own_pct"] = merged["pred_own_pct__own"].where(
+            pd.notna(merged["pred_own_pct__own"]),
+            merged.get("pred_own_pct"),
+        )
+        merged = merged.drop(columns=["pred_own_pct__own"])
+
+    return merged.drop(
+        columns=["_own_join_dk_player_id", "_own_join_name", "_own_join_team"],
+        errors="ignore",
+    )
+
+
 def build_player_pool(
     game_date: str,
     draft_group_id: int,
@@ -741,6 +853,22 @@ def build_player_pool(
         how=merge_how,
         suffixes=("", "_sal"),
     )
+
+    ownership_df = load_ownership_for_date(
+        game_date,
+        draft_group_id=draft_group_id,
+        run_id=run_id,
+        data_root=root,
+    )
+    if ownership_df is not None and not ownership_df.empty:
+        merged = _overlay_ownership_columns(merged, ownership_df)
+        own_rows = int(pd.to_numeric(merged.get("pred_own_pct"), errors="coerce").notna().sum())
+        logger.info(
+            "Overlayed ownership for %s draft_group=%s (%d rows with ownership)",
+            game_date,
+            draft_group_id,
+            own_rows,
+        )
 
     logger.info(
         "Player pool merge: %d projections x %d salaries → %d matched",
