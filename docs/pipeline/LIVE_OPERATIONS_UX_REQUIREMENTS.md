@@ -18,6 +18,9 @@ It complements:
 4. Manual availability actions must be auditable and easy to understand under
    time pressure.
 5. Strategy controls must stay separate from canonical live projection state.
+6. The first implementation may assume a single primary operator and should
+   optimize for speed, clarity, and low-friction actions over workflow
+   ceremony.
 
 ## 2. Latest Published Run Behavior
 
@@ -96,9 +99,17 @@ Not canonical live projection actions:
 
 - minute boosts
 - fantasy-point boosts
+- projection nerfs
 - direct model-output edits
 
 Those belong in optimizer / contest-sim controls.
+
+Placement requirement:
+
+- canonical live availability actions must live in `GameView`
+- slate-level `Live` can link into `GameView` and display override state
+- boosts / nerfs must live in optimizer and/or contest sim, not in the
+  canonical live control surface
 
 ### 5.2 Required manual override display
 
@@ -113,7 +124,18 @@ For each active manual override, show:
 - expiry/clear state
 - whether it has been confirmed by source data yet
 
-### 5.3 Reset behavior
+### 5.3 First-pass interaction defaults
+
+For the initial implementation:
+
+- override actions apply immediately on submit
+- a lightweight confirmation is sufficient for destructive actions
+- no approval workflow is required
+- desktop/laptop is the primary operating environment
+- the UI should always frame published state as the current truth and candidate
+  state as secondary
+
+### 5.4 Reset behavior
 
 The operator UI should provide a single reset action for manual strategy inputs
 that are not manual `OUT` overrides.

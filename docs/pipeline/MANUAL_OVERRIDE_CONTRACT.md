@@ -71,6 +71,14 @@ Operator judgment that is not availability-related should remain in:
 - contest sim portfolio controls
 - downstream build preferences
 
+UI placement requirement:
+
+- `GameView` is the canonical UI for `force_out` / `force_in`
+- `Live` may surface override state and route into `GameView`
+- optimizer / contest sim may support boosts, nerfs, exposure shifts, or
+  preference controls, but those must remain downstream-only and must not be
+  represented as canonical live overrides
+
 ## 4. Shipping Strategy
 
 ### 4.1 Stage 1: Reuse current ops/GameView path
@@ -159,6 +167,8 @@ Practical rule:
 
 - the endpoint may still accept the broader payload for compatibility
 - the live v3 pipeline should only honor availability fields
+- the first UI implementation may assume a single operator and does not need
+  an approval workflow before persisting an availability override
 
 ### 6.2 Recommended target API
 
