@@ -591,7 +591,36 @@ def test_summarize_world_contracts_from_frame_handles_clean_worlds() -> None:
         }
     )
     checks = _summarize_world_contracts_from_frame(worlds)
+    assert checks["team_minutes_not_240"] == 0
     assert checks["minutes_negative"] == 0
+
+
+def test_summarize_world_contracts_from_frame_tolerates_small_float_drift() -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 1, 1],
+            "game_id": [1, 1, 1, 1],
+            "team_id": [10, 20, 10, 20],
+            "player_id": [100, 200, 100, 200],
+            "active": [1, 1, 1, 1],
+            "minutes": [240.00003, 239.99997, 239.99998, 240.00002],
+            "fga2": [1.0, 1.0, 1.0, 1.0],
+            "fg2m": [1.0, 1.0, 1.0, 1.0],
+            "fga3": [0.0, 0.0, 0.0, 0.0],
+            "fg3m": [0.0, 0.0, 0.0, 0.0],
+            "fta": [0.0, 0.0, 0.0, 0.0],
+            "ftm": [0.0, 0.0, 0.0, 0.0],
+            "pts": [2.0, 2.0, 2.0, 2.0],
+            "reb": [0.0, 0.0, 0.0, 0.0],
+            "ast": [0.0, 0.0, 0.0, 0.0],
+            "stl": [0.0, 0.0, 0.0, 0.0],
+            "blk": [0.0, 0.0, 0.0, 0.0],
+            "tov": [0.0, 0.0, 0.0, 0.0],
+            "dk_fpts": [2.0, 2.0, 2.0, 2.0],
+        }
+    )
+    checks = _summarize_world_contracts_from_frame(worlds)
+    assert checks["team_minutes_not_240"] == 0
 
 
 def test_feature_input_checklist_fails_when_required_snapshot_missing(

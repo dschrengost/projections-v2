@@ -149,6 +149,7 @@ _REPORT_WINDOW_WAIT_TIMEOUT_SECONDS = 300
 _REPORT_WINDOW_WAIT_INTERVAL_SECONDS = 30
 _STALE_INPUT_TOLERANCE_SECONDS = 30
 _ODDS_MATERIALITY_MAX_MINUTES_TO_TIP = 180.0
+_WORLD_CONTRACT_TOL = 1e-4
 
 
 def _utc_now_iso() -> str:
@@ -1294,14 +1295,14 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
             .reset_index()
         )
         team_minutes_not_240 = int(
-            (team_minutes["minutes"].sub(240.0).abs() > 1e-6).sum()
+            (team_minutes["minutes"].sub(240.0).abs() > _WORLD_CONTRACT_TOL).sum()
         )
     else:
         team_minutes_not_240 = 0
     negative_stats = 0
     for col in ("pts", "reb", "ast", "stl", "blk", "tov"):
         if col in df.columns:
-            negative_stats += int((df[col] < -1e-6).sum())
+            negative_stats += int((df[col] < -_WORLD_CONTRACT_TOL).sum())
     if "active" in df.columns:
         inactive_mask = (
             pd.to_numeric(df["active"], errors="coerce").fillna(0).astype(int) <= 0
@@ -1325,16 +1326,18 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
             if c in df.columns
         ]
         if stat_cols:
-            nonzero_stats = df.loc[:, stat_cols].abs().sum(axis=1) > 1e-6
+            nonzero_stats = (
+                df.loc[:, stat_cols].abs().sum(axis=1) > _WORLD_CONTRACT_TOL
+            )
             inactive_nonzero_stats = int((inactive_mask & nonzero_stats).sum())
         else:
             inactive_nonzero_stats = 0
         dk_nonzero = (
             pd.to_numeric(df.get("dk_fpts", 0), errors="coerce").fillna(0.0).abs()
-            > 1e-6
+            > _WORLD_CONTRACT_TOL
         ) | (
             pd.to_numeric(df.get("minutes", 0), errors="coerce").fillna(0.0).abs()
-            > 1e-6
+            > _WORLD_CONTRACT_TOL
         )
         inactive_nonzero_fpts_proxy = int((inactive_mask & dk_nonzero).sum())
     else:
@@ -1343,15 +1346,24 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
     return {
         "team_minutes_not_240": team_minutes_not_240,
         "minutes_negative": int(
-            (df.get("minutes", pd.Series(dtype=float)) < -1e-6).sum()
+            (df.get("minutes", pd.Series(dtype=float)) < -_WORLD_CONTRACT_TOL).sum()
         ),
         "minutes_over_48": int(
-            (df.get("minutes", pd.Series(dtype=float)) > 48.0 + 1e-6).sum()
+            (
+                df.get("minutes", pd.Series(dtype=float))
+                > 48.0 + _WORLD_CONTRACT_TOL
+            ).sum()
         ),
         "negative_stats": int(negative_stats),
-        "fg2m_gt_fga2": int(((df.get("fg2m", 0) - df.get("fga2", 0)) > 1e-6).sum()),
-        "fg3m_gt_fga3": int(((df.get("fg3m", 0) - df.get("fga3", 0)) > 1e-6).sum()),
-        "ftm_gt_fta": int(((df.get("ftm", 0) - df.get("fta", 0)) > 1e-6).sum()),
+        "fg2m_gt_fga2": int(
+            ((df.get("fg2m", 0) - df.get("fga2", 0)) > _WORLD_CONTRACT_TOL).sum()
+        ),
+        "fg3m_gt_fga3": int(
+            ((df.get("fg3m", 0) - df.get("fga3", 0)) > _WORLD_CONTRACT_TOL).sum()
+        ),
+        "ftm_gt_fta": int(
+            ((df.get("ftm", 0) - df.get("fta", 0)) > _WORLD_CONTRACT_TOL).sum()
+        ),
         "inactive_nonzero_stats": inactive_nonzero_stats,
         "inactive_nonzero_fpts_proxy": inactive_nonzero_fpts_proxy,
     }
