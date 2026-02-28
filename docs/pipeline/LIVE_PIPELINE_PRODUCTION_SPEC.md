@@ -580,10 +580,14 @@ following are true:
 
 ### A. Freshness and publish safety
 
-- [ ] Add injury/lineup freshness gates to live publish path
-- [ ] Add bounded wait loops around scheduled NBA report windows
-- [ ] Add per-game source freshness fields to published metadata
-- [ ] Add stale-publish detection and alerting
+- [x] Add injury/lineup freshness gates to live publish path
+- [x] Add bounded wait loops around scheduled NBA report windows
+- [x] Add per-game source freshness fields to published metadata
+- [x] Add stale-publish detection and alerting
+
+Status note:
+- implemented in canonical v3; continue real-slate validation for lock-window
+  behavior and report-window waits
 
 ### B. Incremental pipeline execution
 
@@ -603,9 +607,13 @@ following are true:
 
 ### D. Source quality and disagreements
 
-- [ ] Define source precedence contract for availability
+- [x] Define source precedence contract for availability
 - [ ] Add disagreement diagnostics between official injuries, Rotowire, and ESPN
 - [ ] Add stronger policy for high-impact-player disagreements
+
+Status note:
+- baseline precedence is now defined in the spec and reflected in the live v3
+  path, but disagreement diagnostics and escalation policy are still open
 
 ### E. MLOps
 
