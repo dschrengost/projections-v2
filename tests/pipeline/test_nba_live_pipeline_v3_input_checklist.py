@@ -7,6 +7,7 @@ import pandas as pd
 from prefect_flows.live_nba_pipeline_v3 import (
     _build_feature_input_checklist,
     _build_input_change_set,
+    _build_publish_superseded_report,
     _build_rerun_plan,
     _compute_per_game_input_digests,
     _detect_stale_authoritative_inputs,
@@ -521,6 +522,30 @@ def test_rerun_plan_uses_game_scoped_policy_for_material_pre_tip_changes(
     )
     assert plan["mode"] == "game_scoped"
     assert plan["target_game_ids"] == [1]
+
+
+def test_publish_superseded_report_flags_newer_current_pointer(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "artifacts" / "runs" / "nba_live" / "game_date=2026-02-24" / "run=candidate" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        '{"run_id":"candidate","as_of_ts":"2026-02-24T16:00:00Z"}',
+        encoding="utf-8",
+    )
+    dataset_dir = tmp_path / "artifacts" / "projections" / "2026-02-24"
+    pointer_path = dataset_dir / "LATEST" / "current.json"
+    pointer_path.parent.mkdir(parents=True, exist_ok=True)
+    pointer_path.write_text(
+        '{"run_id":"published","as_of_ts":"2026-02-24T16:05:00Z","manifest_path":"x"}',
+        encoding="utf-8",
+    )
+
+    report = _build_publish_superseded_report(
+        run_id="candidate",
+        manifest_path=manifest_path,
+        dataset_dir=dataset_dir,
+    )
+    assert report["superseded"] is True
+    assert report["reason"] == "newer_pointer_as_of_ts"
 
 
 def test_merge_parquet_for_target_games_replaces_only_changed_games(

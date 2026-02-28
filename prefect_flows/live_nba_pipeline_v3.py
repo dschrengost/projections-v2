@@ -884,6 +884,66 @@ def _load_promoted_manifest_payload(
     return payload if isinstance(payload, dict) else None
 
 
+def _load_promoted_pointer_payload(*, dataset_dir: Path) -> dict[str, Any] | None:
+    for candidate in (
+        dataset_dir / control_plane.LATEST_DIRNAME / control_plane.CURRENT_POINTER_NAME,
+        dataset_dir / control_plane.LEGACY_POINTER_NAME,
+    ):
+        if not candidate.exists():
+            continue
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def _build_publish_superseded_report(
+    *,
+    run_id: str,
+    manifest_path: Path,
+    dataset_dir: Path,
+) -> dict[str, Any]:
+    current_pointer = _load_promoted_pointer_payload(dataset_dir=dataset_dir)
+    current_run_id = None if current_pointer is None else current_pointer.get("run_id")
+    current_as_of_ts = None if current_pointer is None else current_pointer.get("as_of_ts")
+    try:
+        manifest_payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest_payload = {}
+    candidate_as_of_ts = manifest_payload.get("as_of_ts")
+
+    superseded = False
+    reason: str | None = None
+    current_ts = pd.to_datetime(current_as_of_ts, utc=True, errors="coerce")
+    candidate_ts = pd.to_datetime(candidate_as_of_ts, utc=True, errors="coerce")
+    if current_pointer and str(current_run_id or "") != str(run_id):
+        if not pd.isna(current_ts) and not pd.isna(candidate_ts):
+            if pd.Timestamp(current_ts) > pd.Timestamp(candidate_ts):
+                superseded = True
+                reason = "newer_pointer_as_of_ts"
+            elif pd.Timestamp(current_ts) == pd.Timestamp(candidate_ts):
+                superseded = True
+                reason = "equal_as_of_ts_other_run_already_published"
+        else:
+            superseded = True
+            reason = "existing_pointer_present_unknown_order"
+
+    return {
+        "checked_at": _utc_now_iso(),
+        "superseded": bool(superseded),
+        "reason": reason,
+        "candidate": {
+            "run_id": str(run_id),
+            "manifest_path": str(manifest_path),
+            "as_of_ts": candidate_as_of_ts,
+        },
+        "current_pointer": current_pointer,
+    }
+
+
 def _build_input_change_set(
     *,
     game_date: str,
@@ -2905,7 +2965,37 @@ def nba_live_pipeline_v3_flow(
     )
     v3_run_dir.mkdir(parents=True, exist_ok=True)
 
-    with writer_guard.PipelineWriterLock(data_root=data_root, run_id=run_id):
+    try:
+        writer_lock = writer_guard.PipelineWriterLock(data_root=data_root, run_id=run_id)
+        writer_lock.__enter__()
+    except RuntimeError as exc:
+        if "Another writer is active" not in str(exc):
+            raise
+        duplicate_report = {
+            "checked_at": _utc_now_iso(),
+            "status": "skipped_due_to_active_writer",
+            "reason": str(exc),
+            "run_id": run_id,
+            "game_date": resolved_game_date,
+        }
+        (v3_run_dir / "duplicate_run_report.json").write_text(
+            json.dumps(duplicate_report, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return {
+            "run_id": run_id,
+            "game_date": resolved_game_date,
+            "manifest_path": "",
+            "features_path": "",
+            "projections_path": "",
+            "bundle_dir": str(bundle_dir),
+            "pointer_count": "0",
+            "rerun_mode": "",
+            "rerun_reason": "",
+            "publish_status": "skipped_active_writer",
+        }
+
+    try:
         os.environ["PROJECTIONS_SKIP_POINTER_WRITES"] = "1"
 
         scrape_marker = scrape_core_inputs_task(
@@ -3084,6 +3174,7 @@ def nba_live_pipeline_v3_flow(
                 "pointer_count": "0",
                 "rerun_mode": str(rerun_plan.get("mode")),
                 "rerun_reason": str(rerun_plan.get("reason")),
+                "publish_status": "not_requested",
             }
 
         features_path = build_features_gtv2_live_task(
@@ -3216,6 +3307,7 @@ def nba_live_pipeline_v3_flow(
         )
 
         pointer_payload: dict[str, str] = {}
+        publish_status = "not_requested" if not promote_pointers else "pending"
         if promote_pointers:
             if placeholder_mode:
                 stale_publish_report: dict[str, Any] = {
@@ -3261,26 +3353,53 @@ def nba_live_pipeline_v3_flow(
                         "stale publish blocked: newer authoritative injuries/lineups arrived after freeze. "
                         f"See {v3_run_dir / 'stale_publish_report.json'}"
                     )
+            superseded_report = _build_publish_superseded_report(
+                run_id=run_id,
+                manifest_path=manifest_path,
+                dataset_dir=data_root / "artifacts" / "projections" / resolved_game_date,
+            )
+            control_plane.atomic_update_json(
+                manifest_path,
+                {
+                    "publish_superseded": superseded_report,
+                },
+            )
+            (v3_run_dir / "publish_superseded_report.json").write_text(
+                json.dumps(superseded_report, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            if bool(superseded_report.get("superseded")):
+                logger.warning(
+                    "Skipping publish for %s because a newer run is already published. reason=%s current_run_id=%s",
+                    run_id,
+                    superseded_report.get("reason"),
+                    dict(superseded_report.get("current_pointer") or {}).get("run_id"),
+                )
+                publish_status = "superseded"
+            else:
+                pointer_payload = publish_atomic_task(
+                    game_date=resolved_game_date,
+                    run_id=run_id,
+                    manifest_path=manifest_path,
+                    data_root=data_root,
+                )
+                publish_status = "published"
             if placeholder_mode:
                 (v3_run_dir / "stale_publish_report.json").write_text(
                     json.dumps(stale_publish_report, indent=2, sort_keys=True),
                     encoding="utf-8",
                 )
-            pointer_payload = publish_atomic_task(
-                game_date=resolved_game_date,
-                run_id=run_id,
-                manifest_path=manifest_path,
-                data_root=data_root,
-            )
-
-    return {
-        "run_id": run_id,
-        "game_date": resolved_game_date,
-        "manifest_path": str(manifest_path),
-        "features_path": str(features_path),
-        "projections_path": str(projections_dir / "projections.parquet"),
-        "bundle_dir": str(bundle_dir),
-        "pointer_count": str(len(pointer_payload)),
-        "rerun_mode": str(rerun_plan.get("mode")),
-        "rerun_reason": str(rerun_plan.get("reason")),
-    }
+        return {
+            "run_id": run_id,
+            "game_date": resolved_game_date,
+            "manifest_path": str(manifest_path),
+            "features_path": str(features_path),
+            "projections_path": str(projections_dir / "projections.parquet"),
+            "bundle_dir": str(bundle_dir),
+            "pointer_count": str(len(pointer_payload)),
+            "rerun_mode": str(rerun_plan.get("mode")),
+            "rerun_reason": str(rerun_plan.get("reason")),
+            "publish_status": publish_status,
+        }
+    finally:
+        writer_lock.__exit__(None, None, None)
