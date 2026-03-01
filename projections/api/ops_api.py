@@ -1118,23 +1118,34 @@ def get_game_ops(
     rates_run_id = summary.get("rates_run_id")
     sim_run_id = summary.get("sim_run_id")
 
-    minutes_base_dir = data_root / "artifacts" / "minutes_v1" / "daily" / slate_day.isoformat()
-    minutes_dir, resolved_minutes_run_id = _resolve_run_dir(
-        minutes_base_dir, run_id=str(minutes_run_id) if minutes_run_id else None, parquet_name="minutes.parquet"
-    )
-    minutes_df = pd.read_parquet(minutes_dir / "minutes.parquet")
-    minutes_df = minutes_df.copy()
-    minutes_df["game_id"] = _normalize_id_str_series(minutes_df["game_id"])
-    minutes_game = minutes_df.loc[minutes_df["game_id"] == gid].copy()
+    resolved_minutes_run_id: str | None = str(minutes_run_id) if minutes_run_id else None
+    resolved_rates_run_id: str | None = str(rates_run_id) if rates_run_id else None
 
-    rates_base_dir = data_root / "gold" / "rates_v1_live" / slate_day.isoformat()
-    rates_dir, resolved_rates_run_id = _resolve_run_dir(
-        rates_base_dir, run_id=str(rates_run_id) if rates_run_id else None, parquet_name="rates.parquet"
-    )
-    rates_df = pd.read_parquet(rates_dir / "rates.parquet")
-    rates_df = rates_df.copy()
-    rates_df["game_id"] = _normalize_id_str_series(rates_df["game_id"])
-    rates_game = rates_df.loc[rates_df["game_id"] == gid].copy()
+    # Legacy minutes/rates artifacts may not exist for v3-only live runs. In that case,
+    # fall back to the unified projections frame so GameView still renders the slate.
+    try:
+        minutes_base_dir = data_root / "artifacts" / "minutes_v1" / "daily" / slate_day.isoformat()
+        minutes_dir, resolved_minutes_run_id = _resolve_run_dir(
+            minutes_base_dir, run_id=str(minutes_run_id) if minutes_run_id else None, parquet_name="minutes.parquet"
+        )
+        minutes_df = pd.read_parquet(minutes_dir / "minutes.parquet")
+        minutes_df = minutes_df.copy()
+        minutes_df["game_id"] = _normalize_id_str_series(minutes_df["game_id"])
+        minutes_game = minutes_df.loc[minutes_df["game_id"] == gid].copy()
+    except HTTPException:
+        minutes_game = unified_game.copy()
+
+    try:
+        rates_base_dir = data_root / "gold" / "rates_v1_live" / slate_day.isoformat()
+        rates_dir, resolved_rates_run_id = _resolve_run_dir(
+            rates_base_dir, run_id=str(rates_run_id) if rates_run_id else None, parquet_name="rates.parquet"
+        )
+        rates_df = pd.read_parquet(rates_dir / "rates.parquet")
+        rates_df = rates_df.copy()
+        rates_df["game_id"] = _normalize_id_str_series(rates_df["game_id"])
+        rates_game = rates_df.loc[rates_df["game_id"] == gid].copy()
+    except HTTPException:
+        rates_game = unified_game.copy()
 
     minutes_effective = minutes_game.copy()
     manual_overrides_df = load_manual_overrides_df(slate_day, data_root=data_root)

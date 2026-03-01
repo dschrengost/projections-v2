@@ -140,3 +140,50 @@ def test_manual_availability_override_endpoints_and_game_view(
     )
     assert clear_resp.status_code == 200
     assert clear_resp.json()["active_overrides"] == []
+
+
+@pytest.mark.usefixtures("monkeypatch")
+def test_ops_game_falls_back_to_unified_when_legacy_artifacts_absent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PROJECTIONS_DATA_ROOT", str(tmp_path))
+
+    slate_day = date(2026, 3, 1)
+    gid = 222
+    pid = 123
+    projections_run_id = "PROJ_RUN_ONLY"
+
+    unified_day = tmp_path / "artifacts" / "projections" / slate_day.isoformat()
+    unified_run = unified_day / f"run={projections_run_id}"
+    unified_run.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "game_date": slate_day.isoformat(),
+                "game_id": gid,
+                "player_id": pid,
+                "player_name": "Fallback Player",
+                "team_id": 10,
+                "team_tricode": "AAA",
+                "status": "Ava",
+                "play_prob": 0.91,
+                "minutes_p50": 28.5,
+                "is_projected_starter": True,
+                "is_confirmed_starter": False,
+            }
+        ]
+    ).to_parquet(unified_run / "projections.parquet", index=False)
+    _write_json(unified_day / "latest_run.json", {"run_id": projections_run_id})
+
+    app = create_app(daily_root=tmp_path, dashboard_dist=tmp_path, fpts_root=tmp_path, sim_root=tmp_path)
+    client = TestClient(app)
+
+    game_resp = client.get(
+        "/api/ops/game",
+        params={"date": slate_day.isoformat(), "game_id": str(gid)},
+    )
+    assert game_resp.status_code == 200
+    player = game_resp.json()["players"][0]
+    assert player["player_name"] == "Fallback Player"
+    assert player["minutes_baseline"]["minutes_p50"] == 28.5
+    assert player["minutes_effective"]["minutes_p50"] == 28.5
