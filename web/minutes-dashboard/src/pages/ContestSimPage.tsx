@@ -726,8 +726,8 @@ export default function ContestSimPage() {
     const [minUniques, setMinUniques] = useState(0)
     const [exposureBounds, setExposureBounds] = useState<Map<string, ExposureBounds>>(new Map())
 
-    const ownershipMode = useOwnership ? 'full' : 'off'
-    const rankMode = useOwnership ? 'current' : 'tail_only'
+    const ownershipMode = useOwnership ? 'field_only' : 'off'
+    const rankMode = 'tail_only'
     const displayOwnershipMode = (() => {
         const debugMode = simResult?.stats?.debug?.ownership_mode
         return typeof debugMode === 'string' ? debugMode : ownershipMode
@@ -1820,11 +1820,15 @@ export default function ContestSimPage() {
                             checked={useOwnership}
                             onChange={e => setUseOwnership(e.target.checked)}
                         />
-                        Use ownership + dupe penalty
+                        Use ownership-informed field
                     </label>
-                    {!useOwnership && (
+                    {useOwnership ? (
                         <div className="muted" style={{ fontSize: '0.85rem' }}>
-                            Ownership is disabled for field weights and dupe penalties.
+                            Ownership informs generated-field weights. Dupe penalty is disabled.
+                        </div>
+                    ) : (
+                        <div className="muted" style={{ fontSize: '0.85rem' }}>
+                            Ownership is disabled for generated-field weights. Dupe penalty remains disabled.
                         </div>
                     )}
 

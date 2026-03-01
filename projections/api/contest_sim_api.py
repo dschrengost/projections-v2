@@ -209,8 +209,8 @@ class ContestSimRequest(BaseModel):
     weights: Optional[List[int]] = Field(default=None, description="Entry counts per lineup")
     entry_max: int = Field(default=150, description="Max entries per user (for dupe penalty)")
     ownership_mode: str = Field(
-        default="full",
-        description="Ownership usage: full | off | dupe_only | field_only",
+        default="field_only",
+        description="Ownership usage: field_only | full | dupe_only | off",
     )
     rank_mode: str = Field(
         default="current",
@@ -367,8 +367,8 @@ class BuildFieldLibraryRequest(BaseModel):
     rebuild: bool = False
     rebuild_candidates: bool = False
     ownership_mode: str = Field(
-        default="full",
-        description="Ownership usage: full | off | dupe_only | field_only",
+        default="field_only",
+        description="Ownership usage: field_only | full | dupe_only | off",
     )
 
 

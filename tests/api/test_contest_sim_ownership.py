@@ -32,3 +32,15 @@ def test_load_player_ownership_uses_slate_player_pool(monkeypatch) -> None:
     assert captured["draft_group_id"] == 222222
     assert captured["run_id"] == "20260228T180002Z"
     assert ownership == {"2": 42.5}
+
+
+def test_contest_sim_request_defaults_disable_dupe_penalty() -> None:
+    request = contest_sim_api.ContestSimRequest(game_date="2026-02-28", lineups=[["1"]])
+
+    assert request.ownership_mode == "field_only"
+
+
+def test_build_field_library_request_defaults_disable_dupe_penalty() -> None:
+    request = contest_sim_api.BuildFieldLibraryRequest(game_date="2026-02-28", draft_group_id=222222)
+
+    assert request.ownership_mode == "field_only"
