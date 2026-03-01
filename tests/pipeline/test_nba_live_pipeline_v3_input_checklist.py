@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +17,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _summarize_world_contracts_from_frame,
     _resolve_season_month,
 )
+from projections.ops.manual_availability import upsert_manual_override
 
 
 def _write(path: Path, df: pd.DataFrame) -> None:
@@ -119,6 +121,117 @@ def test_feature_input_checklist_passes_with_required_inputs(tmp_path: Path) -> 
     assert report["failed_required_checks"] == []
     assert report["source_freshness"]["summary"]["slate_game_count"] == 1
     assert report["freshness_gates"]["lock_window"]["ok"] is True
+
+
+def test_feature_input_checklist_includes_manual_override_freshness(tmp_path: Path) -> None:
+    game_date = "2026-02-24"
+    season, month = _resolve_season_month(game_date)
+    game_id = 22500831
+
+    _write(
+        tmp_path
+        / "silver"
+        / "schedule"
+        / f"season={season}"
+        / f"month={month:02d}"
+        / "schedule.parquet",
+        pd.DataFrame(
+            {
+                "game_id": [game_id],
+                "game_date": [game_date],
+                "tip_ts": ["2026-02-24T17:00:00Z"],
+            }
+        ),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "roster_nightly"
+        / f"season={season}"
+        / f"month={month:02d}"
+        / "roster.parquet",
+        pd.DataFrame(
+            {
+                "game_id": [game_id],
+                "player_id": [1],
+                "team_id": [10],
+                "game_date": [game_date],
+                "as_of_ts": ["2026-02-24T16:00:00Z"],
+            }
+        ),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "odds_snapshot"
+        / f"season={season}"
+        / f"month={month:02d}"
+        / "odds_snapshot.parquet",
+        pd.DataFrame({"game_id": [game_id], "as_of_ts": ["2026-02-24T16:00:00Z"]}),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "injuries_snapshot"
+        / f"season={season}"
+        / f"month={month:02d}"
+        / "injuries_snapshot.parquet",
+        pd.DataFrame({"game_id": [game_id], "player_id": [1], "as_of_ts": ["2026-02-24T16:00:00Z"]}),
+    )
+    _write(
+        tmp_path / "labels" / f"season={season}" / "boxscore_labels.parquet",
+        pd.DataFrame(
+            {
+                "game_id": [123],
+                "player_id": [1],
+                "team_id": [10],
+                "game_date": ["2026-02-23"],
+                "minutes": [20.0],
+            }
+        ),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "rotation_priors_v1"
+        / "team_game_priors"
+        / f"season={season}"
+        / f"game_id={str(game_id).zfill(10)}.parquet",
+        pd.DataFrame({"game_id": [str(game_id).zfill(10)], "team_id": [10]}),
+    )
+    _write(
+        tmp_path
+        / "silver"
+        / "rotation_priors_v1"
+        / "player_game_priors"
+        / f"season={season}"
+        / f"game_id={str(game_id).zfill(10)}.parquet",
+        pd.DataFrame({"game_id": [str(game_id).zfill(10)], "person_id": [1]}),
+    )
+    upsert_manual_override(
+        date.fromisoformat(game_date),
+        game_id=str(game_id),
+        player_id="1",
+        player_name="Player One",
+        team_id=10,
+        team_tricode="AAA",
+        override_type="force_out",
+        entered_by="daniel",
+        effective_ts="2026-02-24T16:10:00Z",
+        data_root=tmp_path,
+    )
+
+    report = _build_feature_input_checklist(
+        game_date=game_date,
+        run_as_of_ts="2026-02-24T16:30:00Z",
+        data_root=tmp_path,
+        allow_priors_fallback=False,
+        require_action_props=False,
+    )
+    assert report["source_freshness"]["summary"]["manual_override_count"] == 1
+    info = report["source_freshness"]["per_game"][str(game_id)]["sources"]["manual_overrides"]
+    assert info["source_used"] == "manual_override"
+    assert info["content_digest"] is not None
 
 
 def test_feature_input_checklist_emits_lock_window_failures(tmp_path: Path) -> None:
@@ -549,6 +662,58 @@ def test_input_change_set_detects_changed_and_new_games() -> None:
     assert report["changed_game_ids"] == [1]
     assert report["new_game_ids"] == [2]
     assert report["changed_games"][0]["changed_sources"] == ["injuries"]
+
+
+def test_input_change_set_detects_manual_override_change() -> None:
+    previous_source_freshness = {
+        "per_game": {
+            "1": {
+                "game_id": 1,
+                "tip_ts": "2026-02-24T17:00:00Z",
+                "is_live_game": True,
+                "sources": {
+                    "manual_overrides": {
+                        "latest_as_of_ts": "2026-02-24T16:00:00Z",
+                        "source_used": "manual_override",
+                        "content_digest": "abc",
+                    }
+                },
+            }
+        }
+    }
+    current = {
+        "per_game": {
+            "1": {
+                "game_id": 1,
+                "tip_ts": "2026-02-24T17:00:00Z",
+                "is_live_game": True,
+                "sources": {
+                    "manual_overrides": {
+                        "latest_as_of_ts": "2026-02-24T16:05:00Z",
+                        "source_used": "manual_override",
+                        "content_digest": "def",
+                    }
+                },
+            }
+        }
+    }
+    previous_manifest = {
+        "run_id": "prev_run",
+        "source_freshness": previous_source_freshness,
+        "input_change_set": {
+            "per_game_digests": _compute_per_game_input_digests(
+                previous_source_freshness
+            ),
+        },
+    }
+
+    report = _build_input_change_set(
+        game_date="2026-02-24",
+        current_source_freshness=current,
+        previous_manifest_payload=previous_manifest,
+    )
+    assert report["changed_game_ids"] == [1]
+    assert report["changed_games"][0]["changed_sources"] == ["manual_overrides"]
 
 
 def test_input_change_set_ignores_timestamp_only_refresh_when_content_same() -> None:

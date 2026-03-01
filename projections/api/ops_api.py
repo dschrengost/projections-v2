@@ -14,6 +14,13 @@ from pydantic import BaseModel
 
 from projections import paths
 from projections.artifacts.unified_projections import load_projections_df, load_summary, resolve_unified_run_dir
+from projections.ops.manual_availability import (
+    apply_manual_overrides_to_frame,
+    clear_manual_override,
+    list_manual_overrides,
+    load_manual_overrides_df,
+    upsert_manual_override,
+)
 from projections.ops.overrides import (
     OPS_OVERRIDES_VERSION,
     OverrideKey,
@@ -374,6 +381,21 @@ def _baseline_minutes_column(df: pd.DataFrame) -> str:
     )
 
 
+class ManualAvailabilityOverrideRequest(BaseModel):
+    date: str
+    game_id: str
+    player_id: str
+    override_type: str
+    entered_by: str
+    reason_code: str | None = None
+    reason_text: str | None = None
+    source_label: str | None = None
+    expires_ts: str | None = None
+    player_name: str | None = None
+    team_id: int | None = None
+    team_tricode: str | None = None
+
+
 class OpsPlayerOverrideUpdate(BaseModel):
     game_id: str
     player_id: str
@@ -434,6 +456,70 @@ class OpsV2ApplyRequest(BaseModel):
     run_id: str | None = None
     override_infeasible: str = "error"
     overrides: list[OpsV2PlayerOverride]
+
+
+def _resolve_manual_override_player_context(
+    *,
+    game_date: date,
+    game_id: str,
+    player_id: str,
+    data_root: Path,
+    player_name: str | None,
+    team_id: int | None,
+    team_tricode: str | None,
+) -> dict[str, Any]:
+    if player_name and team_id is not None and team_tricode:
+        return {
+            "player_name": str(player_name),
+            "team_id": int(team_id),
+            "team_tricode": str(team_tricode).strip().upper(),
+        }
+
+    run_dir, _ = resolve_unified_run_dir(data_root, game_date, run_id=None)
+    if run_dir is not None:
+        unified_df = load_projections_df(run_dir)
+        if not unified_df.empty:
+            work = unified_df.copy()
+            work["game_id"] = _normalize_id_str_series(work["game_id"])
+            work["player_id"] = _normalize_id_str_series(work["player_id"])
+            match = work.loc[
+                work["game_id"].eq(str(game_id)) & work["player_id"].eq(str(player_id))
+            ].copy()
+            if not match.empty:
+                row = match.iloc[0]
+                resolved_team_id = pd.to_numeric(
+                    pd.Series([row.get("team_id")]), errors="coerce"
+                ).iloc[0]
+                if pd.isna(resolved_team_id):
+                    resolved_team_id = team_id
+                if resolved_team_id is None or pd.isna(resolved_team_id):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Could not resolve team_id for manual availability override. "
+                            "Provide team_id explicitly or ensure unified projections contain it."
+                        ),
+                    )
+                return {
+                    "player_name": str(row.get("player_name") or player_name or ""),
+                    "team_id": int(resolved_team_id),
+                    "team_tricode": str(row.get("team_tricode") or team_tricode or "").strip().upper(),
+                }
+
+    if player_name and team_id is not None and team_tricode:
+        return {
+            "player_name": str(player_name),
+            "team_id": int(team_id),
+            "team_tricode": str(team_tricode).strip().upper(),
+        }
+
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "Could not resolve player/team context for manual availability override. "
+            "Provide player_name, team_id, and team_tricode or ensure unified projections exist for the slate."
+        ),
+    )
 
 
 @router.get("/overrides")
@@ -507,6 +593,66 @@ def post_overrides(req: OpsUpsertOverridesRequest) -> dict[str, Any]:
         raise
 
     return {"date": game_date.isoformat(), "overrides": merged}
+
+
+@router.get("/manual-availability-overrides")
+def get_manual_availability_overrides(
+    date: str = Query(...),
+    active_only: bool = Query(True),
+) -> dict[str, Any]:
+    game_date = _parse_date(date)
+    items = list_manual_overrides(
+        game_date,
+        data_root=paths.data_path(),
+        active_only=bool(active_only),
+    )
+    return {"date": game_date.isoformat(), "overrides": items}
+
+
+@router.post("/manual-availability-overrides")
+def post_manual_availability_override(
+    req: ManualAvailabilityOverrideRequest,
+) -> dict[str, Any]:
+    game_date = _parse_date(req.date)
+    data_root = paths.data_path()
+    context = _resolve_manual_override_player_context(
+        game_date=game_date,
+        game_id=str(req.game_id),
+        player_id=str(req.player_id),
+        data_root=data_root,
+        player_name=req.player_name,
+        team_id=req.team_id,
+        team_tricode=req.team_tricode,
+    )
+    try:
+        created = upsert_manual_override(
+            game_date,
+            game_id=req.game_id,
+            player_id=req.player_id,
+            player_name=context["player_name"],
+            team_id=context["team_id"],
+            team_tricode=context["team_tricode"],
+            override_type=req.override_type,
+            entered_by=req.entered_by,
+            reason_code=req.reason_code,
+            reason_text=req.reason_text,
+            source_label=req.source_label,
+            expires_ts=req.expires_ts,
+            data_root=data_root,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "date": game_date.isoformat(),
+        "override": created,
+        "material_change_detected": True,
+        "active_overrides": list_manual_overrides(
+            game_date,
+            data_root=data_root,
+            active_only=True,
+        ),
+    }
 
 
 def _infer_v2_mode(fields: dict[str, Any]) -> str:
@@ -668,6 +814,37 @@ def delete_overrides(
         ) from exc
 
     return {"date": game_date.isoformat(), "overrides": remaining}
+
+
+@router.delete("/manual-availability-overrides/{override_id}")
+def delete_manual_availability_override(
+    override_id: str,
+    date: str = Query(...),
+    cleared_by: str = Query(...),
+) -> dict[str, Any]:
+    game_date = _parse_date(date)
+    data_root = paths.data_path()
+    try:
+        cleared = clear_manual_override(
+            game_date,
+            override_id=override_id,
+            cleared_by=cleared_by,
+            data_root=data_root,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if cleared is None:
+        raise HTTPException(status_code=404, detail=f"Manual override {override_id} not found.")
+    return {
+        "date": game_date.isoformat(),
+        "cleared_override": cleared,
+        "material_change_detected": True,
+        "active_overrides": list_manual_overrides(
+            game_date,
+            data_root=data_root,
+            active_only=True,
+        ),
+    }
 
 
 @router.get("/overrides-v2")
@@ -960,14 +1137,28 @@ def get_game_ops(
     rates_df["game_id"] = _normalize_id_str_series(rates_df["game_id"])
     rates_game = rates_df.loc[rates_df["game_id"] == gid].copy()
 
-    # Apply authoritative overrides (effective inputs).
     minutes_effective = apply_overrides_to_minutes_df(
         minutes_game,
         game_date=slate_day,
         data_root=data_root,
         force_reconcile=True,
     )
+    manual_overrides_df = load_manual_overrides_df(slate_day, data_root=data_root)
+    minutes_effective, _ = apply_manual_overrides_to_frame(
+        minutes_effective,
+        overrides_df=manual_overrides_df,
+    )
     rates_effective = apply_overrides_to_rates_df(rates_game, game_date=slate_day, data_root=data_root)
+
+    game_manual_overrides: dict[str, dict[str, Any]] = {}
+    for record in list_manual_overrides(
+        slate_day,
+        data_root=data_root,
+        active_only=True,
+    ):
+        if str(record.get("game_id")) != gid:
+            continue
+        game_manual_overrides[str(record.get("player_id"))] = record
 
     overrides_map = load_overrides_map(slate_day, data_root=data_root)
     game_overrides: dict[str, dict[str, Any]] = {}
@@ -1009,6 +1200,7 @@ def get_game_ops(
         base_rates = rates_base_by_pid.get(pid) or {}
         eff_rates = rates_eff_by_pid.get(pid) or {}
         override = game_overrides.get(pid)
+        manual_override = game_manual_overrides.get(pid)
 
         def _pick(source: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
             return {k: source.get(k) for k in keys if k in source}
@@ -1064,10 +1256,19 @@ def get_game_ops(
                     "ops_override_applied",
                     "minutes_contract_version",
                     "minutes_contract_hash",
+                    "manual_override_id",
+                    "manual_override_type",
+                    "manual_override_reason_code",
+                    "manual_override_reason_text",
+                    "manual_override_source_label",
+                    "manual_override_entered_by",
+                    "manual_override_active",
+                    "manual_override_used",
                 )),
                 "rates_baseline": _pick(base_rates, rates_keys),
                 "rates_effective": _pick(eff_rates, rates_keys),
                 "override": override,
+                "manual_override": manual_override,
             }
         )
 

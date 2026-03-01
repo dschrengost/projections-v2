@@ -28,7 +28,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +61,7 @@ from projections.pipeline.parity_manifest import (
 )
 from projections.pipeline.v3_postflight import run_postflight_gate
 from projections.pipeline.v3_preflight import run_preflight_gate
+from projections.ops.manual_availability import manual_override_report
 from projections.rotation.game_transformer_v2 import (
     GameLevelDataset,
     GameTransformerV2Config,
@@ -747,7 +748,7 @@ def _detect_stale_authoritative_inputs(
         if not bool(current.get("is_live_game")):
             continue
         sources_out: dict[str, dict[str, str | None]] = {}
-        for source_name in ("injuries", "lineups"):
+        for source_name in ("injuries", "lineups", "manual_overrides"):
             frozen_source = dict(frozen.get("sources", {}).get(source_name, {}))
             current_source = dict(current.get("sources", {}).get(source_name, {}))
             frozen_ts = pd.to_datetime(
@@ -827,6 +828,9 @@ def _compute_per_game_input_digests(
                 "source_used": dict(sources.get("props", {})).get("source_used"),
             },
             "roster": _source_digest_payload(dict(sources.get("roster", {}))),
+            "manual_overrides": _source_digest_payload(
+                dict(sources.get("manual_overrides", {}))
+            ),
         }
         digests[str(game_id)] = {
             "digest_sha256": _stable_digest(digest_payload),
@@ -1039,7 +1043,14 @@ def _build_input_change_set(
         previous_payload = dict(previous.get("payload", {}))
         changed_sources: list[str] = []
         source_deltas: dict[str, dict[str, Any]] = {}
-        for source_name in ("injuries", "lineups", "odds", "props", "roster"):
+        for source_name in (
+            "injuries",
+            "lineups",
+            "odds",
+            "props",
+            "roster",
+            "manual_overrides",
+        ):
             current_source = dict(current_payload.get(source_name, {}))
             previous_source = dict(previous_payload.get(source_name, {}))
             current_digest = current_source.get("content_digest")
@@ -1853,6 +1864,11 @@ def _build_feature_input_checklist(
     )
 
     selected_props_source = "rotowire" if rotowire_ok else "none"
+    manual_override_summary = manual_override_report(
+        date.fromisoformat(game_date),
+        data_root=data_root,
+        as_of_ts=run_ts,
+    )
     schedule_tip_by_game = _latest_ts_by_game(slate_df, time_col="tip_ts")
     odds_latest_by_game = _latest_ts_by_game(odds_slate, time_col="as_of_ts")
     roster_latest_by_game = _latest_ts_by_game(roster_slate, time_col="as_of_ts")
@@ -1993,6 +2009,15 @@ def _build_feature_input_checklist(
                     "age_minutes": _age_minutes(run_ts, props_latest),
                     "rotowire_latest_as_of_ts": _ts_to_iso(rotowire_props_ts),
                 },
+                "manual_overrides": dict(
+                    manual_override_summary.get("per_game", {}).get(str(int(gid)), {})
+                )
+                or {
+                    "source_used": "none",
+                    "latest_as_of_ts": None,
+                    "content_digest": None,
+                    "active_override_count": 0,
+                },
             },
         }
     report_window = _report_window_status(
@@ -2011,6 +2036,13 @@ def _build_feature_input_checklist(
                 )
             ),
             "selected_props_source": selected_props_source,
+            "manual_override_count": int(
+                manual_override_summary.get("active_override_count", 0)
+            ),
+            "manual_override_games": list(
+                manual_override_summary.get("affected_game_ids", [])
+            ),
+            "manual_override_digest": manual_override_summary.get("override_digest"),
         },
         "per_game": per_game_freshness,
     }

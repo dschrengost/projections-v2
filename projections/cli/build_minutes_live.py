@@ -52,6 +52,11 @@ from projections.features.action_props import (
     attach_action_props_features,
     load_action_props_feature_snapshots_for_date_live,
 )
+from projections.ops.manual_availability import (
+    apply_manual_overrides_to_frame,
+    load_manual_overrides_df,
+    manual_override_report,
+)
 from scrapers.nba_players import NbaPlayersScraper, PlayerProfile
 
 UTC = timezone.utc
@@ -936,6 +941,37 @@ def _compute_injury_diagnostics(
     return diagnostics
 
 
+def _apply_manual_availability_overrides(
+    live_slice: pd.DataFrame,
+    *,
+    game_date: pd.Timestamp,
+    run_as_of_ts: pd.Timestamp,
+    data_root: Path,
+    warnings: list[str],
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    overrides_df = load_manual_overrides_df(game_date.date(), data_root=data_root)
+    report = manual_override_report(
+        game_date.date(),
+        data_root=data_root,
+        as_of_ts=run_as_of_ts,
+    )
+    if overrides_df.empty:
+        return live_slice, {**report, "matched_override_count": 0, "unmatched_override_count": 0}
+
+    updated, apply_diag = apply_manual_overrides_to_frame(
+        live_slice,
+        overrides_df=overrides_df,
+        as_of_ts=run_as_of_ts,
+    )
+    unmatched = apply_diag.get("unmatched_override_ids", [])
+    if unmatched:
+        warnings.append(
+            "Manual availability overrides present but not matched to live rows: "
+            f"{', '.join(str(value) for value in unmatched)}"
+        )
+    return updated, {**report, **apply_diag}
+
+
 def _write_summary(
     path: Path,
     *,
@@ -947,6 +983,7 @@ def _write_summary(
     snapshot_meta: dict,
     active_roster_meta: dict | None,
     active_validation: dict | None,
+    manual_overrides: dict[str, object] | None,
     warnings: list[str],
 ) -> None:
     summary = {
@@ -959,6 +996,7 @@ def _write_summary(
         "snapshots": snapshot_meta,
         "active_roster": active_roster_meta,
         "active_validation": active_validation,
+        "manual_overrides": manual_overrides or {},
         "warnings": warnings,
     }
     path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -2086,6 +2124,14 @@ def _build_minutes_live_logic(
                 "dropped_rows": mismatch_count if enforce_active_roster else 0,
             }
 
+    live_slice, manual_override_summary = _apply_manual_availability_overrides(
+        live_slice,
+        game_date=target_day,
+        run_as_of_ts=run_ts,
+        data_root=data_root,
+        warnings=warnings,
+    )
+
     day_dir, run_dir = _ensure_run_output_dir(out_root, target_day, run_id)
     feature_path = run_dir / FEATURE_FILENAME
     ids_path = run_dir / IDS_FILENAME
@@ -2155,6 +2201,7 @@ def _build_minutes_live_logic(
         snapshot_meta=snapshot_meta,
         active_roster_meta=active_roster_summary,
         active_validation=active_validation,
+        manual_overrides=manual_override_summary,
         warnings=warnings,
     )
     _write_latest_pointer(day_dir, run_id=run_id, run_as_of_ts=run_ts)
