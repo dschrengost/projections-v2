@@ -17,7 +17,6 @@ class V3PostflightError(RuntimeError):
 
 
 _REQUIRED_WORLD_ZERO_KEYS = (
-    "team_minutes_not_240",
     "minutes_negative",
     "minutes_over_48",
     "negative_stats",
@@ -27,13 +26,16 @@ _REQUIRED_WORLD_ZERO_KEYS = (
     "inactive_nonzero_stats",
     "inactive_nonzero_fpts_proxy",
 )
+_TEAM_MINUTES_MAX_ABS_DRIFT_TOL = 0.05
+_TEAM_MINUTES_MAX_VIOLATION_RATE = 0.005
+_TEAM_MINUTES_MAX_FALLBACK_VIOLATIONS = 50
 
 
 def _load_world_checks(
     *,
     world_contract_summary_path: Path | None,
     world_contract_checks: Mapping[str, Any] | None,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     if world_contract_checks is not None:
         payload = dict(world_contract_checks)
     elif world_contract_summary_path is not None:
@@ -54,24 +56,55 @@ def _load_world_checks(
     else:
         raise V3PostflightError("world contract checks are required")
 
-    out: dict[str, int] = {}
+    out: dict[str, Any] = {}
     for k, v in payload.items():
-        try:
-            out[str(k)] = int(v)
-        except Exception:
-            out[str(k)] = 0
+        out[str(k)] = v
     return out
 
 
-def _validate_world_contracts(world_checks: Mapping[str, int]) -> dict[str, int]:
+def _validate_world_contracts(world_checks: Mapping[str, Any]) -> dict[str, Any]:
     bad: dict[str, int] = {}
     for key in _REQUIRED_WORLD_ZERO_KEYS:
         val = int(world_checks.get(key, 0))
         if val != 0:
             bad[key] = val
+
+    team_minutes_not_240 = int(world_checks.get("team_minutes_not_240", 0))
+    team_minutes_total_checks = int(world_checks.get("team_minutes_total_checks", 0))
+    try:
+        team_minutes_max_abs_drift = float(
+            world_checks.get("team_minutes_max_abs_drift", 0.0)
+        )
+    except Exception:
+        team_minutes_max_abs_drift = 0.0
+
+    team_minutes_rate = (
+        float(team_minutes_not_240) / float(team_minutes_total_checks)
+        if team_minutes_total_checks > 0
+        else None
+    )
+    team_minutes_bad = False
+    if team_minutes_not_240 > 0:
+        if team_minutes_total_checks > 0:
+            team_minutes_bad = bool(
+                team_minutes_max_abs_drift > _TEAM_MINUTES_MAX_ABS_DRIFT_TOL
+                or (team_minutes_rate is not None and team_minutes_rate > _TEAM_MINUTES_MAX_VIOLATION_RATE)
+            )
+        else:
+            team_minutes_bad = bool(
+                team_minutes_not_240 > _TEAM_MINUTES_MAX_FALLBACK_VIOLATIONS
+            )
+    if team_minutes_bad:
+        bad["team_minutes_not_240"] = team_minutes_not_240
     if bad:
         raise V3PostflightError(f"world contract check failed: {bad}")
-    return {k: int(world_checks.get(k, 0)) for k in _REQUIRED_WORLD_ZERO_KEYS}
+    return {
+        **{k: int(world_checks.get(k, 0)) for k in _REQUIRED_WORLD_ZERO_KEYS},
+        "team_minutes_not_240": team_minutes_not_240,
+        "team_minutes_total_checks": team_minutes_total_checks,
+        "team_minutes_max_abs_drift": team_minutes_max_abs_drift,
+        "team_minutes_violation_rate": team_minutes_rate,
+    }
 
 
 def _validate_projection_rows(

@@ -1581,10 +1581,12 @@ def _merge_parquet_for_target_games(
     return merged
 
 
-def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, int]:
+def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, Any]:
     if worlds_df.empty:
         return {
             "team_minutes_not_240": 0,
+            "team_minutes_total_checks": 0,
+            "team_minutes_max_abs_drift": 0.0,
             "minutes_negative": 0,
             "minutes_over_48": 0,
             "negative_stats": 0,
@@ -1623,11 +1625,16 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
             .sum()
             .reset_index()
         )
+        team_minute_delta = team_minutes["minutes"].sub(240.0).abs()
         team_minutes_not_240 = int(
-            (team_minutes["minutes"].sub(240.0).abs() > _WORLD_CONTRACT_TOL).sum()
+            (team_minute_delta > _WORLD_CONTRACT_TOL).sum()
         )
+        team_minutes_total_checks = int(len(team_minutes))
+        team_minutes_max_abs_drift = float(team_minute_delta.max()) if not team_minutes.empty else 0.0
     else:
         team_minutes_not_240 = 0
+        team_minutes_total_checks = 0
+        team_minutes_max_abs_drift = 0.0
     negative_stats = 0
     for col in ("pts", "reb", "ast", "stl", "blk", "tov"):
         if col in df.columns:
@@ -1674,6 +1681,8 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
         inactive_nonzero_fpts_proxy = 0
     return {
         "team_minutes_not_240": team_minutes_not_240,
+        "team_minutes_total_checks": team_minutes_total_checks,
+        "team_minutes_max_abs_drift": team_minutes_max_abs_drift,
         "minutes_negative": int(
             (df.get("minutes", pd.Series(dtype=float)) < -_WORLD_CONTRACT_TOL).sum()
         ),
@@ -3051,6 +3060,8 @@ def generate_worlds_gtv2_live_task(
         contract_summary = {
             "contract_checks": {
                 "team_minutes_not_240": 0,
+                "team_minutes_total_checks": 0,
+                "team_minutes_max_abs_drift": 0.0,
                 "minutes_negative": 0,
                 "minutes_over_48": 0,
                 "negative_stats": 0,
@@ -3140,8 +3151,10 @@ def generate_worlds_gtv2_live_task(
             projections_path,
             required_cols=("game_date", "game_id", "team_id", "player_id"),
         )
+        contract_checks = dict(contract_counter)
+        contract_checks.update(_summarize_world_contracts_from_frame(worlds_df))
         contract_summary = {
-            "contract_checks": dict(contract_counter),
+            "contract_checks": contract_checks,
             "placeholder_mode": False,
             "world_rows": int(len(worlds_df)),
             "projection_rows": int(len(projections)),

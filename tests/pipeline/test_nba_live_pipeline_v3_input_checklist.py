@@ -1032,6 +1032,8 @@ def test_summarize_world_contracts_from_frame_handles_clean_worlds() -> None:
     )
     checks = _summarize_world_contracts_from_frame(worlds)
     assert checks["team_minutes_not_240"] == 0
+    assert checks["team_minutes_total_checks"] == 2
+    assert checks["team_minutes_max_abs_drift"] == pytest.approx(0.0)
     assert checks["minutes_negative"] == 0
 
 
@@ -1061,6 +1063,8 @@ def test_summarize_world_contracts_from_frame_tolerates_small_float_drift() -> N
     )
     checks = _summarize_world_contracts_from_frame(worlds)
     assert checks["team_minutes_not_240"] == 0
+    assert checks["team_minutes_total_checks"] == 4
+    assert checks["team_minutes_max_abs_drift"] == pytest.approx(0.00003)
 
 
 def test_feature_input_checklist_fails_when_required_snapshot_missing(
