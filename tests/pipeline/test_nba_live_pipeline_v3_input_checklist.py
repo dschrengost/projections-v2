@@ -4,8 +4,10 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from prefect_flows.live_nba_pipeline_v3 import (
+    _atomic_write_validated_parquet,
     _build_feature_input_checklist,
     _build_input_change_set,
     _build_publish_superseded_report,
@@ -16,8 +18,10 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _report_window_status,
     _summarize_world_contracts_from_frame,
     _resolve_season_month,
+    publish_atomic_task,
 )
 from projections.ops.manual_availability import upsert_manual_override
+from projections.pipeline import writer_guard
 
 
 def _write(path: Path, df: pd.DataFrame) -> None:
@@ -855,6 +859,148 @@ def test_merge_parquet_for_target_games_replaces_only_changed_games(
         target_game_ids=[2],
     )
     assert merged.sort_values(["game_id", "player_id"])["value"].tolist() == [100, 250]
+
+
+def test_merge_parquet_for_target_games_falls_back_when_promoted_baseline_is_corrupt(
+    tmp_path: Path,
+) -> None:
+    dataset_dir = tmp_path / "artifacts" / "gtv2_worlds" / "game_date=2026-02-24"
+    older_full = dataset_dir / "run=20260224T210000Z" / "worlds.parquet"
+    newer_partial = dataset_dir / "run=20260224T211500Z" / "worlds.parquet"
+    corrupt_promoted = dataset_dir / "run=20260224T213000Z" / "worlds.parquet"
+    current = dataset_dir / "run=20260224T220000Z" / "worlds.parquet"
+
+    _write(
+        older_full,
+        pd.DataFrame(
+            {
+                "game_id": [1, 2, 3],
+                "player_id": [10, 20, 30],
+                "value": [100, 200, 300],
+            }
+        ),
+    )
+    _write(
+        newer_partial,
+        pd.DataFrame({"game_id": [2], "player_id": [20], "value": [225]}),
+    )
+    corrupt_promoted.parent.mkdir(parents=True, exist_ok=True)
+    corrupt_promoted.write_text("not a parquet file", encoding="utf-8")
+    _write(current, pd.DataFrame({"game_id": [2], "player_id": [20], "value": [250]}))
+
+    merged = _merge_parquet_for_target_games(
+        current_path=current,
+        previous_path=corrupt_promoted,
+        target_game_ids=[2],
+    )
+
+    merged = merged.sort_values(["game_id", "player_id"]).reset_index(drop=True)
+    assert merged["game_id"].tolist() == [1, 2, 3]
+    assert merged["value"].tolist() == [100, 250, 300]
+
+
+def test_atomic_write_validated_parquet_round_trips(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.parquet"
+    df = pd.DataFrame({"game_id": [1, 2], "team_id": [10, 20], "player_id": [100, 200]})
+
+    report = _atomic_write_validated_parquet(
+        df,
+        path,
+        required_cols=("game_id", "team_id", "player_id"),
+    )
+
+    assert path.exists()
+    assert report["rows"] == 2
+    assert "game_id" in report["columns"]
+    assert not list(tmp_path.glob("*.tmp.*.parquet"))
+    reloaded = pd.read_parquet(path).sort_values("game_id").reset_index(drop=True)
+    assert reloaded.equals(df.sort_values("game_id").reset_index(drop=True))
+
+
+def test_publish_atomic_task_rejects_corrupt_worlds_before_pointer_promotion(
+    tmp_path: Path,
+) -> None:
+    game_date = "2026-02-24"
+    run_id = "20260224T220000Z"
+    manifest_path = (
+        tmp_path
+        / "artifacts"
+        / "runs"
+        / "nba_live"
+        / f"game_date={game_date}"
+        / f"run={run_id}"
+        / "manifest.json"
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        '{"run_id":"20260224T220000Z","as_of_ts":"2026-02-24T22:00:00Z","source_freshness":{"summary":{}}}',
+        encoding="utf-8",
+    )
+
+    _atomic_write_validated_parquet(
+        pd.DataFrame({"game_id": [1], "team_id": [10], "player_id": [100]}),
+        tmp_path / "live" / "features_gtv2_v1" / game_date / f"run={run_id}" / "features.parquet",
+        required_cols=("game_id", "team_id", "player_id"),
+    )
+    _atomic_write_validated_parquet(
+        pd.DataFrame(
+            {"game_date": [game_date], "game_id": [1], "team_id": [10], "player_id": [100]}
+        ),
+        tmp_path
+        / "artifacts"
+        / "gtv2_scores"
+        / f"game_date={game_date}"
+        / f"run={run_id}"
+        / "scores.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+    worlds_dir = (
+        tmp_path / "artifacts" / "gtv2_worlds" / f"game_date={game_date}" / f"run={run_id}"
+    )
+    worlds_dir.mkdir(parents=True, exist_ok=True)
+    (worlds_dir / "worlds.parquet").write_text("not a parquet file", encoding="utf-8")
+    _atomic_write_validated_parquet(
+        pd.DataFrame(
+            {"game_date": [game_date], "game_id": [1], "team_id": [10], "player_id": [100]}
+        ),
+        worlds_dir / "projections.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+    _atomic_write_validated_parquet(
+        pd.DataFrame(
+            {"game_date": [game_date], "game_id": [1], "team_id": [10], "player_id": [100]}
+        ),
+        tmp_path
+        / "artifacts"
+        / "projections"
+        / game_date
+        / f"run={run_id}"
+        / "projections.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+    _atomic_write_validated_parquet(
+        pd.DataFrame({"player_id": [100], "pred_own_pct": [0.1]}),
+        tmp_path
+        / "silver"
+        / "ownership_predictions"
+        / game_date
+        / f"run={run_id}"
+        / "123.parquet",
+        required_cols=("player_id",),
+    )
+
+    with writer_guard.PipelineWriterLock(data_root=tmp_path, run_id=run_id):
+        with pytest.raises(RuntimeError, match="failed to open parquet|failed to stream-validate parquet contents"):
+            publish_atomic_task.fn(
+                game_date=game_date,
+                run_id=run_id,
+                manifest_path=manifest_path,
+                data_root=tmp_path,
+            )
+
+    assert not (
+        tmp_path / "artifacts" / "gtv2_worlds" / f"game_date={game_date}" / "LATEST" / "current.json"
+    ).exists()
 
 
 def test_summarize_world_contracts_from_frame_handles_clean_worlds() -> None:

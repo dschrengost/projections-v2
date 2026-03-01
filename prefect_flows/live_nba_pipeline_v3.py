@@ -34,6 +34,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import torch
 from prefect import flow, get_run_logger, task
 from torch.utils.data import DataLoader
@@ -1286,6 +1287,116 @@ def _sort_for_stable_write(df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values(preferred, kind="stable").reset_index(drop=True)
 
 
+def _stream_validate_parquet(
+    path: Path,
+    *,
+    expected_rows: int | None = None,
+    required_cols: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    try:
+        parquet_file = pq.ParquetFile(path)
+    except Exception as exc:
+        raise RuntimeError(f"failed to open parquet for validation: {path}") from exc
+
+    columns = tuple(str(name) for name in parquet_file.schema_arrow.names)
+    missing = [col for col in required_cols if col not in columns]
+    if missing:
+        raise RuntimeError(
+            f"validated parquet missing required columns {missing}: {path}"
+        )
+
+    row_count = 0
+    try:
+        for batch in parquet_file.iter_batches(batch_size=65536):
+            row_count += int(batch.num_rows)
+    except Exception as exc:
+        raise RuntimeError(f"failed to stream-validate parquet contents: {path}") from exc
+
+    if expected_rows is not None and row_count != int(expected_rows):
+        raise RuntimeError(
+            f"validated parquet row count mismatch for {path}: "
+            f"expected={expected_rows} actual={row_count}"
+        )
+
+    return {
+        "path": str(path),
+        "rows": int(row_count),
+        "columns": list(columns),
+    }
+
+
+def _atomic_write_validated_parquet(
+    df: pd.DataFrame,
+    path: Path,
+    *,
+    required_cols: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(
+        f".tmp.{control_plane.canonical_run_id()}.{os.getpid()}.parquet"
+    )
+    try:
+        df.to_parquet(tmp, index=False)
+        validation = _stream_validate_parquet(
+            tmp,
+            expected_rows=int(len(df)),
+            required_cols=required_cols,
+        )
+        tmp.replace(path)
+        return validation
+    except Exception:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _distinct_game_count(df: pd.DataFrame) -> int:
+    if "game_id" not in df.columns:
+        return 0
+    gids = pd.to_numeric(df["game_id"], errors="coerce")
+    return int(gids.dropna().nunique())
+
+
+def _load_fallback_merge_baseline(
+    *,
+    current_path: Path,
+    failed_previous_path: Path,
+) -> tuple[pd.DataFrame, Path] | None:
+    dataset_dir = current_path.parent.parent
+    current_run_dir = current_path.parent.name
+    filename = current_path.name
+    candidates: list[tuple[int, str, Path]] = []
+
+    for run_dir in sorted(dataset_dir.glob("run=*"), reverse=True):
+        if not run_dir.is_dir() or run_dir.name >= current_run_dir:
+            continue
+        candidate_path = run_dir / filename
+        if candidate_path == failed_previous_path or not candidate_path.exists():
+            continue
+        try:
+            probe = pd.read_parquet(candidate_path, columns=["game_id"])
+        except Exception:
+            continue
+        candidates.append((_distinct_game_count(probe), run_dir.name, candidate_path))
+
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    for game_count, _, candidate_path in candidates:
+        try:
+            fallback_df = pd.read_parquet(candidate_path)
+        except Exception:
+            continue
+        print(
+            "[materialize] promoted baseline unreadable; "
+            f"falling back from {failed_previous_path} to {candidate_path} "
+            f"(distinct_games={game_count})"
+        )
+        return fallback_df, candidate_path
+    return None
+
+
 def _merge_parquet_for_target_games(
     *,
     current_path: Path,
@@ -1298,7 +1409,16 @@ def _merge_parquet_for_target_games(
     if previous_path is None or not previous_path.exists():
         merged = current_df
     else:
-        previous_df = pd.read_parquet(previous_path)
+        try:
+            previous_df = pd.read_parquet(previous_path)
+        except Exception:
+            fallback = _load_fallback_merge_baseline(
+                current_path=current_path,
+                failed_previous_path=previous_path,
+            )
+            if fallback is None:
+                raise
+            previous_df, previous_path = fallback
         previous_keep = previous_df
         if "game_id" in previous_df.columns and target_game_ids:
             gids = pd.to_numeric(previous_df["game_id"], errors="coerce").astype(
@@ -1307,8 +1427,16 @@ def _merge_parquet_for_target_games(
             previous_keep = previous_df.loc[~gids.isin(target_game_ids)].copy()
         merged = pd.concat([previous_keep, current_df], ignore_index=True, sort=False)
     merged = _sort_for_stable_write(merged)
-    current_path.parent.mkdir(parents=True, exist_ok=True)
-    merged.to_parquet(current_path, index=False)
+    required_cols = (
+        ("game_id", "team_id", "player_id")
+        if {"game_id", "team_id", "player_id"}.issubset(merged.columns)
+        else tuple()
+    )
+    _atomic_write_validated_parquet(
+        merged,
+        current_path,
+        required_cols=required_cols,
+    )
     return merged
 
 
@@ -2233,7 +2361,11 @@ def score_ownership_linestar_task(
         placeholder_df["pred_own_pct"] = 0.05
         placeholder_df["source"] = "linestar"
         placeholder_df["model_run"] = "linestar_placeholder"
-        placeholder_df.to_parquet(out_dir / "123.parquet", index=False)
+        _atomic_write_validated_parquet(
+            placeholder_df,
+            out_dir / "123.parquet",
+            required_cols=("player_id",),
+        )
         (out_dir / "slates.json").write_text(
             json.dumps(
                 {
@@ -2347,7 +2479,11 @@ def build_features_gtv2_live_task(
             game_date=game_date, as_of_ts=run_as_of_ts
         )
         features_df = _filter_to_target_games(features_df, target_game_ids)
-        features_df.to_parquet(out_path, index=False)
+        _atomic_write_validated_parquet(
+            features_df,
+            out_path,
+            required_cols=("game_id", "team_id", "player_id"),
+        )
 
         transform_manifest = {
             "feature_builder": "placeholder_gtv2_live_v1",
@@ -2489,7 +2625,11 @@ def build_features_gtv2_live_task(
             )
 
         features_df = _coerce_frame_to_manifest_schema(built.features, parity_payload)
-        features_df.to_parquet(out_path, index=False)
+        _atomic_write_validated_parquet(
+            features_df,
+            out_path,
+            required_cols=("game_id", "team_id", "player_id"),
+        )
 
         integrity_src = dict(parity_payload.get("integrity", {}))
         integrity = {
@@ -2591,7 +2731,11 @@ def score_gtv2_live_task(
         scores["dk_rate"] = (
             pd.to_numeric(features["usage_prior"], errors="coerce").fillna(0.0) * 100.0
         )
-        scores.to_parquet(out_path, index=False)
+        _atomic_write_validated_parquet(
+            scores,
+            out_path,
+            required_cols=("game_date", "game_id", "team_id", "player_id"),
+        )
         summary_path.write_text(
             json.dumps(
                 {
@@ -2684,7 +2828,11 @@ def score_gtv2_live_task(
     scores = scores.sort_values(
         ["game_date", "game_id", "team_id", "player_id"]
     ).reset_index(drop=True)
-    scores.to_parquet(out_path, index=False)
+    _atomic_write_validated_parquet(
+        scores,
+        out_path,
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
     summary_path.write_text(
         json.dumps(
             {
@@ -2752,8 +2900,16 @@ def generate_worlds_gtv2_live_task(
         projections["n_worlds"] = int(sim_worlds)
         projections["sim_profile"] = "game_transformer_v2"
         projections = projections[PLACEHOLDER_PROJECTION_COLUMNS]
-        projections.to_parquet(projections_path, index=False)
-        pd.DataFrame(columns=["world_idx"]).to_parquet(worlds_path, index=False)
+        _atomic_write_validated_parquet(
+            projections,
+            projections_path,
+            required_cols=("game_date", "game_id", "team_id", "player_id"),
+        )
+        _atomic_write_validated_parquet(
+            pd.DataFrame(columns=["world_idx"]),
+            worlds_path,
+            required_cols=("world_idx",),
+        )
         contract_summary = {
             "contract_checks": {
                 "team_minutes_not_240": 0,
@@ -2831,13 +2987,21 @@ def generate_worlds_gtv2_live_task(
         )
         if worlds_df.empty:
             raise RuntimeError("GTV2 worlds generation produced zero rows")
-        worlds_df.to_parquet(worlds_path, index=False)
+        _atomic_write_validated_parquet(
+            worlds_df,
+            worlds_path,
+            required_cols=("world_idx", "game_id", "team_id", "player_id"),
+        )
 
         projections = summarize_worlds_to_projections(
             worlds_df,
             sim_profile="game_transformer_v2",
         )
-        projections.to_parquet(projections_path, index=False)
+        _atomic_write_validated_parquet(
+            projections,
+            projections_path,
+            required_cols=("game_date", "game_id", "team_id", "player_id"),
+        )
         contract_summary = {
             "contract_checks": dict(contract_counter),
             "placeholder_mode": False,
@@ -3025,7 +3189,11 @@ def finalize_projections_live_task(
             .round(2)
         )
 
-    df.to_parquet(out_path, index=False)
+    _atomic_write_validated_parquet(
+        df,
+        out_path,
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
     return out_dir
 
 
@@ -3106,6 +3274,66 @@ def materialize_unified_run_artifacts_task(
     }
 
 
+def _validate_publishable_run_artifacts(
+    *,
+    game_date: str,
+    run_id: str,
+    data_root: Path,
+) -> dict[str, Any]:
+    stage_reports: dict[str, Any] = {}
+    single_file_targets = {
+        "features_gtv2_v1": (
+            data_root / "live" / FEATURES_ROOT / game_date / f"run={run_id}" / "features.parquet",
+            ("game_id", "team_id", "player_id"),
+        ),
+        "scores_gtv2": (
+            data_root / "artifacts" / SCORES_ROOT / f"game_date={game_date}" / f"run={run_id}" / "scores.parquet",
+            ("game_date", "game_id", "team_id", "player_id"),
+        ),
+        "worlds_gtv2/worlds": (
+            data_root / "artifacts" / WORLDS_ROOT / f"game_date={game_date}" / f"run={run_id}" / "worlds.parquet",
+            ("world_idx",),
+        ),
+        "worlds_gtv2/projections": (
+            data_root / "artifacts" / WORLDS_ROOT / f"game_date={game_date}" / f"run={run_id}" / "projections.parquet",
+            ("game_date", "game_id", "team_id", "player_id"),
+        ),
+        "unified_projections": (
+            data_root / "artifacts" / "projections" / game_date / f"run={run_id}" / "projections.parquet",
+            ("game_date", "game_id", "team_id", "player_id"),
+        ),
+    }
+    for stage, (path, required_cols) in single_file_targets.items():
+        if not path.exists():
+            raise RuntimeError(f"publish validation missing required parquet: {path}")
+        stage_reports[stage] = _stream_validate_parquet(
+            path,
+            required_cols=required_cols,
+        )
+
+    ownership_dir = (
+        data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}"
+    )
+    ownership_files = sorted(
+        path for path in ownership_dir.glob("*.parquet") if path.is_file()
+    )
+    if not ownership_files:
+        raise RuntimeError(
+            f"publish validation found no ownership parquet files under {ownership_dir}"
+        )
+    ownership_reports = []
+    for path in ownership_files:
+        ownership_reports.append(
+            _stream_validate_parquet(path, required_cols=("player_id",))
+        )
+    stage_reports["ownership_predictions"] = {
+        "dir": str(ownership_dir),
+        "file_count": int(len(ownership_reports)),
+        "files": ownership_reports,
+    }
+    return stage_reports
+
+
 @task(name="v3-postflight", retries=0)
 def postflight_gate_task(
     *,
@@ -3134,6 +3362,16 @@ def publish_atomic_task(
     freshness_summary = dict(
         manifest_payload.get("source_freshness", {}).get("summary", {})
     )
+    validation_report = _validate_publishable_run_artifacts(
+        game_date=game_date,
+        run_id=run_id,
+        data_root=data_root,
+    )
+    manifest_payload["publish_validation"] = {
+        "validated_at": _utc_now_iso(),
+        "stages": validation_report,
+    }
+    control_plane.atomic_write_json(Path(manifest_path), manifest_payload)
     pointers: dict[str, str] = {}
     targets = {
         "features_gtv2_v1": data_root / "live" / FEATURES_ROOT / game_date,
