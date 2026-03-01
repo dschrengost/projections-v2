@@ -196,3 +196,93 @@ def test_entry_manager_export_filters_selected_entries(tmp_path: Path, monkeypat
     manifest_path = contest_root / "exports" / f"export_{export_id}_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["lineup_count"] == 1
+
+
+def test_entry_manager_batch_export_combines_multiple_contests(tmp_path: Path, monkeypatch) -> None:
+    data_root = tmp_path / "data_root"
+
+    def fake_data_path(*parts: Any) -> Path:
+        return data_root.joinpath(*parts)
+
+    monkeypatch.setattr(paths, "data_path", fake_data_path)
+
+    def fake_popen(*_args, **_kwargs):
+        class DummyProc:
+            pass
+
+        return DummyProc()
+
+    import projections.api.entry_manager_api as entry_manager_api
+
+    monkeypatch.setattr(entry_manager_api.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(entry_manager_api, "_safe_git_sha", lambda: "deadbeef")
+    monkeypatch.setattr(entry_manager_api, "_resolve_latest_sim_v2_worlds", lambda **_: {})
+
+    game_date = "2026-01-13"
+    dg = 777
+    header = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee", "PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
+
+    for contest_id, entry_prefix in (("111", "a"), ("222", "b")):
+        entry_state = EntryFileState(
+            game_date=game_date,
+            draft_group_id=dg,
+            site="dk",
+            contest_id=contest_id,
+            contest_name=f"Contest {contest_id}",
+            entry_fee="1",
+            created_at="t",
+            updated_at="t",
+            client_revision=1,
+            header=header,
+            entries=[
+                {
+                    "entry_id": f"{entry_prefix}1",
+                    "entry_key": f"{entry_prefix}1",
+                    "contest_id": contest_id,
+                    "contest_name": f"Contest {contest_id}",
+                    "entry_fee": "1",
+                    "PG": "A (1)",
+                    "SG": "B (2)",
+                    "SF": "C (3)",
+                    "PF": "D (4)",
+                    "C": "E (5)",
+                    "G": "F (6)",
+                    "F": "G (7)",
+                    "UTIL": "H (8)",
+                },
+                {
+                    "entry_id": f"{entry_prefix}2",
+                    "entry_key": f"{entry_prefix}2",
+                    "contest_id": contest_id,
+                    "contest_name": f"Contest {contest_id}",
+                    "entry_fee": "1",
+                    "PG": "I (9)",
+                    "SG": "J (10)",
+                    "SF": "K (11)",
+                    "PF": "L (12)",
+                    "C": "M (13)",
+                    "G": "N (14)",
+                    "F": "O (15)",
+                    "UTIL": "P (16)",
+                },
+            ],
+        )
+
+        entry_path = fake_data_path("entries") / game_date / "dk" / f"{contest_id}.json"
+        entry_path.parent.mkdir(parents=True, exist_ok=True)
+        entry_path.write_text(entry_state.model_dump_json(indent=2), encoding="utf-8")
+
+    app = create_app(daily_root=tmp_path, dashboard_dist=tmp_path, fpts_root=tmp_path)
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/entry-manager/entries/export",
+        params={"date": game_date},
+        json={"contest_ids": ["111", "222"]},
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("X-Entry-Count") == "4"
+    csv_lines = resp.text.strip().splitlines()
+    assert len(csv_lines) == 5
+    assert csv_lines[1].startswith("a1,Contest 111,111,1,")
+    assert csv_lines[4].startswith("b2,Contest 222,222,1,")
