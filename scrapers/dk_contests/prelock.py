@@ -211,7 +211,7 @@ def main() -> None:
     con = duckdb.connect(str(db_path))
 
     # Ensure schema (tables)
-    schema_sql = (Path(__file__).parent.parent.parent / "sql" / "schema.sql").read_text(encoding="utf-8")
+    schema_sql = (Path(__file__).parent.parent.parent / "sql" / "dk_contests_schema.sql").read_text(encoding="utf-8")
     con.execute(schema_sql)
 
     sess = None
