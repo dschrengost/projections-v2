@@ -21,6 +21,20 @@ _TEAM_ABBR_TO_NBA: dict[str, str] = {
 
 _SUPPORTED_PROP_KEYS: tuple[str, ...] = ("pts", "reb", "ast", "3pm", "pra", "pr", "pa", "ra")
 _NAME_SUFFIXES: set[str] = {"jr", "sr", "ii", "iii", "iv", "v"}
+_ACTION_PROPS_LONG_COLUMNS: tuple[str, ...] = (
+    "game_date",
+    "team_tricode",
+    "player_name",
+    "player_name_norm",
+    "prop_key",
+    "line",
+    "p_over",
+    "line_std",
+    "books",
+    "action_props_as_of_ts",
+    "action_game_id",
+    "source_file",
+)
 
 
 def _coerce_ts(value: object) -> pd.Timestamp:
@@ -47,6 +61,19 @@ def _american_to_implied_prob(odds: float) -> float | None:
     if odds > 0:
         return float(100.0 / (odds + 100.0))
     return float((-odds) / ((-odds) + 100.0))
+
+
+def _coerce_finite_float(value: object) -> float | None:
+    numeric = pd.to_numeric(value, errors="coerce")
+    if pd.isna(numeric):
+        return None
+    try:
+        out = float(numeric)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(out):
+        return None
+    return out
 
 
 def _canonical_prop_key(raw_name: object) -> str | None:
@@ -473,129 +500,100 @@ def load_rotowire_props_long_from_bronze(
     day = pd.Timestamp(game_date).normalize().date().isoformat()
     partition = Path(rotowire_props_root) / f"game_date={day}"
     files = sorted(partition.glob("*.parquet")) if partition.exists() else []
+    empty = pd.DataFrame(columns=_ACTION_PROPS_LONG_COLUMNS)
     if not files:
-        return pd.DataFrame(
-            columns=[
-                "game_date",
-                "team_tricode",
-                "player_name",
-                "player_name_norm",
-                "prop_key",
-                "line",
-                "p_over",
-                "line_std",
-                "books",
-                "action_props_as_of_ts",
-                "action_game_id",
-                "source_file",
-            ]
-        )
+        return empty.copy()
 
-    frames: list[pd.DataFrame] = []
+    required_cols = {"player_name", "team", "prop_type", "line", "book", "scraped_at"}
+    selected_cols = [
+        "player_name",
+        "team",
+        "prop_type",
+        "line",
+        "book",
+        "scraped_at",
+        "over_odds",
+        "implied_over_prob",
+        "game_id",
+    ]
+    rows: list[dict[str, object]] = []
     for path in files:
         try:
             df = pd.read_parquet(path)
         except Exception:
             continue
-        if df.empty:
+        if df.empty or not required_cols.issubset(df.columns):
             continue
-        df = df.copy()
-        df["source_file"] = path.name
-        frames.append(df)
-    if not frames:
-        return pd.DataFrame(
-            columns=[
-                "game_date",
-                "team_tricode",
-                "player_name",
-                "player_name_norm",
-                "prop_key",
-                "line",
-                "p_over",
-                "line_std",
-                "books",
-                "action_props_as_of_ts",
-                "action_game_id",
-                "source_file",
-            ]
-        )
+        for (
+            player_name,
+            team,
+            prop_type,
+            line,
+            book,
+            scraped_at,
+            over_odds,
+            implied_over_prob,
+            game_id,
+        ) in df.reindex(columns=selected_cols).itertuples(index=False, name=None):
+            prop_key = _canonical_rotowire_prop_key(prop_type)
+            if prop_key not in _SUPPORTED_PROP_KEYS:
+                continue
 
-    raw = pd.concat(frames, ignore_index=True)
-    required_cols = {"player_name", "team", "prop_type", "line", "book", "scraped_at"}
-    if not required_cols.issubset(raw.columns):
-        return pd.DataFrame(
-            columns=[
-                "game_date",
-                "team_tricode",
-                "player_name",
-                "player_name_norm",
-                "prop_key",
-                "line",
-                "p_over",
-                "line_std",
-                "books",
-                "action_props_as_of_ts",
-                "action_game_id",
-                "source_file",
-            ]
-        )
+            if pd.isna(player_name) or pd.isna(team):
+                continue
+            player_name_text = str(player_name).strip()
+            if not player_name_text:
+                continue
+            player_name_norm = _normalize_player_name(player_name_text)
+            if not player_name_norm:
+                continue
 
-    work = raw.copy()
-    work["prop_key"] = work["prop_type"].map(_canonical_rotowire_prop_key)
-    work = work.loc[work["prop_key"].isin(_SUPPORTED_PROP_KEYS)].copy()
-    if work.empty:
-        return pd.DataFrame(
-            columns=[
-                "game_date",
-                "team_tricode",
-                "player_name",
-                "player_name_norm",
-                "prop_key",
-                "line",
-                "p_over",
-                "line_std",
-                "books",
-                "action_props_as_of_ts",
-                "action_game_id",
-                "source_file",
-            ]
-        )
+            team_tricode = _normalize_team_abbr(team)
+            if not team_tricode:
+                continue
 
-    work["line"] = pd.to_numeric(work["line"], errors="coerce")
-    work["over_odds"] = pd.to_numeric(work.get("over_odds"), errors="coerce")
-    implied_over = pd.to_numeric(work.get("implied_over_prob"), errors="coerce")
-    work["p_over"] = implied_over
-    missing_over = work["p_over"].isna()
-    if missing_over.any():
-        work.loc[missing_over, "p_over"] = work.loc[missing_over, "over_odds"].map(_american_to_implied_prob)
-    work["p_over"] = pd.to_numeric(work["p_over"], errors="coerce").fillna(0.5).clip(0.0, 1.0)
-    work["action_props_as_of_ts"] = pd.to_datetime(work["scraped_at"], utc=True, errors="coerce")
-    work["team_tricode"] = work["team"].map(_normalize_team_abbr)
-    work["player_name_norm"] = work["player_name"].map(_normalize_player_name)
-    work["game_date"] = pd.Timestamp(day)
-    work["action_game_id"] = pd.to_numeric(work.get("game_id"), errors="coerce").astype("Int64")
-    work = work.dropna(subset=["line", "action_props_as_of_ts"])
-    work = work.loc[
-        work["team_tricode"].astype(str).str.len().gt(0)
-        & work["player_name_norm"].astype(str).str.len().gt(0)
-    ].copy()
-    if work.empty:
-        return pd.DataFrame(
-            columns=[
-                "game_date",
-                "team_tricode",
-                "player_name",
-                "player_name_norm",
-                "prop_key",
-                "line",
-                "p_over",
-                "line_std",
-                "books",
-                "action_props_as_of_ts",
-                "action_game_id",
-                "source_file",
-            ]
-        )
+            line_value = _coerce_finite_float(line)
+            if line_value is None:
+                continue
+
+            action_props_as_of_ts = _coerce_ts(scraped_at)
+            if pd.isna(action_props_as_of_ts):
+                continue
+
+            p_over = _coerce_finite_float(implied_over_prob)
+            if p_over is None:
+                over_odds_value = _coerce_finite_float(over_odds)
+                if over_odds_value is not None:
+                    p_over = _american_to_implied_prob(over_odds_value)
+            if p_over is None:
+                p_over = 0.5
+            p_over = float(min(max(p_over, 0.0), 1.0))
+
+            game_id_numeric = pd.to_numeric(game_id, errors="coerce")
+            if pd.isna(book) or not str(book).strip():
+                book_value: object = pd.NA
+            else:
+                book_value = str(book).strip()
+
+            rows.append(
+                {
+                    "game_date": pd.Timestamp(day),
+                    "team_tricode": team_tricode,
+                    "player_name": player_name_text,
+                    "player_name_norm": player_name_norm,
+                    "prop_key": prop_key,
+                    "line": line_value,
+                    "p_over": p_over,
+                    "book": book_value,
+                    "action_props_as_of_ts": action_props_as_of_ts,
+                    "action_game_id": int(game_id_numeric) if pd.notna(game_id_numeric) else pd.NA,
+                    "source_file": path.name,
+                }
+            )
+    if not rows:
+        return empty.copy()
+
+    work = pd.DataFrame.from_records(rows)
 
     grouped = (
         work.groupby(
@@ -620,22 +618,7 @@ def load_rotowire_props_long_from_bronze(
     )
     grouped["line_std"] = pd.to_numeric(grouped["line_std"], errors="coerce").fillna(0.0)
     grouped["books"] = pd.to_numeric(grouped["books"], errors="coerce").fillna(0.0)
-    return grouped[
-        [
-            "game_date",
-            "team_tricode",
-            "player_name",
-            "player_name_norm",
-            "prop_key",
-            "line",
-            "p_over",
-            "line_std",
-            "books",
-            "action_props_as_of_ts",
-            "action_game_id",
-            "source_file",
-        ]
-    ].copy()
+    return grouped[list(_ACTION_PROPS_LONG_COLUMNS)].copy()
 
 
 def load_action_props_feature_snapshots_for_date_live(

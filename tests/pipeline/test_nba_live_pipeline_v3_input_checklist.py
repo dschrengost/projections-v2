@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import subprocess
 
 import pandas as pd
 import pytest
@@ -15,11 +16,13 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _compute_per_game_input_digests,
     _detect_stale_authoritative_inputs,
     _merge_parquet_for_target_games,
+    _run_python_module,
     _report_window_status,
     _summarize_world_contracts_from_frame,
     _resolve_season_month,
     publish_atomic_task,
 )
+from projections.features.action_props import load_rotowire_props_long_from_bronze
 from projections.ops.manual_availability import upsert_manual_override
 from projections.pipeline import writer_guard
 
@@ -1368,3 +1371,82 @@ def test_feature_input_checklist_passes_with_rotowire_live_props(tmp_path: Path)
         if item["name"] == "props_source_policy_satisfied"
     )
     assert props_check["details"]["selected_source"] == "rotowire"
+
+
+def test_load_rotowire_props_long_from_bronze_normalizes_without_dataframe_masks(
+    tmp_path: Path,
+) -> None:
+    game_date = pd.Timestamp("2026-03-01")
+    _write(
+        tmp_path / "game_date=2026-03-01" / "props_1.parquet",
+        pd.DataFrame(
+            {
+                "player_name": ["Player One", "Player One", None, "Player Two"],
+                "team": ["NY", "NYK", "BOS", "BOS"],
+                "prop_type": ["pts", "pts", "ast", "bogus"],
+                "line": [22.5, 23.5, 6.5, 3.5],
+                "book": ["draftkings", "fanduel", "betmgm", "draftkings"],
+                "scraped_at": [
+                    "2026-03-01T17:00:00Z",
+                    "2026-03-01T17:00:00Z",
+                    "2026-03-01T17:00:00Z",
+                    None,
+                ],
+                "over_odds": [-110, -105, -120, -110],
+                "implied_over_prob": [None, 0.54, 0.51, 0.5],
+                "game_id": ["123", "123", "123", "123"],
+            }
+        ),
+    )
+    _write(
+        tmp_path / "game_date=2026-03-01" / "props_missing_cols.parquet",
+        pd.DataFrame({"player_name": ["Ignored"], "team": ["NYK"]}),
+    )
+
+    actual = load_rotowire_props_long_from_bronze(
+        rotowire_props_root=tmp_path,
+        game_date=game_date,
+    ).sort_values(["player_name", "prop_key"]).reset_index(drop=True)
+
+    assert list(actual["player_name"]) == ["Player One"]
+    assert list(actual["team_tricode"]) == ["NYK"]
+    assert list(actual["prop_key"]) == ["pts"]
+    assert actual.loc[0, "line"] == pytest.approx(23.0)
+    assert actual.loc[0, "p_over"] == pytest.approx((0.5238095238 + 0.54) / 2.0)
+    assert actual.loc[0, "line_std"] == pytest.approx(0.5)
+    assert actual.loc[0, "books"] == pytest.approx(2.0)
+    assert actual.loc[0, "action_game_id"] == 123
+
+
+def test_run_python_module_retries_retryable_exit_codes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    attempts: list[int] = []
+
+    def fake_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            return subprocess.CompletedProcess(
+                args=args[0],
+                returncode=139,
+                stdout="",
+                stderr="segfault",
+            )
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        )
+
+    monkeypatch.setattr("prefect_flows.live_nba_pipeline_v3.subprocess.run", fake_run)
+    monkeypatch.setattr("prefect_flows.live_nba_pipeline_v3.time.sleep", lambda _: None)
+
+    _run_python_module(
+        "projections.cli.fake_module",
+        ["--flag"],
+        data_root=tmp_path,
+        timeout_s=5,
+    )
+
+    assert attempts == [1, 2]

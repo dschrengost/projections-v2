@@ -42,10 +42,6 @@ from zoneinfo import ZoneInfo
 
 from projections import model_selectors, paths
 from projections.etl import storage as bronze_storage
-from projections.features.action_props import (
-    build_action_props_feature_snapshots,
-    load_rotowire_props_long_from_bronze,
-)
 from projections.names import normalize_player_name
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline.gtv2_live_features import (
@@ -153,6 +149,9 @@ _REPORT_WINDOW_WAIT_INTERVAL_SECONDS = 30
 _STALE_INPUT_TOLERANCE_SECONDS = 30
 _ODDS_MATERIALITY_MAX_MINUTES_TO_TIP = 180.0
 _WORLD_CONTRACT_TOL = 1e-4
+_RETRYABLE_SUBPROCESS_EXIT_CODES = frozenset({-11, -6, 134, 139})
+_SUBPROCESS_CRASH_RETRY_ATTEMPTS = 2
+_SUBPROCESS_CRASH_RETRY_DELAY_SECONDS = 5
 
 
 def _utc_now_iso() -> str:
@@ -195,21 +194,38 @@ def _run_python_module(
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
     cmd = [_subprocess_python(), "-m", module, *args]
-    result = subprocess.run(
-        cmd,
-        cwd=str(PROJECT_ROOT),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=timeout_s,
-        check=False,
+    last_result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(1, _SUBPROCESS_CRASH_RETRY_ATTEMPTS + 1):
+        result = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+        if result.stdout:
+            print(result.stdout.rstrip())
+        if result.stderr:
+            print(result.stderr.rstrip(), file=sys.stderr)
+        if result.returncode == 0:
+            return
+        last_result = result
+        if (
+            result.returncode not in _RETRYABLE_SUBPROCESS_EXIT_CODES
+            or attempt >= _SUBPROCESS_CRASH_RETRY_ATTEMPTS
+        ):
+            break
+        print(
+            f"[subprocess-retry] {module} exited with {result.returncode}; "
+            f"retrying attempt {attempt + 1}/{_SUBPROCESS_CRASH_RETRY_ATTEMPTS}",
+            file=sys.stderr,
+        )
+        time.sleep(_SUBPROCESS_CRASH_RETRY_DELAY_SECONDS)
+    raise RuntimeError(
+        f"{module} failed with exit_code={last_result.returncode if last_result else 'unknown'}"
     )
-    if result.stdout:
-        print(result.stdout.rstrip())
-    if result.stderr:
-        print(result.stderr.rstrip(), file=sys.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(f"{module} failed with exit_code={result.returncode}")
 
 
 def _resolve_game_date(game_date: str | None) -> str:
@@ -563,6 +579,131 @@ def _latest_ts_by_game_from_teams(
         if ts_values:
             out[int(game_id)] = max(ts_values)
     return out
+
+
+def _probe_rotowire_props_snapshot_summary(
+    *,
+    rotowire_props_root: Path,
+    game_date: pd.Timestamp,
+    data_root: Path,
+    timeout_s: int = 180,
+) -> dict[str, Any]:
+    probe_code = """
+import json
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+from projections.features.action_props import (
+    build_action_props_feature_snapshots,
+    load_rotowire_props_long_from_bronze,
+)
+
+root = Path(sys.argv[1])
+day = pd.Timestamp(sys.argv[2])
+frames = []
+for offset in (0, 1):
+    current_day = day + pd.Timedelta(days=offset)
+    long_df = load_rotowire_props_long_from_bronze(
+        rotowire_props_root=root,
+        game_date=current_day,
+    )
+    snap_df = build_action_props_feature_snapshots(long_df)
+    if not snap_df.empty:
+        frames.append(snap_df.loc[:, ["team_tricode", "action_props_as_of_ts"]].copy())
+
+if frames:
+    combined = pd.concat(frames, ignore_index=True)
+    combined["team_tricode"] = combined["team_tricode"].astype(str).str.strip().str.upper()
+    combined["action_props_as_of_ts"] = pd.to_datetime(
+        combined["action_props_as_of_ts"], utc=True, errors="coerce"
+    )
+    combined = combined.dropna(subset=["team_tricode", "action_props_as_of_ts"])
+else:
+    combined = pd.DataFrame(columns=["team_tricode", "action_props_as_of_ts"])
+
+team_latest = (
+    combined.groupby("team_tricode", sort=False)["action_props_as_of_ts"].max().to_dict()
+    if not combined.empty
+    else {}
+)
+latest = combined["action_props_as_of_ts"].max() if not combined.empty else None
+payload = {
+    "parsed_rows": int(len(combined)),
+    "latest_action_props_as_of_ts": (
+        None if latest is None or pd.isna(latest) else pd.Timestamp(latest).isoformat()
+    ),
+    "teams": sorted(team_latest.keys()),
+    "team_latest_as_of_ts": {
+        str(team): pd.Timestamp(ts).isoformat()
+        for team, ts in team_latest.items()
+        if ts is not None and not pd.isna(ts)
+    },
+}
+print(json.dumps(payload))
+""".strip()
+    env = os.environ.copy()
+    env["PROJECTIONS_DATA_ROOT"] = str(data_root)
+    cmd = [
+        _subprocess_python(),
+        "-c",
+        probe_code,
+        str(rotowire_props_root),
+        pd.Timestamp(game_date).normalize().date().isoformat(),
+    ]
+    last_error = "rotowire props probe did not run"
+    for attempt in range(1, _SUBPROCESS_CRASH_RETRY_ATTEMPTS + 1):
+        result = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+        if result.stderr:
+            print(result.stderr.rstrip(), file=sys.stderr)
+        if result.returncode == 0:
+            stdout = result.stdout.strip()
+            if not stdout:
+                return {
+                    "parsed_rows": 0,
+                    "latest_action_props_as_of_ts": None,
+                    "teams": [],
+                    "team_latest_as_of_ts": {},
+                    "parse_error": "rotowire props probe returned empty stdout",
+                }
+            try:
+                payload = json.loads(stdout)
+            except json.JSONDecodeError as exc:
+                last_error = f"rotowire props probe invalid json: {exc}"
+            else:
+                payload["parse_error"] = None
+                return payload
+        else:
+            last_error = f"rotowire props probe exited with code {result.returncode}"
+            if (
+                result.returncode in _RETRYABLE_SUBPROCESS_EXIT_CODES
+                and attempt < _SUBPROCESS_CRASH_RETRY_ATTEMPTS
+            ):
+                print(
+                    "[subprocess-retry] rotowire props probe exited with "
+                    f"{result.returncode}; retrying attempt "
+                    f"{attempt + 1}/{_SUBPROCESS_CRASH_RETRY_ATTEMPTS}",
+                    file=sys.stderr,
+                )
+                time.sleep(_SUBPROCESS_CRASH_RETRY_DELAY_SECONDS)
+                continue
+        break
+    return {
+        "parsed_rows": 0,
+        "latest_action_props_as_of_ts": None,
+        "teams": [],
+        "team_latest_as_of_ts": {},
+        "parse_error": last_error,
+    }
 
 
 def _content_digest_by_game_from_teams(
@@ -1790,30 +1931,20 @@ def _build_feature_input_checklist(
     ) + sorted(
         (rotowire_props_root / f"game_date={action_props_next_day}").glob("*.parquet")
     )
-    rotowire_snapshots = pd.DataFrame()
-    rotowire_parse_error: str | None = None
+    rotowire_props_summary = {
+        "parsed_rows": 0,
+        "latest_action_props_as_of_ts": None,
+        "teams": [],
+        "team_latest_as_of_ts": {},
+        "parse_error": None,
+    }
     if rotowire_props_root.exists():
-        try:
-            rw_day_long = load_rotowire_props_long_from_bronze(
-                rotowire_props_root=rotowire_props_root,
-                game_date=day,
-            )
-            rw_next_long = load_rotowire_props_long_from_bronze(
-                rotowire_props_root=rotowire_props_root,
-                game_date=day + pd.Timedelta(days=1),
-            )
-            rw_day_snap = build_action_props_feature_snapshots(rw_day_long)
-            rw_next_snap = build_action_props_feature_snapshots(rw_next_long)
-            rw_frames = [
-                df
-                for df in (rw_day_snap, rw_next_snap)
-                if isinstance(df, pd.DataFrame) and not df.empty
-            ]
-            rotowire_snapshots = (
-                pd.concat(rw_frames, ignore_index=True) if rw_frames else pd.DataFrame()
-            )
-        except Exception as exc:  # noqa: BLE001
-            rotowire_parse_error = str(exc)
+        rotowire_props_summary = _probe_rotowire_props_snapshot_summary(
+            rotowire_props_root=rotowire_props_root,
+            game_date=day,
+            data_root=data_root,
+        )
+    rotowire_parse_error = rotowire_props_summary.get("parse_error")
 
     checks.append(
         {
@@ -1832,35 +1963,42 @@ def _build_feature_input_checklist(
             },
         }
     )
-    latest_rotowire_props_ts = _latest_ts(
-        rotowire_snapshots, time_col="action_props_as_of_ts"
+    latest_rotowire_props_ts = pd.to_datetime(
+        rotowire_props_summary.get("latest_action_props_as_of_ts"),
+        utc=True,
+        errors="coerce",
     )
     checks.append(
         {
             "name": "rotowire_props_parsed_snapshots",
             "required": False,
-            "ok": bool(not rotowire_snapshots.empty and rotowire_parse_error is None),
+            "ok": bool(
+                int(rotowire_props_summary.get("parsed_rows", 0)) > 0
+                and rotowire_parse_error is None
+            ),
             "details": {
-                "parsed_rows": int(len(rotowire_snapshots)),
+                "parsed_rows": int(rotowire_props_summary.get("parsed_rows", 0)),
                 "latest_action_props_as_of_ts": None
-                if latest_rotowire_props_ts is None
+                if pd.isna(latest_rotowire_props_ts)
                 else latest_rotowire_props_ts.isoformat(),
                 "parse_error": rotowire_parse_error,
             },
         }
     )
-    rotowire_props_teams = (
+    rotowire_props_teams = {
+        _normalize_props_team_abbr(team)
+        for team in rotowire_props_summary.get("teams", [])
+        if str(team).strip()
+    }
+    rotowire_props_team_latest = pd.DataFrame(
         {
-            _normalize_props_team_abbr(team)
-            for team in rotowire_snapshots.get(
-                "team_tricode", pd.Series(dtype="object")
-            )
-            .dropna()
-            .tolist()
-            if str(team).strip()
+            "team_tricode": list(
+                (rotowire_props_summary.get("team_latest_as_of_ts") or {}).keys()
+            ),
+            "action_props_as_of_ts": list(
+                (rotowire_props_summary.get("team_latest_as_of_ts") or {}).values()
+            ),
         }
-        if not rotowire_snapshots.empty
-        else set()
     )
     rotowire_props_team_overlap = rotowire_props_teams.intersection(
         expected_props_teams
@@ -1883,7 +2021,7 @@ def _build_feature_input_checklist(
         }
     )
     rotowire_ok = bool(
-        not rotowire_snapshots.empty
+        int(rotowire_props_summary.get("parsed_rows", 0)) > 0
         and rotowire_parse_error is None
         and rotowire_overlap_ok
     )
@@ -2058,7 +2196,7 @@ def _build_feature_input_checklist(
     )
     rotowire_props_latest_by_game = _latest_ts_by_game_from_teams(
         slate_df,
-        rotowire_snapshots,
+        rotowire_props_team_latest,
         time_col="action_props_as_of_ts",
     )
     per_game_freshness: dict[str, dict[str, Any]] = {}
