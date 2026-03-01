@@ -40,7 +40,11 @@ This spec makes the following hard decisions:
 3. define a single backend portfolio optimizer contract and route UI selection through it
 4. harden the logic around exposure bounds, metric handling, diagnostics, and
    train/holdout separation
-5. allow a substantial rewrite of the current experimental module if that is the
+5. keep `top_n` only as a simple visible filter on the browsed candidate list
+6. remove opaque contest-sim selection heuristics such as `Final`, `Upside %`,
+   `Select Final`, `Run Final`, `core`, `upside`, and "set and forget"
+   auto-bucketing from the authoritative selection path
+7. allow a substantial rewrite of the current experimental module if that is the
    cleanest path
 
 ### 1.3 Why this matters
@@ -54,6 +58,11 @@ A production portfolio optimizer must solve two separate problems:
 
 The correct place to solve that is after contest sim has already scored candidate lineups
 against a realistic field and a realistic worlds distribution.
+
+The product also needs a direct manual path. If the user wants to filter lineups, use a
+simple `Top N` cutoff, sort by `EV`, `ROI`, `tail_score`, or another visible metric, and
+then select lineups directly, the system should support that cleanly. It should not force
+the user through derived "Final" or "Upside %" lineup buckets.
 
 ---
 
@@ -147,11 +156,18 @@ The contest-sim page currently uses local selection heuristics for:
 2. min-uniques filtering
 3. exposure-bound filtering
 4. final-set selection
-5. "set and forget" construction
+5. "core" / "upside" lineup partitioning
+6. "set and forget" construction
 
 This creates a contract split between backend and frontend selection logic.
 
 That split should be removed.
+
+The problem is not `Top N` itself. `Top N` is acceptable as a simple, visible shortlist
+filter. The unacceptable part is the current "Final + Upside % + Select Final / Run Final"
+recipe layered on top of that shortlist. That flow is too opaque, too heuristic, and too
+hard to reason about relative to direct metric-based selection or an explicit portfolio
+optimizer mode.
 
 ---
 
@@ -167,24 +183,45 @@ portfolio that:
 3. respects explicit exposure and uniqueness constraints
 4. is reproducible and auditable
 
+The product must also support a simpler non-optimizer workflow:
+
+1. filter lineups by explicit visible criteria
+2. optionally cap the browsed list with `Top N`
+3. sort by a chosen metric
+4. manually select or save the resulting set
+
+That simple workflow should remain available and should not be wrapped in hidden heuristic
+sub-selection.
+
 ### 5.2 Desired user modes
 
-The product should support three modes:
+The product should support four modes:
 
-1. `greedy_constraints`
+1. `browse_select`
+   - filter by explicit constraints and ranges
+   - optionally apply a simple `Top N` shortlist after sorting
+   - sort by one chosen contest-sim metric
+   - let the operator manually select lineups directly
+   - no hidden re-ranking and no `Final` / `Upside %` auto-bucketing
+
+2. `greedy_constraints`
    - rank by a chosen contest-sim metric
    - apply min uniques / max ownership / exposure bounds
    - simple and fast baseline
 
-2. `decorrelated_ev`
+3. `decorrelated_ev`
    - start from best-EV feasible set
    - reduce covariance subject to EV retention floor
    - default recommended portfolio mode
 
-3. `weighted_allocations`
+4. `weighted_allocations`
    - integer weights over fewer unique lineups
    - useful for larger entry counts / duplicate-allowed strategies
    - later phase, but included in the contract now
+
+There should be no separate product mode for `Final` / `Upside %` selection. If a user
+wants a portfolio optimizer, they should choose a named optimizer mode. If they want
+manual control, they should use `browse_select`.
 
 ---
 
@@ -290,6 +327,9 @@ Saved portfolio builds must record:
 
 ## 8. Objective Logic
 
+`browse_select` is intentionally not an optimizer objective. It is a deterministic
+filter/sort/select workflow driven by visible user inputs only.
+
 ## 8.1 Baseline constrained portfolio
 
 The baseline selector is greedy and deterministic:
@@ -346,6 +386,22 @@ Use cases:
 2. contest-specific allocation later through entry manager
 
 This mode should not block the initial hardening release.
+
+## 8.4 Explicitly prohibited selection logic
+
+The authoritative selection layer must not depend on opaque heuristic categories such as:
+
+1. `Final` lineup bucket percentages
+2. `Upside %` bucket percentages
+3. fixed-percentage splits between lineup buckets
+4. page-local "Select Final" / "Run Final" recipes that are not represented as backend
+   contract fields
+5. `core` lineups
+6. `upside` lineups
+7. page-local "set and forget" recipes that are not represented as backend contract fields
+
+If a future selector wants to blend floor and ceiling, it must do so through an explicit
+mode and explicit parameters, not through hidden page logic.
 
 ---
 
@@ -474,6 +530,13 @@ Suggested request fields:
 13. `max_total_own`
 14. `exposure_bounds`
 15. `allow_weighted_duplicates`
+16. optional explicit filter predicates for browse/select mode:
+    - metric ranges
+    - player/team/game includes or excludes
+    - ownership ranges
+    - uniqueness filter
+    - optional `top_n`
+17. optional explicit manual lineup ids for save/export
 
 Suggested response fields:
 
@@ -481,6 +544,7 @@ Suggested response fields:
 2. weights if any
 3. diagnostics
 4. warnings / constraint exhaustion info
+5. filtered lineup count before and after any selection step
 
 ## 12.2 UI contract
 
@@ -489,9 +553,10 @@ The contest-sim page should stop re-implementing core selection logic locally.
 UI responsibilities:
 
 1. collect config
-2. send request to backend selector
-3. display diagnostics
-4. allow manual include/exclude edits on top of the selected set
+2. support direct filter/sort/manual selection in `browse_select` mode
+3. send request to backend selector when an explicit optimizer mode is chosen
+4. display diagnostics
+5. allow manual include/exclude edits on top of the selected set
 
 Backend responsibilities:
 
@@ -499,6 +564,20 @@ Backend responsibilities:
 2. validate config
 3. enforce constraints
 4. return diagnostics
+
+Additional UI/product rules:
+
+1. keep `Top N` as a visible shortlist control
+2. remove current `Final` / `Upside %` / `Select Final` / `Run Final` flow as an
+   authoritative path
+3. if the user is in manual mode, the page should not auto-invent lineup classes
+4. all lineup selection actions should be explainable from visible filters, sort keys, or
+   explicit optimizer parameters
+5. saved builds should record whether they came from:
+   - manual browse/select
+   - greedy_constraints
+   - decorrelated_ev
+   - weighted_allocations
 
 ---
 
@@ -550,13 +629,21 @@ Files:
 Tasks:
 
 1. remove local duplicate selection logic as authoritative path
-2. call backend selector for final-set construction
-3. display diagnostics:
+2. keep `Top N` as a simple shortlist filter
+3. remove `Final` / `Upside %` / `Select Final` / `Run Final` + `core` / `upside` +
+   "set and forget" heuristics from the page
+4. implement a simple `browse_select` workflow:
+   - explicit filters
+   - visible `Top N`
+   - explicit sort key and direction
+   - manual lineup selection
+5. call backend selector only for explicit optimizer modes
+6. display diagnostics:
    - EV retained
    - risk reduction
    - worlds source
    - train/holdout policy
-4. keep manual include/exclude as a thin post-selector layer
+7. keep manual include/exclude as a thin post-selector layer
 
 ### 13.4 Phase 4: Weighted allocations and entry-manager integration
 
@@ -590,6 +677,7 @@ The hardened selector must satisfy all of the following:
 4. no silent ignoring of requested constraints
 5. no frontend/backend divergence in authoritative selection logic
 6. saved outputs include enough metadata to reconstruct what happened
+7. no opaque page-local heuristic lineup classes in the authoritative path
 
 ---
 
@@ -600,11 +688,15 @@ The hardened portfolio optimizer is acceptable when:
 1. it is the authoritative final-set selector for contest sim
 2. live selection uses `gtv2` worlds by default and surfaces that fact in diagnostics
 3. selection logic is no longer duplicated in frontend-only heuristics
-4. historical replay shows:
+4. the current `Final` / `Upside %` / `Select Final` / `Run Final` recipe is fully removed
+   from the authoritative flow
+5. the page supports direct filter/sort/manual selection, including visible `Top N`,
+   without hidden sub-selection
+6. historical replay shows:
    - similar or slightly lower EV than best-EV greedy baseline
    - materially lower concentration / covariance
    - more stable downside behavior
-5. tests cover the main contract edges
+7. tests cover the main contract edges
 
 ---
 
@@ -612,11 +704,15 @@ The hardened portfolio optimizer is acceptable when:
 
 To avoid ambiguity, adopt these decisions now:
 
-1. `decorrelated_ev` becomes the default production portfolio mode
-2. `gtv2` is the default live worlds source
-3. `min` exposure is rejected until implemented properly
-4. train/holdout split is required for risk-aware selection in production
-5. the frontend final-set logic is transitional and should be replaced by the backend selector
+1. `browse_select` is the default contest-sim interaction mode
+2. `decorrelated_ev` becomes the default optimizer-backed portfolio mode
+3. keep `Top N` as a shortlist control, not a heuristic selector
+4. remove `Final` / `Upside %` / `Select Final` / `Run Final` / `core` / `upside` /
+   "set and forget" as supported product concepts
+5. `gtv2` is the default live worlds source
+6. `min` exposure is rejected until implemented properly
+7. train/holdout split is required for risk-aware selection in production
+8. the frontend final-set logic is transitional and should be replaced by the backend selector
 
 ---
 
@@ -639,7 +735,11 @@ To avoid ambiguity, adopt these decisions now:
 ### Frontend
 
 - [ ] `web/minutes-dashboard/src/pages/ContestSimPage.tsx`
-  - replace local final-set logic with backend call
+  - keep `Top N` as a simple shortlist control
+  - remove `Final` / `Upside %` / `Select Final` / `Run Final` / `core` / `upside` /
+    "set and forget" logic
+  - implement direct filter/sort/manual selection flow
+  - replace local final-set optimizer logic with backend call for explicit optimizer modes
   - surface diagnostics and warnings
 
 ### Tests
