@@ -92,7 +92,7 @@ export default function LineupCard({
                                     onToggleFinalSet()
                                 }}
                             >
-                                {isInFinalSet ? 'Remove Final' : 'Add Final'}
+                                {isInFinalSet ? 'Remove Portfolio' : 'Add Portfolio'}
                             </button>
                         )}
                         {hasFinalOverride && onClearFinalOverride && (
@@ -130,7 +130,7 @@ export default function LineupCard({
                         )}
                     </div>
                     <div className="lineup-flags">
-                        {isInFinalSet && <span className="lineup-flag final">Final</span>}
+                        {isInFinalSet && <span className="lineup-flag final">Portfolio</span>}
                         {finalTag === 'core' && <span className="lineup-flag core">Core</span>}
                         {finalTag === 'upside' && <span className="lineup-flag upside">Upside</span>}
                         {isEdited && <span className="lineup-flag edited">Edited</span>}
