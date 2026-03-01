@@ -3790,6 +3790,28 @@ th.override-col {
   cursor: pointer;
 }
 
+.exposure-scope-toggle {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.exposure-scope-btn {
+  padding: 0.3rem 0.55rem;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.exposure-scope-btn.active {
+  background: #1d4ed8;
+  border-color: #3b82f6;
+  color: #eff6ff;
+}
+
 .exposure-controls select,
 .exposure-controls input[type="number"] {
   padding: 0.3rem 0.5rem;
@@ -3872,6 +3894,12 @@ th.override-col {
   font-size: 0.8rem;
 }
 
+.exposure-table .player-baseline {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 .exposure-table .player-exposure {
   min-width: 100px;
 }
@@ -3909,6 +3937,24 @@ th.override-col {
   color: #64748b;
   font-size: 0.8rem;
   white-space: nowrap;
+}
+
+.exposure-table .player-delta {
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.exposure-table .player-delta.up {
+  color: #f59e0b;
+}
+
+.exposure-table .player-delta.down {
+  color: #22c55e;
+}
+
+.exposure-table .player-delta.flat {
+  color: #64748b;
 }
 
 /* Exposure color classes */

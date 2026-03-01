@@ -27,7 +27,7 @@ import {
     Slate,
 } from '../api/optimizer'
 import LineupCard from '../components/LineupCard'
-import PlayerExposurePanel, { ExposureBounds } from '../components/PlayerExposurePanel'
+import PlayerExposurePanel, { ExposureBounds, ExposureScope } from '../components/PlayerExposurePanel'
 import { useSlateDateAndSlate } from '../hooks/useSlateDate'
 import { formatSlateLabel } from '../utils/slateFormat'
 
@@ -718,6 +718,7 @@ export default function ContestSimPage() {
     const [portfolioLoading, setPortfolioLoading] = useState(false)
     const [portfolioError, setPortfolioError] = useState<string | null>(null)
     const [portfolioResponse, setPortfolioResponse] = useState<PortfolioSelectionResponse | null>(null)
+    const [exposureScope, setExposureScope] = useState<ExposureScope>('visible')
 
     const [selectedLineups, setSelectedLineups] = useState<Set<number>>(new Set())
     const [manualIncludeFinal, setManualIncludeFinal] = useState<Set<number>>(new Set())
@@ -1166,6 +1167,9 @@ export default function ContestSimPage() {
             .map(id => poolByLineupId.get(id))
             .filter((r): r is LineupResultWithOwnership => Boolean(r))
     }, [finalSetLineupIds, poolByLineupId])
+    const selectedResults = useMemo(() => {
+        return filteredByPlayersResults.filter(r => selectedLineups.has(r.lineup_id))
+    }, [filteredByPlayersResults, selectedLineups])
     const editedFinalCount = useMemo(() => {
         return finalSetResults.filter(r => Boolean(editedLineupsById[r.lineup_id])).length
     }, [finalSetResults, editedLineupsById])
@@ -1221,6 +1225,18 @@ export default function ContestSimPage() {
         exposureBounds,
         requiredPlayerIds,
     ])
+
+    useEffect(() => {
+        setExposureScope(prev => {
+            if (prev === 'portfolio' && finalSetResults.length === 0) {
+                return selectedResults.length > 0 ? 'selected' : 'visible'
+            }
+            if (prev === 'selected' && selectedResults.length === 0) {
+                return finalSetResults.length > 0 ? 'portfolio' : 'visible'
+            }
+            return prev
+        })
+    }, [finalSetResults.length, selectedResults.length])
 
     useEffect(() => {
         const visibleIds = new Set(filteredByPlayersResults.map(r => r.lineup_id))
@@ -1389,6 +1405,7 @@ export default function ContestSimPage() {
                             if (typeof selectionMode === 'string' && selectionMode !== 'browse_select') {
                                 setPortfolioMode(selectionMode as PortfolioSelectionMode)
                             }
+                            setExposureScope('portfolio')
                         } else {
                             setPortfolioResponse(null)
                         }
@@ -1541,6 +1558,7 @@ export default function ContestSimPage() {
             setPortfolioResponse(response)
             setManualIncludeFinal(new Set())
             setManualExcludeFinal(new Set())
+            setExposureScope('portfolio')
         } catch (err) {
             setPortfolioError((err as Error).message)
         } finally {
@@ -2186,7 +2204,11 @@ export default function ContestSimPage() {
                             )}
                             {/* Player Exposure Panel */}
                             <PlayerExposurePanel
-                                lineupResults={filteredByPlayersResults}
+                                visibleLineupResults={filteredByPlayersResults}
+                                portfolioLineupResults={finalSetResults}
+                                selectedLineupResults={selectedResults}
+                                scope={exposureScope}
+                                onScopeChange={setExposureScope}
                                 playerMap={playerMap}
                                 minUniques={minUniques}
                                 onMinUniquesChange={setMinUniques}
