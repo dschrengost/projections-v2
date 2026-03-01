@@ -1,23 +1,19 @@
 """Portfolio selection utilities for multi-entry DFS.
 
-This module focuses on *selection* of lineups after contest simulation has produced
-per-lineup EV metrics.
+This module is the authoritative selection layer *after* contest simulation has
+already produced lineup-level metrics. It supports:
 
-Initial implementation is a fast greedy selector that supports:
-- Sorting by a chosen metric (default: expected_value)
-- Optional positive-EV filtering
-- Minimum uniques constraint (per pair of selected lineups)
-- Player exposure caps (max %)
-
-It also includes a *de-correlation* selector that uses sim world outcomes to
-penalize covariance between lineups, producing a diversified portfolio without
-requiring explicit min-uniques or exposure caps.
+- deterministic greedy selection over a chosen contest-sim metric
+- hard min-uniques and player max-exposure constraints
+- covariance-aware EV retention selection using player/world outcomes
+- portfolio summaries used by the API and UI diagnostics
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from math import isfinite
 from typing import Iterable, Literal, Mapping, Sequence
 
 SortDir = Literal["asc", "desc"]
@@ -29,11 +25,17 @@ SortKey = Literal[
     "expected_value",
     "roi",
     "win_rate",
-    "top_1pct_rate",
     "top_5pct_rate",
     "top_10pct_rate",
+    "top_1pct_rate",
     "cash_rate",
     "total_own",
+    "ucv90",
+    "tail_score",
+    "select_score",
+    "score_lcb95",
+    "score_cvar10",
+    "robust_floor",
 ]
 
 
@@ -66,6 +68,12 @@ class PortfolioCandidate:
     cash_rate: float | None = None
 
     total_own: float | None = None
+    ucv90: float | None = None
+    tail_score: float | None = None
+    select_score: float | None = None
+    score_lcb95: float | None = None
+    score_cvar10: float | None = None
+    robust_floor: float | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +82,20 @@ class PortfolioSelection:
 
     selected: list[PortfolioCandidate]
     min_uniques_checked: int
+
+
+@dataclass(frozen=True)
+class PortfolioDiagnosticsSummary:
+    """Exposure and overlap summaries for a selected lineup set."""
+
+    exposure_summary: dict[str, object]
+    overlap_summary: dict[str, object]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "exposure_summary": dict(self.exposure_summary),
+            "overlap_summary": dict(self.overlap_summary),
+        }
 
 
 @dataclass(frozen=True)
@@ -137,14 +159,89 @@ def _as_float(value: object | None) -> float | None:
         return None
 
 
-def _get_sort_value(candidate: PortfolioCandidate, *, sort_key: SortKey) -> float:
+def _validate_exposure_bounds(
+    exposure_bounds: Mapping[str, ExposureBoundsPct] | None,
+) -> Mapping[str, ExposureBoundsPct]:
+    bounds = exposure_bounds or {}
+    for pid, bound in bounds.items():
+        if bound.min is not None:
+            raise ValueError(
+                f"Minimum exposure is not supported yet for player {pid!r}; "
+                "use max exposure only."
+            )
+        if bound.max is not None and not (0.0 <= float(bound.max) <= 100.0):
+            raise ValueError(
+                f"Exposure max for player {pid!r} must be between 0 and 100"
+            )
+    return bounds
+
+
+def _get_candidate_metric_value(
+    candidate: PortfolioCandidate,
+    *,
+    sort_key: SortKey,
+) -> float | None:
     if sort_key == "lineup_id":
         return float(candidate.lineup_id)
     value = getattr(candidate, sort_key, None)
     value_f = _as_float(value)
-    if value_f is None:
-        return float("-inf")
+    if value_f is None or not isfinite(value_f):
+        return None
     return float(value_f)
+
+
+def get_candidate_metric_value(
+    candidate: PortfolioCandidate,
+    *,
+    sort_key: SortKey,
+) -> float | None:
+    """Public helper for API-level candidate filtering/diagnostics."""
+    return _get_candidate_metric_value(candidate, sort_key=sort_key)
+
+
+def _sort_candidates(
+    candidates: Sequence[PortfolioCandidate],
+    *,
+    sort_key: SortKey,
+    sort_dir: SortDir,
+) -> list[PortfolioCandidate]:
+    multiplier = -1.0 if sort_dir == "desc" else 1.0
+
+    def _key(candidate: PortfolioCandidate) -> tuple[int, float, int]:
+        metric_value = _get_candidate_metric_value(candidate, sort_key=sort_key)
+        if metric_value is None:
+            return (1, 0.0, candidate.lineup_id)
+        return (0, multiplier * float(metric_value), candidate.lineup_id)
+
+    return sorted(
+        candidates,
+        key=_key,
+    )
+
+
+def _count_uniques_between_lineups(
+    candidate_player_ids: Sequence[str],
+    existing_player_ids: set[str],
+) -> int:
+    shared = 0
+    for pid in candidate_player_ids:
+        if pid in existing_player_ids:
+            shared += 1
+    return len(candidate_player_ids) - shared
+
+
+def _passes_min_uniques(
+    candidate: PortfolioCandidate,
+    *,
+    selected_sets: Sequence[set[str]],
+    min_uniques: int,
+) -> bool:
+    if min_uniques <= 0:
+        return True
+    for existing in selected_sets:
+        if _count_uniques_between_lineups(candidate.player_ids, existing) < min_uniques:
+            return False
+    return True
 
 
 def build_portfolio(
@@ -191,7 +288,7 @@ def build_portfolio(
     if min_uniques < 0:
         raise ValueError("min_uniques must be >= 0")
 
-    bounds = exposure_bounds or {}
+    bounds = _validate_exposure_bounds(exposure_bounds)
 
     filtered: list[PortfolioCandidate] = []
     for c in candidates:
@@ -212,12 +309,7 @@ def build_portfolio(
             f"portfolio_size={portfolio_size} exceeds candidate count={len(filtered)}"
         )
 
-    reverse = sort_dir == "desc"
-    ordered = sorted(
-        filtered,
-        key=lambda c: _get_sort_value(c, sort_key=sort_key),
-        reverse=reverse,
-    )
+    ordered = _sort_candidates(filtered, sort_key=sort_key, sort_dir=sort_dir)
 
     selected: list[PortfolioCandidate] = []
     selected_sets: list[set[str]] = []
@@ -231,15 +323,12 @@ def build_portfolio(
         pids = set(cand.player_ids)
         valid = True
 
-        if min_uniques > 0:
-            for existing in selected_sets:
-                shared = len(existing.intersection(pids))
-                uniques = len(cand.player_ids) - shared
-                if uniques < min_uniques:
-                    valid = False
-                    break
-            if not valid:
-                continue
+        if not _passes_min_uniques(
+            cand,
+            selected_sets=selected_sets,
+            min_uniques=min_uniques,
+        ):
+            continue
         min_uniques_checked += 1
 
         # Enforce max exposure caps during construction.
@@ -285,6 +374,79 @@ def compute_total_own(player_ids: Iterable[str], ownership: Mapping[str, float])
     return total
 
 
+def summarize_portfolio(
+    selected: Sequence[PortfolioCandidate],
+) -> PortfolioDiagnosticsSummary:
+    """Build exposure and overlap summaries for diagnostics."""
+    if not selected:
+        return PortfolioDiagnosticsSummary(
+            exposure_summary={
+                "unique_players": 0,
+                "top_players": [],
+                "max_exposure_pct": 0.0,
+            },
+            overlap_summary={
+                "pairs": 0,
+                "mean_shared_players": 0.0,
+                "max_shared_players": 0,
+                "mean_uniques": 0.0,
+                "min_uniques": 0,
+            },
+        )
+
+    exposure_counts: dict[str, int] = {}
+    selected_sets = [set(c.player_ids) for c in selected]
+    for candidate in selected:
+        for pid in candidate.player_ids:
+            exposure_counts[pid] = exposure_counts.get(pid, 0) + 1
+
+    lineup_count = len(selected)
+    top_players = sorted(
+        (
+            {
+                "player_id": pid,
+                "count": count,
+                "exposure_pct": round((count / lineup_count) * 100.0, 2),
+            }
+            for pid, count in exposure_counts.items()
+        ),
+        key=lambda item: (-float(item["exposure_pct"]), str(item["player_id"])),
+    )[:15]
+
+    shared_counts: list[int] = []
+    unique_counts: list[int] = []
+    lineup_size = max((len(c.player_ids) for c in selected), default=0)
+    for i in range(len(selected_sets)):
+        for j in range(i + 1, len(selected_sets)):
+            shared = len(selected_sets[i].intersection(selected_sets[j]))
+            shared_counts.append(shared)
+            unique_counts.append(max(0, lineup_size - shared))
+
+    overlap_summary = {
+        "pairs": len(shared_counts),
+        "mean_shared_players": (
+            0.0 if not shared_counts else round(sum(shared_counts) / len(shared_counts), 4)
+        ),
+        "max_shared_players": max(shared_counts, default=0),
+        "mean_uniques": (
+            0.0 if not unique_counts else round(sum(unique_counts) / len(unique_counts), 4)
+        ),
+        "min_uniques": min(unique_counts, default=0),
+    }
+    exposure_summary = {
+        "unique_players": len(exposure_counts),
+        "max_exposure_pct": max(
+            (float(item["exposure_pct"]) for item in top_players),
+            default=0.0,
+        ),
+        "top_players": top_players,
+    }
+    return PortfolioDiagnosticsSummary(
+        exposure_summary=exposure_summary,
+        overlap_summary=overlap_summary,
+    )
+
+
 def build_decorrelated_portfolio(
     candidates: Sequence[PortfolioCandidate],
     portfolio_size: int,
@@ -294,6 +456,7 @@ def build_decorrelated_portfolio(
     world_indices: Sequence[int] | None = None,
     config: DecorrelatedPortfolioConfig | None = None,
     exposure_bounds: Mapping[str, ExposureBoundsPct] | None = None,
+    min_uniques: int = 0,
 ) -> tuple[PortfolioSelection, DecorrelatedPortfolioDiagnostics]:
     """Select a diversified portfolio by penalizing covariance between lineups.
 
@@ -330,8 +493,10 @@ def build_decorrelated_portfolio(
         raise ValueError("max_passes must be >= 1")
     if int(cfg.max_swaps) < 0:
         raise ValueError("max_swaps must be >= 0")
+    if min_uniques < 0:
+        raise ValueError("min_uniques must be >= 0")
 
-    bounds = exposure_bounds or {}
+    bounds = _validate_exposure_bounds(exposure_bounds)
 
     # Build player universe from candidates.
     player_ids: list[str] = []
@@ -417,6 +582,7 @@ def build_decorrelated_portfolio(
     kept_candidates = [c for c, keep in zip(candidates, keep_mask) if keep]
     kept_idxs = [idxs for idxs, keep in zip(lineup_idxs, keep_mask) if keep]
     kept_ev = ev_arr[keep_mask]
+    kept_player_sets = [set(c.player_ids) for c in kept_candidates]
 
     # Re-pack to dense (K2, Lmax) with padding for fast vectorized penalty sums.
     K2 = len(kept_candidates)
@@ -455,10 +621,8 @@ def build_decorrelated_portfolio(
             max_counts[loc] = (float(b.max) / 100.0) * float(portfolio_size)
 
     def _select_best_ev_feasible() -> list[int]:
-        """Best-EV greedy baseline (respects max exposure caps if present)."""
+        """Best-EV greedy baseline under active hard constraints."""
         order = np.argsort(-kept_ev)
-        if np.isinf(max_counts).all():
-            return [int(i) for i in order[:portfolio_size]]
 
         selected: list[int] = []
         counts = np.zeros((len(player_ids),), dtype=np.float64)
@@ -469,13 +633,25 @@ def build_decorrelated_portfolio(
                 continue
             if np.any((counts[idxs] + 1.0) > (max_counts[idxs] + 1e-9)):
                 continue
+            if min_uniques > 0:
+                cand_set = kept_player_sets[int(i)]
+                violates = False
+                for selected_idx in selected:
+                    if _count_uniques_between_lineups(
+                        tuple(cand_set),
+                        kept_player_sets[int(selected_idx)],
+                    ) < min_uniques:
+                        violates = True
+                        break
+                if violates:
+                    continue
             selected.append(int(i))
             counts[idxs] += 1.0
             if len(selected) >= portfolio_size:
                 break
 
         if len(selected) < portfolio_size:
-            raise ValueError("No feasible portfolio under exposure caps (pool exhausted)")
+            raise ValueError("No feasible portfolio under active constraints (pool exhausted)")
         return selected
 
     # Baseline: best EV portfolio (under optional caps).
@@ -536,6 +712,26 @@ def build_decorrelated_portfolio(
                     axis=1,
                 )
                 feasible &= ~over
+                if not feasible.any():
+                    continue
+
+            if min_uniques > 0:
+                feasible_uniques = np.ones((K2,), dtype=bool)
+                current_sets = [
+                    kept_player_sets[int(selected_idx)]
+                    for selected_idx in selected
+                    if int(selected_idx) != idx_remove
+                ]
+                for candidate_idx in np.flatnonzero(feasible):
+                    cand_set = kept_player_sets[int(candidate_idx)]
+                    for existing_set in current_sets:
+                        if _count_uniques_between_lineups(
+                            tuple(cand_set),
+                            existing_set,
+                        ) < min_uniques:
+                            feasible_uniques[int(candidate_idx)] = False
+                            break
+                feasible &= feasible_uniques
                 if not feasible.any():
                     continue
 
@@ -601,7 +797,7 @@ def build_decorrelated_portfolio(
 
     selection = PortfolioSelection(
         selected=[kept_candidates[i] for i in selected],
-        min_uniques_checked=0,
+        min_uniques_checked=int(min_uniques),
     )
     diag = DecorrelatedPortfolioDiagnostics(
         ev_best=ev_best,

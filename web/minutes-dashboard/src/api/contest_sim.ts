@@ -129,7 +129,7 @@ export interface SavedSimBuildSummary {
     created_at: string
     lineups_count: number
     name?: string | null
-    kind: 'run' | 'lineups'
+    kind: 'run' | 'lineups' | 'portfolio'
     stats?: Record<string, unknown>
 }
 
@@ -138,6 +138,48 @@ export interface SavedSimBuildDetail extends SavedSimBuildSummary {
     results?: LineupEVResult[]
     lineups: string[][]
     request?: Record<string, unknown> | null
+}
+
+export type PortfolioSelectionMode = 'greedy_constraints' | 'decorrelated_ev' | 'weighted_allocations'
+
+export interface PortfolioExposureBounds {
+    min?: number
+    max?: number
+}
+
+export interface PortfolioSelectionRequest {
+    game_date: string
+    draft_group_id?: number | null
+    source_build_id: string
+    mode: PortfolioSelectionMode
+    worlds_source?: 'gtv2' | 'sim_v2'
+    sort_key?: keyof LineupEVResult | 'lineup_id' | 'total_own'
+    sort_dir?: 'asc' | 'desc'
+    portfolio_size: number
+    ev_retention?: number
+    worlds_sample?: number
+    worlds_train_frac?: number | null
+    world_indices?: number[] | null
+    min_uniques?: number
+    max_total_own?: number | null
+    filter_positive_ev?: boolean
+    top_n?: number | null
+    candidate_lineup_ids?: number[] | null
+    exposure_bounds?: Record<string, PortfolioExposureBounds>
+    seed?: number
+}
+
+export interface PortfolioSelectionResponse {
+    mode: PortfolioSelectionMode
+    source_build_id: string
+    candidate_count: number
+    filtered_candidate_count: number
+    selected_lineup_ids: number[]
+    selected_results: LineupEVResult[]
+    selected_lineups: string[][]
+    weights?: number[] | null
+    diagnostics: Record<string, unknown>
+    warnings: string[]
 }
 
 export async function runContestSim(request: ContestSimRequest): Promise<ContestSimResponse> {
@@ -215,6 +257,14 @@ export async function saveSimLineups(
     results?: LineupEVResult[] | null,
     config?: ContestConfig | null,
     stats?: SummaryStats | null,
+    options?: {
+        kind?: 'lineups' | 'portfolio'
+        sourceBuildId?: string | null
+        selectionMode?: string | null
+        selectionConfig?: Record<string, unknown> | null
+        selectionDiagnostics?: Record<string, unknown> | null
+        warnings?: string[]
+    },
 ): Promise<SavedSimBuildSummary> {
     const resp = await fetch(`${API_BASE}/saved-lineups`, {
         method: 'POST',
@@ -224,9 +274,15 @@ export async function saveSimLineups(
             draft_group_id: draftGroupId,
             name,
             lineups,
+            kind: options?.kind ?? 'lineups',
             results: results ?? null,
             config: config ?? null,
             stats: stats ?? null,
+            source_build_id: options?.sourceBuildId ?? null,
+            selection_mode: options?.selectionMode ?? null,
+            selection_config: options?.selectionConfig ?? null,
+            selection_diagnostics: options?.selectionDiagnostics ?? null,
+            warnings: options?.warnings ?? [],
         }),
     })
     if (!resp.ok) {
@@ -244,4 +300,19 @@ export async function deleteSavedSimBuild(date: string, buildId: string): Promis
         const err = await resp.json().catch(() => ({ detail: resp.statusText }))
         throw new Error(err.detail || 'Failed to delete sim build')
     }
+}
+
+export async function selectPortfolio(
+    request: PortfolioSelectionRequest,
+): Promise<PortfolioSelectionResponse> {
+    const resp = await fetch(`${API_BASE}/portfolio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+    })
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+        throw new Error(err.detail || 'Failed to build portfolio')
+    }
+    return resp.json()
 }

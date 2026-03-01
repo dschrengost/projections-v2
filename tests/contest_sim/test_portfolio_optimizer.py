@@ -45,6 +45,37 @@ def test_build_portfolio_respects_max_exposure_caps() -> None:
     assert [c.lineup_id for c in selection.selected] == [1, 3]
 
 
+def test_build_portfolio_sorts_missing_metrics_to_bottom_for_ascending() -> None:
+    candidates = [
+        PortfolioCandidate(lineup_id=1, player_ids=("A",), total_own=55.0),
+        PortfolioCandidate(lineup_id=2, player_ids=("B",), total_own=None),
+        PortfolioCandidate(lineup_id=3, player_ids=("C",), total_own=25.0),
+    ]
+
+    selection = build_portfolio(
+        candidates,
+        portfolio_size=2,
+        sort_key="total_own",
+        sort_dir="asc",
+    )
+
+    assert [c.lineup_id for c in selection.selected] == [3, 1]
+
+
+def test_build_portfolio_rejects_min_exposure_bounds() -> None:
+    candidates = [
+        PortfolioCandidate(lineup_id=1, player_ids=("A", "B"), expected_value=10.0),
+        PortfolioCandidate(lineup_id=2, player_ids=("C", "D"), expected_value=9.0),
+    ]
+
+    with pytest.raises(ValueError, match="Minimum exposure is not supported yet"):
+        build_portfolio(
+            candidates,
+            portfolio_size=1,
+            exposure_bounds={"A": ExposureBoundsPct(min=25.0)},
+        )
+
+
 def test_build_portfolio_raises_when_constraints_exhaust_pool() -> None:
     candidates = [
         PortfolioCandidate(lineup_id=1, player_ids=("A",), expected_value=10.0),
@@ -182,3 +213,47 @@ def test_build_decorrelated_portfolio_reports_exact_risk() -> None:
     assert abs(risk_exact - diag.risk_var_total_selected) <= 1e-6 * max(1.0, abs(risk_exact))
 
     assert diag.ev_selected + 1e-9 >= diag.ev_target
+
+
+def test_build_decorrelated_portfolio_is_deterministic_for_train_split() -> None:
+    import numpy as np
+
+    rng = np.random.default_rng(321)
+    worlds = rng.normal(size=(200, 12)).astype(np.float64)
+    player_ids = [f"P{i}" for i in range(12)]
+    player_index = {pid: i for i, pid in enumerate(player_ids)}
+    candidates = [
+        PortfolioCandidate(
+            lineup_id=lineup_id,
+            player_ids=tuple(player_ids[lineup_id - 1 : lineup_id + 3]),
+            expected_value=2.0 - (lineup_id * 0.05),
+        )
+        for lineup_id in range(1, 7)
+    ]
+
+    cfg = DecorrelatedPortfolioConfig(
+        ev_retention=0.97,
+        worlds_sample=150,
+        worlds_train_frac=0.6,
+        seed=17,
+        max_passes=2,
+        max_swaps=20,
+    )
+
+    selection_a, diag_a = build_decorrelated_portfolio(
+        candidates,
+        portfolio_size=3,
+        worlds_matrix=worlds,
+        player_index=player_index,
+        config=cfg,
+    )
+    selection_b, diag_b = build_decorrelated_portfolio(
+        candidates,
+        portfolio_size=3,
+        worlds_matrix=worlds,
+        player_index=player_index,
+        config=cfg,
+    )
+
+    assert [c.lineup_id for c in selection_a.selected] == [c.lineup_id for c in selection_b.selected]
+    assert diag_a.to_dict() == diag_b.to_dict()
