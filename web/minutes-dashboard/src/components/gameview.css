@@ -8,9 +8,6 @@
 .gv-toolbar,
 .gv-toolbar-fields,
 .gv-toolbar-actions,
-.gv-player-top,
-.gv-player-meta,
-.gv-player-actions,
 .gv-team-head,
 .gv-summary,
 .gv-summary-card {
@@ -19,8 +16,7 @@
 }
 
 .gv-header,
-.gv-team-head,
-.gv-player-top {
+.gv-team-head {
   justify-content: space-between;
   align-items: center;
 }
@@ -28,7 +24,6 @@
 .gv-toolbar,
 .gv-team-panel,
 .gv-summary-card,
-.gv-player-card,
 .gv-message {
   border: 1px solid #334155;
   border-radius: 16px;
@@ -136,46 +131,6 @@
   font-size: 0.82rem;
 }
 
-.gv-player-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.gv-player-card {
-  padding: 0.9rem;
-}
-
-.gv-player-name {
-  font-size: 0.96rem;
-  font-weight: 700;
-}
-
-.gv-player-meta,
-.gv-override-copy,
-.gv-card-note {
-  flex-wrap: wrap;
-}
-
-.gv-player-meta {
-  margin-top: 0.25rem;
-  color: #cbd5e1;
-  font-size: 0.84rem;
-}
-
-.gv-card-note {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  color: #94a3b8;
-  font-size: 0.8rem;
-}
-
-.gv-player-actions {
-  flex-wrap: wrap;
-  margin-top: 0.9rem;
-}
-
 .gv-button {
   border: 1px solid #475569;
   border-radius: 999px;
@@ -184,6 +139,11 @@
   padding: 0.5rem 0.9rem;
   cursor: pointer;
   font-weight: 600;
+}
+
+.gv-button-small {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.72rem;
 }
 
 .gv-button:disabled {
@@ -252,14 +212,6 @@
   color: #fca5a5;
 }
 
-.gv-override-copy {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.65rem;
-  color: #fdba74;
-  font-size: 0.8rem;
-}
-
 .gv-message {
   color: #cbd5e1;
 }
@@ -272,6 +224,162 @@
 .gv-empty {
   color: #94a3b8;
   font-size: 0.9rem;
+}
+
+.gv-player-table-wrap {
+  overflow: auto;
+}
+
+.gv-player-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.gv-player-table th,
+.gv-player-table td {
+  border-bottom: 1px solid #1f2937;
+  padding: 0.4rem 0.35rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.gv-player-table tbody tr {
+  cursor: pointer;
+}
+
+.gv-player-table tbody tr:hover {
+  background: rgba(30, 58, 138, 0.14);
+}
+
+.gv-player-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.gv-player-name-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.gv-row-note {
+  color: #94a3b8;
+  font-size: 0.72rem;
+}
+
+.gv-inline-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.gv2-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.45);
+  z-index: 100;
+}
+
+.gv2-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: min(420px, 100%);
+  background: #0b1220;
+  border-left: 1px solid #1e293b;
+  z-index: 110;
+  padding: 0.8rem;
+  overflow-y: auto;
+}
+
+.gv2-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.gv2-drawer-header h3 {
+  margin: 0;
+}
+
+.gv2-drawer-player-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.gv2-drawer-header button {
+  border: 1px solid #334155;
+  background: #111827;
+  color: #e5e7eb;
+  border-radius: 6px;
+  padding: 0.3rem 0.55rem;
+}
+
+.gv2-drawer-section {
+  margin-top: 0.75rem;
+  border-top: 1px solid #1f2937;
+  padding-top: 0.6rem;
+}
+
+.gv2-drawer-section h4 {
+  margin: 0 0 0.45rem 0;
+  font-size: 0.9rem;
+}
+
+.gv2-metric-row {
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 0.38rem 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.gv2-metric-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.78rem;
+}
+
+.gv2-metric-quantiles {
+  margin-top: 0.2rem;
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.7rem;
+  color: #9ca3af;
+}
+
+.gv2-why-changed {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.gv2-last-games-wrap {
+  overflow-x: auto;
+}
+
+.gv2-last-games-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.74rem;
+}
+
+.gv2-last-games-table th,
+.gv2-last-games-table td {
+  border-bottom: 1px solid #1f2937;
+  padding: 0.3rem 0.35rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.gv2-last-games-table th {
+  color: #94a3b8;
+  font-weight: 600;
 }
 
 @media (max-width: 960px) {

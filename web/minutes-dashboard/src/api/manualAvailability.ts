@@ -29,6 +29,8 @@ export type OpsGamePlayer = {
   status?: string | null
   is_confirmed_starter?: boolean | null
   is_projected_starter?: boolean | null
+  effective?: Record<string, unknown>
+  minutes_baseline?: Record<string, unknown>
   minutes_effective: {
     status?: string | null
     play_prob?: number | null
@@ -48,6 +50,8 @@ export type OpsGamePlayer = {
     manual_override_active?: boolean | null
     manual_override_used?: boolean | null
   }
+  rates_baseline?: Record<string, unknown>
+  rates_effective?: Record<string, unknown>
   manual_override?: ManualAvailabilityOverride | null
 }
 
@@ -69,6 +73,28 @@ export type UpsertManualAvailabilityPayload = {
   reason_code?: string | null
   reason_text?: string | null
   source_label?: string | null
+}
+
+export type PlayerLastGameStat = {
+  game_date: string
+  game_id: string
+  team_tricode?: string | null
+  opponent_tricode?: string | null
+  minutes: number
+  pts: number
+  reb: number
+  ast: number
+  stl?: number
+  blk?: number
+  to?: number
+  fpts: number
+}
+
+export type PlayerLastGamesResponse = {
+  date: string
+  player_id: string
+  limit: number
+  games: PlayerLastGameStat[]
 }
 
 const parseError = async (res: Response, fallback: string) => {
@@ -117,4 +143,20 @@ export async function clearManualAvailabilityOverride(params: {
   if (!res.ok) {
     throw new Error(await parseError(res, `Failed to clear manual availability override: ${res.status}`))
   }
+}
+
+export async function fetchPlayerLastGames(
+  date: string,
+  playerId: string,
+  limit = 5,
+): Promise<PlayerLastGamesResponse> {
+  const res = await fetch(
+    apiUrl(
+      `/api/ops/player-last-games?date=${encodeURIComponent(date)}&player_id=${encodeURIComponent(playerId)}&limit=${encodeURIComponent(String(limit))}`,
+    ),
+  )
+  if (!res.ok) {
+    throw new Error(await parseError(res, `Failed to fetch player game log: ${res.status}`))
+  }
+  return (await res.json()) as PlayerLastGamesResponse
 }

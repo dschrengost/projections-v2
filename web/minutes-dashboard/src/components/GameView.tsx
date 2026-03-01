@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react'
 import {
     clearManualAvailabilityOverride,
     fetchOpsGame,
+    fetchPlayerLastGames,
     OpsGamePlayer,
     OpsGameResponse,
+    PlayerLastGameStat,
     upsertManualAvailabilityOverride,
 } from '../api/manualAvailability'
+import { PlayerDetailsDrawer, PlayerDrawerData } from './PlayerDetailsDrawer'
 import { PlayerRow } from '../types'
-import { formatMinutes, formatPercent, formatTime, getStatusBadge } from '../utils'
+import { formatFpts, formatMinutes, formatPercent, formatTime, getStatusBadge } from '../utils'
 import './gameview.css'
 
 type GameViewProps = {
@@ -43,6 +46,28 @@ export const GameView: React.FC<GameViewProps> = ({
     const [reasonCode, setReasonCode] = useState('operator_report')
     const [reasonText, setReasonText] = useState('')
     const [sourceLabel, setSourceLabel] = useState('')
+    const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null)
+    const [lastGames, setLastGames] = useState<PlayerLastGameStat[]>([])
+    const [lastGamesLoading, setLastGamesLoading] = useState(false)
+    const [lastGamesError, setLastGamesError] = useState<string | null>(null)
+
+    const asNumber = (value: unknown): number | null => {
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? parsed : null
+    }
+
+    const statValue = (record: Record<string, unknown> | undefined, keys: string[]) => {
+        for (const key of keys) {
+            if (record && key in record) {
+                const parsed = asNumber(record[key])
+                if (parsed != null) return parsed
+            }
+        }
+        return null
+    }
+
+    const resolvedStat = (baseline: number | null, player: OpsGamePlayer) =>
+        player.manual_override?.override_type === 'force_out' ? 0 : baseline
 
     useEffect(() => {
         if (typeof window === 'undefined') return
@@ -119,6 +144,96 @@ export const GameView: React.FC<GameViewProps> = ({
         () => (game?.players ?? []).filter((player) => Boolean(player.manual_override?.active)),
         [game],
     )
+
+    const selectedPlayer = useMemo(
+        () => (game?.players ?? []).find((player) => player.player_id === selectedPlayerId) ?? null,
+        [game, selectedPlayerId],
+    )
+
+    const drawerData = useMemo<PlayerDrawerData | null>(() => {
+        if (!selectedPlayer) return null
+        const baseline = selectedPlayer.effective || {}
+        const minutesBaseline = selectedPlayer.minutes_baseline || {}
+        const minutesEffective = selectedPlayer.minutes_effective || {}
+
+        const baselineMinutes = statValue(minutesBaseline, ['minutes_final', 'minutes_p50', 'minutes_p50_cond']) ?? statValue(baseline, ['minutes_p50', 'minutes_p50_cond', 'minutes_final'])
+        const resolvedMinutes = statValue(minutesEffective as Record<string, unknown>, ['minutes_final', 'minutes_p50', 'minutes_p50_cond']) ?? baselineMinutes
+
+        return {
+            player: selectedPlayer,
+            metrics: {
+                minutes: {
+                    baseline: baselineMinutes,
+                    resolved: resolvedMinutes,
+                    p10: statValue(minutesEffective as Record<string, unknown>, ['minutes_p10', 'minutes_p10_cond']),
+                    p50: statValue(minutesEffective as Record<string, unknown>, ['minutes_p50', 'minutes_p50_cond']),
+                    p90: statValue(minutesEffective as Record<string, unknown>, ['minutes_p90', 'minutes_p90_cond']),
+                },
+                fpts: {
+                    baseline: statValue(baseline, ['fpts_sim_uncond_mean', 'dk_fpts_mean', 'sim_dk_fpts_mean']),
+                    resolved: resolvedStat(statValue(baseline, ['fpts_sim_uncond_mean', 'dk_fpts_mean', 'sim_dk_fpts_mean']), selectedPlayer),
+                    p10: statValue(baseline, ['fpts_sim_uncond_p10', 'dk_fpts_p10', 'sim_dk_fpts_p10']),
+                    p50: statValue(baseline, ['fpts_sim_uncond_p50', 'dk_fpts_p50', 'sim_dk_fpts_p50']),
+                    p90: statValue(baseline, ['fpts_sim_uncond_p90', 'dk_fpts_p90', 'sim_dk_fpts_p90']),
+                },
+                pts: {
+                    baseline: statValue(baseline, ['pts_mean_uncond', 'pts_mean', 'sim_pts_mean_uncond', 'sim_pts_mean']),
+                    resolved: resolvedStat(statValue(baseline, ['pts_mean_uncond', 'pts_mean', 'sim_pts_mean_uncond', 'sim_pts_mean']), selectedPlayer),
+                },
+                reb: {
+                    baseline: statValue(baseline, ['reb_mean_uncond', 'reb_mean', 'sim_reb_mean_uncond', 'sim_reb_mean']),
+                    resolved: resolvedStat(statValue(baseline, ['reb_mean_uncond', 'reb_mean', 'sim_reb_mean_uncond', 'sim_reb_mean']), selectedPlayer),
+                },
+                ast: {
+                    baseline: statValue(baseline, ['ast_mean_uncond', 'ast_mean', 'sim_ast_mean_uncond', 'sim_ast_mean']),
+                    resolved: resolvedStat(statValue(baseline, ['ast_mean_uncond', 'ast_mean', 'sim_ast_mean_uncond', 'sim_ast_mean']), selectedPlayer),
+                },
+                stl: {
+                    baseline: statValue(baseline, ['stl_mean_uncond', 'stl_mean', 'sim_stl_mean_uncond', 'sim_stl_mean']),
+                    resolved: resolvedStat(statValue(baseline, ['stl_mean_uncond', 'stl_mean', 'sim_stl_mean_uncond', 'sim_stl_mean']), selectedPlayer),
+                },
+                blk: {
+                    baseline: statValue(baseline, ['blk_mean_uncond', 'blk_mean', 'sim_blk_mean_uncond', 'sim_blk_mean']),
+                    resolved: resolvedStat(statValue(baseline, ['blk_mean_uncond', 'blk_mean', 'sim_blk_mean_uncond', 'sim_blk_mean']), selectedPlayer),
+                },
+                to: {
+                    baseline: statValue(baseline, ['tov_mean_uncond', 'tov_mean', 'sim_tov_mean_uncond', 'sim_tov_mean']),
+                    resolved: resolvedStat(statValue(baseline, ['tov_mean_uncond', 'tov_mean', 'sim_tov_mean_uncond', 'sim_tov_mean']), selectedPlayer),
+                },
+            },
+            lastGames,
+            lastGamesLoading,
+            lastGamesError,
+        }
+    }, [selectedPlayer, lastGames, lastGamesLoading, lastGamesError])
+
+    useEffect(() => {
+        let cancelled = false
+        if (!selectedPlayerId) {
+            setLastGames([])
+            setLastGamesError(null)
+            setLastGamesLoading(false)
+            return
+        }
+        setLastGamesLoading(true)
+        setLastGamesError(null)
+        void fetchPlayerLastGames(targetDate, selectedPlayerId, 5)
+            .then((payload) => {
+                if (cancelled) return
+                setLastGames(payload.games ?? [])
+            })
+            .catch((err) => {
+                if (cancelled) return
+                setLastGames([])
+                setLastGamesError((err as Error).message)
+            })
+            .finally(() => {
+                if (!cancelled) setLastGamesLoading(false)
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [targetDate, selectedPlayerId])
 
     const actionDisabled = Boolean(readOnly) || !operator.trim()
 
@@ -284,84 +399,91 @@ export const GameView: React.FC<GameViewProps> = ({
                                 </span>
                             </div>
                         </div>
-                        <div className="gv-player-list">
-                            {team.players.map((player) => {
-                                const effective = player.minutes_effective || {}
-                                const statusBadge = getStatusBadge(String(effective.status || player.status || ''))
-                                const isBusy = busyPlayerId === player.player_id
-                                const manualOverride = player.manual_override
-                                return (
-                                    <article key={player.player_id} className="gv-player-card">
-                                        <div className="gv-player-top">
-                                            <div>
-                                                <div className="gv-player-name">{player.player_name || player.player_id}</div>
-                                                <div className="gv-player-meta">
-                                                    <span>P50 {formatMinutes(effective.minutes_p50 ?? undefined)}</span>
-                                                    <span>Final {formatMinutes(effective.minutes_final ?? undefined)}</span>
-                                                    <span>Play {formatPercent(effective.play_prob ?? undefined)}</span>
-                                                </div>
-                                            </div>
-                                            <div className="gv-chip-row">
-                                                {statusBadge ? (
-                                                    <span className={`status-tag ${statusBadge.className}`} title={statusBadge.title}>
-                                                        {statusBadge.label}
-                                                    </span>
-                                                ) : null}
-                                                {player.is_confirmed_starter ? <span className="gv-chip gv-chip-starter">Confirmed starter</span> : null}
-                                                {!player.is_confirmed_starter && player.is_projected_starter ? <span className="gv-chip gv-chip-starter">Projected starter</span> : null}
-                                                {manualOverride?.override_type === 'force_out' ? <span className="gv-chip gv-chip-out">Manual out</span> : null}
-                                                {manualOverride?.override_type === 'force_in' ? <span className="gv-chip gv-chip-manual">Manual in</span> : null}
-                                            </div>
-                                        </div>
-
-                                        {manualOverride ? (
-                                            <div className="gv-override-copy">
-                                                <span>{manualOverride.override_type === 'force_out' ? 'Force OUT' : 'Force IN'}</span>
-                                                {manualOverride.entered_by ? <span>by {manualOverride.entered_by}</span> : null}
-                                                {manualOverride.reason_code ? <span>{manualOverride.reason_code}</span> : null}
-                                                {manualOverride.source_label ? <span>{manualOverride.source_label}</span> : null}
-                                                {manualOverride.created_ts ? <span>{formatTime(manualOverride.created_ts)}</span> : null}
-                                            </div>
-                                        ) : null}
-                                        {effective.manual_override_reason_text ? (
-                                            <div className="gv-card-note">
-                                                <span>{effective.manual_override_reason_text}</span>
-                                            </div>
-                                        ) : null}
-
-                                        <div className="gv-player-actions">
-                                            <button
-                                                type="button"
-                                                className="gv-button gv-button-out"
-                                                disabled={actionDisabled || isBusy}
-                                                onClick={() => void submitOverride(player, 'force_out')}
-                                            >
-                                                {isBusy && manualOverride?.override_type !== 'force_in' ? 'Saving…' : 'Mark OUT'}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="gv-button gv-button-in"
-                                                disabled={actionDisabled || isBusy}
-                                                onClick={() => void submitOverride(player, 'force_in')}
-                                            >
-                                                {isBusy && manualOverride?.override_type === 'force_in' ? 'Saving…' : 'Mark IN'}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="gv-button gv-button-clear"
-                                                disabled={actionDisabled || isBusy || !manualOverride?.override_id}
-                                                onClick={() => void clearOverride(player)}
-                                            >
-                                                Clear
-                                            </button>
-                                        </div>
-                                    </article>
-                                )
-                            })}
+                        <div className="gv-player-table-wrap">
+                            <table className="gv-player-table">
+                                <thead>
+                                    <tr>
+                                        <th>Player</th>
+                                        <th>Status</th>
+                                        <th>P50</th>
+                                        <th>P90</th>
+                                        <th>FPTS</th>
+                                        <th>Play</th>
+                                        <th>Override</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {team.players.map((player) => {
+                                        const effective = player.minutes_effective || {}
+                                        const statusBadge = getStatusBadge(String(effective.status || player.status || ''))
+                                        const isBusy = busyPlayerId === player.player_id
+                                        const manualOverride = player.manual_override
+                                        const baseline = player.effective || {}
+                                        return (
+                                            <tr key={player.player_id} onClick={() => setSelectedPlayerId(player.player_id)}>
+                                                <td>
+                                                    <div className="gv-player-cell">
+                                                        <div className="gv-player-name-row">
+                                                            <strong>{player.player_name || player.player_id}</strong>
+                                                            {player.is_confirmed_starter ? <span className="gv-chip gv-chip-starter">Confirmed</span> : null}
+                                                            {!player.is_confirmed_starter && player.is_projected_starter ? <span className="gv-chip gv-chip-starter">Projected</span> : null}
+                                                        </div>
+                                                        {manualOverride ? (
+                                                            <div className="gv-row-note">
+                                                                {manualOverride.override_type === 'force_out' ? 'Force OUT' : 'Force IN'}
+                                                                {manualOverride.entered_by ? ` · ${manualOverride.entered_by}` : ''}
+                                                                {manualOverride.created_ts ? ` · ${formatTime(manualOverride.created_ts)}` : ''}
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                </td>
+                                                <td>{statusBadge ? <span className={`status-tag ${statusBadge.className}`}>{statusBadge.label}</span> : (effective.status || player.status || '-')}</td>
+                                                <td>{formatMinutes(effective.minutes_p50 ?? undefined)}</td>
+                                                <td>{formatMinutes(effective.minutes_p90 ?? undefined)}</td>
+                                                <td>{formatFpts(asNumber(baseline.fpts_sim_uncond_mean ?? baseline.dk_fpts_mean ?? baseline.sim_dk_fpts_mean) ?? undefined)}</td>
+                                                <td>{formatPercent(effective.play_prob ?? undefined)}</td>
+                                                <td>
+                                                    <div className="gv-inline-actions" onClick={(event) => event.stopPropagation()}>
+                                                        <button
+                                                            type="button"
+                                                            className="gv-button gv-button-small gv-button-out"
+                                                            disabled={actionDisabled || isBusy}
+                                                            onClick={() => void submitOverride(player, 'force_out')}
+                                                        >
+                                                            OUT
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="gv-button gv-button-small gv-button-in"
+                                                            disabled={actionDisabled || isBusy}
+                                                            onClick={() => void submitOverride(player, 'force_in')}
+                                                        >
+                                                            IN
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="gv-button gv-button-small gv-button-clear"
+                                                            disabled={actionDisabled || isBusy || !manualOverride?.override_id}
+                                                            onClick={() => void clearOverride(player)}
+                                                        >
+                                                            Clear
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 ))}
             </section>
+            <PlayerDetailsDrawer
+                open={Boolean(drawerData)}
+                data={drawerData}
+                onClose={() => setSelectedPlayerId(null)}
+            />
         </div>
     )
 }
