@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -215,6 +215,10 @@ class ContestSimRequest(BaseModel):
     rank_mode: str = Field(
         default="current",
         description="Ranking mode for select_score: current | tail_only | tail_times_dupe",
+    )
+    worlds_source: Literal["gtv2", "sim_v2"] = Field(
+        default="gtv2",
+        description="Worlds family for contest sim scoring: gtv2 (live default) or sim_v2 (explicit backtest fallback)",
     )
 
 
@@ -468,11 +472,18 @@ async def run_simulation(request: ContestSimRequest):
             entry_max=request.entry_max,
             ownership_mode=ownership_mode,
             rank_mode=rank_mode,
+            worlds_source=request.worlds_source,
         )
         if field_library_info:
             result.stats.debug.update(field_library_info)
         else:
-            result.stats.debug.update({"ownership_mode": ownership_mode, "rank_mode": rank_mode})
+            result.stats.debug.update(
+                {
+                    "ownership_mode": ownership_mode,
+                    "rank_mode": rank_mode,
+                    "worlds_source": request.worlds_source,
+                }
+            )
 
         build_data = {
             "build_id": str(uuid4()),

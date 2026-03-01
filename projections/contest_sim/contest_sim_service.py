@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -31,23 +31,34 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+WorldsSource = Literal["gtv2", "sim_v2", "auto"]
+
 
 def _resolve_worlds_root(
     game_date: str,
     *,
     data_root: Path,
+    worlds_source: WorldsSource,
 ) -> Path:
     sim_v2_root = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2" / f"game_date={game_date}"
+    gtv2_root = data_root / "artifacts" / "gtv2_worlds" / f"game_date={game_date}"
+
+    if worlds_source == "gtv2":
+        if gtv2_root.exists():
+            return gtv2_root
+        raise FileNotFoundError(f"No gtv2 worlds data for {game_date} at {gtv2_root}")
+
+    if worlds_source == "sim_v2":
+        if sim_v2_root.exists():
+            return sim_v2_root
+        raise FileNotFoundError(f"No sim_v2 worlds data for {game_date} at {sim_v2_root}")
+
+    if gtv2_root.exists():
+        return gtv2_root
     if sim_v2_root.exists():
         return sim_v2_root
 
-    gtv2_root = data_root / "artifacts" / "gtv2_worlds" / f"game_date={game_date}"
-    if gtv2_root.exists():
-        return gtv2_root
-
-    raise FileNotFoundError(
-        f"No worlds data for {game_date} at {sim_v2_root} or {gtv2_root}"
-    )
+    raise FileNotFoundError(f"No worlds data for {game_date} at {gtv2_root} or {sim_v2_root}")
 
 
 def _resolve_worlds_dir(root_dir: Path, run_id: str | None) -> Path:
@@ -119,6 +130,7 @@ def load_worlds_matrix(
     game_date: str,
     data_root: Path | None = None,
     run_id: str | None = None,
+    worlds_source: WorldsSource = "gtv2",
     n_synthetic_worlds: int = 10000,
     seed: int = 42,
 ) -> Tuple[np.ndarray, Dict[str, int]]:
@@ -135,6 +147,9 @@ def load_worlds_matrix(
         Game date in YYYY-MM-DD format
     data_root : Path | None
         Data root directory
+    worlds_source : {"gtv2", "sim_v2", "auto"}
+        Which worlds family to load. Live paths should use ``gtv2`` so missing
+        generative worlds fail loudly. Backtests may opt into ``sim_v2``.
     n_synthetic_worlds : int
         Number of worlds to generate if using synthetic mode
     seed : int
@@ -149,7 +164,7 @@ def load_worlds_matrix(
     if data_root is None:
         data_root = data_path()
 
-    base_dir = _resolve_worlds_root(game_date, data_root=data_root)
+    base_dir = _resolve_worlds_root(game_date, data_root=data_root, worlds_source=worlds_source)
     worlds_dir = _resolve_worlds_dir(base_dir, run_id)
 
     if "gtv2_worlds" in base_dir.parts or (worlds_dir / "worlds.parquet").exists():
@@ -409,6 +424,7 @@ def run_contest_simulation(
     entry_max: int = 150,
     ownership_mode: str = "full",
     rank_mode: str = "current",
+    worlds_source: WorldsSource = "gtv2",
 ) -> ContestSimResult:
     """Run a contest simulation of user lineups against an opponent field.
 
@@ -450,6 +466,8 @@ def run_contest_simulation(
           - current: tail_score - (1 - dupe_penalty) * mean  (existing behavior)
           - tail_only: tail_score
           - tail_times_dupe: tail_score * dupe_penalty
+    worlds_source : {"gtv2", "sim_v2", "auto"}
+        Which worlds family to use for lineup scoring.
 
     Returns
     -------
@@ -529,6 +547,7 @@ def run_contest_simulation(
         game_date,
         data_root,
         run_id=sim_run_id or run_id,
+        worlds_source=worlds_source,
     )
     user_scores = score_lineups(user_lineups, worlds_matrix, player_index)
     field_scores = score_lineups(field_lineups, worlds_matrix, player_index)
@@ -717,6 +736,7 @@ def run_contest_simulation(
         "dupe_penalty_disabled_for_field_matches": int(dupe_penalty_disabled_for_matches),
         "ownership_mode": ownership_mode_n,
         "rank_mode": rank_mode_n,
+        "worlds_source": worlds_source,
     }
 
     # Optional DNP diagnostics for selection debugging (off by default).
