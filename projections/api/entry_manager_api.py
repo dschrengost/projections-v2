@@ -85,6 +85,31 @@ def _is_dk_nba_classic_entry_header(header: List[str]) -> bool:
     return all(slot in cols for slot in DK_NBA_SLOTS)
 
 
+def _export_header_for_entry_state(entry_state: "EntryFileState") -> List[str]:
+    header = [str(col) if col is not None else "" for col in (entry_state.header or [])]
+    if _is_dk_nba_classic_entry_header(header):
+        return header
+    return ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
+
+
+def _export_row_for_header(entry: Dict[str, str], header: List[str]) -> List[str]:
+    row: List[str] = []
+    for col in header:
+        if col == "Entry ID":
+            row.append(entry.get("entry_id", ""))
+        elif col == "Contest Name":
+            row.append(entry.get("contest_name", ""))
+        elif col == "Contest ID":
+            row.append(entry.get("contest_id", ""))
+        elif col == "Entry Fee":
+            row.append(entry.get("entry_fee", ""))
+        elif col in DK_NBA_SLOTS:
+            row.append(entry.get(col, ""))
+        else:
+            row.append("")
+    return row
+
+
 def _draft_group_looks_like_dk_nba_classic(draft_group_id: int, *, game_date: str) -> tuple[bool, int]:
     bronze_path = (
         paths.data_path()
@@ -1700,20 +1725,10 @@ async def export_entry_file(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    # Use canonical header to ensure column count matches data rows
-    # (entry_state.header may have extra columns from DK's original export)
-    canonical_header = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
-    writer.writerow(canonical_header)
+    export_header = _export_header_for_entry_state(entry_state)
+    writer.writerow(export_header)
     for entry in entries:
-        row = [
-            entry.get("entry_id", ""),
-            entry.get("contest_name", ""),
-            entry.get("contest_id", ""),
-            entry.get("entry_fee", ""),
-        ]
-        for slot in DK_NBA_SLOTS:
-            row.append(entry.get(slot, ""))
-        writer.writerow(row)
+        writer.writerow(_export_row_for_header(entry, export_header))
 
     csv_text = output.getvalue()
     export_csv_path = exports_dir / f"export_{export_id}.csv"
@@ -1812,11 +1827,17 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest, force: 
     all_entries: List[Dict[str, str]] = []
     draft_group_ids: set[int] = set()
     sites: set[str] = set()
+    export_header: List[str] | None = None
     for contest_id in request.contest_ids:
         path = _entry_path(date, contest_id)
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
         entry_state = EntryFileState.model_validate_json(path.read_text())
+        contest_header = _export_header_for_entry_state(entry_state)
+        if export_header is None:
+            export_header = contest_header
+        elif contest_header != export_header:
+            export_header = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
         draft_group_ids.add(int(entry_state.draft_group_id))
         sites.add(str(entry_state.site or "dk"))
         all_entries.extend(entry_state.entries)
@@ -1836,19 +1857,11 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest, force: 
     # Second pass: write CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    canonical_header = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
-    writer.writerow(canonical_header)
+    resolved_header = export_header or ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
+    writer.writerow(resolved_header)
     total_entries = 0
     for entry in all_entries:
-        row = [
-            entry.get("entry_id", ""),
-            entry.get("contest_name", ""),
-            entry.get("contest_id", ""),
-            entry.get("entry_fee", ""),
-        ]
-        for slot in DK_NBA_SLOTS:
-            row.append(entry.get(slot, ""))
-        writer.writerow(row)
+        writer.writerow(_export_row_for_header(entry, resolved_header))
         total_entries += 1
 
     export_id = _generate_export_id()

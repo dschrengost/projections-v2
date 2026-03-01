@@ -80,6 +80,7 @@ const buildLineupSlots = (entry: Record<string, string>): LineupSlots => {
 const buildLineupStates = (
     baselineEntries: Record<string, string>[],
     currentEntries: Record<string, string>[],
+    isSelected = true,
 ): Record<string, LineupState> => {
     const baselineById = new Map<string, LineupSlots>()
     baselineEntries.forEach((entry, idx) => {
@@ -93,7 +94,7 @@ const buildLineupStates = (
         next[entryId] = {
             baselineLineup: baselineById.get(entryId) ?? currentLineup,
             currentLineup,
-            isSelected: true,
+            isSelected,
         }
     })
     return next
@@ -474,6 +475,26 @@ export default function EntryManagerPage() {
         }
     }
 
+    const handleExportCheckedContests = async () => {
+        const targetIds = contestOrder.filter(id => selectedContestIds.has(id))
+        if (targetIds.length === 0) return
+        try {
+            const blob = targetIds.length === 1
+                ? await exportEntryFile(selectedDate, targetIds[0])
+                : await exportEntriesBatch(selectedDate, targetIds)
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = targetIds.length === 1
+                ? `entries_${selectedDate}_${targetIds[0]}.csv`
+                : `entries_${selectedDate}_selected_contests.csv`
+            a.click()
+            URL.revokeObjectURL(url)
+        } catch (err) {
+            alert('Export failed: ' + (err as Error).message)
+        }
+    }
+
     const handleExportCurrentContest = async () => {
         if (!selectedContestId) return
         try {
@@ -586,7 +607,7 @@ export default function EntryManagerPage() {
                 if (contestId === selectedContestId) {
                     setEntryFile(result.entry_state)
                     const baselineEntries = prevEntries ?? result.entry_state.entries
-                    setLineupStates(buildLineupStates(baselineEntries, result.entry_state.entries))
+                    setLineupStates(buildLineupStates(baselineEntries, result.entry_state.entries, false))
                     setLineupStateKey(`${selectedDate}:${result.entry_state.contest_id}`)
                     setLineupBaselineLocked(true)
                     setEntryPage(1)
@@ -646,6 +667,17 @@ export default function EntryManagerPage() {
         const map = new Map(entryFiles.map(entry => [entry.contest_id, entry]))
         return contestOrder.map(id => map.get(id)).filter(Boolean) as EntryFileSummary[]
     }, [contestOrder, entryFiles])
+
+    const checkedContestIds = useMemo(() => {
+        return contestOrder.filter(id => selectedContestIds.has(id))
+    }, [contestOrder, selectedContestIds])
+
+    const checkedContestEntryCount = useMemo(() => {
+        return checkedContestIds.reduce((sum, id) => {
+            const entry = entryFiles.find(e => e.contest_id === id)
+            return sum + (entry?.entry_count ?? 0)
+        }, 0)
+    }, [checkedContestIds, entryFiles])
 
     const applyBuildTargetInfo = useMemo<ApplyBuildTargetInfo>(() => {
         const explicitTargets = contestOrder.filter(id => selectedContestIds.has(id))
@@ -1001,32 +1033,27 @@ export default function EntryManagerPage() {
                     </button>
                     <button
                         className="export-btn"
-                        onClick={handleExport}
-                        disabled={applyBuildTargetInfo.contestCount === 0 || applyBuildTargetInfo.totalEntries === 0}
+                        onClick={handleExportCheckedContests}
+                        disabled={checkedContestIds.length === 0}
                     >
-                        {applyBuildTargetInfo.contestCount > 1
-                            ? applyBuildTargetInfo.applyingAllByDefault
-                                ? `Export All Contests (${applyBuildTargetInfo.totalEntries} lineups)`
-                                : `Export ${applyBuildTargetInfo.contestCount} Contests (${applyBuildTargetInfo.totalEntries} lineups)`
-                            : 'Export All Lineups'}
+                        {checkedContestIds.length > 1
+                            ? `Export Checked Contests (${checkedContestEntryCount} lineups)`
+                            : 'Export Checked Contest'}
                     </button>
-                    {applyBuildTargetInfo.applyingAllByDefault && (
-                        <div className="muted">No contests selected; exporting all uploaded contests.</div>
-                    )}
                     <div className="lineup-export-actions">
                         <button
                             className="lineups-action-btn"
                             onClick={selectAllLineups}
                             disabled={!entryFile}
                         >
-                            Select All
+                            Check All
                         </button>
                         <button
                             className="lineups-action-btn"
                             onClick={clearAllLineups}
                             disabled={!entryFile}
                         >
-                            Select None
+                            Uncheck All
                         </button>
                         <span className="muted">{selectedLineupCount} selected</span>
                     </div>
@@ -1036,6 +1063,15 @@ export default function EntryManagerPage() {
                         disabled={!selectedContestId || currentEntriesCount === 0}
                     >
                         Export Current Contest
+                    </button>
+                    <button
+                        className="export-btn"
+                        onClick={handleExport}
+                        disabled={applyBuildTargetInfo.contestCount === 0 || applyBuildTargetInfo.totalEntries === 0}
+                    >
+                        {applyBuildTargetInfo.contestCount > 1
+                            ? `Export All Uploaded (${applyBuildTargetInfo.totalEntries} lineups)`
+                            : 'Export All Lineups'}
                     </button>
                 </aside>
 
