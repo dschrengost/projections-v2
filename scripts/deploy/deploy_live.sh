@@ -137,6 +137,21 @@ echo "[deploy] Running uv sync --frozen in PROD..."
 cd "$PROD_REPO"
 /home/daniel/.local/bin/uv sync --frozen
 
+# --- Post-sync: frontend build ---
+FRONTEND_DIR="$PROD_REPO/web/minutes-dashboard"
+if [[ -f "$FRONTEND_DIR/package.json" ]]; then
+    echo "[deploy] Building frontend in PROD..."
+    cd "$FRONTEND_DIR"
+    if [[ ! -d node_modules ]]; then
+        echo "[deploy] Installing frontend deps with npm ci..."
+        npm ci
+    fi
+    npm run build
+    cd "$PROD_REPO"
+else
+    echo "[deploy] WARNING: frontend package.json not found at $FRONTEND_DIR"
+fi
+
 # --- Write deploy marker ---
 DEPLOY_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 cat > "$PROD_REPO/.deploy_info" <<EOF

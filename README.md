@@ -67,8 +67,14 @@ git add -A && git commit -m "your message"
 The deploy script:
 1. Syncs DEV → PROD using rsync (excludes `.git`, caches, virtualenvs)
 2. Runs `uv sync --frozen` to ensure deps match
-3. Writes `.deploy_info` with deployment metadata
-4. Prints the runtime stamp from PROD
+3. Rebuilds the frontend in `~/prod/projections-v2/web/minutes-dashboard`
+4. Writes `.deploy_info` with deployment metadata
+5. Prints the runtime stamp from PROD
+
+Important:
+- `web/minutes-dashboard/dist/` is intentionally excluded from rsync.
+- Production serves the built assets from the PROD checkout, not the DEV checkout.
+- For frontend changes, the authoritative build is the one created in `~/prod/projections-v2/web/minutes-dashboard`.
 
 By default, deploys preserve production model selector pointers:
 - `config/minutes_current_run.json`
