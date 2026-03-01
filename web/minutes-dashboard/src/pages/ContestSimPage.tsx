@@ -963,8 +963,8 @@ export default function ContestSimPage() {
             try {
                 const build = await loadSavedSimBuild(selectedDate, selectedSimBuildId)
                 if (build.kind === 'run' && build.results && build.config && build.stats) {
-                    if (build.draft_group_id && build.draft_group_id !== selectedSlate) {
-                        setSelectedSlate(build.draft_group_id)
+                    if (selectedSlate && build.draft_group_id && build.draft_group_id !== selectedSlate) {
+                        return
                     }
                     setPortfolioResponse(null)
                     setSimResult({
@@ -1381,8 +1381,8 @@ export default function ContestSimPage() {
             try {
                 const build = await loadSavedSimBuild(selectedDate, selectedSimLineupId)
                 if (build.kind === 'lineups' || build.kind === 'portfolio') {
-                    if (build.draft_group_id && build.draft_group_id !== selectedSlate) {
-                        setSelectedSlate(build.draft_group_id)
+                    if (selectedSlate && build.draft_group_id && build.draft_group_id !== selectedSlate) {
+                        return
                     }
                     setLineups(build.lineups ?? [])
                     if (build.results && build.config && build.stats) {
