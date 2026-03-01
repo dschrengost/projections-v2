@@ -1342,11 +1342,25 @@ tbody tr:hover {
   overflow-y: auto;
 }
 
+.game-filter-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #1e293b;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.game-filter-card.excluded {
+  opacity: 0.55;
+}
+
 .game-filter-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.25rem 0.5rem;
+  padding: 0;
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s;
@@ -1360,6 +1374,34 @@ tbody tr:hover {
 .game-filter-item.excluded {
   opacity: 0.5;
   text-decoration: line-through;
+}
+
+.team-filter-row {
+  display: flex;
+  gap: 0.4rem;
+  padding-left: 1.35rem;
+}
+
+.team-filter-chip {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.team-filter-chip:hover {
+  border-color: #64748b;
+  color: #f8fafc;
+}
+
+.team-filter-chip.excluded {
+  border-color: #b45309;
+  background: rgba(180, 83, 9, 0.16);
+  color: #fdba74;
 }
 
 .game-filter-item input[type="checkbox"] {

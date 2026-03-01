@@ -25,6 +25,23 @@ type GameViewProps = {
     onRunCompleted?: (runId: string | null) => void
 }
 
+const toId = (value: unknown) => String(value ?? '')
+
+const toMaybeNum = (value: unknown): number | null => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+}
+
+const projectedPointsForRow = (row: PlayerRow): number | null => {
+    const baseline =
+        toMaybeNum(row.sim_pts_mean_uncond) ??
+        toMaybeNum(row.pts_mean_uncond) ??
+        toMaybeNum(row.sim_pts_mean) ??
+        toMaybeNum(row.pts_mean)
+    if (baseline == null) return null
+    return row.manual_override_type === 'force_out' ? 0 : baseline
+}
+
 export const GameView: React.FC<GameViewProps> = ({
     rows,
     gameId,
@@ -149,6 +166,79 @@ export const GameView: React.FC<GameViewProps> = ({
         () => (game?.players ?? []).find((player) => player.player_id === selectedPlayerId) ?? null,
         [game, selectedPlayerId],
     )
+
+    const gameContext = useMemo(() => {
+        const gameRows = rows.filter((row) => toId(row.game_id) === gameId)
+        if (!gameRows.length) return null
+
+        const byTeam = new Map<string, { teamId: string; teamName: string; players: PlayerRow[] }>()
+        for (const row of gameRows) {
+            const teamId = toId(row.team_id)
+            if (!teamId) continue
+            const teamName = row.team_tricode || row.team_name || teamId
+            const bucket = byTeam.get(teamId) ?? { teamId, teamName, players: [] }
+            bucket.players.push(row)
+            byTeam.set(teamId, bucket)
+        }
+        const teamsList = Array.from(byTeam.values())
+        if (!teamsList.length) return null
+
+        let away = teamsList[0]
+        let home = teamsList[teamsList.length - 1]
+        if (teamsList.length === 2) {
+            const sample = gameRows[0]
+            const total = toMaybeNum(sample?.total)
+            const spreadHome = toMaybeNum(sample?.spread_home)
+            if (total != null && spreadHome != null) {
+                const homeImplied = total / 2 - spreadHome / 2
+                const distance = (team: { players: PlayerRow[] }) => {
+                    const implied = toMaybeNum(team.players[0]?.team_implied_total)
+                    if (implied == null) return Number.POSITIVE_INFINITY
+                    return Math.abs(implied - homeImplied)
+                }
+                const [a, b] = teamsList
+                const aDist = distance(a)
+                const bDist = distance(b)
+                if (Number.isFinite(aDist) && Number.isFinite(bDist) && aDist !== bDist) {
+                    home = aDist < bDist ? a : b
+                    away = home === a ? b : a
+                } else {
+                    const sorted = [...teamsList].sort((left, right) => left.teamName.localeCompare(right.teamName))
+                    away = sorted[0]
+                    home = sorted[1]
+                }
+            }
+        }
+
+        const sample = gameRows[0]
+        const total = toMaybeNum(sample?.total)
+        const spreadHome = toMaybeNum(sample?.spread_home)
+        const homeImplied = toMaybeNum(home.players[0]?.team_implied_total)
+        const awayImplied = toMaybeNum(away.players[0]?.team_implied_total)
+        const ourHomeImpliedRaw = home.players.reduce((sum, player) => sum + (projectedPointsForRow(player) ?? 0), 0)
+        const ourAwayImpliedRaw = away.players.reduce((sum, player) => sum + (projectedPointsForRow(player) ?? 0), 0)
+        const hasOurHomeImplied = home.players.some((player) => projectedPointsForRow(player) != null)
+        const hasOurAwayImplied = away.players.some((player) => projectedPointsForRow(player) != null)
+        const ourHomeImplied = hasOurHomeImplied ? ourHomeImpliedRaw : null
+        const ourAwayImplied = hasOurAwayImplied ? ourAwayImpliedRaw : null
+        const ourTotal =
+            ourHomeImplied != null && ourAwayImplied != null ? ourHomeImplied + ourAwayImplied : null
+        const ourSpreadHome =
+            ourHomeImplied != null && ourAwayImplied != null ? ourAwayImplied - ourHomeImplied : null
+        return {
+            away,
+            home,
+            total,
+            spreadHome,
+            homeImplied,
+            awayImplied,
+            ourTotal,
+            ourSpreadHome,
+            ourHomeImplied,
+            ourAwayImplied,
+            tipTs: sample?.tip_ts,
+        }
+    }, [gameId, rows])
 
     const drawerData = useMemo<PlayerDrawerData | null>(() => {
         if (!selectedPlayer) return null
@@ -381,6 +471,59 @@ export const GameView: React.FC<GameViewProps> = ({
                     <span className="gv-summary-subtle">Immediate effective view from <code>/api/ops/game</code>.</span>
                 </div>
             </section>
+
+            {gameContext ? (
+                <section className="gv-summary gv-summary-lines">
+                    <div className="gv-summary-card">
+                        <span className="gv-summary-label">Matchup</span>
+                        <span className="gv-summary-value gv-summary-value-small">
+                            {gameContext.away.teamName} @ {gameContext.home.teamName}
+                        </span>
+                        <span className="gv-summary-subtle">
+                            {gameContext.tipTs ? formatTime(gameContext.tipTs, targetDate) : 'Tip TBD'}
+                        </span>
+                    </div>
+                    <div className="gv-summary-card">
+                        <span className="gv-summary-label">Game Total</span>
+                        <span className="gv-summary-value">
+                            {gameContext.ourTotal == null ? '—' : gameContext.ourTotal.toFixed(1)}
+                        </span>
+                        <span className="gv-summary-subtle">
+                            Ours
+                            <strong>{gameContext.ourTotal == null ? ' —' : ` ${gameContext.ourTotal.toFixed(1)}`}</strong>
+                            {' · '}
+                            Mkt
+                            <strong>{gameContext.total == null ? ' —' : ` ${gameContext.total.toFixed(1)}`}</strong>
+                        </span>
+                    </div>
+                    <div className="gv-summary-card">
+                        <span className="gv-summary-label">Home Spread</span>
+                        <span className="gv-summary-value">
+                            {gameContext.ourSpreadHome == null ? '—' : gameContext.ourSpreadHome.toFixed(1)}
+                        </span>
+                        <span className="gv-summary-subtle">
+                            Ours
+                            <strong>{gameContext.ourSpreadHome == null ? ' —' : ` ${gameContext.ourSpreadHome.toFixed(1)}`}</strong>
+                            {' · '}
+                            Mkt
+                            <strong>{gameContext.spreadHome == null ? ' —' : ` ${gameContext.spreadHome.toFixed(1)}`}</strong>
+                            {' · '}
+                            {gameContext.home.teamName}
+                        </span>
+                    </div>
+                    <div className="gv-summary-card">
+                        <span className="gv-summary-label">Implied Totals</span>
+                        <span className="gv-summary-value gv-summary-value-small">
+                            {gameContext.away.teamName} {gameContext.ourAwayImplied == null ? '—' : gameContext.ourAwayImplied.toFixed(1)}
+                            {' · '}
+                            {gameContext.home.teamName} {gameContext.ourHomeImplied == null ? '—' : gameContext.ourHomeImplied.toFixed(1)}
+                        </span>
+                        <span className="gv-summary-subtle">
+                            Mkt: {gameContext.away.teamName} {gameContext.awayImplied == null ? '—' : gameContext.awayImplied.toFixed(1)} · {gameContext.home.teamName} {gameContext.homeImplied == null ? '—' : gameContext.homeImplied.toFixed(1)}
+                        </span>
+                    </div>
+                </section>
+            ) : null}
 
             {loading && !game ? <div className="gv-message">Loading game view…</div> : null}
             {!loading && !error && !teams.length ? <div className="gv-message gv-empty">No players found for this game.</div> : null}

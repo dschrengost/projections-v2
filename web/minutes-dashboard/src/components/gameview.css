@@ -84,6 +84,10 @@
   flex-wrap: wrap;
 }
 
+.gv-summary-lines .gv-summary-card {
+  min-width: 200px;
+}
+
 .gv-summary-card {
   flex: 1;
   min-width: 180px;
@@ -102,6 +106,10 @@
   font-size: 1.15rem;
   font-weight: 700;
   color: #f8fafc;
+}
+
+.gv-summary-value-small {
+  font-size: 1rem;
 }
 
 .gv-summary-subtle {
