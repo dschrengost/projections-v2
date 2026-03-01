@@ -18,7 +18,9 @@ def _write_json(path: Path, payload: dict) -> None:
 
 
 @pytest.mark.usefixtures("monkeypatch")
-def test_ops_game_includes_minutes_and_rates_and_applies_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_ops_game_includes_minutes_and_rates_and_applies_manual_availability_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("PROJECTIONS_DATA_ROOT", str(tmp_path))
 
     slate_day = date(2025, 1, 2)
@@ -124,8 +126,7 @@ def test_ops_game_includes_minutes_and_rates_and_applies_overrides(monkeypatch: 
     assert player["minutes_baseline"]["minutes_p50"] == 30.0
     assert player["rates_baseline"]["pred_fga2_per_min"] == 0.6
 
-    # Apply overrides: bump minutes + FGA2
-    upsert = client.post(
+    legacy_upsert = client.post(
         "/api/ops/overrides",
         json={
             "date": slate_day.isoformat(),
@@ -139,35 +140,29 @@ def test_ops_game_includes_minutes_and_rates_and_applies_overrides(monkeypatch: 
             ],
         },
     )
-    assert upsert.status_code == 200
+    assert legacy_upsert.status_code == 200
+
+    manual_upsert = client.post(
+        "/api/ops/manual-availability-overrides",
+        json={
+            "date": slate_day.isoformat(),
+            "game_id": str(gid),
+            "player_id": str(pid),
+            "override_type": "force_out",
+            "entered_by": "daniel",
+            "reason_code": "operator_report",
+        },
+    )
+    assert manual_upsert.status_code == 200
 
     resp2 = client.get("/api/ops/game", params={"date": slate_day.isoformat(), "game_id": str(gid)})
     assert resp2.status_code == 200
     player2 = resp2.json()["players"][0]
-    assert player2["minutes_effective"]["minutes_p50"] == 34.0
-    assert player2["rates_effective"]["pred_fga2_per_min"] == 0.75
-
-    # Status OUT forces minutes/play_prob to 0 in effective view (keeps the row).
-    out_res = client.post(
-        "/api/ops/overrides",
-        json={
-            "date": slate_day.isoformat(),
-            "updates": [
-                {
-                    "game_id": str(gid),
-                    "player_id": str(pid),
-                    "status": "out",
-                }
-            ],
-        },
-    )
-    assert out_res.status_code == 200
-
-    resp3 = client.get("/api/ops/game", params={"date": slate_day.isoformat(), "game_id": str(gid)})
-    assert resp3.status_code == 200
-    player3 = resp3.json()["players"][0]
-    assert player3["minutes_effective"]["minutes_p50"] == 0.0
-    assert player3["minutes_effective"]["play_prob"] == 0.0
+    assert player2["minutes_effective"]["minutes_p50"] == 0.0
+    assert player2["minutes_effective"]["play_prob"] == 0.0
+    assert player2["rates_effective"]["pred_fga2_per_min"] == 0.6
+    assert player2["override"] is None
+    assert player2["manual_override"]["override_type"] == "force_out"
 
 
 @pytest.mark.usefixtures("monkeypatch")

@@ -26,7 +26,6 @@ from projections.ops.overrides import (
     OverrideKey,
     USAGE_RATE_FIELDS,
     apply_overrides_to_minutes_df,
-    apply_overrides_to_rates_df,
     clear_overrides,
     list_overrides,
     load_overrides_map,
@@ -1137,18 +1136,13 @@ def get_game_ops(
     rates_df["game_id"] = _normalize_id_str_series(rates_df["game_id"])
     rates_game = rates_df.loc[rates_df["game_id"] == gid].copy()
 
-    minutes_effective = apply_overrides_to_minutes_df(
-        minutes_game,
-        game_date=slate_day,
-        data_root=data_root,
-        force_reconcile=True,
-    )
+    minutes_effective = minutes_game.copy()
     manual_overrides_df = load_manual_overrides_df(slate_day, data_root=data_root)
     minutes_effective, _ = apply_manual_overrides_to_frame(
         minutes_effective,
         overrides_df=manual_overrides_df,
     )
-    rates_effective = apply_overrides_to_rates_df(rates_game, game_date=slate_day, data_root=data_root)
+    rates_effective = rates_game.copy()
 
     game_manual_overrides: dict[str, dict[str, Any]] = {}
     for record in list_manual_overrides(
@@ -1159,20 +1153,6 @@ def get_game_ops(
         if str(record.get("game_id")) != gid:
             continue
         game_manual_overrides[str(record.get("player_id"))] = record
-
-    overrides_map = load_overrides_map(slate_day, data_root=data_root)
-    game_overrides: dict[str, dict[str, Any]] = {}
-    for key, record in overrides_map.items():
-        if key.game_id != gid:
-            continue
-        fields = record.get("fields", {}) if isinstance(record.get("fields"), dict) else {}
-        game_overrides[str(key.player_id)] = {
-            "game_id": key.game_id,
-            "player_id": key.player_id,
-            "fields": fields,
-            "updated_at": record.get("updated_at"),
-            "note": record.get("note"),
-        }
 
     # Build per-player rows keyed by player_id (string).
     out_players: list[dict[str, Any]] = []
@@ -1199,7 +1179,6 @@ def get_game_ops(
         eff_minutes = minutes_eff_by_pid.get(pid) or {}
         base_rates = rates_base_by_pid.get(pid) or {}
         eff_rates = rates_eff_by_pid.get(pid) or {}
-        override = game_overrides.get(pid)
         manual_override = game_manual_overrides.get(pid)
 
         def _pick(source: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
@@ -1267,7 +1246,7 @@ def get_game_ops(
                 )),
                 "rates_baseline": _pick(base_rates, rates_keys),
                 "rates_effective": _pick(eff_rates, rates_keys),
-                "override": override,
+                "override": None,
                 "manual_override": manual_override,
             }
         )

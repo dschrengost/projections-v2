@@ -240,8 +240,8 @@ export default function LivePage({
             rows={rows}
             gameId={selectedGameId}
             date={date}
-            readOnly
             onGameChange={onOpenGame}
+            onOverridesSaved={() => void load()}
             onOpenLateSwap={onOpenLateSwap}
           />
         </section>
