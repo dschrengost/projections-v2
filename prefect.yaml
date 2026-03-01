@@ -304,3 +304,40 @@ deployments:
   schedules:
     - cron: "45 4 * * *"
       timezone: "America/New_York"
+
+- name: dk-contests-morning
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: "Scrape today's DK contest list, download yesterday's results, backfill payouts, and ETL load."
+  entrypoint: prefect_flows/dk_contests.py:dk_contests_morning_flow
+  parameters:
+    target_date: null
+    yesterday: null
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+  schedules:
+    - cron: "0 6 * * *"
+      timezone: "America/New_York"
+
+- name: dk-contests-prelock
+  version: null
+  tags: []
+  concurrency_limit: 1
+  description: "Ingest pre-lock player pools and scrape payout curves before lock."
+  entrypoint: prefect_flows/dk_contests.py:dk_contests_prelock_flow
+  parameters:
+    target_date: null
+  work_pool:
+    name: projections-local
+    work_queue_name: null
+    job_variables:
+      env:
+        PROJECTIONS_DATA_ROOT: /home/daniel/projections-data
+  schedules:
+    - cron: "30 15 * * *"
+      timezone: "America/New_York"

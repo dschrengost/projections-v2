@@ -80,14 +80,14 @@ def _to_int(x: str | None) -> Optional[int]:
 
 
 def ensure_db(con: duckdb.DuckDBPyConnection) -> None:
-    schema_sql = (Path(__file__).parent.parent.parent / "sql" / "schema.sql").read_text(
+    schema_sql = (Path(__file__).parent.parent.parent / "sql" / "dk_contests_schema.sql").read_text(
         encoding="utf-8"
     )
     con.execute(schema_sql)
 
 
 def create_views(con: duckdb.DuckDBPyConnection) -> None:
-    views_sql = (Path(__file__).parent.parent.parent / "sql" / "views_metrics.sql").read_text(
+    views_sql = (Path(__file__).parent.parent.parent / "sql" / "dk_contests_views.sql").read_text(
         encoding="utf-8"
     )
     con.execute(views_sql)
