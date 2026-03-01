@@ -27,6 +27,7 @@ import {
     Slate,
 } from '../api/optimizer'
 import LineupCard from '../components/LineupCard'
+import NumericTextInput from '../components/NumericTextInput'
 import PlayerExposurePanel, { ExposureBounds, ExposureScope } from '../components/PlayerExposurePanel'
 import { useSlateDateAndSlate } from '../hooks/useSlateDate'
 import { formatSlateLabel } from '../utils/slateFormat'
@@ -808,6 +809,13 @@ export default function ContestSimPage() {
         return opts
     }, [selectedDate, selectedSlate, slates])
 
+    const savedSimBuildsForSlate = useMemo(() => {
+        if (!selectedSlate) {
+            return savedSimBuilds
+        }
+        return savedSimBuilds.filter(build => build.draft_group_id == null || build.draft_group_id === selectedSlate)
+    }, [savedSimBuilds, selectedSlate])
+
     // Load saved builds when slate changes
     useEffect(() => {
         if (!selectedSlate) {
@@ -836,14 +844,20 @@ export default function ContestSimPage() {
             try {
                 const builds = await getSavedSimBuilds(selectedDate)
                 setSavedSimBuilds(builds)
-                const latestRun = builds.find(b => b.kind === 'run')?.build_id ?? null
-                const latestLineup = builds.find(b => b.kind === 'lineups')?.build_id ?? null
+                const scopedBuilds = selectedSlate
+                    ? builds.filter(b => b.draft_group_id == null || b.draft_group_id === selectedSlate)
+                    : builds
+                const latestRun = scopedBuilds.find(b => b.kind === 'run')?.build_id ?? null
+                const latestLineup = scopedBuilds.find(b => b.kind === 'lineups' || b.kind === 'portfolio')?.build_id ?? null
                 if (latestRun) {
                     setSelectedSimBuildId(latestRun)
                     setSelectedSimLineupId(null)
-                } else {
+                } else if (latestLineup) {
                     setSelectedSimBuildId(null)
                     setSelectedSimLineupId(latestLineup)
+                } else {
+                    setSelectedSimBuildId(null)
+                    setSelectedSimLineupId(null)
                 }
             } catch {
                 setSavedSimBuilds([])
@@ -1864,7 +1878,7 @@ export default function ContestSimPage() {
                         Slate
                         <select
                             value={selectedSlate ?? ''}
-                            onChange={e => setSelectedSlate(Number(e.target.value) || null)}
+                            onChange={e => setSelectedSlate(e.target.value ? Number(e.target.value) : null)}
                             disabled={slatesLoading}
                         >
                             {slateOptions.length === 0 && <option value="">No slates</option>}
@@ -1975,25 +1989,25 @@ export default function ContestSimPage() {
 
                             <label>
                                 Field K (unique lineups)
-                                <input
-                                    type="number"
+                                <NumericTextInput
                                     value={fieldLibraryK}
-                                    onChange={e => setFieldLibraryK(Number(e.target.value))}
+                                    onChangeValue={n => setFieldLibraryK(Math.max(100, Math.min(5000, Math.round(n ?? 2500))))}
                                     min={100}
                                     max={5000}
                                     step={100}
+                                    integerOnly
                                 />
                             </label>
 
                             <label>
                                 Candidate Pool Size
-                                <input
-                                    type="number"
+                                <NumericTextInput
                                     value={fieldCandidatePoolSize}
-                                    onChange={e => setFieldCandidatePoolSize(Number(e.target.value))}
+                                    onChangeValue={n => setFieldCandidatePoolSize(Math.max(5000, Math.min(100000, Math.round(n ?? 40000))))}
                                     min={5000}
                                     max={100000}
                                     step={5000}
+                                    integerOnly
                                 />
                             </label>
 
@@ -2029,13 +2043,13 @@ export default function ContestSimPage() {
 
                     <label>
                         Entry Fee
-                        <input
-                            type="number"
+                        <NumericTextInput
                             value={entryFee}
-                            onChange={e => setEntryFee(Number(e.target.value))}
+                            onChangeValue={n => setEntryFee(Math.max(0.25, Math.min(1000, n ?? 3.0)))}
                             min={0.25}
                             max={1000}
                             step={0.25}
+                            inputMode="decimal"
                         />
                     </label>
 
@@ -2078,10 +2092,10 @@ export default function ContestSimPage() {
                             </div>
                         </div>
                         <div className="saved-builds-list">
-                            {savedSimBuilds.filter(b => b.kind === 'run').length === 0 && (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'run').length === 0 && (
                                 <span className="muted">No sim runs yet.</span>
                             )}
-                            {savedSimBuilds.filter(b => b.kind === 'run').map(b => (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'run').map(b => (
                                 <div key={b.build_id} className={`saved-build-card ${selectedSimBuildId === b.build_id ? 'selected' : ''}`}>
                                     <div className="saved-build-info">
                                         <span className="saved-build-count">DG{b.draft_group_id}</span>
@@ -2119,10 +2133,10 @@ export default function ContestSimPage() {
                             <h3>Saved Lineup Sets</h3>
                         </div>
                         <div className="saved-builds-list">
-                            {savedSimBuilds.filter(b => b.kind === 'lineups').length === 0 && (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'lineups').length === 0 && (
                                 <span className="muted">No saved lineups yet.</span>
                             )}
-                            {savedSimBuilds.filter(b => b.kind === 'lineups').map(b => (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'lineups').map(b => (
                                 <div key={b.build_id} className={`saved-build-card ${selectedSimLineupId === b.build_id ? 'selected' : ''}`}>
                                     <div className="saved-build-info">
                                         <span className="saved-build-count">DG{b.draft_group_id ?? '?'}</span>
@@ -2157,10 +2171,10 @@ export default function ContestSimPage() {
                             <h3>Saved Portfolios</h3>
                         </div>
                         <div className="saved-builds-list">
-                            {savedSimBuilds.filter(b => b.kind === 'portfolio').length === 0 && (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'portfolio').length === 0 && (
                                 <span className="muted">No saved portfolios yet.</span>
                             )}
-                            {savedSimBuilds.filter(b => b.kind === 'portfolio').map(b => (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'portfolio').map(b => (
                                 <div key={b.build_id} className={`saved-build-card ${selectedSimLineupId === b.build_id ? 'selected' : ''}`}>
                                     <div className="saved-build-info">
                                         <span className="saved-build-count">DG{b.draft_group_id ?? '?'}</span>
@@ -2262,6 +2276,7 @@ export default function ContestSimPage() {
                                 <div className="toolbar-group">
                                     <label>Sort:</label>
                                     <select
+                                        className="contest-sim-select"
                                         value={sortKey}
                                         onChange={e => setSortKey(e.target.value as SortKey)}
                                     >
@@ -2282,8 +2297,8 @@ export default function ContestSimPage() {
                                         <option value="lineup_id">Lineup #</option>
                                     </select>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
                                     >
                                         {sortDir === 'desc' ? '↓' : '↑'}
                                     </button>
@@ -2304,6 +2319,7 @@ export default function ContestSimPage() {
                                 <div className="toolbar-group">
                                     <label>Max Own%:</label>
                                     <select
+                                        className="contest-sim-select"
                                         value={maxOwnership ?? ''}
                                         onChange={e => setMaxOwnership(e.target.value ? Number(e.target.value) : null)}
                                     >
@@ -2320,6 +2336,7 @@ export default function ContestSimPage() {
                                 <div className="toolbar-group">
                                     <label>Players:</label>
                                     <input
+                                        className="contest-sim-input contest-sim-input-md"
                                         type="text"
                                         list="contest-sim-player-options"
                                         placeholder="Add player..."
@@ -2331,7 +2348,6 @@ export default function ContestSimPage() {
                                                 handleAddPlayerFilter()
                                             }
                                         }}
-                                        style={{ width: '170px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
                                     />
                                     <datalist id="contest-sim-player-options">
                                         {sortedPlayers.map(p => (
@@ -2339,15 +2355,15 @@ export default function ContestSimPage() {
                                         ))}
                                     </datalist>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={handleAddPlayerFilter}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
                                     >
                                         Add
                                     </button>
                                     {requiredPlayerIds.length > 0 && (
                                         <button
+                                            className="contest-sim-btn contest-sim-btn-ghost"
                                             onClick={() => setRequiredPlayerIds([])}
-                                            style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
                                         >
                                             Clear
                                         </button>
@@ -2355,16 +2371,16 @@ export default function ContestSimPage() {
                                 </div>
 
                                 <div className="toolbar-group">
-                                    <button onClick={selectAll} style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}>
+                                    <button className="contest-sim-btn contest-sim-btn-ghost" onClick={selectAll}>
                                         Select Visible ({filteredByPlayersResults.length})
                                     </button>
-                                    <button onClick={clearSelection} style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}>
+                                    <button className="contest-sim-btn contest-sim-btn-ghost" onClick={clearSelection}>
                                         Clear
                                     </button>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-primary"
                                         onClick={runSelectedLineups}
                                         disabled={simLoading || selectedLineups.size === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: '4px', color: '#60a5fa', cursor: 'pointer' }}
                                     >
                                         Run Selected ({selectedLineups.size})
                                     </button>
@@ -2373,6 +2389,7 @@ export default function ContestSimPage() {
                                 <div className="toolbar-group">
                                     <label>Mode:</label>
                                     <select
+                                        className="contest-sim-select"
                                         value={portfolioMode}
                                         onChange={e => setPortfolioMode(e.target.value as typeof portfolioMode)}
                                     >
@@ -2381,25 +2398,25 @@ export default function ContestSimPage() {
                                         <option value="decorrelated_ev">Decorrelated EV</option>
                                     </select>
                                     <label>Portfolio:</label>
-                                    <input
-                                        type="number"
+                                    <NumericTextInput
+                                        value={finalSetSize}
+                                        onChangeValue={n => setFinalSetSize(Math.max(1, Math.min(Math.max(1, filteredByPlayersResults.length), Math.round(n ?? 1))))}
                                         min={1}
                                         max={Math.max(1, filteredByPlayersResults.length)}
-                                        value={finalSetSize}
-                                        onChange={e => setFinalSetSize(Math.max(1, Number(e.target.value) || 1))}
-                                        style={{ width: '70px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                        integerOnly
+                                        className="contest-sim-input contest-sim-input-sm"
                                     />
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-primary"
                                         onClick={handleBuildPortfolio}
                                         disabled={portfolioMode === 'browse_select' || portfolioLoading || filteredByPlayersResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: '4px', color: '#60a5fa', cursor: 'pointer' }}
                                     >
                                         {portfolioLoading ? 'Building...' : `Build Portfolio (${Math.min(finalSetSize, filteredByPlayersResults.length)})`}
                                     </button>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={applyFinalSetToSelection}
                                         disabled={finalSetResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
                                     >
                                         Select Portfolio ({finalSetResults.length})
                                     </button>
@@ -2409,6 +2426,7 @@ export default function ContestSimPage() {
                                     <div className="toolbar-group">
                                         <label>Worlds:</label>
                                         <select
+                                            className="contest-sim-select"
                                             value={portfolioWorldsSource}
                                             onChange={e => setPortfolioWorldsSource(e.target.value as typeof portfolioWorldsSource)}
                                         >
@@ -2418,33 +2436,33 @@ export default function ContestSimPage() {
                                         {portfolioMode === 'decorrelated_ev' && (
                                             <>
                                                 <label>EV Ret:</label>
-                                                <input
-                                                    type="number"
+                                                <NumericTextInput
+                                                    value={portfolioEvRetention}
+                                                    onChangeValue={n => setPortfolioEvRetention(Math.max(0.5, Math.min(1, n ?? 0.99)))}
                                                     min={0.5}
                                                     max={1}
                                                     step={0.01}
-                                                    value={portfolioEvRetention}
-                                                    onChange={e => setPortfolioEvRetention(Math.max(0.5, Math.min(1, Number(e.target.value) || 0.99)))}
-                                                    style={{ width: '70px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                                    inputMode="decimal"
+                                                    className="contest-sim-input contest-sim-input-sm"
                                                 />
                                                 <label>Train:</label>
-                                                <input
-                                                    type="number"
+                                                <NumericTextInput
+                                                    value={portfolioWorldsTrainFrac}
+                                                    onChangeValue={n => setPortfolioWorldsTrainFrac(Math.max(0.5, Math.min(0.95, n ?? 0.8)))}
                                                     min={0.5}
                                                     max={0.95}
                                                     step={0.05}
-                                                    value={portfolioWorldsTrainFrac}
-                                                    onChange={e => setPortfolioWorldsTrainFrac(Math.max(0.5, Math.min(0.95, Number(e.target.value) || 0.8)))}
-                                                    style={{ width: '70px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                                    inputMode="decimal"
+                                                    className="contest-sim-input contest-sim-input-sm"
                                                 />
                                                 <label>Sample:</label>
-                                                <input
-                                                    type="number"
+                                                <NumericTextInput
+                                                    value={portfolioWorldsSample}
+                                                    onChangeValue={n => setPortfolioWorldsSample(Math.max(100, Math.round(n ?? 5000)))}
                                                     min={100}
                                                     step={100}
-                                                    value={portfolioWorldsSample}
-                                                    onChange={e => setPortfolioWorldsSample(Math.max(100, Number(e.target.value) || 5000))}
-                                                    style={{ width: '90px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                                    integerOnly
+                                                    className="contest-sim-input contest-sim-input-md"
                                                 />
                                             </>
                                         )}
@@ -2453,15 +2471,16 @@ export default function ContestSimPage() {
 
                                 <div className="toolbar-group">
                                     <label>Top N:</label>
-                                    <input
-                                        type="number"
+                                    <NumericTextInput
+                                        value={topN}
+                                        onChangeValue={n => setTopN(n === null ? null : Math.max(1, Math.round(n)))}
                                         min={1}
                                         placeholder="All"
-                                        value={topN ?? ''}
-                                        onChange={e => setTopN(e.target.value ? Number(e.target.value) : null)}
-                                        style={{ width: '90px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                        allowNull
+                                        integerOnly
+                                        className="contest-sim-input contest-sim-input-md"
                                     />
-                                    <span style={{ color: '#64748b', fontSize: '0.78rem' }}>
+                                    <span className="toolbar-metric">
                                         {filteredByPlayersResults.length}/{targetCount}
                                     </span>
                                 </div>
@@ -2470,16 +2489,16 @@ export default function ContestSimPage() {
 
                                 <div className="toolbar-group">
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={() => handleExport('view')}
                                         disabled={filteredByPlayersResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer', marginRight: '0.5rem' }}
                                     >
                                         Export View ({filteredByPlayersResults.length})
                                     </button>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={() => handleExport('final')}
                                         disabled={finalSetResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer', marginRight: '0.5rem' }}
                                     >
                                         Export Portfolio ({finalSetResults.length})
                                     </button>
@@ -2491,23 +2510,23 @@ export default function ContestSimPage() {
                                         Export Selected ({selectedLineups.size})
                                     </button>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-primary"
                                         onClick={handleSaveSimLineups}
                                         disabled={filteredByPlayersResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: '4px', color: '#60a5fa', cursor: 'pointer', marginLeft: '0.5rem' }}
                                     >
                                         Save View ({filteredByPlayersResults.length})
                                     </button>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-secondary"
                                         onClick={handleSaveSelectedLineups}
                                         disabled={selectedLineups.size === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #334155', borderRadius: '4px', color: '#cbd5e1', cursor: 'pointer', marginLeft: '0.5rem' }}
                                     >
                                         Save Selected ({selectedLineups.size})
                                     </button>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-secondary"
                                         onClick={handleSaveFinalSet}
                                         disabled={finalSetResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #334155', borderRadius: '4px', color: '#cbd5e1', cursor: 'pointer', marginLeft: '0.5rem' }}
                                     >
                                         Save Portfolio ({finalSetResults.length})
                                     </button>

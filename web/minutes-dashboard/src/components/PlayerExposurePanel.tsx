@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { LineupEVResult } from '../api/contest_sim'
 import { PoolPlayer } from '../api/optimizer'
+import NumericTextInput from './NumericTextInput'
 
 export interface PlayerExposure {
     player_id: string
@@ -269,12 +270,12 @@ export default function PlayerExposurePanel({
 
                         <div className="control-group">
                             <label>Min Uniques:</label>
-                            <input
-                                type="number"
+                            <NumericTextInput
+                                value={minUniques}
+                                onChangeValue={n => onMinUniquesChange(Math.max(0, Math.min(8, n ?? 0)))}
                                 min={0}
                                 max={8}
-                                value={minUniques}
-                                onChange={e => onMinUniquesChange(Math.max(0, Math.min(8, Number(e.target.value))))}
+                                integerOnly
                                 className="min-uniques-input"
                             />
                             <span className="min-uniques-info">
