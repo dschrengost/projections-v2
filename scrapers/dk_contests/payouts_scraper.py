@@ -104,7 +104,7 @@ def parse_payout_summary(payload: Dict) -> List[Dict]:
 
 
 def ensure_schema(con: duckdb.DuckDBPyConnection) -> None:
-    schema_sql = (Path(__file__).parent.parent.parent / "sql" / "schema.sql").read_text(encoding="utf-8")
+    schema_sql = (Path(__file__).parent.parent.parent / "sql" / "dk_contests_schema.sql").read_text(encoding="utf-8")
     con.execute(schema_sql)
 
 
