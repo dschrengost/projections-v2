@@ -9,6 +9,9 @@ from typing import Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
 from projections.paths import data_path
 
@@ -96,30 +99,47 @@ def _load_gtv2_worlds_matrix(worlds_dir: Path) -> Tuple[np.ndarray, Dict[str, in
         raise FileNotFoundError(f"No worlds.parquet found in {worlds_dir}")
 
     logger.info("Loading GTV2 worlds from %s", worlds_path)
-    df = pd.read_parquet(worlds_path, columns=["world_idx", "player_id", "dk_fpts"])
-    if df.empty:
+    table = pq.ParquetFile(worlds_path).read(columns=["world_idx", "player_id", "dk_fpts"])
+    if table.num_rows == 0:
         raise ValueError(f"GTV2 worlds parquet is empty: {worlds_path}")
 
-    df["world_idx"] = pd.to_numeric(df["world_idx"], errors="coerce").astype("Int64")
-    df["player_id"] = df["player_id"].astype(str)
-    df["dk_fpts"] = pd.to_numeric(df["dk_fpts"], errors="coerce").fillna(0.0)
-    df = df.dropna(subset=["world_idx"])
-    if df.empty:
-        raise ValueError(f"GTV2 worlds parquet has no valid world_idx rows: {worlds_path}")
+    world_array = table["world_idx"]
+    player_array = table["player_id"]
+    value_array = table["dk_fpts"]
+
+    valid_mask = pc.and_(pc.is_valid(world_array), pc.is_valid(player_array))
+    valid_rows = int(pc.sum(pc.cast(valid_mask, pa.int64())).as_py() or 0)
+    if valid_rows == 0:
+        raise ValueError(f"GTV2 worlds parquet has no valid world_idx/player_id rows: {worlds_path}")
+
+    if valid_rows != table.num_rows:
+        dropped_rows = int(table.num_rows - valid_rows)
+        logger.warning("Dropping %d invalid GTV2 world rows from %s", dropped_rows, worlds_path)
+        table = table.filter(valid_mask)
+        world_array = table["world_idx"]
+        player_array = table["player_id"]
+        value_array = table["dk_fpts"]
+
+    world_values = pc.cast(world_array, pa.int64(), safe=False).to_numpy(zero_copy_only=False)
+    values = pc.fill_null(
+        pc.cast(value_array, pa.float64(), safe=False),
+        pa.scalar(0.0, type=pa.float64()),
+    ).to_numpy(zero_copy_only=False)
+
+    world_ids = np.unique(world_values)
+    row_idx = np.searchsorted(world_ids, world_values)
 
     try:
-        player_ids = [str(pid) for pid in sorted(df["player_id"].astype(int).unique().tolist())]
-    except Exception:
-        player_ids = sorted(df["player_id"].unique().tolist())
+        player_values = pc.cast(player_array, pa.int64(), safe=False).to_numpy(zero_copy_only=False)
+        player_ids_numeric = np.unique(player_values)
+        col_idx = np.searchsorted(player_ids_numeric, player_values)
+        player_index = {str(int(pid)): idx for idx, pid in enumerate(player_ids_numeric.tolist())}
+    except (pa.ArrowInvalid, pa.ArrowTypeError, ValueError):
+        player_values = pc.cast(player_array, pa.string(), safe=False).to_numpy(zero_copy_only=False)
+        player_ids, col_idx = np.unique(player_values, return_inverse=True)
+        player_index = {str(pid): idx for idx, pid in enumerate(player_ids.tolist())}
 
-    world_ids = sorted(df["world_idx"].astype(int).unique().tolist())
-    player_index = {pid: idx for idx, pid in enumerate(player_ids)}
-    world_index = {wid: idx for idx, wid in enumerate(world_ids)}
-    worlds_matrix = np.zeros((len(world_ids), len(player_ids)), dtype=np.float64)
-
-    row_idx = df["world_idx"].astype(int).map(world_index).to_numpy(dtype=np.int64, copy=False)
-    col_idx = df["player_id"].map(player_index).to_numpy(dtype=np.int64, copy=False)
-    values = df["dk_fpts"].to_numpy(dtype=np.float64, copy=False)
+    worlds_matrix = np.zeros((len(world_ids), len(player_index)), dtype=np.float64)
     worlds_matrix[row_idx, col_idx] = values
 
     logger.info("Loaded GTV2 worlds matrix shape=%s from %s", worlds_matrix.shape, worlds_path)
