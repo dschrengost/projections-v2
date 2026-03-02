@@ -80,6 +80,7 @@ class PossessionHead(nn.Module):
         max_df: float = 30.0,
         min_sigma: float = 0.5,
         max_sigma: float = 15.0,
+        num_game_features: int = 0,
     ) -> None:
         super().__init__()
         if str(mu_mode) not in {"absolute", "baseline_delta"}:
@@ -90,10 +91,12 @@ class PossessionHead(nn.Module):
         self.max_df = float(max_df)
         self.min_sigma = float(min_sigma)
         self.max_sigma = float(max_sigma)
+        self.num_game_features = int(num_game_features)
 
+        input_dim = d_model + int(num_game_features)
         self.net = nn.Sequential(
-            nn.LayerNorm(d_model),
-            nn.Linear(d_model, hidden_dim),
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, 3),  # mu, raw_sigma, raw_df
@@ -110,17 +113,26 @@ class PossessionHead(nn.Module):
         game_state: torch.Tensor,
         *,
         sample: bool = False,
+        game_features: torch.Tensor | None = None,
     ) -> PossessionHeadOutputs:
         """Predict possession distribution parameters.
 
         Args:
             game_state: (B, D) game-level hidden state.
             sample: If True, sample P_game from the predicted distribution.
+            game_features: (B, G) raw game features for direct injection.
+                Required when num_game_features > 0.
         """
         if game_state.ndim != 2:
             raise ValueError("game_state must have shape (B, D)")
 
-        raw = self.net(game_state)  # (B, 3)
+        if self.num_game_features > 0:
+            if game_features is None:
+                raise ValueError("game_features required when num_game_features > 0")
+            inp = torch.cat([game_state, game_features], dim=-1)
+        else:
+            inp = game_state
+        raw = self.net(inp)  # (B, 3)
         if self.mu_mode == "baseline_delta":
             mu = self.mu_baseline + raw[:, 0]
         else:
@@ -195,15 +207,17 @@ class TeamEventBackbone(nn.Module):
         dropout: float = 0.1,
         min_df: float = 2.5,
         max_df: float = 30.0,
+        num_game_features: int = 0,
     ) -> None:
         super().__init__()
         self.min_df = float(min_df)
         self.max_df = float(max_df)
+        self.num_game_features = int(num_game_features)
 
-        # Per-team rate predictor: from [team_state, game_state, poss_embedding]
+        # Per-team rate predictor: from [team_state, game_state, poss_embedding, game_features]
         # Outputs for each team: 3 rates * 3 params (mu, raw_sigma, raw_df) = 9
         # Rates: fta_rate, tov_rate, oreb_rate (all as fractions of possessions)
-        input_dim = d_model * 2 + 1  # team_state + game_state + poss_scalar
+        input_dim = d_model * 2 + 1 + int(num_game_features)  # team_state + game_state + poss_scalar + game_features
         self.rate_net = nn.Sequential(
             nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
@@ -233,6 +247,7 @@ class TeamEventBackbone(nn.Module):
         poss: torch.Tensor,
         *,
         sample: bool = False,
+        game_features: torch.Tensor | None = None,
     ) -> TeamEventBackboneOutputs:
         """Generate team event vectors.
 
@@ -241,6 +256,8 @@ class TeamEventBackbone(nn.Module):
             game_state: (B, D) game hidden state.
             poss: (B,) shared possession count for this world.
             sample: If True, sample rates from Student-t; else use mean (mu).
+            game_features: (B, G) raw game features for direct injection.
+                Required when num_game_features > 0.
         """
         if team_states.ndim != 3 or team_states.shape[1] != 2:
             raise ValueError("team_states must have shape (B, 2, D)")
@@ -258,8 +275,14 @@ class TeamEventBackbone(nn.Module):
         game_exp = game_state.unsqueeze(1).expand(-1, 2, -1)  # (B, 2, D)
         poss_exp = poss_feat.unsqueeze(1).expand(-1, 2, -1)  # (B, 2, 1)
 
-        # Concatenate: [team_state, game_state, poss]
-        inp = torch.cat([team_states, game_exp, poss_exp], dim=-1)  # (B, 2, 2D+1)
+        # Concatenate: [team_state, game_state, poss, game_features]
+        parts = [team_states, game_exp, poss_exp]
+        if self.num_game_features > 0:
+            if game_features is None:
+                raise ValueError("game_features required when num_game_features > 0")
+            gf_exp = game_features.unsqueeze(1).expand(-1, 2, -1)  # (B, 2, G)
+            parts.append(gf_exp)
+        inp = torch.cat(parts, dim=-1)  # (B, 2, 2D+1+G)
         raw = self.rate_net(inp)  # (B, 2, 9)
 
         # Parse into 3 rates x 3 params
@@ -318,6 +341,7 @@ class TeamEventBackbone(nn.Module):
         fta_true: torch.Tensor,
         tov_true: torch.Tensor,
         oreb_true: torch.Tensor,
+        game_features: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute NLL of observed rates under the predicted Student-t in logit space.
 
@@ -345,7 +369,13 @@ class TeamEventBackbone(nn.Module):
         poss_feat = poss.unsqueeze(-1).to(dtype=dtype)
         game_exp = game_state.unsqueeze(1).expand(-1, 2, -1)
         poss_exp = poss_feat.unsqueeze(1).expand(-1, 2, -1)
-        inp = torch.cat([team_states, game_exp, poss_exp], dim=-1)
+        parts = [team_states, game_exp, poss_exp]
+        if self.num_game_features > 0:
+            if game_features is None:
+                raise ValueError("game_features required when num_game_features > 0")
+            gf_exp = game_features.unsqueeze(1).expand(-1, 2, -1)
+            parts.append(gf_exp)
+        inp = torch.cat(parts, dim=-1)
         raw = self.rate_net(inp)  # (B, 2, 9)
 
         rate_mus_logit = raw[:, :, [0, 3, 6]]
@@ -375,13 +405,15 @@ class ThreePAShareHead(nn.Module):
         dropout: float = 0.1,
         min_df: float = 2.5,
         max_df: float = 30.0,
+        num_game_features: int = 0,
     ) -> None:
         super().__init__()
         self.min_df = float(min_df)
         self.max_df = float(max_df)
+        self.num_game_features = int(num_game_features)
 
-        # Input: team_state + game_state + FGA_team scalar
-        input_dim = d_model * 2 + 1
+        # Input: team_state + game_state + FGA_team scalar + game_features
+        input_dim = d_model * 2 + 1 + int(num_game_features)
         self.net = nn.Sequential(
             nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
@@ -400,6 +432,7 @@ class ThreePAShareHead(nn.Module):
         fga: torch.Tensor,
         *,
         sample: bool = False,
+        game_features: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Predict 3PA share per team.
 
@@ -408,13 +441,20 @@ class ThreePAShareHead(nn.Module):
             game_state: (B, D).
             fga: (B, 2) FGA per team from backbone.
             sample: If True, sample from Student-t in logit space.
+            game_features: (B, G) raw game features for direct injection.
 
         Returns:
             three_pa_share: (B, 2) in (0, 1).
         """
         game_exp = game_state.unsqueeze(1).expand(-1, 2, -1)
         fga_feat = fga.unsqueeze(-1).to(dtype=team_states.dtype)
-        inp = torch.cat([team_states, game_exp, fga_feat], dim=-1)
+        parts = [team_states, game_exp, fga_feat]
+        if self.num_game_features > 0:
+            if game_features is None:
+                raise ValueError("game_features required when num_game_features > 0")
+            gf_exp = game_features.unsqueeze(1).expand(-1, 2, -1)
+            parts.append(gf_exp)
+        inp = torch.cat(parts, dim=-1)
         raw = self.net(inp)  # (B, 2, 3)
 
         mu_logit = raw[:, :, 0]
@@ -434,18 +474,26 @@ class ThreePAShareHead(nn.Module):
         fga: torch.Tensor,
         *,
         three_pa_share_true: torch.Tensor,
+        game_features: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """NLL of observed 3PA share under logit-normal Student-t.
 
         Args:
             three_pa_share_true: (B, 2) ground truth 3PA shares.
+            game_features: (B, G) raw game features for direct injection.
 
         Returns:
             Scalar mean NLL.
         """
         game_exp = game_state.unsqueeze(1).expand(-1, 2, -1)
         fga_feat = fga.unsqueeze(-1).to(dtype=team_states.dtype)
-        inp = torch.cat([team_states, game_exp, fga_feat], dim=-1)
+        parts = [team_states, game_exp, fga_feat]
+        if self.num_game_features > 0:
+            if game_features is None:
+                raise ValueError("game_features required when num_game_features > 0")
+            gf_exp = game_features.unsqueeze(1).expand(-1, 2, -1)
+            parts.append(gf_exp)
+        inp = torch.cat(parts, dim=-1)
         raw = self.net(inp)
 
         mu_logit = raw[:, :, 0]

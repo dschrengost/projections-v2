@@ -719,17 +719,20 @@ class GameTransformerV2(nn.Module):
                 dropout=float(dropout),
                 mu_mode=str(possession_mu_mode),
                 mu_baseline=float(possession_mu_baseline),
+                num_game_features=int(num_game_features),
             )
             self.event_backbone = TeamEventBackbone(
                 d_model=int(d_model),
                 hidden_dim=int(backbone_hidden),
                 dropout=float(dropout),
+                num_game_features=int(num_game_features),
             )
             if self.enable_three_pa_share:
                 self.three_pa_share_head = ThreePAShareHead(
                     d_model=int(d_model),
                     hidden_dim=int(three_pa_share_hidden),
                     dropout=float(dropout),
+                    num_game_features=int(num_game_features),
                 )
 
         self.enable_usage_share_head = bool(enable_usage_share_head)
@@ -946,19 +949,23 @@ class GameTransformerV2(nn.Module):
             else:
                 game_state_bb = game_state
                 team_states_bb = team_states
-            poss_out = self.possession_head(game_state_bb, sample=bool(sample_backbone))
+            poss_out = self.possession_head(
+                game_state_bb, sample=bool(sample_backbone), game_features=game_features,
+            )
             if poss_out.sampled_poss is not None:
                 poss_for_backbone = poss_out.sampled_poss
             else:
                 # During training (no sampling), use the predicted mean
                 poss_for_backbone = poss_out.mu
             backbone_out = self.event_backbone(
-                team_states_bb, game_state_bb, poss_for_backbone, sample=bool(sample_backbone),
+                team_states_bb, game_state_bb, poss_for_backbone,
+                sample=bool(sample_backbone), game_features=game_features,
             )
             # Optional shot-mix latent
             if self.three_pa_share_head is not None and backbone_out is not None:
                 three_pa_share = self.three_pa_share_head(
-                    team_states_bb, game_state_bb, backbone_out.fga, sample=bool(sample_backbone),
+                    team_states_bb, game_state_bb, backbone_out.fga,
+                    sample=bool(sample_backbone), game_features=game_features,
                 )
                 backbone_out = TeamEventBackboneOutputs(
                     fga=backbone_out.fga,

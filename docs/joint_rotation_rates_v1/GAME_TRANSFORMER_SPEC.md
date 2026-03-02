@@ -3300,7 +3300,7 @@ What to look for:
 	•	`val_poss_nll` and `val_backbone_nll` should decrease across epochs.
 	•	`val_three_pa_nll` should decrease (if `--enable-three-pa-share`).
 
-15.13.3 Full training run (recommended: staged detach)
+15.13.3 Full training run (legacy staged-detach baseline)
 
 ```bash
 PROJECTIONS_DATA_ROOT=/home/daniel/projections-data \
@@ -3331,7 +3331,61 @@ Notes:
 	•	**`--backbone-detach-until-epoch 10`**: backbone inputs are detached from the encoder for epochs 0–9 (flow head stabilizes, backbone MLPs warm up). From epoch 10 onward, backbone gradients flow into the shared encoder at low weight (0.1). See section 15.12.2 for empirical justification.
 	•	**Low backbone weights (0.1/0.1/0.05)**: required when detach is off. Full weights (1.0/1.0/0.5) destabilize the flow head even with never-detach (confirmed in v2 run, rollback at epoch 4).
 
-**Do not use `--w-poss-nll 1.0` with `--backbone-detach-until-epoch 0`** — this will rollback within the first few epochs. Either keep detach on (weights don't matter) or use low weights (≤ 0.1) when detach is off.
+**Do not use `--w-poss-nll 1.0` with `--backbone-detach-until-epoch 0` and no stabilization controls** — this will rollback within the first few epochs. Either keep detach on, or use low effective weights plus the ramp / LR / clipping controls below.
+
+15.13.3A Full training run (detach-free stabilized follow-up)
+
+This is the exact follow-up recipe for the 2026-03-02 conditioning failure audit.
+It keeps encoder gradients flowing from epoch 1 while damping the early backbone
+signal via loss ramps, lower encoder LR, tighter encoder clipping, and a coupled-epoch
+gate on early stopping.
+
+```bash
+PROJECTIONS_DATA_ROOT=/home/daniel/projections-data \
+uv run python scripts/rotation/train_game_transformer_v2.py \
+  --dataset-dir $PROJECTIONS_DATA_ROOT/training/datasets/joint_rotation_rates_v1_priors_contract_livefill_overflowpol_20260224T200110Z \
+  --out-dir $PROJECTIONS_DATA_ROOT/training/runs/gtv2_poss_backbone_detachfree_stabilized_20260302 \
+  --init-model-pt $PROJECTIONS_DATA_ROOT/training/runs/gtv2_h1h2_phase23_20260225/model.pt \
+  --val-days 30 \
+  --batch-size 32 \
+  --epochs 8 \
+  --lr 3e-4 \
+  --seed 42 \
+  --device cpu \
+  --enable-phase2-flow \
+  --flow-context-mode attention \
+  --flow-scale-clip 3.0 \
+  --enable-possession-backbone \
+  --enable-three-pa-share \
+  --w-flow-nll 0.5 \
+  --w-poss-nll 0.2 \
+  --w-backbone-nll 0.1 \
+  --w-three-pa-nll 0.05 \
+  --backbone-detach-until-epoch 0 \
+  --backbone-loss-ramp-epochs 6 \
+  --poss-loss-start-scale 0.1 \
+  --backbone-loss-start-scale 0.2 \
+  --three-pa-loss-start-scale 0.4 \
+  --encoder-lr-scale 0.25 \
+  --backbone-head-lr-scale 1.0 \
+  --backbone-grad-clip-norm 1.0 \
+  --encoder-grad-clip-norm 0.35 \
+  --backbone-head-grad-clip-norm 0.75 \
+  --early-stop-patience 2 \
+  --early-stop-min-delta 0.001 \
+  --early-stop-min-epochs 4 \
+  --early-stop-min-coupled-epochs 4
+```
+
+Notes:
+	•	Effective epoch-1 backbone weights from the command above are:
+	  `w_poss_nll=0.02`, `w_backbone_nll=0.02`, `w_three_pa_nll=0.02`.
+	•	Those weights ramp linearly to their configured targets by epoch 6.
+	•	`--encoder-lr-scale 0.25` keeps the shared encoder in a lower-LR regime while
+	  the new backbone heads adapt at the base LR.
+	•	`--early-stop-min-coupled-epochs 4` prevents the short Stage-B recipe from
+	  stopping before the backbone has had enough fully coupled epochs to move.
+	•	If CUDA is available, replace `--device cpu` with `--device cuda`.
 
 15.13.4 CLI args reference (backbone-specific)
 
@@ -3342,8 +3396,17 @@ Notes:
 | `--w-poss-nll` | 1.0 | Weight for P_game NLL loss. Use 0.1 with staged detach. |
 | `--w-backbone-nll` | 1.0 | Weight for team event rate NLL loss. Use 0.1 with staged detach. |
 | `--w-three-pa-nll` | 0.5 | Weight for 3PA share NLL loss. Use 0.05 with staged detach. |
-| `--backbone-grad-clip-norm` | 1.0 | Gradient clip for backbone parameters |
-| `--backbone-detach-until-epoch` | 0 | Detach backbone from encoder for first N epochs. **Recommended: 10.** 0=never detach (unsafe without very low weights). |
+| `--backbone-loss-ramp-epochs` | 0 | Linearly ramp backbone losses to target values over N epochs. Use `6` for the detach-free stabilized recipe. |
+| `--poss-loss-start-scale` | 1.0 | Initial scale for `--w-poss-nll` when ramping is enabled. Use `0.1` in the detach-free recipe. |
+| `--backbone-loss-start-scale` | 1.0 | Initial scale for `--w-backbone-nll` when ramping is enabled. Use `0.2` in the detach-free recipe. |
+| `--three-pa-loss-start-scale` | 1.0 | Initial scale for `--w-three-pa-nll` when ramping is enabled. Use `0.4` in the detach-free recipe. |
+| `--backbone-grad-clip-norm` | 1.0 | Gradient clip for non-flow, non-encoder shared heads. |
+| `--encoder-grad-clip-norm` | -1.0 | Gradient clip for shared encoder params. `<=0` falls back to `--backbone-grad-clip-norm`. |
+| `--backbone-head-grad-clip-norm` | -1.0 | Gradient clip for possession/event/3PA backbone heads. `<=0` falls back to `--backbone-grad-clip-norm`. |
+| `--encoder-lr-scale` | 1.0 | LR multiplier for shared encoder / projection / token params. |
+| `--backbone-head-lr-scale` | 1.0 | LR multiplier for possession/event/3PA backbone heads. |
+| `--backbone-detach-until-epoch` | 0 | Detach backbone from encoder for first N epochs. `10` is the legacy staged-detach baseline; `0` is supported for the stabilized detach-free recipe when combined with ramping and LR/clipping controls. |
+| `--early-stop-min-coupled-epochs` | 0 | Prevent early stopping until the backbone has seen at least N epochs with encoder gradients flowing. |
 
 15.13.5 World sampling with backbone
 
@@ -3377,12 +3440,14 @@ When backbone is enabled on the model, the sampler automatically:
 During training, the epoch log line includes backbone metrics when `--enable-possession-backbone` is active:
 
 ```
-epoch=005 train_total=2.3456 val_total=2.5678 ... val_poss_nll=3.1234 val_backbone_nll=4.5678 val_three_pa_nll=1.2345
+epoch=005 train_total=2.3456 val_total=2.5678 ... val_poss_nll=3.1234 val_backbone_nll=4.5678 bb_detach=N bb_coupled_epochs=5 w_poss=0.1640 w_bb=0.0840 val_three_pa_nll=1.2345 w_3pa=0.0440
 ```
 
 	•	**val_poss_nll**: NLL for game possessions prediction. Healthy convergence: starts ~5–8, should decrease to ~3–4 within 10 epochs. Indicates how well the model predicts game pace.
 	•	**val_backbone_nll**: NLL for team event rates (FTA, TOV, OREB fractions). Starts higher (~8–15) because three rates are jointly modeled. Should decrease steadily.
 	•	**val_three_pa_nll**: NLL for 3PA share. Typically lower magnitude since it's a single bounded value.
+	•	**bb_coupled_epochs**: how many epochs have run with backbone gradients flowing into the encoder. Use this to verify early stopping did not trigger too early in detach-free experiments.
+	•	**w_poss / w_bb / w_3pa**: effective loss weights after ramp scheduling. Useful for confirming the detach-free recipe is still in its low-weight stabilization phase.
 
 During world sampling, possession symmetry diagnostics appear in the log:
 
@@ -4720,3 +4785,785 @@ Recommended direction if this work is resumed:
   - rebound structure should likely be coupled to sampled missed-shot opportunity at the same game-event layer
 - add stronger invariance / guardrail diagnostics before promotion:
   - `FGA`, `PTS`, possession, and team-total drift checks must remain first-class promotion blockers for any future AST/REB branch
+
+---
+
+## 16. Backbone Game-Environment Conditioning Failure (2026-03-02)
+
+### 16.1 Summary
+
+A deep inspection of production worlds from the **2026-03-01** slate reveals that the
+PossessionHead and TeamEventBackbone produce **game-agnostic outputs**: identical
+possession distributions and near-identical rate distributions for every game on the
+slate, regardless of Vegas lines, team pace, or any other game-environment context.
+
+This is a **critical** finding because:
+
+1. It means world-level game total variance is driven almost entirely by shooting
+   efficiency noise, not by pace/volume differentiation.
+2. It undermines any downstream use of worlds as "scenario diversity" — the worlds
+   are far more homogeneous than they should be.
+3. It explains the compressed game total distributions observed in prior calibration
+   passes (sections 15.20, 15.21).
+
+### 16.2 Evidence
+
+#### 16.2.1 Possession Head outputs are game-invariant
+
+Production worlds for 2026-03-01 (25,000 worlds × 6 games, 12 teams):
+
+| Game | Teams | Vegas Total | Est. Possessions | Backbone Poss (mean ± std) |
+|------|-------|------------:|-----------------:|---------------------------:|
+| 22500873 | ATL/POR | 235.5 | 103.7 | 101.2 ± 5.7 |
+| 22500874 | BOS/PHI | 220.0 | 96.9 | 101.2 ± 5.6 |
+| 22500875 | ORL/DET | 224.5 | 98.9 | 101.2 ± 5.7 |
+| 22500876 | CLE/OKC | 235.5 | 103.7 | 101.2 ± 5.7 |
+| 22500877 | CHA/LAC | 222.5 | 98.0 | 101.2 ± 5.6 |
+| 22500878 | LAL/SAC | 235.5 | 103.7 | 101.2 ± 5.7 |
+
+Key statistics:
+- **Vegas total range**: 220.0 – 241.0 (span: 21.0 pts)
+- **Vegas est. possessions range**: 96.9 – 106.2 (span: 9.3)
+- **Backbone possessions range**: 101.15 – 101.24 (span: **0.1**)
+- **Correlation(vegas_total, backbone_poss)**: r = 0.046 (p = 0.931)
+
+The PossessionHead outputs a fixed mu ≈ 101 with sigma ≈ 5.7 for every game. The
+Student-t sampling around this single point produces all within-world possession
+variance; there is no between-game variance.
+
+#### 16.2.2 TeamEventBackbone rates are team-invariant
+
+Per-team rate distributions (averaged over 25,000 worlds):
+
+| Team | FTA rate | TOV rate | OREB rate |
+|------|----------|----------|-----------|
+| ATL | 0.219 ± 0.067 | 0.138 ± 0.039 | 0.116 ± 0.044 |
+| BOS | 0.218 ± 0.067 | 0.136 ± 0.039 | 0.116 ± 0.045 |
+| CHA | 0.217 ± 0.066 | 0.139 ± 0.039 | 0.117 ± 0.044 |
+| CLE | 0.212 ± 0.066 | 0.140 ± 0.039 | 0.120 ± 0.045 |
+| DET | 0.216 ± 0.067 | 0.141 ± 0.039 | 0.119 ± 0.044 |
+| LAC | 0.220 ± 0.067 | 0.138 ± 0.039 | 0.115 ± 0.044 |
+| LAL | 0.220 ± 0.067 | 0.139 ± 0.039 | 0.116 ± 0.043 |
+| OKC | 0.214 ± 0.066 | 0.143 ± 0.040 | 0.120 ± 0.044 |
+| ORL | 0.219 ± 0.066 | 0.139 ± 0.039 | 0.117 ± 0.045 |
+| PHI | 0.216 ± 0.066 | 0.137 ± 0.039 | 0.117 ± 0.045 |
+| POR | 0.214 ± 0.065 | 0.141 ± 0.039 | 0.119 ± 0.044 |
+| SAC | 0.215 ± 0.066 | 0.140 ± 0.039 | 0.119 ± 0.044 |
+
+Rate spans across all 12 teams:
+- FTA rate: 0.212 – 0.220 (0.008 spread)
+- TOV rate: 0.136 – 0.143 (0.007 spread)
+- OREB rate: 0.115 – 0.120 (0.005 spread)
+
+Compare to `TeamEventBackbone.__init__` bias defaults:
+- FTA rate: logit(-1.2) = **0.232** — observed means cluster near this
+- TOV rate: logit(-1.8) = **0.142** — observed means cluster near this
+- OREB rate: logit(-2.2) = **0.100** — observed means cluster near this
+
+The rate MLP has barely moved from initialization.
+
+#### 16.2.3 Downstream consequence: collapsed game totals
+
+Because all teams get ~101 possessions, ~89 FGA, ~22 FTA regardless of game context:
+
+- **Team FGA range**: 89.1 – 89.7 across all 12 teams (span: 0.6)
+- **Team FTA range**: 21.5 – 22.3 (span: 0.8)
+- **Team points mean range**: 112.4 – 117.5 (span: 5.1)
+- **Vegas implied team points range**: 105.8 – 126.5 (span: 20.8)
+
+The only source of team scoring differentiation is player-level shooting efficiency
+from the flow head:
+- Team FG% ranges 0.456 – 0.483 (2.7pp)
+- Team FT% ranges 0.760 – 0.794 (3.4pp)
+
+Game total distribution:
+- **World mean game total range**: 225.8 – 232.0 (span: 6.2 pts)
+- **Vegas game total range**: 220.0 – 241.0 (span: 21.0 pts)
+- **Correlation(vegas_total, world_mean_total)**: r = −0.570
+
+The negative correlation means games with higher Vegas totals actually produce
+*lower* mean world totals — a clear sign that the backbone is not conditioning
+on game environment.
+
+#### 16.2.4 Features are correctly encoded
+
+The input features file (`features_gtv2_v1/2026-03-01`) confirms game-level
+features are present and differentiated:
+
+| Game | vegas_total | estimated_possessions | team_pace_szn (range) |
+|------|------------:|----------------------:|----------------------:|
+| BOS/PHI | 220.0 | 96.9 | 97.2 – 99.1 |
+| CHA/LAC | 222.5 | 98.0 | 98.2 – 100.1 |
+| ORL/DET | 224.5 | 98.9 | 98.1 – 100.9 |
+| ATL/POR | 235.5 | 103.7 | 99.9 – 101.7 |
+| CLE/OKC | 235.5 | 103.7 | 99.5 – 104.2 |
+| LAL/SAC | 235.5 | 103.7 | 100.1 – 103.5 |
+
+The feature values vary meaningfully. The problem is not in the data pipeline.
+
+### 16.3 Root Cause Analysis
+
+#### 16.3.1 Architecture path: features → game_state → backbone
+
+The game-environment features reach the backbone through a narrow information
+bottleneck:
+
+```
+raw features                    game_state (D-dim latent)        backbone outputs
+─────────────                   ──────────────────────────       ─────────────────
+vegas_total    ─┐               ┌─────────────────────┐         PossessionHead:
+est_possessions ├─ game_proj ──>│ [GAME] token        │──MLP──> mu, sigma, df
+team_pace_szn  ─┘  (Linear)    │ + encoder attention  │
+                                │ with player/team ctx │──MLP──> TeamEventBackbone:
+                                └─────────────────────┘         fta_rate, tov_rate,
+                                                                oreb_rate
+```
+
+1. Game features are projected via `nn.Linear(G, d_model)` and **added** to the
+   `[GAME]` token embedding (`game_transformer_v2.py:768-774`).
+2. The `[GAME]` token passes through the transformer encoder with cross-attention
+   to player/team tokens.
+3. The encoder output `game_state = encoded[:, 0, :]` (shape `(B, D)`) is what the
+   PossessionHead and TeamEventBackbone see.
+4. **The backbone MLPs never see raw game features directly.**
+
+#### 16.3.2 Why the encoder fails to propagate game-environment signal
+
+Several mechanisms conspire to suppress game-environment conditioning:
+
+1. **Gradient pathway weakness**: Per spec section 15.12.2, the backbone was trained
+   with `--backbone-detach-until-epoch 10`, meaning backbone gradients were detached
+   from the encoder for the first 10 epochs. Even after epoch 10, backbone losses
+   (`w_poss_nll`, `w_backbone_rate_nll`) are small relative to the dominant
+   flow + minutes + active losses. The encoder primarily optimizes player-level
+   objectives and has little incentive to encode game-environment information into
+   `game_state`.
+
+2. **Information dilution**: The `[GAME]` token's game_proj contribution is a small
+   additive perturbation on a D-dimensional vector that then gets transformed by
+   multiple attention layers optimized for player-level prediction. The game-level
+   signal (3-5 scalar features → D-dim vector) gets diluted by the much stronger
+   player-level gradients.
+
+3. **Initialization gravity**: The PossessionHead and TeamEventBackbone are
+   initialized with strong priors (mu=97/100, rates at NBA averages). If the
+   backbone loss gradients are weak, the MLPs stay near initialization — which is
+   exactly what we observe (section 16.2.2).
+
+4. **No direct supervision of game-total calibration**: There is no loss term that
+   explicitly penalizes `|mean(team_total_points) - vegas_total|`. The backbone NLL
+   losses supervise possession counts and event rates, but these are necessary
+   conditions for good totals, not sufficient. Without a team-total loss, the model
+   has no gradient signal to push possession means toward game-specific targets.
+
+#### 16.3.3 Relationship to prior diagnostics
+
+This finding is consistent with but more severe than what sections 15.17 and 15.21
+documented:
+
+- Section 15.21.1 found `mu_P.mean = 101.06, mu_P.std = 0.60` across 107 val games.
+  The std of 0.60 was noted but interpreted as "suppression is not in the possession
+  head." In hindsight, `std = 0.60` across 107 games with real possession variation
+  of ~5-8 points confirms the head is nearly unconditional.
+- Section 15.20's working hypothesis ("flow stability objectives implicitly reward
+  lower variance") is confirmed: the optimizer found a low-variance equilibrium
+  where the backbone is effectively a constant.
+
+### 16.4 Impact Assessment
+
+#### 16.4.1 Impact on DFS world-keyed optimization
+
+The proposed world-keyed lineup build (see `WORLD_KEYED_BUILD_SPEC.md`) assumed
+that different worlds represent meaningfully different game scenarios. With the
+backbone producing identical volume budgets:
+
+- **Game scenario diversity is minimal**: worlds differ only in active set, flow
+  allocation shares, and shooting efficiency — not in pace or volume.
+- **Cross-game correlation structure is wrong**: a world where ATL/POR plays at
+  high pace should correlate with different optimal lineups than BOS/PHI at low
+  pace. Currently all games have the same pace in every world.
+- **Portfolio diversification benefit is reduced**: if worlds are more similar than
+  reality, the resulting lineup portfolio will underestimate the value of
+  game-script-sensitive player selection.
+
+#### 16.4.2 Impact on production projections
+
+For mean projections (which average across worlds), the impact is partially masked:
+the flow head's player-level predictions may still produce reasonable player means.
+But:
+
+- **Tail calibration is degraded**: P90/P99 percentiles are compressed because
+  game-total variance is too low.
+- **Correlation structure is wrong**: player correlations within the same game are
+  under-correlated at the game-environment level (they should co-vary with pace).
+- **Team total distributions are unreliable**: the model's team total distributions
+  are too narrow and don't respect Vegas priors.
+
+### 16.5 Proposed Remediation Approaches
+
+The approaches below are ordered by invasiveness (least to most). They are not
+mutually exclusive.
+
+#### Approach A: Direct Feature Injection into PossessionHead
+
+**Concept**: Feed raw game features directly to the PossessionHead and
+TeamEventBackbone rate MLP, bypassing the encoder bottleneck entirely.
+
+**Implementation**:
+```python
+# PossessionHead.__init__:
+#   current: self.net input_dim = d_model
+#   proposed: self.net input_dim = d_model + num_game_features
+#
+# PossessionHead.forward:
+#   current: raw = self.net(game_state)
+#   proposed: raw = self.net(torch.cat([game_state, game_features], dim=-1))
+```
+
+Similarly for `TeamEventBackbone.rate_net`:
+```python
+# current input_dim = d_model * 2 + 1  (team_state + game_state + poss_scalar)
+# proposed: input_dim = d_model * 2 + 1 + num_game_features
+```
+
+**Advantages**:
+- Minimal code change (linear layer input dimension + forward signature).
+- Game features are guaranteed to reach the backbone without encoder dilution.
+- Preserves all existing gradients; strictly adds information.
+- No retraining of the encoder necessary — backbone can learn from features directly.
+
+**Risks**:
+- May create a shortcut where the backbone ignores `game_state` entirely and only
+  uses raw features, reducing the benefit of encoder context.
+- Requires re-initialization of the MLP input layers (old weights incompatible).
+
+**Estimated scope**: Small code change, full retrain required.
+
+#### Approach B: Explicit Team-Total Auxiliary Loss
+
+**Concept**: Add a loss term that penalizes the mismatch between sampled world
+team-total points and an anchor (e.g. Vegas implied total or historical mean).
+
+**Implementation sketch**:
+```python
+# During training, after backbone sampling + flow generation:
+world_team_pts = sum(player_pts for active players per team)  # from sampled worlds
+target_team_pts = vegas_implied_team_total  # from features
+
+L_team_total = huber_loss(world_team_pts.mean(dim=worlds), target_team_pts)
+```
+
+**Advantages**:
+- Directly optimizes the metric we care about (team total calibration).
+- Provides strong gradient signal through the backbone → possession and rates
+  will need to adapt to match team total targets.
+- Can be weighted independently of other losses.
+
+**Risks**:
+- Requires sampled worlds during training (expensive).
+- Could destabilize flow head if the gradient is too strong (same failure mode as
+  the AST/REB auxiliary attempts in section 15.27).
+- Team total = f(possessions, efficiency) — the loss can be satisfied by either
+  path, which may not force possession calibration.
+
+**Estimated scope**: Medium code change, full retrain required.
+
+#### Approach C: Possession Head Supervised with Game-Level Target
+
+**Concept**: Add a direct regression loss on the PossessionHead mu output, supervised
+by observed game possessions or Vegas-derived possession estimates.
+
+**Implementation sketch**:
+```python
+# In training loop:
+poss_target = estimated_possessions_from_features  # per game
+L_poss_regression = mse_loss(poss_head.mu, poss_target)
+```
+
+This is simpler than Approach B because it doesn't require full world sampling —
+it directly supervises the PossessionHead's conditional mean.
+
+**Advantages**:
+- Very targeted: fixes exactly the failure we observe.
+- Cheap to compute (no world sampling needed).
+- Clear, interpretable gradient signal.
+
+**Risks**:
+- `estimated_possessions` may have noise or bias that propagates into the backbone.
+- Doesn't fix rate differentiation (TeamEventBackbone) unless the improved poss
+  signal propagates through the concatenated input.
+- May need to be combined with Approach A to also fix rate conditioning.
+
+**Estimated scope**: Small code change, full retrain required.
+
+#### Approach D: Detach-Free Backbone Training from Epoch 0
+
+**Concept**: Remove the `--backbone-detach-until-epoch 10` warmup and train the
+backbone with encoder gradients flowing from the start, potentially with a higher
+backbone loss weight.
+
+**Advantages**:
+- Addresses the root cause: backbone gradients need to shape the encoder's
+  `game_state` representation from the start.
+- No architectural changes needed.
+
+**Risks**:
+- Was likely introduced for stability reasons; removing it may cause training
+  instability in early epochs.
+- The backbone loss may still be too weak relative to player-level losses.
+- Need to combine with increased `w_poss_nll` / `w_backbone_rate_nll`.
+
+**Potential follow-up**:
+- Treat this as a controlled stabilization experiment rather than a simple
+  config flip. If tested, pair `--backbone-detach-until-epoch 0` with:
+  - a gradual ramp for `w_poss_nll` / `w_backbone_nll` / `w_three_pa_nll`
+    instead of full-strength backbone losses at epoch 0
+  - lower LR or separate optimizer param-group scaling for the shared encoder
+    versus the backbone heads
+  - tighter encoder/backbone gradient clipping
+  - a minimum number of fully coupled epochs before early stopping is allowed
+- Priority should be on increasing `w_poss_nll` first. The possession path is
+  the most directly blocked by detach, while the rate loss already has a
+  partial encoder gradient path through the training-time NLL recomputation.
+
+**Estimated scope**: Config change only, full retrain required.
+
+#### Approach E: Post-Hoc Possession Rescaling (Short-Term Patch)
+
+**Concept**: After backbone sampling, rescale the sampled possession count to match
+a game-specific target derived from Vegas lines.
+
+**Implementation sketch**:
+```python
+# In sample_worlds_v2.py, after backbone forward:
+target_poss = estimated_possessions_from_features[game_idx]
+sampled_poss = backbone_output.poss
+
+# Shift to match game-level target while preserving within-world variance
+rescaled_poss = sampled_poss - sampled_poss.mean() + target_poss
+```
+
+**Advantages**:
+- No retraining required. Immediate fix for production worlds.
+- Preserves within-world variance structure.
+- Can be applied selectively (only when Vegas lines are available).
+
+**Risks**:
+- The rate MLP outputs were conditioned on the un-rescaled possession value.
+  Changing possessions post-hoc breaks the FGA identity:
+  `FGA = P + OREB - TOV - 0.44*FTA` would need recomputation.
+- Rates themselves are still unconditional — this fixes possession level but not
+  team-specific FTA/TOV/OREB differentiation.
+- Architectural debt: doesn't fix the underlying model; just patches the output.
+
+**Estimated scope**: Small code change, no retrain. Production-deployable immediately.
+
+### 16.6 Recommended Remediation Plan
+
+**Immediate (no retrain)**:
+- Implement Approach E as a short-term patch to get game-differentiated possession
+  counts in production worlds. This improves game total spread immediately while
+  the model fix is developed.
+
+**Next retrain cycle**:
+- Implement Approach A (direct feature injection) + Approach C (possession
+  regression loss) together. This gives the backbone both the information
+  (raw features) and the gradient signal (regression target) to learn
+  game-conditioned outputs.
+- Optionally combine with Approach D (remove detach warmup) as a follow-up
+  stabilization experiment, but do not rely on detach removal alone as the
+  primary fix. If attempted, use loss-weight ramping, lower encoder LR, and a
+  minimum coupled-epoch budget before early stopping.
+
+**Validation gates for the retrain**:
+- `mu_P.std` across held-out games must be > 3.0 (currently 0.60).
+- Correlation(vegas_total, backbone_poss_mean) must be > 0.7.
+- Game total span in worlds must be within 50% of Vegas total span.
+- Existing promotion gates (pts_mae, pair_corr, etc.) must not regress.
+
+### 16.7 Diagnostic Commands
+
+To reproduce the analysis on any slate:
+
+```python
+import pandas as pd, numpy as np
+
+# Load worlds
+w = pd.read_parquet("<worlds.parquet>")
+agg = w[w['active']==1].groupby(['world_idx','game_id','team_id']).agg(
+    fga=('fga','sum'), fta=('fta','sum'), tov=('tov','sum'), oreb=('oreb','sum')
+).reset_index()
+agg['poss'] = agg['fga'] - agg['oreb'] + agg['tov'] + 0.44*agg['fta']
+
+# Per-game possession summary
+for gid, grp in agg.groupby('game_id'):
+    print(f"Game {gid}: poss mean={grp['poss'].mean():.1f} std={grp['poss'].std():.1f}")
+
+# Compare against Vegas
+features = pd.read_parquet("<features.parquet>")
+game_vegas = features.groupby('game_id')['vegas_total'].first()
+game_poss = agg.groupby('game_id')['poss'].mean()
+merged = pd.DataFrame({'vegas': game_vegas, 'bb_poss': game_poss}).dropna()
+print(f"Correlation: {merged.corr().iloc[0,1]:.3f}")
+```
+
+### 16.8 Experiment Results: Detach-Free Stabilized Run (2026-03-02)
+
+#### 16.8.1 Training summary
+
+Run: `gtv2_poss_backbone_detachfree_stabilized_20260302`
+Recipe: Section 15.13.3A (Approach D — detach-free with loss ramp + encoder LR scale + coupled-epoch guard).
+
+| Metric | Value |
+|--------|-------|
+| Best epoch | 4 (of 8) |
+| Early stop | epoch 6 (patience=2) |
+| best_val_total | 5.9355 |
+| Instability events | 0 |
+| Phase 2 backoffs | 0 |
+
+The stabilization machinery (loss ramp, encoder LR 0.25x, encoder grad clip 0.35,
+min_coupled_epochs gate) worked as intended: zero instability, no rollbacks.
+
+#### 16.8.2 Component-level comparison (best epoch)
+
+| Metric | v3_staged (ep 20/40, detach=10) | detachfree (ep 4/8, detach=0) | Delta |
+|--------|--------------------------------:|------------------------------:|------:|
+| val_minutes_nll | 3.2445 | **3.1495** | −0.095 |
+| val_minutes_mae | 3.1624 | **2.8773** | −0.285 |
+| val_poss_nll | 3.2108 | **3.0799** | −0.131 |
+| val_backbone_nll | 0.5481 | **0.5285** | −0.020 |
+| val_three_pa_nll | 0.3035 | **0.2651** | −0.038 |
+| val_member_loss | 0.3253 | **0.2456** | −0.080 |
+| val_count_loss | 1.7809 | **1.4297** | −0.351 |
+| val_flow_nll | **0.8014** | 0.9766 | +0.175 |
+
+Notes:
+- Every metric improved except `val_flow_nll`, which regressed due to halved
+  `w_flow_nll` (0.5 vs 1.0) and 3× lower base LR (3e-4 vs 1e-3).
+- The minutes MAE improvement (−0.285) is substantial.
+- The v3_staged run used 40 epochs at full LR; the detachfree run used only 8
+  epochs at reduced LR with ramp, making the component wins notable.
+
+#### 16.8.3 Backbone conditioning diagnostic
+
+Diagnostic tool: `tools/diagnose_backbone_conditioning.py` (221 held-out games).
+
+| Gate | Metric | v3_staged | detachfree | Threshold | Status |
+|------|--------|----------:|-----------:|----------:|--------|
+| 1 | mu_P.std | 0.073 | 0.008 | > 3.0 | **FAIL** |
+| 2 | corr(vegas_total, mu_P) | 0.948 | 0.762 | > 0.7 | PASS |
+
+**mu_P distribution:**
+
+| | v3_staged | detachfree |
+|---|----------|-----------|
+| mean | 101.51 | 101.16 |
+| std | 0.07 | 0.01 |
+| range | 101.30 – 101.70 | 101.14 – 101.18 |
+
+**sigma_P distribution:**
+
+| | v3_staged | detachfree |
+|---|----------|-----------|
+| mean | 5.87 | 5.19 |
+| std | 0.04 | 0.01 |
+
+**Backbone rate spread (all team-sides):**
+
+| Rate | v3_staged span | detachfree span |
+|------|---------------:|----------------:|
+| FTA | 1.95 | 1.41 |
+| TOV | 1.31 | 0.70 |
+| OREB | 0.99 | 0.40 |
+
+#### 16.8.4 Interpretation
+
+1. **Gate 2 passes on both models.** The PossessionHead has learned the *direction*
+   of the vegas_total → mu_P mapping (higher totals → higher mu). The detachfree
+   run picked this up in 4 epochs (r=0.76); the staged-detach run strengthened it
+   over 20 coupled epochs (r=0.95).
+
+2. **Gate 1 fails catastrophically on both models.** mu_P varies by only 0.04
+   possessions (detachfree) to 0.40 possessions (staged) across 221 games — when
+   real games differ by ~10 possessions. The head learned the direction but the
+   magnitude is negligible: it is effectively still a constant ~101.
+
+3. **The detachfree run actually regressed on conditioning spread** relative to
+   v3_staged across all metrics (mu_P.std, rate spans). The conservative encoder
+   LR (0.25×) and short training budget (4 coupled epochs) gave the encoder
+   insufficient gradient to move `game_state` meaningfully. The staged-detach
+   run had 30 coupled epochs at full LR.
+
+4. **The section 16.3 root cause is confirmed.** The encoder's `game_state`
+   representation is a D-dim latent that the backbone MLP reads, but the backbone
+   NLL gradient competing against much stronger player-level gradients cannot push
+   enough game-environment signal through the bottleneck. Training recipe changes
+   alone (Approach D) are insufficient.
+
+#### 16.8.5 Conclusion
+
+Approach D (detach-free stabilized training) confirms:
+- The stabilization machinery works (zero instability, no rollbacks).
+- Component metrics improve (minutes MAE, poss NLL, backbone NLL all down).
+- But the core conditioning failure persists: mu_P.std = 0.008, two orders of
+  magnitude below the 3.0 gate.
+
+**Next step**: Implement Approach A (direct feature injection into PossessionHead
+and TeamEventBackbone) + Approach C (possession mu regression loss), per the
+section 16.6 recommended remediation plan. The stabilization knobs from this run
+(loss ramp, encoder LR scale, coupled-epoch guard) should be retained in the
+combined recipe.
+
+### 16.9 Approach A + C: Direct Feature Injection + Possession Regression Loss
+
+#### 16.9.1 Motivation
+
+Section 16.8 confirmed that stabilization alone (Approach D) cannot fix the
+conditioning failure. The root cause is an encoder bottleneck: backbone NLL
+gradient is ~2% of total loss and cannot reshape the shared encoder representation,
+which is optimized overwhelmingly for player-level objectives.
+
+**Approach A** (direct feature injection) bypasses the encoder by giving backbone
+heads raw `game_features` via a skip connection. The backbone MLPs see vegas_total,
+estimated_possessions, etc. directly in their input, so they can learn game-conditional
+outputs without relying on the encoder to encode that information.
+
+**Approach C** (possession regression loss) adds MSE(mu_P, estimated_possessions) as
+a direct regression target. The MSE gradient is order ~8 when mu_P is 10 possessions
+off-target, vs ~0.024 for Student-t NLL with sigma≈5.7. This steep gradient forces
+mu_P to track the game-specific possession estimate.
+
+#### 16.9.2 Model changes
+
+All backbone heads (PossessionHead, TeamEventBackbone, ThreePAShareHead) in
+`projections/rotation/possession_backbone.py` accept a new `num_game_features: int`
+constructor parameter. When > 0, the MLP input dimension expands from `d_model` to
+`d_model + num_game_features` (or `d_model * 2 + 1 + num_game_features` for
+TeamEventBackbone). Forward methods accept `game_features: Tensor | None` and
+concatenate it to the MLP input.
+
+`GameTransformerV2.__init__` passes `num_game_features=len(config.game_feature_columns)`
+to all three backbone constructors. `GameTransformerV2.forward` threads `game_features`
+through to backbone forward and NLL calls.
+
+**Backward compatibility**: When `num_game_features=0` (the default), all dimensions
+and behavior are identical to the pre-change model. Old checkpoints load with
+`strict=False`; the expanded weight/bias columns for the new input dimensions appear
+as "missing keys" and initialize randomly — this is expected and handled by the
+warm-start logging.
+
+#### 16.9.3 Training changes
+
+New CLI arguments:
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `--w-poss-regression` | float | 0.0 | Weight for MSE(mu_P, estimated_possessions). 0 disables. |
+| `--poss-regression-start-scale` | float | 1.0 | Initial ramp scale for regression loss. |
+
+The regression loss is computed in `_run_epoch` as:
+
+```python
+est_poss = game_features[:, estimated_possessions_idx]
+poss_regression_loss = MSE(mu_P[valid], est_poss[valid])
+total_loss += w_poss_regression * poss_regression_loss
+```
+
+where `valid` is the `game_has_labels` mask. The loss ramps from
+`w_poss_regression * poss_regression_start_scale` to `w_poss_regression` over
+`backbone_loss_ramp_epochs` epochs, using the same `_resolve_ramped_loss_scale`
+infrastructure as the NLL losses.
+
+`game_features` is also threaded to `nll_rates()` and `three_pa_share_head.nll()`
+calls in `_run_epoch`, so backbone NLL computation uses the injected features too.
+
+Validation requires `estimated_possessions` in `--game-feature-cols` when
+`--w-poss-regression > 0`.
+
+#### 16.9.4 Training command
+
+Warm-start from the section 16.8 Approach D checkpoint, adding Approach A + C:
+
+```bash
+uv run python scripts/rotation/train_game_transformer_v2.py \
+  --dataset-dir $PROJECTIONS_DATA_ROOT/training/datasets/joint_rotation_rates_v1_priors_contract_livefill_overflowpol_20260224T200110Z \
+  --init-model-pt $PROJECTIONS_DATA_ROOT/training/runs/gtv2_poss_backbone_detachfree_stabilized_20260302/model.pt \
+  --enable-phase2-flow \
+  --enable-possession-backbone \
+  --enable-three-pa-share \
+  --epochs 20 \
+  --lr 1e-3 \
+  --encoder-lr-scale 0.1 \
+  --backbone-head-lr-scale 3.0 \
+  --backbone-loss-ramp-epochs 4 \
+  --poss-loss-start-scale 0.1 \
+  --backbone-loss-start-scale 0.1 \
+  --three-pa-loss-start-scale 0.1 \
+  --w-poss-nll 0.2 \
+  --w-backbone-nll 0.1 \
+  --w-three-pa-nll 0.05 \
+  --w-poss-regression 5.0 \
+  --poss-regression-start-scale 0.2 \
+  --backbone-grad-clip-norm 1.0 \
+  --backbone-head-grad-clip-norm 2.0 \
+  --encoder-grad-clip-norm 0.5 \
+  --phase2-flow-delay-epochs 3 \
+  --phase2-nll-guard-abs 200.0 \
+  --phase2-max-backoffs-before-rollback 10 \
+  --early-stop-patience 5 \
+  --early-stop-min-delta 0.001 \
+  --early-stop-min-epochs 8 \
+  --early-stop-min-coupled-epochs 4 \
+  --seed 42
+```
+
+Key differences from section 15.13.3A (Approach D):
+- `--w-poss-regression 5.0` enables Approach C regression loss
+- `--poss-regression-start-scale 0.2` ramps from 1.0 to 5.0 over 4 epochs
+- `--backbone-head-lr-scale 3.0` raised from 2.0 to compensate for new input dims
+- `--phase2-flow-delay-epochs 3` disables flow head for the first 3 epochs, giving
+  backbone heads time to learn the new game_features input columns (randomly
+  initialized on warm-start) before the flow head sees their outputs
+- `--phase2-nll-guard-abs 200.0` relaxed from default 25 to tolerate transient
+  backbone output noise when flow activates at epoch 4
+- `--phase2-max-backoffs-before-rollback 10` more room for a2_scale backoff
+- `--early-stop-min-epochs 8` raised from 6 to account for the 3-epoch flow delay
+- `--epochs 20` extended from 12 to allow convergence with new loss term
+
+#### 16.9.5 Validation gates
+
+After training, run the section 16.6 diagnostic:
+
+```bash
+uv run python tools/diagnose_backbone_conditioning.py \
+  --run-dir $PROJECTIONS_DATA_ROOT/training/runs/<approach_ac_run> \
+  --dataset-dir $PROJECTIONS_DATA_ROOT/training/datasets/joint_rotation_rates_v1_priors_contract_livefill_overflowpol_20260224T200110Z \
+  --val-days 30
+```
+
+Expected outcomes:
+- Gate 1: mu_P.std > 3.0 (Approach C regression loss should force mu_P spread)
+- Gate 2: corr(vegas_total, mu_P) > 0.7 (Approach A gives heads direct access)
+- Backbone rate spread should increase meaningfully vs production baseline
+
+### 16.10 Status Update (2026-03-02, staged no-flow -> phase2 confirm + production promotion)
+
+#### 16.10.1 What failed first
+
+We first tried a softer direct phase2 recipe (still coupled from the start) with:
+
+- `--phase2-flow-delay-epochs 4`
+- `--phase2-flow-warmup-epochs 6`
+- `--w-flow-nll 0.75`
+- `--phase2-nll-guard-abs 250`
+- `--phase2-max-backoffs-before-rollback 15`
+- `--w-poss-regression 2.0`
+- `--early-stop-metric val_total_ex_possreg`
+
+3-seed confirm manifest:
+
+- `/home/daniel/projections-data/training/runs/confirm_wpossreg2p0_softphase2_20260302T205006Z.txt`
+
+Result:
+
+- rollback `3/3` seeds at epoch 5 due repeated phase2 NLL guard backoffs
+- rollback checkpoints failed conditioning Gate 1 (`mu_P.std ~0.11-0.12`)
+
+This confirmed that direct phase2 coupling remained unstable under this regime.
+
+#### 16.10.2 Successful staged recovery: backbone-only no-flow confirm
+
+We then ran a backbone-only stage by keeping `--enable-phase2-flow` on (required by backbone flags) but setting:
+
+- `--phase2-flow-delay-epochs 20` with `--epochs 20`
+
+which keeps `phase2_flow_warmup=0.0` for all epochs (no flow training), while still training backbone heads.
+
+3-seed confirm manifest:
+
+- `/home/daniel/projections-data/training/runs/confirm_backbone_only_noflow_wpossreg2p0_20260302T210001Z.txt`
+
+Result:
+
+- rollback `0/3` seeds
+- conditioning diagnostics passed on both `val_days=30` and `val_days=14` for all seeds
+- `mu_P.std` moved into target range (`~3.27-3.50`)
+
+Note:
+
+- `summary.json best_epoch=-1` in these no-flow runs is expected from current trainer logic:
+  best-checkpoint tracking is intentionally skipped while within flow-delay epochs.
+
+#### 16.10.3 Successful stage-2 finetune from no-flow checkpoints
+
+From those stable per-seed no-flow checkpoints, we ran conservative phase2 finetune:
+
+- `--phase2-flow-delay-epochs 6`
+- `--phase2-flow-warmup-epochs 8`
+- `--phase2-anchor-end-weight 0.75`
+- `--w-flow-nll 0.10`
+- `--phase2-nll-guard-abs 250`
+- `--phase2-max-backoffs-before-rollback 20`
+- `--encoder-lr-scale 0.05`
+- `--backbone-head-lr-scale 1.5`
+- `--w-poss-regression 2.0`
+- `--early-stop-metric val_total_ex_possreg`
+
+3-seed confirm manifest:
+
+- `/home/daniel/projections-data/training/runs/confirm_phase2_from_noflow_wpossreg2p0_20260302T211623Z.txt`
+
+Result:
+
+- rollback `0/3` seeds
+- no phase2 instability/rollback events
+- conditioning diagnostics remained pass on all seeds:
+  - seed 42: `mu_P.std=3.34` (30d), `3.27` (14d)
+  - seed 77: `mu_P.std=3.47` (30d), `3.42` (14d)
+  - seed 123: `mu_P.std=3.37` (30d), `3.29` (14d)
+
+#### 16.10.4 60d eval slices + strict world-contract checks
+
+Per-seed artifacts:
+
+- seed 42:
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_confirm_phase2_from_noflow_wpossreg2p0_seed42_20260302T211623Z/eval_slices_60d.json`
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_confirm_phase2_from_noflow_wpossreg2p0_seed42_20260302T211623Z/world_contract_60d_4g_64w.json`
+- seed 77:
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_confirm_phase2_from_noflow_wpossreg2p0_seed77_20260302T211623Z/eval_slices_60d.json`
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_confirm_phase2_from_noflow_wpossreg2p0_seed77_20260302T211623Z/world_contract_60d_4g_64w.json`
+- seed 123:
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_confirm_phase2_from_noflow_wpossreg2p0_seed123_20260302T211623Z/eval_slices_60d.json`
+  - `/home/daniel/projections-data/training/runs/game_transformer_v2_confirm_phase2_from_noflow_wpossreg2p0_seed123_20260302T211623Z/world_contract_60d_4g_64w.json`
+
+World-contract result:
+
+- all 3 seeds passed strict checks with `total_violations=0` and `team_minutes_not_240=0`
+
+Balanced candidate choice for promotion:
+
+- seed `42` (best lineup parity gap + best active-count MAE balance)
+
+#### 16.10.5 Production promotion executed
+
+Promotion wrapper root:
+
+- `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_candidate_from_noflow_phase2_20260302T211623Z`
+
+Promotion record:
+
+- `/home/daniel/projections-data/training/runs/game_transformer_v2_phase3_candidate_from_noflow_phase2_20260302T211623Z/promoted_phase3.json`
+
+Promoted bundle:
+
+- `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/phase3_game_transformer_v2_phase3_candidate_from_noflow_phase2_20260302T211623Z_game_transformer_v2_confirm_phase2_from_noflow_wpossreg2p0_seed42_20260302T211623Z_20260302T214002Z`
+
+Live pointer:
+
+- `/home/daniel/projections-data/artifacts/game_transformer_v2/bundle_current` -> promoted bundle above
+
+`promotion_meta.json` includes explicit waiver rationale for missing optional
+`offline_eval_vs_sim_v2_60d_64w_strict.json` in this staged path; promotion was
+accepted as experimental production cutover because multi-seed conditioning and strict
+world-contract checks passed.

@@ -4,10 +4,14 @@ import pytest
 import torch
 
 from scripts.rotation.train_game_transformer_v2 import (
+    BackboneEpochWeights,
     EarlyStopConfig,
     EarlyStopState,
     Phase2StabilityConfig,
     Phase2StabilityState,
+    _count_backbone_coupled_epochs,
+    _resolve_backbone_epoch_weights,
+    _resolve_early_stop_metric_value,
     _resolve_phase2_epoch_weights,
     _team_fixed_opportunity_rate_mse_loss,
     _team_ratio_mse_loss,
@@ -136,23 +140,72 @@ def test_resolve_phase2_epoch_weights_enables_phase3_decision_weights() -> None:
     assert weights.w_team_energy == pytest.approx(0.2)
 
 
+def test_resolve_backbone_epoch_weights_applies_linear_ramp() -> None:
+    weights = _resolve_backbone_epoch_weights(
+        epoch=1,
+        enable_possession_backbone=True,
+        enable_three_pa_share=True,
+        w_poss_nll=0.2,
+        w_backbone_nll=0.1,
+        w_three_pa_nll=0.05,
+        w_poss_regression=5.0,
+        loss_ramp_epochs=5,
+        poss_loss_start_scale=0.1,
+        backbone_loss_start_scale=0.2,
+        three_pa_loss_start_scale=0.4,
+        poss_regression_start_scale=0.2,
+    )
+    assert isinstance(weights, BackboneEpochWeights)
+    assert weights.w_poss_nll == pytest.approx(0.02)
+    assert weights.w_backbone_nll == pytest.approx(0.02)
+    assert weights.w_three_pa_nll == pytest.approx(0.02)
+    assert weights.w_poss_regression == pytest.approx(1.0)  # 5.0 * 0.2
+    assert weights.ramp_scale_poss == pytest.approx(0.1)
+    assert weights.ramp_scale_backbone == pytest.approx(0.2)
+    assert weights.ramp_scale_three_pa == pytest.approx(0.4)
+    assert weights.ramp_scale_poss_regression == pytest.approx(0.2)
+
+
+def test_count_backbone_coupled_epochs_accounts_for_detach_schedule() -> None:
+    assert _count_backbone_coupled_epochs(
+        epoch=1,
+        enable_possession_backbone=True,
+        backbone_detach_until_epoch=0,
+    ) == 1
+    assert _count_backbone_coupled_epochs(
+        epoch=3,
+        enable_possession_backbone=True,
+        backbone_detach_until_epoch=4,
+    ) == 0
+    assert _count_backbone_coupled_epochs(
+        epoch=4,
+        enable_possession_backbone=True,
+        backbone_detach_until_epoch=4,
+    ) == 1
+    assert _count_backbone_coupled_epochs(
+        epoch=6,
+        enable_possession_backbone=True,
+        backbone_detach_until_epoch=4,
+    ) == 3
+
+
 def test_update_early_stop_requests_stop_after_patience_exhausted() -> None:
-    cfg = EarlyStopConfig(patience=2, min_delta=0.01, min_epochs=2)
+    cfg = EarlyStopConfig(patience=2, min_delta=0.01, min_epochs=2, min_coupled_epochs=0)
     state = EarlyStopState()
 
-    assert _update_early_stop(epoch=1, metric_value=5.0, config=cfg, state=state) is False
+    assert _update_early_stop(epoch=1, metric_value=5.0, coupled_epochs=0, config=cfg, state=state) is False
     assert state.best_epoch == 1
     assert state.best_metric == pytest.approx(5.0)
 
-    assert _update_early_stop(epoch=2, metric_value=4.95, config=cfg, state=state) is False
+    assert _update_early_stop(epoch=2, metric_value=4.95, coupled_epochs=0, config=cfg, state=state) is False
     assert state.best_epoch == 2
     assert state.best_metric == pytest.approx(4.95)
 
-    assert _update_early_stop(epoch=3, metric_value=4.955, config=cfg, state=state) is False
+    assert _update_early_stop(epoch=3, metric_value=4.955, coupled_epochs=0, config=cfg, state=state) is False
     assert state.bad_epochs == 1
     assert state.stop_requested is False
 
-    assert _update_early_stop(epoch=4, metric_value=4.958, config=cfg, state=state) is True
+    assert _update_early_stop(epoch=4, metric_value=4.958, coupled_epochs=0, config=cfg, state=state) is True
     assert state.bad_epochs == 2
     assert state.stop_requested is True
     assert state.stop_epoch == 4
@@ -161,12 +214,45 @@ def test_update_early_stop_requests_stop_after_patience_exhausted() -> None:
 
 
 def test_update_early_stop_respects_min_epochs_gate() -> None:
-    cfg = EarlyStopConfig(patience=1, min_delta=0.01, min_epochs=3)
+    cfg = EarlyStopConfig(patience=1, min_delta=0.01, min_epochs=3, min_coupled_epochs=0)
     state = EarlyStopState(best_metric=5.0, best_epoch=1)
 
-    assert _update_early_stop(epoch=2, metric_value=5.02, config=cfg, state=state) is False
+    assert _update_early_stop(epoch=2, metric_value=5.02, coupled_epochs=0, config=cfg, state=state) is False
     assert state.bad_epochs == 0
     assert state.stop_requested is False
+
+
+def test_update_early_stop_respects_min_coupled_epochs_gate() -> None:
+    cfg = EarlyStopConfig(patience=1, min_delta=0.01, min_epochs=0, min_coupled_epochs=2)
+    state = EarlyStopState(best_metric=5.0, best_epoch=1)
+
+    assert _update_early_stop(epoch=2, metric_value=5.02, coupled_epochs=1, config=cfg, state=state) is False
+    assert state.bad_epochs == 0
+    assert state.stop_requested is False
+
+    assert _update_early_stop(epoch=3, metric_value=5.03, coupled_epochs=2, config=cfg, state=state) is True
+    assert state.bad_epochs == 1
+    assert state.stop_requested is True
+
+
+def test_resolve_early_stop_metric_value_val_total_ex_possreg() -> None:
+    v = _resolve_early_stop_metric_value(
+        metric_name="val_total_ex_possreg",
+        val_total=12.0,
+        val_poss_regression=3.0,
+        w_poss_regression=2.0,
+    )
+    assert v == pytest.approx(6.0)
+
+
+def test_resolve_early_stop_metric_value_raises_on_unknown_metric() -> None:
+    with pytest.raises(ValueError):
+        _resolve_early_stop_metric_value(
+            metric_name="unknown_metric",
+            val_total=1.0,
+            val_poss_regression=0.0,
+            w_poss_regression=0.0,
+        )
 
 
 def test_team_sum_by_side_respects_observed_mask() -> None:

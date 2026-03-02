@@ -155,6 +155,9 @@ class EpochMetrics:
     val_reb_share_aux: float = 0.0
     val_ast_team_rate_aux: float = 0.0
     val_reb_opportunity_rate_aux: float = 0.0
+    val_total_ex_possreg: float = 0.0
+    train_poss_regression: float = 0.0
+    val_poss_regression: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -170,6 +173,18 @@ class Phase2EpochWeights:
     anchor_weight: float
     run_phase2_flow: bool
     run_phase3_decision: bool
+
+
+@dataclass(frozen=True)
+class BackboneEpochWeights:
+    w_poss_nll: float
+    w_backbone_nll: float
+    w_three_pa_nll: float
+    w_poss_regression: float
+    ramp_scale_poss: float
+    ramp_scale_backbone: float
+    ramp_scale_three_pa: float
+    ramp_scale_poss_regression: float
 
 
 @dataclass(frozen=True)
@@ -198,6 +213,7 @@ class EarlyStopConfig:
     patience: int = 0
     min_delta: float = 0.0
     min_epochs: int = 0
+    min_coupled_epochs: int = 0
 
 
 @dataclass
@@ -649,12 +665,17 @@ def _sample_decision_fpts(
     return torch.stack(worlds, dim=1)
 
 
-def _phase2_flow_warmup_factor(epoch: int, *, warmup_epochs: int) -> float:
+def _phase2_flow_warmup_factor(
+    epoch: int, *, warmup_epochs: int, delay_epochs: int = 0,
+) -> float:
     if int(epoch) <= 0:
         raise ValueError("epoch must be >= 1")
+    if int(epoch) <= int(delay_epochs):
+        return 0.0
+    effective_epoch = int(epoch) - int(delay_epochs)
     if int(warmup_epochs) <= 0:
         return 1.0
-    return float(min(1.0, float(epoch) / float(warmup_epochs)))
+    return float(min(1.0, float(effective_epoch) / float(warmup_epochs)))
 
 
 def _phase2_anchor_weight(
@@ -665,6 +686,118 @@ def _phase2_anchor_weight(
 ) -> float:
     warm = float(min(max(flow_warmup, 0.0), 1.0))
     return float(end_weight + (start_weight - end_weight) * (1.0 - warm))
+
+
+def _is_flow_param_name(name: str) -> bool:
+    return bool(name.startswith("flow_head."))
+
+
+def _is_backbone_head_param_name(name: str) -> bool:
+    return bool(
+        name.startswith("possession_head.")
+        or name.startswith("event_backbone.")
+        or name.startswith("three_pa_share_head.")
+    )
+
+
+def _is_encoder_param_name(name: str) -> bool:
+    if name in {"game_token", "team_tokens"}:
+        return True
+    return bool(
+        name.startswith("player_proj.")
+        or name.startswith("game_proj.")
+        or name.startswith("team_proj.")
+        or name.startswith("token_type_embedding.")
+        or name.startswith("side_embedding.")
+        or name.startswith("encoder.")
+        or name.startswith("final_norm.")
+    )
+
+
+def _resolve_ramped_loss_scale(
+    *,
+    epoch: int,
+    ramp_epochs: int,
+    start_scale: float,
+) -> float:
+    if int(epoch) <= 0:
+        raise ValueError("epoch must be >= 1")
+    if int(ramp_epochs) <= 1:
+        return 1.0
+    progress = min(1.0, float(int(epoch) - 1) / float(int(ramp_epochs) - 1))
+    return float(start_scale + (1.0 - float(start_scale)) * progress)
+
+
+def _resolve_backbone_epoch_weights(
+    *,
+    epoch: int,
+    enable_possession_backbone: bool,
+    enable_three_pa_share: bool,
+    w_poss_nll: float,
+    w_backbone_nll: float,
+    w_three_pa_nll: float,
+    w_poss_regression: float,
+    loss_ramp_epochs: int,
+    poss_loss_start_scale: float,
+    backbone_loss_start_scale: float,
+    three_pa_loss_start_scale: float,
+    poss_regression_start_scale: float,
+) -> BackboneEpochWeights:
+    if not bool(enable_possession_backbone):
+        return BackboneEpochWeights(
+            w_poss_nll=0.0,
+            w_backbone_nll=0.0,
+            w_three_pa_nll=0.0,
+            w_poss_regression=0.0,
+            ramp_scale_poss=0.0,
+            ramp_scale_backbone=0.0,
+            ramp_scale_three_pa=0.0,
+            ramp_scale_poss_regression=0.0,
+        )
+    poss_scale = _resolve_ramped_loss_scale(
+        epoch=int(epoch),
+        ramp_epochs=int(loss_ramp_epochs),
+        start_scale=float(poss_loss_start_scale),
+    )
+    backbone_scale = _resolve_ramped_loss_scale(
+        epoch=int(epoch),
+        ramp_epochs=int(loss_ramp_epochs),
+        start_scale=float(backbone_loss_start_scale),
+    )
+    three_pa_scale = _resolve_ramped_loss_scale(
+        epoch=int(epoch),
+        ramp_epochs=int(loss_ramp_epochs),
+        start_scale=float(three_pa_loss_start_scale),
+    )
+    poss_reg_scale = _resolve_ramped_loss_scale(
+        epoch=int(epoch),
+        ramp_epochs=int(loss_ramp_epochs),
+        start_scale=float(poss_regression_start_scale),
+    )
+    return BackboneEpochWeights(
+        w_poss_nll=float(w_poss_nll) * poss_scale,
+        w_backbone_nll=float(w_backbone_nll) * backbone_scale,
+        w_three_pa_nll=float(w_three_pa_nll) * three_pa_scale if bool(enable_three_pa_share) else 0.0,
+        w_poss_regression=float(w_poss_regression) * poss_reg_scale,
+        ramp_scale_poss=float(poss_scale),
+        ramp_scale_backbone=float(backbone_scale),
+        ramp_scale_three_pa=float(three_pa_scale) if bool(enable_three_pa_share) else 0.0,
+        ramp_scale_poss_regression=float(poss_reg_scale),
+    )
+
+
+def _count_backbone_coupled_epochs(
+    *,
+    epoch: int,
+    enable_possession_backbone: bool,
+    backbone_detach_until_epoch: int,
+) -> int:
+    if int(epoch) <= 0:
+        raise ValueError("epoch must be >= 1")
+    if not bool(enable_possession_backbone):
+        return int(epoch)
+    detached_epochs = max(0, int(backbone_detach_until_epoch) - 1)
+    return max(0, int(epoch) - detached_epochs)
 
 
 def _resolve_phase2_epoch_weights(
@@ -680,6 +813,7 @@ def _resolve_phase2_epoch_weights(
     w_crps_fpts: float,
     w_team_energy: float,
     flow_warmup_epochs: int,
+    flow_delay_epochs: int = 0,
     anchor_start_weight: float,
     anchor_end_weight: float,
     a2_scale: float,
@@ -699,7 +833,9 @@ def _resolve_phase2_epoch_weights(
             run_phase3_decision=False,
         )
 
-    flow_warmup = _phase2_flow_warmup_factor(int(epoch), warmup_epochs=int(flow_warmup_epochs))
+    flow_warmup = _phase2_flow_warmup_factor(
+        int(epoch), warmup_epochs=int(flow_warmup_epochs), delay_epochs=int(flow_delay_epochs),
+    )
     anchor_weight = _phase2_anchor_weight(
         flow_warmup,
         start_weight=float(anchor_start_weight),
@@ -809,8 +945,10 @@ def _update_early_stop(
     *,
     epoch: int,
     metric_value: float,
+    coupled_epochs: int,
     config: EarlyStopConfig,
     state: EarlyStopState,
+    metric_name: str = "val_total",
 ) -> bool:
     if int(config.patience) <= 0:
         return False
@@ -821,6 +959,8 @@ def _update_early_stop(
         return False
     if int(epoch) < int(config.min_epochs):
         return False
+    if int(coupled_epochs) < int(config.min_coupled_epochs):
+        return False
     if state.best_epoch <= 0:
         return False
     state.bad_epochs += 1
@@ -829,10 +969,25 @@ def _update_early_stop(
     state.stop_requested = True
     state.stop_epoch = int(epoch)
     state.stop_reason = (
-        f"no val_total improvement >= {float(config.min_delta):.6f} "
+        f"no {str(metric_name)} improvement >= {float(config.min_delta):.6f} "
         f"for {int(config.patience)} epoch(s)"
     )
     return True
+
+
+def _resolve_early_stop_metric_value(
+    *,
+    metric_name: str,
+    val_total: float,
+    val_poss_regression: float,
+    w_poss_regression: float,
+) -> float:
+    name = str(metric_name).strip().lower()
+    if name == "val_total":
+        return float(val_total)
+    if name == "val_total_ex_possreg":
+        return float(val_total) - float(w_poss_regression) * float(val_poss_regression)
+    raise ValueError(f"Unsupported early-stop metric: {metric_name}")
 
 
 def _run_epoch(
@@ -861,9 +1016,13 @@ def _run_epoch(
     epoch_index: int,
     backbone_grad_clip_norm: float,
     flow_grad_clip_norm: float,
+    encoder_grad_clip_norm: float = -1.0,
+    backbone_head_grad_clip_norm: float = -1.0,
     w_poss_nll: float = 0.0,
     w_backbone_nll: float = 0.0,
     w_three_pa_nll: float = 0.0,
+    w_poss_regression: float = 0.0,
+    estimated_possessions_idx: int = -1,
     w_efficiency_nll: float = 0.0,
     w_usage_share_nll: float = 0.0,
     w_emergent_share_aux: float = 0.0,
@@ -892,6 +1051,7 @@ def _run_epoch(
         "team_energy": 0.0,
         "count_acc": 0.0,
         "poss_nll": 0.0,
+        "poss_regression": 0.0,
         "backbone_nll": 0.0,
         "three_pa_nll": 0.0,
         "efficiency_nll": 0.0,
@@ -906,15 +1066,21 @@ def _run_epoch(
         "instability_events": 0,
     }
     flow_params: list[nn.Parameter] = []
-    backbone_params: list[nn.Parameter] = []
+    encoder_params: list[nn.Parameter] = []
+    backbone_head_params: list[nn.Parameter] = []
+    base_params: list[nn.Parameter] = []
     if training:
         for name, param in model.named_parameters():
             if not param.requires_grad:
                 continue
-            if name.startswith("flow_head."):
+            if _is_flow_param_name(name):
                 flow_params.append(param)
+            elif _is_backbone_head_param_name(name):
+                backbone_head_params.append(param)
+            elif _is_encoder_param_name(name):
+                encoder_params.append(param)
             else:
-                backbone_params.append(param)
+                base_params.append(param)
 
     for batch_idx, batch in enumerate(loader, start=1):
         player_features = batch["player_features"].to(device=device)
@@ -1024,6 +1190,7 @@ def _run_epoch(
 
             # Possession backbone losses (section 15)
             poss_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            poss_regression_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             backbone_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             three_pa_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             if bool(enable_possession_backbone) and out.possession is not None and out.backbone is not None:
@@ -1083,6 +1250,7 @@ def _run_epoch(
                         fta_true=fta_team,
                         tov_true=tov_team,
                         oreb_true=oreb_team,
+                        game_features=game_features,
                     )
 
                     # 3PA share NLL (optional)
@@ -1094,6 +1262,16 @@ def _run_epoch(
                             out.game_state,
                             fga_team,
                             three_pa_share_true=three_pa_share_true,
+                            game_features=game_features,
+                        )
+
+                    # Possession regression loss (Approach C): MSE(mu_P, estimated_possessions)
+                    if float(w_poss_regression) > 0.0 and int(estimated_possessions_idx) >= 0:
+                        est_poss = game_features[:, int(estimated_possessions_idx)]  # (B,)
+                        mask_f = game_has_labels.to(dtype=poss_nll_loss.dtype)
+                        n_valid = mask_f.sum().clamp(min=1.0)
+                        poss_regression_loss = (
+                            ((out.possession.mu - est_poss) ** 2 * mask_f).sum() / n_valid
                         )
 
             efficiency_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
@@ -1394,6 +1572,7 @@ def _run_epoch(
                 + float(w_crps_fpts) * crps_fpts
                 + float(w_team_energy) * team_energy
                 + float(w_poss_nll) * poss_nll_loss
+                + float(w_poss_regression) * poss_regression_loss
                 + float(w_backbone_nll) * backbone_nll_loss
                 + float(w_three_pa_nll) * three_pa_nll_loss
                 + float(w_efficiency_nll) * efficiency_nll_loss
@@ -1458,9 +1637,29 @@ def _run_epoch(
                 else:
                     optimizer.zero_grad(set_to_none=True)
                     total_loss.backward()
-                    if backbone_params:
+                    encoder_clip = (
+                        float(encoder_grad_clip_norm)
+                        if float(encoder_grad_clip_norm) > 0.0
+                        else float(backbone_grad_clip_norm)
+                    )
+                    backbone_head_clip = (
+                        float(backbone_head_grad_clip_norm)
+                        if float(backbone_head_grad_clip_norm) > 0.0
+                        else float(backbone_grad_clip_norm)
+                    )
+                    if encoder_params:
                         torch.nn.utils.clip_grad_norm_(
-                            backbone_params,
+                            encoder_params,
+                            max_norm=max(0.0, float(encoder_clip)),
+                        )
+                    if backbone_head_params:
+                        torch.nn.utils.clip_grad_norm_(
+                            backbone_head_params,
+                            max_norm=max(0.0, float(backbone_head_clip)),
+                        )
+                    if base_params:
+                        torch.nn.utils.clip_grad_norm_(
+                            base_params,
                             max_norm=max(0.0, float(backbone_grad_clip_norm)),
                         )
                     if bool(run_phase2_flow) and flow_params:
@@ -1484,6 +1683,7 @@ def _run_epoch(
             totals["team_energy"] += float(team_energy.item())
             totals["count_acc"] += float(count_acc.item())
             totals["poss_nll"] += float(poss_nll_loss.item())
+            totals["poss_regression"] += float(poss_regression_loss.item())
             totals["backbone_nll"] += float(backbone_nll_loss.item())
             totals["three_pa_nll"] += float(three_pa_nll_loss.item())
             totals["efficiency_nll"] += float(efficiency_nll_loss.item())
@@ -1509,6 +1709,7 @@ def _run_epoch(
         "team_energy": totals["team_energy"] / denom,
         "count_acc": totals["count_acc"] / denom,
         "poss_nll": totals["poss_nll"] / denom,
+        "poss_regression": totals["poss_regression"] / denom,
         "backbone_nll": totals["backbone_nll"] / denom,
         "three_pa_nll": totals["three_pa_nll"] / denom,
         "efficiency_nll": totals["efficiency_nll"] / denom,
@@ -1614,6 +1815,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--active-positive-weight", type=float, default=1.0)
     parser.add_argument("--enable-phase2-flow", action="store_true")
     parser.add_argument("--phase2-flow-warmup-epochs", type=int, default=4)
+    parser.add_argument(
+        "--phase2-flow-delay-epochs",
+        type=int,
+        default=0,
+        help="Completely disable flow head for the first N epochs (0 disables). "
+        "Useful when warm-starting with expanded backbone inputs that need "
+        "time to stabilize before flow training begins.",
+    )
     parser.add_argument("--phase2-anchor-start-weight", type=float, default=1.0)
     parser.add_argument("--phase2-anchor-end-weight", type=float, default=0.5)
     parser.add_argument("--phase2-nll-guard-ratio", type=float, default=3.0)
@@ -1640,11 +1849,48 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Do not trigger early stopping before this epoch.",
     )
+    parser.add_argument(
+        "--early-stop-min-coupled-epochs",
+        type=int,
+        default=0,
+        help="Do not trigger early stopping until backbone-coupled epochs reach this count.",
+    )
+    parser.add_argument(
+        "--early-stop-metric",
+        type=str,
+        default="val_total",
+        choices=["val_total", "val_total_ex_possreg"],
+        help="Validation metric used for early stopping.",
+    )
     parser.add_argument("--flow-num-blocks", type=int, default=4)
     parser.add_argument("--flow-scale-clip", type=float, default=3.0)  # H1 fix: 2.0 → 3.0
     parser.add_argument("--flow-context-mode", type=str, default="attention", choices=["mean", "attention"])  # H2 fix
     parser.add_argument("--backbone-grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--flow-grad-clip-norm", type=float, default=5.0)
+    parser.add_argument(
+        "--encoder-grad-clip-norm",
+        type=float,
+        default=-1.0,
+        help="Gradient clip for shared encoder params. <=0 falls back to --backbone-grad-clip-norm.",
+    )
+    parser.add_argument(
+        "--backbone-head-grad-clip-norm",
+        type=float,
+        default=-1.0,
+        help="Gradient clip for possession/event/3PA backbone heads. <=0 falls back to --backbone-grad-clip-norm.",
+    )
+    parser.add_argument(
+        "--encoder-lr-scale",
+        type=float,
+        default=1.0,
+        help="LR multiplier for shared encoder params (encoder/projections/tokens).",
+    )
+    parser.add_argument(
+        "--backbone-head-lr-scale",
+        type=float,
+        default=1.0,
+        help="LR multiplier for possession/event/3PA backbone head params.",
+    )
     parser.add_argument("--enable-phase3-decision", action="store_true")
     parser.add_argument("--w-crps-fpts", type=float, default=1.0)
     parser.add_argument("--w-team-energy", type=float, default=0.25)
@@ -1710,6 +1956,42 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--w-poss-nll", type=float, default=1.0)
     parser.add_argument("--w-backbone-nll", type=float, default=1.0)
     parser.add_argument("--w-three-pa-nll", type=float, default=0.5)
+    parser.add_argument(
+        "--backbone-loss-ramp-epochs",
+        type=int,
+        default=0,
+        help="Linearly ramp backbone losses to their target values over N epochs (0 disables).",
+    )
+    parser.add_argument(
+        "--poss-loss-start-scale",
+        type=float,
+        default=1.0,
+        help="Initial scale factor for --w-poss-nll when backbone loss ramping is enabled.",
+    )
+    parser.add_argument(
+        "--backbone-loss-start-scale",
+        type=float,
+        default=1.0,
+        help="Initial scale factor for --w-backbone-nll when backbone loss ramping is enabled.",
+    )
+    parser.add_argument(
+        "--three-pa-loss-start-scale",
+        type=float,
+        default=1.0,
+        help="Initial scale factor for --w-three-pa-nll when backbone loss ramping is enabled.",
+    )
+    parser.add_argument(
+        "--w-poss-regression",
+        type=float,
+        default=0.0,
+        help="Weight for MSE(mu_P, estimated_possessions) regression loss (Approach C). 0 disables.",
+    )
+    parser.add_argument(
+        "--poss-regression-start-scale",
+        type=float,
+        default=1.0,
+        help="Initial scale factor for --w-poss-regression when backbone loss ramping is enabled.",
+    )
     parser.add_argument(
         "--possession-mu-mode",
         type=str,
@@ -1778,6 +2060,26 @@ def main() -> None:
         raise ValueError("--early-stop-min-delta must be >= 0")
     if int(args.early_stop_min_epochs) < 0:
         raise ValueError("--early-stop-min-epochs must be >= 0")
+    if int(args.early_stop_min_coupled_epochs) < 0:
+        raise ValueError("--early-stop-min-coupled-epochs must be >= 0")
+    if int(args.early_stop_min_coupled_epochs) > 0 and not bool(args.enable_possession_backbone):
+        raise ValueError("--early-stop-min-coupled-epochs requires --enable-possession-backbone")
+    if str(args.early_stop_metric) == "val_total_ex_possreg" and float(args.w_poss_regression) <= 0.0:
+        raise ValueError("--early-stop-metric=val_total_ex_possreg requires --w-poss-regression > 0")
+    if int(args.backbone_detach_until_epoch) < 0:
+        raise ValueError("--backbone-detach-until-epoch must be >= 0")
+    if int(args.backbone_loss_ramp_epochs) < 0:
+        raise ValueError("--backbone-loss-ramp-epochs must be >= 0")
+    if float(args.poss_loss_start_scale) < 0.0:
+        raise ValueError("--poss-loss-start-scale must be >= 0")
+    if float(args.backbone_loss_start_scale) < 0.0:
+        raise ValueError("--backbone-loss-start-scale must be >= 0")
+    if float(args.three_pa_loss_start_scale) < 0.0:
+        raise ValueError("--three-pa-loss-start-scale must be >= 0")
+    if float(args.encoder_lr_scale) <= 0.0:
+        raise ValueError("--encoder-lr-scale must be > 0")
+    if float(args.backbone_head_lr_scale) <= 0.0:
+        raise ValueError("--backbone-head-lr-scale must be > 0")
     if int(args.efficiency_head_hidden) <= 0:
         raise ValueError("--efficiency-head-hidden must be > 0")
     if int(args.usage_share_head_hidden) <= 0:
@@ -1879,6 +2181,14 @@ def main() -> None:
     feature_mean, feature_std = _compute_feature_norm(train_df, feature_cols)
     game_feature_cols = [c.strip() for c in str(args.game_feature_cols).split(",") if c.strip()]
     team_feature_cols = [c.strip() for c in str(args.team_feature_cols).split(",") if c.strip()]
+
+    estimated_possessions_idx = -1
+    if "estimated_possessions" in game_feature_cols:
+        estimated_possessions_idx = game_feature_cols.index("estimated_possessions")
+    if float(args.w_poss_regression) > 0.0 and estimated_possessions_idx < 0:
+        raise ValueError(
+            "--w-poss-regression > 0 requires 'estimated_possessions' in --game-feature-cols"
+        )
 
     train_examples = build_game_level_examples(
         train_df,
@@ -1984,6 +2294,20 @@ def main() -> None:
         if not init_model_pt.exists():
             raise FileNotFoundError(f"init checkpoint not found: {init_model_pt}")
         init_state = torch.load(init_model_pt, map_location=device)
+        # Filter out keys with shape mismatches (e.g. backbone heads expanded
+        # by num_game_features via Approach A).  Those params keep their random
+        # init and are reported below.
+        model_state = model.state_dict()
+        shape_mismatched: list[str] = []
+        for key in list(init_state.keys()):
+            if key in model_state and init_state[key].shape != model_state[key].shape:
+                shape_mismatched.append(key)
+                del init_state[key]
+        if shape_mismatched:
+            print(
+                f"[warm-start] shape-mismatched keys skipped ({len(shape_mismatched)}): {shape_mismatched}",
+                flush=True,
+            )
         missing, unexpected = model.load_state_dict(init_state, strict=False)
         if unexpected:
             raise RuntimeError(f"Unexpected keys in init checkpoint {init_model_pt}: {unexpected}")
@@ -2019,10 +2343,62 @@ def main() -> None:
             f"[usage-share-head-only] trainable_param_tensors={n_trainable} total_param_tensors={n_total}",
             flush=True,
         )
-    optimizer = torch.optim.AdamW(
-        [p for p in model.parameters() if p.requires_grad],
-        lr=float(args.lr),
-        weight_decay=float(args.weight_decay),
+    optimizer_groups: dict[str, list[nn.Parameter]] = {
+        "encoder": [],
+        "backbone_heads": [],
+        "base": [],
+    }
+    optimizer_group_tensor_counts = {key: 0 for key in optimizer_groups}
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if _is_encoder_param_name(name):
+            group_name = "encoder"
+        elif _is_backbone_head_param_name(name):
+            group_name = "backbone_heads"
+        else:
+            group_name = "base"
+        optimizer_groups[group_name].append(param)
+        optimizer_group_tensor_counts[group_name] += 1
+
+    optimizer_param_groups: list[dict[str, Any]] = []
+    base_lr = float(args.lr)
+    if optimizer_groups["encoder"]:
+        optimizer_param_groups.append(
+            {
+                "params": optimizer_groups["encoder"],
+                "lr": base_lr * float(args.encoder_lr_scale),
+                "weight_decay": float(args.weight_decay),
+            }
+        )
+    if optimizer_groups["backbone_heads"]:
+        optimizer_param_groups.append(
+            {
+                "params": optimizer_groups["backbone_heads"],
+                "lr": base_lr * float(args.backbone_head_lr_scale),
+                "weight_decay": float(args.weight_decay),
+            }
+        )
+    if optimizer_groups["base"]:
+        optimizer_param_groups.append(
+            {
+                "params": optimizer_groups["base"],
+                "lr": base_lr,
+                "weight_decay": float(args.weight_decay),
+            }
+        )
+    optimizer = torch.optim.AdamW(optimizer_param_groups)
+    print(
+        (
+            "[optimizer] "
+            f"base_lr={base_lr:.6g} "
+            f"encoder_tensors={optimizer_group_tensor_counts['encoder']} "
+            f"encoder_lr={base_lr * float(args.encoder_lr_scale):.6g} "
+            f"backbone_head_tensors={optimizer_group_tensor_counts['backbone_heads']} "
+            f"backbone_head_lr={base_lr * float(args.backbone_head_lr_scale):.6g} "
+            f"base_tensors={optimizer_group_tensor_counts['base']}"
+        ),
+        flush=True,
     )
 
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else (
@@ -2041,6 +2417,7 @@ def main() -> None:
         patience=int(args.early_stop_patience),
         min_delta=float(args.early_stop_min_delta),
         min_epochs=int(args.early_stop_min_epochs),
+        min_coupled_epochs=int(args.early_stop_min_coupled_epochs),
     )
     early_stop_state = EarlyStopState()
 
@@ -2067,9 +2444,29 @@ def main() -> None:
             w_crps_fpts=float(args.w_crps_fpts),
             w_team_energy=float(args.w_team_energy),
             flow_warmup_epochs=int(args.phase2_flow_warmup_epochs),
+            flow_delay_epochs=int(args.phase2_flow_delay_epochs),
             anchor_start_weight=float(args.phase2_anchor_start_weight),
             anchor_end_weight=float(args.phase2_anchor_end_weight),
             a2_scale=float(phase2_guard_state.a2_scale),
+        )
+        backbone_weights = _resolve_backbone_epoch_weights(
+            epoch=int(epoch),
+            enable_possession_backbone=bool(args.enable_possession_backbone),
+            enable_three_pa_share=bool(args.enable_three_pa_share),
+            w_poss_nll=float(args.w_poss_nll),
+            w_backbone_nll=float(args.w_backbone_nll),
+            w_three_pa_nll=float(args.w_three_pa_nll),
+            w_poss_regression=float(args.w_poss_regression),
+            loss_ramp_epochs=int(args.backbone_loss_ramp_epochs),
+            poss_loss_start_scale=float(args.poss_loss_start_scale),
+            backbone_loss_start_scale=float(args.backbone_loss_start_scale),
+            three_pa_loss_start_scale=float(args.three_pa_loss_start_scale),
+            poss_regression_start_scale=float(args.poss_regression_start_scale),
+        )
+        coupled_epochs = _count_backbone_coupled_epochs(
+            epoch=int(epoch),
+            enable_possession_backbone=bool(args.enable_possession_backbone),
+            backbone_detach_until_epoch=int(args.backbone_detach_until_epoch),
         )
 
         train_stats = _run_epoch(
@@ -2097,9 +2494,11 @@ def main() -> None:
             epoch_index=int(epoch),
             backbone_grad_clip_norm=float(args.backbone_grad_clip_norm),
             flow_grad_clip_norm=float(args.flow_grad_clip_norm),
-            w_poss_nll=float(args.w_poss_nll) if bool(args.enable_possession_backbone) else 0.0,
-            w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
-            w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
+            encoder_grad_clip_norm=float(args.encoder_grad_clip_norm),
+            backbone_head_grad_clip_norm=float(args.backbone_head_grad_clip_norm),
+            w_poss_nll=float(backbone_weights.w_poss_nll),
+            w_backbone_nll=float(backbone_weights.w_backbone_nll),
+            w_three_pa_nll=float(backbone_weights.w_three_pa_nll),
             w_efficiency_nll=float(args.w_efficiency_nll) if bool(args.enable_efficiency_head) else 0.0,
             w_usage_share_nll=float(args.w_usage_share_nll) if bool(args.enable_usage_share_head) else 0.0,
             w_emergent_share_aux=float(args.w_emergent_share_aux),
@@ -2113,6 +2512,8 @@ def main() -> None:
             detach_backbone=bool(int(epoch) < int(args.backbone_detach_until_epoch)),
             phase2_stability_config=phase2_guard_cfg if bool(args.enable_phase2_flow) else None,
             phase2_stability_state=phase2_guard_state if bool(args.enable_phase2_flow) else None,
+            w_poss_regression=float(backbone_weights.w_poss_regression),
+            estimated_possessions_idx=int(estimated_possessions_idx),
         )
         rollback_requested = bool(train_stats.get("rollback_requested", 0.0) > 0.0)
         if rollback_requested:
@@ -2141,6 +2542,7 @@ def main() -> None:
                 "reb_share_aux": float("nan"),
                 "ast_team_rate_aux": float("nan"),
                 "reb_opportunity_rate_aux": float("nan"),
+                "poss_regression": float("nan"),
                 "skipped_batches": 0.0,
                 "instability_events": 0.0,
                 "rollback_requested": 1.0,
@@ -2171,9 +2573,11 @@ def main() -> None:
                 epoch_index=int(epoch),
                 backbone_grad_clip_norm=float(args.backbone_grad_clip_norm),
                 flow_grad_clip_norm=float(args.flow_grad_clip_norm),
-                w_poss_nll=float(args.w_poss_nll) if bool(args.enable_possession_backbone) else 0.0,
-                w_backbone_nll=float(args.w_backbone_nll) if bool(args.enable_possession_backbone) else 0.0,
-                w_three_pa_nll=float(args.w_three_pa_nll) if bool(args.enable_three_pa_share) else 0.0,
+                encoder_grad_clip_norm=float(args.encoder_grad_clip_norm),
+                backbone_head_grad_clip_norm=float(args.backbone_head_grad_clip_norm),
+                w_poss_nll=float(backbone_weights.w_poss_nll),
+                w_backbone_nll=float(backbone_weights.w_backbone_nll),
+                w_three_pa_nll=float(backbone_weights.w_three_pa_nll),
                 w_efficiency_nll=float(args.w_efficiency_nll) if bool(args.enable_efficiency_head) else 0.0,
                 w_usage_share_nll=float(args.w_usage_share_nll) if bool(args.enable_usage_share_head) else 0.0,
                 w_emergent_share_aux=float(args.w_emergent_share_aux),
@@ -2185,8 +2589,16 @@ def main() -> None:
                 enable_efficiency_head=bool(args.enable_efficiency_head),
                 enable_usage_share_head=bool(args.enable_usage_share_head),
                 detach_backbone=bool(int(epoch) < int(args.backbone_detach_until_epoch)),
+                w_poss_regression=float(backbone_weights.w_poss_regression),
+                estimated_possessions_idx=int(estimated_possessions_idx),
             )
 
+        val_total_ex_possreg = _resolve_early_stop_metric_value(
+            metric_name="val_total_ex_possreg",
+            val_total=float(val_stats["total"]),
+            val_poss_regression=float(val_stats.get("poss_regression", 0.0)),
+            w_poss_regression=float(backbone_weights.w_poss_regression),
+        )
         metrics = EpochMetrics(
             epoch=epoch,
             phase2_flow_warmup=float(phase2_weights.flow_warmup),
@@ -2214,6 +2626,7 @@ def main() -> None:
             train_reb_share_aux=train_stats.get("reb_share_aux", 0.0),
             train_ast_team_rate_aux=train_stats.get("ast_team_rate_aux", 0.0),
             train_reb_opportunity_rate_aux=train_stats.get("reb_opportunity_rate_aux", 0.0),
+            train_poss_regression=train_stats.get("poss_regression", 0.0),
             val_total=val_stats["total"],
             val_minutes_mae=val_stats["minutes_mae"],
             val_count_loss=val_stats["count_loss"],
@@ -2233,6 +2646,8 @@ def main() -> None:
             val_reb_share_aux=val_stats.get("reb_share_aux", 0.0),
             val_ast_team_rate_aux=val_stats.get("ast_team_rate_aux", 0.0),
             val_reb_opportunity_rate_aux=val_stats.get("reb_opportunity_rate_aux", 0.0),
+            val_total_ex_possreg=float(val_total_ex_possreg),
+            val_poss_regression=val_stats.get("poss_regression", 0.0),
         )
         history.append(metrics)
 
@@ -2277,13 +2692,38 @@ def main() -> None:
                 f"{msg} "
                 f"val_poss_nll={metrics.val_poss_nll:.4f} "
                 f"val_backbone_nll={metrics.val_backbone_nll:.4f} "
-                f"bb_detach={'Y' if bb_detached else 'N'}"
+                f"bb_detach={'Y' if bb_detached else 'N'} "
+                f"bb_coupled_epochs={coupled_epochs} "
+                f"w_poss={backbone_weights.w_poss_nll:.4f} "
+                f"w_bb={backbone_weights.w_backbone_nll:.4f}"
             )
             if bool(args.enable_three_pa_share):
-                msg = f"{msg} val_three_pa_nll={metrics.val_three_pa_nll:.4f}"
+                msg = (
+                    f"{msg} "
+                    f"val_three_pa_nll={metrics.val_three_pa_nll:.4f} "
+                    f"w_3pa={backbone_weights.w_three_pa_nll:.4f}"
+                )
+            if float(args.w_poss_regression) > 0.0:
+                msg = (
+                    f"{msg} "
+                    f"val_poss_reg={metrics.val_poss_regression:.4f} "
+                    f"w_poss_reg={backbone_weights.w_poss_regression:.4f} "
+                    f"val_total_ex_possreg={metrics.val_total_ex_possreg:.4f}"
+                )
         print(msg, flush=True)
 
-        if math.isfinite(float(metrics.val_total)) and metrics.val_total < best_val:
+        # Don't update best_val during flow delay: val_total is not comparable
+        # across the delay boundary because it excludes flow_nll during delay.
+        in_flow_delay = (
+            bool(args.enable_phase2_flow)
+            and int(args.phase2_flow_delay_epochs) > 0
+            and int(epoch) <= int(args.phase2_flow_delay_epochs)
+        )
+        if (
+            not in_flow_delay
+            and math.isfinite(float(metrics.val_total))
+            and metrics.val_total < best_val
+        ):
             best_val = metrics.val_total
             best_epoch = epoch
             torch.save(model.state_dict(), out_dir / "model.pt")
@@ -2302,13 +2742,22 @@ def main() -> None:
 
         if (
             int(early_stop_cfg.patience) > 0
+            and not in_flow_delay
             and int(train_stats.get("instability_events", 0.0)) <= 0
         ):
+            early_stop_metric_value = _resolve_early_stop_metric_value(
+                metric_name=str(args.early_stop_metric),
+                val_total=float(metrics.val_total),
+                val_poss_regression=float(metrics.val_poss_regression),
+                w_poss_regression=float(backbone_weights.w_poss_regression),
+            )
             should_stop = _update_early_stop(
                 epoch=int(epoch),
-                metric_value=float(metrics.val_total),
+                metric_value=float(early_stop_metric_value),
+                coupled_epochs=int(coupled_epochs),
                 config=early_stop_cfg,
                 state=early_stop_state,
+                metric_name=str(args.early_stop_metric),
             )
             if should_stop:
                 print(
@@ -2316,7 +2765,7 @@ def main() -> None:
                         "[early-stop] "
                         f"stopped_at_epoch={epoch:03d} "
                         f"best_epoch={early_stop_state.best_epoch:03d} "
-                        f"best_val_total={early_stop_state.best_metric:.6f} "
+                        f"best_{str(args.early_stop_metric)}={early_stop_state.best_metric:.6f} "
                         f"reason={early_stop_state.stop_reason}"
                     ),
                     flush=True,
@@ -2382,8 +2831,23 @@ def main() -> None:
             "events": phase2_guard_state.events[-50:],
             "config": asdict(phase2_guard_cfg),
         },
+        "backbone_stabilization": {
+            "detach_until_epoch": int(args.backbone_detach_until_epoch),
+            "loss_ramp_epochs": int(args.backbone_loss_ramp_epochs),
+            "poss_loss_start_scale": float(args.poss_loss_start_scale),
+            "backbone_loss_start_scale": float(args.backbone_loss_start_scale),
+            "three_pa_loss_start_scale": float(args.three_pa_loss_start_scale),
+            "encoder_lr_scale": float(args.encoder_lr_scale),
+            "backbone_head_lr_scale": float(args.backbone_head_lr_scale),
+            "backbone_grad_clip_norm": float(args.backbone_grad_clip_norm),
+            "encoder_grad_clip_norm": float(args.encoder_grad_clip_norm),
+            "backbone_head_grad_clip_norm": float(args.backbone_head_grad_clip_norm),
+            "w_poss_regression": float(args.w_poss_regression),
+            "poss_regression_start_scale": float(args.poss_regression_start_scale),
+        },
         "early_stopping": {
             "enabled": bool(int(early_stop_cfg.patience) > 0),
+            "metric": str(args.early_stop_metric),
             "config": asdict(early_stop_cfg),
             "best_epoch": int(early_stop_state.best_epoch),
             "best_metric": float(early_stop_state.best_metric),
