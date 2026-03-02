@@ -1,21 +1,18 @@
 [Unit]
-Description=Minutes dashboard API + static assets
+Description=Minutes dashboard production service (port 8501)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/daniel/projects/projections-v2
+WorkingDirectory=/home/daniel/prod/projections-v2
 Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
 Environment=MINUTES_DAILY_ROOT=/home/daniel/projections-data/artifacts/minutes_v1/daily
-# NOTE: MINUTES_FPTS_ROOT removed - sim_v2 provides dk_fpts_mean now
-Environment=MINUTES_DASHBOARD_DIST=/home/daniel/projects/projections-v2/web/minutes-dashboard/dist
-User=daniel
-Group=daniel
-ExecStart=/home/daniel/.local/bin/uv run uvicorn projections.api.minutes_api:create_app --host 0.0.0.0 --port 8501
+Environment=MINUTES_DASHBOARD_DIST=/home/daniel/prod/projections-v2/web/minutes-dashboard/dist
+ExecStart=/usr/bin/env -i HOME=/home/daniel USER=daniel PATH=/usr/bin:/bin PROJECTIONS_DATA_ROOT=/home/daniel/projections-data MINUTES_DAILY_ROOT=/home/daniel/projections-data/artifacts/minutes_v1/daily MINUTES_DASHBOARD_DIST=/home/daniel/prod/projections-v2/web/minutes-dashboard/dist /home/daniel/prod/projections-v2/.venv/bin/python -m uvicorn projections.api.minutes_api:create_app --factory --host 0.0.0.0 --port 8501
 Restart=always
 RestartSec=5
 Nice=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
