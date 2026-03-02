@@ -696,6 +696,7 @@ export default function ContestSimPage() {
         const stored = window.localStorage.getItem(ownershipStorageKey)
         return stored ? stored === 'true' : false
     })
+    const [useStrategyOverrides, setUseStrategyOverrides] = useState(false)
 
     // Simulation state
     const [lineups, setLineups] = useState<string[][]>([])
@@ -903,14 +904,19 @@ export default function ContestSimPage() {
         }
         const load = async () => {
             try {
-                const data = await getPlayerPool(selectedDate, selectedSlate)
+                const data = await getPlayerPool(
+                    selectedDate,
+                    selectedSlate,
+                    undefined,
+                    { useStrategyOverrides },
+                )
                 setPool(data)
             } catch {
                 setPool([])
             }
         }
         void load()
-    }, [selectedDate, selectedSlate])
+    }, [selectedDate, selectedSlate, useStrategyOverrides])
 
     // Load config on mount
     useEffect(() => {
@@ -1304,6 +1310,7 @@ export default function ContestSimPage() {
                 field_library_rebuild_candidates: fieldMode === 'generated_field' ? fieldLibraryRebuildCandidates : undefined,
                 ownership_mode: ownershipMode,
                 rank_mode: rankMode,
+                use_strategy_overrides: useStrategyOverrides,
             })
             setSimResult(result)
             const builds = await getSavedSimBuilds(selectedDate)
@@ -1329,6 +1336,7 @@ export default function ContestSimPage() {
         fieldLibraryRebuildCandidates,
         ownershipMode,
         rankMode,
+        useStrategyOverrides,
     ])
 
     const handleBuildFieldLibrary = useCallback(async () => {
@@ -1968,6 +1976,15 @@ export default function ContestSimPage() {
                             <option value="self_play">Self-play (your lineups as field)</option>
                             <option value="generated_field">Representative field (QuickBuild)</option>
                         </select>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input
+                            type="checkbox"
+                            checked={useStrategyOverrides}
+                            onChange={e => setUseStrategyOverrides(e.target.checked)}
+                        />
+                        Use persistent strategy overrides
                     </label>
 
                     {fieldMode === 'generated_field' && (

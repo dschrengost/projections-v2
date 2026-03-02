@@ -35,7 +35,6 @@ from projections.optimizer.quick_build import (
 )
 from projections.optimizer.lineup_sim_stats import (
     compute_lineup_distribution_stats,
-    load_world_fpts_matrix,
 )
 from projections.projections_bundle import add_canonical_projection_fields, resolve_unified_projections_run
 from projections.optimizer.objective import (
@@ -768,6 +767,85 @@ def _overlay_ownership_columns(
     )
 
 
+def _find_projection_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    for col in candidates:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _extract_single_string_value(df: pd.DataFrame, column: str) -> str | None:
+    if column not in df.columns:
+        return None
+    values = df[column].dropna().astype(str).unique().tolist()
+    return values[0] if len(values) == 1 else None
+
+
+def _projection_fpts_col(df: pd.DataFrame) -> Optional[str]:
+    return _find_projection_col(
+        df,
+        [
+            "fpts_sim_uncond_mean",
+            "sim_dk_fpts_mean_uncond",
+            "dk_fpts_mean_uncond",
+            "fpts_sim_cond_mean",
+            "sim_dk_fpts_mean",
+            "dk_fpts_mean",
+            "proj_fpts",
+            "fpts_mean",
+            "proj",
+        ],
+    )
+
+
+def _projection_minutes_col(df: pd.DataFrame) -> Optional[str]:
+    return _find_projection_col(
+        df,
+        [
+            "minutes_sim_uncond_mean",
+            "minutes_sim_mean_uncond",
+            "minutes_sim_uncond_p50",
+            "minutes_sim_p50_uncond",
+            "minutes_sim_cond_mean",
+            "minutes_sim_mean",
+            "minutes_sim_cond_p50",
+            "minutes_sim_p50",
+            "minutes_final",
+            "minutes_p50_cond",
+            "minutes_p50",
+            "minutes",
+            "minutes_pred",
+        ],
+    )
+
+
+def _build_model_value_maps(
+    projection_df: pd.DataFrame,
+) -> tuple[Dict[str, float], Dict[str, float]]:
+    player_ids = projection_df.get("player_id")
+    if player_ids is None:
+        return {}, {}
+
+    base = projection_df.copy()
+    base = base.loc[player_ids.notna()].copy()
+    if base.empty:
+        return {}, {}
+
+    base["player_id"] = base["player_id"].astype(str)
+    fpts_col = _projection_fpts_col(base)
+    minutes_col = _projection_minutes_col(base)
+
+    model_fpts_by_player: Dict[str, float] = {}
+    model_minutes_by_player: Dict[str, float] = {}
+    if fpts_col:
+        fpts_series = pd.to_numeric(base[fpts_col], errors="coerce").fillna(0.0)
+        model_fpts_by_player = dict(zip(base["player_id"], fpts_series.astype(float)))
+    if minutes_col:
+        minutes_series = pd.to_numeric(base[minutes_col], errors="coerce").fillna(0.0)
+        model_minutes_by_player = dict(zip(base["player_id"], minutes_series.astype(float)))
+    return model_fpts_by_player, model_minutes_by_player
+
+
 def build_player_pool(
     game_date: str,
     draft_group_id: int,
@@ -792,11 +870,11 @@ def build_player_pool(
         data_root: Optional data root override
         include_games: If set, only include players from these games (e.g., ["MIN@DAL", "LAL@GSW"])
         exclude_games: If set, exclude players from these games
-        use_user_overrides: If True, apply user overrides from SlateOverrides
-        ownership_mode: For overrides - "raw" or "renormalize" (default)
+        use_user_overrides: Legacy flag name for strategy overrides
+        ownership_mode: Included for backwards compatibility; ownership is unchanged in v1
         include_unmatched_salaries: If True, keep salary rows even when projections don't match.
         allow_zero_projections: If True, include players with missing/zero projection (proj=0.0).
-        exclude_inactive_players: When using overrides, drop players marked out (default True).
+        exclude_inactive_players: Legacy flag; strategy overrides do not mark players out.
 
     Returns list of player dicts with required QuickBuild fields:
         player_id, name, team, positions, salary, proj, own_proj, stddev, dk_id,
@@ -804,7 +882,8 @@ def build_player_pool(
         
         When use_user_overrides=True, also includes:
         model_proj, model_minutes, model_own, effective_proj, effective_minutes,
-        effective_own, has_override, used_fppm_fallback, is_active, fppm
+        effective_own, effective_stddev, effective_p90, has_override,
+        used_fppm_fallback, is_active, fppm
     """
     root = data_root or get_data_root()
 
@@ -908,32 +987,71 @@ def build_player_pool(
                 exclude_games,
             )
 
-    # Apply user overrides if requested
+    # Apply downstream strategy overrides if requested.
     slate_overrides = None
     if use_user_overrides:
-        from .user_overrides import apply_overrides as apply_user_overrides, load_slate_overrides
-        
-        slate_overrides = load_slate_overrides(game_date, draft_group_id)
-        merged = apply_user_overrides(
+        from projections.contest_sim.contest_sim_service import load_player_worlds
+
+        from .strategy_overrides import (
+            apply_strategy_overrides,
+            apply_strategy_overrides_to_worlds,
+            load_slate_strategy_overrides,
+            summarize_worlds,
+        )
+
+        slate_overrides = load_slate_strategy_overrides(game_date, draft_group_id)
+        adjusted_summaries = None
+        if slate_overrides.overrides:
+            try:
+                model_fpts_by_player, model_minutes_by_player = _build_model_value_maps(proj_df)
+                sim_run_id = _extract_single_string_value(proj_df, "sim_run_id")
+                player_worlds = load_player_worlds(
+                    game_date,
+                    root,
+                    run_id=sim_run_id or run_id,
+                    worlds_source="gtv2",
+                )
+                adjusted_fpts, adjusted_minutes, world_diagnostics = apply_strategy_overrides_to_worlds(
+                    fpts_matrix=player_worlds.fpts_matrix,
+                    player_index=player_worlds.player_index,
+                    overrides=slate_overrides,
+                    minutes_matrix=player_worlds.minutes_matrix,
+                    model_minutes_by_player=model_minutes_by_player,
+                    model_fpts_by_player=model_fpts_by_player,
+                )
+                adjusted_summaries = summarize_worlds(
+                    fpts_matrix=adjusted_fpts,
+                    player_index=player_worlds.player_index,
+                    minutes_matrix=adjusted_minutes,
+                )
+                logger.info(
+                    "Applied strategy overrides to worlds for %s/dg=%d: matched=%d minutes=%d fpts=%d",
+                    game_date,
+                    draft_group_id,
+                    int(world_diagnostics.get("matched_override_count", 0)),
+                    int(world_diagnostics.get("applied_minutes_delta_count", 0)),
+                    int(world_diagnostics.get("applied_fpts_delta_count", 0)),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to apply strategy overrides to worlds for %s/dg=%d: %s",
+                    game_date,
+                    draft_group_id,
+                    exc,
+                )
+
+        merged = apply_strategy_overrides(
             merged,
             slate_overrides,
-            ownership_mode=ownership_mode,  # type: ignore
+            ownership_mode=ownership_mode,  # type: ignore[arg-type]
+            adjusted_summaries=adjusted_summaries,
         )
         logger.info(
-            "Applied %d user overrides for %s/dg=%d",
+            "Applied %d strategy overrides for %s/dg=%d",
             len(slate_overrides.overrides),
             game_date,
             draft_group_id,
         )
-        if exclude_inactive_players:
-            # Filter out players marked as out
-            before_count = len(merged)
-            merged = merged[merged["is_active"]]
-            if len(merged) < before_count:
-                logger.info(
-                    "Excluded %d players marked as out",
-                    before_count - len(merged),
-                )
 
     # Build player pool list
     pool: List[Dict[str, Any]] = []
@@ -944,54 +1062,12 @@ def build_player_pool(
     dk_player_id_col = "dk_player_id_sal" if "dk_player_id_sal" in merged.columns else "dk_player_id"
 
     # Identify projection column
-    proj_col = next(
-        (
-            c
-            for c in [
-                # Canonical decision metric (matches sim/contest-sim): unconditional (DNP=0).
-                "fpts_sim_uncond_mean",
-                # Prefer unconditional (DNP=0) world aggregates when available.
-                "sim_dk_fpts_mean_uncond",
-                "dk_fpts_mean_uncond",
-                "fpts_sim_cond_mean",
-                "sim_dk_fpts_mean",
-                "dk_fpts_mean",
-                "proj_fpts",
-                "fpts_mean",
-                "proj",
-            ]
-            if c in merged.columns
-        ),
-        None,
-    )
+    proj_col = _projection_fpts_col(merged)
     if not proj_col:
         raise ValueError("No projection column found in merged data")
     
     # Identify minutes column
-    minutes_col = next(
-        (
-            c
-            for c in [
-                # Canonical decision metric (matches sim/contest-sim): unconditional (DNP=0).
-                "minutes_sim_uncond_mean",
-                "minutes_sim_mean_uncond",
-                "minutes_sim_uncond_p50",
-                "minutes_sim_p50_uncond",
-                # Conditional (given plays).
-                "minutes_sim_cond_mean",
-                "minutes_sim_mean",
-                "minutes_sim_cond_p50",
-                "minutes_sim_p50",
-                "minutes_final",
-                "minutes_p50_cond",
-                "minutes_p50",
-                "minutes",
-                "minutes_pred",
-            ]
-            if c in merged.columns
-        ),
-        None,
-    )
+    minutes_col = _projection_minutes_col(merged)
 
     # Identify ownership column
     own_col = next(
@@ -1143,9 +1219,15 @@ def build_player_pool(
         # Optional fields
         if own_col and pd.notna(row.get(own_col)):
             player["own_proj"] = float(effective_own if use_user_overrides else row[own_col])
-        if stddev_col and pd.notna(row.get(stddev_col)):
+        effective_stddev = row.get("effective_fpts_std") if use_user_overrides else None
+        effective_p90 = row.get("effective_fpts_p90") if use_user_overrides else None
+        if use_user_overrides and pd.notna(effective_stddev):
+            player["stddev"] = float(effective_stddev)
+        elif stddev_col and pd.notna(row.get(stddev_col)):
             player["stddev"] = float(row[stddev_col])
-        if p90_col and pd.notna(row.get(p90_col)):
+        if use_user_overrides and pd.notna(effective_p90):
+            player["p90"] = float(effective_p90)
+        elif p90_col and pd.notna(row.get(p90_col)):
             player["p90"] = float(row[p90_col])
         
         # Game info
@@ -1171,16 +1253,15 @@ def build_player_pool(
             player["effective_proj"] = float(proj)
             player["effective_minutes"] = float(effective_minutes) if pd.notna(effective_minutes) else 0.0
             player["effective_own"] = float(effective_own) if pd.notna(effective_own) else 0.0
+            player["effective_stddev"] = float(effective_stddev) if pd.notna(effective_stddev) else None
+            player["effective_p90"] = float(effective_p90) if pd.notna(effective_p90) else None
             player["has_override"] = has_override
             player["used_fppm_fallback"] = used_fppm_fallback
-            player["override_minutes"] = (
-                float(row.get("override_minutes")) if pd.notna(row.get("override_minutes")) else None
+            player["override_minutes_delta"] = (
+                float(row.get("override_minutes_delta")) if pd.notna(row.get("override_minutes_delta")) else None
             )
-            player["override_fpts"] = (
-                float(row.get("override_fpts")) if pd.notna(row.get("override_fpts")) else None
-            )
-            player["override_own"] = (
-                float(row.get("override_own")) if pd.notna(row.get("override_own")) else None
+            player["override_fpts_delta"] = (
+                float(row.get("override_fpts_delta")) if pd.notna(row.get("override_fpts_delta")) else None
             )
 
         pool.append(player)
@@ -1419,6 +1500,9 @@ def run_quick_build(
 
         qb_cfg = _build_qb_config(job.config, defaults)
         constraints = _build_constraints(job.config, job.site, defaults)
+        strategy_overrides_enabled = bool(
+            job.config.get("use_strategy_overrides") or job.config.get("use_user_overrides")
+        )
 
         # Set late swap bonus config for the main process
         # (Note: multiprocess workers may not inherit this global state)
@@ -1436,14 +1520,67 @@ def run_quick_build(
 
         # Build WorldSampleConfig if enabled
         world_sample_cfg = None
+        lineup_stats_worlds_matrix: np.ndarray | None = None
+        lineup_stats_player_index: Dict[str, int] | None = None
+        resolved_worlds_run_id: str | None = None
         if job.config.get("world_sample_enabled", False):
             try:
-                from projections.contest_sim.contest_sim_service import load_worlds_matrix
-                worlds_matrix, player_index = load_worlds_matrix(
+                from projections.contest_sim.contest_sim_service import load_player_worlds
+
+                from .strategy_overrides import (
+                    apply_strategy_overrides_to_worlds,
+                    load_slate_strategy_overrides,
+                )
+
+                run_id = job.config.get("run_id") if isinstance(job.config, dict) else None
+                if run_id:
+                    try:
+                        from projections.projections_bundle import load_unified_projections_df
+
+                        bundle = load_unified_projections_df(
+                            job.game_date,
+                            run_id=str(run_id),
+                            data_root=get_data_root(),
+                        )
+                        resolved_worlds_run_id = _extract_single_string_value(bundle.df, "sim_run_id")
+                    except Exception:
+                        resolved_worlds_run_id = None
+
+                player_worlds = load_player_worlds(
                     job.game_date,
                     get_data_root(),
+                    run_id=resolved_worlds_run_id or run_id,
                     worlds_source=str(job.config.get("worlds_source") or "gtv2"),
                 )
+                worlds_matrix = player_worlds.fpts_matrix
+                player_index = player_worlds.player_index
+                if strategy_overrides_enabled:
+                    slate_overrides = load_slate_strategy_overrides(job.game_date, int(job.draft_group_id))
+                    if slate_overrides.overrides:
+                        model_fpts_by_player = {
+                            str(p.get("player_id")): float(p.get("model_proj", p.get("proj", 0.0)) or 0.0)
+                            for p in player_pool
+                            if p.get("player_id") is not None
+                        }
+                        model_minutes_by_player = {
+                            str(p.get("player_id")): float(p.get("model_minutes", 0.0) or 0.0)
+                            for p in player_pool
+                            if p.get("player_id") is not None
+                        }
+                        worlds_matrix, _, world_diagnostics = apply_strategy_overrides_to_worlds(
+                            fpts_matrix=player_worlds.fpts_matrix,
+                            player_index=player_index,
+                            overrides=slate_overrides,
+                            minutes_matrix=player_worlds.minutes_matrix,
+                            model_minutes_by_player=model_minutes_by_player,
+                            model_fpts_by_player=model_fpts_by_player,
+                        )
+                        logger.info(
+                            "QuickBuild world-sample strategy overrides applied for %s/dg=%d: matched=%d",
+                            job.game_date,
+                            job.draft_group_id,
+                            int(world_diagnostics.get("matched_override_count", 0)),
+                        )
                 # Build mean projections fallback from player pool
                 mean_projections = {str(p.get("player_id")): float(p.get("proj", 0)) for p in player_pool}
                 world_sample_cfg = WorldSampleConfig(
@@ -1454,6 +1591,8 @@ def run_quick_build(
                     player_index=player_index,
                     mean_projections=mean_projections,
                 )
+                lineup_stats_worlds_matrix = worlds_matrix
+                lineup_stats_player_index = player_index
                 logger.info(
                     "WorldSample configured: n_worlds=%d, n_players=%d",
                     worlds_matrix.shape[0],
@@ -1478,98 +1617,53 @@ def run_quick_build(
 
         lineup_stats: List[Dict[str, Any]] = []
         try:
-            data_root = get_data_root()
-            worlds_root = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2"
-            run_id = None
-            if isinstance(job.config, dict):
-                run_id = job.config.get("run_id")
-            sim_run_id: str | None = None
-            if run_id:
-                try:
-                    from projections.projections_bundle import load_unified_projections_df
+            if lineup_stats_worlds_matrix is None or lineup_stats_player_index is None:
+                from projections.contest_sim.contest_sim_service import load_player_worlds
 
-                    bundle = load_unified_projections_df(job.game_date, run_id=str(run_id), data_root=data_root)
-                    if "sim_run_id" in bundle.df.columns:
-                        vals = bundle.df["sim_run_id"].dropna().astype(str).unique().tolist()
-                        sim_run_id = vals[0] if len(vals) == 1 else None
-                except Exception:
-                    sim_run_id = None
-
-            def _resolve_worlds_dir(base_root: Path, game_date: str, run_id: str | None) -> Path | None:
-                import json
-
-                candidates = [
-                    base_root / f"game_date={game_date}",
-                    base_root / f"date={game_date}",
-                    base_root / game_date,
-                ]
-                for base in candidates:
-                    if not base.exists():
-                        continue
-                    if run_id:
-                        candidate = base / f"run={run_id}"
-                        if candidate.exists():
-                            return candidate
-
-                    pointer = base / "latest_run.json"
-                    if pointer.exists():
-                        try:
-                            payload = json.loads(pointer.read_text(encoding="utf-8"))
-                            latest = payload.get("run_id")
-                        except Exception:
-                            latest = None
-                        if latest:
-                            candidate = base / f"run={latest}"
-                            if candidate.exists():
-                                return candidate
-
-                    run_dirs = sorted(
-                        [p for p in base.iterdir() if p.is_dir() and p.name.startswith("run=")],
-                        reverse=True,
-                    )
-                    if run_dirs:
-                        if run_id:
-                            logger.warning(
-                                "sim_v2 worlds run_id=%s not found for %s; using %s",
-                                run_id,
-                                game_date,
-                                run_dirs[0].name,
-                            )
-                        return run_dirs[0]
-
-                    if base.is_dir():
-                        if run_id:
-                            logger.warning(
-                                "sim_v2 worlds run_id=%s not found for %s; using base dir %s",
-                                run_id,
-                                game_date,
-                                base,
-                            )
-                        return base
-                return None
-
-            worlds_dir = _resolve_worlds_dir(worlds_root, job.game_date, sim_run_id or run_id)
-            if worlds_dir is None:
-                raise FileNotFoundError(
-                    f"sim_v2 worlds directory not found for {job.game_date} under {worlds_root}"
+                from .strategy_overrides import (
+                    apply_strategy_overrides_to_worlds,
+                    load_slate_strategy_overrides,
                 )
 
-            player_ids = sorted(
-                {
-                    int(str(pid))
-                    for lu in result.lineups
-                    for pid in lu
-                    if str(pid).strip() and str(pid).lower() != "nan"
-                }
-            )
-            if player_ids:
-                _, world_player_ids, fpts_by_world = load_world_fpts_matrix(
-                    worlds_dir=worlds_dir, player_ids=player_ids
+                run_id = job.config.get("run_id") if isinstance(job.config, dict) else None
+                player_worlds = load_player_worlds(
+                    job.game_date,
+                    get_data_root(),
+                    run_id=resolved_worlds_run_id or run_id,
+                    worlds_source=str(job.config.get("worlds_source") or "gtv2"),
                 )
+                lineup_stats_worlds_matrix = player_worlds.fpts_matrix
+                lineup_stats_player_index = player_worlds.player_index
+                if strategy_overrides_enabled:
+                    slate_overrides = load_slate_strategy_overrides(job.game_date, int(job.draft_group_id))
+                    if slate_overrides.overrides:
+                        model_fpts_by_player = {
+                            str(p.get("player_id")): float(p.get("model_proj", p.get("proj", 0.0)) or 0.0)
+                            for p in player_pool
+                            if p.get("player_id") is not None
+                        }
+                        model_minutes_by_player = {
+                            str(p.get("player_id")): float(p.get("model_minutes", 0.0) or 0.0)
+                            for p in player_pool
+                            if p.get("player_id") is not None
+                        }
+                        lineup_stats_worlds_matrix, _, _ = apply_strategy_overrides_to_worlds(
+                            fpts_matrix=player_worlds.fpts_matrix,
+                            player_index=player_worlds.player_index,
+                            overrides=slate_overrides,
+                            minutes_matrix=player_worlds.minutes_matrix,
+                            model_minutes_by_player=model_minutes_by_player,
+                            model_fpts_by_player=model_fpts_by_player,
+                        )
+
+            if lineup_stats_worlds_matrix is not None and lineup_stats_player_index:
+                world_player_ids = [0] * len(lineup_stats_player_index)
+                for pid, idx in lineup_stats_player_index.items():
+                    world_player_ids[int(idx)] = int(str(pid))
                 stats_objs = compute_lineup_distribution_stats(
                     lineups=result.lineups,
                     world_player_ids=world_player_ids,
-                    fpts_by_world=fpts_by_world,
+                    fpts_by_world=lineup_stats_worlds_matrix,
                 )
                 lineup_stats = [s.to_dict() for s in stats_objs]
         except Exception as exc:

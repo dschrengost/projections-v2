@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -27,6 +28,7 @@ from .dupe_penalty import compute_batch_dupe_penalties
 from .weights import drop_zero_weight_items, scale_integer_weights_to_target
 
 __all__ = [
+    "load_player_worlds",
     "load_worlds_matrix",
     "score_lineups",
     "run_contest_simulation",
@@ -35,6 +37,13 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 WorldsSource = Literal["gtv2", "sim_v2", "auto"]
+
+
+@dataclass(frozen=True)
+class PlayerWorlds:
+    fpts_matrix: np.ndarray
+    player_index: Dict[str, int]
+    minutes_matrix: np.ndarray | None = None
 
 
 def _resolve_worlds_root(
@@ -93,19 +102,20 @@ def _resolve_worlds_dir(root_dir: Path, run_id: str | None) -> Path:
     return root_dir
 
 
-def _load_gtv2_worlds_matrix(worlds_dir: Path) -> Tuple[np.ndarray, Dict[str, int]]:
+def _load_gtv2_worlds(worlds_dir: Path) -> PlayerWorlds:
     worlds_path = worlds_dir / "worlds.parquet"
     if not worlds_path.exists():
         raise FileNotFoundError(f"No worlds.parquet found in {worlds_dir}")
 
     logger.info("Loading GTV2 worlds from %s", worlds_path)
-    table = pq.ParquetFile(worlds_path).read(columns=["world_idx", "player_id", "dk_fpts"])
+    table = pq.ParquetFile(worlds_path).read(columns=["world_idx", "player_id", "dk_fpts", "minutes"])
     if table.num_rows == 0:
         raise ValueError(f"GTV2 worlds parquet is empty: {worlds_path}")
 
     world_array = table["world_idx"]
     player_array = table["player_id"]
     value_array = table["dk_fpts"]
+    minutes_array = table["minutes"]
 
     valid_mask = pc.and_(pc.is_valid(world_array), pc.is_valid(player_array))
     valid_rows = int(pc.sum(pc.cast(valid_mask, pa.int64())).as_py() or 0)
@@ -125,6 +135,10 @@ def _load_gtv2_worlds_matrix(worlds_dir: Path) -> Tuple[np.ndarray, Dict[str, in
         pc.cast(value_array, pa.float64(), safe=False),
         pa.scalar(0.0, type=pa.float64()),
     ).to_numpy(zero_copy_only=False)
+    minutes = pc.fill_null(
+        pc.cast(minutes_array, pa.float64(), safe=False),
+        pa.scalar(0.0, type=pa.float64()),
+    ).to_numpy(zero_copy_only=False)
 
     world_ids = np.unique(world_values)
     row_idx = np.searchsorted(world_ids, world_values)
@@ -140,10 +154,241 @@ def _load_gtv2_worlds_matrix(worlds_dir: Path) -> Tuple[np.ndarray, Dict[str, in
         player_index = {str(pid): idx for idx, pid in enumerate(player_ids.tolist())}
 
     worlds_matrix = np.zeros((len(world_ids), len(player_index)), dtype=np.float64)
+    minutes_matrix = np.zeros((len(world_ids), len(player_index)), dtype=np.float64)
     worlds_matrix[row_idx, col_idx] = values
+    minutes_matrix[row_idx, col_idx] = minutes
 
     logger.info("Loaded GTV2 worlds matrix shape=%s from %s", worlds_matrix.shape, worlds_path)
-    return worlds_matrix, player_index
+    return PlayerWorlds(
+        fpts_matrix=worlds_matrix,
+        player_index=player_index,
+        minutes_matrix=minutes_matrix,
+    )
+
+
+def load_player_worlds(
+    game_date: str,
+    data_root: Path | None = None,
+    run_id: str | None = None,
+    worlds_source: WorldsSource = "gtv2",
+    n_synthetic_worlds: int = 10000,
+    seed: int = 42,
+) -> PlayerWorlds:
+    """Load or generate player worlds data.
+
+    Returns both fantasy-point worlds and, when available, minutes worlds.
+    """
+    if data_root is None:
+        data_root = data_path()
+
+    base_dir = _resolve_worlds_root(game_date, data_root=data_root, worlds_source=worlds_source)
+    worlds_dir = _resolve_worlds_dir(base_dir, run_id)
+
+    if "gtv2_worlds" in base_dir.parts or (worlds_dir / "worlds.parquet").exists():
+        return _load_gtv2_worlds(worlds_dir)
+
+    # Try consolidated matrix first
+    matrix_path = worlds_dir / "worlds_matrix.parquet"
+    minutes_matrix_path = worlds_dir / "minutes_matrix.parquet"
+    if matrix_path.exists():
+        logger.info("Loading consolidated worlds matrix from %s", matrix_path)
+        matrix_df = pd.read_parquet(matrix_path)
+        player_ids = list(matrix_df.columns)
+        player_index = {str(pid): idx for idx, pid in enumerate(player_ids)}
+        worlds_matrix = matrix_df.values.astype(np.float64)
+
+        minutes_matrix = None
+        if minutes_matrix_path.exists():
+            minutes_df = pd.read_parquet(minutes_matrix_path)
+            minutes_df = minutes_df.reindex(columns=player_ids, fill_value=0.0)
+            minutes_matrix = minutes_df.values.astype(np.float64)
+
+        max_val = np.max(worlds_matrix)
+        if max_val > 1000:
+            logger.error("CORRUPTION DETECTED in consolidated matrix: max value is %s", max_val)
+            col_maxes = np.max(worlds_matrix, axis=0)
+            bad_col_indices = np.where(col_maxes > 1000)[0]
+            idx_to_pid = {v: k for k, v in player_index.items()}
+            for idx in bad_col_indices:
+                pid = idx_to_pid.get(idx, "unknown")
+                logger.error("Corrupted Player %s (idx=%s): max=%s", pid, idx, col_maxes[idx])
+            logger.warning("Clamping worlds matrix to max 500.0")
+            worlds_matrix = np.minimum(worlds_matrix, 500.0)
+
+        return PlayerWorlds(
+            fpts_matrix=worlds_matrix,
+            player_index=player_index,
+            minutes_matrix=minutes_matrix,
+        )
+
+    world_files = sorted(worlds_dir.glob("world=*.parquet"))
+
+    if world_files:
+        logger.info("Aggregating %d world files from %s", len(world_files), worlds_dir)
+        first_df = pd.read_parquet(world_files[0])
+
+        fpts_col = "dk_fpts_world"
+        if fpts_col not in first_df.columns:
+            for alt in ["fpts_world", "dk_fpts", "fpts"]:
+                if alt in first_df.columns:
+                    fpts_col = alt
+                    break
+            else:
+                raise ValueError(f"No FPTS column found in world files. Available: {list(first_df.columns)}")
+
+        minutes_col = next(
+            (col for col in ["minutes_sim", "minutes", "minutes_world"] if col in first_df.columns),
+            None,
+        )
+
+        player_id_set: set[str] = set()
+        for world_file in world_files:
+            ids = pd.read_parquet(world_file, columns=["player_id"])["player_id"]
+            player_id_set.update(ids.astype(str).tolist())
+        if not player_id_set:
+            raise ValueError(f"No player_id values found while aggregating world files under {worlds_dir}")
+
+        try:
+            player_ids = [str(pid) for pid in sorted((int(p) for p in player_id_set))]
+        except Exception:
+            player_ids = sorted(player_id_set)
+        player_index = {pid: idx for idx, pid in enumerate(player_ids)}
+
+        n_worlds = len(world_files)
+        n_players = len(player_ids)
+        worlds_matrix = np.zeros((n_worlds, n_players), dtype=np.float64)
+        minutes_matrix = np.zeros((n_worlds, n_players), dtype=np.float64) if minutes_col else None
+
+        any_positive = False
+        for world_idx, world_file in enumerate(world_files):
+            columns = ["player_id", fpts_col] + ([minutes_col] if minutes_col else [])
+            df = pd.read_parquet(world_file, columns=columns)
+            if df.empty:
+                continue
+            df["player_id"] = df["player_id"].astype(str)
+            df[fpts_col] = pd.to_numeric(df[fpts_col], errors="coerce").fillna(0.0).astype(float)
+            if minutes_col:
+                df[minutes_col] = pd.to_numeric(df[minutes_col], errors="coerce").fillna(0.0).astype(float)
+            if not any_positive and (df[fpts_col] > 0).any():
+                any_positive = True
+
+            cols = df["player_id"].map(player_index)
+            valid = cols.notna()
+            if not valid.any():
+                continue
+            col_idx = cols[valid].astype(int).to_numpy()
+            worlds_matrix[world_idx, col_idx] = df.loc[valid, fpts_col].to_numpy(dtype=np.float64, copy=False)
+            if minutes_col and minutes_matrix is not None:
+                minutes_matrix[world_idx, col_idx] = df.loc[valid, minutes_col].to_numpy(dtype=np.float64, copy=False)
+
+        max_val = float(np.max(worlds_matrix)) if worlds_matrix.size else 0.0
+        if any_positive and max_val <= 0.0:
+            raise RuntimeError(
+                "Aggregated worlds matrix is all zeros despite positive per-world values. "
+                "This usually indicates a player_id dtype mismatch or an unexpected world file schema."
+            )
+
+        logger.info("Aggregated %d world files, shape=%s", n_worlds, worlds_matrix.shape)
+        return PlayerWorlds(
+            fpts_matrix=worlds_matrix,
+            player_index=player_index,
+            minutes_matrix=minutes_matrix,
+        )
+
+    proj_path = worlds_dir / "projections.parquet"
+    if not proj_path.exists():
+        raise FileNotFoundError(f"No world files or projections.parquet found in {worlds_dir}")
+
+    logger.info("Generating %d synthetic worlds from %s", n_synthetic_worlds, proj_path)
+    proj_df = pd.read_parquet(proj_path)
+
+    player_ids = proj_df["player_id"].astype(str).tolist()
+    player_index = {pid: idx for idx, pid in enumerate(player_ids)}
+
+    if "dk_fpts_mean" not in proj_df.columns:
+        raise FileNotFoundError(f"projections.parquet missing dk_fpts_mean at {proj_path}")
+
+    means_cond = proj_df["dk_fpts_mean"].values.astype(np.float64)
+    means_cond = np.nan_to_num(means_cond, nan=0.0)
+
+    if "dk_fpts_std" in proj_df.columns:
+        stds = proj_df["dk_fpts_std"].values.astype(np.float64)
+        stds = np.where(np.isnan(stds), means_cond * 0.2, stds)
+    elif "dk_fpts_p90" in proj_df.columns and "dk_fpts_p10" in proj_df.columns:
+        p10 = np.nan_to_num(proj_df["dk_fpts_p10"].values, nan=0.0)
+        p90 = np.nan_to_num(proj_df["dk_fpts_p90"].values, nan=0.0)
+        stds = np.maximum((p90 - p10) / 2.56, means_cond * 0.1).astype(np.float64)
+    else:
+        stds = (means_cond * 0.2).astype(np.float64)
+    stds = np.maximum(stds, 1.0)
+
+    rng = np.random.default_rng(seed)
+    n_players = len(player_ids)
+
+    if "play_prob" in proj_df.columns:
+        play_prob = pd.to_numeric(proj_df["play_prob"], errors="coerce").fillna(1.0).to_numpy(dtype=np.float64)
+        play_prob = np.clip(play_prob, 0.0, 1.0)
+    else:
+        play_prob = np.ones(n_players, dtype=np.float64)
+    active_mask = rng.random(size=(n_synthetic_worlds, n_players)) < play_prob[np.newaxis, :]
+    sampled = rng.normal(
+        loc=means_cond[np.newaxis, :],
+        scale=stds[np.newaxis, :],
+        size=(n_synthetic_worlds, n_players),
+    )
+
+    sampled = np.maximum(sampled, 0.0)
+    sampled = np.minimum(sampled, means_cond + 4 * stds)
+    worlds_matrix = np.where(active_mask, sampled, 0.0)
+
+    max_val = np.max(worlds_matrix)
+    if max_val > 1000:
+        logger.error("CORRUPTION DETECTED: max value in worlds matrix is %s", max_val)
+        col_maxes = np.max(worlds_matrix, axis=0)
+        bad_col_indices = np.where(col_maxes > 1000)[0]
+        idx_to_pid = {v: k for k, v in player_index.items()}
+        for idx in bad_col_indices:
+            pid = idx_to_pid.get(idx, "unknown")
+            logger.error("Corrupted Player %s (idx=%s): max=%s", pid, idx, col_maxes[idx])
+        logger.warning("Clamping worlds matrix to max 500.0")
+        worlds_matrix = np.minimum(worlds_matrix, 500.0)
+
+    minutes_matrix = None
+    minutes_mean_col = next(
+        (
+            col
+            for col in [
+                "minutes_sim_cond_mean",
+                "minutes_sim_mean",
+                "minutes_sim_uncond_mean",
+                "minutes",
+                "minutes_pred",
+            ]
+            if col in proj_df.columns
+        ),
+        None,
+    )
+    if minutes_mean_col is not None:
+        minutes_means = pd.to_numeric(proj_df[minutes_mean_col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+        minutes_std = np.maximum(minutes_means * 0.15, 1.0)
+        sampled_minutes = rng.normal(
+            loc=minutes_means[np.newaxis, :],
+            scale=minutes_std[np.newaxis, :],
+            size=(n_synthetic_worlds, n_players),
+        )
+        minutes_matrix = np.where(active_mask, np.maximum(sampled_minutes, 0.0), 0.0)
+
+    logger.info(
+        "Generated synthetic worlds: shape=%s, mean range=[%.1f, %.1f]",
+        worlds_matrix.shape,
+        worlds_matrix.mean(axis=0).min(),
+        worlds_matrix.mean(axis=0).max(),
+    )
+    return PlayerWorlds(
+        fpts_matrix=worlds_matrix,
+        player_index=player_index,
+        minutes_matrix=minutes_matrix,
+    )
 
 
 def load_worlds_matrix(
@@ -181,196 +426,15 @@ def load_worlds_matrix(
         worlds_matrix: (n_worlds, n_players) FPTS matrix
         player_index: {player_id -> column index}
     """
-    if data_root is None:
-        data_root = data_path()
-
-    base_dir = _resolve_worlds_root(game_date, data_root=data_root, worlds_source=worlds_source)
-    worlds_dir = _resolve_worlds_dir(base_dir, run_id)
-
-    if "gtv2_worlds" in base_dir.parts or (worlds_dir / "worlds.parquet").exists():
-        return _load_gtv2_worlds_matrix(worlds_dir)
-
-    # Try consolidated matrix first
-    matrix_path = worlds_dir / "worlds_matrix.parquet"
-    if matrix_path.exists():
-        logger.info(f"Loading consolidated worlds matrix from {matrix_path}")
-        matrix_df = pd.read_parquet(matrix_path)
-        player_ids = list(matrix_df.columns)
-        player_index = {str(pid): idx for idx, pid in enumerate(player_ids)}
-        worlds_matrix = matrix_df.values.astype(np.float64)
-        logger.info(f"Loaded worlds matrix shape={worlds_matrix.shape}")
-        
-        # Validating worlds matrix data
-        max_val = np.max(worlds_matrix)
-        if max_val > 1000:
-            logger.error(f"CORRUPTION DETECTED in consolidated matrix: max value is {max_val}")
-            
-            # Identify bad columns
-            col_maxes = np.max(worlds_matrix, axis=0)
-            bad_col_indices = np.where(col_maxes > 1000)[0]
-            
-            # Reverse map to player IDs for logging
-            idx_to_pid = {v: k for k, v in player_index.items()}
-            for idx in bad_col_indices:
-                pid = idx_to_pid.get(idx, "unknown")
-                logger.error(f"Corrupted Player {pid} (idx={idx}): max={col_maxes[idx]}")
-                
-            # Clamp to reasonable max (e.g. 500)
-            logger.warning("Clamping worlds matrix to max 500.0")
-            worlds_matrix = np.minimum(worlds_matrix, 500.0)
-            
-        return worlds_matrix, player_index
-
-    # Try aggregating individual world files
-    world_files = sorted(worlds_dir.glob("world=*.parquet"))
-
-    if world_files:
-        logger.info("Aggregating %d world files from %s", len(world_files), worlds_dir)
-        # Load first file to resolve schema + FPTS column.
-        first_df = pd.read_parquet(world_files[0])
-
-        # Determine FPTS column
-        fpts_col = "dk_fpts_world"
-        if fpts_col not in first_df.columns:
-            for alt in ["fpts_world", "dk_fpts", "fpts"]:
-                if alt in first_df.columns:
-                    fpts_col = alt
-                    break
-            else:
-                raise ValueError(f"No FPTS column found in world files. Available: {list(first_df.columns)}")
-
-        # Build a union of player_ids across all world files. Older runs often emit sparse
-        # per-world files (only players who played / received minutes), so using just the
-        # first world's player_ids silently drops players present in later worlds.
-        player_id_set: set[str] = set()
-        for world_file in world_files:
-            ids = pd.read_parquet(world_file, columns=["player_id"])["player_id"]
-            player_id_set.update(ids.astype(str).tolist())
-        if not player_id_set:
-            raise ValueError(f"No player_id values found while aggregating world files under {worlds_dir}")
-
-        # Deterministic ordering (prefer numeric sort when possible).
-        try:
-            player_ids = [str(pid) for pid in sorted((int(p) for p in player_id_set))]
-        except Exception:
-            player_ids = sorted(player_id_set)
-        player_index = {pid: idx for idx, pid in enumerate(player_ids)}
-
-        n_worlds = len(world_files)
-        n_players = len(player_ids)
-        worlds_matrix = np.zeros((n_worlds, n_players), dtype=np.float64)
-
-        any_positive = False
-        for world_idx, world_file in enumerate(world_files):
-            df = pd.read_parquet(world_file, columns=["player_id", fpts_col])
-            if df.empty:
-                continue
-            df["player_id"] = df["player_id"].astype(str)
-            df[fpts_col] = pd.to_numeric(df[fpts_col], errors="coerce").fillna(0.0).astype(float)
-            if not any_positive and (df[fpts_col] > 0).any():
-                any_positive = True
-
-            cols = df["player_id"].map(player_index)
-            valid = cols.notna()
-            if not valid.any():
-                continue
-            col_idx = cols[valid].astype(int).to_numpy()
-            worlds_matrix[world_idx, col_idx] = df.loc[valid, fpts_col].to_numpy(dtype=np.float64, copy=False)
-
-        max_val = float(np.max(worlds_matrix)) if worlds_matrix.size else 0.0
-        if any_positive and max_val <= 0.0:
-            raise RuntimeError(
-                "Aggregated worlds matrix is all zeros despite positive per-world values. "
-                "This usually indicates a player_id dtype mismatch or an unexpected world file schema."
-            )
-
-        logger.info("Aggregated %d world files, shape=%s", n_worlds, worlds_matrix.shape)
-        return worlds_matrix, player_index
-
-    # Fall back to generating synthetic worlds from projections.parquet
-    proj_path = worlds_dir / "projections.parquet"
-    if not proj_path.exists():
-        raise FileNotFoundError(
-            f"No world files or projections.parquet found in {worlds_dir}"
-        )
-
-    logger.info(f"Generating {n_synthetic_worlds} synthetic worlds from {proj_path}")
-    proj_df = pd.read_parquet(proj_path)
-
-    # Get player IDs and stats
-    player_ids = proj_df["player_id"].astype(str).tolist()
-    player_index = {pid: idx for idx, pid in enumerate(player_ids)}
-
-    # Synthetic worlds are a last-resort fallback. Treat DNP/inactive as 0 via play_prob
-    # by sampling conditional-on-playing scores then zeroing out inactive worlds.
-    if "dk_fpts_mean" not in proj_df.columns:
-        raise FileNotFoundError(f"projections.parquet missing dk_fpts_mean at {proj_path}")
-
-    means_cond = proj_df["dk_fpts_mean"].values.astype(np.float64)
-    means_cond = np.nan_to_num(means_cond, nan=0.0)
-    
-    # Use dk_fpts_std if available, otherwise estimate from p90/p10 or use 20% of mean
-    if "dk_fpts_std" in proj_df.columns:
-        stds = proj_df["dk_fpts_std"].values.astype(np.float64)
-        stds = np.where(np.isnan(stds), means_cond * 0.2, stds)
-    elif "dk_fpts_p90" in proj_df.columns and "dk_fpts_p10" in proj_df.columns:
-        p10 = np.nan_to_num(proj_df["dk_fpts_p10"].values, nan=0.0)
-        p90 = np.nan_to_num(proj_df["dk_fpts_p90"].values, nan=0.0)
-        # For normal dist, p90 - p10 ≈ 2.56 * std
-        stds = np.maximum((p90 - p10) / 2.56, means_cond * 0.1).astype(np.float64)
-    else:
-        stds = (means_cond * 0.2).astype(np.float64)
-    
-    # Ensure minimum std to avoid degenerate distributions
-    stds = np.maximum(stds, 1.0)
-
-    # Generate synthetic worlds
-    rng = np.random.default_rng(seed)
-    n_players = len(player_ids)
-    
-    # Sample from normal distribution for each player across all worlds
-    # Shape: (n_synthetic_worlds, n_players)
-    if "play_prob" in proj_df.columns:
-        play_prob = pd.to_numeric(proj_df["play_prob"], errors="coerce").fillna(1.0).to_numpy(dtype=np.float64)
-        play_prob = np.clip(play_prob, 0.0, 1.0)
-    else:
-        play_prob = np.ones(n_players, dtype=np.float64)
-    active_mask = rng.random(size=(n_synthetic_worlds, n_players)) < play_prob[np.newaxis, :]
-    sampled = rng.normal(
-        loc=means_cond[np.newaxis, :],
-        scale=stds[np.newaxis, :],
-        size=(n_synthetic_worlds, n_players),
+    worlds = load_player_worlds(
+        game_date,
+        data_root=data_root,
+        run_id=run_id,
+        worlds_source=worlds_source,
+        n_synthetic_worlds=n_synthetic_worlds,
+        seed=seed,
     )
-    
-    # Clip to reasonable bounds (no negative FPTS, cap at ~4 std above mean_cond).
-    sampled = np.maximum(sampled, 0.0)
-    sampled = np.minimum(sampled, means_cond + 4 * stds)
-    worlds_matrix = np.where(active_mask, sampled, 0.0)
-
-    # Validating worlds matrix data
-    max_val = np.max(worlds_matrix)
-    if max_val > 1000:
-        logger.error(f"CORRUPTION DETECTED: max value in worlds matrix is {max_val}")
-        
-        # Identify bad columns
-        col_maxes = np.max(worlds_matrix, axis=0)
-        bad_col_indices = np.where(col_maxes > 1000)[0]
-        
-        # Reverse map to player IDs for logging
-        idx_to_pid = {v: k for k, v in player_index.items()}
-        for idx in bad_col_indices:
-            pid = idx_to_pid.get(idx, "unknown")
-            logger.error(f"Corrupted Player {pid} (idx={idx}): max={col_maxes[idx]}")
-            
-        # Clamp to reasonable max (e.g. 500)
-        logger.warning("Clamping worlds matrix to max 500.0")
-        worlds_matrix = np.minimum(worlds_matrix, 500.0)
-
-    logger.info(
-        f"Generated synthetic worlds: shape={worlds_matrix.shape}, "
-        f"mean range=[{worlds_matrix.mean(axis=0).min():.1f}, {worlds_matrix.mean(axis=0).max():.1f}]"
-    )
-    return worlds_matrix, player_index
+    return worlds.fpts_matrix, worlds.player_index
 
 
 def score_lineups(
@@ -431,6 +495,7 @@ def run_contest_simulation(
     *,
     user_lineups: List[List[str]],
     game_date: str,
+    draft_group_id: int | None = None,
     run_id: str | None = None,
     archetype: str = "medium",
     field_size_bucket: str = "medium",
@@ -445,6 +510,7 @@ def run_contest_simulation(
     ownership_mode: str = "full",
     rank_mode: str = "current",
     worlds_source: WorldsSource = "gtv2",
+    use_strategy_overrides: bool = False,
 ) -> ContestSimResult:
     """Run a contest simulation of user lineups against an opponent field.
 
@@ -551,24 +617,121 @@ def run_contest_simulation(
 
     # Load worlds and score both user + field lineups
     sim_run_id: str | None = None
+    bundle_df: pd.DataFrame | None = None
     try:
         # Prefer the sim_run_id referenced by the unified projections bundle so the
         # contest sim uses the same worlds as the projections shown/optimized.
         from projections.projections_bundle import load_unified_projections_df
 
         bundle = load_unified_projections_df(game_date, run_id=run_id, data_root=data_root)
+        bundle_df = bundle.df.copy()
         if "sim_run_id" in bundle.df.columns:
             vals = bundle.df["sim_run_id"].dropna().astype(str).unique().tolist()
             sim_run_id = vals[0] if len(vals) == 1 else None
     except Exception:
         sim_run_id = None
 
-    worlds_matrix, player_index = load_worlds_matrix(
+    player_worlds = load_player_worlds(
         game_date,
         data_root,
         run_id=sim_run_id or run_id,
         worlds_source=worlds_source,
     )
+    worlds_matrix = player_worlds.fpts_matrix
+    player_index = player_worlds.player_index
+    strategy_override_diagnostics: dict[str, object] = {
+        "strategy_overrides_enabled": bool(use_strategy_overrides),
+        "strategy_overrides_applied": False,
+        "strategy_override_count": 0,
+    }
+    if use_strategy_overrides:
+        if draft_group_id is None:
+            raise ValueError("draft_group_id is required when use_strategy_overrides=true")
+
+        from projections.api.strategy_overrides import (
+            apply_strategy_overrides_to_worlds,
+            load_slate_strategy_overrides,
+        )
+
+        slate_overrides = load_slate_strategy_overrides(game_date, int(draft_group_id))
+        strategy_override_diagnostics["strategy_override_count"] = int(len(slate_overrides.overrides))
+        if slate_overrides.overrides:
+            model_fpts_by_player: Dict[str, float] = {}
+            model_minutes_by_player: Dict[str, float] = {}
+            if bundle_df is not None and not bundle_df.empty and "player_id" in bundle_df.columns:
+                fpts_col = next(
+                    (
+                        col
+                        for col in [
+                            "fpts_sim_uncond_mean",
+                            "sim_dk_fpts_mean_uncond",
+                            "dk_fpts_mean_uncond",
+                            "fpts_sim_cond_mean",
+                            "sim_dk_fpts_mean",
+                            "dk_fpts_mean",
+                            "proj_fpts",
+                            "fpts_mean",
+                            "proj",
+                        ]
+                        if col in bundle_df.columns
+                    ),
+                    None,
+                )
+                minutes_col = next(
+                    (
+                        col
+                        for col in [
+                            "minutes_sim_uncond_mean",
+                            "minutes_sim_mean_uncond",
+                            "minutes_sim_uncond_p50",
+                            "minutes_sim_p50_uncond",
+                            "minutes_sim_cond_mean",
+                            "minutes_sim_mean",
+                            "minutes_sim_cond_p50",
+                            "minutes_sim_p50",
+                            "minutes_final",
+                            "minutes_p50_cond",
+                            "minutes_p50",
+                            "minutes",
+                            "minutes_pred",
+                        ]
+                        if col in bundle_df.columns
+                    ),
+                    None,
+                )
+                base = bundle_df.loc[bundle_df["player_id"].notna()].copy()
+                base["player_id"] = base["player_id"].astype(str)
+                if fpts_col:
+                    model_fpts_by_player = dict(
+                        zip(
+                            base["player_id"],
+                            pd.to_numeric(base[fpts_col], errors="coerce").fillna(0.0).astype(float),
+                        )
+                    )
+                if minutes_col:
+                    model_minutes_by_player = dict(
+                        zip(
+                            base["player_id"],
+                            pd.to_numeric(base[minutes_col], errors="coerce").fillna(0.0).astype(float),
+                        )
+                    )
+
+            worlds_matrix, _, world_diagnostics = apply_strategy_overrides_to_worlds(
+                fpts_matrix=player_worlds.fpts_matrix,
+                player_index=player_worlds.player_index,
+                overrides=slate_overrides,
+                minutes_matrix=player_worlds.minutes_matrix,
+                model_minutes_by_player=model_minutes_by_player,
+                model_fpts_by_player=model_fpts_by_player,
+            )
+            strategy_override_diagnostics.update(
+                {
+                    "strategy_overrides_applied": True,
+                    "strategy_override_matched_count": int(world_diagnostics.get("matched_override_count", 0)),
+                    "strategy_override_minutes_count": int(world_diagnostics.get("applied_minutes_delta_count", 0)),
+                    "strategy_override_fpts_count": int(world_diagnostics.get("applied_fpts_delta_count", 0)),
+                }
+            )
     user_scores = score_lineups(user_lineups, worlds_matrix, player_index)
     field_scores = score_lineups(field_lineups, worlds_matrix, player_index)
 
@@ -758,6 +921,7 @@ def run_contest_simulation(
         "rank_mode": rank_mode_n,
         "worlds_source": worlds_source,
     }
+    debug_payload.update(strategy_override_diagnostics)
 
     # Optional DNP diagnostics for selection debugging (off by default).
     # Enable with: PROJECTIONS_CONTEST_SIM_DEBUG_TOPK_ANY_ZERO=1

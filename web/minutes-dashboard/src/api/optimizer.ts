@@ -34,7 +34,20 @@ export interface PoolPlayer {
     p90?: number | null
     game_matchup?: string
     game_start_utc?: string
+    model_proj?: number | null
     model_minutes?: number | null
+    model_own?: number | null
+    effective_proj?: number | null
+    effective_minutes?: number | null
+    effective_own?: number | null
+    effective_stddev?: number | null
+    effective_p90?: number | null
+    override_minutes_delta?: number | null
+    override_fpts_delta?: number | null
+    has_override?: boolean | null
+    used_fppm_fallback?: boolean | null
+    is_active?: boolean | null
+    is_out?: boolean | null
     fppm?: number | null
 }
 
@@ -66,9 +79,11 @@ export interface QuickBuildRequest {
     late_swap_bonus_per_hour?: number
     late_swap_max_bonus?: number
     randomness_pct?: number | null
+    use_strategy_overrides?: boolean
     use_user_overrides?: boolean
     ownership_mode?: string
     world_sample_enabled?: boolean
+    worlds_source?: 'gtv2' | 'sim_v2'
 }
 
 export interface JobStatus {
@@ -118,9 +133,11 @@ export async function getPlayerPool(
     date: string,
     draftGroupId: number,
     runId?: string | null,
+    options?: { useStrategyOverrides?: boolean },
 ): Promise<PoolPlayer[]> {
     let url = apiUrl(`/api/optimizer/pool?date=${date}&draft_group_id=${draftGroupId}`)
     if (runId) url += `&run_id=${encodeURIComponent(runId)}`
+    if (options?.useStrategyOverrides) url += '&use_strategy_overrides=true'
     const res = await fetch(url)
     if (!res.ok) {
         const body = await res.json().catch(() => ({}))
@@ -279,43 +296,30 @@ export async function saveCustomBuild(
 }
 
 // ---------------------------------------------------------------------------
-// User Overrides
+// Strategy Overrides
 // ---------------------------------------------------------------------------
 
-export interface PlayerOverride {
+export interface PlayerStrategyOverride {
     player_id: string
+    minutes_delta?: number | null
+    fpts_delta?: number | null
     minutes?: number | null
     fpts?: number | null
-    own?: number | null
-    is_out: boolean
-    updated_at?: string
+    updated_at?: string | null
 }
 
-export interface SlateOverrides {
+export interface SlateStrategyOverrides {
     game_date: string
     draft_group_id: number
     client_revision: number
     updated_at: string
-    overrides: PlayerOverride[]
+    overrides: PlayerStrategyOverride[]
 }
 
-export interface PoolPlayerWithOverrides extends PoolPlayer {
-    model_proj?: number
-    model_minutes?: number
-    model_own?: number
-    effective_proj?: number
-    effective_minutes?: number
-    effective_own?: number
-    has_override?: boolean
-    used_fppm_fallback?: boolean
-    fppm?: number
-    is_active?: boolean
-}
-
-export async function getOverrides(
+export async function getStrategyOverrides(
     date: string,
     draftGroupId: number,
-): Promise<SlateOverrides> {
+): Promise<SlateStrategyOverrides> {
     const res = await fetch(
         apiUrl(`/api/optimizer/overrides?date=${date}&draft_group_id=${draftGroupId}`)
     )
@@ -326,12 +330,12 @@ export async function getOverrides(
     return res.json()
 }
 
-export async function saveOverrides(
+export async function saveStrategyOverrides(
     date: string,
     draftGroupId: number,
-    overrides: PlayerOverride[],
+    overrides: PlayerStrategyOverride[],
     expectedRevision?: number,
-): Promise<SlateOverrides> {
+): Promise<SlateStrategyOverrides> {
     const res = await fetch(apiUrl('/api/optimizer/overrides'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -349,7 +353,7 @@ export async function saveOverrides(
     return res.json()
 }
 
-export async function clearOverrides(
+export async function clearStrategyOverrides(
     date: string,
     draftGroupId: number,
 ): Promise<{ status: string; count: number }> {
@@ -364,13 +368,13 @@ export async function clearOverrides(
     return res.json()
 }
 
-export async function getPlayerPoolWithOverrides(
+export async function getPlayerPoolWithStrategyOverrides(
     date: string,
     draftGroupId: number,
     runId?: string | null,
-): Promise<PoolPlayerWithOverrides[]> {
+): Promise<PoolPlayer[]> {
     let url = apiUrl(
-        `/api/optimizer/pool?date=${date}&draft_group_id=${draftGroupId}&use_user_overrides=true`
+        `/api/optimizer/pool?date=${date}&draft_group_id=${draftGroupId}&use_strategy_overrides=true`
     )
     if (runId) url += `&run_id=${encodeURIComponent(runId)}`
     const res = await fetch(url)

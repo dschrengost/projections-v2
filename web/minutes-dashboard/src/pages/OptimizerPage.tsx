@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
     getSlates,
     getPlayerPool,
+    getStrategyOverrides,
     startBuild,
     getBuildStatus,
     getBuildLineups,
@@ -11,8 +12,11 @@ import {
     loadSavedBuild,
     deleteSavedBuild,
     saveCustomBuild,
+    saveStrategyOverrides,
+    clearStrategyOverrides,
     Slate,
     PoolPlayer,
+    PlayerStrategyOverride,
     JobStatus,
     LineupRow,
     QuickBuildRequest,
@@ -60,6 +64,13 @@ export default function OptimizerPage() {
     const [pool, setPool] = useState<PoolPlayer[]>([])
     const [poolLoading, setPoolLoading] = useState(false)
     const [poolError, setPoolError] = useState<string | null>(null)
+    const [useStrategyOverrides, setUseStrategyOverrides] = useState(false)
+    const [strategyOverrides, setStrategyOverrides] = useState<Map<string, PlayerStrategyOverride>>(new Map())
+    const [savedStrategyOverrides, setSavedStrategyOverrides] = useState<Map<string, PlayerStrategyOverride>>(new Map())
+    const [overrideRevision, setOverrideRevision] = useState<number | null>(null)
+    const [overrideLoading, setOverrideLoading] = useState(false)
+    const [overrideSaving, setOverrideSaving] = useState(false)
+    const [overrideError, setOverrideError] = useState<string | null>(null)
 
     // Lock/ban players
     const [lockedIds, setLockedIds] = useState<Set<string>>(new Set())
@@ -147,6 +158,19 @@ export default function OptimizerPage() {
         pool.some(p => p.stddev != null && p.stddev > 0), [pool])
 
     useEffect(() => {
+        if (typeof window === 'undefined') return
+        const stored = window.localStorage.getItem('optimizer.useStrategyOverrides')
+        if (stored != null) {
+            setUseStrategyOverrides(stored === 'true')
+        }
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem('optimizer.useStrategyOverrides', String(useStrategyOverrides))
+    }, [useStrategyOverrides])
+
+    useEffect(() => {
         setExcludedGames(new Set())
         setExcludedTeams(new Set())
     }, [selectedDate, selectedSlate])
@@ -182,7 +206,12 @@ export default function OptimizerPage() {
         setPoolLoading(true)
         setPoolError(null)
         try {
-            const data = await getPlayerPool(selectedDate, selectedSlate)
+            const data = await getPlayerPool(
+                selectedDate,
+                selectedSlate,
+                undefined,
+                { useStrategyOverrides },
+            )
             setPool(data)
             setLockedIds(new Set())
             setBannedIds(new Set())
@@ -192,12 +221,146 @@ export default function OptimizerPage() {
         } finally {
             setPoolLoading(false)
         }
-    }, [selectedDate, selectedSlate])
+    }, [selectedDate, selectedSlate, useStrategyOverrides])
 
     // Load player pool when slate changes
     useEffect(() => {
         void loadPool()
     }, [loadPool])
+
+    const loadOverrides = useCallback(async () => {
+        if (!selectedSlate) {
+            setStrategyOverrides(new Map())
+            setSavedStrategyOverrides(new Map())
+            setOverrideRevision(null)
+            return
+        }
+        setOverrideLoading(true)
+        setOverrideError(null)
+        try {
+            const data = await getStrategyOverrides(selectedDate, selectedSlate)
+            const next = new Map<string, PlayerStrategyOverride>()
+            data.overrides.forEach((override) => {
+                next.set(override.player_id, override)
+            })
+            setStrategyOverrides(new Map(next))
+            setSavedStrategyOverrides(new Map(next))
+            setOverrideRevision(data.client_revision)
+        } catch (err) {
+            setOverrideError((err as Error).message)
+            setStrategyOverrides(new Map())
+            setSavedStrategyOverrides(new Map())
+            setOverrideRevision(null)
+        } finally {
+            setOverrideLoading(false)
+        }
+    }, [selectedDate, selectedSlate])
+
+    useEffect(() => {
+        void loadOverrides()
+    }, [loadOverrides])
+
+    const overrideSignature = (override?: PlayerStrategyOverride) => JSON.stringify({
+        minutes_delta: override?.minutes_delta ?? null,
+        fpts_delta: override?.fpts_delta ?? null,
+        minutes: override?.minutes ?? null,
+        fpts: override?.fpts ?? null,
+    })
+
+    const unsavedOverrideCount = useMemo(() => {
+        const ids = new Set<string>([
+            ...Array.from(strategyOverrides.keys()),
+            ...Array.from(savedStrategyOverrides.keys()),
+        ])
+        let count = 0
+        ids.forEach((playerId) => {
+            if (overrideSignature(strategyOverrides.get(playerId)) !== overrideSignature(savedStrategyOverrides.get(playerId))) {
+                count += 1
+            }
+        })
+        return count
+    }, [savedStrategyOverrides, strategyOverrides])
+
+    const activeOverrideCount = useMemo(() => savedStrategyOverrides.size, [savedStrategyOverrides])
+
+    const updateStrategyOverride = (
+        playerId: string,
+        updates: Partial<PlayerStrategyOverride>,
+    ) => {
+        setStrategyOverrides((prev) => {
+            const next = new Map(prev)
+            const current = next.get(playerId) ?? { player_id: playerId }
+            const updated: PlayerStrategyOverride = {
+                ...current,
+                ...updates,
+                player_id: playerId,
+            }
+            const hasAnyValue =
+                updated.minutes_delta != null ||
+                updated.fpts_delta != null ||
+                updated.minutes != null ||
+                updated.fpts != null
+            if (hasAnyValue) {
+                next.set(playerId, updated)
+            } else {
+                next.delete(playerId)
+            }
+            return next
+        })
+    }
+
+    const saveOverrideChanges = useCallback(async () => {
+        if (!selectedSlate) return
+        setOverrideSaving(true)
+        setOverrideError(null)
+        try {
+            const payload = Array.from(strategyOverrides.values()).map((override) => ({
+                player_id: override.player_id,
+                minutes_delta: override.minutes_delta ?? null,
+                fpts_delta: override.fpts_delta ?? null,
+                minutes: override.minutes ?? null,
+                fpts: override.fpts ?? null,
+            }))
+            const response = await saveStrategyOverrides(
+                selectedDate,
+                selectedSlate,
+                payload,
+                overrideRevision ?? undefined,
+            )
+            const next = new Map<string, PlayerStrategyOverride>()
+            response.overrides.forEach((override) => {
+                next.set(override.player_id, override)
+            })
+            setStrategyOverrides(new Map(next))
+            setSavedStrategyOverrides(new Map(next))
+            setOverrideRevision(response.client_revision)
+            await loadPool()
+        } catch (err) {
+            setOverrideError((err as Error).message)
+        } finally {
+            setOverrideSaving(false)
+        }
+    }, [loadPool, overrideRevision, selectedDate, selectedSlate, strategyOverrides])
+
+    const discardOverrideChanges = () => {
+        setStrategyOverrides(new Map(savedStrategyOverrides))
+        setOverrideError(null)
+    }
+
+    const resetAllOverrides = useCallback(async () => {
+        if (!selectedSlate) return
+        setOverrideSaving(true)
+        setOverrideError(null)
+        try {
+            await clearStrategyOverrides(selectedDate, selectedSlate)
+            await loadOverrides()
+            await loadPool()
+        } catch (err) {
+            setOverrideError((err as Error).message)
+        } finally {
+            setOverrideSaving(false)
+        }
+    }, [loadOverrides, loadPool, selectedDate, selectedSlate])
 
     // Poll job status
     useEffect(() => {
@@ -334,7 +497,10 @@ export default function OptimizerPage() {
                 case 'proj': left = a.proj; right = b.proj; break
                 case 'own_proj': left = a.own_proj ?? 0; right = b.own_proj ?? 0; break
                 case 'value': left = a.proj / (a.salary / 1000); right = b.proj / (b.salary / 1000); break
-                case 'min': left = a.model_minutes ?? 0; right = b.model_minutes ?? 0; break
+                case 'min':
+                    left = useStrategyOverrides ? a.effective_minutes ?? a.model_minutes ?? 0 : a.model_minutes ?? 0
+                    right = useStrategyOverrides ? b.effective_minutes ?? b.model_minutes ?? 0 : b.model_minutes ?? 0
+                    break
                 case 'fppm': left = a.fppm ?? 0; right = b.fppm ?? 0; break
                 default: left = a.proj; right = b.proj
             }
@@ -344,7 +510,7 @@ export default function OptimizerPage() {
             return sortDir === 'asc' ? String(left).localeCompare(String(right)) : String(right).localeCompare(String(left))
         })
         return filtered
-    }, [pool, filter, sortKey, sortDir, minProj])
+    }, [pool, filter, sortKey, sortDir, minProj, useStrategyOverrides])
 
     // Toggle lock/ban
     const toggleLock = (id: string) => {
@@ -378,6 +544,10 @@ export default function OptimizerPage() {
     // Start build
     const handleStartBuild = async () => {
         if (!selectedSlate) return
+        if (useStrategyOverrides && unsavedOverrideCount > 0) {
+            setBuildError('Save or discard strategy override changes before building.')
+            return
+        }
         setBuildError(null)
         setLineups([])
         try {
@@ -404,6 +574,7 @@ export default function OptimizerPage() {
                 exclude_games: Array.from(excludedGames),
                 enum_enable: maxPool >= 5000,
                 randomness_pct: randomnessPct > 0 && hasStddev ? randomnessPct : undefined,
+                use_strategy_overrides: useStrategyOverrides,
                 late_swap_enabled: lateSwapEnabled,
                 world_sample_enabled: worldSampleEnabled,
             }
@@ -613,6 +784,25 @@ export default function OptimizerPage() {
         }
         return result
     }, [lineups, lineupFilter, lineupSort, playerMap, minLineupProj, maxLineupOwn, minLineupP90])
+
+    const showStrategyColumns = useMemo(
+        () => useStrategyOverrides || strategyOverrides.size > 0 || savedStrategyOverrides.size > 0,
+        [savedStrategyOverrides.size, strategyOverrides.size, useStrategyOverrides],
+    )
+
+    const getCurrentOverride = (playerId: string) => strategyOverrides.get(playerId)
+
+    const getDisplayMinutes = (player: PoolPlayer) =>
+        useStrategyOverrides ? player.effective_minutes ?? player.model_minutes : player.model_minutes
+
+    const getDisplayStddev = (player: PoolPlayer) =>
+        useStrategyOverrides ? player.effective_stddev ?? player.stddev : player.stddev
+
+    const getDisplayP90 = (player: PoolPlayer) =>
+        useStrategyOverrides ? player.effective_p90 ?? player.p90 : player.p90
+
+    const formatDelta = (val: number | undefined | null) =>
+        val != null ? `${val > 0 ? '+' : ''}${val.toFixed(1)}` : '—'
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) {
@@ -876,6 +1066,63 @@ export default function OptimizerPage() {
                             </div>
                             <span className="text-sm">{worldSampleEnabled ? 'World Sample Mode' : 'Mean Projections'}</span>
                         </label>
+                        <label className="flex items-center gap-2.5 cursor-pointer">
+                            <div className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={useStrategyOverrides}
+                                    onChange={e => setUseStrategyOverrides(e.target.checked)}
+                                />
+                                <span className="toggle-slider"></span>
+                            </div>
+                            <span className="text-sm">{useStrategyOverrides ? 'Strategy Overrides On' : 'Strategy Overrides Off'}</span>
+                        </label>
+                    </div>
+
+                    <div className="rounded-md border border-[hsl(var(--border))] p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                                Strategy Overrides
+                            </span>
+                            <Badge variant="secondary">{activeOverrideCount} saved</Badge>
+                        </div>
+                        <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                            Minutes and FPTS deltas persist by slate and only apply downstream to optimizer and contest sim.
+                        </p>
+                        {overrideLoading && (
+                            <p className="text-xs text-[hsl(var(--muted-foreground))]">Loading overrides…</p>
+                        )}
+                        {overrideError && (
+                            <p className="text-xs text-red-400">{overrideError}</p>
+                        )}
+                        <div className="flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))]">
+                            <span>{unsavedOverrideCount} unsaved</span>
+                            {overrideSaving && <span>Saving…</span>}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <Button
+                                variant="default"
+                                onClick={() => void saveOverrideChanges()}
+                                disabled={!selectedSlate || overrideSaving || unsavedOverrideCount === 0}
+                            >
+                                Save
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={discardOverrideChanges}
+                                disabled={overrideSaving || unsavedOverrideCount === 0}
+                            >
+                                Discard
+                            </Button>
+                        </div>
+                        <Button
+                            variant="outline"
+                            className="w-full"
+                            onClick={() => void resetAllOverrides()}
+                            disabled={!selectedSlate || overrideSaving || activeOverrideCount === 0}
+                        >
+                            Reset Slate Overrides
+                        </Button>
                     </div>
 
                     {/* Game Filters */}
@@ -1051,8 +1298,10 @@ export default function OptimizerPage() {
                                             className="sortable cursor-pointer select-none"
                                             title="Projected minutes (P50)"
                                         >
-                                            Min<SortIcon col="min" />
+                                            {showStrategyColumns ? 'Model Min' : 'Min'}<SortIcon col="min" />
                                         </th>
+                                        {showStrategyColumns && <th className="text-center">Min Δ</th>}
+                                        {showStrategyColumns && <th className="text-center">Eff Min</th>}
                                         <th
                                             onClick={() => toggleSort('fppm')}
                                             className="sortable cursor-pointer select-none"
@@ -1060,11 +1309,13 @@ export default function OptimizerPage() {
                                         >
                                             FPPM<SortIcon col="fppm" />
                                         </th>
+                                        {showStrategyColumns && <th className="text-center">Model Proj</th>}
+                                        {showStrategyColumns && <th className="text-center">FPTS Δ</th>}
                                         <th
                                             onClick={() => toggleSort('proj')}
                                             className="sortable cursor-pointer select-none"
                                         >
-                                            Proj<SortIcon col="proj" />
+                                            {showStrategyColumns ? 'Eff Proj' : 'Proj'}<SortIcon col="proj" />
                                         </th>
                                         <th
                                             onClick={() => toggleSort('own_proj')}
@@ -1072,6 +1323,7 @@ export default function OptimizerPage() {
                                         >
                                             Own%<SortIcon col="own_proj" />
                                         </th>
+                                        {showStrategyColumns && <th className="text-center">Override</th>}
                                         <th
                                             onClick={() => toggleSort('value')}
                                             className="sortable cursor-pointer select-none"
@@ -1084,12 +1336,14 @@ export default function OptimizerPage() {
                                     {filteredPool.map(p => {
                                         const isLocked = lockedIds.has(p.player_id)
                                         const isBanned = bannedIds.has(p.player_id)
+                                        const currentOverride = getCurrentOverride(p.player_id)
                                         return (
                                             <tr
                                                 key={p.player_id}
                                                 className={[
                                                     isLocked ? 'player-locked' : '',
                                                     isBanned ? 'player-banned' : '',
+                                                    p.has_override ? 'player-override' : '',
                                                 ].filter(Boolean).join(' ')}
                                             >
                                                 <td className="text-center">
@@ -1123,20 +1377,87 @@ export default function OptimizerPage() {
                                                 <td className="tabular-nums text-[hsl(var(--muted-foreground))]">
                                                     {formatMin(p.model_minutes)}
                                                 </td>
+                                                {showStrategyColumns && (
+                                                    <td className="min-w-[92px]">
+                                                        <Input
+                                                            type="number"
+                                                            step="0.5"
+                                                            min={-24}
+                                                            max={24}
+                                                            value={currentOverride?.minutes_delta ?? ''}
+                                                            onChange={(e) => {
+                                                                const value = e.target.value
+                                                                updateStrategyOverride(p.player_id, {
+                                                                    minutes_delta: value === '' ? null : Number(value),
+                                                                })
+                                                            }}
+                                                            className="h-8 tabular-nums"
+                                                            placeholder="0.0"
+                                                        />
+                                                    </td>
+                                                )}
+                                                {showStrategyColumns && (
+                                                    <td className="tabular-nums text-[hsl(var(--muted-foreground))]">
+                                                        {formatMin(getDisplayMinutes(p))}
+                                                    </td>
+                                                )}
                                                 <td className="tabular-nums text-[hsl(var(--muted-foreground))]">
                                                     {formatFppm(p.fppm)}
                                                 </td>
+                                                {showStrategyColumns && (
+                                                    <td className="tabular-nums text-[hsl(var(--muted-foreground))]">
+                                                        {formatProj(p.model_proj)}
+                                                    </td>
+                                                )}
+                                                {showStrategyColumns && (
+                                                    <td className="min-w-[92px]">
+                                                        <Input
+                                                            type="number"
+                                                            step="0.5"
+                                                            min={-40}
+                                                            max={40}
+                                                            value={currentOverride?.fpts_delta ?? ''}
+                                                            onChange={(e) => {
+                                                                const value = e.target.value
+                                                                updateStrategyOverride(p.player_id, {
+                                                                    fpts_delta: value === '' ? null : Number(value),
+                                                                })
+                                                            }}
+                                                            className="h-8 tabular-nums"
+                                                            placeholder="0.0"
+                                                        />
+                                                    </td>
+                                                )}
                                                 <td className="tabular-nums font-medium text-[hsl(var(--primary))]">
                                                     {formatProj(p.proj)}
                                                 </td>
                                                 <td className="tabular-nums">{formatOwn(p.own_proj)}</td>
+                                                {showStrategyColumns && (
+                                                    <td className="text-center">
+                                                        <Button
+                                                            variant="outline"
+                                                            className="h-8 px-2"
+                                                            disabled={!currentOverride}
+                                                            onClick={() => {
+                                                                updateStrategyOverride(p.player_id, {
+                                                                    minutes_delta: null,
+                                                                    fpts_delta: null,
+                                                                    minutes: null,
+                                                                    fpts: null,
+                                                                })
+                                                            }}
+                                                        >
+                                                            Clear
+                                                        </Button>
+                                                    </td>
+                                                )}
                                                 <td className="tabular-nums">{formatValue(p)}</td>
                                             </tr>
                                         )
                                     })}
                                     {filteredPool.length === 0 && !poolLoading && (
                                         <tr>
-                                            <td colSpan={11} className="text-center text-[hsl(var(--muted-foreground))] py-8">
+                                            <td colSpan={showStrategyColumns ? 16 : 11} className="text-center text-[hsl(var(--muted-foreground))] py-8">
                                                 No players found
                                             </td>
                                         </tr>

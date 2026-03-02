@@ -75,6 +75,7 @@ export interface ContestSimRequest {
     weights?: number[]
     ownership_mode?: 'full' | 'off' | 'dupe_only' | 'field_only'
     rank_mode?: 'current' | 'tail_only' | 'tail_times_dupe'
+    use_strategy_overrides?: boolean
 }
 
 export interface FieldLibrarySummary {

@@ -407,6 +407,10 @@ class ContestSimRequest(BaseModel):
         default="gtv2",
         description="Worlds family for contest sim scoring: gtv2 (live default) or sim_v2 (explicit backtest fallback)",
     )
+    use_strategy_overrides: bool = Field(
+        default=False,
+        description="Apply persistent slate strategy overrides to downstream worlds before scoring",
+    )
 
 
 class LineupEVResultResponse(BaseModel):
@@ -651,6 +655,12 @@ async def run_simulation(request: ContestSimRequest):
         if ownership_mode == "off":
             rank_mode = "tail_only"
 
+        if request.use_strategy_overrides and request.draft_group_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="draft_group_id is required when use_strategy_overrides=true",
+            )
+
         use_dupe_ownership = ownership_mode in {"full", "dupe_only"}
         use_field_ownership = ownership_mode in {"full", "field_only"}
 
@@ -712,6 +722,7 @@ async def run_simulation(request: ContestSimRequest):
         result = run_contest_simulation(
             user_lineups=request.lineups,
             game_date=request.game_date,
+            draft_group_id=request.draft_group_id,
             run_id=request.run_id,
             archetype=request.archetype,
             field_size_bucket=request.field_size_bucket,
@@ -725,6 +736,7 @@ async def run_simulation(request: ContestSimRequest):
             ownership_mode=ownership_mode,
             rank_mode=rank_mode,
             worlds_source=request.worlds_source,
+            use_strategy_overrides=request.use_strategy_overrides,
         )
         if field_library_info:
             result.stats.debug.update(field_library_info)

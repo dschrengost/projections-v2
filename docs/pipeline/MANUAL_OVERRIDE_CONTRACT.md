@@ -12,6 +12,10 @@ It is the companion to
   outputs
 - boost/preference logic belongs in optimizer / contest sim surfaces
 
+The companion contract for those downstream-only strategy controls is:
+
+- `docs/pipeline/STRATEGY_OVERRIDE_CONTRACT.md`
+
 ## 1. Scope
 
 This contract covers:
@@ -28,6 +32,9 @@ This contract does not cover:
 - ownership overrides
 - arbitrary point-estimate minute edits
 - contest strategy controls
+
+Those downstream controls are covered by
+`docs/pipeline/STRATEGY_OVERRIDE_CONTRACT.md`.
 
 ## 2. Current State In Repo
 
