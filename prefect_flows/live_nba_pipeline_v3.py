@@ -30,7 +30,7 @@ import time
 from collections import Counter
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
@@ -1499,6 +1499,122 @@ def _distinct_game_count(df: pd.DataFrame) -> int:
         return 0
     gids = pd.to_numeric(df["game_id"], errors="coerce")
     return int(gids.dropna().nunique())
+
+
+def _sanitize_frame_to_expected_keys(
+    df: pd.DataFrame,
+    *,
+    expected_keys_df: pd.DataFrame,
+    key_cols: Sequence[str],
+    label: str,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    key_cols = tuple(str(col) for col in key_cols)
+    if df.empty:
+        return (
+            df.copy(),
+            {
+                "label": str(label),
+                "rows_in": 0,
+                "rows_out": 0,
+                "dropped_null_key_rows": 0,
+                "dropped_unexpected_key_rows": 0,
+                "expected_distinct_keys": 0,
+            },
+        )
+
+    missing_df = [col for col in key_cols if col not in df.columns]
+    if missing_df:
+        raise RuntimeError(f"{label} missing required key columns: {missing_df}")
+    missing_expected = [col for col in key_cols if col not in expected_keys_df.columns]
+    if missing_expected:
+        raise RuntimeError(
+            f"{label} expected-keys frame missing required columns: {missing_expected}"
+        )
+
+    work = df.copy()
+    expected = expected_keys_df.loc[:, list(key_cols)].copy()
+    for col in key_cols:
+        work[col] = pd.to_numeric(work[col], errors="coerce").astype("Int64")
+        expected[col] = pd.to_numeric(expected[col], errors="coerce").astype("Int64")
+
+    rows_in = int(len(work))
+    null_mask = work.loc[:, list(key_cols)].isna().any(axis=1)
+    dropped_null_key_rows = int(null_mask.sum())
+    if dropped_null_key_rows:
+        work = work.loc[~null_mask].copy()
+
+    expected = (
+        expected.dropna(subset=list(key_cols))
+        .drop_duplicates(ignore_index=True)
+        .reset_index(drop=True)
+    )
+    expected_distinct_keys = int(len(expected))
+
+    if expected.empty:
+        return (
+            work.iloc[0:0].copy(),
+            {
+                "label": str(label),
+                "rows_in": rows_in,
+                "rows_out": 0,
+                "dropped_null_key_rows": dropped_null_key_rows,
+                "dropped_unexpected_key_rows": int(len(work)),
+                "expected_distinct_keys": 0,
+            },
+        )
+
+    work["_row_order"] = np.arange(len(work), dtype=np.int64)
+    merged = work.merge(
+        expected.assign(_expected_key=1),
+        on=list(key_cols),
+        how="inner",
+        sort=False,
+    )
+    dropped_unexpected_key_rows = int(len(work) - len(merged))
+    merged = (
+        merged.sort_values("_row_order", kind="stable")
+        .drop(columns=["_row_order", "_expected_key"], errors="ignore")
+        .reset_index(drop=True)
+    )
+    for col in key_cols:
+        merged[col] = pd.to_numeric(merged[col], errors="raise").astype("int64")
+
+    return (
+        merged,
+        {
+            "label": str(label),
+            "rows_in": rows_in,
+            "rows_out": int(len(merged)),
+            "dropped_null_key_rows": dropped_null_key_rows,
+            "dropped_unexpected_key_rows": dropped_unexpected_key_rows,
+            "expected_distinct_keys": expected_distinct_keys,
+        },
+    )
+
+
+def _validate_parquet_key_contract(
+    path: Path,
+    *,
+    expected_keys_df: pd.DataFrame,
+    key_cols: Sequence[str],
+    label: str,
+) -> dict[str, Any]:
+    key_cols = tuple(str(col) for col in key_cols)
+    df = pd.read_parquet(path, columns=list(key_cols))
+    _, report = _sanitize_frame_to_expected_keys(
+        df,
+        expected_keys_df=expected_keys_df,
+        key_cols=key_cols,
+        label=label,
+    )
+    if report["dropped_null_key_rows"] > 0 or report["dropped_unexpected_key_rows"] > 0:
+        raise RuntimeError(
+            f"{label} key contract failed for {path}: "
+            f"null_key_rows={report['dropped_null_key_rows']} "
+            f"unexpected_key_rows={report['dropped_unexpected_key_rows']}"
+        )
+    report["path"] = str(path)
+    return report
 
 
 def _load_fallback_merge_baseline(
@@ -3136,6 +3252,22 @@ def generate_worlds_gtv2_live_task(
         )
         if worlds_df.empty:
             raise RuntimeError("GTV2 worlds generation produced zero rows")
+        worlds_df, world_key_report = _sanitize_frame_to_expected_keys(
+            worlds_df,
+            expected_keys_df=features_df,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="generated worlds",
+        )
+        if worlds_df.empty:
+            raise RuntimeError("GTV2 worlds generation produced zero valid rows after key sanitization")
+        if (
+            world_key_report["dropped_null_key_rows"] > 0
+            or world_key_report["dropped_unexpected_key_rows"] > 0
+        ):
+            logger.warning(
+                "Dropped invalid world rows before publish: %s",
+                world_key_report,
+            )
         _atomic_write_validated_parquet(
             worlds_df,
             worlds_path,
@@ -3145,6 +3277,12 @@ def generate_worlds_gtv2_live_task(
         projections = summarize_worlds_to_projections(
             worlds_df,
             sim_profile="game_transformer_v2",
+        )
+        projections, projection_key_report = _sanitize_frame_to_expected_keys(
+            projections,
+            expected_keys_df=features_df,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="generated world projections",
         )
         _atomic_write_validated_parquet(
             projections,
@@ -3160,6 +3298,10 @@ def generate_worlds_gtv2_live_task(
             "projection_rows": int(len(projections)),
             "bundle_dir": str(bundle_dir),
             "device": str(device),
+            "key_sanitization": {
+                "worlds": world_key_report,
+                "projections": projection_key_report,
+            },
             "make_model": {
                 "mode": str(make_model_cfg.mode),
                 "use_learned_efficiency": bool(make_model_cfg.use_learned_efficiency),
@@ -3401,10 +3543,66 @@ def materialize_unified_run_artifacts_task(
         target_game_ids=target_ids,
     )
 
+    expected_feature_keys = merged_features.loc[:, ["game_id", "team_id", "player_id"]]
+
+    merged_scores, score_key_report = _sanitize_frame_to_expected_keys(
+        merged_scores,
+        expected_keys_df=expected_feature_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="merged scores",
+    )
+    _atomic_write_validated_parquet(
+        merged_scores,
+        scores_dir / f"run={run_id}" / "scores.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+
+    merged_worlds, world_key_report = _sanitize_frame_to_expected_keys(
+        merged_worlds,
+        expected_keys_df=expected_feature_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="merged worlds",
+    )
+    _atomic_write_validated_parquet(
+        merged_worlds,
+        worlds_dir / f"run={run_id}" / "worlds.parquet",
+        required_cols=("world_idx", "game_id", "team_id", "player_id"),
+    )
+
+    merged_world_projections, world_projection_key_report = _sanitize_frame_to_expected_keys(
+        merged_world_projections,
+        expected_keys_df=expected_feature_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="merged world projections",
+    )
+    _atomic_write_validated_parquet(
+        merged_world_projections,
+        worlds_dir / f"run={run_id}" / "projections.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+
+    merged_final, final_projection_key_report = _sanitize_frame_to_expected_keys(
+        merged_final,
+        expected_keys_df=expected_feature_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="merged unified projections",
+    )
+    _atomic_write_validated_parquet(
+        merged_final,
+        projections_dir / f"run={run_id}" / "projections.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+
     world_summary_path = worlds_dir / f"run={run_id}" / "world_contracts_summary.json"
     world_summary_payload = {
         "contract_checks": _summarize_world_contracts_from_frame(merged_worlds),
         "merged_from_previous": True,
+        "key_sanitization": {
+            "scores": score_key_report,
+            "worlds": world_key_report,
+            "world_projections": world_projection_key_report,
+            "unified_projections": final_projection_key_report,
+        },
         "target_game_ids": target_ids,
         "rows": int(len(merged_worlds)),
         "projection_rows": int(len(merged_world_projections)),
@@ -3461,6 +3659,37 @@ def _validate_publishable_run_artifacts(
             path,
             required_cols=required_cols,
         )
+
+    feature_keys = pd.read_parquet(
+        single_file_targets["features_gtv2_v1"][0],
+        columns=["game_id", "team_id", "player_id"],
+    )
+    stage_reports["semantic_key_contracts"] = {
+        "scores_gtv2": _validate_parquet_key_contract(
+            single_file_targets["scores_gtv2"][0],
+            expected_keys_df=feature_keys,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="scores_gtv2",
+        ),
+        "worlds_gtv2/worlds": _validate_parquet_key_contract(
+            single_file_targets["worlds_gtv2/worlds"][0],
+            expected_keys_df=feature_keys,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="worlds_gtv2/worlds",
+        ),
+        "worlds_gtv2/projections": _validate_parquet_key_contract(
+            single_file_targets["worlds_gtv2/projections"][0],
+            expected_keys_df=feature_keys,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="worlds_gtv2/projections",
+        ),
+        "unified_projections": _validate_parquet_key_contract(
+            single_file_targets["unified_projections"][0],
+            expected_keys_df=feature_keys,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="unified_projections",
+        ),
+    }
 
     ownership_dir = (
         data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}"

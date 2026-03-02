@@ -18,6 +18,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _merge_parquet_for_target_games,
     _run_python_module,
     _report_window_status,
+    _sanitize_frame_to_expected_keys,
     _summarize_world_contracts_from_frame,
     _resolve_season_month,
     publish_atomic_task,
@@ -920,6 +921,56 @@ def test_atomic_write_validated_parquet_round_trips(tmp_path: Path) -> None:
     assert reloaded.equals(df.sort_values("game_id").reset_index(drop=True))
 
 
+def test_sanitize_frame_to_expected_keys_drops_invalid_world_rows_before_contract_summary() -> None:
+    expected_keys = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 20],
+            "player_id": [100, 200],
+        }
+    )
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 0, 1],
+            "game_id": [1, 1, 576460752325924364, None],
+            "team_id": [10, 20, 10, 20],
+            "player_id": [100, 200, 100, 200],
+            "active": [1, 1, 1, 1],
+            "minutes": [240.0, 240.0, 17.0, 240.0],
+            "fga2": [1.0, 1.0, 0.0, 1.0],
+            "fg2m": [1.0, 1.0, 0.0, 1.0],
+            "fga3": [0.0, 0.0, 0.0, 0.0],
+            "fg3m": [0.0, 0.0, 0.0, 0.0],
+            "fta": [0.0, 0.0, 0.0, 0.0],
+            "ftm": [0.0, 0.0, 0.0, 0.0],
+            "pts": [2.0, 2.0, 0.0, 2.0],
+            "reb": [0.0, 0.0, 0.0, 0.0],
+            "ast": [0.0, 0.0, 0.0, 0.0],
+            "stl": [0.0, 0.0, 0.0, 0.0],
+            "blk": [0.0, 0.0, 0.0, 0.0],
+            "tov": [0.0, 0.0, 0.0, 0.0],
+            "dk_fpts": [2.0, 2.0, 0.0, 2.0],
+        }
+    )
+
+    cleaned, report = _sanitize_frame_to_expected_keys(
+        worlds,
+        expected_keys_df=expected_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="unit-test worlds",
+    )
+
+    assert report["rows_in"] == 4
+    assert report["rows_out"] == 2
+    assert report["dropped_null_key_rows"] == 1
+    assert report["dropped_unexpected_key_rows"] == 1
+
+    checks = _summarize_world_contracts_from_frame(cleaned)
+    assert checks["team_minutes_not_240"] == 0
+    assert checks["team_minutes_total_checks"] == 2
+    assert cleaned["game_id"].tolist() == [1, 1]
+
+
 def test_publish_atomic_task_rejects_corrupt_worlds_before_pointer_promotion(
     tmp_path: Path,
 ) -> None:
@@ -1004,6 +1055,106 @@ def test_publish_atomic_task_rejects_corrupt_worlds_before_pointer_promotion(
     assert not (
         tmp_path / "artifacts" / "gtv2_worlds" / f"game_date={game_date}" / "LATEST" / "current.json"
     ).exists()
+
+
+def test_publish_atomic_task_rejects_world_key_contract_violation_before_pointer_promotion(
+    tmp_path: Path,
+) -> None:
+    game_date = "2026-02-24"
+    run_id = "20260224T221500Z"
+    manifest_path = (
+        tmp_path
+        / "artifacts"
+        / "runs"
+        / "nba_live"
+        / f"game_date={game_date}"
+        / f"run={run_id}"
+        / "manifest.json"
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        '{"run_id":"20260224T221500Z","as_of_ts":"2026-02-24T22:15:00Z","source_freshness":{"summary":{}}}',
+        encoding="utf-8",
+    )
+
+    _atomic_write_validated_parquet(
+        pd.DataFrame({"game_id": [1], "team_id": [10], "player_id": [100]}),
+        tmp_path / "live" / "features_gtv2_v1" / game_date / f"run={run_id}" / "features.parquet",
+        required_cols=("game_id", "team_id", "player_id"),
+    )
+    _atomic_write_validated_parquet(
+        pd.DataFrame(
+            {"game_date": [game_date], "game_id": [1], "team_id": [10], "player_id": [100]}
+        ),
+        tmp_path
+        / "artifacts"
+        / "gtv2_scores"
+        / f"game_date={game_date}"
+        / f"run={run_id}"
+        / "scores.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+    _atomic_write_validated_parquet(
+        pd.DataFrame(
+            {
+                "world_idx": [0, 0],
+                "game_id": [1, 576460752325924364],
+                "team_id": [10, 10],
+                "player_id": [100, 100],
+                "minutes": [240.0, 17.0],
+            }
+        ),
+        tmp_path
+        / "artifacts"
+        / "gtv2_worlds"
+        / f"game_date={game_date}"
+        / f"run={run_id}"
+        / "worlds.parquet",
+        required_cols=("world_idx",),
+    )
+    _atomic_write_validated_parquet(
+        pd.DataFrame(
+            {"game_date": [game_date], "game_id": [1], "team_id": [10], "player_id": [100]}
+        ),
+        tmp_path
+        / "artifacts"
+        / "gtv2_worlds"
+        / f"game_date={game_date}"
+        / f"run={run_id}"
+        / "projections.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+    _atomic_write_validated_parquet(
+        pd.DataFrame(
+            {"game_date": [game_date], "game_id": [1], "team_id": [10], "player_id": [100]}
+        ),
+        tmp_path
+        / "artifacts"
+        / "projections"
+        / game_date
+        / f"run={run_id}"
+        / "projections.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+    _atomic_write_validated_parquet(
+        pd.DataFrame({"player_id": [100], "pred_own_pct": [0.1]}),
+        tmp_path
+        / "silver"
+        / "ownership_predictions"
+        / game_date
+        / f"run={run_id}"
+        / "123.parquet",
+        required_cols=("player_id",),
+    )
+
+    with writer_guard.PipelineWriterLock(data_root=tmp_path, run_id=run_id):
+        with pytest.raises(RuntimeError, match="key contract failed"):
+            publish_atomic_task.fn(
+                game_date=game_date,
+                run_id=run_id,
+                manifest_path=manifest_path,
+                data_root=tmp_path,
+            )
 
 
 def test_summarize_world_contracts_from_frame_handles_clean_worlds() -> None:

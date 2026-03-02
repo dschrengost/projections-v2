@@ -111,6 +111,7 @@ If you accidentally edited PROD:
 All Prefect flows run exclusively from the PROD directory:
 - `prefect.yaml` sets `directory: /home/daniel/prod/projections-v2`
 - The systemd worker has `WorkingDirectory=/home/daniel/prod/projections-v2`
+- The live deployment metadata must be refreshed with `uv run prefect deploy --all` after changing `prefect.yaml`
 
 The runtime stamp at the start of each run will show:
 ```
