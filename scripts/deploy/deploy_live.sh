@@ -78,6 +78,7 @@ fi
 rsync -av --delete $DRY_RUN \
     --exclude='.git' \
     --exclude='.venv' \
+    --exclude='.venv311' \
     --exclude='.venv-user' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
@@ -94,6 +95,8 @@ rsync -av --delete $DRY_RUN \
     --exclude='nohup.out' \
     --exclude='*.log' \
     --exclude='.DS_Store' \
+    --exclude='.serena' \
+    --exclude='Running' \
     "${POINTER_EXCLUDES[@]}" \
     "$DEV_REPO/" "$PROD_REPO/"
 
@@ -136,6 +139,21 @@ sync_selector "rates_current_run.json"
 echo "[deploy] Running uv sync --frozen in PROD..."
 cd "$PROD_REPO"
 /home/daniel/.local/bin/uv sync --frozen
+
+# --- Post-sync: frontend build ---
+FRONTEND_DIR="$PROD_REPO/web/minutes-dashboard"
+if [[ -f "$FRONTEND_DIR/package.json" ]]; then
+    echo "[deploy] Building frontend in PROD..."
+    cd "$FRONTEND_DIR"
+    if [[ ! -d node_modules ]]; then
+        echo "[deploy] Installing frontend deps with npm ci..."
+        npm ci
+    fi
+    npm run build
+    cd "$PROD_REPO"
+else
+    echo "[deploy] WARNING: frontend package.json not found at $FRONTEND_DIR"
+fi
 
 # --- Write deploy marker ---
 DEPLOY_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

@@ -28,12 +28,13 @@ import subprocess
 import sys
 import time
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import torch
 from prefect import flow, get_run_logger, task
 from torch.utils.data import DataLoader
@@ -41,10 +42,6 @@ from zoneinfo import ZoneInfo
 
 from projections import model_selectors, paths
 from projections.etl import storage as bronze_storage
-from projections.features.action_props import (
-    build_action_props_feature_snapshots,
-    load_rotowire_props_long_from_bronze,
-)
 from projections.names import normalize_player_name
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline.gtv2_live_features import (
@@ -61,6 +58,7 @@ from projections.pipeline.parity_manifest import (
 )
 from projections.pipeline.v3_postflight import run_postflight_gate
 from projections.pipeline.v3_preflight import run_preflight_gate
+from projections.ops.manual_availability import manual_override_report
 from projections.rotation.game_transformer_v2 import (
     GameLevelDataset,
     GameTransformerV2Config,
@@ -151,6 +149,9 @@ _REPORT_WINDOW_WAIT_INTERVAL_SECONDS = 30
 _STALE_INPUT_TOLERANCE_SECONDS = 30
 _ODDS_MATERIALITY_MAX_MINUTES_TO_TIP = 180.0
 _WORLD_CONTRACT_TOL = 1e-4
+_RETRYABLE_SUBPROCESS_EXIT_CODES = frozenset({-11, -6, 134, 139})
+_SUBPROCESS_CRASH_RETRY_ATTEMPTS = 2
+_SUBPROCESS_CRASH_RETRY_DELAY_SECONDS = 5
 
 
 def _utc_now_iso() -> str:
@@ -193,21 +194,38 @@ def _run_python_module(
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
     cmd = [_subprocess_python(), "-m", module, *args]
-    result = subprocess.run(
-        cmd,
-        cwd=str(PROJECT_ROOT),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=timeout_s,
-        check=False,
+    last_result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(1, _SUBPROCESS_CRASH_RETRY_ATTEMPTS + 1):
+        result = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+        if result.stdout:
+            print(result.stdout.rstrip())
+        if result.stderr:
+            print(result.stderr.rstrip(), file=sys.stderr)
+        if result.returncode == 0:
+            return
+        last_result = result
+        if (
+            result.returncode not in _RETRYABLE_SUBPROCESS_EXIT_CODES
+            or attempt >= _SUBPROCESS_CRASH_RETRY_ATTEMPTS
+        ):
+            break
+        print(
+            f"[subprocess-retry] {module} exited with {result.returncode}; "
+            f"retrying attempt {attempt + 1}/{_SUBPROCESS_CRASH_RETRY_ATTEMPTS}",
+            file=sys.stderr,
+        )
+        time.sleep(_SUBPROCESS_CRASH_RETRY_DELAY_SECONDS)
+    raise RuntimeError(
+        f"{module} failed with exit_code={last_result.returncode if last_result else 'unknown'}"
     )
-    if result.stdout:
-        print(result.stdout.rstrip())
-    if result.stderr:
-        print(result.stderr.rstrip(), file=sys.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(f"{module} failed with exit_code={result.returncode}")
 
 
 def _resolve_game_date(game_date: str | None) -> str:
@@ -563,6 +581,131 @@ def _latest_ts_by_game_from_teams(
     return out
 
 
+def _probe_rotowire_props_snapshot_summary(
+    *,
+    rotowire_props_root: Path,
+    game_date: pd.Timestamp,
+    data_root: Path,
+    timeout_s: int = 180,
+) -> dict[str, Any]:
+    probe_code = """
+import json
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+from projections.features.action_props import (
+    build_action_props_feature_snapshots,
+    load_rotowire_props_long_from_bronze,
+)
+
+root = Path(sys.argv[1])
+day = pd.Timestamp(sys.argv[2])
+frames = []
+for offset in (0, 1):
+    current_day = day + pd.Timedelta(days=offset)
+    long_df = load_rotowire_props_long_from_bronze(
+        rotowire_props_root=root,
+        game_date=current_day,
+    )
+    snap_df = build_action_props_feature_snapshots(long_df)
+    if not snap_df.empty:
+        frames.append(snap_df.loc[:, ["team_tricode", "action_props_as_of_ts"]].copy())
+
+if frames:
+    combined = pd.concat(frames, ignore_index=True)
+    combined["team_tricode"] = combined["team_tricode"].astype(str).str.strip().str.upper()
+    combined["action_props_as_of_ts"] = pd.to_datetime(
+        combined["action_props_as_of_ts"], utc=True, errors="coerce"
+    )
+    combined = combined.dropna(subset=["team_tricode", "action_props_as_of_ts"])
+else:
+    combined = pd.DataFrame(columns=["team_tricode", "action_props_as_of_ts"])
+
+team_latest = (
+    combined.groupby("team_tricode", sort=False)["action_props_as_of_ts"].max().to_dict()
+    if not combined.empty
+    else {}
+)
+latest = combined["action_props_as_of_ts"].max() if not combined.empty else None
+payload = {
+    "parsed_rows": int(len(combined)),
+    "latest_action_props_as_of_ts": (
+        None if latest is None or pd.isna(latest) else pd.Timestamp(latest).isoformat()
+    ),
+    "teams": sorted(team_latest.keys()),
+    "team_latest_as_of_ts": {
+        str(team): pd.Timestamp(ts).isoformat()
+        for team, ts in team_latest.items()
+        if ts is not None and not pd.isna(ts)
+    },
+}
+print(json.dumps(payload))
+""".strip()
+    env = os.environ.copy()
+    env["PROJECTIONS_DATA_ROOT"] = str(data_root)
+    cmd = [
+        _subprocess_python(),
+        "-c",
+        probe_code,
+        str(rotowire_props_root),
+        pd.Timestamp(game_date).normalize().date().isoformat(),
+    ]
+    last_error = "rotowire props probe did not run"
+    for attempt in range(1, _SUBPROCESS_CRASH_RETRY_ATTEMPTS + 1):
+        result = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+        if result.stderr:
+            print(result.stderr.rstrip(), file=sys.stderr)
+        if result.returncode == 0:
+            stdout = result.stdout.strip()
+            if not stdout:
+                return {
+                    "parsed_rows": 0,
+                    "latest_action_props_as_of_ts": None,
+                    "teams": [],
+                    "team_latest_as_of_ts": {},
+                    "parse_error": "rotowire props probe returned empty stdout",
+                }
+            try:
+                payload = json.loads(stdout)
+            except json.JSONDecodeError as exc:
+                last_error = f"rotowire props probe invalid json: {exc}"
+            else:
+                payload["parse_error"] = None
+                return payload
+        else:
+            last_error = f"rotowire props probe exited with code {result.returncode}"
+            if (
+                result.returncode in _RETRYABLE_SUBPROCESS_EXIT_CODES
+                and attempt < _SUBPROCESS_CRASH_RETRY_ATTEMPTS
+            ):
+                print(
+                    "[subprocess-retry] rotowire props probe exited with "
+                    f"{result.returncode}; retrying attempt "
+                    f"{attempt + 1}/{_SUBPROCESS_CRASH_RETRY_ATTEMPTS}",
+                    file=sys.stderr,
+                )
+                time.sleep(_SUBPROCESS_CRASH_RETRY_DELAY_SECONDS)
+                continue
+        break
+    return {
+        "parsed_rows": 0,
+        "latest_action_props_as_of_ts": None,
+        "teams": [],
+        "team_latest_as_of_ts": {},
+        "parse_error": last_error,
+    }
+
+
 def _content_digest_by_game_from_teams(
     slate_df: pd.DataFrame,
     source_df: pd.DataFrame,
@@ -747,7 +890,7 @@ def _detect_stale_authoritative_inputs(
         if not bool(current.get("is_live_game")):
             continue
         sources_out: dict[str, dict[str, str | None]] = {}
-        for source_name in ("injuries", "lineups"):
+        for source_name in ("injuries", "lineups", "manual_overrides"):
             frozen_source = dict(frozen.get("sources", {}).get(source_name, {}))
             current_source = dict(current.get("sources", {}).get(source_name, {}))
             frozen_ts = pd.to_datetime(
@@ -827,6 +970,9 @@ def _compute_per_game_input_digests(
                 "source_used": dict(sources.get("props", {})).get("source_used"),
             },
             "roster": _source_digest_payload(dict(sources.get("roster", {}))),
+            "manual_overrides": _source_digest_payload(
+                dict(sources.get("manual_overrides", {}))
+            ),
         }
         digests[str(game_id)] = {
             "digest_sha256": _stable_digest(digest_payload),
@@ -1039,7 +1185,14 @@ def _build_input_change_set(
         previous_payload = dict(previous.get("payload", {}))
         changed_sources: list[str] = []
         source_deltas: dict[str, dict[str, Any]] = {}
-        for source_name in ("injuries", "lineups", "odds", "props", "roster"):
+        for source_name in (
+            "injuries",
+            "lineups",
+            "odds",
+            "props",
+            "roster",
+            "manual_overrides",
+        ):
             current_source = dict(current_payload.get(source_name, {}))
             previous_source = dict(previous_payload.get(source_name, {}))
             current_digest = current_source.get("content_digest")
@@ -1275,6 +1428,232 @@ def _sort_for_stable_write(df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values(preferred, kind="stable").reset_index(drop=True)
 
 
+def _stream_validate_parquet(
+    path: Path,
+    *,
+    expected_rows: int | None = None,
+    required_cols: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    try:
+        parquet_file = pq.ParquetFile(path)
+    except Exception as exc:
+        raise RuntimeError(f"failed to open parquet for validation: {path}") from exc
+
+    columns = tuple(str(name) for name in parquet_file.schema_arrow.names)
+    missing = [col for col in required_cols if col not in columns]
+    if missing:
+        raise RuntimeError(
+            f"validated parquet missing required columns {missing}: {path}"
+        )
+
+    row_count = 0
+    try:
+        for batch in parquet_file.iter_batches(batch_size=65536):
+            row_count += int(batch.num_rows)
+    except Exception as exc:
+        raise RuntimeError(f"failed to stream-validate parquet contents: {path}") from exc
+
+    if expected_rows is not None and row_count != int(expected_rows):
+        raise RuntimeError(
+            f"validated parquet row count mismatch for {path}: "
+            f"expected={expected_rows} actual={row_count}"
+        )
+
+    return {
+        "path": str(path),
+        "rows": int(row_count),
+        "columns": list(columns),
+    }
+
+
+def _atomic_write_validated_parquet(
+    df: pd.DataFrame,
+    path: Path,
+    *,
+    required_cols: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(
+        f".tmp.{control_plane.canonical_run_id()}.{os.getpid()}.parquet"
+    )
+    try:
+        df.to_parquet(tmp, index=False)
+        validation = _stream_validate_parquet(
+            tmp,
+            expected_rows=int(len(df)),
+            required_cols=required_cols,
+        )
+        tmp.replace(path)
+        return validation
+    except Exception:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _distinct_game_count(df: pd.DataFrame) -> int:
+    if "game_id" not in df.columns:
+        return 0
+    gids = pd.to_numeric(df["game_id"], errors="coerce")
+    return int(gids.dropna().nunique())
+
+
+def _sanitize_frame_to_expected_keys(
+    df: pd.DataFrame,
+    *,
+    expected_keys_df: pd.DataFrame,
+    key_cols: Sequence[str],
+    label: str,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    key_cols = tuple(str(col) for col in key_cols)
+    if df.empty:
+        return (
+            df.copy(),
+            {
+                "label": str(label),
+                "rows_in": 0,
+                "rows_out": 0,
+                "dropped_null_key_rows": 0,
+                "dropped_unexpected_key_rows": 0,
+                "expected_distinct_keys": 0,
+            },
+        )
+
+    missing_df = [col for col in key_cols if col not in df.columns]
+    if missing_df:
+        raise RuntimeError(f"{label} missing required key columns: {missing_df}")
+    missing_expected = [col for col in key_cols if col not in expected_keys_df.columns]
+    if missing_expected:
+        raise RuntimeError(
+            f"{label} expected-keys frame missing required columns: {missing_expected}"
+        )
+
+    work = df.copy()
+    expected = expected_keys_df.loc[:, list(key_cols)].copy()
+    for col in key_cols:
+        work[col] = pd.to_numeric(work[col], errors="coerce").astype("Int64")
+        expected[col] = pd.to_numeric(expected[col], errors="coerce").astype("Int64")
+
+    rows_in = int(len(work))
+    null_mask = work.loc[:, list(key_cols)].isna().any(axis=1)
+    dropped_null_key_rows = int(null_mask.sum())
+    if dropped_null_key_rows:
+        work = work.loc[~null_mask].copy()
+
+    expected = (
+        expected.dropna(subset=list(key_cols))
+        .drop_duplicates(ignore_index=True)
+        .reset_index(drop=True)
+    )
+    expected_distinct_keys = int(len(expected))
+
+    if expected.empty:
+        return (
+            work.iloc[0:0].copy(),
+            {
+                "label": str(label),
+                "rows_in": rows_in,
+                "rows_out": 0,
+                "dropped_null_key_rows": dropped_null_key_rows,
+                "dropped_unexpected_key_rows": int(len(work)),
+                "expected_distinct_keys": 0,
+            },
+        )
+
+    work["_row_order"] = np.arange(len(work), dtype=np.int64)
+    merged = work.merge(
+        expected.assign(_expected_key=1),
+        on=list(key_cols),
+        how="inner",
+        sort=False,
+    )
+    dropped_unexpected_key_rows = int(len(work) - len(merged))
+    merged = (
+        merged.sort_values("_row_order", kind="stable")
+        .drop(columns=["_row_order", "_expected_key"], errors="ignore")
+        .reset_index(drop=True)
+    )
+    for col in key_cols:
+        merged[col] = pd.to_numeric(merged[col], errors="raise").astype("int64")
+
+    return (
+        merged,
+        {
+            "label": str(label),
+            "rows_in": rows_in,
+            "rows_out": int(len(merged)),
+            "dropped_null_key_rows": dropped_null_key_rows,
+            "dropped_unexpected_key_rows": dropped_unexpected_key_rows,
+            "expected_distinct_keys": expected_distinct_keys,
+        },
+    )
+
+
+def _validate_parquet_key_contract(
+    path: Path,
+    *,
+    expected_keys_df: pd.DataFrame,
+    key_cols: Sequence[str],
+    label: str,
+) -> dict[str, Any]:
+    key_cols = tuple(str(col) for col in key_cols)
+    df = pd.read_parquet(path, columns=list(key_cols))
+    _, report = _sanitize_frame_to_expected_keys(
+        df,
+        expected_keys_df=expected_keys_df,
+        key_cols=key_cols,
+        label=label,
+    )
+    if report["dropped_null_key_rows"] > 0 or report["dropped_unexpected_key_rows"] > 0:
+        raise RuntimeError(
+            f"{label} key contract failed for {path}: "
+            f"null_key_rows={report['dropped_null_key_rows']} "
+            f"unexpected_key_rows={report['dropped_unexpected_key_rows']}"
+        )
+    report["path"] = str(path)
+    return report
+
+
+def _load_fallback_merge_baseline(
+    *,
+    current_path: Path,
+    failed_previous_path: Path,
+) -> tuple[pd.DataFrame, Path] | None:
+    dataset_dir = current_path.parent.parent
+    current_run_dir = current_path.parent.name
+    filename = current_path.name
+    candidates: list[tuple[int, str, Path]] = []
+
+    for run_dir in sorted(dataset_dir.glob("run=*"), reverse=True):
+        if not run_dir.is_dir() or run_dir.name >= current_run_dir:
+            continue
+        candidate_path = run_dir / filename
+        if candidate_path == failed_previous_path or not candidate_path.exists():
+            continue
+        try:
+            probe = pd.read_parquet(candidate_path, columns=["game_id"])
+        except Exception:
+            continue
+        candidates.append((_distinct_game_count(probe), run_dir.name, candidate_path))
+
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    for game_count, _, candidate_path in candidates:
+        try:
+            fallback_df = pd.read_parquet(candidate_path)
+        except Exception:
+            continue
+        print(
+            "[materialize] promoted baseline unreadable; "
+            f"falling back from {failed_previous_path} to {candidate_path} "
+            f"(distinct_games={game_count})"
+        )
+        return fallback_df, candidate_path
+    return None
+
+
 def _merge_parquet_for_target_games(
     *,
     current_path: Path,
@@ -1287,7 +1666,16 @@ def _merge_parquet_for_target_games(
     if previous_path is None or not previous_path.exists():
         merged = current_df
     else:
-        previous_df = pd.read_parquet(previous_path)
+        try:
+            previous_df = pd.read_parquet(previous_path)
+        except Exception:
+            fallback = _load_fallback_merge_baseline(
+                current_path=current_path,
+                failed_previous_path=previous_path,
+            )
+            if fallback is None:
+                raise
+            previous_df, previous_path = fallback
         previous_keep = previous_df
         if "game_id" in previous_df.columns and target_game_ids:
             gids = pd.to_numeric(previous_df["game_id"], errors="coerce").astype(
@@ -1296,15 +1684,25 @@ def _merge_parquet_for_target_games(
             previous_keep = previous_df.loc[~gids.isin(target_game_ids)].copy()
         merged = pd.concat([previous_keep, current_df], ignore_index=True, sort=False)
     merged = _sort_for_stable_write(merged)
-    current_path.parent.mkdir(parents=True, exist_ok=True)
-    merged.to_parquet(current_path, index=False)
+    required_cols = (
+        ("game_id", "team_id", "player_id")
+        if {"game_id", "team_id", "player_id"}.issubset(merged.columns)
+        else tuple()
+    )
+    _atomic_write_validated_parquet(
+        merged,
+        current_path,
+        required_cols=required_cols,
+    )
     return merged
 
 
-def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, int]:
+def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, Any]:
     if worlds_df.empty:
         return {
             "team_minutes_not_240": 0,
+            "team_minutes_total_checks": 0,
+            "team_minutes_max_abs_drift": 0.0,
             "minutes_negative": 0,
             "minutes_over_48": 0,
             "negative_stats": 0,
@@ -1343,11 +1741,16 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
             .sum()
             .reset_index()
         )
+        team_minute_delta = team_minutes["minutes"].sub(240.0).abs()
         team_minutes_not_240 = int(
-            (team_minutes["minutes"].sub(240.0).abs() > _WORLD_CONTRACT_TOL).sum()
+            (team_minute_delta > _WORLD_CONTRACT_TOL).sum()
         )
+        team_minutes_total_checks = int(len(team_minutes))
+        team_minutes_max_abs_drift = float(team_minute_delta.max()) if not team_minutes.empty else 0.0
     else:
         team_minutes_not_240 = 0
+        team_minutes_total_checks = 0
+        team_minutes_max_abs_drift = 0.0
     negative_stats = 0
     for col in ("pts", "reb", "ast", "stl", "blk", "tov"):
         if col in df.columns:
@@ -1394,6 +1797,8 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
         inactive_nonzero_fpts_proxy = 0
     return {
         "team_minutes_not_240": team_minutes_not_240,
+        "team_minutes_total_checks": team_minutes_total_checks,
+        "team_minutes_max_abs_drift": team_minutes_max_abs_drift,
         "minutes_negative": int(
             (df.get("minutes", pd.Series(dtype=float)) < -_WORLD_CONTRACT_TOL).sum()
         ),
@@ -1651,30 +2056,20 @@ def _build_feature_input_checklist(
     ) + sorted(
         (rotowire_props_root / f"game_date={action_props_next_day}").glob("*.parquet")
     )
-    rotowire_snapshots = pd.DataFrame()
-    rotowire_parse_error: str | None = None
+    rotowire_props_summary = {
+        "parsed_rows": 0,
+        "latest_action_props_as_of_ts": None,
+        "teams": [],
+        "team_latest_as_of_ts": {},
+        "parse_error": None,
+    }
     if rotowire_props_root.exists():
-        try:
-            rw_day_long = load_rotowire_props_long_from_bronze(
-                rotowire_props_root=rotowire_props_root,
-                game_date=day,
-            )
-            rw_next_long = load_rotowire_props_long_from_bronze(
-                rotowire_props_root=rotowire_props_root,
-                game_date=day + pd.Timedelta(days=1),
-            )
-            rw_day_snap = build_action_props_feature_snapshots(rw_day_long)
-            rw_next_snap = build_action_props_feature_snapshots(rw_next_long)
-            rw_frames = [
-                df
-                for df in (rw_day_snap, rw_next_snap)
-                if isinstance(df, pd.DataFrame) and not df.empty
-            ]
-            rotowire_snapshots = (
-                pd.concat(rw_frames, ignore_index=True) if rw_frames else pd.DataFrame()
-            )
-        except Exception as exc:  # noqa: BLE001
-            rotowire_parse_error = str(exc)
+        rotowire_props_summary = _probe_rotowire_props_snapshot_summary(
+            rotowire_props_root=rotowire_props_root,
+            game_date=day,
+            data_root=data_root,
+        )
+    rotowire_parse_error = rotowire_props_summary.get("parse_error")
 
     checks.append(
         {
@@ -1693,35 +2088,42 @@ def _build_feature_input_checklist(
             },
         }
     )
-    latest_rotowire_props_ts = _latest_ts(
-        rotowire_snapshots, time_col="action_props_as_of_ts"
+    latest_rotowire_props_ts = pd.to_datetime(
+        rotowire_props_summary.get("latest_action_props_as_of_ts"),
+        utc=True,
+        errors="coerce",
     )
     checks.append(
         {
             "name": "rotowire_props_parsed_snapshots",
             "required": False,
-            "ok": bool(not rotowire_snapshots.empty and rotowire_parse_error is None),
+            "ok": bool(
+                int(rotowire_props_summary.get("parsed_rows", 0)) > 0
+                and rotowire_parse_error is None
+            ),
             "details": {
-                "parsed_rows": int(len(rotowire_snapshots)),
+                "parsed_rows": int(rotowire_props_summary.get("parsed_rows", 0)),
                 "latest_action_props_as_of_ts": None
-                if latest_rotowire_props_ts is None
+                if pd.isna(latest_rotowire_props_ts)
                 else latest_rotowire_props_ts.isoformat(),
                 "parse_error": rotowire_parse_error,
             },
         }
     )
-    rotowire_props_teams = (
+    rotowire_props_teams = {
+        _normalize_props_team_abbr(team)
+        for team in rotowire_props_summary.get("teams", [])
+        if str(team).strip()
+    }
+    rotowire_props_team_latest = pd.DataFrame(
         {
-            _normalize_props_team_abbr(team)
-            for team in rotowire_snapshots.get(
-                "team_tricode", pd.Series(dtype="object")
-            )
-            .dropna()
-            .tolist()
-            if str(team).strip()
+            "team_tricode": list(
+                (rotowire_props_summary.get("team_latest_as_of_ts") or {}).keys()
+            ),
+            "action_props_as_of_ts": list(
+                (rotowire_props_summary.get("team_latest_as_of_ts") or {}).values()
+            ),
         }
-        if not rotowire_snapshots.empty
-        else set()
     )
     rotowire_props_team_overlap = rotowire_props_teams.intersection(
         expected_props_teams
@@ -1744,7 +2146,7 @@ def _build_feature_input_checklist(
         }
     )
     rotowire_ok = bool(
-        not rotowire_snapshots.empty
+        int(rotowire_props_summary.get("parsed_rows", 0)) > 0
         and rotowire_parse_error is None
         and rotowire_overlap_ok
     )
@@ -1853,6 +2255,11 @@ def _build_feature_input_checklist(
     )
 
     selected_props_source = "rotowire" if rotowire_ok else "none"
+    manual_override_summary = manual_override_report(
+        date.fromisoformat(game_date),
+        data_root=data_root,
+        as_of_ts=run_ts,
+    )
     schedule_tip_by_game = _latest_ts_by_game(slate_df, time_col="tip_ts")
     odds_latest_by_game = _latest_ts_by_game(odds_slate, time_col="as_of_ts")
     roster_latest_by_game = _latest_ts_by_game(roster_slate, time_col="as_of_ts")
@@ -1914,7 +2321,7 @@ def _build_feature_input_checklist(
     )
     rotowire_props_latest_by_game = _latest_ts_by_game_from_teams(
         slate_df,
-        rotowire_snapshots,
+        rotowire_props_team_latest,
         time_col="action_props_as_of_ts",
     )
     per_game_freshness: dict[str, dict[str, Any]] = {}
@@ -1993,6 +2400,15 @@ def _build_feature_input_checklist(
                     "age_minutes": _age_minutes(run_ts, props_latest),
                     "rotowire_latest_as_of_ts": _ts_to_iso(rotowire_props_ts),
                 },
+                "manual_overrides": dict(
+                    manual_override_summary.get("per_game", {}).get(str(int(gid)), {})
+                )
+                or {
+                    "source_used": "none",
+                    "latest_as_of_ts": None,
+                    "content_digest": None,
+                    "active_override_count": 0,
+                },
             },
         }
     report_window = _report_window_status(
@@ -2011,6 +2427,13 @@ def _build_feature_input_checklist(
                 )
             ),
             "selected_props_source": selected_props_source,
+            "manual_override_count": int(
+                manual_override_summary.get("active_override_count", 0)
+            ),
+            "manual_override_games": list(
+                manual_override_summary.get("affected_game_ids", [])
+            ),
+            "manual_override_digest": manual_override_summary.get("override_digest"),
         },
         "per_game": per_game_freshness,
     }
@@ -2201,7 +2624,11 @@ def score_ownership_linestar_task(
         placeholder_df["pred_own_pct"] = 0.05
         placeholder_df["source"] = "linestar"
         placeholder_df["model_run"] = "linestar_placeholder"
-        placeholder_df.to_parquet(out_dir / "123.parquet", index=False)
+        _atomic_write_validated_parquet(
+            placeholder_df,
+            out_dir / "123.parquet",
+            required_cols=("player_id",),
+        )
         (out_dir / "slates.json").write_text(
             json.dumps(
                 {
@@ -2315,7 +2742,11 @@ def build_features_gtv2_live_task(
             game_date=game_date, as_of_ts=run_as_of_ts
         )
         features_df = _filter_to_target_games(features_df, target_game_ids)
-        features_df.to_parquet(out_path, index=False)
+        _atomic_write_validated_parquet(
+            features_df,
+            out_path,
+            required_cols=("game_id", "team_id", "player_id"),
+        )
 
         transform_manifest = {
             "feature_builder": "placeholder_gtv2_live_v1",
@@ -2457,7 +2888,11 @@ def build_features_gtv2_live_task(
             )
 
         features_df = _coerce_frame_to_manifest_schema(built.features, parity_payload)
-        features_df.to_parquet(out_path, index=False)
+        _atomic_write_validated_parquet(
+            features_df,
+            out_path,
+            required_cols=("game_id", "team_id", "player_id"),
+        )
 
         integrity_src = dict(parity_payload.get("integrity", {}))
         integrity = {
@@ -2559,7 +2994,11 @@ def score_gtv2_live_task(
         scores["dk_rate"] = (
             pd.to_numeric(features["usage_prior"], errors="coerce").fillna(0.0) * 100.0
         )
-        scores.to_parquet(out_path, index=False)
+        _atomic_write_validated_parquet(
+            scores,
+            out_path,
+            required_cols=("game_date", "game_id", "team_id", "player_id"),
+        )
         summary_path.write_text(
             json.dumps(
                 {
@@ -2652,7 +3091,11 @@ def score_gtv2_live_task(
     scores = scores.sort_values(
         ["game_date", "game_id", "team_id", "player_id"]
     ).reset_index(drop=True)
-    scores.to_parquet(out_path, index=False)
+    _atomic_write_validated_parquet(
+        scores,
+        out_path,
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
     summary_path.write_text(
         json.dumps(
             {
@@ -2720,11 +3163,21 @@ def generate_worlds_gtv2_live_task(
         projections["n_worlds"] = int(sim_worlds)
         projections["sim_profile"] = "game_transformer_v2"
         projections = projections[PLACEHOLDER_PROJECTION_COLUMNS]
-        projections.to_parquet(projections_path, index=False)
-        pd.DataFrame(columns=["world_idx"]).to_parquet(worlds_path, index=False)
+        _atomic_write_validated_parquet(
+            projections,
+            projections_path,
+            required_cols=("game_date", "game_id", "team_id", "player_id"),
+        )
+        _atomic_write_validated_parquet(
+            pd.DataFrame(columns=["world_idx"]),
+            worlds_path,
+            required_cols=("world_idx",),
+        )
         contract_summary = {
             "contract_checks": {
                 "team_minutes_not_240": 0,
+                "team_minutes_total_checks": 0,
+                "team_minutes_max_abs_drift": 0.0,
                 "minutes_negative": 0,
                 "minutes_over_48": 0,
                 "negative_stats": 0,
@@ -2799,20 +3252,56 @@ def generate_worlds_gtv2_live_task(
         )
         if worlds_df.empty:
             raise RuntimeError("GTV2 worlds generation produced zero rows")
-        worlds_df.to_parquet(worlds_path, index=False)
+        worlds_df, world_key_report = _sanitize_frame_to_expected_keys(
+            worlds_df,
+            expected_keys_df=features_df,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="generated worlds",
+        )
+        if worlds_df.empty:
+            raise RuntimeError("GTV2 worlds generation produced zero valid rows after key sanitization")
+        if (
+            world_key_report["dropped_null_key_rows"] > 0
+            or world_key_report["dropped_unexpected_key_rows"] > 0
+        ):
+            logger.warning(
+                "Dropped invalid world rows before publish: %s",
+                world_key_report,
+            )
+        _atomic_write_validated_parquet(
+            worlds_df,
+            worlds_path,
+            required_cols=("world_idx", "game_id", "team_id", "player_id"),
+        )
 
         projections = summarize_worlds_to_projections(
             worlds_df,
             sim_profile="game_transformer_v2",
         )
-        projections.to_parquet(projections_path, index=False)
+        projections, projection_key_report = _sanitize_frame_to_expected_keys(
+            projections,
+            expected_keys_df=features_df,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="generated world projections",
+        )
+        _atomic_write_validated_parquet(
+            projections,
+            projections_path,
+            required_cols=("game_date", "game_id", "team_id", "player_id"),
+        )
+        contract_checks = dict(contract_counter)
+        contract_checks.update(_summarize_world_contracts_from_frame(worlds_df))
         contract_summary = {
-            "contract_checks": dict(contract_counter),
+            "contract_checks": contract_checks,
             "placeholder_mode": False,
             "world_rows": int(len(worlds_df)),
             "projection_rows": int(len(projections)),
             "bundle_dir": str(bundle_dir),
             "device": str(device),
+            "key_sanitization": {
+                "worlds": world_key_report,
+                "projections": projection_key_report,
+            },
             "make_model": {
                 "mode": str(make_model_cfg.mode),
                 "use_learned_efficiency": bool(make_model_cfg.use_learned_efficiency),
@@ -2993,7 +3482,11 @@ def finalize_projections_live_task(
             .round(2)
         )
 
-    df.to_parquet(out_path, index=False)
+    _atomic_write_validated_parquet(
+        df,
+        out_path,
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
     return out_dir
 
 
@@ -3050,10 +3543,66 @@ def materialize_unified_run_artifacts_task(
         target_game_ids=target_ids,
     )
 
+    expected_feature_keys = merged_features.loc[:, ["game_id", "team_id", "player_id"]]
+
+    merged_scores, score_key_report = _sanitize_frame_to_expected_keys(
+        merged_scores,
+        expected_keys_df=expected_feature_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="merged scores",
+    )
+    _atomic_write_validated_parquet(
+        merged_scores,
+        scores_dir / f"run={run_id}" / "scores.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+
+    merged_worlds, world_key_report = _sanitize_frame_to_expected_keys(
+        merged_worlds,
+        expected_keys_df=expected_feature_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="merged worlds",
+    )
+    _atomic_write_validated_parquet(
+        merged_worlds,
+        worlds_dir / f"run={run_id}" / "worlds.parquet",
+        required_cols=("world_idx", "game_id", "team_id", "player_id"),
+    )
+
+    merged_world_projections, world_projection_key_report = _sanitize_frame_to_expected_keys(
+        merged_world_projections,
+        expected_keys_df=expected_feature_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="merged world projections",
+    )
+    _atomic_write_validated_parquet(
+        merged_world_projections,
+        worlds_dir / f"run={run_id}" / "projections.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+
+    merged_final, final_projection_key_report = _sanitize_frame_to_expected_keys(
+        merged_final,
+        expected_keys_df=expected_feature_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="merged unified projections",
+    )
+    _atomic_write_validated_parquet(
+        merged_final,
+        projections_dir / f"run={run_id}" / "projections.parquet",
+        required_cols=("game_date", "game_id", "team_id", "player_id"),
+    )
+
     world_summary_path = worlds_dir / f"run={run_id}" / "world_contracts_summary.json"
     world_summary_payload = {
         "contract_checks": _summarize_world_contracts_from_frame(merged_worlds),
         "merged_from_previous": True,
+        "key_sanitization": {
+            "scores": score_key_report,
+            "worlds": world_key_report,
+            "world_projections": world_projection_key_report,
+            "unified_projections": final_projection_key_report,
+        },
         "target_game_ids": target_ids,
         "rows": int(len(merged_worlds)),
         "projection_rows": int(len(merged_world_projections)),
@@ -3072,6 +3621,97 @@ def materialize_unified_run_artifacts_task(
         "projection_rows": int(len(merged_final)),
         "world_contract_summary_path": str(world_summary_path),
     }
+
+
+def _validate_publishable_run_artifacts(
+    *,
+    game_date: str,
+    run_id: str,
+    data_root: Path,
+) -> dict[str, Any]:
+    stage_reports: dict[str, Any] = {}
+    single_file_targets = {
+        "features_gtv2_v1": (
+            data_root / "live" / FEATURES_ROOT / game_date / f"run={run_id}" / "features.parquet",
+            ("game_id", "team_id", "player_id"),
+        ),
+        "scores_gtv2": (
+            data_root / "artifacts" / SCORES_ROOT / f"game_date={game_date}" / f"run={run_id}" / "scores.parquet",
+            ("game_date", "game_id", "team_id", "player_id"),
+        ),
+        "worlds_gtv2/worlds": (
+            data_root / "artifacts" / WORLDS_ROOT / f"game_date={game_date}" / f"run={run_id}" / "worlds.parquet",
+            ("world_idx",),
+        ),
+        "worlds_gtv2/projections": (
+            data_root / "artifacts" / WORLDS_ROOT / f"game_date={game_date}" / f"run={run_id}" / "projections.parquet",
+            ("game_date", "game_id", "team_id", "player_id"),
+        ),
+        "unified_projections": (
+            data_root / "artifacts" / "projections" / game_date / f"run={run_id}" / "projections.parquet",
+            ("game_date", "game_id", "team_id", "player_id"),
+        ),
+    }
+    for stage, (path, required_cols) in single_file_targets.items():
+        if not path.exists():
+            raise RuntimeError(f"publish validation missing required parquet: {path}")
+        stage_reports[stage] = _stream_validate_parquet(
+            path,
+            required_cols=required_cols,
+        )
+
+    feature_keys = pd.read_parquet(
+        single_file_targets["features_gtv2_v1"][0],
+        columns=["game_id", "team_id", "player_id"],
+    )
+    stage_reports["semantic_key_contracts"] = {
+        "scores_gtv2": _validate_parquet_key_contract(
+            single_file_targets["scores_gtv2"][0],
+            expected_keys_df=feature_keys,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="scores_gtv2",
+        ),
+        "worlds_gtv2/worlds": _validate_parquet_key_contract(
+            single_file_targets["worlds_gtv2/worlds"][0],
+            expected_keys_df=feature_keys,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="worlds_gtv2/worlds",
+        ),
+        "worlds_gtv2/projections": _validate_parquet_key_contract(
+            single_file_targets["worlds_gtv2/projections"][0],
+            expected_keys_df=feature_keys,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="worlds_gtv2/projections",
+        ),
+        "unified_projections": _validate_parquet_key_contract(
+            single_file_targets["unified_projections"][0],
+            expected_keys_df=feature_keys,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="unified_projections",
+        ),
+    }
+
+    ownership_dir = (
+        data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}"
+    )
+    ownership_files = sorted(
+        path for path in ownership_dir.glob("*.parquet") if path.is_file()
+    )
+    if not ownership_files:
+        raise RuntimeError(
+            f"publish validation found no ownership parquet files under {ownership_dir}"
+        )
+    ownership_reports = []
+    for path in ownership_files:
+        ownership_reports.append(
+            _stream_validate_parquet(path, required_cols=("player_id",))
+        )
+    stage_reports["ownership_predictions"] = {
+        "dir": str(ownership_dir),
+        "file_count": int(len(ownership_reports)),
+        "files": ownership_reports,
+    }
+    return stage_reports
 
 
 @task(name="v3-postflight", retries=0)
@@ -3102,6 +3742,16 @@ def publish_atomic_task(
     freshness_summary = dict(
         manifest_payload.get("source_freshness", {}).get("summary", {})
     )
+    validation_report = _validate_publishable_run_artifacts(
+        game_date=game_date,
+        run_id=run_id,
+        data_root=data_root,
+    )
+    manifest_payload["publish_validation"] = {
+        "validated_at": _utc_now_iso(),
+        "stages": validation_report,
+    }
+    control_plane.atomic_write_json(Path(manifest_path), manifest_payload)
     pointers: dict[str, str] = {}
     targets = {
         "features_gtv2_v1": data_root / "live" / FEATURES_ROOT / game_date,

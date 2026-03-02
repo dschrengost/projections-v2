@@ -44,6 +44,22 @@ uv run python tools/prefect_apply_deployment_overrides.py
 uv run prefect deployment ls
 ```
 
+### Source Repo vs PROD Checkout
+
+The control-plane workflow has one intended source of truth and one intended runtime copy:
+
+1. Edit, test, and commit in `/home/daniel/projects/projections-v2`.
+2. Deploy with [`scripts/deploy/deploy_live.sh`](/home/daniel/projects/projections-v2/scripts/deploy/deploy_live.sh), which rsyncs DEV to `/home/daniel/prod/projections-v2`, runs `uv sync --frozen`, rebuilds the frontend, and writes `.deploy_info`.
+3. Publish Prefect deployment metadata from DEV with `uv run prefect deploy --all`, but keep `prefect.yaml` pointed at `/home/daniel/prod/projections-v2`.
+4. Run the worker from PROD. The worker systemd unit and the Prefect deployment working directory must both resolve to `/home/daniel/prod/projections-v2`.
+
+Rules:
+
+- Do not edit `/home/daniel/prod/projections-v2` directly.
+- Do not point Prefect `pull_steps.set_working_directory` at `/home/daniel/projects/projections-v2` for live runs.
+- If runtime stamp paths show DEV during a live run, the deployment metadata is wrong and should be refreshed with `uv run prefect deploy --all`.
+- If the prod checkout is stale, rerun `./scripts/deploy/deploy_live.sh` before restarting the worker.
+
 ### Flow Schedules
 
 | Flow | Schedule | Purpose |

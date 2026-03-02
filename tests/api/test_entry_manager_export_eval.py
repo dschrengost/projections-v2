@@ -198,6 +198,77 @@ def test_entry_manager_export_filters_selected_entries(tmp_path: Path, monkeypat
     assert manifest["lineup_count"] == 1
 
 
+def test_entry_manager_export_preserves_uploaded_dk_header(tmp_path: Path, monkeypatch) -> None:
+    data_root = tmp_path / "data_root"
+
+    def fake_data_path(*parts: Any) -> Path:
+        return data_root.joinpath(*parts)
+
+    monkeypatch.setattr(paths, "data_path", fake_data_path)
+
+    def fake_popen(*_args, **_kwargs):
+        class DummyProc:
+            pass
+
+        return DummyProc()
+
+    import projections.api.entry_manager_api as entry_manager_api
+
+    monkeypatch.setattr(entry_manager_api.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(entry_manager_api, "_safe_git_sha", lambda: "deadbeef")
+    monkeypatch.setattr(entry_manager_api, "_resolve_latest_sim_v2_worlds", lambda **_: {})
+
+    game_date = "2026-01-12"
+    contest_id = "333"
+    dg = 888
+    uploaded_header = [
+        "Entry ID", "Contest Name", "Contest ID", "Entry Fee",
+        "PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "", "Instructions",
+    ]
+
+    entry_state = EntryFileState(
+        game_date=game_date,
+        draft_group_id=dg,
+        site="dk",
+        contest_id=contest_id,
+        contest_name="Contest",
+        entry_fee="1",
+        created_at="t",
+        updated_at="t",
+        client_revision=1,
+        header=uploaded_header,
+        entries=[
+            {
+                "entry_id": "e1",
+                "entry_key": "e1",
+                "contest_id": contest_id,
+                "contest_name": "Contest",
+                "entry_fee": "1",
+                "PG": "A (1)",
+                "SG": "B (2)",
+                "SF": "C (3)",
+                "PF": "D (4)",
+                "C": "E (5)",
+                "G": "F (6)",
+                "F": "G (7)",
+                "UTIL": "H (8)",
+            }
+        ],
+    )
+
+    entry_path = fake_data_path("entries") / game_date / "dk" / f"{contest_id}.json"
+    entry_path.parent.mkdir(parents=True, exist_ok=True)
+    entry_path.write_text(entry_state.model_dump_json(indent=2), encoding="utf-8")
+
+    app = create_app(daily_root=tmp_path, dashboard_dist=tmp_path, fpts_root=tmp_path)
+    client = TestClient(app)
+
+    resp = client.post(f"/api/entry-manager/entries/{contest_id}/export", params={"date": game_date})
+    assert resp.status_code == 200
+    header = resp.text.splitlines()[0]
+    assert header == ",".join(uploaded_header)
+
+
 def test_entry_manager_batch_export_combines_multiple_contests(tmp_path: Path, monkeypatch) -> None:
     data_root = tmp_path / "data_root"
 

@@ -1342,11 +1342,25 @@ tbody tr:hover {
   overflow-y: auto;
 }
 
+.game-filter-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #1e293b;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.game-filter-card.excluded {
+  opacity: 0.55;
+}
+
 .game-filter-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.25rem 0.5rem;
+  padding: 0;
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s;
@@ -1360,6 +1374,34 @@ tbody tr:hover {
 .game-filter-item.excluded {
   opacity: 0.5;
   text-decoration: line-through;
+}
+
+.team-filter-row {
+  display: flex;
+  gap: 0.4rem;
+  padding-left: 1.35rem;
+}
+
+.team-filter-chip {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.team-filter-chip:hover {
+  border-color: #64748b;
+  color: #f8fafc;
+}
+
+.team-filter-chip.excluded {
+  border-color: #b45309;
+  background: rgba(180, 83, 9, 0.16);
+  color: #fdba74;
 }
 
 .game-filter-item input[type="checkbox"] {
@@ -1601,19 +1643,21 @@ tbody tr:hover {
 }
 
 .saved-builds-list {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.6rem;
 }
 
 .saved-build-card {
   display: flex;
-  align-items: center;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 0.75rem;
-  background: #0f172a;
+  background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
   border: 1px solid #334155;
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  min-height: 76px;
 }
 
 .saved-build-card.selected {
@@ -1623,8 +1667,9 @@ tbody tr:hover {
 
 .saved-build-info {
   display: flex;
-  gap: 0.5rem;
-  align-items: center;
+  gap: 0.35rem;
+  align-items: flex-start;
+  flex-direction: column;
   font-size: 0.8rem;
 }
 
@@ -2658,6 +2703,19 @@ tbody tr:hover {
   height: fit-content;
 }
 
+.sim-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.lineup-cards-container {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(15, 23, 42, 0.72) 100%);
+  border: 1px solid #334155;
+  border-radius: 14px;
+  padding: 1rem;
+}
+
 .contest-sim-sidebar h2 {
   margin: 0 0 1.5rem 0;
   font-size: 1.1rem;
@@ -2684,6 +2742,22 @@ tbody tr:hover {
   background: #0f172a;
   color: #f8fafc;
   font-size: 0.9rem;
+}
+
+.controls select,
+.controls input,
+.sim-setting select,
+.sim-setting input {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.controls select:focus,
+.controls input:focus,
+.sim-setting select:focus,
+.sim-setting input:focus {
+  outline: none;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.14);
 }
 
 .sim-setting .hint {
@@ -3161,6 +3235,118 @@ tbody tr:hover {
 
 .contest-sim-finalset-banner .warning {
   color: #fca5a5;
+}
+
+.lineup-cards-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding: 0.85rem 0.9rem;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.92) 100%);
+  border: 1px solid #334155;
+  border-radius: 12px;
+}
+
+.toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 38px;
+}
+
+.toolbar-group label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.toolbar-divider {
+  width: 1px;
+  align-self: stretch;
+  background: linear-gradient(180deg, rgba(51, 65, 85, 0) 0%, rgba(51, 65, 85, 1) 18%, rgba(51, 65, 85, 1) 82%, rgba(51, 65, 85, 0) 100%);
+}
+
+.contest-sim-select,
+.contest-sim-input {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.86rem;
+  line-height: 1.2;
+}
+
+.contest-sim-select:focus,
+.contest-sim-input:focus {
+  outline: none;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.14);
+}
+
+.contest-sim-input-sm {
+  width: 72px;
+}
+
+.contest-sim-input-md {
+  width: 96px;
+}
+
+.contest-sim-btn {
+  border-radius: 8px;
+  border: 1px solid #334155;
+  padding: 0.42rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+}
+
+.contest-sim-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.contest-sim-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.contest-sim-btn-ghost {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.contest-sim-btn-ghost:hover:not(:disabled) {
+  border-color: #60a5fa;
+  color: #dbeafe;
+}
+
+.contest-sim-btn-primary {
+  background: linear-gradient(180deg, #1d4ed8 0%, #1e40af 100%);
+  border-color: #3b82f6;
+  color: #eff6ff;
+}
+
+.contest-sim-btn-primary:hover:not(:disabled) {
+  border-color: #93c5fd;
+}
+
+.contest-sim-btn-secondary {
+  background: linear-gradient(180deg, #1e3a5f 0%, #172554 100%);
+  border-color: #334155;
+  color: #cbd5e1;
+}
+
+.toolbar-metric {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .contest-sim-editor-backdrop {
@@ -3748,6 +3934,28 @@ th.override-col {
   cursor: pointer;
 }
 
+.exposure-scope-toggle {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.exposure-scope-btn {
+  padding: 0.3rem 0.55rem;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.exposure-scope-btn.active {
+  background: #1d4ed8;
+  border-color: #3b82f6;
+  color: #eff6ff;
+}
+
 .exposure-controls select,
 .exposure-controls input[type="number"] {
   padding: 0.3rem 0.5rem;
@@ -3830,6 +4038,12 @@ th.override-col {
   font-size: 0.8rem;
 }
 
+.exposure-table .player-baseline {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 .exposure-table .player-exposure {
   min-width: 100px;
 }
@@ -3867,6 +4081,24 @@ th.override-col {
   color: #64748b;
   font-size: 0.8rem;
   white-space: nowrap;
+}
+
+.exposure-table .player-delta {
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.exposure-table .player-delta.up {
+  color: #f59e0b;
+}
+
+.exposure-table .player-delta.down {
+  color: #22c55e;
+}
+
+.exposure-table .player-delta.flat {
+  color: #64748b;
 }
 
 /* Exposure color classes */

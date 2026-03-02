@@ -41,6 +41,14 @@ type LineupGroup = {
     created_at: string
 }
 
+const parseMatchupTeams = (matchup?: string | null): string[] => {
+    if (!matchup) return []
+    return matchup
+        .split('@')
+        .map(part => part.trim().toUpperCase())
+        .filter(Boolean)
+}
+
 export default function OptimizerPage() {
     // Date and slate selection (persisted in URL)
     const [selectedDate, setSelectedDate, selectedSlate, setSelectedSlate] = useSlateDateAndSlate()
@@ -100,6 +108,7 @@ export default function OptimizerPage() {
 
     // Game exclusion
     const [excludedGames, setExcludedGames] = useState<Set<string>>(new Set())
+    const [excludedTeams, setExcludedTeams] = useState<Set<string>>(new Set())
 
     // Get current slate's games
     const currentSlateGames = useMemo(() => {
@@ -107,10 +116,40 @@ export default function OptimizerPage() {
         return slate?.games ?? []
     }, [slates, selectedSlate])
 
+    const currentSlateGameFilters = useMemo(() => {
+        return currentSlateGames.map(game => ({
+            ...game,
+            teams: parseMatchupTeams(game.matchup),
+        }))
+    }, [currentSlateGames])
+
+    const fadedTeamBanIds = useMemo(() => {
+        const ids = new Set<string>()
+        if (excludedTeams.size === 0) return ids
+        for (const player of pool) {
+            const team = player.team?.toUpperCase()
+            if (!team || !excludedTeams.has(team) || lockedIds.has(player.player_id)) continue
+            ids.add(player.player_id)
+        }
+        return ids
+    }, [excludedTeams, lockedIds, pool])
+
+    const combinedBanCount = useMemo(() => {
+        const ids = new Set(bannedIds)
+        for (const playerId of fadedTeamBanIds) {
+            ids.add(playerId)
+        }
+        return ids.size
+    }, [bannedIds, fadedTeamBanIds])
+
     // Check if stddev is available in pool (needed for randomness feature)
     const hasStddev = useMemo(() =>
         pool.some(p => p.stddev != null && p.stddev > 0), [pool])
 
+    useEffect(() => {
+        setExcludedGames(new Set())
+        setExcludedTeams(new Set())
+    }, [selectedDate, selectedSlate])
     // Load slates when date changes
     useEffect(() => {
         const loadSlates = async () => {
@@ -342,6 +381,10 @@ export default function OptimizerPage() {
         setBuildError(null)
         setLineups([])
         try {
+            const combinedBanIds = new Set(bannedIds)
+            for (const playerId of fadedTeamBanIds) {
+                combinedBanIds.add(playerId)
+            }
             const request: QuickBuildRequest = {
                 date: selectedDate,
                 draft_group_id: selectedSlate,
@@ -356,7 +399,7 @@ export default function OptimizerPage() {
                 min_salary: minSalary,
                 max_salary: maxSalary,
                 lock_ids: Array.from(lockedIds),
-                ban_ids: Array.from(bannedIds),
+                ban_ids: Array.from(combinedBanIds),
                 max_offoptimal_pct: maxOffoptimalPct > 0 ? maxOffoptimalPct / 100 : undefined,
                 exclude_games: Array.from(excludedGames),
                 enum_enable: maxPool >= 5000,
@@ -836,46 +879,79 @@ export default function OptimizerPage() {
                     </div>
 
                     {/* Game Filters */}
-                    {currentSlateGames.length > 0 && (
+                    {currentSlateGameFilters.length > 0 && (
                         <div className="game-filters">
                             <h4 className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-2">
-                                Games ({currentSlateGames.length - excludedGames.size} of {currentSlateGames.length})
+                                Games ({currentSlateGameFilters.length - excludedGames.size} of {currentSlateGameFilters.length})
+                                {excludedTeams.size > 0 ? ` · Teams faded: ${excludedTeams.size}` : ''}
                             </h4>
                             <div className="game-filter-list">
-                                {currentSlateGames.map(game => {
+                                {currentSlateGameFilters.map(game => {
                                     const isExcluded = excludedGames.has(game.matchup)
                                     const startTime = game.start_time
                                         ? new Date(game.start_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
                                         : ''
                                     return (
-                                        <label key={game.matchup} className={`game-filter-item ${isExcluded ? 'excluded' : ''}`}>
-                                            <input
-                                                type="checkbox"
-                                                checked={!isExcluded}
-                                                onChange={() => {
-                                                    setExcludedGames(prev => {
-                                                        const next = new Set(prev)
-                                                        if (next.has(game.matchup)) {
-                                                            next.delete(game.matchup)
-                                                        } else {
-                                                            next.add(game.matchup)
-                                                        }
-                                                        return next
-                                                    })
-                                                }}
-                                            />
-                                            <span className="game-matchup">{game.matchup}</span>
-                                            {startTime && <span className="game-time">{startTime}</span>}
-                                        </label>
+                                        <div key={game.matchup} className={`game-filter-card ${isExcluded ? 'excluded' : ''}`}>
+                                            <label className={`game-filter-item ${isExcluded ? 'excluded' : ''}`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={!isExcluded}
+                                                    onChange={() => {
+                                                        setExcludedGames(prev => {
+                                                            const next = new Set(prev)
+                                                            if (next.has(game.matchup)) {
+                                                                next.delete(game.matchup)
+                                                            } else {
+                                                                next.add(game.matchup)
+                                                            }
+                                                            return next
+                                                        })
+                                                    }}
+                                                />
+                                                <span className="game-matchup">{game.matchup}</span>
+                                                {startTime && <span className="game-time">{startTime}</span>}
+                                            </label>
+                                            {game.teams.length > 0 && (
+                                                <div className="team-filter-row">
+                                                    {game.teams.map(team => {
+                                                        const isTeamExcluded = excludedTeams.has(team)
+                                                        return (
+                                                            <button
+                                                                key={`${game.matchup}-${team}`}
+                                                                type="button"
+                                                                className={`team-filter-chip ${isTeamExcluded ? 'excluded' : ''}`}
+                                                                onClick={() => {
+                                                                    setExcludedTeams(prev => {
+                                                                        const next = new Set(prev)
+                                                                        if (next.has(team)) {
+                                                                            next.delete(team)
+                                                                        } else {
+                                                                            next.add(team)
+                                                                        }
+                                                                        return next
+                                                                    })
+                                                                }}
+                                                            >
+                                                                {isTeamExcluded ? `Fade ${team}` : team}
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
                                     )
                                 })}
                             </div>
-                            {excludedGames.size > 0 && (
+                            {(excludedGames.size > 0 || excludedTeams.size > 0) && (
                                 <button
                                     className="clear-exclusions"
-                                    onClick={() => setExcludedGames(new Set())}
+                                    onClick={() => {
+                                        setExcludedGames(new Set())
+                                        setExcludedTeams(new Set())
+                                    }}
                                 >
-                                    Include All Games
+                                    Include All Games and Teams
                                 </button>
                             )}
                         </div>
@@ -883,7 +959,8 @@ export default function OptimizerPage() {
 
                     <div className="flex gap-3 text-sm text-[hsl(var(--muted-foreground))]">
                         <span>🔒 {lockedIds.size} locked</span>
-                        <span>🚫 {bannedIds.size} banned</span>
+                        <span>🚫 Banned: {combinedBanCount}</span>
+                        <span>🏁 {excludedTeams.size} team fades</span>
                     </div>
 
                     <Button

@@ -5,10 +5,13 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
 from projections.paths import data_path
 
@@ -31,23 +34,34 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+WorldsSource = Literal["gtv2", "sim_v2", "auto"]
+
 
 def _resolve_worlds_root(
     game_date: str,
     *,
     data_root: Path,
+    worlds_source: WorldsSource,
 ) -> Path:
     sim_v2_root = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2" / f"game_date={game_date}"
+    gtv2_root = data_root / "artifacts" / "gtv2_worlds" / f"game_date={game_date}"
+
+    if worlds_source == "gtv2":
+        if gtv2_root.exists():
+            return gtv2_root
+        raise FileNotFoundError(f"No gtv2 worlds data for {game_date} at {gtv2_root}")
+
+    if worlds_source == "sim_v2":
+        if sim_v2_root.exists():
+            return sim_v2_root
+        raise FileNotFoundError(f"No sim_v2 worlds data for {game_date} at {sim_v2_root}")
+
+    if gtv2_root.exists():
+        return gtv2_root
     if sim_v2_root.exists():
         return sim_v2_root
 
-    gtv2_root = data_root / "artifacts" / "gtv2_worlds" / f"game_date={game_date}"
-    if gtv2_root.exists():
-        return gtv2_root
-
-    raise FileNotFoundError(
-        f"No worlds data for {game_date} at {sim_v2_root} or {gtv2_root}"
-    )
+    raise FileNotFoundError(f"No worlds data for {game_date} at {gtv2_root} or {sim_v2_root}")
 
 
 def _resolve_worlds_dir(root_dir: Path, run_id: str | None) -> Path:
@@ -85,30 +99,47 @@ def _load_gtv2_worlds_matrix(worlds_dir: Path) -> Tuple[np.ndarray, Dict[str, in
         raise FileNotFoundError(f"No worlds.parquet found in {worlds_dir}")
 
     logger.info("Loading GTV2 worlds from %s", worlds_path)
-    df = pd.read_parquet(worlds_path, columns=["world_idx", "player_id", "dk_fpts"])
-    if df.empty:
+    table = pq.ParquetFile(worlds_path).read(columns=["world_idx", "player_id", "dk_fpts"])
+    if table.num_rows == 0:
         raise ValueError(f"GTV2 worlds parquet is empty: {worlds_path}")
 
-    df["world_idx"] = pd.to_numeric(df["world_idx"], errors="coerce").astype("Int64")
-    df["player_id"] = df["player_id"].astype(str)
-    df["dk_fpts"] = pd.to_numeric(df["dk_fpts"], errors="coerce").fillna(0.0)
-    df = df.dropna(subset=["world_idx"])
-    if df.empty:
-        raise ValueError(f"GTV2 worlds parquet has no valid world_idx rows: {worlds_path}")
+    world_array = table["world_idx"]
+    player_array = table["player_id"]
+    value_array = table["dk_fpts"]
+
+    valid_mask = pc.and_(pc.is_valid(world_array), pc.is_valid(player_array))
+    valid_rows = int(pc.sum(pc.cast(valid_mask, pa.int64())).as_py() or 0)
+    if valid_rows == 0:
+        raise ValueError(f"GTV2 worlds parquet has no valid world_idx/player_id rows: {worlds_path}")
+
+    if valid_rows != table.num_rows:
+        dropped_rows = int(table.num_rows - valid_rows)
+        logger.warning("Dropping %d invalid GTV2 world rows from %s", dropped_rows, worlds_path)
+        table = table.filter(valid_mask)
+        world_array = table["world_idx"]
+        player_array = table["player_id"]
+        value_array = table["dk_fpts"]
+
+    world_values = pc.cast(world_array, pa.int64(), safe=False).to_numpy(zero_copy_only=False)
+    values = pc.fill_null(
+        pc.cast(value_array, pa.float64(), safe=False),
+        pa.scalar(0.0, type=pa.float64()),
+    ).to_numpy(zero_copy_only=False)
+
+    world_ids = np.unique(world_values)
+    row_idx = np.searchsorted(world_ids, world_values)
 
     try:
-        player_ids = [str(pid) for pid in sorted(df["player_id"].astype(int).unique().tolist())]
-    except Exception:
-        player_ids = sorted(df["player_id"].unique().tolist())
+        player_values = pc.cast(player_array, pa.int64(), safe=False).to_numpy(zero_copy_only=False)
+        player_ids_numeric = np.unique(player_values)
+        col_idx = np.searchsorted(player_ids_numeric, player_values)
+        player_index = {str(int(pid)): idx for idx, pid in enumerate(player_ids_numeric.tolist())}
+    except (pa.ArrowInvalid, pa.ArrowTypeError, ValueError):
+        player_values = pc.cast(player_array, pa.string(), safe=False).to_numpy(zero_copy_only=False)
+        player_ids, col_idx = np.unique(player_values, return_inverse=True)
+        player_index = {str(pid): idx for idx, pid in enumerate(player_ids.tolist())}
 
-    world_ids = sorted(df["world_idx"].astype(int).unique().tolist())
-    player_index = {pid: idx for idx, pid in enumerate(player_ids)}
-    world_index = {wid: idx for idx, wid in enumerate(world_ids)}
-    worlds_matrix = np.zeros((len(world_ids), len(player_ids)), dtype=np.float64)
-
-    row_idx = df["world_idx"].astype(int).map(world_index).to_numpy(dtype=np.int64, copy=False)
-    col_idx = df["player_id"].map(player_index).to_numpy(dtype=np.int64, copy=False)
-    values = df["dk_fpts"].to_numpy(dtype=np.float64, copy=False)
+    worlds_matrix = np.zeros((len(world_ids), len(player_index)), dtype=np.float64)
     worlds_matrix[row_idx, col_idx] = values
 
     logger.info("Loaded GTV2 worlds matrix shape=%s from %s", worlds_matrix.shape, worlds_path)
@@ -119,6 +150,7 @@ def load_worlds_matrix(
     game_date: str,
     data_root: Path | None = None,
     run_id: str | None = None,
+    worlds_source: WorldsSource = "gtv2",
     n_synthetic_worlds: int = 10000,
     seed: int = 42,
 ) -> Tuple[np.ndarray, Dict[str, int]]:
@@ -135,6 +167,9 @@ def load_worlds_matrix(
         Game date in YYYY-MM-DD format
     data_root : Path | None
         Data root directory
+    worlds_source : {"gtv2", "sim_v2", "auto"}
+        Which worlds family to load. Live paths should use ``gtv2`` so missing
+        generative worlds fail loudly. Backtests may opt into ``sim_v2``.
     n_synthetic_worlds : int
         Number of worlds to generate if using synthetic mode
     seed : int
@@ -149,7 +184,7 @@ def load_worlds_matrix(
     if data_root is None:
         data_root = data_path()
 
-    base_dir = _resolve_worlds_root(game_date, data_root=data_root)
+    base_dir = _resolve_worlds_root(game_date, data_root=data_root, worlds_source=worlds_source)
     worlds_dir = _resolve_worlds_dir(base_dir, run_id)
 
     if "gtv2_worlds" in base_dir.parts or (worlds_dir / "worlds.parquet").exists():
@@ -409,6 +444,7 @@ def run_contest_simulation(
     entry_max: int = 150,
     ownership_mode: str = "full",
     rank_mode: str = "current",
+    worlds_source: WorldsSource = "gtv2",
 ) -> ContestSimResult:
     """Run a contest simulation of user lineups against an opponent field.
 
@@ -450,6 +486,8 @@ def run_contest_simulation(
           - current: tail_score - (1 - dupe_penalty) * mean  (existing behavior)
           - tail_only: tail_score
           - tail_times_dupe: tail_score * dupe_penalty
+    worlds_source : {"gtv2", "sim_v2", "auto"}
+        Which worlds family to use for lineup scoring.
 
     Returns
     -------
@@ -529,6 +567,7 @@ def run_contest_simulation(
         game_date,
         data_root,
         run_id=sim_run_id or run_id,
+        worlds_source=worlds_source,
     )
     user_scores = score_lineups(user_lineups, worlds_matrix, player_index)
     field_scores = score_lineups(field_lineups, worlds_matrix, player_index)
@@ -717,6 +756,7 @@ def run_contest_simulation(
         "dupe_penalty_disabled_for_field_matches": int(dupe_penalty_disabled_for_matches),
         "ownership_mode": ownership_mode_n,
         "rank_mode": rank_mode_n,
+        "worlds_source": worlds_source,
     }
 
     # Optional DNP diagnostics for selection debugging (off by default).

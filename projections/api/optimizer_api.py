@@ -23,7 +23,7 @@ import io
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
 from pydantic import BaseModel, Field
@@ -155,6 +155,10 @@ class QuickBuildRequest(BaseModel):
 
     # World sampling mode
     world_sample_enabled: bool = Field(default=False, description="Optimize against sampled worlds instead of mean projections")
+    worlds_source: Literal["gtv2", "sim_v2"] = Field(
+        default="gtv2",
+        description="Worlds family for world-sample optimization: gtv2 (live default) or sim_v2 (explicit backtest fallback)",
+    )
 
 
 class JobStatus(BaseModel):

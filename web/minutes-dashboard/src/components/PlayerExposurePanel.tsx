@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { LineupEVResult } from '../api/contest_sim'
 import { PoolPlayer } from '../api/optimizer'
+import NumericTextInput from './NumericTextInput'
 
 export interface PlayerExposure {
     player_id: string
@@ -14,8 +15,24 @@ export interface ExposureBounds {
     max?: number
 }
 
+export type ExposureScope = 'visible' | 'portfolio' | 'selected'
+
+interface ExposureRow {
+    player_id: string
+    player: PoolPlayer | undefined
+    count: number
+    exposure_pct: number
+    baseline_count: number
+    baseline_pct: number
+    delta_pct: number
+}
+
 interface PlayerExposurePanelProps {
-    lineupResults: (LineupEVResult & { total_own?: number })[]
+    visibleLineupResults: (LineupEVResult & { total_own?: number })[]
+    portfolioLineupResults: (LineupEVResult & { total_own?: number })[]
+    selectedLineupResults: (LineupEVResult & { total_own?: number })[]
+    scope: ExposureScope
+    onScopeChange: (scope: ExposureScope) => void
     playerMap: Map<string, PoolPlayer>
     minUniques: number
     onMinUniquesChange: (n: number) => void
@@ -27,7 +44,11 @@ interface PlayerExposurePanelProps {
 }
 
 export default function PlayerExposurePanel({
-    lineupResults,
+    visibleLineupResults,
+    portfolioLineupResults,
+    selectedLineupResults,
+    scope,
+    onScopeChange,
     playerMap,
     minUniques,
     onMinUniquesChange,
@@ -38,34 +59,104 @@ export default function PlayerExposurePanel({
     exposureCapError,
 }: PlayerExposurePanelProps) {
     const [isCollapsed, setIsCollapsed] = useState(false)
-    const [sortBy, setSortBy] = useState<'exposure' | 'salary' | 'ownership'>('exposure')
+    const [sortBy, setSortBy] = useState<'exposure' | 'delta' | 'salary' | 'ownership'>('exposure')
     const [showOnlyHighExposure, setShowOnlyHighExposure] = useState(false)
     const [editingPlayer, setEditingPlayer] = useState<{ playerId: string; field: 'min' | 'max' } | null>(null)
     const [editValue, setEditValue] = useState('')
 
-    // Compute exposure data
-    const exposureData = useMemo(() => {
-        if (lineupResults.length === 0) return []
-
+    const buildExposureMap = (
+        lineupResults: (LineupEVResult & { total_own?: number })[],
+    ): Map<string, PlayerExposure> => {
         const counts = new Map<string, number>()
         lineupResults.forEach(r => {
             r.player_ids.forEach(pid => counts.set(pid, (counts.get(pid) || 0) + 1))
         })
 
-        return Array.from(counts.entries())
-            .map(([pid, count]) => ({
-                player_id: pid,
-                player: playerMap.get(pid),
-                count,
-                exposure_pct: (count / lineupResults.length) * 100,
-            }))
+        return new Map(
+            Array.from(counts.entries()).map(([pid, count]) => [
+                pid,
+                {
+                    player_id: pid,
+                    player: playerMap.get(pid),
+                    count,
+                    exposure_pct: lineupResults.length > 0 ? (count / lineupResults.length) * 100 : 0,
+                },
+            ]),
+        )
+    }
+
+    const visibleExposureMap = useMemo(() => buildExposureMap(visibleLineupResults), [visibleLineupResults, playerMap])
+    const portfolioExposureMap = useMemo(() => buildExposureMap(portfolioLineupResults), [portfolioLineupResults, playerMap])
+    const selectedExposureMap = useMemo(() => buildExposureMap(selectedLineupResults), [selectedLineupResults, playerMap])
+
+    const scopeOptions = useMemo(() => {
+        const options: Array<{ scope: ExposureScope; label: string; lineupCount: number }> = [
+            { scope: 'visible', label: 'Visible', lineupCount: visibleLineupResults.length },
+        ]
+        if (portfolioLineupResults.length > 0) {
+            options.push({ scope: 'portfolio', label: 'Portfolio', lineupCount: portfolioLineupResults.length })
+        }
+        if (selectedLineupResults.length > 0) {
+            options.push({ scope: 'selected', label: 'Selected', lineupCount: selectedLineupResults.length })
+        }
+        return options
+    }, [visibleLineupResults.length, portfolioLineupResults.length, selectedLineupResults.length])
+
+    const effectiveScope = scopeOptions.some(option => option.scope === scope) ? scope : 'visible'
+    const scopeLabel = scopeOptions.find(option => option.scope === effectiveScope)?.label ?? 'Visible'
+    const currentLineupResults = effectiveScope === 'portfolio'
+        ? portfolioLineupResults
+        : effectiveScope === 'selected'
+            ? selectedLineupResults
+            : visibleLineupResults
+    const currentExposureMap = effectiveScope === 'portfolio'
+        ? portfolioExposureMap
+        : effectiveScope === 'selected'
+            ? selectedExposureMap
+            : visibleExposureMap
+    const showMovementColumns = effectiveScope !== 'visible'
+
+    useEffect(() => {
+        if (effectiveScope !== scope) {
+            onScopeChange(effectiveScope)
+        }
+    }, [effectiveScope, onScopeChange, scope])
+
+    useEffect(() => {
+        if (!showMovementColumns && sortBy === 'delta') {
+            setSortBy('exposure')
+        }
+    }, [showMovementColumns, sortBy])
+
+    const exposureData = useMemo(() => {
+        const playerIds = new Set<string>([
+            ...visibleExposureMap.keys(),
+            ...currentExposureMap.keys(),
+            ...exposureBounds.keys(),
+        ])
+
+        return Array.from(playerIds)
+            .map((pid): ExposureRow => {
+                const current = currentExposureMap.get(pid)
+                const baseline = visibleExposureMap.get(pid)
+                return {
+                    player_id: pid,
+                    player: playerMap.get(pid) ?? current?.player ?? baseline?.player,
+                    count: current?.count ?? 0,
+                    exposure_pct: current?.exposure_pct ?? 0,
+                    baseline_count: baseline?.count ?? 0,
+                    baseline_pct: baseline?.exposure_pct ?? 0,
+                    delta_pct: (current?.exposure_pct ?? 0) - (baseline?.exposure_pct ?? 0),
+                }
+            })
             .sort((a, b) => {
                 if (sortBy === 'exposure') return b.exposure_pct - a.exposure_pct
+                if (sortBy === 'delta') return Math.abs(b.delta_pct) - Math.abs(a.delta_pct)
                 if (sortBy === 'salary') return (b.player?.salary ?? 0) - (a.player?.salary ?? 0)
                 if (sortBy === 'ownership') return (b.player?.own_proj ?? 0) - (a.player?.own_proj ?? 0)
                 return 0
             })
-    }, [lineupResults, playerMap, sortBy])
+    }, [currentExposureMap, exposureBounds, playerMap, sortBy, visibleExposureMap])
 
     // Filter if needed
     const filteredExposure = useMemo(() => {
@@ -132,7 +223,7 @@ export default function PlayerExposurePanel({
         exposureBounds.forEach((_, pid) => onExposureBoundsChange(pid, null))
     }
 
-    if (lineupResults.length === 0) {
+    if (visibleLineupResults.length === 0) {
         return null
     }
 
@@ -144,6 +235,7 @@ export default function PlayerExposurePanel({
                 <h4>
                     <span className="collapse-icon">{isCollapsed ? '▶' : '▼'}</span>
                     Player Exposure
+                    <span className="exposure-badge">{scopeLabel} {currentLineupResults.length}</span>
                     <span className="exposure-badge">{exposureData.length} players</span>
                     {boundsCount > 0 && <span className="exposure-badge caps-badge">{boundsCount} constraints</span>}
                 </h4>
@@ -161,13 +253,29 @@ export default function PlayerExposurePanel({
                     {/* Min Uniques Control */}
                     <div className="exposure-controls">
                         <div className="control-group">
+                            <label>Scope:</label>
+                            <div className="exposure-scope-toggle">
+                                {scopeOptions.map(option => (
+                                    <button
+                                        key={option.scope}
+                                        type="button"
+                                        className={`exposure-scope-btn ${effectiveScope === option.scope ? 'active' : ''}`}
+                                        onClick={() => onScopeChange(option.scope)}
+                                    >
+                                        {option.label} ({option.lineupCount})
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="control-group">
                             <label>Min Uniques:</label>
-                            <input
-                                type="number"
+                            <NumericTextInput
+                                value={minUniques}
+                                onChangeValue={n => onMinUniquesChange(Math.max(0, Math.min(8, n ?? 0)))}
                                 min={0}
                                 max={8}
-                                value={minUniques}
-                                onChange={e => onMinUniquesChange(Math.max(0, Math.min(8, Number(e.target.value))))}
+                                integerOnly
                                 className="min-uniques-input"
                             />
                             <span className="min-uniques-info">
@@ -181,7 +289,8 @@ export default function PlayerExposurePanel({
                                 value={sortBy}
                                 onChange={e => setSortBy(e.target.value as typeof sortBy)}
                             >
-                                <option value="exposure">Exposure %</option>
+                                <option value="exposure">{scopeLabel} %</option>
+                                {showMovementColumns && <option value="delta">Movement</option>}
                                 <option value="salary">Salary</option>
                                 <option value="ownership">Ownership %</option>
                             </select>
@@ -220,7 +329,9 @@ export default function PlayerExposurePanel({
                                     <th>Pos</th>
                                     <th>Salary</th>
                                     <th>Own%</th>
-                                    <th>Exp%</th>
+                                    <th>{scopeLabel}%</th>
+                                    {showMovementColumns && <th>Visible%</th>}
+                                    {showMovementColumns && <th>Move</th>}
                                     <th>Min%</th>
                                     <th>Max%</th>
                                     <th>Count</th>
@@ -274,6 +385,17 @@ export default function PlayerExposurePanel({
                                                     <span className="exposure-value">{e.exposure_pct.toFixed(1)}%</span>
                                                 </div>
                                             </td>
+                                            {showMovementColumns && (
+                                                <td className="player-baseline">
+                                                    {e.baseline_pct.toFixed(1)}%
+                                                </td>
+                                            )}
+                                            {showMovementColumns && (
+                                                <td className={`player-delta ${e.delta_pct > 0.01 ? 'up' : e.delta_pct < -0.01 ? 'down' : 'flat'}`}>
+                                                    {e.delta_pct > 0 ? '+' : ''}
+                                                    {e.delta_pct.toFixed(1)}%
+                                                </td>
+                                            )}
                                             <td className="player-cap" onClick={() => handleBoundsClick(e.player_id, 'min')}>
                                                 {isEditingMin ? (
                                                     <input
@@ -315,7 +437,7 @@ export default function PlayerExposurePanel({
                                                 )}
                                             </td>
                                             <td className="player-count">
-                                                {e.count} / {lineupResults.length}
+                                                {e.count} / {currentLineupResults.length}
                                             </td>
                                         </tr>
                                     )

@@ -15,15 +15,17 @@ export type PlayerRow = {
     is_projected_starter?: boolean
     is_confirmed_starter?: boolean
     play_prob?: number
-    // Ops manual overrides (GameView)
-    ops_override_applied?: boolean
-    ops_depth_role?: string
-    minutes_delta?: number
-    minutes_delta_applied?: boolean
-    minutes_target?: number | null
-    minutes_lock?: boolean | null
-    minutes_target_eff?: number
-    minutes_lock_eff?: boolean
+    manual_override_id?: string | null
+    manual_override_type?: 'force_out' | 'force_in' | null
+    manual_override_reason_code?: string | null
+    manual_override_reason_text?: string | null
+    manual_override_source_label?: string | null
+    manual_override_entered_by?: string | null
+    manual_override_created_ts?: string | null
+    manual_override_effective_ts?: string | null
+    manual_override_expires_ts?: string | null
+    manual_override_active?: boolean
+    manual_override_used?: boolean
     // Canonical play probability fields (explicit conditioning)
     p_play_raw?: number
     p_play_eff?: number

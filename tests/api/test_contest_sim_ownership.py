@@ -38,6 +38,7 @@ def test_contest_sim_request_defaults_disable_dupe_penalty() -> None:
     request = contest_sim_api.ContestSimRequest(game_date="2026-02-28", lineups=[["1"]])
 
     assert request.ownership_mode == "field_only"
+    assert request.worlds_source == "gtv2"
 
 
 def test_build_field_library_request_defaults_disable_dupe_penalty() -> None:

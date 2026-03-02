@@ -217,10 +217,40 @@ def test_v3_postflight_pass_and_fail_cases(tmp_path: Path) -> None:
     assert report["projection_row_report"]["row_count"] == 2
 
     world_summary_path.write_text(
-        json.dumps({"contract_checks": {"team_minutes_not_240": 1}}),
+        json.dumps(
+            {
+                "contract_checks": {
+                    "team_minutes_not_240": 43,
+                    "team_minutes_total_checks": 10000,
+                    "team_minutes_max_abs_drift": 0.01,
+                }
+            }
+        ),
         encoding="utf-8",
     )
     with writer_guard.PipelineWriterLock(data_root=tmp_path, run_id="test2"):
+        report = run_postflight_gate(
+            projections_path=projections_path,
+            parity_manifest_path=parity_manifest_path,
+            world_contract_summary_path=world_summary_path,
+            key_columns=("game_id", "team_id", "player_id"),
+            min_rows=2,
+        )
+    assert report["world_contract_report"]["team_minutes_not_240"] == 43
+
+    world_summary_path.write_text(
+        json.dumps(
+            {
+                "contract_checks": {
+                    "team_minutes_not_240": 43,
+                    "team_minutes_total_checks": 10000,
+                    "team_minutes_max_abs_drift": 0.2,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with writer_guard.PipelineWriterLock(data_root=tmp_path, run_id="test3"):
         with pytest.raises(V3PostflightError):
             run_postflight_gate(
                 projections_path=projections_path,

@@ -35,6 +35,7 @@ Out of scope (initially):
 - `docs/joint_rotation_rates_v1/01_ARCHITECTURE.md`
 - `docs/joint_rotation_rates_v1/02_DATA_AND_LABELS.md`
 - `docs/joint_rotation_rates_v1/03_TRAINING_AND_ROLLOUT.md`
+- `docs/joint_rotation_rates_v1/PORTFOLIO_OPTIMIZER_SPEC.md`
 
 ## Dataset Builder (Implemented)
 

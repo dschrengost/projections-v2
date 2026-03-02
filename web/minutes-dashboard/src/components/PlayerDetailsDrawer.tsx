@@ -1,200 +1,156 @@
 import React from 'react'
-import { PlayerLastGameStat, PlayerOverrideState } from '../api/gameview_v2'
-import { OverrideControl } from './OverrideControl'
+import { OpsGamePlayer, PlayerLastGameStat } from '../api/manualAvailability'
 
-export type DrawerMetric = {
-    baseline: number | null
-    resolved: number | null
-    p10?: number | null
-    p50?: number | null
-    p90?: number | null
+type DrawerMetric = {
+  baseline: number | null
+  resolved: number | null
+  p10?: number | null
+  p50?: number | null
+  p90?: number | null
 }
 
 export type PlayerDrawerData = {
-    player_id: string
-    name: string
-    team: string
-    pos?: string
-    status?: string
-    isProjectedStarter?: boolean
-    isConfirmedStarter?: boolean
-    baselineMinutes: number
-    resolvedMinutes: number
-    override: PlayerOverrideState
-    whyChanged?: string | null
-    metrics: {
-        minutes: DrawerMetric
-        fpts: DrawerMetric
-        pts: DrawerMetric
-        reb: DrawerMetric
-        ast: DrawerMetric
-        stl: DrawerMetric
-        blk: DrawerMetric
-        to: DrawerMetric
-    }
-    lastGames: PlayerLastGameStat[]
-    lastGamesLoading: boolean
-    lastGamesError?: string | null
-    minutesBandLabel?: string | null
+  player: OpsGamePlayer
+  metrics: {
+    minutes: DrawerMetric
+    fpts: DrawerMetric
+    pts: DrawerMetric
+    reb: DrawerMetric
+    ast: DrawerMetric
+    stl: DrawerMetric
+    blk: DrawerMetric
+    to: DrawerMetric
+  }
+  lastGames: PlayerLastGameStat[]
+  lastGamesLoading: boolean
+  lastGamesError?: string | null
 }
 
 type PlayerDetailsDrawerProps = {
-    open: boolean
-    player: PlayerDrawerData | null
-    readOnly?: boolean
-    onClose: () => void
-    onOverrideChange: (playerId: string, next: PlayerOverrideState) => void
+  open: boolean
+  data: PlayerDrawerData | null
+  onClose: () => void
 }
 
-const describeOverride = (override: PlayerOverrideState): string | null => {
-    const mode = override.mode ?? 'none'
-    if (mode === 'none') return null
-    if (mode === 'zero' || mode === 'force_inactive') return 'Manual OUT'
-    if (mode === 'force_active') return 'Manual IN'
-    if (mode === 'lock' && override.lock_value != null) return `Locked to ${override.lock_value.toFixed(1)} minutes`
-    if (mode === 'band' && override.min_value != null && override.max_value != null) {
-        return `Band ${override.min_value.toFixed(1)} to ${override.max_value.toFixed(1)} minutes`
-    }
-    return `Override mode: ${mode}`
-}
+const fmt = (value: number | null | undefined, digits = 1) =>
+  value == null || Number.isNaN(value) ? '-' : value.toFixed(digits)
 
 const MetricRow: React.FC<{ label: string; metric: DrawerMetric }> = ({ label, metric }) => {
-    const hasQuantiles = metric.p10 != null || metric.p50 != null || metric.p90 != null
-    return (
-        <div className="gv2-metric-row">
-            <div className="gv2-metric-head">
-                <span>{label}</span>
-                <span>
-                    {metric.baseline == null ? '-' : metric.baseline.toFixed(1)} → {metric.resolved == null ? '-' : metric.resolved.toFixed(1)}
-                </span>
-            </div>
-            {hasQuantiles && (
-                <div className="gv2-metric-quantiles">
-                    <span>p10 {metric.p10 == null ? '-' : metric.p10.toFixed(1)}</span>
-                    <span>p50 {metric.p50 == null ? '-' : metric.p50.toFixed(1)}</span>
-                    <span>p90 {metric.p90 == null ? '-' : metric.p90.toFixed(1)}</span>
-                </div>
-            )}
+  const hasQuantiles = metric.p10 != null || metric.p50 != null || metric.p90 != null
+  return (
+    <div className="gv2-metric-row">
+      <div className="gv2-metric-head">
+        <span>{label}</span>
+        <span>
+          {fmt(metric.baseline)} → {fmt(metric.resolved)}
+        </span>
+      </div>
+      {hasQuantiles ? (
+        <div className="gv2-metric-quantiles">
+          <span>p10 {fmt(metric.p10)}</span>
+          <span>p50 {fmt(metric.p50)}</span>
+          <span>p90 {fmt(metric.p90)}</span>
         </div>
-    )
+      ) : null}
+    </div>
+  )
 }
 
 export const PlayerDetailsDrawer: React.FC<PlayerDetailsDrawerProps> = ({
-    open,
-    player,
-    readOnly = false,
-    onClose,
-    onOverrideChange,
+  open,
+  data,
+  onClose,
 }) => {
-    if (!open || !player) return null
+  if (!open || !data) return null
 
-    return (
-        <>
-            <div className="gv2-drawer-backdrop" onClick={onClose} />
-            <aside className="gv2-drawer" role="dialog" aria-label="Player details">
-                <div className="gv2-drawer-header">
-                    <div>
-                        <h3 className="gv2-drawer-player-title">
-                            {player.name}
-                            {player.isConfirmedStarter ? (
-                                <span className="status-tag badge-confirmed" title="Confirmed Starter">
-                                    Confirmed
-                                </span>
-                            ) : player.isProjectedStarter ? (
-                                <span className="status-tag badge-projected" title="Projected Starter">
-                                    Projected
-                                </span>
-                            ) : null}
-                        </h3>
-                        <div className="muted">{player.team} {player.pos ? `· ${player.pos}` : ''} {player.status ? `· ${player.status}` : ''}</div>
-                    </div>
-                    <button type="button" onClick={onClose}>Close</button>
-                </div>
+  const { player, metrics, lastGames, lastGamesLoading, lastGamesError } = data
+  const manualOverride = player.manual_override
 
-                {!readOnly ? (
-                    <section className="gv2-drawer-section">
-                        <h4>Target Minutes</h4>
-                        <div className="muted gv2-band-note">Sets resolved mean minutes μ; worlds remain stochastic.</div>
-                        <OverrideControl
-                            value={player.override}
-                            baselineMinutes={player.baselineMinutes}
-                            resolvedMinutes={player.resolvedMinutes}
-                            onChange={(next) => onOverrideChange(player.player_id, next)}
-                        />
-                    </section>
-                ) : describeOverride(player.override) ? (
-                    <section className="gv2-drawer-section">
-                        <h4>Active Override</h4>
-                        <div className="gv2-why-changed">{describeOverride(player.override)}</div>
-                    </section>
-                ) : null}
+  return (
+    <>
+      <div className="gv2-drawer-backdrop" onClick={onClose} />
+      <aside className="gv2-drawer" role="dialog" aria-label="Player details">
+        <div className="gv2-drawer-header">
+          <div>
+            <h3 className="gv2-drawer-player-title">{player.player_name || player.player_id}</h3>
+            <div className="muted">
+              {player.team_tricode || player.team_id}
+              {player.minutes_effective?.status ? ` · ${player.minutes_effective.status}` : ''}
+            </div>
+          </div>
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
 
-                <section className="gv2-drawer-section">
-                    <h4>Projections</h4>
-                    <div className="muted gv2-band-note">
-                        Minutes p10/p50/p90 source: {player.minutesBandLabel ?? 'Sim (uncond)'}
-                    </div>
-                    <MetricRow label="Minutes" metric={player.metrics.minutes} />
-                    <MetricRow label="FPTS" metric={player.metrics.fpts} />
-                    <MetricRow label="PTS" metric={player.metrics.pts} />
-                    <MetricRow label="REB" metric={player.metrics.reb} />
-                    <MetricRow label="AST" metric={player.metrics.ast} />
-                    <MetricRow label="STL" metric={player.metrics.stl} />
-                    <MetricRow label="BLK" metric={player.metrics.blk} />
-                    <MetricRow label="TO" metric={player.metrics.to} />
-                </section>
+        {manualOverride ? (
+          <section className="gv2-drawer-section">
+            <h4>Manual Availability</h4>
+            <div className="gv2-why-changed">
+              {manualOverride.override_type === 'force_out' ? 'Force OUT' : 'Force IN'}
+              {manualOverride.entered_by ? ` · ${manualOverride.entered_by}` : ''}
+              {manualOverride.reason_code ? ` · ${manualOverride.reason_code}` : ''}
+            </div>
+            {manualOverride.reason_text ? (
+              <div className="gv2-why-changed" style={{ marginTop: '0.35rem' }}>{manualOverride.reason_text}</div>
+            ) : null}
+          </section>
+        ) : null}
 
-                {!readOnly && player.whyChanged ? (
-                    <section className="gv2-drawer-section">
-                        <h4>Why Changed</h4>
-                        <div className="gv2-why-changed">{player.whyChanged}</div>
-                    </section>
-                ) : null}
+        <section className="gv2-drawer-section">
+          <h4>Projections</h4>
+          <MetricRow label="Minutes" metric={metrics.minutes} />
+          <MetricRow label="FPTS" metric={metrics.fpts} />
+          <MetricRow label="PTS" metric={metrics.pts} />
+          <MetricRow label="REB" metric={metrics.reb} />
+          <MetricRow label="AST" metric={metrics.ast} />
+          <MetricRow label="STL" metric={metrics.stl} />
+          <MetricRow label="BLK" metric={metrics.blk} />
+          <MetricRow label="TO" metric={metrics.to} />
+        </section>
 
-                <section className="gv2-drawer-section">
-                    <h4>Last 5 Games (Actuals)</h4>
-                    {player.lastGamesLoading ? (
-                        <div className="muted">Loading game log...</div>
-                    ) : player.lastGamesError ? (
-                        <div className="gv2-why-changed">{player.lastGamesError}</div>
-                    ) : player.lastGames.length === 0 ? (
-                        <div className="muted">No recent games found.</div>
-                    ) : (
-                        <div className="gv2-last-games-wrap">
-                            <table className="gv2-last-games-table">
-                                <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Opp</th>
-                                        <th>MIN</th>
-                                        <th>PTS</th>
-                                        <th>REB</th>
-                                        <th>AST</th>
-                                        <th>FPTS</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {player.lastGames.map((game) => (
-                                        <tr key={`${game.game_id}-${game.game_date}`}>
-                                            <td>{game.game_date}</td>
-                                            <td>
-                                                {game.team_tricode && game.opponent_tricode
-                                                    ? `${game.team_tricode} vs ${game.opponent_tricode}`
-                                                    : game.opponent_tricode || '-'}
-                                            </td>
-                                            <td>{game.minutes.toFixed(1)}</td>
-                                            <td>{game.pts.toFixed(0)}</td>
-                                            <td>{game.reb.toFixed(0)}</td>
-                                            <td>{game.ast.toFixed(0)}</td>
-                                            <td>{game.fpts.toFixed(1)}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </section>
-            </aside>
-        </>
-    )
+        <section className="gv2-drawer-section">
+          <h4>Last 5 Games (Actuals)</h4>
+          {lastGamesLoading ? (
+            <div className="muted">Loading game log…</div>
+          ) : lastGamesError ? (
+            <div className="gv2-why-changed">{lastGamesError}</div>
+          ) : lastGames.length === 0 ? (
+            <div className="muted">No recent games found.</div>
+          ) : (
+            <div className="gv2-last-games-wrap">
+              <table className="gv2-last-games-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Opp</th>
+                    <th>MIN</th>
+                    <th>PTS</th>
+                    <th>REB</th>
+                    <th>AST</th>
+                    <th>FPTS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lastGames.map((game) => (
+                    <tr key={`${game.game_id}-${game.game_date}`}>
+                      <td>{game.game_date}</td>
+                      <td>
+                        {game.team_tricode && game.opponent_tricode
+                          ? `${game.team_tricode} vs ${game.opponent_tricode}`
+                          : game.opponent_tricode || '-'}
+                      </td>
+                      <td>{fmt(game.minutes)}</td>
+                      <td>{fmt(game.pts, 0)}</td>
+                      <td>{fmt(game.reb, 0)}</td>
+                      <td>{fmt(game.ast, 0)}</td>
+                      <td>{fmt(game.fpts)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </aside>
+    </>
+  )
 }

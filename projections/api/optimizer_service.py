@@ -1439,7 +1439,11 @@ def run_quick_build(
         if job.config.get("world_sample_enabled", False):
             try:
                 from projections.contest_sim.contest_sim_service import load_worlds_matrix
-                worlds_matrix, player_index = load_worlds_matrix(job.game_date, get_data_root())
+                worlds_matrix, player_index = load_worlds_matrix(
+                    job.game_date,
+                    get_data_root(),
+                    worlds_source=str(job.config.get("worlds_source") or "gtv2"),
+                )
                 # Build mean projections fallback from player pool
                 mean_projections = {str(p.get("player_id")): float(p.get("proj", 0)) for p in player_pool}
                 world_sample_cfg = WorldSampleConfig(

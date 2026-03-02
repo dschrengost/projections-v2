@@ -12,6 +12,9 @@ import {
     saveSimLineups,
     deleteSavedSimBuild,
     SavedSimBuildSummary,
+    selectPortfolio,
+    PortfolioSelectionResponse,
+    PortfolioSelectionMode,
 } from '../api/contest_sim'
 import {
     getSavedBuilds,
@@ -24,7 +27,8 @@ import {
     Slate,
 } from '../api/optimizer'
 import LineupCard from '../components/LineupCard'
-import PlayerExposurePanel, { ExposureBounds } from '../components/PlayerExposurePanel'
+import NumericTextInput from '../components/NumericTextInput'
+import PlayerExposurePanel, { ExposureBounds, ExposureScope } from '../components/PlayerExposurePanel'
 import { useSlateDateAndSlate } from '../hooks/useSlateDate'
 import { formatSlateLabel } from '../utils/slateFormat'
 
@@ -706,8 +710,16 @@ export default function ContestSimPage() {
     const [maxOwnership, setMaxOwnership] = useState<number | null>(null)
     const [playerSearch, setPlayerSearch] = useState('')
     const [requiredPlayerIds, setRequiredPlayerIds] = useState<string[]>([])
+    const [portfolioMode, setPortfolioMode] = useState<'browse_select' | PortfolioSelectionMode>('browse_select')
     const [finalSetSize, setFinalSetSize] = useState(40)
-    const [finalUpsidePct, setFinalUpsidePct] = useState(20)
+    const [portfolioWorldsSource, setPortfolioWorldsSource] = useState<'gtv2' | 'sim_v2'>('gtv2')
+    const [portfolioEvRetention, setPortfolioEvRetention] = useState(0.99)
+    const [portfolioWorldsTrainFrac, setPortfolioWorldsTrainFrac] = useState(0.8)
+    const [portfolioWorldsSample, setPortfolioWorldsSample] = useState(5000)
+    const [portfolioLoading, setPortfolioLoading] = useState(false)
+    const [portfolioError, setPortfolioError] = useState<string | null>(null)
+    const [portfolioResponse, setPortfolioResponse] = useState<PortfolioSelectionResponse | null>(null)
+    const [exposureScope, setExposureScope] = useState<ExposureScope>('visible')
 
     const [selectedLineups, setSelectedLineups] = useState<Set<number>>(new Set())
     const [manualIncludeFinal, setManualIncludeFinal] = useState<Set<number>>(new Set())
@@ -797,6 +809,13 @@ export default function ContestSimPage() {
         return opts
     }, [selectedDate, selectedSlate, slates])
 
+    const savedSimBuildsForSlate = useMemo(() => {
+        if (!selectedSlate) {
+            return savedSimBuilds
+        }
+        return savedSimBuilds.filter(build => build.draft_group_id == null || build.draft_group_id === selectedSlate)
+    }, [savedSimBuilds, selectedSlate])
+
     // Load saved builds when slate changes
     useEffect(() => {
         if (!selectedSlate) {
@@ -825,14 +844,20 @@ export default function ContestSimPage() {
             try {
                 const builds = await getSavedSimBuilds(selectedDate)
                 setSavedSimBuilds(builds)
-                const latestRun = builds.find(b => b.kind === 'run')?.build_id ?? null
-                const latestLineup = builds.find(b => b.kind === 'lineups')?.build_id ?? null
+                const scopedBuilds = selectedSlate
+                    ? builds.filter(b => b.draft_group_id == null || b.draft_group_id === selectedSlate)
+                    : builds
+                const latestRun = scopedBuilds.find(b => b.kind === 'run')?.build_id ?? null
+                const latestLineup = scopedBuilds.find(b => b.kind === 'lineups' || b.kind === 'portfolio')?.build_id ?? null
                 if (latestRun) {
                     setSelectedSimBuildId(latestRun)
                     setSelectedSimLineupId(null)
-                } else {
+                } else if (latestLineup) {
                     setSelectedSimBuildId(null)
                     setSelectedSimLineupId(latestLineup)
+                } else {
+                    setSelectedSimBuildId(null)
+                    setSelectedSimLineupId(null)
                 }
             } catch {
                 setSavedSimBuilds([])
@@ -938,9 +963,10 @@ export default function ContestSimPage() {
             try {
                 const build = await loadSavedSimBuild(selectedDate, selectedSimBuildId)
                 if (build.kind === 'run' && build.results && build.config && build.stats) {
-                    if (build.draft_group_id && build.draft_group_id !== selectedSlate) {
-                        setSelectedSlate(build.draft_group_id)
+                    if (selectedSlate && build.draft_group_id && build.draft_group_id !== selectedSlate) {
+                        return
                     }
+                    setPortfolioResponse(null)
                     setSimResult({
                         results: build.results,
                         config: build.config as unknown as ContestSimResponse['config'],
@@ -1077,63 +1103,69 @@ export default function ContestSimPage() {
         })
     }, [simResult, playerMap, getEffectivePlayerIds])
 
-    // Filter and sort results (NO Top N here - that's applied after constraint filters)
+    // Browse-select path: explicit filters, visible sort, optional Top N shortlist.
     const sortedResults = useMemo(() => {
         let results = [...resultsWithOwnership]
 
-        // Apply filters
         if (filterPositiveEV) {
             results = results.filter(r => r.expected_value >= 0)
         }
         if (maxOwnership !== null) {
             results = results.filter(r => r.total_own <= maxOwnership)
         }
+        if (requiredPlayerIds.length > 0) {
+            results = results.filter(r =>
+                requiredPlayerIds.every(pid => getEffectivePlayerIds(r).includes(pid)),
+            )
+        }
 
-        // Sort (handle null/undefined values by treating them as -Infinity for desc, +Infinity for asc)
         results.sort((a, b) => {
             const aVal = a[sortKey as keyof typeof a]
             const bVal = b[sortKey as keyof typeof b]
-            const aNum = typeof aVal === 'number' && !isNaN(aVal) ? aVal : (sortDir === 'desc' ? -Infinity : Infinity)
-            const bNum = typeof bVal === 'number' && !isNaN(bVal) ? bVal : (sortDir === 'desc' ? -Infinity : Infinity)
+            const aNum = typeof aVal === 'number' && Number.isFinite(aVal) ? aVal : null
+            const bNum = typeof bVal === 'number' && Number.isFinite(bVal) ? bVal : null
+            if (aNum === null && bNum === null) return a.lineup_id - b.lineup_id
+            if (aNum === null) return 1
+            if (bNum === null) return -1
             return sortDir === 'asc' ? aNum - bNum : bNum - aNum
         })
 
         return results
-    }, [resultsWithOwnership, filterPositiveEV, maxOwnership, sortKey, sortDir])
-    // Combined constraint filter: top-N + min uniques + exposure min/max.
-    const { constrainedResults, minUniquesPassCount, exposureCapError, targetCount } = useMemo(() => {
-        return selectConstrainedLineups(
-            sortedResults,
-            topN ?? sortedResults.length,
-            minUniques,
-            exposureBounds,
-            playerMap,
-        )
-    }, [sortedResults, topN, minUniques, exposureBounds, playerMap])
+    }, [resultsWithOwnership, filterPositiveEV, maxOwnership, requiredPlayerIds, getEffectivePlayerIds, sortKey, sortDir])
 
+    const targetCount = topN ?? sortedResults.length
     const filteredByPlayersResults = useMemo(() => {
-        if (requiredPlayerIds.length === 0) {
-            return constrainedResults
+        if (topN === null) {
+            return sortedResults
         }
-        return constrainedResults.filter(r =>
-            requiredPlayerIds.every(pid => getEffectivePlayerIds(r).includes(pid)),
-        )
-    }, [constrainedResults, requiredPlayerIds, getEffectivePlayerIds])
+        return sortedResults.slice(0, topN)
+    }, [sortedResults, topN])
+
+    const minUniquesPassCount = minUniques === 0 ? filteredByPlayersResults.length : 0
+    const exposureCapError = portfolioMode === 'browse_select'
+        ? 'Exposure caps and min-uniques apply only in optimizer modes.'
+        : null
 
     const poolByLineupId = useMemo(() => {
         return new Map(filteredByPlayersResults.map(r => [r.lineup_id, r] as const))
     }, [filteredByPlayersResults])
 
-    const setAndForgetAuto = useMemo(() => {
-        return buildSetAndForgetSelection(filteredByPlayersResults, finalSetSize, finalUpsidePct)
-    }, [filteredByPlayersResults, finalSetSize, finalUpsidePct])
+    const portfolioBaseLineupIds = useMemo(() => {
+        return portfolioResponse?.selected_lineup_ids ?? []
+    }, [portfolioResponse])
 
     const finalSetLineupIds = useMemo(() => {
         const poolIds = new Set(filteredByPlayersResults.map(r => r.lineup_id))
+        if (portfolioMode === 'browse_select') {
+            return []
+        }
         const included = Array.from(manualIncludeFinal).filter(id => poolIds.has(id) && !manualExcludeFinal.has(id))
-        const desiredSize = Math.min(filteredByPlayersResults.length, Math.max(finalSetSize, included.length))
+        const desiredSize = Math.min(
+            filteredByPlayersResults.length,
+            Math.max(portfolioBaseLineupIds.length, included.length),
+        )
         const ordered: number[] = [...included]
-        for (const id of setAndForgetAuto.orderedIds) {
+        for (const id of portfolioBaseLineupIds) {
             if (ordered.length >= desiredSize) break
             if (manualExcludeFinal.has(id)) continue
             if (!ordered.includes(id)) {
@@ -1141,7 +1173,7 @@ export default function ContestSimPage() {
             }
         }
         return ordered
-    }, [filteredByPlayersResults, finalSetSize, manualIncludeFinal, manualExcludeFinal, setAndForgetAuto])
+    }, [filteredByPlayersResults, manualIncludeFinal, manualExcludeFinal, portfolioBaseLineupIds, portfolioMode])
 
     const finalSetIdSet = useMemo(() => new Set(finalSetLineupIds), [finalSetLineupIds])
     const finalSetResults = useMemo(() => {
@@ -1149,6 +1181,9 @@ export default function ContestSimPage() {
             .map(id => poolByLineupId.get(id))
             .filter((r): r is LineupResultWithOwnership => Boolean(r))
     }, [finalSetLineupIds, poolByLineupId])
+    const selectedResults = useMemo(() => {
+        return filteredByPlayersResults.filter(r => selectedLineups.has(r.lineup_id))
+    }, [filteredByPlayersResults, selectedLineups])
     const editedFinalCount = useMemo(() => {
         return finalSetResults.filter(r => Boolean(editedLineupsById[r.lineup_id])).length
     }, [finalSetResults, editedLineupsById])
@@ -1190,6 +1225,34 @@ export default function ContestSimPage() {
     }, [filterPositiveEV, maxOwnership, topN, sortKey, sortDir, minUniques, exposureBounds, requiredPlayerIds])
 
     useEffect(() => {
+        setPortfolioResponse(null)
+        setPortfolioError(null)
+        setManualIncludeFinal(new Set())
+        setManualExcludeFinal(new Set())
+    }, [
+        filterPositiveEV,
+        maxOwnership,
+        topN,
+        sortKey,
+        sortDir,
+        minUniques,
+        exposureBounds,
+        requiredPlayerIds,
+    ])
+
+    useEffect(() => {
+        setExposureScope(prev => {
+            if (prev === 'portfolio' && finalSetResults.length === 0) {
+                return selectedResults.length > 0 ? 'selected' : 'visible'
+            }
+            if (prev === 'selected' && selectedResults.length === 0) {
+                return finalSetResults.length > 0 ? 'portfolio' : 'visible'
+            }
+            return prev
+        })
+    }, [finalSetResults.length, selectedResults.length])
+
+    useEffect(() => {
         const visibleIds = new Set(filteredByPlayersResults.map(r => r.lineup_id))
         setSelectedLineups(prev => {
             let changed = false
@@ -1224,6 +1287,7 @@ export default function ContestSimPage() {
         setSimLoading(true)
         setSimError(null)
         setSimResult(null)
+        setPortfolioResponse(null)
         try {
             const result = await runContestSim({
                 game_date: selectedDate,
@@ -1316,9 +1380,9 @@ export default function ContestSimPage() {
         const load = async () => {
             try {
                 const build = await loadSavedSimBuild(selectedDate, selectedSimLineupId)
-                if (build.kind === 'lineups') {
-                    if (build.draft_group_id && build.draft_group_id !== selectedSlate) {
-                        setSelectedSlate(build.draft_group_id)
+                if (build.kind === 'lineups' || build.kind === 'portfolio') {
+                    if (selectedSlate && build.draft_group_id && build.draft_group_id !== selectedSlate) {
+                        return
                     }
                     setLineups(build.lineups ?? [])
                     if (build.results && build.config && build.stats) {
@@ -1328,8 +1392,40 @@ export default function ContestSimPage() {
                             stats: build.stats as unknown as ContestSimResponse['stats'],
                             build_id: build.build_id,
                         })
+                        const requestMeta = (build.request ?? {}) as Record<string, unknown>
+                        const selectionMode = requestMeta.selection_mode
+                        if (build.kind === 'portfolio' && Array.isArray(build.results)) {
+                            const diagnostics = (
+                                typeof build.stats?.debug === 'object' && build.stats?.debug && 'selection' in build.stats.debug
+                                    ? (build.stats.debug as Record<string, unknown>).selection
+                                    : requestMeta.selection_diagnostics
+                            ) as Record<string, unknown> | undefined
+                            const warnings = (
+                                Array.isArray(requestMeta.warnings)
+                                    ? requestMeta.warnings
+                                    : []
+                            ) as string[]
+                            setPortfolioResponse({
+                                mode: (typeof selectionMode === 'string' ? selectionMode : 'decorrelated_ev') as PortfolioSelectionMode,
+                                source_build_id: typeof requestMeta.source_build_id === 'string' ? requestMeta.source_build_id : build.build_id,
+                                candidate_count: build.results.length,
+                                filtered_candidate_count: build.results.length,
+                                selected_lineup_ids: build.results.map(r => r.lineup_id),
+                                selected_results: build.results,
+                                selected_lineups: build.lineups ?? [],
+                                diagnostics: diagnostics ?? {},
+                                warnings,
+                            })
+                            if (typeof selectionMode === 'string' && selectionMode !== 'browse_select') {
+                                setPortfolioMode(selectionMode as PortfolioSelectionMode)
+                            }
+                            setExposureScope('portfolio')
+                        } else {
+                            setPortfolioResponse(null)
+                        }
                     } else {
                         setSimResult(null)
+                        setPortfolioResponse(null)
                         setSimError('Saved lineups missing snapshot results. Re-save from a sim run.')
                     }
                 }
@@ -1363,6 +1459,19 @@ export default function ContestSimPage() {
                 resultsToSave,
                 simResult?.config ?? null,
                 simResult?.stats ?? null,
+                {
+                    kind: 'lineups',
+                    sourceBuildId: simResult?.build_id ?? null,
+                    selectionMode: 'browse_select',
+                    selectionConfig: {
+                        sortKey,
+                        sortDir,
+                        filterPositiveEV,
+                        maxOwnership,
+                        requiredPlayerIds,
+                        topN,
+                    },
+                },
             )
             const builds = await getSavedSimBuilds(selectedDate)
             setSavedSimBuilds(builds)
@@ -1373,15 +1482,117 @@ export default function ContestSimPage() {
         }
     }
 
+    const handleSaveSelectedLineups = async () => {
+        if (!selectedSlate) return
+        if (selectedLineups.size === 0) return
+        const selectedResults = filteredByPlayersResults.filter(r => selectedLineups.has(r.lineup_id))
+        const editedCount = selectedResults.filter(r => Boolean(editedLineupsById[r.lineup_id])).length
+        if (editedCount > 0) {
+            alert(`There are ${editedCount} edited selected lineups. Run sim on the edited set first, then save.`)
+            return
+        }
+        const defaultName = `Selected lineups (${selectedResults.length})`
+        const name = prompt('Save selected lineups as:', defaultName)?.trim()
+        if (!name) return
+        try {
+            const lineupsToSave = selectedResults.map(getEffectivePlayerIds)
+            const resultIds = new Set(selectedResults.map(r => r.lineup_id))
+            const resultsToSave = simResult?.results.filter(r => resultIds.has(r.lineup_id)) ?? null
+            const saved = await saveSimLineups(
+                selectedDate,
+                selectedSlate,
+                name,
+                lineupsToSave,
+                resultsToSave,
+                simResult?.config ?? null,
+                simResult?.stats ?? null,
+                {
+                    kind: 'lineups',
+                    sourceBuildId: simResult?.build_id ?? null,
+                    selectionMode: 'browse_select',
+                    selectionConfig: {
+                        selectedLineupIds: Array.from(selectedLineups),
+                        sortKey,
+                        sortDir,
+                        filterPositiveEV,
+                        maxOwnership,
+                        requiredPlayerIds,
+                        topN,
+                    },
+                },
+            )
+            const builds = await getSavedSimBuilds(selectedDate)
+            setSavedSimBuilds(builds)
+            setSelectedSimBuildId(null)
+            setSelectedSimLineupId(saved.build_id)
+        } catch (err) {
+            alert('Failed to save selected lineups: ' + (err as Error).message)
+        }
+    }
+
+    const handleBuildPortfolio = async () => {
+        if (portfolioMode === 'browse_select') {
+            setPortfolioError('Switch to an optimizer mode to build a portfolio.')
+            return
+        }
+        if (!simResult?.build_id) {
+            setPortfolioError('Load or run a saved contest-sim build first.')
+            return
+        }
+        if (filteredByPlayersResults.length === 0) {
+            setPortfolioError('No visible candidates remain after filters.')
+            return
+        }
+        const editedCount = filteredByPlayersResults.filter(r => Boolean(editedLineupsById[r.lineup_id])).length
+        if (editedCount > 0) {
+            setPortfolioError(`There are ${editedCount} edited lineups in view. Re-run sim on the edited set first.`)
+            return
+        }
+        setPortfolioLoading(true)
+        setPortfolioError(null)
+        try {
+            const response = await selectPortfolio({
+                game_date: selectedDate,
+                draft_group_id: selectedSlate ?? undefined,
+                source_build_id: simResult.build_id,
+                mode: portfolioMode,
+                worlds_source: portfolioWorldsSource,
+                sort_key: sortKey,
+                sort_dir: sortDir,
+                portfolio_size: Math.max(1, Math.min(finalSetSize, filteredByPlayersResults.length)),
+                ev_retention: portfolioEvRetention,
+                worlds_sample: portfolioWorldsSample,
+                worlds_train_frac: portfolioMode === 'decorrelated_ev' ? portfolioWorldsTrainFrac : null,
+                min_uniques: minUniques,
+                max_total_own: maxOwnership,
+                filter_positive_ev: filterPositiveEV,
+                candidate_lineup_ids: filteredByPlayersResults.map(r => r.lineup_id),
+                exposure_bounds: Object.fromEntries(Array.from(exposureBounds.entries())),
+            })
+            setPortfolioResponse(response)
+            setManualIncludeFinal(new Set())
+            setManualExcludeFinal(new Set())
+            setExposureScope('portfolio')
+        } catch (err) {
+            setPortfolioError((err as Error).message)
+        } finally {
+            setPortfolioLoading(false)
+        }
+    }
+
     const handleSaveFinalSet = async () => {
         if (!selectedSlate) return
         if (finalSetResults.length === 0) return
-        if (editedFinalCount > 0) {
-            alert(`There are ${editedFinalCount} edited lineups in the final set. Run sim on final set first, then save.`)
+        if (portfolioMode === 'browse_select' || !portfolioResponse) {
+            alert('Build a portfolio first, or use Save Selected / Save View.')
             return
         }
-        const defaultName = `Final set (${finalSetResults.length})`
-        const name = prompt('Save final set as:', defaultName)?.trim()
+        if (editedFinalCount > 0) {
+            alert(`There are ${editedFinalCount} edited lineups in the portfolio. Run sim on the edited set first, then save.`)
+            return
+        }
+        const defaultName = `Portfolio (${finalSetResults.length})`
+        const name = prompt('Save portfolio as:', defaultName)?.trim()
         if (!name) return
         try {
             const lineupsToSave = finalSetResults.map(getEffectivePlayerIds)
@@ -1395,13 +1606,37 @@ export default function ContestSimPage() {
                 resultsToSave,
                 simResult?.config ?? null,
                 simResult?.stats ?? null,
+                {
+                    kind: 'portfolio',
+                    sourceBuildId: portfolioResponse.source_build_id,
+                    selectionMode: portfolioResponse.mode,
+                    selectionConfig: {
+                        sortKey,
+                        sortDir,
+                        filterPositiveEV,
+                        maxOwnership,
+                        requiredPlayerIds,
+                        topN,
+                        portfolioSize: finalSetSize,
+                        minUniques,
+                        exposureBounds: Object.fromEntries(Array.from(exposureBounds.entries())),
+                        worldsSource: portfolioWorldsSource,
+                        evRetention: portfolioEvRetention,
+                        worldsTrainFrac: portfolioWorldsTrainFrac,
+                        worldsSample: portfolioWorldsSample,
+                        manualIncludeIds: Array.from(manualIncludeFinal),
+                        manualExcludeIds: Array.from(manualExcludeFinal),
+                    },
+                    selectionDiagnostics: portfolioResponse.diagnostics,
+                    warnings: portfolioResponse.warnings,
+                },
             )
             const builds = await getSavedSimBuilds(selectedDate)
             setSavedSimBuilds(builds)
             setSelectedSimBuildId(null)
             setSelectedSimLineupId(saved.build_id)
         } catch (err) {
-            alert('Failed to save final set: ' + (err as Error).message)
+            alert('Failed to save portfolio: ' + (err as Error).message)
         }
     }
 
@@ -1445,6 +1680,16 @@ export default function ContestSimPage() {
         setSelectedLineups(new Set())
     }
 
+    const runSelectedLineups = async () => {
+        const selectedResults = filteredByPlayersResults.filter(r => selectedLineups.has(r.lineup_id))
+        if (selectedResults.length === 0) {
+            setSimError('No selected lineups available.')
+            return
+        }
+        const lineupsToRun = selectedResults.map(getEffectivePlayerIds)
+        await runSimWithLineups(lineupsToRun)
+    }
+
     // Export handler
     const handleExport = async (type: 'selected' | 'view' | 'final') => {
         if (!selectedSlate) return
@@ -1458,7 +1703,6 @@ export default function ContestSimPage() {
             if (finalSetResults.length === 0) return
             lineupsToExport = finalSetResults
         } else {
-            // Export current filtered view (Top N + constraints + player filters)
             lineupsToExport = filteredByPlayersResults
         }
 
@@ -1531,12 +1775,7 @@ export default function ContestSimPage() {
     }
 
     const runFinalSet = async () => {
-        if (finalSetResults.length === 0) {
-            setSimError('No final-set lineups available.')
-            return
-        }
-        const lineupsToRun = finalSetResults.map(getEffectivePlayerIds)
-        await runSimWithLineups(lineupsToRun)
+        await runSelectedLineups()
     }
 
     const openLineupEditor = (lineup: LineupResultWithOwnership) => {
@@ -1639,7 +1878,7 @@ export default function ContestSimPage() {
                         Slate
                         <select
                             value={selectedSlate ?? ''}
-                            onChange={e => setSelectedSlate(Number(e.target.value) || null)}
+                            onChange={e => setSelectedSlate(e.target.value ? Number(e.target.value) : null)}
                             disabled={slatesLoading}
                         >
                             {slateOptions.length === 0 && <option value="">No slates</option>}
@@ -1750,25 +1989,25 @@ export default function ContestSimPage() {
 
                             <label>
                                 Field K (unique lineups)
-                                <input
-                                    type="number"
+                                <NumericTextInput
                                     value={fieldLibraryK}
-                                    onChange={e => setFieldLibraryK(Number(e.target.value))}
+                                    onChangeValue={n => setFieldLibraryK(Math.max(100, Math.min(5000, Math.round(n ?? 2500))))}
                                     min={100}
                                     max={5000}
                                     step={100}
+                                    integerOnly
                                 />
                             </label>
 
                             <label>
                                 Candidate Pool Size
-                                <input
-                                    type="number"
+                                <NumericTextInput
                                     value={fieldCandidatePoolSize}
-                                    onChange={e => setFieldCandidatePoolSize(Number(e.target.value))}
+                                    onChangeValue={n => setFieldCandidatePoolSize(Math.max(5000, Math.min(100000, Math.round(n ?? 40000))))}
                                     min={5000}
                                     max={100000}
                                     step={5000}
+                                    integerOnly
                                 />
                             </label>
 
@@ -1804,13 +2043,13 @@ export default function ContestSimPage() {
 
                     <label>
                         Entry Fee
-                        <input
-                            type="number"
+                        <NumericTextInput
                             value={entryFee}
-                            onChange={e => setEntryFee(Number(e.target.value))}
+                            onChangeValue={n => setEntryFee(Math.max(0.25, Math.min(1000, n ?? 3.0)))}
                             min={0.25}
                             max={1000}
                             step={0.25}
+                            inputMode="decimal"
                         />
                     </label>
 
@@ -1853,10 +2092,10 @@ export default function ContestSimPage() {
                             </div>
                         </div>
                         <div className="saved-builds-list">
-                            {savedSimBuilds.filter(b => b.kind === 'run').length === 0 && (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'run').length === 0 && (
                                 <span className="muted">No sim runs yet.</span>
                             )}
-                            {savedSimBuilds.filter(b => b.kind === 'run').map(b => (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'run').map(b => (
                                 <div key={b.build_id} className={`saved-build-card ${selectedSimBuildId === b.build_id ? 'selected' : ''}`}>
                                     <div className="saved-build-info">
                                         <span className="saved-build-count">DG{b.draft_group_id}</span>
@@ -1891,18 +2130,59 @@ export default function ContestSimPage() {
 
                     <section className="saved-builds-section">
                         <div className="saved-builds-header">
-                            <h3>Saved Sim Lineups</h3>
+                            <h3>Saved Lineup Sets</h3>
                         </div>
                         <div className="saved-builds-list">
-                            {savedSimBuilds.filter(b => b.kind === 'lineups').length === 0 && (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'lineups').length === 0 && (
                                 <span className="muted">No saved lineups yet.</span>
                             )}
-                            {savedSimBuilds.filter(b => b.kind === 'lineups').map(b => (
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'lineups').map(b => (
                                 <div key={b.build_id} className={`saved-build-card ${selectedSimLineupId === b.build_id ? 'selected' : ''}`}>
                                     <div className="saved-build-info">
                                         <span className="saved-build-count">DG{b.draft_group_id ?? '?'}</span>
                                         <span className="saved-build-count">{b.lineups_count} lineups</span>
                                         <span className="saved-build-time">{b.name ?? b.build_id.slice(0, 8)}</span>
+                                    </div>
+                                    <div className="saved-build-actions">
+                                        <button
+                                            className="load-btn"
+                                            onClick={() => {
+                                                setSelectedSimBuildId(null)
+                                                setSelectedSimLineupId(b.build_id)
+                                            }}
+                                        >
+                                            Load
+                                        </button>
+                                        <button
+                                            className="delete-btn"
+                                            onClick={() => handleDeleteSimBuild(b.build_id)}
+                                            title="Delete"
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+
+                    <section className="saved-builds-section">
+                        <div className="saved-builds-header">
+                            <h3>Saved Portfolios</h3>
+                        </div>
+                        <div className="saved-builds-list">
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'portfolio').length === 0 && (
+                                <span className="muted">No saved portfolios yet.</span>
+                            )}
+                            {savedSimBuildsForSlate.filter(b => b.kind === 'portfolio').map(b => (
+                                <div key={b.build_id} className={`saved-build-card ${selectedSimLineupId === b.build_id ? 'selected' : ''}`}>
+                                    <div className="saved-build-info">
+                                        <span className="saved-build-count">DG{b.draft_group_id ?? '?'}</span>
+                                        <span className="saved-build-count">{b.lineups_count} lineups</span>
+                                        <span className="saved-build-time">{b.name ?? b.build_id.slice(0, 8)}</span>
+                                        {typeof b.stats?.debug === 'object' && b.stats?.debug && 'selection_mode' in b.stats.debug && (
+                                            <span className="saved-build-stats">{String((b.stats.debug as Record<string, unknown>).selection_mode)}</span>
+                                        )}
                                     </div>
                                     <div className="saved-build-actions">
                                         <button
@@ -1938,7 +2218,11 @@ export default function ContestSimPage() {
                             )}
                             {/* Player Exposure Panel */}
                             <PlayerExposurePanel
-                                lineupResults={constrainedResults}
+                                visibleLineupResults={filteredByPlayersResults}
+                                portfolioLineupResults={finalSetResults}
+                                selectedLineupResults={selectedResults}
+                                scope={exposureScope}
+                                onScopeChange={setExposureScope}
                                 playerMap={playerMap}
                                 minUniques={minUniques}
                                 onMinUniquesChange={setMinUniques}
@@ -1992,6 +2276,7 @@ export default function ContestSimPage() {
                                 <div className="toolbar-group">
                                     <label>Sort:</label>
                                     <select
+                                        className="contest-sim-select"
                                         value={sortKey}
                                         onChange={e => setSortKey(e.target.value as SortKey)}
                                     >
@@ -2012,8 +2297,8 @@ export default function ContestSimPage() {
                                         <option value="lineup_id">Lineup #</option>
                                     </select>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
                                     >
                                         {sortDir === 'desc' ? '↓' : '↑'}
                                     </button>
@@ -2034,6 +2319,7 @@ export default function ContestSimPage() {
                                 <div className="toolbar-group">
                                     <label>Max Own%:</label>
                                     <select
+                                        className="contest-sim-select"
                                         value={maxOwnership ?? ''}
                                         onChange={e => setMaxOwnership(e.target.value ? Number(e.target.value) : null)}
                                     >
@@ -2050,6 +2336,7 @@ export default function ContestSimPage() {
                                 <div className="toolbar-group">
                                     <label>Players:</label>
                                     <input
+                                        className="contest-sim-input contest-sim-input-md"
                                         type="text"
                                         list="contest-sim-player-options"
                                         placeholder="Add player..."
@@ -2061,7 +2348,6 @@ export default function ContestSimPage() {
                                                 handleAddPlayerFilter()
                                             }
                                         }}
-                                        style={{ width: '170px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
                                     />
                                     <datalist id="contest-sim-player-options">
                                         {sortedPlayers.map(p => (
@@ -2069,15 +2355,15 @@ export default function ContestSimPage() {
                                         ))}
                                     </datalist>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={handleAddPlayerFilter}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
                                     >
                                         Add
                                     </button>
                                     {requiredPlayerIds.length > 0 && (
                                         <button
+                                            className="contest-sim-btn contest-sim-btn-ghost"
                                             onClick={() => setRequiredPlayerIds([])}
-                                            style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
                                         >
                                             Clear
                                         </button>
@@ -2085,60 +2371,116 @@ export default function ContestSimPage() {
                                 </div>
 
                                 <div className="toolbar-group">
-                                    <button onClick={selectAll} style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}>
-                                        Select All ({filteredByPlayersResults.length})
+                                    <button className="contest-sim-btn contest-sim-btn-ghost" onClick={selectAll}>
+                                        Select Visible ({filteredByPlayersResults.length})
                                     </button>
-                                    <button onClick={clearSelection} style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}>
+                                    <button className="contest-sim-btn contest-sim-btn-ghost" onClick={clearSelection}>
                                         Clear
+                                    </button>
+                                    <button
+                                        className="contest-sim-btn contest-sim-btn-primary"
+                                        onClick={runSelectedLineups}
+                                        disabled={simLoading || selectedLineups.size === 0}
+                                    >
+                                        Run Selected ({selectedLineups.size})
                                     </button>
                                 </div>
 
                                 <div className="toolbar-group">
-                                    <label>Final:</label>
-                                    <input
-                                        type="number"
+                                    <label>Mode:</label>
+                                    <select
+                                        className="contest-sim-select"
+                                        value={portfolioMode}
+                                        onChange={e => setPortfolioMode(e.target.value as typeof portfolioMode)}
+                                    >
+                                        <option value="browse_select">Browse / Select</option>
+                                        <option value="greedy_constraints">Greedy Constraints</option>
+                                        <option value="decorrelated_ev">Decorrelated EV</option>
+                                    </select>
+                                    <label>Portfolio:</label>
+                                    <NumericTextInput
+                                        value={finalSetSize}
+                                        onChangeValue={n => setFinalSetSize(Math.max(1, Math.min(Math.max(1, filteredByPlayersResults.length), Math.round(n ?? 1))))}
                                         min={1}
                                         max={Math.max(1, filteredByPlayersResults.length)}
-                                        value={finalSetSize}
-                                        onChange={e => setFinalSetSize(Math.max(1, Number(e.target.value) || 1))}
-                                        style={{ width: '70px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
-                                    />
-                                    <label>Upside %:</label>
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        max={100}
-                                        value={finalUpsidePct}
-                                        onChange={e => setFinalUpsidePct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-                                        style={{ width: '60px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                        integerOnly
+                                        className="contest-sim-input contest-sim-input-sm"
                                     />
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-primary"
+                                        onClick={handleBuildPortfolio}
+                                        disabled={portfolioMode === 'browse_select' || portfolioLoading || filteredByPlayersResults.length === 0}
+                                    >
+                                        {portfolioLoading ? 'Building...' : `Build Portfolio (${Math.min(finalSetSize, filteredByPlayersResults.length)})`}
+                                    </button>
+                                    <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={applyFinalSetToSelection}
                                         disabled={finalSetResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer' }}
                                     >
-                                        Select Final ({finalSetResults.length})
-                                    </button>
-                                    <button
-                                        onClick={runFinalSet}
-                                        disabled={simLoading || finalSetResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: '4px', color: '#60a5fa', cursor: 'pointer' }}
-                                    >
-                                        Run Final
+                                        Select Portfolio ({finalSetResults.length})
                                     </button>
                                 </div>
+
+                                {portfolioMode !== 'browse_select' && (
+                                    <div className="toolbar-group">
+                                        <label>Worlds:</label>
+                                        <select
+                                            className="contest-sim-select"
+                                            value={portfolioWorldsSource}
+                                            onChange={e => setPortfolioWorldsSource(e.target.value as typeof portfolioWorldsSource)}
+                                        >
+                                            <option value="gtv2">gtv2</option>
+                                            <option value="sim_v2">sim_v2</option>
+                                        </select>
+                                        {portfolioMode === 'decorrelated_ev' && (
+                                            <>
+                                                <label>EV Ret:</label>
+                                                <NumericTextInput
+                                                    value={portfolioEvRetention}
+                                                    onChangeValue={n => setPortfolioEvRetention(Math.max(0.5, Math.min(1, n ?? 0.99)))}
+                                                    min={0.5}
+                                                    max={1}
+                                                    step={0.01}
+                                                    inputMode="decimal"
+                                                    className="contest-sim-input contest-sim-input-sm"
+                                                />
+                                                <label>Train:</label>
+                                                <NumericTextInput
+                                                    value={portfolioWorldsTrainFrac}
+                                                    onChangeValue={n => setPortfolioWorldsTrainFrac(Math.max(0.5, Math.min(0.95, n ?? 0.8)))}
+                                                    min={0.5}
+                                                    max={0.95}
+                                                    step={0.05}
+                                                    inputMode="decimal"
+                                                    className="contest-sim-input contest-sim-input-sm"
+                                                />
+                                                <label>Sample:</label>
+                                                <NumericTextInput
+                                                    value={portfolioWorldsSample}
+                                                    onChangeValue={n => setPortfolioWorldsSample(Math.max(100, Math.round(n ?? 5000)))}
+                                                    min={100}
+                                                    step={100}
+                                                    integerOnly
+                                                    className="contest-sim-input contest-sim-input-md"
+                                                />
+                                            </>
+                                        )}
+                                    </div>
+                                )}
 
                                 <div className="toolbar-group">
                                     <label>Top N:</label>
-                                    <input
-                                        type="number"
+                                    <NumericTextInput
+                                        value={topN}
+                                        onChangeValue={n => setTopN(n === null ? null : Math.max(1, Math.round(n)))}
                                         min={1}
                                         placeholder="All"
-                                        value={topN ?? ''}
-                                        onChange={e => setTopN(e.target.value ? Number(e.target.value) : null)}
-                                        style={{ width: '90px', padding: '0.25rem 0.4rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                        allowNull
+                                        integerOnly
+                                        className="contest-sim-input contest-sim-input-md"
                                     />
-                                    <span style={{ color: '#64748b', fontSize: '0.78rem' }}>
+                                    <span className="toolbar-metric">
                                         {filteredByPlayersResults.length}/{targetCount}
                                     </span>
                                 </div>
@@ -2147,18 +2489,18 @@ export default function ContestSimPage() {
 
                                 <div className="toolbar-group">
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={() => handleExport('view')}
                                         disabled={filteredByPlayersResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer', marginRight: '0.5rem' }}
                                     >
                                         Export View ({filteredByPlayersResults.length})
                                     </button>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={() => handleExport('final')}
                                         disabled={finalSetResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#0f172a', border: '1px solid #334155', borderRadius: '4px', color: '#f8fafc', cursor: 'pointer', marginRight: '0.5rem' }}
                                     >
-                                        Export Final ({finalSetResults.length})
+                                        Export Portfolio ({finalSetResults.length})
                                     </button>
                                     <button
                                         className="export-btn"
@@ -2168,35 +2510,63 @@ export default function ContestSimPage() {
                                         Export Selected ({selectedLineups.size})
                                     </button>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-primary"
                                         onClick={handleSaveSimLineups}
                                         disabled={filteredByPlayersResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: '4px', color: '#60a5fa', cursor: 'pointer', marginLeft: '0.5rem' }}
                                     >
-                                        Save Sim Lineups ({filteredByPlayersResults.length})
+                                        Save View ({filteredByPlayersResults.length})
                                     </button>
                                     <button
+                                        className="contest-sim-btn contest-sim-btn-secondary"
+                                        onClick={handleSaveSelectedLineups}
+                                        disabled={selectedLineups.size === 0}
+                                    >
+                                        Save Selected ({selectedLineups.size})
+                                    </button>
+                                    <button
+                                        className="contest-sim-btn contest-sim-btn-secondary"
                                         onClick={handleSaveFinalSet}
                                         disabled={finalSetResults.length === 0}
-                                        style={{ padding: '0.35rem 0.5rem', background: '#1e3a5f', border: '1px solid #334155', borderRadius: '4px', color: '#cbd5e1', cursor: 'pointer', marginLeft: '0.5rem' }}
                                     >
-                                        Save Final ({finalSetResults.length})
+                                        Save Portfolio ({finalSetResults.length})
                                     </button>
                                 </div>
                             </div>
 
                             <div className="contest-sim-finalset-banner">
-                                <span className="muted">Set &amp; Forget</span>
-                                <span>Final {finalSetResults.length}</span>
-                                <span>Core {finalSetResults.filter(r => setAndForgetAuto.coreIds.has(r.lineup_id)).length}</span>
-                                <span>Upside {finalSetResults.filter(r => setAndForgetAuto.upsideIds.has(r.lineup_id)).length}</span>
-                                <span>Safety floor {Number.isFinite(setAndForgetAuto.safetyFloor) ? setAndForgetAuto.safetyFloor.toFixed(1) : '—'}</span>
-                                {(manualIncludeFinal.size > 0 || manualExcludeFinal.size > 0) && (
+                                <span className="muted">
+                                    {portfolioMode === 'browse_select' ? 'Browse / Select' : 'Portfolio'}
+                                </span>
+                                <span>Visible {filteredByPlayersResults.length}</span>
+                                <span>Selected {selectedLineups.size}</span>
+                                {portfolioMode !== 'browse_select' && (
+                                    <span>Portfolio {finalSetResults.length}</span>
+                                )}
+                                {portfolioResponse && typeof portfolioResponse.diagnostics.ev_selected === 'number' && (
+                                    <span>EV {Number(portfolioResponse.diagnostics.ev_selected).toFixed(2)}</span>
+                                )}
+                                {portfolioResponse && typeof portfolioResponse.diagnostics.risk_var_total_reduction_pct === 'number' && (
+                                    <span>Risk ↓ {Number(portfolioResponse.diagnostics.risk_var_total_reduction_pct).toFixed(1)}%</span>
+                                )}
+                                {portfolioResponse && typeof portfolioResponse.diagnostics.world_selection_policy === 'string' && (
+                                    <span>{String(portfolioResponse.diagnostics.world_selection_policy)}</span>
+                                )}
+                                {(manualIncludeFinal.size > 0 || manualExcludeFinal.size > 0) && portfolioMode !== 'browse_select' && (
                                     <span>Manual ± {manualIncludeFinal.size}/{manualExcludeFinal.size}</span>
                                 )}
                                 {editedFinalCount > 0 && (
-                                    <span className="warning">Edited in final: {editedFinalCount} (rerun before save)</span>
+                                    <span className="warning">Edited in portfolio: {editedFinalCount} (rerun before save)</span>
                                 )}
                             </div>
+
+                            {(portfolioError || (portfolioResponse?.warnings?.length ?? 0) > 0) && (
+                                <div className="contest-sim-finalset-banner">
+                                    {portfolioError && <span className="warning">{portfolioError}</span>}
+                                    {(portfolioResponse?.warnings ?? []).map((warning) => (
+                                        <span key={warning} className="warning">{warning}</span>
+                                    ))}
+                                </div>
+                            )}
 
                             {requiredPlayerNames.length > 0 && (
                                 <div className="contest-sim-player-filters">
@@ -2264,17 +2634,11 @@ export default function ContestSimPage() {
                                         selected={selectedLineups.has(result.lineup_id)}
                                         onToggleSelect={() => toggleLineupSelection(result.lineup_id)}
                                         isInFinalSet={finalSetIdSet.has(result.lineup_id)}
-                                        finalTag={
-                                            setAndForgetAuto.coreIds.has(result.lineup_id)
-                                                ? 'core'
-                                                : setAndForgetAuto.upsideIds.has(result.lineup_id)
-                                                    ? 'upside'
-                                                    : null
-                                        }
+                                        finalTag={null}
                                         isEdited={Boolean(editedLineupsById[result.lineup_id])}
-                                        onToggleFinalSet={() => toggleFinalSetMembership(result.lineup_id)}
-                                        onClearFinalOverride={() => clearFinalOverride(result.lineup_id)}
-                                        hasFinalOverride={manualIncludeFinal.has(result.lineup_id) || manualExcludeFinal.has(result.lineup_id)}
+                                        onToggleFinalSet={portfolioMode === 'browse_select' ? undefined : () => toggleFinalSetMembership(result.lineup_id)}
+                                        onClearFinalOverride={portfolioMode === 'browse_select' ? undefined : () => clearFinalOverride(result.lineup_id)}
+                                        hasFinalOverride={portfolioMode === 'browse_select' ? false : (manualIncludeFinal.has(result.lineup_id) || manualExcludeFinal.has(result.lineup_id))}
                                         onEditLineup={() => openLineupEditor(result)}
                                         onResetEditLineup={() => resetEditedLineup(result.lineup_id)}
                                         highlighted={

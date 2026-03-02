@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from projections import paths
-from projections.ops.overrides import load_overrides_map
+from projections.ops.manual_availability import manual_override_report
 
 router = APIRouter(prefix="/api/live", tags=["live"])
 
@@ -262,14 +262,12 @@ def get_live_status(
     rerun_targets = {str(game_id) for game_id in rerun_plan.get("target_game_ids", [])}
     blocking_games = {str(game_id) for game_id in report_window_gate.get("blocking_games", [])}
 
-    overrides_map = load_overrides_map(slate_day, data_root=data_root)
+    override_summary = manual_override_report(slate_day, data_root=data_root)
     overrides_by_game: dict[str, int] = {}
-    for key, record in overrides_map.items():
-        fields = record.get("fields", {}) if isinstance(record, dict) else {}
-        if not fields:
+    for game_id, payload in dict(override_summary.get("per_game") or {}).items():
+        if not isinstance(payload, dict):
             continue
-        game_id = str(key.game_id)
-        overrides_by_game[game_id] = overrides_by_game.get(game_id, 0) + 1
+        overrides_by_game[str(game_id)] = int(payload.get("active_override_count") or 0)
 
     now = datetime.now(tz=UTC)
     game_ids = sorted(set(per_game.keys()) | set(changed_games.keys()) | set(overrides_by_game.keys()))

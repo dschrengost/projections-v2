@@ -10,7 +10,7 @@ def test_self_play_entry_accounting_totals_to_field_size(monkeypatch) -> None:
     worlds = np.array([[10.0, 0.0]], dtype=np.float64)  # (W, P)
     player_index = {"1": 0, "2": 1}
 
-    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None):  # type: ignore[no-untyped-def]
+    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None, worlds_source=None):  # type: ignore[no-untyped-def]
         return worlds, player_index
 
     monkeypatch.setattr(contest_sim_service, "load_worlds_matrix", _fake_load_worlds_matrix)
@@ -32,7 +32,7 @@ def test_dupe_penalty_adjusts_expected_payout(monkeypatch) -> None:
     worlds = np.array([[10.0]], dtype=np.float64)
     player_index = {"1": 0}
 
-    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None):  # type: ignore[no-untyped-def]
+    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None, worlds_source=None):  # type: ignore[no-untyped-def]
         return worlds, player_index
 
     monkeypatch.setattr(contest_sim_service, "load_worlds_matrix", _fake_load_worlds_matrix)
@@ -59,7 +59,7 @@ def test_dupe_penalty_disabled_when_lineup_present_in_field(monkeypatch) -> None
     worlds = np.array([[10.0]], dtype=np.float64)
     player_index = {"1": 0}
 
-    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None):  # type: ignore[no-untyped-def]
+    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None, worlds_source=None):  # type: ignore[no-untyped-def]
         return worlds, player_index
 
     monkeypatch.setattr(contest_sim_service, "load_worlds_matrix", _fake_load_worlds_matrix)
@@ -86,7 +86,7 @@ def test_dupe_penalty_applies_when_lineup_not_in_field(monkeypatch) -> None:
     worlds = np.array([[10.0, 0.0]], dtype=np.float64)
     player_index = {"1": 0, "2": 1}
 
-    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None):  # type: ignore[no-untyped-def]
+    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None, worlds_source=None):  # type: ignore[no-untyped-def]
         return worlds, player_index
 
     monkeypatch.setattr(contest_sim_service, "load_worlds_matrix", _fake_load_worlds_matrix)
@@ -133,7 +133,7 @@ def test_ucvar90_and_tail_score_in_results(monkeypatch) -> None:
     worlds = np.arange(100, dtype=np.float64).reshape(-1, 1)  # (W=100, P=1)
     player_index = {"1": 0}
 
-    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None):
+    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None, worlds_source=None):
         return worlds, player_index
 
     monkeypatch.setattr(contest_sim_service, "load_worlds_matrix", _fake_load_worlds_matrix)
@@ -177,7 +177,7 @@ def test_select_score_applies_dupe_penalty(monkeypatch) -> None:
     worlds = np.arange(100, dtype=np.float64).reshape(-1, 1)
     player_index = {"1": 0}
 
-    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None):
+    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None, worlds_source=None):
         return worlds, player_index
 
     monkeypatch.setattr(contest_sim_service, "load_worlds_matrix", _fake_load_worlds_matrix)
@@ -209,7 +209,7 @@ def test_robust_floor_metrics_computed(monkeypatch) -> None:
     worlds = np.arange(100, dtype=np.float64).reshape(-1, 1)
     player_index = {"1": 0}
 
-    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None):
+    def _fake_load_worlds_matrix(game_date: str, data_root=None, run_id=None, worlds_source=None):
         return worlds, player_index
 
     monkeypatch.setattr(contest_sim_service, "load_worlds_matrix", _fake_load_worlds_matrix)

@@ -115,6 +115,34 @@ def test_live_status_endpoint_returns_candidate_and_games(monkeypatch, tmp_path:
         data_root / "artifacts" / "runs" / "nba_live_v3" / f"game_date={game_date}" / f"run={candidate_run_id}" / "preflight_report.json",
         {"as_of_ts": "2026-02-28T15:00:19Z"},
     )
+    manual_override_dir = data_root / "live" / "manual_overrides" / f"game_date={game_date}"
+    manual_override_dir.mkdir(parents=True, exist_ok=True)
+    import pandas as pd
+
+    pd.DataFrame(
+        [
+            {
+                "override_id": "ovr_1",
+                "game_date": game_date,
+                "game_id": "22500863",
+                "player_id": "101",
+                "player_name": "Example Player",
+                "team_id": 10,
+                "team_tricode": "AAA",
+                "override_type": "force_out",
+                "reason_code": "operator_report",
+                "reason_text": None,
+                "source_label": "twitter",
+                "entered_by": "daniel",
+                "created_ts": "2026-02-28T14:58:00Z",
+                "effective_ts": "2026-02-28T14:58:00Z",
+                "expires_ts": None,
+                "active": True,
+                "cleared_ts": None,
+                "cleared_by": None,
+            }
+        ]
+    ).to_parquet(manual_override_dir / "manual_overrides.parquet", index=False)
 
     monkeypatch.setattr("projections.api.live_status_api.paths.data_path", lambda *args, **kwargs: data_root)
 
@@ -135,5 +163,8 @@ def test_live_status_endpoint_returns_candidate_and_games(monkeypatch, tmp_path:
     assert game["game_id"] == "22500863"
     assert game["affected_by_change_set"] is True
     assert game["rerun_targeted"] is True
+    assert game["manual_override_active"] is True
+    assert game["manual_override_count"] == 1
     assert game["changed_sources"] == ["injuries", "props"]
     assert "candidate-running" in game["warning_badges"]
+    assert "manual-override" in game["warning_badges"]
