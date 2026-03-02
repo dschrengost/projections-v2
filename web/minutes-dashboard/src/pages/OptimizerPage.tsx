@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
     getSlates,
     getPlayerPool,
-    getPlayerPoolWithOverrides,
     startBuild,
     getBuildStatus,
     getBuildLineups,
@@ -12,23 +11,28 @@ import {
     loadSavedBuild,
     deleteSavedBuild,
     saveCustomBuild,
-    getOverrides,
-    saveOverrides,
-    clearOverrides,
     Slate,
-    PoolPlayerWithOverrides,
-    PlayerOverride,
+    PoolPlayer,
     JobStatus,
     LineupRow,
     QuickBuildRequest,
     SavedBuild,
-    GameInfo,
 } from '../api/optimizer'
 import { formatSalary } from '../utils'
 import { useSlateDateAndSlate } from '../hooks/useSlateDate'
 import { formatSlateLabel } from '../utils/slateFormat'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 
-type SortKey = 'name' | 'team' | 'salary' | 'proj' | 'own_proj' | 'value'
+type SortKey = 'name' | 'team' | 'salary' | 'proj' | 'own_proj' | 'value' | 'min' | 'fppm'
 
 type LineupGroup = {
     id: string
@@ -45,19 +49,9 @@ export default function OptimizerPage() {
     const [slatesError, setSlatesError] = useState<string | null>(null)
 
     // Player pool
-    const [pool, setPool] = useState<PoolPlayerWithOverrides[]>([])
+    const [pool, setPool] = useState<PoolPlayer[]>([])
     const [poolLoading, setPoolLoading] = useState(false)
     const [poolError, setPoolError] = useState<string | null>(null)
-
-    // User overrides
-    const [overrides, setOverrides] = useState<Map<string, PlayerOverride>>(new Map())
-    const [savedOverrides, setSavedOverrides] = useState<Map<string, PlayerOverride>>(new Map())
-    const [overrideRevision, setOverrideRevision] = useState<number | null>(null)
-    const [overrideLoading, setOverrideLoading] = useState(false)
-    const [overrideSaving, setOverrideSaving] = useState(false)
-    const [overrideError, setOverrideError] = useState<string | null>(null)
-    const [pendingOverrideIds, setPendingOverrideIds] = useState<Set<string>>(new Set())
-    const [pendingOutApply, setPendingOutApply] = useState(false)
 
     // Lock/ban players
     const [lockedIds, setLockedIds] = useState<Set<string>>(new Set())
@@ -80,15 +74,8 @@ export default function OptimizerPage() {
     const [minProj, setMinProj] = useState<number | null>(null)
     const [maxOffoptimalPct, setMaxOffoptimalPct] = useState(0)
     const [randomnessPct, setRandomnessPct] = useState(0)
-    const [useUserOverrides, setUseUserOverrides] = useState(false)
     const [lateSwapEnabled, setLateSwapEnabled] = useState(false)
     const [worldSampleEnabled, setWorldSampleEnabled] = useState(false)
-
-    const overridesRef = useRef(overrides)
-    const savedOverridesRef = useRef(savedOverrides)
-    const pendingOverrideIdsRef = useRef(pendingOverrideIds)
-    const overrideRevisionRef = useRef(overrideRevision)
-    const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     // Job state
     const [currentJob, setCurrentJob] = useState<JobStatus | null>(null)
@@ -124,35 +111,6 @@ export default function OptimizerPage() {
     const hasStddev = useMemo(() =>
         pool.some(p => p.stddev != null && p.stddev > 0), [pool])
 
-    useEffect(() => {
-        overridesRef.current = overrides
-    }, [overrides])
-
-    useEffect(() => {
-        savedOverridesRef.current = savedOverrides
-    }, [savedOverrides])
-
-    useEffect(() => {
-        pendingOverrideIdsRef.current = pendingOverrideIds
-    }, [pendingOverrideIds])
-
-    useEffect(() => {
-        overrideRevisionRef.current = overrideRevision
-    }, [overrideRevision])
-
-    useEffect(() => {
-        if (typeof window === 'undefined') return
-        const stored = window.localStorage.getItem('optimizer.useUserOverrides')
-        if (stored != null) {
-            setUseUserOverrides(stored === 'true')
-        }
-    }, [])
-
-    useEffect(() => {
-        if (typeof window === 'undefined') return
-        window.localStorage.setItem('optimizer.useUserOverrides', String(useUserOverrides))
-    }, [useUserOverrides])
-
     // Load slates when date changes
     useEffect(() => {
         const loadSlates = async () => {
@@ -161,7 +119,6 @@ export default function OptimizerPage() {
             try {
                 const data = await getSlates(selectedDate)
                 setSlates(data)
-                // If URL has a slate and it exists in the data, keep it; otherwise auto-select
                 const urlSlateExists = selectedSlate && data.some(s => s.draft_group_id === selectedSlate)
                 if (!urlSlateExists) {
                     const mainSlate = data.find(s => s.slate_type !== 'showdown')
@@ -186,11 +143,8 @@ export default function OptimizerPage() {
         setPoolLoading(true)
         setPoolError(null)
         try {
-            const data = useUserOverrides
-                ? await getPlayerPoolWithOverrides(selectedDate, selectedSlate)
-                : await getPlayerPool(selectedDate, selectedSlate)
+            const data = await getPlayerPool(selectedDate, selectedSlate)
             setPool(data)
-            // Reset locks/bans on new pool
             setLockedIds(new Set())
             setBannedIds(new Set())
         } catch (err) {
@@ -199,201 +153,12 @@ export default function OptimizerPage() {
         } finally {
             setPoolLoading(false)
         }
-    }, [selectedDate, selectedSlate, useUserOverrides])
+    }, [selectedDate, selectedSlate])
 
     // Load player pool when slate changes
     useEffect(() => {
         void loadPool()
     }, [loadPool])
-
-    const loadOverrides = useCallback(async () => {
-        if (!selectedSlate) {
-            setOverrides(new Map())
-            setSavedOverrides(new Map())
-            setOverrideRevision(null)
-            setPendingOverrideIds(new Set())
-            setPendingOutApply(false)
-            return
-        }
-        setOverrideLoading(true)
-        setOverrideError(null)
-        try {
-            const data = await getOverrides(selectedDate, selectedSlate)
-            const next = new Map<string, PlayerOverride>()
-            data.overrides.forEach((override) => {
-                next.set(override.player_id, override)
-            })
-            setOverrides(next)
-            setSavedOverrides(new Map(next))
-            setOverrideRevision(data.client_revision)
-            setPendingOverrideIds(new Set())
-            setPendingOutApply(false)
-        } catch (err) {
-            setOverrideError((err as Error).message)
-            setOverrides(new Map())
-            setSavedOverrides(new Map())
-            setOverrideRevision(null)
-        } finally {
-            setOverrideLoading(false)
-        }
-    }, [selectedDate, selectedSlate])
-
-    useEffect(() => {
-        void loadOverrides()
-        if (saveTimerRef.current) {
-            clearTimeout(saveTimerRef.current)
-            saveTimerRef.current = null
-        }
-    }, [loadOverrides])
-
-    type OverrideField = 'minutes' | 'fpts' | 'own' | 'is_out'
-
-    const updateOverrideFields = (
-        playerId: string,
-        updates: Partial<Record<OverrideField, number | boolean | null>>,
-    ) => {
-        setOverrides(prev => {
-            const next = new Map(prev)
-            const current = next.get(playerId) ?? {
-                player_id: playerId,
-                minutes: null,
-                fpts: null,
-                own: null,
-                is_out: false,
-            }
-            const updated = {
-                ...current,
-                player_id: playerId,
-                ...updates,
-            } as PlayerOverride
-            const hasOverride = updated.is_out || updated.minutes != null || updated.fpts != null || updated.own != null
-            if (hasOverride) {
-                next.set(playerId, updated)
-            } else {
-                next.delete(playerId)
-            }
-            return next
-        })
-        setPendingOverrideIds(prev => {
-            const next = new Set(prev)
-            next.add(playerId)
-            return next
-        })
-        if (updates.is_out !== undefined) {
-            setPendingOutApply(true)
-        }
-    }
-
-    const updateOverrideField = (playerId: string, field: OverrideField, value: number | boolean | null) => {
-        updateOverrideFields(playerId, { [field]: value })
-    }
-
-    const flushOverrides = useCallback(async () => {
-        if (!selectedSlate) return
-        const pending = Array.from(pendingOverrideIdsRef.current)
-        if (pending.length === 0) return
-        setOverrideSaving(true)
-        setOverrideError(null)
-        const payload = pending.map((playerId) => {
-            const current = overridesRef.current.get(playerId)
-            return {
-                player_id: playerId,
-                minutes: current?.minutes ?? null,
-                fpts: current?.fpts ?? null,
-                own: current?.own ?? null,
-                is_out: current?.is_out ?? false,
-            }
-        })
-        try {
-            const response = await saveOverrides(
-                selectedDate,
-                selectedSlate,
-                payload,
-                overrideRevisionRef.current ?? undefined,
-            )
-            const responseMap = new Map(response.overrides.map(o => [o.player_id, o]))
-            setOverrides(prev => {
-                const next = new Map(prev)
-                pending.forEach((playerId) => {
-                    const updated = responseMap.get(playerId)
-                    if (updated) {
-                        next.set(playerId, updated)
-                    } else {
-                        next.delete(playerId)
-                    }
-                })
-                return next
-            })
-            setSavedOverrides(prev => {
-                const next = new Map(prev)
-                pending.forEach((playerId) => {
-                    const updated = responseMap.get(playerId)
-                    if (updated) {
-                        next.set(playerId, updated)
-                    } else {
-                        next.delete(playerId)
-                    }
-                })
-                return next
-            })
-            setOverrideRevision(response.client_revision)
-            setPendingOverrideIds(prev => {
-                const next = new Set(prev)
-                pending.forEach((playerId) => next.delete(playerId))
-                return next
-            })
-        } catch (err) {
-            setOverrideError((err as Error).message)
-        } finally {
-            setOverrideSaving(false)
-        }
-    }, [selectedDate, selectedSlate])
-
-    const scheduleOverrideSave = useCallback((delayMs = 500) => {
-        if (saveTimerRef.current) {
-            clearTimeout(saveTimerRef.current)
-        }
-        saveTimerRef.current = setTimeout(() => {
-            saveTimerRef.current = null
-            void flushOverrides()
-        }, delayMs)
-    }, [flushOverrides])
-
-    const discardPendingOverrides = () => {
-        if (saveTimerRef.current) {
-            clearTimeout(saveTimerRef.current)
-            saveTimerRef.current = null
-        }
-        setOverrides(new Map(savedOverridesRef.current))
-        setPendingOverrideIds(new Set())
-        setPendingOutApply(false)
-    }
-
-    const applyOutChanges = async () => {
-        await flushOverrides()
-        if (pendingOverrideIdsRef.current.size === 0) {
-            if (useUserOverrides) {
-                await loadPool()
-            }
-            setPendingOutApply(false)
-        }
-    }
-
-    const resetAllOverrides = async () => {
-        if (!selectedSlate) return
-        try {
-            setOverrideSaving(true)
-            await clearOverrides(selectedDate, selectedSlate)
-            await loadOverrides()
-            if (useUserOverrides) {
-                await loadPool()
-            }
-        } catch (err) {
-            setOverrideError((err as Error).message)
-        } finally {
-            setOverrideSaving(false)
-        }
-    }
 
     // Poll job status
     useEffect(() => {
@@ -407,7 +172,6 @@ export default function OptimizerPage() {
                 if (status.status === 'completed') {
                     const result = await getBuildLineups(status.job_id)
                     setLineups(result.lineups)
-                    // Refresh saved builds list
                     refreshSavedBuilds()
                 }
             } catch (err) {
@@ -436,26 +200,23 @@ export default function OptimizerPage() {
         void refreshSavedBuilds()
     }, [selectedDate, selectedSlate])
 
-    // Load a saved build
     const handleLoadSavedBuild = async (jobId: string) => {
         try {
             const build = await loadSavedBuild(selectedDate, jobId)
             if (build.lineups) {
                 setLineups(build.lineups)
-                setCurrentJob(null) // Clear any running job state
+                setCurrentJob(null)
             }
         } catch (err) {
             setBuildError((err as Error).message)
         }
     }
 
-    // Delete a saved build
     const handleDeleteSavedBuild = async (jobId: string) => {
         if (!confirm('Delete this saved build?')) return
         try {
             await deleteSavedBuild(selectedDate, jobId)
             await refreshSavedBuilds()
-            // Remove from selection if selected
             setSelectedBuildIds(prev => {
                 const next = new Set(prev)
                 next.delete(jobId)
@@ -466,7 +227,6 @@ export default function OptimizerPage() {
         }
     }
 
-    // Toggle build selection for joining
     const toggleBuildSelection = (jobId: string) => {
         setSelectedBuildIds(prev => {
             const next = new Set(prev)
@@ -479,15 +239,11 @@ export default function OptimizerPage() {
         })
     }
 
-    // Join selected builds
     const handleJoinBuilds = async () => {
         if (selectedBuildIds.size < 2 || !selectedSlate) return
-
         const buildName = prompt('Name for merged build:', `Merged (${selectedBuildIds.size} builds)`)
         if (!buildName) return
-
         try {
-            // Load all selected builds
             const allLineups: LineupRow[] = []
             for (const jobId of selectedBuildIds) {
                 const build = await loadSavedBuild(selectedDate, jobId)
@@ -495,8 +251,6 @@ export default function OptimizerPage() {
                     allLineups.push(...build.lineups)
                 }
             }
-
-            // De-duplicate by player_ids set
             const seen = new Set<string>()
             const unique: LineupRow[] = []
             for (const lu of allLineups) {
@@ -506,11 +260,7 @@ export default function OptimizerPage() {
                     unique.push({ ...lu, lineup_id: unique.length })
                 }
             }
-
-            // Save the merged build to the server
             await saveCustomBuild(selectedDate, selectedSlate, unique, buildName)
-
-            // Update local state and refresh saved builds list
             setLineups(unique)
             setCurrentJob(null)
             setSelectedBuildIds(new Set())
@@ -524,12 +274,9 @@ export default function OptimizerPage() {
     // Filtered and sorted pool
     const filteredPool = useMemo(() => {
         let filtered = pool.slice()
-
-        // Filter by minimum projection
         if (minProj != null) {
             filtered = filtered.filter(p => p.proj >= minProj)
         }
-
         const text = filter.trim().toLowerCase()
         if (text) {
             filtered = filtered.filter(p =>
@@ -548,6 +295,8 @@ export default function OptimizerPage() {
                 case 'proj': left = a.proj; right = b.proj; break
                 case 'own_proj': left = a.own_proj ?? 0; right = b.own_proj ?? 0; break
                 case 'value': left = a.proj / (a.salary / 1000); right = b.proj / (b.salary / 1000); break
+                case 'min': left = a.model_minutes ?? 0; right = b.model_minutes ?? 0; break
+                case 'fppm': left = a.fppm ?? 0; right = b.fppm ?? 0; break
                 default: left = a.proj; right = b.proj
             }
             if (typeof left === 'number' && typeof right === 'number') {
@@ -566,7 +315,6 @@ export default function OptimizerPage() {
             else next.add(id)
             return next
         })
-        // Remove from banned if locking
         setBannedIds(prev => {
             const next = new Set(prev)
             next.delete(id)
@@ -581,7 +329,6 @@ export default function OptimizerPage() {
             else next.add(id)
             return next
         })
-        // Remove from locked if banning
         setLockedIds(prev => {
             const next = new Set(prev)
             next.delete(id)
@@ -614,7 +361,6 @@ export default function OptimizerPage() {
                 exclude_games: Array.from(excludedGames),
                 enum_enable: maxPool >= 5000,
                 randomness_pct: randomnessPct > 0 && hasStddev ? randomnessPct : undefined,
-                use_user_overrides: useUserOverrides,
                 late_swap_enabled: lateSwapEnabled,
                 world_sample_enabled: worldSampleEnabled,
             }
@@ -625,7 +371,6 @@ export default function OptimizerPage() {
         }
     }
 
-    // Export CSV
     const handleExport = async () => {
         if (!currentJob?.job_id) return
         try {
@@ -641,7 +386,6 @@ export default function OptimizerPage() {
         }
     }
 
-    // Export saved build CSV
     const handleExportBuild = async (jobId: string) => {
         try {
             const blob = await exportLineupsCSV(jobId)
@@ -662,7 +406,6 @@ export default function OptimizerPage() {
         return `${Date.now()}_${Math.random().toString(16).slice(2)}`
     }
 
-    // Toggle lineup selection
     const toggleLineupSelection = (lineupId: number) => {
         setSelectedLineupIds(prev => {
             const next = new Set(prev)
@@ -675,7 +418,6 @@ export default function OptimizerPage() {
         })
     }
 
-    // Select all visible lineups
     const selectAllVisible = () => {
         const visibleIds = filteredLineups.slice(0, showCount).map(lu => lu.lineup_id)
         setSelectedLineupIds(new Set(visibleIds))
@@ -686,7 +428,6 @@ export default function OptimizerPage() {
         setSelectedLineupIds(new Set(filteredIds))
     }
 
-    // Clear selection
     const clearSelection = () => {
         setSelectedLineupIds(new Set())
     }
@@ -711,12 +452,10 @@ export default function OptimizerPage() {
     const exportLineupsByIds = async (lineupIds: number[], filenamePrefix: string) => {
         if (!selectedSlate) return
         if (lineupIds.length === 0) return
-
         const byId = new Map(lineups.map(lu => [lu.lineup_id, lu]))
         const exportLineups = lineupIds.map(id => byId.get(id)).filter(Boolean) as LineupRow[]
         const payload = exportLineups.map(lu => lu.player_ids)
         if (payload.length === 0) return
-
         try {
             const blob = await exportCustomLineupsCSV(selectedDate, selectedSlate, payload, filenamePrefix)
             downloadCSVBlob(
@@ -728,7 +467,6 @@ export default function OptimizerPage() {
         }
     }
 
-    // Export selected lineups as CSV
     const exportSelectedCSV = async () => {
         if (selectedLineupIds.size === 0) return
         await exportLineupsByIds(
@@ -775,9 +513,8 @@ export default function OptimizerPage() {
         setSelectedLineupIds(new Set(g.lineup_ids))
     }
 
-    // Get player name by ID for lineup display
     const playerMap = useMemo(() => {
-        const map = new Map<string, PoolPlayerWithOverrides>()
+        const map = new Map<string, PoolPlayer>()
         pool.forEach(p => map.set(p.player_id, p))
         return map
     }, [pool])
@@ -788,11 +525,8 @@ export default function OptimizerPage() {
         setActiveLineupGroupId('')
     }, [lineups])
 
-    // Filter and sort lineups
     const filteredLineups = useMemo(() => {
         let result = lineups.slice()
-
-        // Filter by player name
         if (lineupFilter.trim()) {
             const text = lineupFilter.trim().toLowerCase()
             result = result.filter(lu =>
@@ -802,31 +536,25 @@ export default function OptimizerPage() {
                 })
             )
         }
-
-        // Filter by lineup metrics
         result = result.filter(lu => {
-            const proj = lu.player_ids.reduce((sum, id) => sum + getEffectiveProj(playerMap.get(id)), 0)
+            const proj = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
             const own = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
             const p90 = lu.p90 ?? lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
-
             if (minLineupProj != null && proj < minLineupProj) return false
             if (maxLineupOwn != null && own > maxLineupOwn) return false
             if (minLineupP90 != null && p90 < minLineupP90) return false
             return true
         })
-
-        // Sort
         if (lineupSort !== 'default') {
             result.sort((a, b) => {
-                const aProj = a.player_ids.reduce((sum, id) => sum + getEffectiveProj(playerMap.get(id)), 0)
-                const bProj = b.player_ids.reduce((sum, id) => sum + getEffectiveProj(playerMap.get(id)), 0)
+                const aProj = a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
+                const bProj = b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
                 const aSal = a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0)
                 const bSal = b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0)
                 const aP90 = a.p90 ?? a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
                 const bP90 = b.p90 ?? b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
                 const aOwn = a.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
                 const bOwn = b.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
-
                 switch (lineupSort) {
                     case 'proj-desc': return bProj - aProj
                     case 'proj-asc': return aProj - bProj
@@ -840,10 +568,8 @@ export default function OptimizerPage() {
                 }
             })
         }
-
         return result
-    }, [lineups, lineupFilter, lineupSort, playerMap, minLineupProj, maxLineupOwn, minLineupP90, overrides, useUserOverrides])
-
+    }, [lineups, lineupFilter, lineupSort, playerMap, minLineupProj, maxLineupOwn, minLineupP90])
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) {
@@ -855,93 +581,82 @@ export default function OptimizerPage() {
     }
 
     const formatProj = (val: number | undefined | null) =>
-        val != null ? val.toFixed(1) : '-'
+        val != null ? val.toFixed(1) : '—'
 
     const formatOwn = (val: number | undefined | null) =>
-        val != null ? val.toFixed(1) + '%' : '-'
+        val != null ? val.toFixed(1) + '%' : '—'
 
-    const formatMinutes = (val: number | undefined | null) =>
-        val != null ? val.toFixed(1) : '-'
+    const formatMin = (val: number | undefined | null) =>
+        val != null ? val.toFixed(1) : '—'
 
-    const formatValue = (p: PoolPlayerWithOverrides) =>
+    const formatFppm = (val: number | undefined | null) =>
+        val != null ? val.toFixed(2) : '—'
+
+    const formatValue = (p: PoolPlayer) =>
         (p.proj / (p.salary / 1000)).toFixed(2)
 
-    const isOverrideActive = (override: PlayerOverride | undefined) =>
-        Boolean(override && (override.is_out || override.minutes != null || override.fpts != null || override.own != null))
-
-    const showOverrideColumns = useUserOverrides || overrides.size > 0 || pendingOverrideIds.size > 0
-
-    function getModelFppm(player: PoolPlayerWithOverrides) {
-        const baseMinutes = player.model_minutes ?? null
-        const baseProj = player.model_proj ?? player.proj
-        if (baseMinutes && baseMinutes > 0 && baseProj != null) {
-            return baseProj / baseMinutes
-        }
-        return 1.0
-    }
-
-    function getEffectiveProj(player: PoolPlayerWithOverrides | undefined) {
-        if (!player) return 0
-        if (!useUserOverrides) return player.proj ?? 0
-        const override = overrides.get(player.player_id)
-        if (override?.is_out) return 0
-        if (override?.fpts != null) return override.fpts
-        if (override?.minutes != null) {
-            const fppm = getModelFppm(player)
-            return Number((override.minutes * fppm).toFixed(1))
-        }
-        return player.proj ?? 0
+    const SortIcon = ({ col }: { col: SortKey }) => {
+        if (sortKey !== col) return <span className="ml-1 opacity-30">↕</span>
+        return <span className="ml-1">{sortDir === 'asc' ? '▲' : '▼'}</span>
     }
 
     return (
-        <div className="optimizer-page">
+        <div className="optimizer-page flex flex-col gap-5">
             {/* Header */}
-            <header className="app-header">
+            <div className="flex items-end justify-between gap-4 pb-4 border-b border-[hsl(var(--border))]">
                 <div>
-                    <h1>Lineup Optimizer</h1>
-                    <p className="subtitle">QuickBuild lineup pool generation</p>
+                    <h1 className="text-2xl font-bold tracking-tight">Lineup Optimizer</h1>
+                    <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">QuickBuild lineup pool generation</p>
                 </div>
-                <div className="controls">
-                    <label>
-                        Date
-                        <input
+                <div className="flex items-end gap-3">
+                    <div className="flex flex-col gap-1.5">
+                        <span className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Date</span>
+                        <Input
                             type="date"
                             value={selectedDate}
                             onChange={e => setSelectedDate(e.target.value)}
+                            className="w-[145px]"
                         />
-                    </label>
-                    <label>
-                        Slate
-                        <select
-                            value={selectedSlate ?? ''}
-                            onChange={e => setSelectedSlate(Number(e.target.value) || null)}
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <span className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Slate</span>
+                        <Select
+                            value={selectedSlate?.toString() ?? ''}
+                            onValueChange={v => setSelectedSlate(Number(v) || null)}
                             disabled={slatesLoading}
                         >
-                            {slates.length === 0 && <option value="">No slates</option>}
-                            {slates.map(s => (
-                                <option key={s.draft_group_id} value={s.draft_group_id}>
-                                    {formatSlateLabel(s)}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
+                            <SelectTrigger className="w-[360px]">
+                                <SelectValue placeholder={slatesLoading ? 'Loading slates…' : 'Select a slate…'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {slates.length === 0 && (
+                                    <SelectItem value="_none" disabled>No slates available</SelectItem>
+                                )}
+                                {slates.map(s => (
+                                    <SelectItem key={s.draft_group_id} value={s.draft_group_id.toString()}>
+                                        {formatSlateLabel(s)}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
                 </div>
-            </header>
+            </div>
 
             {(slatesError || poolError) && (
-                <section className="status-bar">
-                    <span className="error">{slatesError || poolError}</span>
-                </section>
+                <div className="rounded-md bg-red-950/40 border border-red-800/50 px-4 py-2 text-sm text-red-400">
+                    {slatesError || poolError}
+                </div>
             )}
 
             <div className="optimizer-layout">
                 {/* Settings Sidebar */}
-                <aside className="optimizer-sidebar">
-                    <h3>Build Settings</h3>
+                <aside className="optimizer-sidebar space-y-4">
+                    <h3 className="text-sm font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Build Settings</h3>
 
-                    <label>
-                        Max Lineups
-                        <input
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Max Lineups</label>
+                        <Input
                             type="number"
                             value={maxPool}
                             onChange={e => setMaxPool(Number(e.target.value))}
@@ -949,75 +664,79 @@ export default function OptimizerPage() {
                             max={100000}
                             step={500}
                         />
-                    </label>
+                    </div>
 
-                    <label>
-                        Workers
-                        <input
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Workers</label>
+                        <Input
                             type="number"
                             value={builds}
                             onChange={e => setBuilds(Number(e.target.value))}
                             min={1}
                             max={24}
                         />
-                    </label>
+                    </div>
 
-                    <label>
-                        Min Uniques
-                        <input
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Min Uniques</label>
+                        <Input
                             type="number"
                             value={minUniq}
                             onChange={e => setMinUniq(Number(e.target.value))}
                             min={0}
                             max={8}
                         />
-                    </label>
-
-                    <div className="randomness-control">
-                        <label>
-                            Max Exposure: {maxExposurePct}%
-                            <input
-                                type="range"
-                                min={0}
-                                max={100}
-                                step={5}
-                                value={maxExposurePct}
-                                onChange={e => setMaxExposurePct(Number(e.target.value))}
-                            />
-                        </label>
-                        <small className="hint">0% disables exposure cap</small>
                     </div>
 
-                    <div className="randomness-control">
-                        <label>
-                            Near-Dup Jaccard: {nearDupJaccard.toFixed(2)}
-                            <input
-                                type="range"
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                value={nearDupJaccard}
-                                onChange={e => setNearDupJaccard(Number(e.target.value))}
-                            />
-                        </label>
-                        <small className="hint">Higher = stricter. For 8-man DK, 0.75 ≈ 7/8 overlap, 0.60 ≈ 6/8; 0 disables.</small>
-                    </div>
-
-                    <label>
-                        Team Limit
+                    <div className="space-y-1.5">
+                        <div className="flex justify-between">
+                            <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Max Exposure</label>
+                            <span className="text-xs text-[hsl(var(--foreground))]">{maxExposurePct}%</span>
+                        </div>
                         <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={maxExposurePct}
+                            onChange={e => setMaxExposurePct(Number(e.target.value))}
+                            className="w-full accent-[hsl(var(--primary))]"
+                        />
+                        <p className="text-xs text-[hsl(var(--muted-foreground))]">0% disables exposure cap</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <div className="flex justify-between">
+                            <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Near-Dup Jaccard</label>
+                            <span className="text-xs text-[hsl(var(--foreground))]">{nearDupJaccard.toFixed(2)}</span>
+                        </div>
+                        <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={nearDupJaccard}
+                            onChange={e => setNearDupJaccard(Number(e.target.value))}
+                            className="w-full accent-[hsl(var(--primary))]"
+                        />
+                        <p className="text-xs text-[hsl(var(--muted-foreground))]">0.75 ≈ 7/8 overlap for 8-man DK; 0 disables</p>
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Team Limit</label>
+                        <Input
                             type="number"
                             value={globalTeamLimit}
                             onChange={e => setGlobalTeamLimit(Number(e.target.value))}
                             min={1}
                             max={8}
                         />
-                    </label>
+                    </div>
 
-                    <div className="salary-range">
-                        <label>
-                            Min Salary
-                            <input
+                    <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Min Salary</label>
+                            <Input
                                 type="number"
                                 value={minSalary ?? ''}
                                 onChange={e => setMinSalary(e.target.value ? Number(e.target.value) : null)}
@@ -1026,10 +745,10 @@ export default function OptimizerPage() {
                                 max={50000}
                                 step={100}
                             />
-                        </label>
-                        <label>
-                            Max Salary
-                            <input
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Max Salary</label>
+                            <Input
                                 type="number"
                                 value={maxSalary ?? ''}
                                 onChange={e => setMaxSalary(e.target.value ? Number(e.target.value) : null)}
@@ -1038,12 +757,12 @@ export default function OptimizerPage() {
                                 max={50000}
                                 step={100}
                             />
-                        </label>
+                        </div>
                     </div>
 
-                    <label>
-                        Min Projection
-                        <input
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Min Projection</label>
+                        <Input
                             type="number"
                             value={minProj ?? ''}
                             onChange={e => setMinProj(e.target.value ? Number(e.target.value) : null)}
@@ -1051,159 +770,77 @@ export default function OptimizerPage() {
                             min={0}
                             step={5}
                         />
-                    </label>
-
-                    <div className="randomness-control">
-                        <label>
-                            Max % Off Optimal: {maxOffoptimalPct}%
-                            <input
-                                type="range"
-                                min={0}
-                                max={50}
-                                step={0.5}
-                                value={maxOffoptimalPct}
-                                onChange={e => setMaxOffoptimalPct(Number(e.target.value))}
-                            />
-                        </label>
-                        <small className="hint">0% disables; tighter caps may return fewer lineups.</small>
                     </div>
 
-                    {/* Randomness Control */}
-                    <div className={`randomness-control ${!hasStddev ? 'disabled' : ''}`}>
-                        <label>
-                            Randomness: {randomnessPct}%
-                            <input
-                                type="range"
-                                min={0}
-                                max={100}
-                                step={5}
-                                value={randomnessPct}
-                                onChange={e => setRandomnessPct(Number(e.target.value))}
-                                disabled={!hasStddev}
-                            />
-                        </label>
-                        {!hasStddev && (
-                            <small className="hint">Requires sim projections with stddev</small>
-                        )}
-                        {hasStddev && randomnessPct > 0 && (
-                            <small className="hint">Adds variance-aware noise for diversity</small>
-                        )}
+                    <div className="space-y-1.5">
+                        <div className="flex justify-between">
+                            <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Max % Off Optimal</label>
+                            <span className="text-xs text-[hsl(var(--foreground))]">{maxOffoptimalPct}%</span>
+                        </div>
+                        <input
+                            type="range"
+                            min={0}
+                            max={50}
+                            step={0.5}
+                            value={maxOffoptimalPct}
+                            onChange={e => setMaxOffoptimalPct(Number(e.target.value))}
+                            className="w-full accent-[hsl(var(--primary))]"
+                        />
+                        <p className="text-xs text-[hsl(var(--muted-foreground))]">0% disables; tighter caps may return fewer lineups</p>
                     </div>
 
-                    {/* User Overrides Toggle */}
-                    <div className="override-toggle">
-                        <label className="toggle-switch">
-                            <input
-                                type="checkbox"
-                                checked={useUserOverrides}
-                                onChange={e => setUseUserOverrides(e.target.checked)}
-                            />
-                            <span className="toggle-slider"></span>
-                            <span className="toggle-label">
-                                {useUserOverrides ? 'My Projections' : 'Model Projections'}
-                            </span>
-                        </label>
-                        <small className="hint">
-                            {useUserOverrides
-                                ? 'Using your manual projection overrides'
-                                : 'Using model projections (set overrides via API)'}
-                        </small>
+                    <div className={`space-y-1.5 ${!hasStddev ? 'opacity-50' : ''}`}>
+                        <div className="flex justify-between">
+                            <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Randomness</label>
+                            <span className="text-xs text-[hsl(var(--foreground))]">{randomnessPct}%</span>
+                        </div>
+                        <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={randomnessPct}
+                            onChange={e => setRandomnessPct(Number(e.target.value))}
+                            disabled={!hasStddev}
+                            className="w-full accent-[hsl(var(--primary))]"
+                        />
+                        <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                            {!hasStddev ? 'Requires sim projections with stddev' : 'Variance-aware noise for diversity'}
+                        </p>
                     </div>
 
-                    {/* Late Swap Toggle */}
-                    <div className="override-toggle">
-                        <label className="toggle-switch">
-                            <input
-                                type="checkbox"
-                                checked={lateSwapEnabled}
-                                onChange={e => setLateSwapEnabled(e.target.checked)}
-                            />
-                            <span className="toggle-slider"></span>
-                            <span className="toggle-label">
-                                {lateSwapEnabled ? 'Late Swap Mode' : 'Standard Mode'}
-                            </span>
-                        </label>
-                        <small className="hint">
-                            {lateSwapEnabled
-                                ? 'Favors later games for swap optionality'
-                                : 'No late swap preference'}
-                        </small>
-                    </div>
-
-                    {/* World Sample Toggle */}
-                    <div className="override-toggle">
-                        <label className="toggle-switch">
-                            <input
-                                type="checkbox"
-                                checked={worldSampleEnabled}
-                                onChange={e => setWorldSampleEnabled(e.target.checked)}
-                            />
-                            <span className="toggle-slider"></span>
-                            <span className="toggle-label">
-                                {worldSampleEnabled ? 'World Sample Mode' : 'Mean Projections'}
-                            </span>
-                        </label>
-                        <small className="hint">
-                            {worldSampleEnabled
-                                ? 'Optimizes against random sampled worlds'
-                                : 'Uses mean projections for optimization'}
-                        </small>
-                    </div>
-
-                    <div className="override-status">
-                        {overrideLoading && <div className="muted">Loading overrides...</div>}
-                        {overrideSaving && <div className="muted">Saving overrides...</div>}
-                        {overrideError && <div className="error">Overrides: {overrideError}</div>}
-                        {pendingOverrideIds.size > 0 && (
-                            <div className="override-actions">
-                                <span>{pendingOverrideIds.size} unsaved changes</span>
-                                <div className="override-buttons">
-                                    <button
-                                        type="button"
-                                        onClick={applyOutChanges}
-                                        disabled={overrideSaving}
-                                    >
-                                        Apply
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={discardPendingOverrides}
-                                        disabled={overrideSaving}
-                                    >
-                                        Discard
-                                    </button>
-                                </div>
+                    {/* Toggles */}
+                    <div className="space-y-2 pt-1">
+                        <label className="flex items-center gap-2.5 cursor-pointer">
+                            <div className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={lateSwapEnabled}
+                                    onChange={e => setLateSwapEnabled(e.target.checked)}
+                                />
+                                <span className="toggle-slider"></span>
                             </div>
-                        )}
-                        {pendingOutApply && pendingOverrideIds.size === 0 && (
-                            <div className="override-actions">
-                                <span>Out changes saved. Apply to refresh pool.</span>
-                                <div className="override-buttons">
-                                    <button
-                                        type="button"
-                                        onClick={applyOutChanges}
-                                        disabled={overrideSaving}
-                                    >
-                                        Apply
-                                    </button>
-                                </div>
+                            <span className="text-sm">{lateSwapEnabled ? 'Late Swap Mode' : 'Standard Mode'}</span>
+                        </label>
+                        <label className="flex items-center gap-2.5 cursor-pointer">
+                            <div className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={worldSampleEnabled}
+                                    onChange={e => setWorldSampleEnabled(e.target.checked)}
+                                />
+                                <span className="toggle-slider"></span>
                             </div>
-                        )}
-                        <button
-                            type="button"
-                            className="reset-overrides-btn"
-                            onClick={resetAllOverrides}
-                            disabled={!selectedSlate || overrideSaving}
-                        >
-                            Reset All Overrides
-                        </button>
+                            <span className="text-sm">{worldSampleEnabled ? 'World Sample Mode' : 'Mean Projections'}</span>
+                        </label>
                     </div>
 
                     {/* Game Filters */}
-
                     {currentSlateGames.length > 0 && (
                         <div className="game-filters">
-                            <h4>Games ({currentSlateGames.length - excludedGames.size} of {currentSlateGames.length})</h4>
+                            <h4 className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-2">
+                                Games ({currentSlateGames.length - excludedGames.size} of {currentSlateGames.length})
+                            </h4>
                             <div className="game-filter-list">
                                 {currentSlateGames.map(game => {
                                     const isExcluded = excludedGames.has(game.matchup)
@@ -1244,32 +881,32 @@ export default function OptimizerPage() {
                         </div>
                     )}
 
-                    <div className="lock-ban-summary">
-                        <span>🔒 Locked: {lockedIds.size}</span>
-                        <span>🚫 Banned: {bannedIds.size}</span>
+                    <div className="flex gap-3 text-sm text-[hsl(var(--muted-foreground))]">
+                        <span>🔒 {lockedIds.size} locked</span>
+                        <span>🚫 {bannedIds.size} banned</span>
                     </div>
 
-                    <button
-                        className="build-btn"
+                    <Button
+                        className="w-full"
                         onClick={handleStartBuild}
                         disabled={!selectedSlate || poolLoading || (currentJob?.status === 'running')}
                     >
-                        {currentJob?.status === 'running' ? 'Building...' : 'Generate Lineups'}
-                    </button>
+                        {currentJob?.status === 'running' ? 'Building…' : 'Generate Lineups'}
+                    </Button>
 
                     {/* Progress */}
                     {currentJob && (
-                        <div className="build-status">
-                            <div className="status-label">
-                                {currentJob.status === 'running' && `Generating... ${currentJob.lineups_count}/${currentJob.target}`}
+                        <div className="space-y-2">
+                            <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                                {currentJob.status === 'running' && `Generating… ${currentJob.lineups_count}/${currentJob.target}`}
                                 {currentJob.status === 'completed' && `✓ ${currentJob.lineups_count} lineups in ${currentJob.wall_time_sec?.toFixed(1)}s`}
                                 {currentJob.status === 'failed' && `✗ ${currentJob.error}`}
-                                {currentJob.status === 'pending' && 'Starting...'}
-                            </div>
+                                {currentJob.status === 'pending' && 'Starting…'}
+                            </p>
                             {currentJob.status === 'running' && (
-                                <div className="progress-bar">
+                                <div className="h-1.5 rounded-full bg-[hsl(var(--secondary))]">
                                     <div
-                                        className="progress-fill"
+                                        className="h-1.5 rounded-full bg-[hsl(var(--primary))] transition-all"
                                         style={{ width: `${Math.min(100, (currentJob.lineups_count / currentJob.target) * 100)}%` }}
                                     />
                                 </div>
@@ -1277,64 +914,92 @@ export default function OptimizerPage() {
                         </div>
                     )}
 
-                    {buildError && <div className="error">{buildError}</div>}
+                    {buildError && (
+                        <p className="text-sm text-red-400">{buildError}</p>
+                    )}
 
                     {currentJob?.status === 'completed' && (
-                        <button className="export-btn" onClick={handleExport}>
+                        <Button variant="outline" className="w-full" onClick={handleExport}>
                             Export CSV
-                        </button>
+                        </Button>
                     )}
                 </aside>
 
                 {/* Player Pool Table */}
                 <section className="optimizer-pool">
-                    <div className="pool-header">
-                        <h3>Player Pool ({pool.length} players)</h3>
-                        <input
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
+                            Player Pool
+                            <span className="ml-2 font-normal text-[hsl(var(--foreground))]">({pool.length})</span>
+                        </h3>
+                        <Input
                             type="text"
-                            placeholder="Filter players..."
+                            placeholder="Filter players…"
                             value={filter}
                             onChange={e => setFilter(e.target.value)}
+                            className="w-[220px]"
                         />
                     </div>
 
                     {poolLoading ? (
-                        <div className="loading">Loading player pool...</div>
+                        <div className="text-sm text-[hsl(var(--muted-foreground))] py-8 text-center">Loading player pool…</div>
                     ) : (
                         <div className="table-wrapper">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Lock</th>
-                                        <th>Ban</th>
-                                        <th onClick={() => toggleSort('name')} className="sortable">
-                                            Player {sortKey === 'name' && (sortDir === 'asc' ? '▲' : '▼')}
+                                        <th className="w-10 text-center">Lock</th>
+                                        <th className="w-10 text-center">Ban</th>
+                                        <th
+                                            onClick={() => toggleSort('name')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Player<SortIcon col="name" />
                                         </th>
-                                        <th onClick={() => toggleSort('team')} className="sortable">
-                                            Team {sortKey === 'team' && (sortDir === 'asc' ? '▲' : '▼')}
+                                        <th
+                                            onClick={() => toggleSort('team')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Team<SortIcon col="team" />
                                         </th>
                                         <th>Pos</th>
-                                        <th onClick={() => toggleSort('salary')} className="sortable">
-                                            Salary {sortKey === 'salary' && (sortDir === 'asc' ? '▲' : '▼')}
+                                        <th
+                                            onClick={() => toggleSort('salary')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Salary<SortIcon col="salary" />
                                         </th>
-                                        {showOverrideColumns && (
-                                            <>
-                                                <th className="override-col">Model FPTS</th>
-                                                <th className="override-col">Model Min</th>
-                                                <th className="override-col">My Min</th>
-                                                <th className="override-col">My FPTS</th>
-                                                <th className="override-col">My Own</th>
-                                                <th className="override-col">Out</th>
-                                            </>
-                                        )}
-                                        <th onClick={() => toggleSort('proj')} className="sortable">
-                                            Proj {sortKey === 'proj' && (sortDir === 'asc' ? '▲' : '▼')}
+                                        <th
+                                            onClick={() => toggleSort('min')}
+                                            className="sortable cursor-pointer select-none"
+                                            title="Projected minutes (P50)"
+                                        >
+                                            Min<SortIcon col="min" />
                                         </th>
-                                        <th onClick={() => toggleSort('own_proj')} className="sortable">
-                                            Own% {sortKey === 'own_proj' && (sortDir === 'asc' ? '▲' : '▼')}
+                                        <th
+                                            onClick={() => toggleSort('fppm')}
+                                            className="sortable cursor-pointer select-none"
+                                            title="Fantasy points per minute"
+                                        >
+                                            FPPM<SortIcon col="fppm" />
                                         </th>
-                                        <th onClick={() => toggleSort('value')} className="sortable">
-                                            Value {sortKey === 'value' && (sortDir === 'asc' ? '▲' : '▼')}
+                                        <th
+                                            onClick={() => toggleSort('proj')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Proj<SortIcon col="proj" />
+                                        </th>
+                                        <th
+                                            onClick={() => toggleSort('own_proj')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Own%<SortIcon col="own_proj" />
+                                        </th>
+                                        <th
+                                            onClick={() => toggleSort('value')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Value<SortIcon col="value" />
                                         </th>
                                     </tr>
                                 </thead>
@@ -1342,20 +1007,15 @@ export default function OptimizerPage() {
                                     {filteredPool.map(p => {
                                         const isLocked = lockedIds.has(p.player_id)
                                         const isBanned = bannedIds.has(p.player_id)
-                                        const override = overrides.get(p.player_id)
-                                        const isOut = override?.is_out ?? false
-                                        const hasOverride = isOverrideActive(override)
                                         return (
                                             <tr
                                                 key={p.player_id}
                                                 className={[
                                                     isLocked ? 'player-locked' : '',
                                                     isBanned ? 'player-banned' : '',
-                                                    isOut ? 'player-out' : '',
-                                                    hasOverride ? 'player-override' : '',
                                                 ].filter(Boolean).join(' ')}
                                             >
-                                                <td>
+                                                <td className="text-center">
                                                     <input
                                                         type="checkbox"
                                                         checked={isLocked}
@@ -1363,7 +1023,7 @@ export default function OptimizerPage() {
                                                         title="Lock this player"
                                                     />
                                                 </td>
-                                                <td>
+                                                <td className="text-center">
                                                     <input
                                                         type="checkbox"
                                                         checked={isBanned}
@@ -1371,98 +1031,37 @@ export default function OptimizerPage() {
                                                         title="Ban this player"
                                                     />
                                                 </td>
-                                                <td><strong>{p.name}</strong></td>
-                                                <td>{p.team}</td>
-                                                <td>{p.positions.join('/')}</td>
-                                                <td>{formatSalary(p.salary)}</td>
-                                                {showOverrideColumns && (
-                                                    <>
-                                                        <td>{formatProj(p.model_proj ?? p.proj)}</td>
-                                                        <td>{formatMinutes(p.model_minutes ?? null)}</td>
-                                                        <td className={`override-input-cell ${override?.minutes != null ? 'override-active' : ''}`}>
-                                                            <input
-                                                                type="number"
-                                                                className="override-input"
-                                                                placeholder="—"
-                                                                step={0.5}
-                                                                min={0}
-                                                                max={48}
-                                                                value={override?.minutes ?? ''}
-                                                                onChange={e => {
-                                                                    const minutes = e.target.value === '' ? null : Number(e.target.value)
-                                                                    if (minutes == null) {
-                                                                        updateOverrideFields(p.player_id, { minutes: null, fpts: null })
-                                                                    } else {
-                                                                        const fppm = getModelFppm(p)
-                                                                        const fpts = Number((minutes * fppm).toFixed(1))
-                                                                        updateOverrideFields(p.player_id, { minutes, fpts })
-                                                                    }
-                                                                }}
-                                                                onBlur={() => scheduleOverrideSave()}
-                                                            />
-                                                        </td>
-                                                        <td className={`override-input-cell ${override?.fpts != null ? 'override-active' : ''}`}>
-                                                            <div className="override-input-wrap">
-                                                                <input
-                                                                    type="number"
-                                                                    className="override-input"
-                                                                    placeholder="—"
-                                                                    step={0.5}
-                                                                    min={0}
-                                                                    value={override?.fpts ?? ''}
-                                                                    onChange={e => updateOverrideField(
-                                                                        p.player_id,
-                                                                        'fpts',
-                                                                        e.target.value === '' ? null : Number(e.target.value),
-                                                                    )}
-                                                                    onBlur={() => scheduleOverrideSave()}
-                                                                />
-                                                                {p.used_fppm_fallback && (
-                                                                    <span className="fppm-warning" title="FPPM fallback used for minutes → FPTS">
-                                                                        ⚠
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                        <td className={`override-input-cell ${override?.own != null ? 'override-active' : ''}`}>
-                                                            <input
-                                                                type="number"
-                                                                className="override-input"
-                                                                placeholder="—"
-                                                                step={0.5}
-                                                                min={0}
-                                                                max={100}
-                                                                value={override?.own ?? ''}
-                                                                onChange={e => updateOverrideField(
-                                                                    p.player_id,
-                                                                    'own',
-                                                                    e.target.value === '' ? null : Number(e.target.value),
-                                                                )}
-                                                                onBlur={() => scheduleOverrideSave()}
-                                                            />
-                                                        </td>
-                                                        <td className="override-input-cell">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={isOut}
-                                                                onChange={e => {
-                                                                    updateOverrideField(p.player_id, 'is_out', e.target.checked)
-                                                                    scheduleOverrideSave(0)
-                                                                }}
-                                                                title="Mark player out"
-                                                            />
-                                                        </td>
-                                                    </>
-                                                )}
-                                                <td>{formatProj(p.proj)}</td>
-                                                <td>{formatOwn(p.own_proj)}</td>
-                                                <td>{formatValue(p)}</td>
+                                                <td className="font-medium">{p.name}</td>
+                                                <td className="text-[hsl(var(--muted-foreground))]">{p.team}</td>
+                                                <td>
+                                                    <div className="flex flex-wrap gap-0.5">
+                                                        {p.positions.join('/').split('/').map(pos => (
+                                                            <Badge key={pos} variant="secondary" className="text-[10px] py-0 px-1">
+                                                                {pos}
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                                <td className="tabular-nums">{formatSalary(p.salary)}</td>
+                                                <td className="tabular-nums text-[hsl(var(--muted-foreground))]">
+                                                    {formatMin(p.model_minutes)}
+                                                </td>
+                                                <td className="tabular-nums text-[hsl(var(--muted-foreground))]">
+                                                    {formatFppm(p.fppm)}
+                                                </td>
+                                                <td className="tabular-nums font-medium text-[hsl(var(--primary))]">
+                                                    {formatProj(p.proj)}
+                                                </td>
+                                                <td className="tabular-nums">{formatOwn(p.own_proj)}</td>
+                                                <td className="tabular-nums">{formatValue(p)}</td>
                                             </tr>
                                         )
                                     })}
                                     {filteredPool.length === 0 && !poolLoading && (
                                         <tr>
-                                            <td colSpan={9} className="muted">No players found</td>
+                                            <td colSpan={11} className="text-center text-[hsl(var(--muted-foreground))] py-8">
+                                                No players found
+                                            </td>
                                         </tr>
                                     )}
                                 </tbody>
@@ -1537,10 +1136,9 @@ export default function OptimizerPage() {
                 </section>
             )}
 
-            {/* Lineups Section - Below the main layout */}
+            {/* Lineups Section */}
             {lineups.length > 0 && (
                 <section className="lineups-section">
-                    {/* Filter taskbar */}
                     <div className="lineups-toolbar">
                         <h3>Lineups ({filteredLineups.length} of {lineups.length})</h3>
                         <div className="lineups-filters">
@@ -1614,7 +1212,6 @@ export default function OptimizerPage() {
                                 className="lineups-action-btn"
                                 onClick={selectAllVisible}
                                 disabled={filteredLineups.length === 0}
-                                title="Select currently shown lineups"
                             >
                                 Select showing
                             </button>
@@ -1622,7 +1219,6 @@ export default function OptimizerPage() {
                                 className="lineups-action-btn"
                                 onClick={selectAllFiltered}
                                 disabled={filteredLineups.length === 0}
-                                title="Select all filtered lineups"
                             >
                                 Select filtered
                             </button>
@@ -1637,7 +1233,6 @@ export default function OptimizerPage() {
                                 className="lineups-action-btn primary"
                                 onClick={exportSelectedCSV}
                                 disabled={selectedLineupIds.size === 0}
-                                title="Export selected lineups"
                             >
                                 Export selected CSV
                             </button>
@@ -1657,7 +1252,6 @@ export default function OptimizerPage() {
                                 className="lineups-action-btn"
                                 onClick={createGroupFromSelection}
                                 disabled={selectedLineupIds.size === 0}
-                                title="Create a group from the current selection"
                             >
                                 Save group
                             </button>
@@ -1665,7 +1259,6 @@ export default function OptimizerPage() {
                                 className="lineups-action-btn"
                                 onClick={selectActiveGroupLineups}
                                 disabled={!activeLineupGroupId}
-                                title="Load the active group into selection"
                             >
                                 Select group
                             </button>
@@ -1673,7 +1266,6 @@ export default function OptimizerPage() {
                                 className="lineups-action-btn primary"
                                 onClick={exportActiveGroupCSV}
                                 disabled={!activeLineupGroupId}
-                                title="Export active group lineups"
                             >
                                 Export group CSV
                             </button>
@@ -1681,14 +1273,12 @@ export default function OptimizerPage() {
                                 className="lineups-action-btn danger"
                                 onClick={deleteActiveGroup}
                                 disabled={!activeLineupGroupId}
-                                title="Delete active group"
                             >
                                 Delete group
                             </button>
                         </div>
                     </div>
 
-                    {/* Lineups grid */}
                     <div className="lineups-grid">
                         {filteredLineups.slice(0, showCount).map((lu, idx) => (
                             <div
@@ -1709,7 +1299,7 @@ export default function OptimizerPage() {
                                         ${lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0).toLocaleString()}
                                     </span>
                                     <span className="lineup-proj">
-                                        {lu.player_ids.reduce((sum, id) => sum + getEffectiveProj(playerMap.get(id)), 0).toFixed(1)} pts
+                                        {lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0).toFixed(1)} pts
                                     </span>
                                     <span className="lineup-p90">
                                         p90: {(() => {

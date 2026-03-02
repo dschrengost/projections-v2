@@ -1158,17 +1158,21 @@ def build_player_pool(
             else:
                 player["game_start_utc"] = str(game_start)
         
+        # Always expose minutes and fppm for UI display
+        if model_minutes and pd.notna(model_minutes) and float(model_minutes) > 0:
+            player["model_minutes"] = float(model_minutes)
+        if pd.notna(fppm):
+            player["fppm"] = float(fppm)
+
         # Add override-related fields when using user overrides
         if use_user_overrides:
             player["model_proj"] = float(model_proj) if pd.notna(model_proj) else 0.0
-            player["model_minutes"] = float(model_minutes) if pd.notna(model_minutes) else 0.0
             player["model_own"] = float(model_own) if pd.notna(model_own) else 0.0
             player["effective_proj"] = float(proj)
             player["effective_minutes"] = float(effective_minutes) if pd.notna(effective_minutes) else 0.0
             player["effective_own"] = float(effective_own) if pd.notna(effective_own) else 0.0
             player["has_override"] = has_override
             player["used_fppm_fallback"] = used_fppm_fallback
-            player["fppm"] = float(fppm) if pd.notna(fppm) else 1.0
             player["override_minutes"] = (
                 float(row.get("override_minutes")) if pd.notna(row.get("override_minutes")) else None
             )

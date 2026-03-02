@@ -34,6 +34,8 @@ export interface PoolPlayer {
     p90?: number | null
     game_matchup?: string
     game_start_utc?: string
+    model_minutes?: number | null
+    fppm?: number | null
 }
 
 
