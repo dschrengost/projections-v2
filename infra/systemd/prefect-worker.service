@@ -11,8 +11,8 @@ Environment="PREFECT_API_URL=http://100.78.180.34:4200/api"
 Environment="MLFLOW_TRACKING_URI=http://dfsbox.tail27dc61.ts.net:5000"
 Environment="MLFLOW_EXPERIMENT_NAME=projections-v2"
 Environment="PROJECTIONS_ALLOW_DIRTY=1"
-Environment="PROJECTIONS_SUBPROCESS_PYTHON=/home/daniel/prod/projections-v2/.venv311/bin/python"
-ExecStart=/home/daniel/prod/projections-v2/.venv311/bin/python -m prefect worker start --pool projections-local --type process --limit 1 --with-healthcheck
+Environment="PROJECTIONS_SUBPROCESS_PYTHON=/home/daniel/prod/projections-v2/.venv/bin/python"
+ExecStart=/home/daniel/prod/projections-v2/.venv/bin/python -m prefect worker start --pool projections-local --type process --limit 1 --with-healthcheck
 Restart=on-failure
 RestartSec=10
 

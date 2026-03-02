@@ -78,6 +78,7 @@ fi
 rsync -av --delete $DRY_RUN \
     --exclude='.git' \
     --exclude='.venv' \
+    --exclude='.venv311' \
     --exclude='.venv-user' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
@@ -94,6 +95,8 @@ rsync -av --delete $DRY_RUN \
     --exclude='nohup.out' \
     --exclude='*.log' \
     --exclude='.DS_Store' \
+    --exclude='.serena' \
+    --exclude='Running' \
     "${POINTER_EXCLUDES[@]}" \
     "$DEV_REPO/" "$PROD_REPO/"
 
