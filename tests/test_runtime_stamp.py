@@ -158,6 +158,14 @@ class TestValidateConfigPaths:
         warnings = validate_config_paths({"existing": config_file})
         assert len(warnings) == 0
 
+    def test_no_warning_for_existing_directory_config(self, tmp_path: Path) -> None:
+        """Verify *_dir config entries are validated as directories."""
+        bundle_dir = tmp_path / "bundle"
+        bundle_dir.mkdir(parents=True)
+
+        warnings = validate_config_paths({"gtv2_bundle_dir": bundle_dir})
+        assert len(warnings) == 0
+
 
 class TestConfigHash:
     """Tests for config hash computation."""

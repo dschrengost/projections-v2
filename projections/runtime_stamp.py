@@ -402,6 +402,7 @@ def validate_config_paths(
 
     for name, path in config_paths.items():
         path = Path(path)
+        expects_directory = str(name).endswith("_dir") or str(name).endswith("_root")
         if not path.exists():
             msg = f"Config file missing: {name} at {path}"
             warnings.append(msg)
@@ -410,6 +411,15 @@ def validate_config_paths(
                     f"{msg}\n"
                     "Set PROJECTIONS_RUNTIME_STAMP_STRICT=0 to disable this check."
                 )
+        elif expects_directory:
+            if not path.is_dir():
+                msg = f"Config path is not a directory: {name} at {path}"
+                warnings.append(msg)
+                if strict and name in required_set:
+                    raise RuntimeError(
+                        f"{msg}\n"
+                        "Set PROJECTIONS_RUNTIME_STAMP_STRICT=0 to disable this check."
+                    )
         elif not path.is_file():
             msg = f"Config path is not a file: {name} at {path}"
             warnings.append(msg)
