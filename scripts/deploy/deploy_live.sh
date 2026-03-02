@@ -145,9 +145,12 @@ FRONTEND_DIR="$PROD_REPO/web/minutes-dashboard"
 if [[ -f "$FRONTEND_DIR/package.json" ]]; then
     echo "[deploy] Building frontend in PROD..."
     cd "$FRONTEND_DIR"
-    if [[ ! -d node_modules ]]; then
+    if [[ -f package-lock.json ]]; then
         echo "[deploy] Installing frontend deps with npm ci..."
         npm ci
+    else
+        echo "[deploy] Installing frontend deps with npm install..."
+        npm install
     fi
     npm run build
     cd "$PROD_REPO"
