@@ -1885,6 +1885,12 @@ def _apply_props_uplift_calibration_to_worlds(
             "max_var_scale": 1.50,
             "line_anchor_min_line": 28.0,
             "line_anchor_frac": 0.93,
+            "min_line_down": 12.0,
+            "min_gap_down": 2.5,
+            "weight_down": 0.45,
+            "min_scale_down": 0.70,
+            "var_weight_down": 0.15,
+            "min_var_scale_down": 0.80,
         },
         "reb": {
             "line_col": "an_reb_line",
@@ -1897,6 +1903,12 @@ def _apply_props_uplift_calibration_to_worlds(
             "max_var_scale": 1.60,
             "line_anchor_min_line": 10.0,
             "line_anchor_frac": 0.92,
+            "min_line_down": 3.0,
+            "min_gap_down": 1.3,
+            "weight_down": 0.60,
+            "min_scale_down": 0.55,
+            "var_weight_down": 0.25,
+            "min_var_scale_down": 0.75,
         },
         "ast": {
             "line_col": "an_ast_line",
@@ -1909,6 +1921,12 @@ def _apply_props_uplift_calibration_to_worlds(
             "max_var_scale": 1.65,
             "line_anchor_min_line": 8.0,
             "line_anchor_frac": 0.92,
+            "min_line_down": 1.5,
+            "min_gap_down": 1.0,
+            "weight_down": 0.65,
+            "min_scale_down": 0.50,
+            "var_weight_down": 0.25,
+            "min_var_scale_down": 0.72,
         },
     }
     key_cols = ["game_id", "team_id", "player_id"]
@@ -1972,33 +1990,63 @@ def _apply_props_uplift_calibration_to_worlds(
         mean = pd.to_numeric(meta[mean_col], errors="coerce")
         gap = line - mean
         denom = line.clip(lower=1.0)
-        mask = line.ge(float(cfg["min_line"])) & gap.ge(float(cfg["min_gap"])) & mean.gt(0.0)
+        has_market = pd.Series(True, index=meta.index, dtype=bool)
         if has_col in meta.columns:
-            mask = mask & pd.to_numeric(meta[has_col], errors="coerce").fillna(0.0).ge(0.5)
+            has_market = pd.to_numeric(meta[has_col], errors="coerce").fillna(0.0).ge(0.5)
+        mask_up = line.ge(float(cfg["min_line"])) & gap.ge(float(cfg["min_gap"])) & mean.gt(0.0) & has_market
+        over_gap = mean - line
+        mask_down = (
+            line.ge(float(cfg["min_line_down"]))
+            & over_gap.ge(float(cfg["min_gap_down"]))
+            & mean.gt(0.0)
+            & has_market
+        )
 
-        target = mean + float(cfg["weight"]) * gap
-        target = target.where(
+        target_up = mean + float(cfg["weight"]) * gap
+        target_up = target_up.where(
             line.lt(float(cfg["line_anchor_min_line"])),
             np.maximum(
-                pd.to_numeric(target, errors="coerce").to_numpy(dtype=float),
+                pd.to_numeric(target_up, errors="coerce").to_numpy(dtype=float),
                 float(cfg["line_anchor_frac"]) * pd.to_numeric(line, errors="coerce").to_numpy(dtype=float),
             ),
         )
-        scale = (target / mean).clip(lower=1.0, upper=float(cfg["max_scale"]))
-        var_scale = (
+        scale_up = (target_up / mean).clip(lower=1.0, upper=float(cfg["max_scale"]))
+        var_scale_up = (
             1.0 + float(cfg["var_weight"]) * (gap / denom).clip(lower=0.0)
         ).clip(lower=1.0, upper=float(cfg["max_var_scale"]))
-        scale_df = meta.loc[mask, key_cols].copy()
+        target_down = mean - float(cfg["weight_down"]) * over_gap
+        scale_down = (target_down / mean).clip(
+            lower=float(cfg["min_scale_down"]),
+            upper=1.0,
+        )
+        var_scale_down = (
+            1.0 - float(cfg["var_weight_down"]) * (over_gap / denom).clip(lower=0.0)
+        ).clip(lower=float(cfg["min_var_scale_down"]), upper=1.0)
+
+        up_df = meta.loc[mask_up, key_cols].copy()
+        down_df = meta.loc[mask_down, key_cols].copy()
         if "player_name" in meta.columns:
-            scale_df["player_name"] = meta.loc[mask, "player_name"].astype(str).values
-        scale_df["mu"] = mean.loc[mask].astype(float).values
-        scale_df["sf_mean"] = scale.loc[mask].astype(float).values
-        scale_df["sf_var"] = var_scale.loc[mask].astype(float).values
-        scale_df["line_gap"] = gap.loc[mask].astype(float).values
+            up_df["player_name"] = meta.loc[mask_up, "player_name"].astype(str).values
+            down_df["player_name"] = meta.loc[mask_down, "player_name"].astype(str).values
+        up_df["mu"] = mean.loc[mask_up].astype(float).values
+        up_df["sf_mean"] = scale_up.loc[mask_up].astype(float).values
+        up_df["sf_var"] = var_scale_up.loc[mask_up].astype(float).values
+        up_df["line_gap"] = gap.loc[mask_up].astype(float).values
+        up_df["direction"] = "up"
+
+        down_df["mu"] = mean.loc[mask_down].astype(float).values
+        down_df["sf_mean"] = scale_down.loc[mask_down].astype(float).values
+        down_df["sf_var"] = var_scale_down.loc[mask_down].astype(float).values
+        down_df["line_gap"] = gap.loc[mask_down].astype(float).values
+        down_df["direction"] = "down"
+
+        scale_df = pd.concat([up_df, down_df], ignore_index=True)
 
         if scale_df.empty:
             report["stats"][stat_name] = {
                 "applied_player_count": 0,
+                "applied_player_count_up": 0,
+                "applied_player_count_down": 0,
                 "mean_gap_pre": float((mean - line).mean()) if (mean - line).notna().any() else float("nan"),
                 "mean_gap_post": float((mean - line).mean()) if (mean - line).notna().any() else float("nan"),
             }
@@ -2049,6 +2097,8 @@ def _apply_props_uplift_calibration_to_worlds(
         )
         report["stats"][stat_name] = {
             "applied_player_count": int(len(scale_df)),
+            "applied_player_count_up": int(len(up_df)),
+            "applied_player_count_down": int(len(down_df)),
             "mean_gap_pre": float(gap_pre.mean()) if gap_pre.notna().any() else float("nan"),
             "mean_gap_post": float(gap_post.mean()) if gap_post.notna().any() else float("nan"),
             "median_gap_pre": float(gap_pre.median()) if gap_pre.notna().any() else float("nan"),
@@ -2057,11 +2107,13 @@ def _apply_props_uplift_calibration_to_worlds(
             "mean_scale_p90": float(scale_df["sf_mean"].quantile(0.90)),
             "var_scale_mean": float(scale_df["sf_var"].mean()),
         }
-        top_cols = [c for c in ["player_name", "player_id", "line_gap", "sf_mean", "sf_var"] if c in scale_df.columns]
+        top_cols = [c for c in ["player_name", "player_id", "direction", "line_gap", "sf_mean", "sf_var"] if c in scale_df.columns]
         top_rows = (
             scale_df.loc[:, top_cols]
-            .sort_values("line_gap", ascending=False)
+            .assign(abs_line_gap=lambda d: pd.to_numeric(d["line_gap"], errors="coerce").abs())
+            .sort_values("abs_line_gap", ascending=False)
             .head(8)
+            .drop(columns=["abs_line_gap"], errors="ignore")
             .replace([np.inf, -np.inf], np.nan)
             .fillna("")
         )
