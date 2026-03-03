@@ -1533,21 +1533,28 @@ def _sanitize_frame_to_expected_keys(
 
     work = df.copy()
     expected = expected_keys_df.loc[:, list(key_cols)].copy()
+    # Keep key columns as numeric until null filtering is complete; converting
+    # nullable pandas Int64 -> numpy int64 can raise intermittently in large
+    # frames when masks are present.
     for col in key_cols:
-        work[col] = pd.to_numeric(work[col], errors="coerce").astype("Int64")
-        expected[col] = pd.to_numeric(expected[col], errors="coerce").astype("Int64")
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+        expected[col] = pd.to_numeric(expected[col], errors="coerce")
 
     rows_in = int(len(work))
     null_mask = work.loc[:, list(key_cols)].isna().any(axis=1)
     dropped_null_key_rows = int(null_mask.sum())
     if dropped_null_key_rows:
         work = work.loc[~null_mask].copy()
+    for col in key_cols:
+        work[col] = work[col].astype("int64", copy=False)
 
     expected = (
         expected.dropna(subset=list(key_cols))
         .drop_duplicates(ignore_index=True)
         .reset_index(drop=True)
     )
+    for col in key_cols:
+        expected[col] = expected[col].astype("int64", copy=False)
     expected_distinct_keys = int(len(expected))
 
     if expected.empty:
@@ -1577,7 +1584,14 @@ def _sanitize_frame_to_expected_keys(
         .reset_index(drop=True)
     )
     for col in key_cols:
-        merged[col] = pd.to_numeric(merged[col], errors="raise").astype("int64")
+        merged[col] = pd.to_numeric(merged[col], errors="coerce")
+    post_merge_null_mask = merged.loc[:, list(key_cols)].isna().any(axis=1)
+    post_merge_null_rows = int(post_merge_null_mask.sum())
+    if post_merge_null_rows:
+        merged = merged.loc[~post_merge_null_mask].copy()
+        dropped_null_key_rows += post_merge_null_rows
+    for col in key_cols:
+        merged[col] = merged[col].astype("int64", copy=False)
 
     return (
         merged,
@@ -1821,6 +1835,259 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
         "inactive_nonzero_stats": inactive_nonzero_stats,
         "inactive_nonzero_fpts_proxy": inactive_nonzero_fpts_proxy,
     }
+
+
+def _apply_props_uplift_calibration_to_worlds(
+    worlds_df: pd.DataFrame,
+    *,
+    features_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Apply one-sided stat uplifts with tail broadening for undercalled prop-heavy players."""
+    if worlds_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_worlds"}
+
+    required_world_cols = {
+        "game_id",
+        "team_id",
+        "player_id",
+        "pts",
+        "reb",
+        "ast",
+        "stl",
+        "blk",
+        "tov",
+        "dk_fpts",
+    }
+    if not required_world_cols.issubset(worlds_df.columns):
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_world_cols",
+            "missing_world_cols": sorted(required_world_cols - set(worlds_df.columns)),
+        }
+
+    required_feature_cols = {"game_id", "team_id", "player_id"}
+    if not required_feature_cols.issubset(features_df.columns):
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_feature_keys",
+            "missing_feature_cols": sorted(required_feature_cols - set(features_df.columns)),
+        }
+
+    stat_cfg: dict[str, dict[str, float | str]] = {
+        "pts": {
+            "line_col": "an_pts_line",
+            "has_col": "an_has_pts",
+            "min_line": 20.0,
+            "min_gap": 2.5,
+            "weight": 0.88,
+            "max_scale": 2.0,
+            "var_weight": 0.40,
+            "max_var_scale": 1.50,
+            "line_anchor_min_line": 28.0,
+            "line_anchor_frac": 0.93,
+        },
+        "reb": {
+            "line_col": "an_reb_line",
+            "has_col": "an_has_reb",
+            "min_line": 7.0,
+            "min_gap": 1.5,
+            "weight": 0.92,
+            "max_scale": 2.2,
+            "var_weight": 0.45,
+            "max_var_scale": 1.60,
+            "line_anchor_min_line": 10.0,
+            "line_anchor_frac": 0.92,
+        },
+        "ast": {
+            "line_col": "an_ast_line",
+            "has_col": "an_has_ast",
+            "min_line": 5.5,
+            "min_gap": 1.0,
+            "weight": 0.92,
+            "max_scale": 2.2,
+            "var_weight": 0.50,
+            "max_var_scale": 1.65,
+            "line_anchor_min_line": 8.0,
+            "line_anchor_frac": 0.92,
+        },
+    }
+    key_cols = ["game_id", "team_id", "player_id"]
+
+    player_means = (
+        worlds_df.groupby(key_cols, dropna=False)[["pts", "reb", "ast"]]
+        .mean()
+        .reset_index()
+        .rename(columns={"pts": "pts_mean", "reb": "reb_mean", "ast": "ast_mean"})
+    )
+
+    feat_cols = list(key_cols)
+    for cfg in stat_cfg.values():
+        line_col = str(cfg["line_col"])
+        has_col = str(cfg["has_col"])
+        if line_col in features_df.columns:
+            feat_cols.append(line_col)
+        if has_col in features_df.columns:
+            feat_cols.append(has_col)
+    feat = features_df.loc[:, sorted(set(feat_cols), key=feat_cols.index)].copy()
+
+    agg_dict: dict[str, str] = {}
+    for col in feat.columns:
+        if col in key_cols:
+            continue
+        agg_dict[col] = "max" if col.startswith("an_has_") else "first"
+    feat = feat.groupby(key_cols, dropna=False, as_index=False).agg(agg_dict)
+
+    meta = player_means.merge(feat, on=key_cols, how="left")
+    if "player_name" in features_df.columns:
+        names = (
+            features_df.loc[:, key_cols + ["player_name"]]
+            .drop_duplicates(subset=key_cols, keep="last")
+            .copy()
+        )
+        meta = meta.merge(names, on=key_cols, how="left")
+    for cfg in stat_cfg.values():
+        line_col = str(cfg["line_col"])
+        has_col = str(cfg["has_col"])
+        if line_col in meta.columns:
+            meta[line_col] = pd.to_numeric(meta[line_col], errors="coerce")
+        if has_col in meta.columns:
+            meta[has_col] = pd.to_numeric(meta[has_col], errors="coerce").fillna(0.0)
+
+    out = worlds_df.copy()
+    report: dict[str, Any] = {"applied": True, "stats": {}}
+    adjusted_key_frames: list[pd.DataFrame] = []
+
+    for stat_name, cfg in stat_cfg.items():
+        line_col = str(cfg["line_col"])
+        has_col = str(cfg["has_col"])
+        mean_col = f"{stat_name}_mean"
+        if line_col not in meta.columns or mean_col not in meta.columns:
+            report["stats"][stat_name] = {
+                "applied_player_count": 0,
+                "reason": "missing_line_or_mean_column",
+            }
+            continue
+
+        line = pd.to_numeric(meta[line_col], errors="coerce")
+        mean = pd.to_numeric(meta[mean_col], errors="coerce")
+        gap = line - mean
+        denom = line.clip(lower=1.0)
+        mask = line.ge(float(cfg["min_line"])) & gap.ge(float(cfg["min_gap"])) & mean.gt(0.0)
+        if has_col in meta.columns:
+            mask = mask & pd.to_numeric(meta[has_col], errors="coerce").fillna(0.0).ge(0.5)
+
+        target = mean + float(cfg["weight"]) * gap
+        target = target.where(
+            line.lt(float(cfg["line_anchor_min_line"])),
+            np.maximum(
+                pd.to_numeric(target, errors="coerce").to_numpy(dtype=float),
+                float(cfg["line_anchor_frac"]) * pd.to_numeric(line, errors="coerce").to_numpy(dtype=float),
+            ),
+        )
+        scale = (target / mean).clip(lower=1.0, upper=float(cfg["max_scale"]))
+        var_scale = (
+            1.0 + float(cfg["var_weight"]) * (gap / denom).clip(lower=0.0)
+        ).clip(lower=1.0, upper=float(cfg["max_var_scale"]))
+        scale_df = meta.loc[mask, key_cols].copy()
+        if "player_name" in meta.columns:
+            scale_df["player_name"] = meta.loc[mask, "player_name"].astype(str).values
+        scale_df["mu"] = mean.loc[mask].astype(float).values
+        scale_df["sf_mean"] = scale.loc[mask].astype(float).values
+        scale_df["sf_var"] = var_scale.loc[mask].astype(float).values
+        scale_df["line_gap"] = gap.loc[mask].astype(float).values
+
+        if scale_df.empty:
+            report["stats"][stat_name] = {
+                "applied_player_count": 0,
+                "mean_gap_pre": float((mean - line).mean()) if (mean - line).notna().any() else float("nan"),
+                "mean_gap_post": float((mean - line).mean()) if (mean - line).notna().any() else float("nan"),
+            }
+            continue
+
+        adjusted_key_frames.append(scale_df.loc[:, key_cols].copy())
+        out = out.merge(scale_df, on=key_cols, how="left")
+        mu = pd.to_numeric(out["mu"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        sf_mean = pd.to_numeric(out["sf_mean"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
+        sf_var = pd.to_numeric(out["sf_var"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
+        target_mu = mu * sf_mean
+        if "minutes" in out.columns:
+            active_mask = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0.0
+        else:
+            active_mask = pd.to_numeric(out["dk_fpts"], errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0.0
+        if stat_name == "pts":
+            x = pd.to_numeric(out["pts"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            pts_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            out["pts"] = np.where(active_mask, pts_new, x)
+        elif stat_name == "reb":
+            x = pd.to_numeric(out["reb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            reb_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            reb_new = np.where(active_mask, reb_new, x)
+            if "oreb" in out.columns and "dreb" in out.columns:
+                oreb = pd.to_numeric(out["oreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                dreb = pd.to_numeric(out["dreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                reb_split_sum = np.maximum(oreb + dreb, 1e-6)
+                oreb_share = np.divide(oreb, reb_split_sum)
+                out["oreb"] = np.where(active_mask, reb_new * oreb_share, oreb)
+                out["dreb"] = np.where(active_mask, reb_new * (1.0 - oreb_share), dreb)
+            out["reb"] = reb_new
+        elif stat_name == "ast":
+            x = pd.to_numeric(out["ast"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            ast_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            out["ast"] = np.where(active_mask, ast_new, x)
+        out = out.drop(columns=["mu", "sf_mean", "sf_var", "line_gap", "player_name"], errors="ignore")
+
+        post_means = (
+            out.groupby(key_cols, dropna=False)[[stat_name]]
+            .mean()
+            .reset_index()
+            .rename(columns={stat_name: f"{stat_name}_mean_post"})
+        )
+        merged_gap = meta.merge(post_means, on=key_cols, how="left")
+        gap_pre = pd.to_numeric(merged_gap[mean_col], errors="coerce") - pd.to_numeric(merged_gap[line_col], errors="coerce")
+        gap_post = pd.to_numeric(merged_gap[f"{stat_name}_mean_post"], errors="coerce") - pd.to_numeric(
+            merged_gap[line_col], errors="coerce"
+        )
+        report["stats"][stat_name] = {
+            "applied_player_count": int(len(scale_df)),
+            "mean_gap_pre": float(gap_pre.mean()) if gap_pre.notna().any() else float("nan"),
+            "mean_gap_post": float(gap_post.mean()) if gap_post.notna().any() else float("nan"),
+            "median_gap_pre": float(gap_pre.median()) if gap_pre.notna().any() else float("nan"),
+            "median_gap_post": float(gap_post.median()) if gap_post.notna().any() else float("nan"),
+            "mean_scale_mean": float(scale_df["sf_mean"].mean()),
+            "mean_scale_p90": float(scale_df["sf_mean"].quantile(0.90)),
+            "var_scale_mean": float(scale_df["sf_var"].mean()),
+        }
+        top_cols = [c for c in ["player_name", "player_id", "line_gap", "sf_mean", "sf_var"] if c in scale_df.columns]
+        top_rows = (
+            scale_df.loc[:, top_cols]
+            .sort_values("line_gap", ascending=False)
+            .head(8)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna("")
+        )
+        report["stats"][stat_name]["top_adjustments"] = top_rows.to_dict(orient="records")
+
+    pts = pd.to_numeric(out["pts"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    reb = pd.to_numeric(out["reb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    ast = pd.to_numeric(out["ast"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    stl = pd.to_numeric(out["stl"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    blk = pd.to_numeric(out["blk"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    tov = pd.to_numeric(out["tov"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    base = pts + 1.25 * reb + 1.5 * ast + 2.0 * stl + 2.0 * blk - 0.5 * tov
+    qualifying = np.stack([pts, reb, ast, stl, blk], axis=1) >= 10.0
+    q_count = qualifying.sum(axis=1)
+    out["dk_fpts"] = np.clip(base + np.where(q_count == 2, 1.5, 0.0) + np.where(q_count >= 3, 3.0, 0.0), 0.0, None)
+
+    report["total_adjustment_events"] = int(
+        sum(int((report["stats"].get(s) or {}).get("applied_player_count", 0)) for s in stat_cfg)
+    )
+    if adjusted_key_frames:
+        report["total_adjusted_players"] = int(
+            len(pd.concat(adjusted_key_frames, ignore_index=True).drop_duplicates(subset=key_cols))
+        )
+    else:
+        report["total_adjusted_players"] = 0
+    return out, report
 
 
 def _resolve_previous_run_file(*, dataset_dir: Path, filename: str) -> Path | None:
@@ -3134,6 +3401,7 @@ def generate_worlds_gtv2_live_task(
     flow_scale_clip_override: float | None = None,
     make_model_mode: str = "beta_binomial_all",
     make_model_use_learned_efficiency: bool = True,
+    apply_props_uplift: bool = True,
 ) -> dict[str, str]:
     run_dir = (
         data_root
@@ -3268,6 +3536,16 @@ def generate_worlds_gtv2_live_task(
                 "Dropped invalid world rows before publish: %s",
                 world_key_report,
             )
+        props_uplift_report: dict[str, Any]
+        if bool(apply_props_uplift):
+            worlds_df, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
+                worlds_df,
+                features_df=features_df,
+            )
+            if bool(props_uplift_report.get("applied")):
+                logger.info("Applied props uplift calibration: %s", props_uplift_report)
+        else:
+            props_uplift_report = {"applied": False, "reason": "disabled"}
         _atomic_write_validated_parquet(
             worlds_df,
             worlds_path,
@@ -3306,6 +3584,7 @@ def generate_worlds_gtv2_live_task(
                 "mode": str(make_model_cfg.mode),
                 "use_learned_efficiency": bool(make_model_cfg.use_learned_efficiency),
             },
+            "props_uplift_calibration": props_uplift_report,
             "created_at": _utc_now_iso(),
         }
 
@@ -3528,13 +3807,6 @@ def materialize_unified_run_artifacts_task(
         ),
         target_game_ids=target_ids,
     )
-    merged_world_projections = _merge_parquet_for_target_games(
-        current_path=worlds_dir / f"run={run_id}" / "projections.parquet",
-        previous_path=_resolve_previous_run_file(
-            dataset_dir=worlds_dir, filename="projections.parquet"
-        ),
-        target_game_ids=target_ids,
-    )
     merged_final = _merge_parquet_for_target_games(
         current_path=projections_dir / f"run={run_id}" / "projections.parquet",
         previous_path=_resolve_previous_run_file(
@@ -3563,12 +3835,20 @@ def materialize_unified_run_artifacts_task(
         key_cols=("game_id", "team_id", "player_id"),
         label="merged worlds",
     )
+    merged_worlds, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
+        merged_worlds,
+        features_df=merged_features,
+    )
     _atomic_write_validated_parquet(
         merged_worlds,
         worlds_dir / f"run={run_id}" / "worlds.parquet",
         required_cols=("world_idx", "game_id", "team_id", "player_id"),
     )
 
+    merged_world_projections = summarize_worlds_to_projections(
+        merged_worlds,
+        sim_profile="game_transformer_v2",
+    )
     merged_world_projections, world_projection_key_report = _sanitize_frame_to_expected_keys(
         merged_world_projections,
         expected_keys_df=expected_feature_keys,
@@ -3580,6 +3860,42 @@ def materialize_unified_run_artifacts_task(
         worlds_dir / f"run={run_id}" / "projections.parquet",
         required_cols=("game_date", "game_id", "team_id", "player_id"),
     )
+
+    projection_join_keys = ["game_id", "team_id", "player_id"]
+    projection_value_cols = [
+        col
+        for col in merged_world_projections.columns
+        if col not in {"game_date", "game_id", "team_id", "player_id"}
+    ]
+    merged_final = merged_final.merge(
+        merged_world_projections.loc[:, projection_join_keys + projection_value_cols],
+        on=projection_join_keys,
+        how="left",
+        suffixes=("", "__world"),
+    )
+    for col in projection_value_cols:
+        src_col = f"{col}__world"
+        if src_col not in merged_final.columns:
+            continue
+        if col in merged_final.columns:
+            merged_final[col] = merged_final[src_col].where(
+                pd.notna(merged_final[src_col]),
+                merged_final[col],
+            )
+        else:
+            merged_final[col] = merged_final[src_col]
+    merged_final = merged_final.drop(
+        columns=[f"{col}__world" for col in projection_value_cols],
+        errors="ignore",
+    )
+    if "dk_fpts_mean" in merged_final.columns and "salary" in merged_final.columns:
+        salary = pd.to_numeric(merged_final["salary"], errors="coerce")
+        merged_final["value"] = (
+            pd.to_numeric(merged_final["dk_fpts_mean"], errors="coerce")
+            .div(salary.where(salary > 0))
+            .mul(1000)
+            .round(2)
+        )
 
     merged_final, final_projection_key_report = _sanitize_frame_to_expected_keys(
         merged_final,
@@ -3606,6 +3922,7 @@ def materialize_unified_run_artifacts_task(
         "target_game_ids": target_ids,
         "rows": int(len(merged_worlds)),
         "projection_rows": int(len(merged_world_projections)),
+        "props_uplift_calibration": props_uplift_report,
         "created_at": _utc_now_iso(),
     }
     world_summary_path.write_text(
@@ -4168,6 +4485,7 @@ def nba_live_pipeline_v3_flow(
             make_model_use_learned_efficiency=bool(
                 gtv2_make_model_use_learned_efficiency
             ),
+            apply_props_uplift=bool(rerun_plan.get("mode") == "full_slate"),
         )
 
         ownership_dir = score_ownership_linestar_task(

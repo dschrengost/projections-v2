@@ -254,6 +254,7 @@ def build_portfolio(
     max_total_own: float | None = None,
     min_uniques: int = 0,
     exposure_bounds: Mapping[str, ExposureBoundsPct] | None = None,
+    seed_lineup_ids: Sequence[int] | None = None,
 ) -> PortfolioSelection:
     """Select a portfolio of lineups with simple diversification constraints.
 
@@ -275,6 +276,10 @@ def build_portfolio(
     exposure_bounds:
         Optional player exposure min/max percentage bounds; selection enforces
         only *max* bounds during greedy construction.
+    seed_lineup_ids:
+        Optional previously selected lineup ids. When provided, selection
+        prioritizes these lineups (highest ranked first) if they still satisfy
+        active constraints, then fills remaining slots from the ranked pool.
 
     Returns
     -------
@@ -310,6 +315,26 @@ def build_portfolio(
         )
 
     ordered = _sort_candidates(filtered, sort_key=sort_key, sort_dir=sort_dir)
+    if seed_lineup_ids:
+        rank_by_lineup_id = {c.lineup_id: idx for idx, c in enumerate(ordered)}
+        seed_ids_ranked: list[int] = []
+        seen_seed_ids: set[int] = set()
+        for lineup_id_raw in seed_lineup_ids:
+            try:
+                lineup_id = int(lineup_id_raw)
+            except Exception:
+                continue
+            if lineup_id in seen_seed_ids:
+                continue
+            if lineup_id not in rank_by_lineup_id:
+                continue
+            seen_seed_ids.add(lineup_id)
+            seed_ids_ranked.append(lineup_id)
+        seed_ids_ranked.sort(key=lambda lineup_id: rank_by_lineup_id[lineup_id])
+        if seed_ids_ranked:
+            seed_set = set(seed_ids_ranked)
+            seed_front = [c for c in ordered if c.lineup_id in seed_set]
+            ordered = seed_front + [c for c in ordered if c.lineup_id not in seed_set]
 
     selected: list[PortfolioCandidate] = []
     selected_sets: list[set[str]] = []
@@ -457,6 +482,7 @@ def build_decorrelated_portfolio(
     config: DecorrelatedPortfolioConfig | None = None,
     exposure_bounds: Mapping[str, ExposureBoundsPct] | None = None,
     min_uniques: int = 0,
+    seed_lineup_ids: Sequence[int] | None = None,
 ) -> tuple[PortfolioSelection, DecorrelatedPortfolioDiagnostics]:
     """Select a diversified portfolio by penalizing covariance between lineups.
 
@@ -620,9 +646,41 @@ def build_decorrelated_portfolio(
                 continue
             max_counts[loc] = (float(b.max) / 100.0) * float(portfolio_size)
 
-    def _select_best_ev_feasible() -> list[int]:
+    kept_lineup_idx_by_id = {c.lineup_id: idx for idx, c in enumerate(kept_candidates)}
+    seed_idxs: list[int] = []
+    if seed_lineup_ids:
+        seen_seed_idxs: set[int] = set()
+        for lineup_id_raw in seed_lineup_ids:
+            try:
+                lineup_id = int(lineup_id_raw)
+            except Exception:
+                continue
+            idx = kept_lineup_idx_by_id.get(lineup_id)
+            if idx is None or idx in seen_seed_idxs:
+                continue
+            seen_seed_idxs.add(idx)
+            seed_idxs.append(idx)
+
+    def _select_best_ev_feasible(initial_seed_idxs: Sequence[int] | None = None) -> list[int]:
         """Best-EV greedy baseline under active hard constraints."""
         order = np.argsort(-kept_ev)
+        if initial_seed_idxs:
+            dedup_seed_idxs: list[int] = []
+            seen_seed_idxs: set[int] = set()
+            for idx in initial_seed_idxs:
+                idx_i = int(idx)
+                if idx_i < 0 or idx_i >= K2 or idx_i in seen_seed_idxs:
+                    continue
+                seen_seed_idxs.add(idx_i)
+                dedup_seed_idxs.append(idx_i)
+            dedup_seed_idxs.sort(
+                key=lambda idx_i: (-float(kept_ev[idx_i]), kept_candidates[idx_i].lineup_id)
+            )
+            if dedup_seed_idxs:
+                order = np.asarray(
+                    dedup_seed_idxs + [int(i) for i in order if int(i) not in seen_seed_idxs],
+                    dtype=np.int64,
+                )
 
         selected: list[int] = []
         counts = np.zeros((len(player_ids),), dtype=np.float64)
@@ -655,12 +713,20 @@ def build_decorrelated_portfolio(
         return selected
 
     # Baseline: best EV portfolio (under optional caps).
-    selected = _select_best_ev_feasible()
+    best_ev_selected = _select_best_ev_feasible()
+    ev_best = float(np.sum(kept_ev[best_ev_selected]))
+    ev_target = float(cfg.ev_retention) * ev_best
+
+    selected = list(best_ev_selected)
+    if seed_idxs:
+        seeded_selected = _select_best_ev_feasible(seed_idxs)
+        seeded_ev = float(np.sum(kept_ev[seeded_selected]))
+        # Preserve seeded portfolios when they already satisfy EV retention.
+        if seeded_ev + 1e-9 >= ev_target:
+            selected = list(seeded_selected)
+
     selected_mask = np.zeros((K2,), dtype=bool)
     selected_mask[selected] = True
-
-    ev_best = float(np.sum(kept_ev[selected]))
-    ev_target = float(cfg.ev_retention) * ev_best
 
     counts = np.zeros((len(player_ids),), dtype=np.float64)
     for i in selected:
@@ -671,7 +737,7 @@ def build_decorrelated_portfolio(
     v = sigma @ counts  # Σ @ counts
     risk_base = float(np.dot(counts, v))
 
-    ev_selected = float(ev_best)
+    ev_selected = float(np.sum(kept_ev[selected]))
     risk_selected = float(risk_base)
 
     passes = 0

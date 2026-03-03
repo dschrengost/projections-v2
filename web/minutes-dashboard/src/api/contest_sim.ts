@@ -166,6 +166,7 @@ export interface PortfolioSelectionRequest {
     filter_positive_ev?: boolean
     top_n?: number | null
     candidate_lineup_ids?: number[] | null
+    seed_lineup_ids?: number[] | null
     exposure_bounds?: Record<string, PortfolioExposureBounds>
     seed?: number
 }

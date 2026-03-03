@@ -41,6 +41,7 @@ JOIN_KEYS = ["game_id", "team_id", "player_id", "game_date"]
 class MakeModelConfig:
     mode: str = "legacy"
     use_learned_efficiency: bool = True
+    legacy_use_efficiency_mean: bool = False
     bb_ft_prior_mean: float = 0.77
     bb_ft_prior_strength: float = 6.0
     bb_ft_concentration: float = 8.0
@@ -249,6 +250,24 @@ def _align_flow_to_backbone_budgets(
     fg3_pct = torch.clamp(fg3_pct, min=0.0, max=1.0)
     ft_pct = torch.clamp(ft_pct, min=0.0, max=1.0)
 
+    cfg = make_model_config or MakeModelConfig()
+    if (
+        str(cfg.mode).strip().lower() == "legacy"
+        and bool(cfg.legacy_use_efficiency_mean)
+        and eff_alpha_fg2 is not None
+        and eff_beta_fg2 is not None
+        and eff_alpha_fg3 is not None
+        and eff_beta_fg3 is not None
+        and eff_alpha_ft is not None
+        and eff_beta_ft is not None
+    ):
+        fg2_pct = eff_alpha_fg2 / (eff_alpha_fg2 + eff_beta_fg2).clamp(min=1e-8)
+        fg3_pct = eff_alpha_fg3 / (eff_alpha_fg3 + eff_beta_fg3).clamp(min=1e-8)
+        ft_pct = eff_alpha_ft / (eff_alpha_ft + eff_beta_ft).clamp(min=1e-8)
+        fg2_pct = torch.clamp(fg2_pct, min=0.0, max=1.0)
+        fg3_pct = torch.clamp(fg3_pct, min=0.0, max=1.0)
+        ft_pct = torch.clamp(ft_pct, min=0.0, max=1.0)
+
     for side in (0, 1):
         side_mask = team_index.eq(side)
         elig = alloc_base & side_mask
@@ -316,7 +335,6 @@ def _align_flow_to_backbone_budgets(
         out[:, :, tov_idx] = out[:, :, tov_idx] * (1.0 - side_f) + new_tov * side_f
         out[:, :, oreb_idx] = out[:, :, oreb_idx] * (1.0 - side_f) + new_oreb * side_f
 
-    cfg = make_model_config or MakeModelConfig()
     mode = str(cfg.mode).strip().lower()
     if mode not in {"legacy", "beta_binomial_ft", "beta_binomial_fg", "beta_binomial_all"}:
         raise ValueError(f"unsupported make_model mode: {cfg.mode}")
@@ -1094,6 +1112,16 @@ def parse_args() -> argparse.Namespace:
             "(1=yes, 0=no fallback to flow-derived rates + priors)."
         ),
     )
+    parser.add_argument(
+        "--legacy-use-efficiency-mean",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help=(
+            "When make-model is legacy, replace flow-derived make rates with efficiency head means "
+            "if available (1=yes, 0=no)."
+        ),
+    )
     parser.add_argument("--out-parquet", type=str, default=None)
     parser.add_argument("--out-summary-json", type=str, default=None)
     parser.add_argument("--out-projections-parquet", type=str, default=None)
@@ -1136,6 +1164,7 @@ def main() -> None:
     make_model_config = MakeModelConfig(
         mode=str(args.make_model),
         use_learned_efficiency=bool(int(args.bb_use_learned_efficiency)),
+        legacy_use_efficiency_mean=bool(int(args.legacy_use_efficiency_mean)),
         bb_ft_prior_mean=float(args.bb_ft_prior_mean),
         bb_ft_prior_strength=float(args.bb_ft_prior_strength),
         bb_ft_concentration=float(args.bb_ft_concentration),

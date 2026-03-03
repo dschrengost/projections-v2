@@ -1241,8 +1241,6 @@ export default function ContestSimPage() {
         topN,
         sortKey,
         sortDir,
-        minUniques,
-        exposureBounds,
         requiredPlayerIds,
     ])
 
@@ -1575,6 +1573,7 @@ export default function ContestSimPage() {
                 max_total_own: maxOwnership,
                 filter_positive_ev: filterPositiveEV,
                 candidate_lineup_ids: filteredByPlayersResults.map(r => r.lineup_id),
+                seed_lineup_ids: portfolioResponse?.selected_lineup_ids ?? undefined,
                 exposure_bounds: Object.fromEntries(Array.from(exposureBounds.entries())),
             })
             setPortfolioResponse(response)

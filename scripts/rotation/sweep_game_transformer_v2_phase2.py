@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -37,6 +38,23 @@ class EvalMetrics:
     minutes_mae_gap_abs: float
     active_count_mae: float
     possessions_proxy_mae: float
+
+
+REALISM_GATE_DEFAULTS: dict[str, float] = {
+    "realism_max_pts_mae": 17.0,
+    "realism_max_abs_pts_bias": 8.0,
+    "realism_max_abs_star_bias": 12.0,
+    "realism_max_abs_elite_bias": 22.0,
+    "realism_max_spread_mae_vs_vegas": 7.5,
+    "realism_min_spread_span_ratio": 0.5,
+    "realism_min_spread_corr_vs_vegas": 0.2,
+    "realism_max_total_mae_vs_vegas": 10.0,
+    "realism_min_total_span_ratio": 0.5,
+    "realism_max_p90_calib_error": 0.03,
+    "realism_max_p95_calib_error": 0.03,
+    "realism_max_top1_share_bias": 0.05,
+    "realism_max_top2_share_bias": 0.05,
+}
 
 
 def _utc_now_compact() -> str:
@@ -204,6 +222,77 @@ def _default_optimizer_trials() -> list[Trial]:
                 "w_member": 0.55,
                 "w_minutes_nll": 0.55,
                 "w_flow_nll": 0.08,
+            },
+        ),
+    ]
+    return [Trial(name=_slugify(name), params=params) for name, params in rows]
+
+
+def _default_all_losses_trials() -> list[Trial]:
+    """Broader search preset that includes all exposed training loss weights."""
+    base: dict[str, Any] = {
+        # Core phase2 scheduling
+        "phase2_flow_delay_epochs": 6,
+        "phase2_flow_warmup_epochs": 8,
+        "phase2_anchor_end_weight": 0.75,
+        # Ensure all relevant heads are active in this preset
+        "enable_possession_backbone": True,
+        "enable_three_pa_share": True,
+        "enable_efficiency_head": True,
+        "enable_usage_share_head": True,
+        # Loss defaults from recent stable staged runs
+        "w_minutes": 1.0,
+        "w_minutes_nll": 1.0,
+        "w_count": 0.5,
+        "w_member": 0.5,
+        "w_flow_nll": 0.10,
+        "w_poss_nll": 0.20,
+        "w_backbone_nll": 0.10,
+        "w_three_pa_nll": 0.05,
+        "w_poss_regression": 2.0,
+        "w_efficiency_nll": 0.50,
+        "w_usage_share_nll": 0.25,
+        "w_emergent_share_aux": 0.00,
+        "w_ast_share_aux": 0.00,
+        "w_reb_share_aux": 0.00,
+        "w_ast_team_rate_aux": 0.00,
+        "w_reb_opportunity_rate_aux": 0.00,
+        # Optimization stability defaults
+        "encoder_lr_scale": 0.05,
+        "backbone_head_lr_scale": 1.5,
+        "backbone_grad_clip_norm": 1.0,
+    }
+    rows: list[tuple[str, dict[str, Any]]] = [
+        ("allloss_baseline", dict(base)),
+        ("allloss_eff_up", {**base, "w_efficiency_nll": 0.80}),
+        ("allloss_eff_down", {**base, "w_efficiency_nll": 0.30}),
+        ("allloss_usage_up", {**base, "w_usage_share_nll": 0.40}),
+        ("allloss_usage_down", {**base, "w_usage_share_nll": 0.15}),
+        ("allloss_flow_up", {**base, "w_flow_nll": 0.20}),
+        ("allloss_flow_down", {**base, "w_flow_nll": 0.05}),
+        ("allloss_possreg_up", {**base, "w_poss_regression": 3.0}),
+        ("allloss_possreg_down", {**base, "w_poss_regression": 1.0}),
+        ("allloss_anchor_stronger", {**base, "phase2_anchor_end_weight": 0.85}),
+        (
+            "allloss_with_ast_reb_aux",
+            {
+                **base,
+                "w_ast_share_aux": 0.05,
+                "w_reb_share_aux": 0.05,
+                "w_ast_team_rate_aux": 0.05,
+                "w_reb_opportunity_rate_aux": 0.05,
+            },
+        ),
+        (
+            "allloss_conservative_flow_with_aux",
+            {
+                **base,
+                "phase2_flow_delay_epochs": 8,
+                "phase2_flow_warmup_epochs": 10,
+                "w_flow_nll": 0.08,
+                "w_efficiency_nll": 0.60,
+                "w_usage_share_nll": 0.30,
+                "w_emergent_share_aux": 0.10,
             },
         ),
     ]
@@ -415,8 +504,14 @@ def _meets_multi_seed_promotion_gate(
 
 def _run(cmd: list[str], *, log_path: Path) -> subprocess.CompletedProcess[str]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env.setdefault("OMP_NUM_THREADS", "1")
+    env.setdefault("MKL_NUM_THREADS", "1")
+    env.setdefault("OPENBLAS_NUM_THREADS", "1")
+    env.setdefault("NUMEXPR_NUM_THREADS", "1")
     proc = subprocess.run(
         cmd,
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -434,6 +529,8 @@ def _print_cmd(prefix: str, cmd: list[str]) -> None:
 def _select_trials(args: argparse.Namespace) -> list[Trial]:
     if args.trials_json:
         return _read_trials_file(Path(args.trials_json).expanduser().resolve())
+    if str(args.trial_preset) == "all_losses":
+        return _default_all_losses_trials()
     if str(args.trial_preset) == "optimizer_quality":
         return _default_optimizer_trials()
     return _default_trials()
@@ -447,6 +544,30 @@ def _build_train_cmd(
     seed: int,
     params: dict[str, Any],
 ) -> list[str]:
+    params_effective = dict(params)
+
+    def _as_float(key: str, default: float = 0.0) -> float:
+        try:
+            return float(params_effective.get(key, default))
+        except Exception:
+            return float(default)
+
+    # Auto-enable heads when corresponding losses are non-zero so trial JSONs can
+    # focus on loss weights without repeating every structural flag.
+    if (
+        _as_float("w_poss_nll") > 0.0
+        or _as_float("w_backbone_nll") > 0.0
+        or _as_float("w_three_pa_nll") > 0.0
+        or _as_float("w_poss_regression") > 0.0
+    ):
+        params_effective.setdefault("enable_possession_backbone", True)
+    if _as_float("w_three_pa_nll") > 0.0:
+        params_effective.setdefault("enable_three_pa_share", True)
+    if _as_float("w_efficiency_nll") > 0.0:
+        params_effective.setdefault("enable_efficiency_head", True)
+    if _as_float("w_usage_share_nll") > 0.0:
+        params_effective.setdefault("enable_usage_share_head", True)
+
     train_cmd = [
         "uv",
         "run",
@@ -489,7 +610,7 @@ def _build_train_cmd(
     ]
     if args.init_model_pt:
         train_cmd.extend(["--init-model-pt", str(Path(args.init_model_pt).expanduser().resolve())])
-    train_cmd.extend(_to_cli_args(params))
+    train_cmd.extend(_to_cli_args(params_effective))
     return train_cmd
 
 
@@ -534,6 +655,7 @@ def _build_world_cmd(
     dataset_dir: Path,
     run_dir: Path,
     world_summary: Path,
+    worlds_parquet: Path,
 ) -> list[str]:
     return [
         "uv",
@@ -558,9 +680,82 @@ def _build_world_cmd(
         "--device",
         str(args.device),
         "--strict-contracts",
+        "--out-parquet",
+        str(worlds_parquet),
         "--out-summary-json",
         str(world_summary),
     ]
+
+
+def _build_realism_cmd(
+    *,
+    dataset_dir: Path,
+    worlds_parquet: Path,
+    out_json: Path,
+    name: str,
+) -> list[str]:
+    return [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.rotation.eval_make_rate_calibration",
+        "--dataset-dir",
+        str(dataset_dir),
+        "--worlds-parquet",
+        str(worlds_parquet),
+        "--name",
+        str(name),
+        "--out-json",
+        str(out_json),
+    ]
+
+
+def _meets_realism_gate(metrics: dict[str, Any], *, args: argparse.Namespace) -> tuple[bool, list[str]]:
+    failures: list[str] = []
+
+    def _val(key: str) -> float:
+        try:
+            return float(metrics.get(key, float("nan")))
+        except Exception:
+            return float("nan")
+
+    def _check_max(key: str, threshold: float | None) -> None:
+        if threshold is None:
+            return
+        v = _val(key)
+        if not math.isfinite(v) or v > float(threshold):
+            failures.append(f"{key}>{threshold}")
+
+    def _check_min(key: str, threshold: float | None) -> None:
+        if threshold is None:
+            return
+        v = _val(key)
+        if not math.isfinite(v) or v < float(threshold):
+            failures.append(f"{key}<{threshold}")
+
+    def _check_abs_max(key: str, threshold: float | None) -> None:
+        if threshold is None:
+            return
+        v = _val(key)
+        if not math.isfinite(v) or abs(v) > float(threshold):
+            failures.append(f"abs({key})>{threshold}")
+
+    _check_max("pts_mae", args.realism_max_pts_mae)
+    _check_abs_max("pts_bias_mean", args.realism_max_abs_pts_bias)
+    _check_abs_max("star_bias_pts_25_34", args.realism_max_abs_star_bias)
+    _check_abs_max("elite_bias_pts_35plus", args.realism_max_abs_elite_bias)
+    _check_max("spread_mae_vs_vegas", args.realism_max_spread_mae_vs_vegas)
+    _check_min("spread_span_ratio", args.realism_min_spread_span_ratio)
+    _check_min("spread_corr_vs_vegas", args.realism_min_spread_corr_vs_vegas)
+    _check_max("total_mae_vs_vegas", args.realism_max_total_mae_vs_vegas)
+    _check_min("total_span_ratio", args.realism_min_total_span_ratio)
+    _check_max("p90_calibration_error_abs", args.realism_max_p90_calib_error)
+    _check_max("p95_calibration_error_abs", args.realism_max_p95_calib_error)
+    _check_abs_max("top1_share_bias_pts", args.realism_max_top1_share_bias)
+    _check_abs_max("top2_share_bias_pts", args.realism_max_top2_share_bias)
+
+    return len(failures) == 0, failures
 
 
 def _run_trial_once(
@@ -578,6 +773,7 @@ def _run_trial_once(
 ) -> dict[str, Any]:
     run_dir = run_root / "run"
     eval_json = run_root / f"eval_slices_{int(args.eval_val_days)}d.json"
+    worlds_parquet = run_root / "worlds.parquet"
 
     result: dict[str, Any] = {
         "trial_name": str(trial_name),
@@ -585,6 +781,7 @@ def _run_trial_once(
         "seed": int(seed),
         "run_dir": str(run_dir),
         "eval_json": str(eval_json),
+        "worlds_parquet": str(worlds_parquet),
         "status": "planned",
     }
 
@@ -651,6 +848,8 @@ def _run_trial_once(
     )
 
     world_ok = True
+    realism_ok = True
+    realism_failures: list[str] = []
     if bool(require_world_check):
         world_summary = run_root / "world_summary.json"
         world_cmd = _build_world_cmd(
@@ -658,6 +857,7 @@ def _run_trial_once(
             dataset_dir=dataset_dir,
             run_dir=run_dir,
             world_summary=world_summary,
+            worlds_parquet=worlds_parquet,
         )
         _print_cmd(f"{step_prefix} world", world_cmd)
         world_proc = _run(world_cmd, log_path=run_root / "world.log")
@@ -673,11 +873,39 @@ def _run_trial_once(
     else:
         result["world_contract_pass"] = True
 
+    if bool(args.realism_gate):
+        realism_json = run_root / "realism_eval.json"
+        result["realism_eval_json"] = str(realism_json)
+        if not world_ok or not worlds_parquet.exists():
+            realism_ok = False
+            realism_failures.append("missing_worlds_parquet")
+        else:
+            realism_name = f"{trial_name}_seed{int(seed)}"
+            realism_cmd = _build_realism_cmd(
+                dataset_dir=dataset_dir,
+                worlds_parquet=worlds_parquet,
+                out_json=realism_json,
+                name=str(realism_name),
+            )
+            _print_cmd(f"{step_prefix} realism", realism_cmd)
+            realism_proc = _run(realism_cmd, log_path=run_root / "realism.log")
+            result["realism_eval_rc"] = int(realism_proc.returncode)
+            if realism_proc.returncode != 0 or not realism_json.exists():
+                realism_ok = False
+                realism_failures.append("realism_eval_failed")
+            else:
+                payload = json.loads(realism_json.read_text(encoding="utf-8"))
+                realism_metrics = payload.get("metrics", payload)
+                result["realism_metrics"] = realism_metrics
+                realism_ok, realism_failures = _meets_realism_gate(realism_metrics, args=args)
+        result["realism_gate_pass"] = bool(realism_ok)
+        result["realism_gate_failures"] = list(realism_failures)
+
     result["metrics"] = metrics.__dict__
     result["deltas_vs_baseline"] = deltas
     result["composite_score"] = float(score)
     result["single_run_gate_pass"] = bool(single_gate_pass)
-    result["promotion_gate_pass"] = bool(single_gate_pass and world_ok)
+    result["promotion_gate_pass"] = bool(single_gate_pass and world_ok and realism_ok)
     result["status"] = "ok"
     return result
 
@@ -719,7 +947,7 @@ def parse_args() -> argparse.Namespace:
         "--trial-preset",
         type=str,
         default="anchor_recovery",
-        choices=["anchor_recovery", "optimizer_quality"],
+        choices=["anchor_recovery", "optimizer_quality", "all_losses"],
         help="Default trial grid to use when --trials-json is not provided.",
     )
     parser.add_argument("--sweep-root", type=str, default=None)
@@ -748,6 +976,24 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run strict world contract checks for every candidate (and for each multi-seed run).",
     )
+    parser.add_argument(
+        "--realism-gate",
+        action="store_true",
+        help="Run additional realism diagnostics (spread, tails, concentration) and gate promotions.",
+    )
+    parser.add_argument("--realism-max-pts-mae", type=float, default=None)
+    parser.add_argument("--realism-max-abs-pts-bias", type=float, default=None)
+    parser.add_argument("--realism-max-abs-star-bias", type=float, default=None)
+    parser.add_argument("--realism-max-abs-elite-bias", type=float, default=None)
+    parser.add_argument("--realism-max-spread-mae-vs-vegas", type=float, default=None)
+    parser.add_argument("--realism-min-spread-span-ratio", type=float, default=None)
+    parser.add_argument("--realism-min-spread-corr-vs-vegas", type=float, default=None)
+    parser.add_argument("--realism-max-total-mae-vs-vegas", type=float, default=None)
+    parser.add_argument("--realism-min-total-span-ratio", type=float, default=None)
+    parser.add_argument("--realism-max-p90-calib-error", type=float, default=None)
+    parser.add_argument("--realism-max-p95-calib-error", type=float, default=None)
+    parser.add_argument("--realism-max-top1-share-bias", type=float, default=None)
+    parser.add_argument("--realism-max-top2-share-bias", type=float, default=None)
     parser.add_argument("--world-num-games", type=int, default=1)
     parser.add_argument("--world-num-worlds", type=int, default=64)
     parser.add_argument("--multi-seed-top-k", type=int, default=0)
@@ -770,6 +1016,17 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    if bool(args.realism_gate):
+        if bool(args.skip_world_contract_check):
+            print(
+                "[realism_gate] overriding --skip-world-contract-check; realism gate requires world sampling",
+                flush=True,
+            )
+            args.skip_world_contract_check = False
+        for key, default in REALISM_GATE_DEFAULTS.items():
+            if getattr(args, key) is None:
+                setattr(args, key, float(default))
+
     dataset_dir = _resolve_dataset_dir(args.dataset_dir)
     baseline_eval_path = Path(args.baseline_eval_json).expanduser().resolve()
     if not baseline_eval_path.exists():
@@ -791,6 +1048,8 @@ def main() -> None:
     require_world_check_all = bool(args.require_world_contract_check_all)
     if not require_world_check_all and str(args.trial_preset) == "optimizer_quality":
         # Quality pass defaults to contract verification on every candidate.
+        require_world_check_all = True
+    if bool(args.realism_gate):
         require_world_check_all = True
 
     multi_seed_enabled = int(args.multi_seed_top_k) > 0
@@ -819,6 +1078,24 @@ def main() -> None:
             "max_delta_minutes_mae_lineup1": float(args.max_delta_minutes_mae_lineup1),
             "max_delta_minutes_gap_abs": float(args.max_delta_minutes_gap_abs),
             "max_delta_active_count_mae": float(args.max_delta_active_count_mae),
+        },
+        "realism_gate": {
+            "enabled": bool(args.realism_gate),
+            "thresholds": {
+                "realism_max_pts_mae": args.realism_max_pts_mae,
+                "realism_max_abs_pts_bias": args.realism_max_abs_pts_bias,
+                "realism_max_abs_star_bias": args.realism_max_abs_star_bias,
+                "realism_max_abs_elite_bias": args.realism_max_abs_elite_bias,
+                "realism_max_spread_mae_vs_vegas": args.realism_max_spread_mae_vs_vegas,
+                "realism_min_spread_span_ratio": args.realism_min_spread_span_ratio,
+                "realism_min_spread_corr_vs_vegas": args.realism_min_spread_corr_vs_vegas,
+                "realism_max_total_mae_vs_vegas": args.realism_max_total_mae_vs_vegas,
+                "realism_min_total_span_ratio": args.realism_min_total_span_ratio,
+                "realism_max_p90_calib_error": args.realism_max_p90_calib_error,
+                "realism_max_p95_calib_error": args.realism_max_p95_calib_error,
+                "realism_max_top1_share_bias": args.realism_max_top1_share_bias,
+                "realism_max_top2_share_bias": args.realism_max_top2_share_bias,
+            },
         },
         "world_check": {
             "skip_world_contract_check": bool(args.skip_world_contract_check),
@@ -873,6 +1150,7 @@ def main() -> None:
                 "composite_score": float(r.get("composite_score", float("nan"))),
                 "single_run_gate_pass": bool(r.get("single_run_gate_pass", False)),
                 "world_contract_pass": bool(r.get("world_contract_pass", False)),
+                "realism_gate_pass": bool(r.get("realism_gate_pass", False)) if args.realism_gate else True,
                 "promotion_gate_pass": bool(r.get("promotion_gate_pass", False)),
                 "minutes_mae_lineup0": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup0")),
                 "minutes_mae_lineup1": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup1")),
@@ -1021,6 +1299,8 @@ def main() -> None:
                     "deltas_vs_baseline": best_seed_run.get("deltas_vs_baseline", {}),
                     "composite_score": _float_or_nan(best_seed_run.get("composite_score")),
                     "world_check_summary_json": best_seed_run.get("world_check_summary_json"),
+                    "realism_eval_json": best_seed_run.get("realism_eval_json"),
+                    "realism_gate_pass": bool(best_seed_run.get("realism_gate_pass", False)),
                 }
         else:
             passing = [r for r in ranked if bool(r.get("promotion_gate_pass", False))]
@@ -1036,6 +1316,8 @@ def main() -> None:
                     "deltas_vs_baseline": best.get("deltas_vs_baseline", {}),
                     "composite_score": _float_or_nan(best.get("composite_score")),
                     "world_check_summary_json": best.get("world_check_summary_json"),
+                    "realism_eval_json": best.get("realism_eval_json"),
+                    "realism_gate_pass": bool(best.get("realism_gate_pass", False)),
                 }
 
     if promoted is not None:
@@ -1054,6 +1336,10 @@ def main() -> None:
         "num_trials": int(len(trials)),
         "num_completed": int(len([r for r in results if r.get("status") == "ok"])),
         "num_promotion_pass": int(len([r for r in results if bool(r.get("promotion_gate_pass"))])),
+        "num_realism_pass": int(len([r for r in results if bool(r.get("realism_gate_pass"))]))
+        if bool(args.realism_gate)
+        else int(len([r for r in results if r.get("status") == "ok"])),
+        "realism_gate_enabled": bool(args.realism_gate),
         "world_check_all_candidates": bool(require_world_check_all and not args.skip_world_contract_check),
         "multi_seed": {
             "enabled": bool(multi_seed_enabled),

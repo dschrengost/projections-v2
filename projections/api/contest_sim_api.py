@@ -587,6 +587,7 @@ class PortfolioSelectionRequest(BaseModel):
     filter_positive_ev: bool = False
     top_n: Optional[int] = Field(default=None, ge=1)
     candidate_lineup_ids: Optional[List[int]] = None
+    seed_lineup_ids: Optional[List[int]] = None
     exposure_bounds: Dict[str, PortfolioExposureBoundsRequest] = Field(default_factory=dict)
     seed: int = 42
 
@@ -1070,6 +1071,18 @@ async def select_portfolio(request: PortfolioSelectionRequest):
         )
 
     exposure_bounds = _build_exposure_bounds(request.exposure_bounds)
+    candidate_ids_after_shortlist = {c.lineup_id for c in ordered_candidates}
+    seed_lineup_ids: List[int] = []
+    if request.seed_lineup_ids:
+        seen_seed_ids: set[int] = set()
+        for lineup_id_raw in request.seed_lineup_ids:
+            lineup_id = int(lineup_id_raw)
+            if lineup_id in seen_seed_ids:
+                continue
+            if lineup_id not in candidate_ids_after_shortlist:
+                continue
+            seen_seed_ids.add(lineup_id)
+            seed_lineup_ids.append(lineup_id)
 
     diagnostics: Dict[str, object] = {
         "mode": request.mode,
@@ -1085,6 +1098,8 @@ async def select_portfolio(request: PortfolioSelectionRequest):
         "warnings": list(warnings),
         "source_build_id": request.source_build_id,
         "run_id": source_run_id,
+        "seed_lineup_count_requested": int(len(request.seed_lineup_ids or [])),
+        "seed_lineup_count_after_shortlist": int(len(seed_lineup_ids)),
     }
 
     try:
@@ -1098,6 +1113,7 @@ async def select_portfolio(request: PortfolioSelectionRequest):
                 max_total_own=None,
                 min_uniques=int(request.min_uniques),
                 exposure_bounds=exposure_bounds,
+                seed_lineup_ids=seed_lineup_ids,
             )
             diagnostics.update(
                 {
@@ -1146,6 +1162,7 @@ async def select_portfolio(request: PortfolioSelectionRequest):
                 max_total_own=None,
                 min_uniques=int(request.min_uniques),
                 exposure_bounds=exposure_bounds,
+                seed_lineup_ids=seed_lineup_ids,
             )
             selection, decor_diag = build_decorrelated_portfolio(
                 ordered_candidates,
@@ -1160,6 +1177,7 @@ async def select_portfolio(request: PortfolioSelectionRequest):
                 ),
                 exposure_bounds=exposure_bounds,
                 min_uniques=int(request.min_uniques),
+                seed_lineup_ids=seed_lineup_ids,
             )
             diagnostics.update(decor_diag.to_dict())
             diagnostics.update(
@@ -1214,6 +1232,16 @@ async def select_portfolio(request: PortfolioSelectionRequest):
 
     portfolio_summary = summarize_portfolio(selection.selected).to_dict()
     diagnostics.update(portfolio_summary)
+    if seed_lineup_ids:
+        seed_lineup_set = set(seed_lineup_ids)
+        selected_lineup_set = {c.lineup_id for c in selection.selected}
+        retained_seed_count = len(seed_lineup_set.intersection(selected_lineup_set))
+        diagnostics.update(
+            {
+                "seed_lineup_count_retained": int(retained_seed_count),
+                "seed_lineup_count_replaced": int(len(seed_lineup_set) - retained_seed_count),
+            }
+        )
 
     selected_results = [result_by_id[c.lineup_id] for c in selection.selected]
     return PortfolioSelectionResponse(

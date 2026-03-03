@@ -177,6 +177,93 @@ def test_portfolio_endpoint_rejects_min_exposure_bounds(tmp_path, monkeypatch) -
     assert "Minimum exposure is not supported yet" in response.json()["detail"]
 
 
+def test_portfolio_endpoint_repairs_from_seed_lineup_ids(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        contest_sim_api,
+        "_load_sim_build",
+        lambda game_date, build_id: {
+            "build_id": "build-1",
+            "game_date": game_date,
+            "results": [
+                {
+                    "lineup_id": 1,
+                    "player_ids": ["1", "2"],
+                    "mean": 101.0,
+                    "std": 10.0,
+                    "p90": 121.0,
+                    "p95": 126.0,
+                    "expected_payout": 5.0,
+                    "expected_value": 3.0,
+                    "roi": 0.4,
+                    "win_rate": 0.1,
+                    "top_1pct_rate": 0.05,
+                    "top_5pct_rate": 0.10,
+                    "top_10pct_rate": 0.15,
+                    "cash_rate": 0.4,
+                },
+                {
+                    "lineup_id": 2,
+                    "player_ids": ["3", "4"],
+                    "mean": 99.0,
+                    "std": 10.0,
+                    "p90": 119.0,
+                    "p95": 124.0,
+                    "expected_payout": 4.8,
+                    "expected_value": 2.0,
+                    "roi": 0.35,
+                    "win_rate": 0.09,
+                    "top_1pct_rate": 0.045,
+                    "top_5pct_rate": 0.09,
+                    "top_10pct_rate": 0.14,
+                    "cash_rate": 0.39,
+                },
+                {
+                    "lineup_id": 3,
+                    "player_ids": ["5", "6"],
+                    "mean": 98.0,
+                    "std": 9.0,
+                    "p90": 118.0,
+                    "p95": 123.0,
+                    "expected_payout": 4.7,
+                    "expected_value": 1.0,
+                    "roi": 0.30,
+                    "win_rate": 0.08,
+                    "top_1pct_rate": 0.04,
+                    "top_5pct_rate": 0.08,
+                    "top_10pct_rate": 0.13,
+                    "cash_rate": 0.37,
+                },
+            ],
+            "request": {},
+        },
+    )
+    monkeypatch.setattr(
+        contest_sim_api,
+        "_load_player_ownership",
+        lambda *args, **kwargs: {"1": 20.0, "2": 20.0, "3": 18.0, "4": 18.0, "5": 15.0, "6": 15.0},
+    )
+
+    client = _client(tmp_path, monkeypatch)
+    response = client.post(
+        "/api/contest-sim/portfolio",
+        json={
+            "game_date": "2026-03-01",
+            "source_build_id": "build-1",
+            "mode": "greedy_constraints",
+            "portfolio_size": 2,
+            "seed_lineup_ids": [2, 3],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["selected_lineup_ids"] == [2, 3]
+    assert payload["diagnostics"]["seed_lineup_count_requested"] == 2
+    assert payload["diagnostics"]["seed_lineup_count_after_shortlist"] == 2
+    assert payload["diagnostics"]["seed_lineup_count_retained"] == 2
+    assert payload["diagnostics"]["seed_lineup_count_replaced"] == 0
+
+
 def test_save_sim_lineups_persists_portfolio_metadata(tmp_path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
     response = client.post(

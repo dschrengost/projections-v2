@@ -62,6 +62,40 @@ def test_build_portfolio_sorts_missing_metrics_to_bottom_for_ascending() -> None
     assert [c.lineup_id for c in selection.selected] == [3, 1]
 
 
+def test_build_portfolio_prioritizes_seed_lineups_when_feasible() -> None:
+    candidates = [
+        PortfolioCandidate(lineup_id=1, player_ids=("A",), expected_value=5.0),
+        PortfolioCandidate(lineup_id=2, player_ids=("B",), expected_value=4.0),
+        PortfolioCandidate(lineup_id=3, player_ids=("C",), expected_value=3.0),
+        PortfolioCandidate(lineup_id=4, player_ids=("D",), expected_value=2.0),
+    ]
+
+    selection = build_portfolio(
+        candidates,
+        portfolio_size=2,
+        seed_lineup_ids=[4, 3],
+    )
+
+    assert [c.lineup_id for c in selection.selected] == [3, 4]
+
+
+def test_build_portfolio_repairs_seed_lineups_with_next_feasible_candidates() -> None:
+    candidates = [
+        PortfolioCandidate(lineup_id=1, player_ids=("A", "B"), expected_value=10.0),
+        PortfolioCandidate(lineup_id=2, player_ids=("A", "C"), expected_value=9.0),
+        PortfolioCandidate(lineup_id=3, player_ids=("D", "E"), expected_value=8.0),
+    ]
+
+    selection = build_portfolio(
+        candidates,
+        portfolio_size=2,
+        exposure_bounds={"A": ExposureBoundsPct(max=50.0)},
+        seed_lineup_ids=[1, 2],
+    )
+
+    assert [c.lineup_id for c in selection.selected] == [1, 3]
+
+
 def test_build_portfolio_rejects_min_exposure_bounds() -> None:
     candidates = [
         PortfolioCandidate(lineup_id=1, player_ids=("A", "B"), expected_value=10.0),
@@ -150,6 +184,32 @@ def test_build_decorrelated_portfolio_respects_exposure_caps() -> None:
 
     picked = {c.lineup_id for c in selection.selected}
     assert picked != {1, 2}  # would violate A max 50% in a 2-lineup portfolio
+
+
+def test_build_decorrelated_portfolio_uses_seed_lineups_when_ev_retention_allows() -> None:
+    import numpy as np
+
+    worlds = np.zeros((50, 3), dtype=np.float64)
+    player_index = {"A": 0, "B": 1, "C": 2}
+
+    candidates = [
+        PortfolioCandidate(lineup_id=1, player_ids=("A",), expected_value=3.0),
+        PortfolioCandidate(lineup_id=2, player_ids=("B",), expected_value=2.9),
+        PortfolioCandidate(lineup_id=3, player_ids=("C",), expected_value=2.8),
+    ]
+
+    selection, diag = build_decorrelated_portfolio(
+        candidates,
+        portfolio_size=2,
+        worlds_matrix=worlds,
+        player_index=player_index,
+        config=DecorrelatedPortfolioConfig(ev_retention=0.9, worlds_sample=50, seed=7),
+        seed_lineup_ids=[3, 2],
+    )
+
+    assert {c.lineup_id for c in selection.selected} == {2, 3}
+    assert diag.ev_best == pytest.approx(5.9)
+    assert diag.ev_selected == pytest.approx(5.7)
 
 
 def test_build_decorrelated_portfolio_reports_exact_risk() -> None:

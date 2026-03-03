@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
+from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
 from projections import paths
@@ -136,6 +137,9 @@ class EpochMetrics:
     train_reb_share_aux: float = 0.0
     train_ast_team_rate_aux: float = 0.0
     train_reb_opportunity_rate_aux: float = 0.0
+    train_spread_aux: float = 0.0
+    train_total_aux: float = 0.0
+    train_efficiency_mean_aux: float = 0.0
     val_total: float = 0.0
     val_minutes_mae: float = 0.0
     val_count_loss: float = 0.0
@@ -155,6 +159,9 @@ class EpochMetrics:
     val_reb_share_aux: float = 0.0
     val_ast_team_rate_aux: float = 0.0
     val_reb_opportunity_rate_aux: float = 0.0
+    val_spread_aux: float = 0.0
+    val_total_aux: float = 0.0
+    val_efficiency_mean_aux: float = 0.0
     val_total_ex_possreg: float = 0.0
     train_poss_regression: float = 0.0
     val_poss_regression: float = 0.0
@@ -728,6 +735,34 @@ def _resolve_ramped_loss_scale(
     return float(start_scale + (1.0 - float(start_scale)) * progress)
 
 
+def _masked_scaled_huber_loss(
+    *,
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    scale: float,
+    delta: float,
+) -> torch.Tensor:
+    """Huber loss on normalized errors, averaged over mask-selected rows."""
+    if pred.shape != target.shape:
+        raise ValueError("pred and target must have the same shape")
+    if mask.shape != pred.shape:
+        raise ValueError("mask must match pred shape")
+    if float(scale) <= 0.0:
+        raise ValueError("scale must be > 0")
+    if float(delta) <= 0.0:
+        raise ValueError("delta must be > 0")
+
+    mask_b = mask.to(dtype=torch.bool)
+    if not bool(mask_b.any()):
+        return pred.new_zeros(())
+    pred_scaled = pred / float(scale)
+    target_scaled = target / float(scale)
+    loss = F.huber_loss(pred_scaled, target_scaled, reduction="none", delta=float(delta))
+    mask_f = mask_b.to(dtype=loss.dtype)
+    return (loss * mask_f).sum() / mask_f.sum().clamp(min=1.0)
+
+
 def _resolve_backbone_epoch_weights(
     *,
     epoch: int,
@@ -1030,6 +1065,19 @@ def _run_epoch(
     w_reb_share_aux: float = 0.0,
     w_ast_team_rate_aux: float = 0.0,
     w_reb_opportunity_rate_aux: float = 0.0,
+    w_spread_aux: float = 0.0,
+    w_total_aux: float = 0.0,
+    spread_total_aux_ramp_epochs: int = 0,
+    spread_total_aux_start_scale: float = 1.0,
+    spread_aux_target_scale: float = 10.0,
+    total_aux_target_scale: float = 25.0,
+    spread_aux_huber_delta: float = 1.0,
+    total_aux_huber_delta: float = 1.0,
+    w_efficiency_mean_aux: float = 0.0,
+    vegas_total_idx: int = -1,
+    vegas_spread_idx: int = -1,
+    vegas_total_missing_idx: int = -1,
+    vegas_spread_missing_idx: int = -1,
     enable_possession_backbone: bool = False,
     enable_efficiency_head: bool = False,
     enable_usage_share_head: bool = False,
@@ -1039,6 +1087,13 @@ def _run_epoch(
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(training)
+    spread_total_aux_ramp = _resolve_ramped_loss_scale(
+        epoch=int(epoch_index),
+        ramp_epochs=int(spread_total_aux_ramp_epochs),
+        start_scale=float(spread_total_aux_start_scale),
+    )
+    w_spread_aux_eff = float(w_spread_aux) * float(spread_total_aux_ramp)
+    w_total_aux_eff = float(w_total_aux) * float(spread_total_aux_ramp)
 
     totals = {
         "total": 0.0,
@@ -1061,6 +1116,9 @@ def _run_epoch(
         "reb_share_aux": 0.0,
         "ast_team_rate_aux": 0.0,
         "reb_opportunity_rate_aux": 0.0,
+        "spread_aux": 0.0,
+        "total_aux": 0.0,
+        "efficiency_mean_aux": 0.0,
         "steps": 0,
         "skipped_batches": 0,
         "instability_events": 0,
@@ -1275,6 +1333,7 @@ def _run_epoch(
                         )
 
             efficiency_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            efficiency_mean_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             if bool(enable_efficiency_head) and out.efficiency is not None:
                 ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
                 required_cols = ["fga2", "fg2m", "fga3", "fg3m", "fta", "ftm"]
@@ -1322,6 +1381,27 @@ def _run_epoch(
                     mask=_obs_mask(fga3_i, fg3m_i),
                 )
                 efficiency_nll_loss = (ft_nll + fg2_nll + fg3_nll) / 3.0
+                if float(w_efficiency_mean_aux) > 0.0:
+                    def _rate_mse(a_idx: int, m_idx: int, pred_mean: torch.Tensor) -> torch.Tensor:
+                        attempts = flow_target_flat[..., a_idx]
+                        makes = flow_target_flat[..., m_idx]
+                        mask = (
+                            flow_observed_flat[..., a_idx]
+                            & flow_observed_flat[..., m_idx]
+                            & out.player_valid_mask
+                            & (attempts > 0.0)
+                        )
+                        if not mask.any():
+                            return torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+                        rate_true = makes / attempts.clamp(min=1.0)
+                        err = (pred_mean - rate_true) ** 2
+                        mask_f = mask.to(dtype=err.dtype)
+                        return (err * mask_f).sum() / mask_f.sum().clamp(min=1.0)
+
+                    ft_mse = _rate_mse(fta_i, ftm_i, out.efficiency.mean_ft)
+                    fg2_mse = _rate_mse(fga2_i, fg2m_i, out.efficiency.mean_fg2)
+                    fg3_mse = _rate_mse(fga3_i, fg3m_i, out.efficiency.mean_fg3)
+                    efficiency_mean_aux_loss = (ft_mse + fg2_mse + fg3_mse) / 3.0
 
             usage_share_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             emergent_share_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
@@ -1329,6 +1409,8 @@ def _run_epoch(
             reb_share_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             ast_team_rate_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             reb_opportunity_rate_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            spread_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            total_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             if bool(run_phase2_flow):
                 ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
                 fga2_i = _flow_index(ftc, "fga2")
@@ -1336,6 +1418,7 @@ def _run_epoch(
                 fga3_i = _flow_index(ftc, "fga3")
                 fg3m_i = _flow_index(ftc, "fg3m")
                 fta_i = _flow_index(ftc, "fta")
+                ftm_i = _flow_index(ftc, "ftm")
                 oreb_i = _flow_index(ftc, "oreb")
                 dreb_i = _flow_index(ftc, "dreb")
                 ast_i = _flow_index(ftc, "ast")
@@ -1394,6 +1477,8 @@ def _run_epoch(
                     or float(w_reb_share_aux) > 0.0
                     or float(w_ast_team_rate_aux) > 0.0
                     or float(w_reb_opportunity_rate_aux) > 0.0
+                    or float(w_spread_aux) > 0.0
+                    or float(w_total_aux) > 0.0
                 ):
                     z0 = torch.zeros(
                         (
@@ -1417,14 +1502,64 @@ def _run_epoch(
                         emergent_flow,
                         flow_target_columns=ftc,
                     )
+                    fg2m_em = emergent_flow[..., fg2m_i]
+                    fg3m_em = emergent_flow[..., fg3m_i]
                     fga_em = emergent_flow[..., fga2_i] + emergent_flow[..., fga3_i]
-                    fgm_em = emergent_flow[..., fg2m_i] + emergent_flow[..., fg3m_i]
+                    fgm_em = fg2m_em + fg3m_em
                     missed_fg_em = torch.clamp(fga_em - fgm_em, min=0.0)
                     fta_em = emergent_flow[..., fta_i]
+                    ftm_em = emergent_flow[..., ftm_i]
                     oreb_em = emergent_flow[..., oreb_i]
                     dreb_em = emergent_flow[..., dreb_i]
                     ast_em = emergent_flow[..., ast_i]
                     tov_em = emergent_flow[..., tov_i]
+                    if float(w_spread_aux) > 0.0 or float(w_total_aux) > 0.0:
+                        if float(w_spread_aux) > 0.0 and int(vegas_spread_idx) < 0:
+                            raise RuntimeError(
+                                "w_spread_aux > 0 requires vegas_spread in --game-feature-cols",
+                            )
+                        if float(w_total_aux) > 0.0 and int(vegas_total_idx) < 0:
+                            raise RuntimeError(
+                                "w_total_aux > 0 requires vegas_total in --game-feature-cols",
+                            )
+
+                        pts_em = 2.0 * fg2m_em + 3.0 * fg3m_em + ftm_em
+                        def _team_sum(values: torch.Tensor, team_id: int) -> torch.Tensor:
+                            mask = out.player_valid_mask & (out.player_team_index == int(team_id))
+                            return (values * mask.to(dtype=values.dtype)).sum(dim=1)
+
+                        home_pts = _team_sum(pts_em, 0)
+                        away_pts = _team_sum(pts_em, 1)
+                        pred_total = home_pts + away_pts
+                        pred_spread = home_pts - away_pts
+
+                        if float(w_total_aux) > 0.0:
+                            target_total = game_features[:, int(vegas_total_idx)]
+                            total_mask = torch.ones_like(pred_total, dtype=torch.bool)
+                            if int(vegas_total_missing_idx) >= 0:
+                                total_mask = game_features[:, int(vegas_total_missing_idx)] < 0.5
+                            total_aux_loss = _masked_scaled_huber_loss(
+                                pred=pred_total,
+                                target=target_total,
+                                mask=total_mask,
+                                scale=float(total_aux_target_scale),
+                                delta=float(total_aux_huber_delta),
+                            )
+
+                        if float(w_spread_aux) > 0.0:
+                            # Dataset vegas_spread follows book line sign (home favorite often negative).
+                            # Convert to home-margin convention to match pred_spread = home_pts - away_pts.
+                            target_spread = -game_features[:, int(vegas_spread_idx)]
+                            spread_mask = torch.ones_like(pred_spread, dtype=torch.bool)
+                            if int(vegas_spread_missing_idx) >= 0:
+                                spread_mask = game_features[:, int(vegas_spread_missing_idx)] < 0.5
+                            spread_aux_loss = _masked_scaled_huber_loss(
+                                pred=pred_spread,
+                                target=target_spread,
+                                mask=spread_mask,
+                                scale=float(spread_aux_target_scale),
+                                delta=float(spread_aux_huber_delta),
+                            )
                     if float(w_emergent_share_aux) > 0.0:
                         loss_fga_em = _team_share_ce_loss(
                             logits=torch.log(torch.clamp(fga_em, min=1e-6)),
@@ -1582,6 +1717,9 @@ def _run_epoch(
                 + float(w_reb_share_aux) * reb_share_aux_loss
                 + float(w_ast_team_rate_aux) * ast_team_rate_aux_loss
                 + float(w_reb_opportunity_rate_aux) * reb_opportunity_rate_aux_loss
+                + float(w_spread_aux_eff) * spread_aux_loss
+                + float(w_total_aux_eff) * total_aux_loss
+                + float(w_efficiency_mean_aux) * efficiency_mean_aux_loss
             )
 
             skip_step = False
@@ -1693,6 +1831,9 @@ def _run_epoch(
             totals["reb_share_aux"] += float(reb_share_aux_loss.item())
             totals["ast_team_rate_aux"] += float(ast_team_rate_aux_loss.item())
             totals["reb_opportunity_rate_aux"] += float(reb_opportunity_rate_aux_loss.item())
+            totals["spread_aux"] += float(spread_aux_loss.item())
+            totals["total_aux"] += float(total_aux_loss.item())
+            totals["efficiency_mean_aux"] += float(efficiency_mean_aux_loss.item())
             totals["steps"] += 1
         if phase2_stability_state is not None and bool(phase2_stability_state.rollback_requested):
             break
@@ -1719,6 +1860,9 @@ def _run_epoch(
         "reb_share_aux": totals["reb_share_aux"] / denom,
         "ast_team_rate_aux": totals["ast_team_rate_aux"] / denom,
         "reb_opportunity_rate_aux": totals["reb_opportunity_rate_aux"] / denom,
+        "spread_aux": totals["spread_aux"] / denom,
+        "total_aux": totals["total_aux"] / denom,
+        "efficiency_mean_aux": totals["efficiency_mean_aux"] / denom,
         "skipped_batches": float(totals["skipped_batches"]),
         "instability_events": float(totals["instability_events"]),
         "rollback_requested": 1.0 if (phase2_stability_state and phase2_stability_state.rollback_requested) else 0.0,
@@ -1949,6 +2093,60 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="Auxiliary OREB/DREB capture-rate loss against missed-FG opportunity on the emergent zero-latent flow path.",
     )
+    parser.add_argument(
+        "--w-spread-aux",
+        type=float,
+        default=0.0,
+        help="Auxiliary normalized Huber loss on home spread vs -vegas_spread using emergent zero-latent flow points.",
+    )
+    parser.add_argument(
+        "--w-total-aux",
+        type=float,
+        default=0.0,
+        help="Auxiliary normalized Huber loss on game total vs vegas_total using emergent zero-latent flow points.",
+    )
+    parser.add_argument(
+        "--spread-total-aux-ramp-epochs",
+        type=int,
+        default=0,
+        help="Linearly ramp spread/total aux weights over N epochs (0 disables).",
+    )
+    parser.add_argument(
+        "--spread-total-aux-start-scale",
+        type=float,
+        default=1.0,
+        help="Initial scale for spread/total aux weight ramp in [0,1].",
+    )
+    parser.add_argument(
+        "--spread-aux-target-scale",
+        type=float,
+        default=10.0,
+        help="Normalization scale (points) for spread aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--total-aux-target-scale",
+        type=float,
+        default=25.0,
+        help="Normalization scale (points) for total aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--spread-aux-huber-delta",
+        type=float,
+        default=1.0,
+        help="Huber delta on normalized spread error.",
+    )
+    parser.add_argument(
+        "--total-aux-huber-delta",
+        type=float,
+        default=1.0,
+        help="Huber delta on normalized total error.",
+    )
+    parser.add_argument(
+        "--w-efficiency-mean-aux",
+        type=float,
+        default=0.0,
+        help="Auxiliary MSE loss on efficiency head mean rates vs observed make rates.",
+    )
 
     # Possession backbone (section 15)
     parser.add_argument("--enable-possession-backbone", action="store_true")
@@ -2110,6 +2308,24 @@ def main() -> None:
         raise ValueError("--w-ast-team-rate-aux must be >= 0")
     if float(args.w_reb_opportunity_rate_aux) < 0.0:
         raise ValueError("--w-reb-opportunity-rate-aux must be >= 0")
+    if float(args.w_spread_aux) < 0.0:
+        raise ValueError("--w-spread-aux must be >= 0")
+    if float(args.w_total_aux) < 0.0:
+        raise ValueError("--w-total-aux must be >= 0")
+    if int(args.spread_total_aux_ramp_epochs) < 0:
+        raise ValueError("--spread-total-aux-ramp-epochs must be >= 0")
+    if float(args.spread_total_aux_start_scale) < 0.0 or float(args.spread_total_aux_start_scale) > 1.0:
+        raise ValueError("--spread-total-aux-start-scale must be in [0, 1]")
+    if float(args.spread_aux_target_scale) <= 0.0:
+        raise ValueError("--spread-aux-target-scale must be > 0")
+    if float(args.total_aux_target_scale) <= 0.0:
+        raise ValueError("--total-aux-target-scale must be > 0")
+    if float(args.spread_aux_huber_delta) <= 0.0:
+        raise ValueError("--spread-aux-huber-delta must be > 0")
+    if float(args.total_aux_huber_delta) <= 0.0:
+        raise ValueError("--total-aux-huber-delta must be > 0")
+    if float(args.w_efficiency_mean_aux) < 0.0:
+        raise ValueError("--w-efficiency-mean-aux must be >= 0")
     if float(args.w_emergent_share_aux) > 0.0 and not bool(args.enable_phase2_flow):
         raise ValueError("--w-emergent-share-aux > 0 requires --enable-phase2-flow")
     if (
@@ -2119,6 +2335,10 @@ def main() -> None:
         or float(args.w_reb_opportunity_rate_aux) > 0.0
     ) and not bool(args.enable_phase2_flow):
         raise ValueError("AST/REB structure auxiliary losses require --enable-phase2-flow")
+    if (float(args.w_spread_aux) > 0.0 or float(args.w_total_aux) > 0.0) and not bool(args.enable_phase2_flow):
+        raise ValueError("--w-spread-aux/--w-total-aux require --enable-phase2-flow")
+    if float(args.w_efficiency_mean_aux) > 0.0 and not bool(args.enable_efficiency_head):
+        raise ValueError("--w-efficiency-mean-aux requires --enable-efficiency-head")
     if float(args.overflow_protected_prior_play_prob_floor) < 0.0 or float(args.overflow_protected_prior_play_prob_floor) > 1.0:
         raise ValueError("--overflow-protected-prior-play-prob-floor must be within [0, 1]")
     if float(args.overflow_protected_prior_minutes_floor) < 0.0:
@@ -2185,10 +2405,22 @@ def main() -> None:
     estimated_possessions_idx = -1
     if "estimated_possessions" in game_feature_cols:
         estimated_possessions_idx = game_feature_cols.index("estimated_possessions")
+    vegas_total_idx = game_feature_cols.index("vegas_total") if "vegas_total" in game_feature_cols else -1
+    vegas_spread_idx = game_feature_cols.index("vegas_spread") if "vegas_spread" in game_feature_cols else -1
+    vegas_total_missing_idx = (
+        game_feature_cols.index("vegas_total_missing") if "vegas_total_missing" in game_feature_cols else -1
+    )
+    vegas_spread_missing_idx = (
+        game_feature_cols.index("vegas_spread_missing") if "vegas_spread_missing" in game_feature_cols else -1
+    )
     if float(args.w_poss_regression) > 0.0 and estimated_possessions_idx < 0:
         raise ValueError(
             "--w-poss-regression > 0 requires 'estimated_possessions' in --game-feature-cols"
         )
+    if float(args.w_total_aux) > 0.0 and vegas_total_idx < 0:
+        raise ValueError("--w-total-aux > 0 requires 'vegas_total' in --game-feature-cols")
+    if float(args.w_spread_aux) > 0.0 and vegas_spread_idx < 0:
+        raise ValueError("--w-spread-aux > 0 requires 'vegas_spread' in --game-feature-cols")
 
     train_examples = build_game_level_examples(
         train_df,
@@ -2506,6 +2738,19 @@ def main() -> None:
             w_reb_share_aux=float(args.w_reb_share_aux),
             w_ast_team_rate_aux=float(args.w_ast_team_rate_aux),
             w_reb_opportunity_rate_aux=float(args.w_reb_opportunity_rate_aux),
+            w_spread_aux=float(args.w_spread_aux),
+            w_total_aux=float(args.w_total_aux),
+            spread_total_aux_ramp_epochs=int(args.spread_total_aux_ramp_epochs),
+            spread_total_aux_start_scale=float(args.spread_total_aux_start_scale),
+            spread_aux_target_scale=float(args.spread_aux_target_scale),
+            total_aux_target_scale=float(args.total_aux_target_scale),
+            spread_aux_huber_delta=float(args.spread_aux_huber_delta),
+            total_aux_huber_delta=float(args.total_aux_huber_delta),
+            w_efficiency_mean_aux=float(args.w_efficiency_mean_aux),
+            vegas_total_idx=int(vegas_total_idx),
+            vegas_spread_idx=int(vegas_spread_idx),
+            vegas_total_missing_idx=int(vegas_total_missing_idx),
+            vegas_spread_missing_idx=int(vegas_spread_missing_idx),
             enable_possession_backbone=bool(args.enable_possession_backbone),
             enable_efficiency_head=bool(args.enable_efficiency_head),
             enable_usage_share_head=bool(args.enable_usage_share_head),
@@ -2585,6 +2830,19 @@ def main() -> None:
                 w_reb_share_aux=float(args.w_reb_share_aux),
                 w_ast_team_rate_aux=float(args.w_ast_team_rate_aux),
                 w_reb_opportunity_rate_aux=float(args.w_reb_opportunity_rate_aux),
+                w_spread_aux=float(args.w_spread_aux),
+                w_total_aux=float(args.w_total_aux),
+                spread_total_aux_ramp_epochs=int(args.spread_total_aux_ramp_epochs),
+                spread_total_aux_start_scale=float(args.spread_total_aux_start_scale),
+                spread_aux_target_scale=float(args.spread_aux_target_scale),
+                total_aux_target_scale=float(args.total_aux_target_scale),
+                spread_aux_huber_delta=float(args.spread_aux_huber_delta),
+                total_aux_huber_delta=float(args.total_aux_huber_delta),
+                w_efficiency_mean_aux=float(args.w_efficiency_mean_aux),
+                vegas_total_idx=int(vegas_total_idx),
+                vegas_spread_idx=int(vegas_spread_idx),
+                vegas_total_missing_idx=int(vegas_total_missing_idx),
+                vegas_spread_missing_idx=int(vegas_spread_missing_idx),
                 enable_possession_backbone=bool(args.enable_possession_backbone),
                 enable_efficiency_head=bool(args.enable_efficiency_head),
                 enable_usage_share_head=bool(args.enable_usage_share_head),
@@ -2626,6 +2884,9 @@ def main() -> None:
             train_reb_share_aux=train_stats.get("reb_share_aux", 0.0),
             train_ast_team_rate_aux=train_stats.get("ast_team_rate_aux", 0.0),
             train_reb_opportunity_rate_aux=train_stats.get("reb_opportunity_rate_aux", 0.0),
+            train_spread_aux=train_stats.get("spread_aux", 0.0),
+            train_total_aux=train_stats.get("total_aux", 0.0),
+            train_efficiency_mean_aux=train_stats.get("efficiency_mean_aux", 0.0),
             train_poss_regression=train_stats.get("poss_regression", 0.0),
             val_total=val_stats["total"],
             val_minutes_mae=val_stats["minutes_mae"],
@@ -2646,6 +2907,9 @@ def main() -> None:
             val_reb_share_aux=val_stats.get("reb_share_aux", 0.0),
             val_ast_team_rate_aux=val_stats.get("ast_team_rate_aux", 0.0),
             val_reb_opportunity_rate_aux=val_stats.get("reb_opportunity_rate_aux", 0.0),
+            val_spread_aux=val_stats.get("spread_aux", 0.0),
+            val_total_aux=val_stats.get("total_aux", 0.0),
+            val_efficiency_mean_aux=val_stats.get("efficiency_mean_aux", 0.0),
             val_total_ex_possreg=float(val_total_ex_possreg),
             val_poss_regression=val_stats.get("poss_regression", 0.0),
         )
@@ -2686,6 +2950,12 @@ def main() -> None:
             msg = f"{msg} val_ast_team_rate_aux={metrics.val_ast_team_rate_aux:.4f}"
         if float(args.w_reb_opportunity_rate_aux) > 0.0:
             msg = f"{msg} val_reb_opp_rate_aux={metrics.val_reb_opportunity_rate_aux:.4f}"
+        if float(args.w_spread_aux) > 0.0:
+            msg = f"{msg} val_spread_aux={metrics.val_spread_aux:.4f}"
+        if float(args.w_total_aux) > 0.0:
+            msg = f"{msg} val_total_aux={metrics.val_total_aux:.4f}"
+        if float(args.w_efficiency_mean_aux) > 0.0:
+            msg = f"{msg} val_eff_mean_aux={metrics.val_efficiency_mean_aux:.4f}"
         if bool(args.enable_possession_backbone):
             bb_detached = int(epoch) < int(args.backbone_detach_until_epoch)
             msg = (
@@ -2808,6 +3078,19 @@ def main() -> None:
             "w_reb_share_aux": float(args.w_reb_share_aux),
             "w_ast_team_rate_aux": float(args.w_ast_team_rate_aux),
             "w_reb_opportunity_rate_aux": float(args.w_reb_opportunity_rate_aux),
+        },
+        "spread_total_aux": {
+            "w_spread_aux": float(args.w_spread_aux),
+            "w_total_aux": float(args.w_total_aux),
+            "ramp_epochs": int(args.spread_total_aux_ramp_epochs),
+            "start_scale": float(args.spread_total_aux_start_scale),
+            "spread_target_scale": float(args.spread_aux_target_scale),
+            "total_target_scale": float(args.total_aux_target_scale),
+            "spread_huber_delta": float(args.spread_aux_huber_delta),
+            "total_huber_delta": float(args.total_aux_huber_delta),
+        },
+        "efficiency_mean_aux": {
+            "w_efficiency_mean_aux": float(args.w_efficiency_mean_aux),
         },
         "phase3_decision_enabled": bool(args.enable_phase3_decision),
         "phase2_schedule": {

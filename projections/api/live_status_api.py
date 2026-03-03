@@ -204,29 +204,41 @@ def get_live_status(
     latest_published_as_of_ts = published_pointer.get("as_of_ts")
 
     run_ids = _list_run_ids(data_root=data_root, game_date=game_date)
-    candidate_run_id = run_ids[-1] if run_ids else latest_published_run_id
+    candidate_run_id: str | None = None
+    candidate_manifest: dict[str, Any] | None = None
+    candidate_report_dir: Path | None = None
+    candidate_status = "waiting_for_fresh_input"
+    candidate_status_reason = "no_runs_found"
 
-    candidate_manifest = _resolve_run_manifest(
-        data_root=data_root,
-        game_date=game_date,
-        run_id=candidate_run_id,
-    )
-    candidate_report_dir = (
-        None
-        if candidate_run_id is None
-        else _resolve_run_report_dir(data_root=data_root, game_date=game_date, run_id=candidate_run_id)
-    )
-    candidate_status, candidate_status_reason = (
-        ("waiting_for_fresh_input", "no_runs_found")
-        if candidate_run_id is None
-        else _classify_run_status(
-            run_id=candidate_run_id,
-            published_run_id=latest_published_run_id,
-            published_as_of_ts=latest_published_as_of_ts,
-            manifest=candidate_manifest,
-            report_dir=candidate_report_dir,
+    if run_ids:
+        classified_runs: list[tuple[str, dict[str, Any] | None, Path | None, str, str]] = []
+        for run_id in reversed(run_ids):
+            manifest = _resolve_run_manifest(
+                data_root=data_root,
+                game_date=game_date,
+                run_id=run_id,
+            )
+            report_dir = _resolve_run_report_dir(data_root=data_root, game_date=game_date, run_id=run_id)
+            status, reason = _classify_run_status(
+                run_id=run_id,
+                published_run_id=latest_published_run_id,
+                published_as_of_ts=latest_published_as_of_ts,
+                manifest=manifest,
+                report_dir=report_dir,
+            )
+            classified_runs.append((run_id, manifest, report_dir, status, reason))
+
+        # Ignore ad-hoc/manual runs that have no run reports and would otherwise
+        # mask a healthy published or in-progress pipeline candidate.
+        selected = next(
+            (item for item in classified_runs if not (item[3] == "blocked" and item[4] == "missing_run_reports")),
+            None,
         )
-    )
+        if selected is None:
+            selected = classified_runs[0]
+
+        candidate_run_id, candidate_manifest, candidate_report_dir, candidate_status, candidate_status_reason = selected
+
     has_distinct_candidate = bool(candidate_run_id and candidate_run_id != latest_published_run_id)
 
     published_manifest = _resolve_run_manifest(

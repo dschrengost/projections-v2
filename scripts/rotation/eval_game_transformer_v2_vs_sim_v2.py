@@ -18,13 +18,18 @@ from projections import paths
 PLAYER_KEY = tuple[str, int, int, int]
 TEAM_KEY = tuple[str, int, int]
 PAIR_KEY = tuple[str, int, int, int, int]
+GAME_PAIR_KEY = tuple[str, int, int, int]
+GAME_KEY = tuple[str, int]
 
 
 @dataclass
 class SampleBundle:
     player_samples: dict[PLAYER_KEY, np.ndarray]
     team_samples: dict[TEAM_KEY, np.ndarray]
-    pair_corr: dict[PAIR_KEY, float]
+    pair_corr: dict[PAIR_KEY, float]  # same-team only
+    cross_pair_corr: dict[GAME_PAIR_KEY, float]
+    game_pair_corr: dict[GAME_PAIR_KEY, float]
+    opp_team_total_corr: dict[GAME_KEY, float]
     source_rows: int
 
 
@@ -87,20 +92,72 @@ def _compute_actual_fpts(labels_counts: pd.DataFrame, *, start_date: str, end_da
     return player_actual, team_actual
 
 
+def _safe_corr(a: np.ndarray, b: np.ndarray) -> float:
+    x = np.asarray(a, dtype=np.float64)
+    y = np.asarray(b, dtype=np.float64)
+    if x.size < 2 or y.size < 2:
+        return float("nan")
+    sx = float(np.std(x))
+    sy = float(np.std(y))
+    if sx <= 1e-12 or sy <= 1e-12:
+        return float("nan")
+    return float(np.corrcoef(x, y)[0, 1])
+
+
 def _build_pair_corr_from_matrix(matrix: np.ndarray, player_ids: list[int], *, date_key: str, game_id: int, team_id: int) -> dict[PAIR_KEY, float]:
     out: dict[PAIR_KEY, float] = {}
     if matrix.shape[1] < 2:
         return out
-    corr = np.corrcoef(matrix, rowvar=False)
     for i in range(len(player_ids)):
         for j in range(i + 1, len(player_ids)):
-            v = float(corr[i, j])
+            v = _safe_corr(matrix[:, i], matrix[:, j])
             if not np.isfinite(v):
                 continue
             p1 = int(min(player_ids[i], player_ids[j]))
             p2 = int(max(player_ids[i], player_ids[j]))
             out[(date_key, int(game_id), int(team_id), p1, p2)] = v
     return out
+
+
+def _build_game_pair_corr_from_matrix(
+    matrix: np.ndarray,
+    player_ids: list[int],
+    team_ids: list[int],
+    *,
+    date_key: str,
+    game_id: int,
+) -> tuple[dict[GAME_PAIR_KEY, float], dict[GAME_PAIR_KEY, float]]:
+    all_pairs: dict[GAME_PAIR_KEY, float] = {}
+    cross_pairs: dict[GAME_PAIR_KEY, float] = {}
+    if matrix.shape[1] < 2:
+        return all_pairs, cross_pairs
+    for i in range(len(player_ids)):
+        for j in range(i + 1, len(player_ids)):
+            v = _safe_corr(matrix[:, i], matrix[:, j])
+            if not np.isfinite(v):
+                continue
+            p1 = int(min(player_ids[i], player_ids[j]))
+            p2 = int(max(player_ids[i], player_ids[j]))
+            key = (date_key, int(game_id), p1, p2)
+            all_pairs[key] = v
+            if int(team_ids[i]) != int(team_ids[j]):
+                cross_pairs[key] = v
+    return all_pairs, cross_pairs
+
+
+def _mean_pairwise_team_corr(team_world_matrix: np.ndarray) -> float:
+    if team_world_matrix.ndim != 2 or team_world_matrix.shape[1] < 2:
+        return float("nan")
+    vals: list[float] = []
+    n = int(team_world_matrix.shape[1])
+    for i in range(n):
+        for j in range(i + 1, n):
+            v = _safe_corr(team_world_matrix[:, i], team_world_matrix[:, j])
+            if np.isfinite(v):
+                vals.append(float(v))
+    if not vals:
+        return float("nan")
+    return float(np.mean(np.asarray(vals, dtype=np.float64)))
 
 
 def _load_game_transformer_worlds(path: Path, *, start_date: str, end_date: str) -> SampleBundle:
@@ -131,6 +188,8 @@ def _load_game_transformer_worlds(path: Path, *, start_date: str, end_date: str)
         team_samples[(str(key[0]), int(key[1]), int(key[2]))] = arr
 
     pair_corr: dict[PAIR_KEY, float] = {}
+    cross_pair_corr: dict[GAME_PAIR_KEY, float] = {}
+    game_pair_corr: dict[GAME_PAIR_KEY, float] = {}
     for key, grp in df.groupby(["game_date", "game_id", "team_id"], sort=False):
         pivot = grp.pivot(index="world_idx", columns="player_id", values="dk_fpts").sort_index()
         if pivot.empty:
@@ -147,10 +206,45 @@ def _load_game_transformer_worlds(path: Path, *, start_date: str, end_date: str)
             )
         )
 
+    for key, grp in df.groupby(["game_date", "game_id"], sort=False):
+        pivot = grp.pivot(index="world_idx", columns="player_id", values="dk_fpts").sort_index()
+        if pivot.empty:
+            continue
+        mat = pivot.to_numpy(dtype=np.float32, copy=False)
+        pids = [int(v) for v in pivot.columns.tolist()]
+        team_map = (
+            grp[["player_id", "team_id"]]
+            .drop_duplicates(subset=["player_id"])
+            .set_index("player_id")["team_id"]
+            .to_dict()
+        )
+        team_ids = [int(team_map.get(int(pid), -1)) for pid in pids]
+        all_pairs, cross_pairs = _build_game_pair_corr_from_matrix(
+            mat,
+            pids,
+            team_ids,
+            date_key=str(key[0]),
+            game_id=int(key[1]),
+        )
+        game_pair_corr.update(all_pairs)
+        cross_pair_corr.update(cross_pairs)
+
+    opp_team_total_corr: dict[GAME_KEY, float] = {}
+    for key, grp in team_world.groupby(["game_date", "game_id"], sort=False):
+        pivot = grp.pivot(index="world_idx", columns="team_id", values="team_fpts").sort_index()
+        if pivot.shape[1] < 2:
+            continue
+        v = _mean_pairwise_team_corr(pivot.to_numpy(dtype=np.float32, copy=False))
+        if np.isfinite(v):
+            opp_team_total_corr[(str(key[0]), int(key[1]))] = float(v)
+
     return SampleBundle(
         player_samples=player_samples,
         team_samples=team_samples,
         pair_corr=pair_corr,
+        cross_pair_corr=cross_pair_corr,
+        game_pair_corr=game_pair_corr,
+        opp_team_total_corr=opp_team_total_corr,
         source_rows=int(len(df)),
     )
 
@@ -165,6 +259,9 @@ def _load_sim_v2_worlds(
     player_samples: dict[PLAYER_KEY, np.ndarray] = {}
     team_samples: dict[TEAM_KEY, np.ndarray] = {}
     pair_corr: dict[PAIR_KEY, float] = {}
+    cross_pair_corr: dict[GAME_PAIR_KEY, float] = {}
+    game_pair_corr: dict[GAME_PAIR_KEY, float] = {}
+    opp_team_total_corr: dict[GAME_KEY, float] = {}
     rows_scanned = 0
 
     for day in _date_range(start_date, end_date):
@@ -187,36 +284,69 @@ def _load_sim_v2_worlds(
         proj_df["player_id"] = pd.to_numeric(proj_df["player_id"], errors="coerce").astype("Int64")
         proj_df = proj_df.dropna(subset=["game_id", "team_id", "player_id"]).copy()
 
-        for key, grp in proj_df.groupby(["game_date", "game_id", "team_id"], sort=False):
-            pids = [int(v) for v in grp["player_id"].tolist()]
-            cols: list[str] = []
-            keep_pids: list[int] = []
-            for pid in pids:
-                c = str(int(pid))
-                if c in worlds_df.columns:
-                    cols.append(c)
-                    keep_pids.append(int(pid))
-            if not cols:
+        for game_key, game_grp in proj_df.groupby(["game_date", "game_id"], sort=False):
+            game_cols: list[str] = []
+            game_pids: list[int] = []
+            game_tids: list[int] = []
+            for row in game_grp.itertuples(index=False):
+                pid = int(row.player_id)
+                col = str(pid)
+                if col in worlds_df.columns:
+                    game_cols.append(col)
+                    game_pids.append(pid)
+                    game_tids.append(int(row.team_id))
+            if not game_cols:
                 continue
 
-            mat = worlds_df.loc[:, cols].to_numpy(dtype=np.float32, copy=False)
-            for idx, pid in enumerate(keep_pids):
-                player_samples[(str(key[0]), int(key[1]), int(key[2]), int(pid))] = mat[:, idx]
-            team_samples[(str(key[0]), int(key[1]), int(key[2]))] = mat.sum(axis=1)
-            pair_corr.update(
-                _build_pair_corr_from_matrix(
-                    mat,
-                    keep_pids,
-                    date_key=str(key[0]),
-                    game_id=int(key[1]),
-                    team_id=int(key[2]),
-                )
+            game_mat = worlds_df.loc[:, game_cols].to_numpy(dtype=np.float32, copy=False)
+            all_pairs, cross_pairs = _build_game_pair_corr_from_matrix(
+                game_mat,
+                game_pids,
+                game_tids,
+                date_key=str(game_key[0]),
+                game_id=int(game_key[1]),
             )
+            game_pair_corr.update(all_pairs)
+            cross_pair_corr.update(cross_pairs)
+
+            team_to_indices: dict[int, list[int]] = {}
+            for idx, tid in enumerate(game_tids):
+                team_to_indices.setdefault(int(tid), []).append(int(idx))
+
+            team_total_cols: list[np.ndarray] = []
+            for team_id, idxs in team_to_indices.items():
+                if not idxs:
+                    continue
+                team_mat = game_mat[:, idxs]
+                team_pids = [int(game_pids[i]) for i in idxs]
+                for local_idx, pid in enumerate(team_pids):
+                    player_samples[(str(game_key[0]), int(game_key[1]), int(team_id), int(pid))] = team_mat[:, local_idx]
+                team_total = team_mat.sum(axis=1)
+                team_samples[(str(game_key[0]), int(game_key[1]), int(team_id))] = team_total
+                team_total_cols.append(team_total.astype(np.float32, copy=False))
+                pair_corr.update(
+                    _build_pair_corr_from_matrix(
+                        team_mat,
+                        team_pids,
+                        date_key=str(game_key[0]),
+                        game_id=int(game_key[1]),
+                        team_id=int(team_id),
+                    )
+                )
+
+            if len(team_total_cols) >= 2:
+                team_matrix = np.column_stack(team_total_cols)
+                v = _mean_pairwise_team_corr(team_matrix)
+                if np.isfinite(v):
+                    opp_team_total_corr[(str(game_key[0]), int(game_key[1]))] = float(v)
 
     return SampleBundle(
         player_samples=player_samples,
         team_samples=team_samples,
         pair_corr=pair_corr,
+        cross_pair_corr=cross_pair_corr,
+        game_pair_corr=game_pair_corr,
+        opp_team_total_corr=opp_team_total_corr,
         source_rows=rows_scanned,
     )
 
@@ -270,12 +400,18 @@ def _compute_metrics(
         team_std_score.append(((float(y) - mean) ** 2) / max(var, 1e-6))
 
     pair_vals = [v for v in bundle.pair_corr.values() if np.isfinite(v)]
+    cross_pair_vals = [v for v in bundle.cross_pair_corr.values() if np.isfinite(v)]
+    game_pair_vals = [v for v in bundle.game_pair_corr.values() if np.isfinite(v)]
+    opp_team_total_corr_vals = [v for v in bundle.opp_team_total_corr.values() if np.isfinite(v)]
     out = {
         "n_player_actual": int(len(player_actual)),
         "n_player_scored": int(len(crps_vals)),
         "n_team_actual": int(len(team_actual)),
         "n_team_scored": int(len(team_mae)),
         "n_pair_corr": int(len(pair_vals)),
+        "n_cross_pair_corr": int(len(cross_pair_vals)),
+        "n_game_pair_corr": int(len(game_pair_vals)),
+        "n_opp_team_total_corr": int(len(opp_team_total_corr_vals)),
         "crps_mean": _safe_mean(crps_vals),
         "p90_coverage": _safe_mean(cov90),
         "p95_coverage": _safe_mean(cov95),
@@ -285,6 +421,9 @@ def _compute_metrics(
         "team_variance_calibration_mse_norm": _safe_mean(team_std_score),
         "team_variance_mean": _safe_mean(team_var),
         "same_team_pair_corr_mean": _safe_mean(pair_vals),
+        "cross_team_pair_corr_mean": _safe_mean(cross_pair_vals),
+        "same_game_pair_corr_mean": _safe_mean(game_pair_vals),
+        "opp_team_total_corr_mean": _safe_mean(opp_team_total_corr_vals),
         "source_rows": int(bundle.source_rows),
     }
     return out
@@ -359,6 +498,45 @@ def main() -> None:
     gt_metrics["pair_corr_rmse_vs_sim_v2"] = pair_rmse_vs_sim
     sim_metrics["pair_corr_rmse_vs_sim_v2"] = 0.0
 
+    common_cross_pair_keys = set(gt_bundle.cross_pair_corr.keys()) & set(sim_bundle.cross_pair_corr.keys())
+    cross_pair_rmse_vs_sim = float("nan")
+    if common_cross_pair_keys:
+        diffs = [
+            float(gt_bundle.cross_pair_corr[k] - sim_bundle.cross_pair_corr[k])
+            for k in common_cross_pair_keys
+            if np.isfinite(gt_bundle.cross_pair_corr[k]) and np.isfinite(sim_bundle.cross_pair_corr[k])
+        ]
+        if diffs:
+            cross_pair_rmse_vs_sim = float(np.sqrt(np.mean(np.square(np.asarray(diffs, dtype=np.float64)))))
+    gt_metrics["cross_team_pair_corr_rmse_vs_sim_v2"] = cross_pair_rmse_vs_sim
+    sim_metrics["cross_team_pair_corr_rmse_vs_sim_v2"] = 0.0
+
+    common_game_pair_keys = set(gt_bundle.game_pair_corr.keys()) & set(sim_bundle.game_pair_corr.keys())
+    game_pair_rmse_vs_sim = float("nan")
+    if common_game_pair_keys:
+        diffs = [
+            float(gt_bundle.game_pair_corr[k] - sim_bundle.game_pair_corr[k])
+            for k in common_game_pair_keys
+            if np.isfinite(gt_bundle.game_pair_corr[k]) and np.isfinite(sim_bundle.game_pair_corr[k])
+        ]
+        if diffs:
+            game_pair_rmse_vs_sim = float(np.sqrt(np.mean(np.square(np.asarray(diffs, dtype=np.float64)))))
+    gt_metrics["same_game_pair_corr_rmse_vs_sim_v2"] = game_pair_rmse_vs_sim
+    sim_metrics["same_game_pair_corr_rmse_vs_sim_v2"] = 0.0
+
+    common_opp_team_corr_keys = set(gt_bundle.opp_team_total_corr.keys()) & set(sim_bundle.opp_team_total_corr.keys())
+    opp_team_total_corr_rmse_vs_sim = float("nan")
+    if common_opp_team_corr_keys:
+        diffs = [
+            float(gt_bundle.opp_team_total_corr[k] - sim_bundle.opp_team_total_corr[k])
+            for k in common_opp_team_corr_keys
+            if np.isfinite(gt_bundle.opp_team_total_corr[k]) and np.isfinite(sim_bundle.opp_team_total_corr[k])
+        ]
+        if diffs:
+            opp_team_total_corr_rmse_vs_sim = float(np.sqrt(np.mean(np.square(np.asarray(diffs, dtype=np.float64)))))
+    gt_metrics["opp_team_total_corr_rmse_vs_sim_v2"] = opp_team_total_corr_rmse_vs_sim
+    sim_metrics["opp_team_total_corr_rmse_vs_sim_v2"] = 0.0
+
     delta_metrics = _delta(
         gt_metrics,
         sim_metrics,
@@ -369,7 +547,13 @@ def main() -> None:
             "team_total_mae",
             "team_variance_calibration_mse_norm",
             "same_team_pair_corr_mean",
+            "cross_team_pair_corr_mean",
+            "same_game_pair_corr_mean",
+            "opp_team_total_corr_mean",
             "pair_corr_rmse_vs_sim_v2",
+            "cross_team_pair_corr_rmse_vs_sim_v2",
+            "same_game_pair_corr_rmse_vs_sim_v2",
+            "opp_team_total_corr_rmse_vs_sim_v2",
         ],
     )
 
