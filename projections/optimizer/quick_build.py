@@ -30,12 +30,13 @@ except Exception:  # pragma: no cover - fallback for tests
 
 try:
     from .cpsat_solver import (
+        assign_slots_dk,
         build_cpsat_counts,
         build_cpsat_model,
         build_objective_weights,
     )
 except Exception:  # pragma: no cover
-    from cpsat_solver import build_cpsat_counts, build_cpsat_model, build_objective_weights  # type: ignore
+    from cpsat_solver import assign_slots_dk, build_cpsat_counts, build_cpsat_model, build_objective_weights  # type: ignore
 
 FNV_OFFSET_BASIS = 0xCBF29CE484222325
 FNV_PRIME = 0x100000001B3
@@ -353,6 +354,7 @@ class QuickBuildStats:
     raw_optimal_max_offoptimal_pct: Optional[float] = None
     # Rejection diagnostics
     rejected_near_dup: int = 0
+    rejected_unassignable: int = 0
     rejected_infeasible: int = 0
     rejected_offoptimal_floor: int = 0
     near_dup_last_jaccard: Optional[float] = None
@@ -678,6 +680,23 @@ def _get_value(src: Any, key: str, default: Any = None) -> Any:
     if isinstance(src, dict):
         return src.get(key, default)
     return default
+
+
+def _is_assignable_dk_lineup(
+    lineup: Sequence[str],
+    pid_to_player: dict[str, SpecPlayer],
+    lineup_size: int,
+) -> bool:
+    """Return True if lineup can be exactly assigned to DK slots."""
+    if len(lineup) != lineup_size:
+        return False
+    if len(set(lineup)) != len(lineup):
+        return False
+    for pid in lineup:
+        if pid not in pid_to_player:
+            return False
+    assigned = assign_slots_dk(list(lineup), pid_to_player)
+    return assigned is not None
 
 
 def _ownership_penalty_to_dict(settings: Any) -> Optional[dict]:
@@ -1394,6 +1413,9 @@ def quick_build_pool(
         cfg = replace(cfg, run_id=run_id).resolved()
 
     spec = _build_spec_from_payload(slate, site, constraints)
+    pid_to_player_for_assignment: dict[str, SpecPlayer] = {
+        p.player_id: p for p in spec.players
+    }
 
     # Use a centralized dedup collector to minimize cross-worker contention
     raw_queue: Queue = Queue(max(1, cfg.queue_size * 2))
@@ -1554,6 +1576,21 @@ def quick_build_pool(
 
             if lineup is None:
                 continue
+
+            # Hard guardrail: do not admit any DK lineup that cannot be assigned to
+            # the canonical 8 roster slots.
+            if spec.site == "dk":
+                try:
+                    if not _is_assignable_dk_lineup(
+                        lineup,
+                        pid_to_player_for_assignment,
+                        cfg.lineup_size,
+                    ):
+                        stats.rejected_unassignable += 1
+                        continue
+                except Exception:
+                    stats.rejected_unassignable += 1
+                    continue
 
             # Enforce consecutive min-uniques in the central collector (global order)
             if cfg.min_uniq > 0 and last_accepted_set is not None:
