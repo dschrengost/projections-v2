@@ -1447,9 +1447,19 @@ def _build_minutes_live_logic(
             roster_df.loc[scoped.index, "is_projected_starter"] = projected_new.values
             roster_df.loc[scoped.index, "is_confirmed_starter"] = confirmed_new.values
             if "lineup_role" in roster_df.columns:
+                # Preserve explicit OUT designations (e.g., Rotowire) while
+                # re-capping starter labels.
+                existing_role = (
+                    roster_df.loc[scoped.index, "lineup_role"]
+                    .astype("string", copy=False)
+                    .str.strip()
+                    .str.lower()
+                    .fillna("")
+                )
                 role = pd.Series(pd.NA, index=scoped.index, dtype="object")
                 role.loc[projected_new] = "projected_starter"
                 role.loc[confirmed_new] = "confirmed_starter"
+                role.loc[existing_role.eq("out")] = "out"
                 roster_df.loc[scoped.index, "lineup_role"] = role.values
 
             if cap_result.overflow:

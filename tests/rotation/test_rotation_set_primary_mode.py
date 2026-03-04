@@ -33,6 +33,19 @@ def test_primary_mode_out_zero_and_scale_to_240() -> None:
     assert summary["zero_sum_teams"] == 0
 
 
+def test_primary_mode_out_mask_respects_lineup_role_out() -> None:
+    df = pd.DataFrame(
+        {
+            "status": ["ACTIVE", "ACTIVE", "ACTIVE"],
+            "is_out": [0, 0, 0],
+            "lineup_role": ["out", "projected_starter", pd.NA],
+        }
+    )
+
+    out_mask = _derive_out_mask(df)
+    assert out_mask.tolist() == [True, False, False]
+
+
 def test_primary_mode_gate_probs_use_thresholds() -> None:
     minutes = pd.Series(
         [
