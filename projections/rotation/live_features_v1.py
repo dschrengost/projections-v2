@@ -8,6 +8,7 @@ possible, reusing shared helpers extracted from
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -31,6 +32,8 @@ from projections.rotation.rotation_set_minutes_features_v1 import (
 
 KEY_COLS: tuple[str, str, str] = ("game_id", "team_id", "player_id")
 OPPONENT_TEAM_ID_COL = "opponent_team_id"
+_MAX_REASONABLE_PRIORS_PARTITION_ROWS = 5000
+_logger = logging.getLogger(__name__)
 
 
 class RotationLiveFeaturesError(RuntimeError):
@@ -248,8 +251,9 @@ def load_latest_rotation_priors_by_entity(
         if not root.exists():
             return pd.DataFrame()
 
-        frames: list[pd.DataFrame] = []
-        for path in root.glob("game_id=*.parquet"):
+        records: list[dict] = []
+        skipped_paths: list[str] = []
+        for path in sorted(root.glob("game_id=*.parquet")):
             # Skip non-regular-season games (All-Star, playoffs, etc.)
             # These use special team IDs that break the team_id-based join
             game_id_str = path.name.replace("game_id=", "").replace(".parquet", "")
@@ -257,14 +261,51 @@ def load_latest_rotation_priors_by_entity(
                 continue
             try:
                 df = pd.read_parquet(path)
-                frames.append(df)
             except Exception:
+                skipped_paths.append(str(path))
                 continue
 
-        if not frames:
+            # Defensive guard for transient/corrupt partitions while writer jobs run.
+            required_cols = {entity_col, "game_date"}
+            if not required_cols.issubset(set(df.columns)):
+                skipped_paths.append(str(path))
+                continue
+
+            try:
+                nrows = int(len(df))
+            except Exception:
+                skipped_paths.append(str(path))
+                continue
+
+            if nrows < 0 or nrows > _MAX_REASONABLE_PRIORS_PARTITION_ROWS:
+                skipped_paths.append(str(path))
+                continue
+
+            try:
+                if any(len(df[col]) != nrows for col in df.columns):
+                    skipped_paths.append(str(path))
+                    continue
+            except Exception:
+                skipped_paths.append(str(path))
+                continue
+
+            try:
+                records.extend(df.to_dict(orient="records"))
+            except Exception:
+                skipped_paths.append(str(path))
+                continue
+
+        if skipped_paths:
+            _logger.warning(
+                "Skipped %d priors partitions under %s due to read/schema/shape validation failures.",
+                len(skipped_paths),
+                root,
+            )
+
+        if not records:
             return pd.DataFrame()
 
-        combined = pd.concat(frames, ignore_index=True)
+        combined = pd.DataFrame.from_records(records)
         combined["game_date"] = pd.to_datetime(combined["game_date"], errors="coerce")
         combined[entity_col] = pd.to_numeric(combined[entity_col], errors="coerce").astype("Int64")
 
