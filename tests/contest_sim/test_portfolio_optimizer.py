@@ -96,18 +96,21 @@ def test_build_portfolio_repairs_seed_lineups_with_next_feasible_candidates() ->
     assert [c.lineup_id for c in selection.selected] == [1, 3]
 
 
-def test_build_portfolio_rejects_min_exposure_bounds() -> None:
+def test_build_portfolio_respects_min_exposure_bounds() -> None:
     candidates = [
         PortfolioCandidate(lineup_id=1, player_ids=("A", "B"), expected_value=10.0),
         PortfolioCandidate(lineup_id=2, player_ids=("C", "D"), expected_value=9.0),
+        PortfolioCandidate(lineup_id=3, player_ids=("A", "E"), expected_value=8.0),
     ]
 
-    with pytest.raises(ValueError, match="Minimum exposure is not supported yet"):
-        build_portfolio(
-            candidates,
-            portfolio_size=1,
-            exposure_bounds={"A": ExposureBoundsPct(min=25.0)},
-        )
+    selection = build_portfolio(
+        candidates,
+        portfolio_size=2,
+        exposure_bounds={"A": ExposureBoundsPct(min=100.0)},
+    )
+    picked = [c.lineup_id for c in selection.selected]
+    assert 1 in picked
+    assert 3 in picked
 
 
 def test_build_portfolio_raises_when_constraints_exhaust_pool() -> None:
@@ -184,6 +187,38 @@ def test_build_decorrelated_portfolio_respects_exposure_caps() -> None:
 
     picked = {c.lineup_id for c in selection.selected}
     assert picked != {1, 2}  # would violate A max 50% in a 2-lineup portfolio
+
+
+def test_build_decorrelated_portfolio_respects_min_exposure_bounds() -> None:
+    import numpy as np
+
+    worlds = np.asarray(
+        [
+            [10.0, 5.0],
+            [20.0, 5.0],
+            [30.0, 5.0],
+        ],
+        dtype=np.float64,
+    )
+    player_index = {"A": 0, "C": 1}
+
+    candidates = [
+        PortfolioCandidate(lineup_id=1, player_ids=("A",), expected_value=1.0),
+        PortfolioCandidate(lineup_id=2, player_ids=("A",), expected_value=0.9),
+        PortfolioCandidate(lineup_id=3, player_ids=("C",), expected_value=0.8),
+    ]
+
+    selection, _diag = build_decorrelated_portfolio(
+        candidates,
+        portfolio_size=2,
+        worlds_matrix=worlds,
+        player_index=player_index,
+        config=DecorrelatedPortfolioConfig(ev_retention=1.0, worlds_sample=3, seed=1),
+        exposure_bounds={"A": ExposureBoundsPct(min=100.0)},
+    )
+
+    picked = {c.lineup_id for c in selection.selected}
+    assert picked == {1, 2}
 
 
 def test_build_decorrelated_portfolio_uses_seed_lineups_when_ev_retention_allows() -> None:

@@ -131,7 +131,7 @@ def test_portfolio_endpoint_propagates_worlds_source_and_diagnostics(tmp_path, m
     assert len(payload["selected_lineup_ids"]) == 2
 
 
-def test_portfolio_endpoint_rejects_min_exposure_bounds(tmp_path, monkeypatch) -> None:
+def test_portfolio_endpoint_supports_min_exposure_bounds(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         contest_sim_api,
         "_load_sim_build",
@@ -154,12 +154,48 @@ def test_portfolio_endpoint_rejects_min_exposure_bounds(tmp_path, monkeypatch) -
                     "top_5pct_rate": 0.10,
                     "top_10pct_rate": 0.15,
                     "cash_rate": 0.4,
-                }
+                },
+                {
+                    "lineup_id": 1,
+                    "player_ids": ["1", "3"],
+                    "mean": 99.0,
+                    "std": 10.0,
+                    "p90": 119.0,
+                    "p95": 124.0,
+                    "expected_payout": 4.8,
+                    "expected_value": 1.9,
+                    "roi": 0.35,
+                    "win_rate": 0.09,
+                    "top_1pct_rate": 0.045,
+                    "top_5pct_rate": 0.09,
+                    "top_10pct_rate": 0.14,
+                    "cash_rate": 0.39,
+                },
+                {
+                    "lineup_id": 2,
+                    "player_ids": ["4", "5"],
+                    "mean": 98.0,
+                    "std": 10.0,
+                    "p90": 118.0,
+                    "p95": 123.0,
+                    "expected_payout": 4.7,
+                    "expected_value": 1.8,
+                    "roi": 0.34,
+                    "win_rate": 0.08,
+                    "top_1pct_rate": 0.04,
+                    "top_5pct_rate": 0.08,
+                    "top_10pct_rate": 0.13,
+                    "cash_rate": 0.38,
+                },
             ],
             "request": {},
         },
     )
-    monkeypatch.setattr(contest_sim_api, "_load_player_ownership", lambda *args, **kwargs: {"1": 25.0, "2": 20.0})
+    monkeypatch.setattr(
+        contest_sim_api,
+        "_load_player_ownership",
+        lambda *args, **kwargs: {"1": 25.0, "2": 20.0, "3": 18.0, "4": 12.0, "5": 10.0},
+    )
 
     client = _client(tmp_path, monkeypatch)
     response = client.post(
@@ -168,13 +204,14 @@ def test_portfolio_endpoint_rejects_min_exposure_bounds(tmp_path, monkeypatch) -
             "game_date": "2026-03-01",
             "source_build_id": "build-1",
             "mode": "greedy_constraints",
-            "portfolio_size": 1,
-            "exposure_bounds": {"1": {"min": 25}},
+            "portfolio_size": 2,
+            "exposure_bounds": {"1": {"min": 100}},
         },
     )
 
-    assert response.status_code == 400
-    assert "Minimum exposure is not supported yet" in response.json()["detail"]
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload["selected_lineup_ids"]) == {0, 1}
 
 
 def test_portfolio_endpoint_repairs_from_seed_lineup_ids(tmp_path, monkeypatch) -> None:

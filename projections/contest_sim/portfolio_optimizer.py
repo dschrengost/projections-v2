@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from math import ceil, floor
 from math import isfinite
 from typing import Iterable, Literal, Mapping, Sequence
 
@@ -164,16 +165,260 @@ def _validate_exposure_bounds(
 ) -> Mapping[str, ExposureBoundsPct]:
     bounds = exposure_bounds or {}
     for pid, bound in bounds.items():
-        if bound.min is not None:
+        if bound.min is not None and not (0.0 <= float(bound.min) <= 100.0):
             raise ValueError(
-                f"Minimum exposure is not supported yet for player {pid!r}; "
-                "use max exposure only."
+                f"Exposure min for player {pid!r} must be between 0 and 100"
             )
         if bound.max is not None and not (0.0 <= float(bound.max) <= 100.0):
             raise ValueError(
                 f"Exposure max for player {pid!r} must be between 0 and 100"
             )
+        if (
+            bound.min is not None
+            and bound.max is not None
+            and float(bound.min) > float(bound.max)
+        ):
+            raise ValueError(
+                f"Exposure min for player {pid!r} cannot exceed max exposure"
+            )
     return bounds
+
+
+def _pct_to_min_count(pct: float, target_count: int) -> int:
+    return max(0, min(target_count, int(ceil((float(pct) / 100.0) * float(target_count) - 1e-12))))
+
+
+def _pct_to_max_count(pct: float, target_count: int) -> int:
+    return max(0, min(target_count, int(floor((float(pct) / 100.0) * float(target_count) + 1e-12))))
+
+
+def _build_exposure_count_bounds(
+    *,
+    bounds: Mapping[str, ExposureBoundsPct],
+    portfolio_size: int,
+) -> tuple[dict[str, int], dict[str, int]]:
+    min_by_pid: dict[str, int] = {}
+    max_by_pid: dict[str, int] = {}
+    for pid, bound in bounds.items():
+        if bound.min is not None:
+            min_by_pid[str(pid)] = _pct_to_min_count(float(bound.min), portfolio_size)
+        if bound.max is not None:
+            max_by_pid[str(pid)] = _pct_to_max_count(float(bound.max), portfolio_size)
+    for pid, min_count in min_by_pid.items():
+        max_count = max_by_pid.get(pid)
+        if max_count is not None and min_count > max_count:
+            raise ValueError(
+                f"Exposure constraints infeasible for player {pid!r}: "
+                f"min_count={min_count} exceeds max_count={max_count}"
+            )
+    return min_by_pid, max_by_pid
+
+
+def _count_min_uniques_passes(
+    candidates: Sequence[PortfolioCandidate],
+    *,
+    min_uniques: int,
+) -> int:
+    if min_uniques <= 0:
+        return len(candidates)
+    selected_sets: list[set[str]] = []
+    pass_count = 0
+    for candidate in candidates:
+        cand_set = set(candidate.player_ids)
+        compatible = True
+        for existing_set in selected_sets:
+            if _count_uniques_between_lineups(candidate.player_ids, existing_set) < min_uniques:
+                compatible = False
+                break
+        if not compatible:
+            continue
+        selected_sets.append(cand_set)
+        pass_count += 1
+    return pass_count
+
+
+def _select_constrained_indices(
+    candidates: Sequence[PortfolioCandidate],
+    *,
+    target_count: int,
+    min_uniques: int,
+    min_by_pid: Mapping[str, int],
+    max_by_pid: Mapping[str, int],
+) -> list[int]:
+    lineup_sets = [set(c.player_ids) for c in candidates]
+    constrained_pids = set(min_by_pid.keys()).union(max_by_pid.keys())
+    lineup_constrained_pid_set = [
+        set(pid for pid in c.player_ids if pid in constrained_pids)
+        for c in candidates
+    ]
+    rank_score = [len(candidates) - idx for idx in range(len(candidates))]
+    min_entries = [(pid, int(min_count)) for pid, min_count in min_by_pid.items() if int(min_count) > 0]
+
+    for pid, min_count in min_entries:
+        coverage = sum(1 for pid_set in lineup_constrained_pid_set if pid in pid_set)
+        if coverage < min_count:
+            raise ValueError(
+                f"Exposure minimum infeasible for player {pid!r}: "
+                f"needs {min_count}/{target_count} lineups, only {coverage} available"
+            )
+
+    selected_indices: list[int] = []
+    selected_index_set: set[int] = set()
+    selected_counts: dict[str, int] = {}
+
+    def _add_index(idx: int) -> None:
+        selected_indices.append(idx)
+        selected_index_set.add(idx)
+        for pid in lineup_constrained_pid_set[idx]:
+            selected_counts[pid] = selected_counts.get(pid, 0) + 1
+
+    def _can_add_index(idx: int) -> bool:
+        for pid in lineup_constrained_pid_set[idx]:
+            max_count = max_by_pid.get(pid)
+            if max_count is not None and (selected_counts.get(pid, 0) + 1) > max_count:
+                return False
+        if min_uniques <= 0:
+            return True
+        for existing_idx in selected_indices:
+            if _count_uniques_between_lineups(
+                candidates[idx].player_ids,
+                lineup_sets[existing_idx],
+            ) < min_uniques:
+                return False
+        return True
+
+    def _compute_total_deficit() -> int:
+        total = 0
+        for pid, min_count in min_entries:
+            total += max(0, int(min_count) - int(selected_counts.get(pid, 0)))
+        return total
+
+    def _compute_deficits() -> list[tuple[str, int]]:
+        deficits: list[tuple[str, int]] = []
+        for pid, min_count in min_entries:
+            deficit = int(min_count) - int(selected_counts.get(pid, 0))
+            if deficit > 0:
+                deficits.append((pid, deficit))
+        return deficits
+
+    while len(selected_indices) < target_count:
+        deficits = _compute_deficits()
+        best_idx = -1
+        best_score = float("-inf")
+        for idx in range(len(candidates)):
+            if idx in selected_index_set or not _can_add_index(idx):
+                continue
+            gain = 0
+            if deficits:
+                for pid, _ in deficits:
+                    if pid in lineup_constrained_pid_set[idx]:
+                        gain += 1
+                if gain == 0:
+                    continue
+            score = float(gain) * 1_000_000.0 + float(rank_score[idx])
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+        if best_idx < 0:
+            break
+        _add_index(best_idx)
+
+    if len(selected_indices) < target_count:
+        for idx in range(len(candidates)):
+            if len(selected_indices) >= target_count:
+                break
+            if idx in selected_index_set or not _can_add_index(idx):
+                continue
+            _add_index(idx)
+
+    def _can_swap(add_idx: int, remove_idx: int) -> bool:
+        for pid, max_count in max_by_pid.items():
+            next_count = int(selected_counts.get(pid, 0))
+            if pid in lineup_constrained_pid_set[remove_idx]:
+                next_count -= 1
+            if pid in lineup_constrained_pid_set[add_idx]:
+                next_count += 1
+            if next_count > int(max_count):
+                return False
+        if min_uniques > 0:
+            for existing_idx in selected_indices:
+                if existing_idx == remove_idx:
+                    continue
+                if _count_uniques_between_lineups(
+                    candidates[add_idx].player_ids,
+                    lineup_sets[existing_idx],
+                ) < min_uniques:
+                    return False
+        return True
+
+    def _deficit_after_swap(add_idx: int, remove_idx: int) -> int:
+        deficit = 0
+        for pid, min_count in min_entries:
+            next_count = int(selected_counts.get(pid, 0))
+            if pid in lineup_constrained_pid_set[remove_idx]:
+                next_count -= 1
+            if pid in lineup_constrained_pid_set[add_idx]:
+                next_count += 1
+            deficit += max(0, int(min_count) - next_count)
+        return deficit
+
+    repair_iterations = 0
+    while _compute_total_deficit() > 0 and repair_iterations < 200:
+        repair_iterations += 1
+        deficits = _compute_deficits()
+        best_swap: tuple[int, int, int, int] | None = None
+        for add_idx in range(len(candidates)):
+            if add_idx in selected_index_set:
+                continue
+            if deficits and not any(pid in lineup_constrained_pid_set[add_idx] for pid, _ in deficits):
+                continue
+            for remove_idx in selected_indices:
+                if not _can_swap(add_idx, remove_idx):
+                    continue
+                deficit = _deficit_after_swap(add_idx, remove_idx)
+                score_delta = int(rank_score[add_idx]) - int(rank_score[remove_idx])
+                if best_swap is None:
+                    best_swap = (add_idx, remove_idx, deficit, score_delta)
+                    continue
+                _, _, best_deficit, best_score_delta = best_swap
+                if deficit < best_deficit or (deficit == best_deficit and score_delta > best_score_delta):
+                    best_swap = (add_idx, remove_idx, deficit, score_delta)
+
+        if best_swap is None:
+            break
+        current_deficit = _compute_total_deficit()
+        add_idx, remove_idx, deficit, score_delta = best_swap
+        if deficit > current_deficit:
+            break
+        if deficit == current_deficit and score_delta <= 0:
+            break
+
+        remove_pos = selected_indices.index(remove_idx)
+        selected_indices[remove_pos] = add_idx
+        selected_index_set.remove(remove_idx)
+        selected_index_set.add(add_idx)
+        for pid in lineup_constrained_pid_set[remove_idx]:
+            selected_counts[pid] = int(selected_counts.get(pid, 0)) - 1
+        for pid in lineup_constrained_pid_set[add_idx]:
+            selected_counts[pid] = int(selected_counts.get(pid, 0)) + 1
+
+    if len(selected_indices) < target_count:
+        raise ValueError(
+            f"Only {len(selected_indices)} of {target_count} lineups meet constraints (pool exhausted)"
+        )
+
+    unmet = [
+        f"{pid!r} ({selected_counts.get(pid, 0)}/{min_count})"
+        for pid, min_count in min_entries
+        if int(selected_counts.get(pid, 0)) < int(min_count)
+    ]
+    if unmet:
+        raise ValueError(
+            "Min exposure constraints not met (pool exhausted): " + ", ".join(unmet)
+        )
+
+    selected_indices.sort()
+    return selected_indices
 
 
 def _get_candidate_metric_value(
@@ -275,7 +520,7 @@ def build_portfolio(
         Minimum unique players between any pair of selected lineups.
     exposure_bounds:
         Optional player exposure min/max percentage bounds; selection enforces
-        only *max* bounds during greedy construction.
+        min/max bounds during greedy construction/repair.
     seed_lineup_ids:
         Optional previously selected lineup ids. When provided, selection
         prioritizes these lineups (highest ranked first) if they still satisfy
@@ -336,51 +581,22 @@ def build_portfolio(
             seed_front = [c for c in ordered if c.lineup_id in seed_set]
             ordered = seed_front + [c for c in ordered if c.lineup_id not in seed_set]
 
-    selected: list[PortfolioCandidate] = []
-    selected_sets: list[set[str]] = []
-    counts: dict[str, int] = {}
-    min_uniques_checked = 0
-
-    for cand in ordered:
-        if len(selected) >= portfolio_size:
-            break
-
-        pids = set(cand.player_ids)
-        valid = True
-
-        if not _passes_min_uniques(
-            cand,
-            selected_sets=selected_sets,
-            min_uniques=min_uniques,
-        ):
-            continue
-        min_uniques_checked += 1
-
-        # Enforce max exposure caps during construction.
-        for pid in cand.player_ids:
-            b = bounds.get(pid)
-            if b is None or b.max is None:
-                continue
-            new_count = counts.get(pid, 0) + 1
-            # Exposure caps are evaluated against the *target* portfolio size,
-            # not the current prefix size.
-            new_exposure_pct = (new_count / portfolio_size) * 100.0
-            if new_exposure_pct > float(b.max) + 1e-9:
-                valid = False
-                break
-
-        if not valid:
-            continue
-
-        selected.append(cand)
-        selected_sets.append(pids)
-        for pid in cand.player_ids:
-            counts[pid] = counts.get(pid, 0) + 1
-
-    if len(selected) < portfolio_size:
-        raise ValueError(
-            f"Only {len(selected)} of {portfolio_size} lineups meet constraints (pool exhausted)"
-        )
+    min_by_pid, max_by_pid = _build_exposure_count_bounds(
+        bounds=bounds,
+        portfolio_size=portfolio_size,
+    )
+    selected_indices = _select_constrained_indices(
+        ordered,
+        target_count=portfolio_size,
+        min_uniques=min_uniques,
+        min_by_pid=min_by_pid,
+        max_by_pid=max_by_pid,
+    )
+    min_uniques_checked = _count_min_uniques_passes(
+        ordered,
+        min_uniques=min_uniques,
+    )
+    selected = [ordered[idx] for idx in selected_indices]
 
     return PortfolioSelection(
         selected=selected,
@@ -635,16 +851,49 @@ def build_decorrelated_portfolio(
         idxs = idxs[idxs >= 0]
         sigma_sum[i] = np.sum(sigma[:, idxs], axis=1, dtype=np.float64).astype(np.float32)
 
-    # Exposure caps (optional): convert max pct to max counts.
+    # Exposure bounds (optional): convert pct bounds to count bounds.
     max_counts = np.full((len(player_ids),), np.inf, dtype=np.float64)
+    min_counts = np.zeros((len(player_ids),), dtype=np.float64)
+    min_locs = np.asarray([], dtype=np.int64)
+    min_targets = np.asarray([], dtype=np.float64)
+    min_hit = None
     if bounds:
         for pid, b in bounds.items():
-            if b.max is None:
-                continue
             loc = pid_to_local.get(str(pid))
             if loc is None:
                 continue
-            max_counts[loc] = (float(b.max) / 100.0) * float(portfolio_size)
+            if b.max is not None:
+                max_counts[loc] = float(_pct_to_max_count(float(b.max), portfolio_size))
+            if b.min is not None:
+                min_counts[loc] = float(_pct_to_min_count(float(b.min), portfolio_size))
+        finite_max = np.isfinite(max_counts)
+        infeasible = np.flatnonzero((min_counts > 0.0) & finite_max & (min_counts > max_counts + 1e-9))
+        if infeasible.size > 0:
+            pid = player_ids[int(infeasible[0])]
+            raise ValueError(
+                f"Exposure constraints infeasible for player {pid!r}: "
+                f"min_count={int(min_counts[int(infeasible[0])])} exceeds "
+                f"max_count={int(max_counts[int(infeasible[0])])}"
+            )
+        min_locs = np.flatnonzero(min_counts > 0.0).astype(np.int64)
+        if min_locs.size > 0:
+            min_targets = min_counts[min_locs].astype(np.float64)
+            min_hit = np.zeros((K2, int(min_locs.size)), dtype=np.float64)
+            loc_to_col = {int(loc): j for j, loc in enumerate(min_locs.tolist())}
+            for i, idxs in enumerate(kept_idxs):
+                for loc in idxs:
+                    col = loc_to_col.get(int(loc))
+                    if col is not None:
+                        min_hit[i, col] = 1.0
+            coverage = np.sum(min_hit > 0.0, axis=0)
+            for j, cov in enumerate(coverage.tolist()):
+                needed = int(min_targets[j])
+                if int(cov) < needed:
+                    pid = player_ids[int(min_locs[j])]
+                    raise ValueError(
+                        f"Exposure minimum infeasible for player {pid!r}: "
+                        f"needs {needed}/{portfolio_size} lineups, only {int(cov)} available"
+                    )
 
     kept_lineup_idx_by_id = {c.lineup_id: idx for idx, c in enumerate(kept_candidates)}
     seed_idxs: list[int] = []
@@ -703,6 +952,11 @@ def build_decorrelated_portfolio(
                         break
                 if violates:
                     continue
+            if min_locs.size > 0 and min_hit is not None:
+                remaining_slots = int(portfolio_size) - (len(selected) + 1)
+                post_counts = counts[min_locs] + min_hit[int(i)]
+                if np.any((post_counts + float(remaining_slots)) < (min_targets - 1e-9)):
+                    continue
             selected.append(int(i))
             counts[idxs] += 1.0
             if len(selected) >= portfolio_size:
@@ -710,6 +964,17 @@ def build_decorrelated_portfolio(
 
         if len(selected) < portfolio_size:
             raise ValueError("No feasible portfolio under active constraints (pool exhausted)")
+        if min_locs.size > 0 and np.any(counts[min_locs] + 1e-9 < min_targets):
+            unmet: list[str] = []
+            for j, loc in enumerate(min_locs.tolist()):
+                got = int(counts[int(loc)])
+                need = int(min_targets[j])
+                if got < need:
+                    unmet.append(f"{player_ids[int(loc)]!r} ({got}/{need})")
+            raise ValueError(
+                "No feasible portfolio under active constraints (min exposures unmet): "
+                + ", ".join(unmet)
+            )
         return selected
 
     # Baseline: best EV portfolio (under optional caps).
@@ -778,6 +1043,16 @@ def build_decorrelated_portfolio(
                     axis=1,
                 )
                 feasible &= ~over
+                if not feasible.any():
+                    continue
+            else:
+                counts_wo = counts.copy()
+                counts_wo[idxs_remove] -= 1.0
+
+            if min_locs.size > 0 and min_hit is not None:
+                post_counts = counts_wo[min_locs][None, :] + min_hit
+                meets_min = np.all(post_counts + 1e-9 >= min_targets[None, :], axis=1)
+                feasible &= meets_min
                 if not feasible.any():
                     continue
 
@@ -860,6 +1135,17 @@ def build_decorrelated_portfolio(
 
     # Recompute risk exactly for reporting.
     risk_selected = float(np.dot(counts, sigma @ counts))
+    if min_locs.size > 0 and np.any(counts[min_locs] + 1e-9 < min_targets):
+        unmet: list[str] = []
+        for j, loc in enumerate(min_locs.tolist()):
+            got = int(counts[int(loc)])
+            need = int(min_targets[j])
+            if got < need:
+                unmet.append(f"{player_ids[int(loc)]!r} ({got}/{need})")
+        raise ValueError(
+            "No feasible portfolio under active constraints (min exposures unmet): "
+            + ", ".join(unmet)
+        )
 
     selection = PortfolioSelection(
         selected=[kept_candidates[i] for i in selected],
