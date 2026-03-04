@@ -25,9 +25,9 @@ from typing import Iterable, List, Tuple
 
 import pandas as pd
 import typer
-from unidecode import unidecode
 
 from projections import paths
+from projections.names import normalize_player_name
 
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest, write_ids_csv
 from projections.minutes_v1.features import MinutesFeatureBuilder
@@ -73,7 +73,7 @@ RATES_TRAINING_BASE_FILENAME = "rates_training_base.parquet"
 
 
 def _normalize_name_for_matching(name: str) -> str:
-    return unidecode(str(name)).strip().lower()
+    return normalize_player_name(name)
 
 VACANCY_FEATURE_COLUMNS: tuple[str, ...] = (
     "vac_min_szn",

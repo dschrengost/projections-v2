@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 import projections.cli.build_minutes_live as build_minutes_live
 
 
-def test_build_minutes_live_promotes_rotowire_out_to_status_and_is_out(tmp_path: Path, monkeypatch) -> None:
+def test_build_minutes_live_matches_rotowire_names_with_suffix_variants(tmp_path: Path, monkeypatch) -> None:
     run_id = "pytest_rotowire_out_roles"
     monkeypatch.setenv("PROJECTIONS_SKIP_POINTER_WRITES", "1")
 
@@ -17,7 +17,7 @@ def test_build_minutes_live_promotes_rotowire_out_to_status_and_is_out(tmp_path:
             "game_id": [999],
             "player_id": [101],
             "team_id": [1610612751],
-            "player_name": ["Player Out"],
+            "player_name": ["Player Out Jr."],
             "season": ["2025-26"],
             "game_date": ["2025-12-30"],
             "minutes": [28.0],
@@ -55,7 +55,7 @@ def test_build_minutes_live_promotes_rotowire_out_to_status_and_is_out(tmp_path:
             "game_date": ["2026-01-01", "2026-01-01"],
             "tip_ts": ["2026-01-02T00:00:00Z", "2026-01-02T00:00:00Z"],
             "player_id": [101, 102],
-            "player_name": ["Player Out", "Player Starter"],
+            "player_name": ["Player Out Jr.", "Player Starter III"],
             "active_flag": [True, True],
             "listed_pos": ["SF", "PG"],
             "as_of_ts": ["2026-01-01T22:00:00Z", "2026-01-01T22:00:00Z"],
@@ -73,6 +73,7 @@ def test_build_minutes_live_promotes_rotowire_out_to_status_and_is_out(tmp_path:
     rotowire_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         {
+            # Suffixes intentionally omitted to verify name normalization.
             "player_name": ["Player Out", "Player Starter"],
             "lineup_role": ["out", "projected_starter"],
             "ingested_ts": [
