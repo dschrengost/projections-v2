@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 
 from projections.minutes_v1.constants import AvailabilityStatus, STATUS_PRIORS
@@ -10,6 +12,8 @@ from projections.minutes_v1.snapshots import ensure_as_of_column
 _STATUS_ALIASES: dict[str, AvailabilityStatus] = {
     "OUT": AvailabilityStatus.OUT,
     "O": AvailabilityStatus.OUT,
+    "DOUBTFUL": AvailabilityStatus.OUT,
+    "D": AvailabilityStatus.OUT,
     "QUESTIONABLE": AvailabilityStatus.QUESTIONABLE,
     "Q": AvailabilityStatus.QUESTIONABLE,
     "PROBABLE": AvailabilityStatus.PROBABLE,
@@ -20,6 +24,7 @@ _STATUS_ALIASES: dict[str, AvailabilityStatus] = {
     "A": AvailabilityStatus.AVAILABLE,
     "AVA": AvailabilityStatus.AVAILABLE,
 }
+_STATUS_TOKEN_SPLIT_RE = re.compile(r"[^A-Z0-9]+")
 
 _INJURY_COLUMNS: tuple[str, ...] = (
     "game_id",
@@ -44,7 +49,13 @@ def normalize_status(value: str | AvailabilityStatus | None) -> AvailabilityStat
     if value is pd.NA:
         return AvailabilityStatus.UNKNOWN
     normalized = str(value).strip().upper()
-    return _STATUS_ALIASES.get(normalized, AvailabilityStatus.UNKNOWN)
+    mapped = _STATUS_ALIASES.get(normalized)
+    if mapped is not None:
+        return mapped
+
+    # Handle feed variants with trailing detail text, e.g. "DOUBTFUL (ankle)".
+    token = _STATUS_TOKEN_SPLIT_RE.split(normalized, maxsplit=1)[0]
+    return _STATUS_ALIASES.get(token, AvailabilityStatus.UNKNOWN)
 
 
 def prepare_injuries_snapshot(injuries_snapshot: pd.DataFrame) -> pd.DataFrame:

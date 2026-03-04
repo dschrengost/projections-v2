@@ -69,6 +69,8 @@ def _status_from_raw(value: str | None) -> AvailabilityStatus:
     normalized = value.strip().lower()
     if normalized.startswith("out"):
         return AvailabilityStatus.OUT
+    if normalized.startswith("doub") or normalized == "d":
+        return AvailabilityStatus.OUT
     if normalized.startswith("quest"):
         return AvailabilityStatus.QUESTIONABLE
     if normalized.startswith("prob"):
