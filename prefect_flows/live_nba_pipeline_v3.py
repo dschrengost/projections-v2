@@ -1614,26 +1614,24 @@ def _sanitize_frame_to_expected_keys(
             },
         )
 
-    work["_row_order"] = np.arange(len(work), dtype=np.int64)
-    merged = work.merge(
-        expected.assign(_expected_key=1),
-        on=list(key_cols),
-        how="inner",
-        sort=False,
+    # NOTE: Avoid dataframe merge here. Large-key merges have intermittently
+    # triggered low-level pandas segmentation faults in production workers.
+    expected_key_index = pd.MultiIndex.from_frame(
+        expected.loc[:, list(key_cols)], names=list(key_cols)
     )
-    dropped_unexpected_key_rows = int(len(work) - len(merged))
-    merged = (
-        merged.sort_values("_row_order", kind="stable")
-        .drop(columns=["_row_order", "_expected_key"], errors="ignore")
-        .reset_index(drop=True)
+    work_key_index = pd.MultiIndex.from_frame(
+        work.loc[:, list(key_cols)], names=list(key_cols)
     )
+    keep_mask = work_key_index.isin(expected_key_index)
+    dropped_unexpected_key_rows = int((~keep_mask).sum())
+    merged = work.loc[keep_mask].copy().reset_index(drop=True)
     for col in key_cols:
         merged[col] = pd.to_numeric(merged[col], errors="coerce")
-    post_merge_null_mask = merged.loc[:, list(key_cols)].isna().any(axis=1)
-    post_merge_null_rows = int(post_merge_null_mask.sum())
-    if post_merge_null_rows:
-        merged = merged.loc[~post_merge_null_mask].copy()
-        dropped_null_key_rows += post_merge_null_rows
+    post_filter_null_mask = merged.loc[:, list(key_cols)].isna().any(axis=1)
+    post_filter_null_rows = int(post_filter_null_mask.sum())
+    if post_filter_null_rows:
+        merged = merged.loc[~post_filter_null_mask].copy()
+        dropped_null_key_rows += post_filter_null_rows
     for col in key_cols:
         merged[col] = merged[col].astype("int64", copy=False)
 
