@@ -56,6 +56,20 @@ class TestBuildAllocMaskFromFeatures:
         expected = np.array([True, False, False])
         np.testing.assert_array_equal(result, expected)
 
+    def test_status_doubtful_excluded(self) -> None:
+        """Players with out-like doubtful statuses should be excluded."""
+        df = pd.DataFrame(
+            {
+                "player_id": [1, 2, 3, 4],
+                "is_out": [0, 0, 0, 0],
+                "status": ["AVAILABLE", "DOUBTFUL", "d", "INACTIVE"],
+                "prior_play_prob": [0.9, 0.9, 0.9, 0.9],
+            }
+        )
+        result = build_alloc_mask_from_features(df, min_eligible=1)
+        expected = np.array([True, False, False, False])
+        np.testing.assert_array_equal(result, expected)
+
     def test_starters_always_eligible(self) -> None:
         """Confirmed or projected starters should always be eligible."""
         df = pd.DataFrame({

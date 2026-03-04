@@ -15,6 +15,9 @@ import pandas as pd
 from projections.rotation.utils import zfill_game_id_series
 
 ODDS_COLS: tuple[str, str] = ("spread_home", "total")
+OUT_LIKE_STATUSES: frozenset[str] = frozenset(
+    {"OUT", "O", "DOUBTFUL", "D", "INACTIVE"}
+)
 
 # The 15 derived features required by newer rotation_set_minutes models.
 ROTATION_SET_DERIVED_FEATURES: tuple[str, ...] = (
@@ -233,7 +236,7 @@ def _normalize_is_out(df: pd.DataFrame) -> pd.Series:
 
     if "status" in df.columns:
         status = df["status"].astype("string").str.upper().str.strip()
-        status_out = status.eq("OUT").fillna(False)
+        status_out = status.isin(OUT_LIKE_STATUSES).fillna(False)
         out_mask = out_mask | status_out.astype("int8")
 
     return out_mask.astype("int8")
@@ -459,4 +462,3 @@ def add_rotation_set_derived_features(
     out = out.drop(columns=["_pos_bucket", "_is_out", "_prior_20", "_is_not_out"], errors="ignore")
 
     return out
-

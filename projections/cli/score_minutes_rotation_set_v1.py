@@ -114,6 +114,9 @@ PRIMARY_PASSTHROUGH_COLS: tuple[str, ...] = (
     "roll_iqr_5",
     "rotation_minutes_std_5g",
 )
+_OUT_LIKE_STATUSES: frozenset[str] = frozenset(
+    {"OUT", "O", "DOUBTFUL", "D", "INACTIVE"}
+)
 
 
 @dataclass(frozen=True)
@@ -320,7 +323,7 @@ def _derive_out_mask(df: pd.DataFrame) -> pd.Series:
         out_mask = out_mask | (out_flag.to_numpy(dtype=int) == 1)
     if "status" in df.columns:
         status = df["status"].astype("string").str.upper()
-        out_mask = out_mask | status.eq("OUT").fillna(False).to_numpy(dtype=bool)
+        out_mask = out_mask | status.isin(_OUT_LIKE_STATUSES).fillna(False).to_numpy(dtype=bool)
     if "lineup_role" in df.columns:
         lineup_role = df["lineup_role"].astype("string").str.strip().str.lower()
         out_mask = out_mask | lineup_role.eq("out").fillna(False).to_numpy(dtype=bool)
@@ -641,7 +644,7 @@ def _load_rotation_historical_features_for_dnp(
 
             # Now check if the FINAL status is OUT
             status = inj["status"].astype("string").str.upper().str.strip()
-            out_like = status.eq("OUT").fillna(False)
+            out_like = status.isin(_OUT_LIKE_STATUSES).fillna(False)
             inj = inj.loc[out_like, ["team_id", "player_id"]].drop_duplicates()
             if inj.empty:
                 continue

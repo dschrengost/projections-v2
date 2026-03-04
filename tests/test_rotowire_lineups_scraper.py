@@ -116,3 +116,33 @@ def test_scrape_rotowire_lineups_keeps_doubtful_players_as_out(monkeypatch) -> N
 
     starter_count = int(okc["lineup_role"].isin([LINEUP_ROLE_PROJECTED, LINEUP_ROLE_CONFIRMED]).sum())
     assert starter_count == 5
+
+
+def test_rotowire_parser_marks_class_only_doubtful_rows_as_out() -> None:
+    html = """
+    <html><body>
+      <div class="lineup is-nba" data-lnum="1">
+        <div class="lineup__box">
+          <div class="lineup__teams">
+            <a class="lineup__team is-visit"><div class="lineup__abbr">OKC</div></a>
+            <a class="lineup__team is-home"><div class="lineup__abbr">NYK</div></a>
+          </div>
+          <ul class="lineup__list is-visit">
+            <li class="lineup__status is-expected">Expected Lineup</li>
+            <li class="lineup__player is-doubtful">
+              <div class="lineup__pos">G</div>
+              <a title="Ajay Mitchell">A. Mitchell</a>
+            </li>
+          </ul>
+          <ul class="lineup__list is-home">
+            <li class="lineup__status is-expected">Expected Lineup</li>
+            <li class="lineup__player"><div class="lineup__pos">PG</div><a title="Home 1">Home 1</a></li>
+          </ul>
+        </div>
+      </div>
+    </body></html>
+    """
+    games = RotowireLineupsScraper().parse_lineups(html)
+    assert len(games) == 1
+    assert len(games[0].away_players) == 1
+    assert games[0].away_players[0].lineup_role == LINEUP_ROLE_OUT

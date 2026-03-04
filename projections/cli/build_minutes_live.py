@@ -102,9 +102,26 @@ REQUIRED_MINUTES_FEATURES: frozenset[str] = frozenset({
     "roll_mean_5", "roll_mean_10", "min_last3", "min_last5",
 })
 
-_OUT_LIKE_STATUS_VALUES: set[str] = {"OUT", "O", "Q", "QUESTIONABLE", "DOUBTFUL", "D", "INACTIVE"}
+_OUT_LIKE_STATUS_VALUES: set[str] = {"OUT", "O", "DOUBTFUL", "D", "INACTIVE"}
 
 app = typer.Typer(help=__doc__)
+
+
+def _status_series_is_out_like(status_series: pd.Series) -> pd.Series:
+    """Return True for out-like statuses across feed variants."""
+    normalized = (
+        status_series.astype("string", copy=False)
+        .str.upper()
+        .str.strip()
+        .fillna("")
+    )
+    token = normalized.str.extract(r"^([A-Z]+)", expand=False).fillna("")
+    return (
+        token.isin(_OUT_LIKE_STATUS_VALUES)
+        | normalized.str.startswith("OUT")
+        | normalized.str.startswith("DOUBT")
+        | normalized.str.startswith("INACT")
+    ).fillna(False)
 
 
 def _verify_required_features(
@@ -351,8 +368,7 @@ def _compute_vacancy_features(
         .tail(1)
     )
 
-    status = injuries["status"].astype(str).str.upper().str.strip()
-    injuries = injuries.loc[status.isin(_OUT_LIKE_STATUS_VALUES)].copy()
+    injuries = injuries.loc[_status_series_is_out_like(injuries["status"])].copy()
     if injuries.empty:
         return pd.DataFrame(columns=["game_id", "team_id", *VACANCY_FEATURE_COLUMNS])
 

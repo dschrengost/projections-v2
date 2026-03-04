@@ -11,6 +11,9 @@ import pandas as pd
 from projections.models.rotalloc import waterfill_redistribute
 
 KEY_COLS: tuple[str, str, str] = ("game_id", "team_id", "player_id")
+_OUT_LIKE_STATUSES: frozenset[str] = frozenset(
+    {"OUT", "O", "DOUBTFUL", "D", "INACTIVE"}
+)
 
 
 @dataclass(frozen=True)
@@ -142,7 +145,7 @@ def apply_rotation_minutes_guardrails(
         out_mask = out_mask | (out_flag.to_numpy(dtype=int) == 1)
     if status_col in work.columns:
         status = work[status_col].astype("string").str.upper()
-        out_mask = out_mask | status.eq("OUT").fillna(False).to_numpy(dtype=bool)
+        out_mask = out_mask | status.isin(_OUT_LIKE_STATUSES).fillna(False).to_numpy(dtype=bool)
 
     if out_mask.any():
         rot = rot.where(~out_mask, 0.0)

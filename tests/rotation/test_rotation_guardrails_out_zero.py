@@ -85,3 +85,44 @@ def test_espn_out_name_normalization_matches_rotation_overlay() -> None:
     assert espn_mask.iloc[1] == True   # Luka (Unicode normalized)
     assert espn_mask.iloc[2] == False  # Harden
     assert espn_mask.iloc[3] == True   # Beal (case insensitive)
+
+
+def test_rotation_overlay_treats_doubtful_status_as_out_like() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "game_id": 1,
+                "team_id": 10,
+                "player_id": 100,
+                "rotation_minutes_p50": 34.0,
+                "minutes_p50": 0.0,
+                "is_out": 0,
+                "status": "DOUBTFUL",
+                "minutes_features_row_missing": 0,
+                "injury_snapshot_missing": 0.0,
+            },
+            {
+                "game_id": 1,
+                "team_id": 10,
+                "player_id": 101,
+                "rotation_minutes_p50": 20.0,
+                "minutes_p50": 20.0,
+                "is_out": 0,
+                "status": "AVAIL",
+                "minutes_features_row_missing": 0,
+                "injury_snapshot_missing": 0.0,
+            },
+        ]
+    )
+
+    result = apply_rotation_minutes_guardrails(
+        df,
+        rotation_p50_col="rotation_minutes_p50",
+        baseline_p50_col="minutes_p50",
+        blend_weight=1.0,
+        dnp_tail_minutes_threshold=8.0,
+        team_target_minutes=240.0,
+    )
+
+    doubtful_row = result.minutes_p50.loc[df["player_id"] == 100].iloc[0]
+    assert doubtful_row == 0.0

@@ -354,18 +354,26 @@ class RotowireLineupsScraper:
             injury_out_like = (
                 injury_status_lower.startswith("out")
                 or injury_status_lower.startswith("doubt")
+                or injury_status_lower.startswith("inact")
                 or injury_status_lower == "d"
             )
 
             # Check if player is OUT (including doubtful).
             element_classes = " ".join(element.get("class", []))
             element_text = element.get_text(strip=True).lower()
+            class_out_like = ("out" in element_classes) or ("doubt" in element_classes) or ("inact" in element_classes)
+            text_out_like = (
+                element_text.endswith("out")
+                or element_text.endswith("doubt")
+                or element_text.endswith("doubtful")
+                or element_text.endswith("inactive")
+                or element_text.split()[-1:] in (["out"], ["doubt"], ["doubtful"], ["inactive"])
+            )
             is_out = (
                 "is-out" in element_classes
-                or "out" in element_classes
+                or class_out_like
                 or injury_out_like
-                or element_text.endswith("out")
-                or element_text.split()[-1:] == ["out"]
+                or text_out_like
             )
 
             if is_out:

@@ -152,6 +152,7 @@ _WORLD_CONTRACT_TOL = 1e-4
 _RETRYABLE_SUBPROCESS_EXIT_CODES = frozenset({-11, -6, 134, 139})
 _SUBPROCESS_CRASH_RETRY_ATTEMPTS = 2
 _SUBPROCESS_CRASH_RETRY_DELAY_SECONDS = 5
+_TORCH_RUNTIME_CONFIGURED = False
 
 
 def _utc_now_iso() -> str:
@@ -321,10 +322,53 @@ def _bundle_artifact_hash(bundle_dir: Path) -> str:
 
 
 def _set_inference_seed(seed: int) -> None:
+    _configure_torch_runtime_for_inference()
     random.seed(int(seed))
     np.random.seed(int(seed))
     torch.manual_seed(int(seed))
     torch.cuda.manual_seed_all(int(seed))
+
+
+def _configure_torch_runtime_for_inference() -> None:
+    """Apply conservative torch runtime settings for long live inference tasks.
+
+    We intentionally default to single-threaded CPU execution and disabled MKLDNN
+    to reduce intermittent native crashes observed in long-running world generation.
+    Operators can override defaults via environment variables:
+      - PROJECTIONS_TORCH_NUM_THREADS
+      - PROJECTIONS_TORCH_NUM_INTEROP_THREADS
+      - PROJECTIONS_TORCH_DISABLE_MKLDNN
+    """
+    global _TORCH_RUNTIME_CONFIGURED
+    if _TORCH_RUNTIME_CONFIGURED:
+        return
+
+    num_threads = int(os.environ.get("PROJECTIONS_TORCH_NUM_THREADS", "1"))
+    interop_threads = int(
+        os.environ.get("PROJECTIONS_TORCH_NUM_INTEROP_THREADS", "1")
+    )
+    disable_mkldnn = (
+        str(os.environ.get("PROJECTIONS_TORCH_DISABLE_MKLDNN", "1"))
+        .strip()
+        .lower()
+        in {"1", "true", "yes"}
+    )
+
+    try:
+        torch.set_num_threads(max(1, int(num_threads)))
+    except Exception:
+        pass
+    try:
+        torch.set_num_interop_threads(max(1, int(interop_threads)))
+    except Exception:
+        pass
+    if disable_mkldnn:
+        try:
+            torch.backends.mkldnn.enabled = False
+        except Exception:
+            pass
+
+    _TORCH_RUNTIME_CONFIGURED = True
 
 
 def _resolve_torch_device(device: str | None) -> torch.device:

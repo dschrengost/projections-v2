@@ -11,6 +11,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+_OUT_LIKE_STATUSES: frozenset[str] = frozenset(
+    {"OUT", "O", "DOUBTFUL", "D", "INACTIVE"}
+)
+
 
 def build_alloc_mask_from_features(
     df: pd.DataFrame,
@@ -68,7 +72,7 @@ def build_alloc_mask_from_features(
         is_out = pd.Series(0, index=df.index)
     not_out = (is_out == 0).to_numpy(dtype=bool)
 
-    # Also check status column for "OUT" string
+    # Also check status column for out-like strings.
     if "status" in df.columns:
         status_out = (
             df["status"]
@@ -76,7 +80,7 @@ def build_alloc_mask_from_features(
             .astype(str)
             .str.upper()
             .str.strip()
-            .isin(["OUT", "O"])
+            .isin(_OUT_LIKE_STATUSES)
         )
         not_out = not_out & ~status_out.to_numpy(dtype=bool)
 
