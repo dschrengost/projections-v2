@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 import projections.cli.build_minutes_live as build_minutes_live
 
 
-def test_build_minutes_live_preserves_rotowire_out_roles(tmp_path: Path, monkeypatch) -> None:
+def test_build_minutes_live_promotes_rotowire_out_to_status_and_is_out(tmp_path: Path, monkeypatch) -> None:
     run_id = "pytest_rotowire_out_roles"
     monkeypatch.setenv("PROJECTIONS_SKIP_POINTER_WRITES", "1")
 
@@ -133,4 +133,7 @@ def test_build_minutes_live_preserves_rotowire_out_roles(tmp_path: Path, monkeyp
 
     by_pid = features.set_index("player_id")
     assert str(by_pid.loc[101, "lineup_role"]).lower() == "out"
+    assert int(by_pid.loc[101, "is_out"]) == 1
+    assert str(by_pid.loc[101, "status"]).upper() == "OUT"
     assert str(by_pid.loc[102, "lineup_role"]).lower() == "projected_starter"
+    assert int(by_pid.loc[102, "is_out"]) == 0

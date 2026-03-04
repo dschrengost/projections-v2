@@ -142,6 +142,34 @@ def _nan_rate(df: pd.DataFrame, cols: list[str]) -> float | None:
     return float(df[present].isna().mean().mean())
 
 
+def _apply_rotowire_out_role_overrides(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Promote Rotowire out role into canonical availability fields."""
+    if df.empty or "lineup_role" not in df.columns:
+        return df, 0
+
+    role_norm = (
+        df["lineup_role"]
+        .astype("string", copy=False)
+        .str.strip()
+        .str.lower()
+        .fillna("")
+    )
+    out_mask = role_norm.eq("out")
+    out_count = int(out_mask.sum())
+    if out_count <= 0:
+        return df, 0
+
+    out = df.copy()
+    if "is_out" not in out.columns:
+        out["is_out"] = 0
+    out.loc[out_mask, "is_out"] = 1
+
+    if "status" not in out.columns:
+        out["status"] = pd.NA
+    out.loc[out_mask, "status"] = "OUT"
+    return out, out_count
+
+
 def _normalize_day(value: datetime | str | pd.Timestamp) -> pd.Timestamp:
     ts = pd.Timestamp(value)
     if ts.tzinfo is not None:
@@ -2133,6 +2161,13 @@ def _build_minutes_live_logic(
                 "enforced": bool(enforce_active_roster),
                 "dropped_rows": mismatch_count if enforce_active_roster else 0,
             }
+
+    live_slice, rotowire_out_override_count = _apply_rotowire_out_role_overrides(live_slice)
+    if rotowire_out_override_count > 0:
+        typer.echo(
+            "[minutes-live] Rotowire OUT override promoted lineup_role=out "
+            f"for {rotowire_out_override_count} player rows (status=OUT, is_out=1)."
+        )
 
     live_slice, manual_override_summary = _apply_manual_availability_overrides(
         live_slice,
