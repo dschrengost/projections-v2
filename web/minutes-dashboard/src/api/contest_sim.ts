@@ -228,7 +228,7 @@ export async function buildFieldLibrary(req: BuildFieldLibraryRequest): Promise<
 
 export async function getSavedSimBuilds(
     date: string,
-    kind?: 'run' | 'lineups',
+    kind?: 'run' | 'lineups' | 'portfolio',
 ): Promise<SavedSimBuildSummary[]> {
     const params = new URLSearchParams({ date })
     if (kind) params.set('kind', kind)

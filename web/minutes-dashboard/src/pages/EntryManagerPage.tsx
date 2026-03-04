@@ -268,8 +268,9 @@ export default function EntryManagerPage() {
     useEffect(() => {
         const load = async () => {
             try {
-                const builds = await getSavedSimBuilds(selectedDate, 'lineups')
-                setSavedSimBuilds(builds)
+                const builds = await getSavedSimBuilds(selectedDate)
+                const simBuilds = builds.filter(b => b.kind === 'lineups' || b.kind === 'portfolio')
+                setSavedSimBuilds(simBuilds)
             } catch {
                 setSavedSimBuilds([])
             }
@@ -659,7 +660,7 @@ export default function EntryManagerPage() {
             }))
             : savedSimBuilds.map(b => ({
                 id: b.build_id,
-                label: `${b.name ?? b.build_id.slice(0, 8)} (DG${b.draft_group_id ?? '?'}, ${b.lineups_count})`,
+                label: `${b.kind === 'portfolio' ? 'Portfolio' : 'Lineups'} ${b.name ?? b.build_id.slice(0, 8)} (DG${b.draft_group_id ?? '?'}, ${b.lineups_count})`,
             }))
     }, [buildSource, savedBuilds, savedSimBuilds])
 
