@@ -342,17 +342,28 @@ class RotowireLineupsScraper:
 
             # Check for injury status
             injury_status = None
-            injury_elem = element.find(class_=re.compile(r"lineup__inj|injury|status"))
+            injury_elem = element.find("span", class_=re.compile(r"lineup__inj|injury|status"))
+            if injury_elem is None:
+                injury_elem = element.find(class_=re.compile(r"lineup__inj|injury|status"))
+                if injury_elem is element:
+                    injury_elem = None
             if injury_elem:
                 injury_status = injury_elem.get_text(strip=True)
 
-            # Check if player is OUT
+            injury_status_lower = (injury_status or "").strip().lower()
+            injury_out_like = (
+                injury_status_lower.startswith("out")
+                or injury_status_lower.startswith("doubt")
+                or injury_status_lower == "d"
+            )
+
+            # Check if player is OUT (including doubtful).
             element_classes = " ".join(element.get("class", []))
             element_text = element.get_text(strip=True).lower()
             is_out = (
                 "is-out" in element_classes
                 or "out" in element_classes
-                or (injury_status and "out" in injury_status.lower())
+                or injury_out_like
                 or element_text.endswith("out")
                 or element_text.split()[-1:] == ["out"]
             )
