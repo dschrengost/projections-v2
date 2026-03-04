@@ -2053,7 +2053,10 @@ def _apply_props_uplift_calibration_to_worlds(
             continue
 
         adjusted_key_frames.append(scale_df.loc[:, key_cols].copy())
-        out = out.merge(scale_df, on=key_cols, how="left")
+        # Keep report-only fields (e.g. direction/line_gap/player_name) out of the
+        # simulation frame to avoid suffix collisions across per-stat passes.
+        scale_apply = scale_df.loc[:, key_cols + ["mu", "sf_mean", "sf_var"]]
+        out = out.merge(scale_apply, on=key_cols, how="left")
         mu = pd.to_numeric(out["mu"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         sf_mean = pd.to_numeric(out["sf_mean"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
         sf_var = pd.to_numeric(out["sf_var"], errors="coerce").fillna(1.0).to_numpy(dtype=float)

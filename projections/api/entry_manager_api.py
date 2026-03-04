@@ -1400,6 +1400,7 @@ async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest
     entries_skipped_no_out = 0
     solver_status_counts: Dict[str, int] = {}
     solver_gaps: List[float] = []
+    proj_by_internal = {str(p.get("player_id")): float(p.get("proj", 0.0)) for p in player_pool}
 
     for idx, entry in enumerate(entry_state.entries):
         entry_key = entry.get("entry_key") or entry.get("entry_id") or f"row-{idx + 1}"
@@ -1469,6 +1470,29 @@ async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest
             entries_held += 1
             continue
 
+        # Once every slot is locked, there is nothing left to optimize.
+        if len(locked_slots) == len(DK_NBA_SLOTS):
+            current_proj = _compute_entry_projection(entry, proj_by_internal, draftable_to_internal)
+            if current_proj is not None:
+                alternatives_by_entry_id[entry_key] = EntryAlternatives(
+                    entry_id=entry_key,
+                    locked_slots=locked_slots,
+                    alternatives=[
+                        LineupAlternative(
+                            lineup_idx=-1,
+                            projected_score=current_proj,
+                            slot_values={slot: entry.get(slot, "") for slot in DK_NBA_SLOTS},
+                            player_swaps=[],
+                        )
+                    ],
+                    selected_idx=0,
+                )
+            else:
+                entries_unknown += 1
+            entries_held += 1
+            updated_entries.append(entry)
+            continue
+
         # Generate N alternatives instead of just 1
         constraints = Constraints(
             N_lineups=request.n_alternatives,
@@ -1536,7 +1560,6 @@ async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest
                 )
             )
 
-        proj_by_internal = {str(p.get("player_id")): float(p.get("proj", 0.0)) for p in player_pool}
         current_proj = _compute_entry_projection(entry, proj_by_internal, draftable_to_internal)
         if current_proj is not None:
             alternatives.append(
