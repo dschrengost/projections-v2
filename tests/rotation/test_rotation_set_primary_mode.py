@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from projections.cli.score_minutes_rotation_set_v1 import (
+    _apply_out_row_overrides,
     _derive_gate_probs,
     _derive_out_mask,
     _extract_baseline_minutes,
@@ -44,6 +45,24 @@ def test_primary_mode_out_mask_respects_lineup_role_out() -> None:
 
     out_mask = _derive_out_mask(df)
     assert out_mask.tolist() == [True, False, False]
+
+
+def test_primary_mode_out_rows_set_status_and_is_out() -> None:
+    df = pd.DataFrame(
+        {
+            "status": ["Ava", "Ava"],
+            "is_out": [0, 0],
+            "lineup_role": ["out", "projected_starter"],
+        }
+    )
+
+    out_mask = _derive_out_mask(df)
+    out = _apply_out_row_overrides(df, out_mask)
+
+    assert out.loc[0, "status"] == "OUT"
+    assert int(out.loc[0, "is_out"]) == 1
+    assert out.loc[1, "status"] == "Ava"
+    assert int(out.loc[1, "is_out"]) == 0
 
 
 def test_primary_mode_gate_probs_use_thresholds() -> None:

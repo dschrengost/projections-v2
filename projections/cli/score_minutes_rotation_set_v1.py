@@ -327,6 +327,31 @@ def _derive_out_mask(df: pd.DataFrame) -> pd.Series:
     return out_mask
 
 
+def _apply_out_row_overrides(df: pd.DataFrame, out_mask: pd.Series) -> pd.DataFrame:
+    """Normalize OUT semantics on scorer outputs.
+
+    Rotation-set scoring can identify OUT rows via lineup_role even when
+    injuries snapshot status remains "Ava". Ensure downstream consumers see
+    explicit out flags/status for these rows.
+    """
+    if df.empty:
+        return df
+
+    out = df.copy()
+    mask = out_mask.reindex(out.index).fillna(False).astype(bool)
+    if not mask.any():
+        return out
+
+    if "is_out" not in out.columns:
+        out["is_out"] = 0
+    out.loc[mask, "is_out"] = 1
+
+    if "status" not in out.columns:
+        out["status"] = pd.NA
+    out.loc[mask, "status"] = "OUT"
+    return out
+
+
 def _scale_minutes_to_team_target(
     df: pd.DataFrame,
     minutes: pd.Series,
@@ -1618,6 +1643,7 @@ def main(
             )
 
         out_mask = _derive_out_mask(out_df)
+        out_df = _apply_out_row_overrides(out_df, out_mask)
         out_df.loc[out_mask, "minutes_p50"] = 0.0
 
         if config.dnp_override_enabled:
@@ -1681,6 +1707,7 @@ def main(
         )
 
         out_mask = _derive_out_mask(out_df)
+        out_df = _apply_out_row_overrides(out_df, out_mask)
         if str(config.play_prob_source).strip().lower() == "gate_prob" and "gate_prob" in out_df.columns:
             play_prob = pd.to_numeric(out_df["gate_prob"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
             play_prob = play_prob.where(~out_mask.to_numpy(dtype=bool), 0.0)
@@ -2052,6 +2079,7 @@ def main(
         if "minutes_p90_cond" in out_df.columns:
             out_df["minutes_p90_cond"] = p90_new
 
+    out_df = _apply_out_row_overrides(out_df, _derive_out_mask(out_df))
     out_df.to_parquet(minutes_path, index=False)
 
     # 5b) Compute delta diagnostics: compare final p50 to original baseline.
