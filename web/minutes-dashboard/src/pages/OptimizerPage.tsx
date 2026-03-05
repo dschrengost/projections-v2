@@ -56,7 +56,15 @@ type LineupGroup = {
 
 const parseMatchupTeams = (matchup?: string | null): string[] => {
     if (!matchup) return []
-    return matchup
+    const normalized = matchup
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\s+at\s+/gi, '@')
+        .replace(/\s+vs\.?\s+/gi, '@')
+        .replace(/\s+v\.?\s+/gi, '@')
+        .replace(/\s*-\s*/g, '@')
+        .replace(/\//g, '@')
+    return normalized
         .split('@')
         .map(part => part.trim().toUpperCase())
         .filter(Boolean)
@@ -287,6 +295,21 @@ export default function OptimizerPage() {
             teams: parseMatchupTeams(game.matchup),
         }))
     }, [currentSlateGames])
+
+    const currentSlateTeams = useMemo(() => {
+        const teamSet = new Set<string>()
+        for (const game of currentSlateGameFilters) {
+            for (const team of game.teams) {
+                if (team) teamSet.add(team.toUpperCase())
+            }
+        }
+        if (teamSet.size === 0) {
+            for (const player of pool) {
+                if (player.team) teamSet.add(player.team.toUpperCase())
+            }
+        }
+        return Array.from(teamSet).sort()
+    }, [currentSlateGameFilters, pool])
 
     const fadedTeamBanIds = useMemo(() => {
         const ids = new Set<string>()
@@ -1321,7 +1344,7 @@ export default function OptimizerPage() {
                     </div>
 
                     {/* Game Filters */}
-                    {currentSlateGameFilters.length > 0 && (
+                    {(currentSlateGameFilters.length > 0 || currentSlateTeams.length > 0) && (
                         <>
                             <div className="game-filters">
                                 <Button
@@ -1331,7 +1354,7 @@ export default function OptimizerPage() {
                                     type="button"
                                 >
                                     <span>
-                                        Games ({currentSlateGameFilters.length - excludedGames.size} of {currentSlateGameFilters.length})
+                                        Filters ({currentSlateGameFilters.length - excludedGames.size} of {currentSlateGameFilters.length} games, {currentSlateTeams.length} teams)
                                         {excludedTeams.size > 0 ? ` · ${excludedTeams.size} teams faded` : ''}
                                     </span>
                                     <span>Open filters</span>
@@ -1361,43 +1384,46 @@ export default function OptimizerPage() {
                                         <p className="text-xs text-[hsl(var(--muted-foreground))] mb-2">
                                             Fade teams, toggle games, and then regenerate your lineup build.
                                         </p>
-                                        <div className="game-filter-list">
-                                            {currentSlateGameFilters.map(game => {
-                                                const isExcluded = excludedGames.has(game.matchup)
-                                                const startTime = game.start_time
-                                                    ? new Date(game.start_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-                                                    : ''
-                                                return (
-                                                    <div key={game.matchup} className={`game-filter-card ${isExcluded ? 'excluded' : ''}`}>
-                                                        <label className={`game-filter-item ${isExcluded ? 'excluded' : ''}`}>
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={!isExcluded}
-                                                                onChange={() => toggleExcludedGame(game.matchup)}
-                                                            />
-                                                            <span className="game-matchup">{game.matchup}</span>
-                                                            {startTime && <span className="game-time">{startTime}</span>}
-                                                        </label>
-                                                        {game.teams.length > 0 && (
-                                                            <div className="team-filter-row">
-                                                                {game.teams.map(team => {
-                                                                    const isTeamExcluded = excludedTeams.has(team)
-                                                                    return (
-                                                                        <button
-                                                                            key={`${game.matchup}-${team}`}
-                                                                            type="button"
-                                                                            className={`team-filter-chip ${isTeamExcluded ? 'excluded' : ''}`}
-                                                                            onClick={() => toggleExcludedTeam(team)}
-                                                                        >
-                                                                            {isTeamExcluded ? `Fade ${team}` : team}
-                                                                        </button>
-                                                                    )
-                                                                })}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )
-                                            })}
+                                        {currentSlateGameFilters.length > 0 && (
+                                            <div className="game-filter-list">
+                                                {currentSlateGameFilters.map(game => {
+                                                    const isExcluded = excludedGames.has(game.matchup)
+                                                    const startTime = game.start_time
+                                                        ? new Date(game.start_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                                                        : ''
+                                                    return (
+                                                        <div key={game.matchup} className={`game-filter-card ${isExcluded ? 'excluded' : ''}`}>
+                                                            <label className={`game-filter-item ${isExcluded ? 'excluded' : ''}`}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={!isExcluded}
+                                                                    onChange={() => toggleExcludedGame(game.matchup)}
+                                                                />
+                                                                <span className="game-matchup">{game.matchup}</span>
+                                                                {startTime && <span className="game-time">{startTime}</span>}
+                                                            </label>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        )}
+                                        <div>
+                                            <div className="text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-1.5">Team fades</div>
+                                            <div className="team-filter-row">
+                                                {currentSlateTeams.map(team => {
+                                                    const isTeamExcluded = excludedTeams.has(team)
+                                                    return (
+                                                        <button
+                                                            key={team}
+                                                            type="button"
+                                                            className={`team-filter-chip ${isTeamExcluded ? 'excluded' : ''}`}
+                                                            onClick={() => toggleExcludedTeam(team)}
+                                                        >
+                                                            {isTeamExcluded ? `Fade ${team}` : team}
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
                                         </div>
                                         <div className="game-filter-actions">
                                             {(excludedGames.size > 0 || excludedTeams.size > 0) ? (

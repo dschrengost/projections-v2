@@ -1370,6 +1370,7 @@ tbody tr:hover {
 
 .team-filter-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
   padding-left: 1.35rem;
 }
