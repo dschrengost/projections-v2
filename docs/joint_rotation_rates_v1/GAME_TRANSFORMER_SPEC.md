@@ -6302,3 +6302,70 @@ Operational notes:
   - `gtv2_world_realism_outlier_resample_max_passes`
 - Reports are written under `world_contracts_summary.json` as `world_realism_controls`
   alongside `props_uplift_calibration`.
+
+#### 16.16.10 Live audit findings after realism rollout (2026-03-05)
+
+Latest audited live worlds run:
+
+- run ID: `20260305T184503Z`
+- path:
+  `/home/daniel/projections-data/artifacts/gtv2_worlds/game_date=2026-03-05/run=20260305T184503Z/world_contracts_summary.json`
+
+Immediate implementation evidence from the run summary:
+
+- `world_realism_controls.applied = true`
+- low-minute tail damping:
+  - `affected_rows = 568288`
+  - `affected_players = 113`
+- bounded outlier resample:
+  - `total_replaced_pairs = 446`
+  - bad pair composition on pass 1:
+    - `bad_short_spike_count = 441`
+    - `bad_game_hi_count = 5`
+    - `bad_game_lo_count = 0`
+
+Before/after comparison vs earlier same-day pre-control run `20260305T141459Z`:
+
+- low-minute spike signature was eliminated:
+  - `minutes < 12 and dk_fpts > 35`: `745 -> 0`
+  - `minutes < 10 and dk_fpts > 30`: `1037 -> 286`
+- extreme per-minute tails were materially reduced:
+  - `per36 pts > 120`: `17 -> 0`
+  - `per36 dk_fpts > 160`: `45 -> 0`
+- game/team upper tails were reduced:
+  - `game_pts_max`: `367.18 -> 339.80`
+  - `team_dk_fpts_max`: `462.64 -> 427.28`
+  - `dk_fpts > 140` rows: `8 -> 1`
+
+Did we over-flatten legitimate upside?
+
+- Projection-level comparison was filtered to a stable cohort (`|minutes_mean_delta| <= 1.0`,
+  `|sim_p_active_delta| <= 0.05`) to avoid conflating realism controls with slate/news drift.
+- On that stable cohort:
+  - all players: mean `dk_fpts_p95_delta = -0.48`
+  - players with `dk_fpts_mean_old >= 30`: mean `dk_fpts_p95_delta = -0.10`
+  - players with `dk_fpts_mean_old >= 40`: mean `dk_fpts_p95_delta = -0.097`
+- Interpretation: realism controls materially cut the bad fringe/low-minute tails without
+  meaningfully flattening core star ceilings.
+
+Remaining limitation:
+
+- The rollout fixed the targeted failure mode (low-minute explosion worlds), but it does
+  **not** fully solve player-level stat-shape realism inside otherwise normal-minute worlds.
+- Example residuals from `20260305T184503Z`:
+  - `Rob Dillingham` still had a world near `20` minutes with `25.7` rebounds.
+  - `John Konchar` still had a world near `20` minutes with `16.6` rebounds and `72.4 DK`.
+- These are no longer low-minute catastrophic worlds; they are residual joint-stat-shape
+  plausibility failures from the sampler.
+
+Downstream impact assessment:
+
+- Mean projection / mean EV impact appears modest.
+- Tail-sensitive downstream systems (contest sim, world-sample lineup ranking) are the main
+  place where such worlds could matter.
+- Quick lineup-generation sanity check after rollout:
+  - 5k lineups in world-sample mode produced `0` Dillingham lineups and only `35` Konchar lineups.
+- Operational conclusion:
+  - no further tuning was applied immediately after this rollout;
+  - remaining residuals are tracked as a future **model-native stat-shape realism** problem,
+    not a reason for another broad post-processing pass.
