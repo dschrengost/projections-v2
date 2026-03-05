@@ -29,6 +29,13 @@ import {
 import LineupCard from '../components/LineupCard'
 import NumericTextInput from '../components/NumericTextInput'
 import PlayerExposurePanel, { ExposureBounds, ExposureScope } from '../components/PlayerExposurePanel'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '../components/ui/select'
 import { useSlateDateAndSlate } from '../hooks/useSlateDate'
 import { formatSlateLabel } from '../utils/slateFormat'
 
@@ -60,6 +67,137 @@ interface SetAndForgetSelection {
 }
 
 const DK_EDITOR_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL'] as const
+type ContestSimEditorSlot = (typeof DK_EDITOR_SLOTS)[number]
+
+function getContestSimSlotFlexDegree(player: PoolPlayer): number {
+    const posSet = new Set((player.positions ?? []).map(pos => pos.trim().toUpperCase()))
+    let flex = 0
+    if (posSet.has('PG')) flex += 1
+    if (posSet.has('SG')) flex += 1
+    if (posSet.has('SF')) flex += 1
+    if (posSet.has('PF')) flex += 1
+    if (posSet.has('C')) flex += 1
+    if (posSet.has('PG') || posSet.has('SG') || posSet.has('G')) flex += 1
+    if (posSet.has('SF') || posSet.has('PF') || posSet.has('F')) flex += 1
+    return flex + 1
+}
+
+function getContestSimLineupSlotAssignments(
+    playerIds: string[],
+    playerMap: Map<string, PoolPlayer>,
+): { playerId: string; slot: ContestSimEditorSlot }[] | null {
+    if (playerIds.length !== DK_EDITOR_SLOTS.length) {
+        return null
+    }
+
+    const uniquePlayerIds = Array.from(new Set(playerIds))
+    if (uniquePlayerIds.length !== DK_EDITOR_SLOTS.length) {
+        return null
+    }
+
+    const baseSlots = DK_EDITOR_SLOTS.slice(0, 5)
+    const getPlayer = (id: string) => playerMap.get(id)
+
+    const greedy = () => {
+        const remaining = new Set(uniquePlayerIds)
+        const assigned: { playerId: string; slot: ContestSimEditorSlot }[] = []
+
+        for (const slot of baseSlots) {
+            const candidates = Array.from(remaining).filter(id => {
+                const player = getPlayer(id)
+                return Boolean(player && isEligibleForSlot(player, slot))
+            })
+            if (candidates.length === 0) return null
+
+            candidates.sort((a, b) => {
+                const aPlayer = getPlayer(a)
+                const bPlayer = getPlayer(b)
+                const aFlex = aPlayer ? getContestSimSlotFlexDegree(aPlayer) : Number.MAX_VALUE
+                const bFlex = bPlayer ? getContestSimSlotFlexDegree(bPlayer) : Number.MAX_VALUE
+                if (aFlex !== bFlex) return aFlex - bFlex
+                return a.localeCompare(b)
+            })
+
+            const picked = candidates[0]
+            if (!picked) return null
+            assigned.push({ playerId: picked, slot })
+            remaining.delete(picked)
+        }
+
+        const pickMostFlexible = (slot: 'G' | 'F') => {
+            const candidates = Array.from(remaining).filter(id => {
+                const player = getPlayer(id)
+                return Boolean(player && isEligibleForSlot(player, slot))
+            })
+            if (candidates.length === 0) return false
+            candidates.sort((a, b) => {
+                const aPlayer = getPlayer(a)
+                const bPlayer = getPlayer(b)
+                const aFlex = aPlayer ? getContestSimSlotFlexDegree(aPlayer) : -Number.MAX_VALUE
+                const bFlex = bPlayer ? getContestSimSlotFlexDegree(bPlayer) : -Number.MAX_VALUE
+                if (aFlex !== bFlex) return bFlex - aFlex
+                return a.localeCompare(b)
+            })
+            const picked = candidates[0]
+            if (!picked) return false
+            assigned.push({ playerId: picked, slot })
+            remaining.delete(picked)
+            return true
+        }
+
+        if (!pickMostFlexible('G')) return null
+        if (!pickMostFlexible('F')) return null
+        if (remaining.size !== 1) return null
+
+            const [utilPlayerId] = Array.from(remaining).sort()
+            assigned.push({ playerId: utilPlayerId, slot: 'UTIL' })
+            return assigned
+    }
+
+    const greedyAssigned = greedy()
+    if (greedyAssigned) {
+        return greedyAssigned
+    }
+
+    const candidatesByPlayer = new Map<string, ContestSimEditorSlot[]>()
+    for (const playerId of uniquePlayerIds) {
+        const player = getPlayer(playerId)
+        if (!player) return null
+        const eligibleSlots = DK_EDITOR_SLOTS.filter(slot => isEligibleForSlot(player, slot))
+        if (eligibleSlots.length === 0) return null
+        candidatesByPlayer.set(playerId, eligibleSlots)
+    }
+
+    const matchBySlot = new Map<ContestSimEditorSlot, string>()
+
+    const assignPlayerToSlot = (playerId: string, seen: Set<ContestSimEditorSlot>): boolean => {
+        for (const slot of candidatesByPlayer.get(playerId) ?? []) {
+            if (seen.has(slot)) continue
+            seen.add(slot)
+            const occupyingPlayerId = matchBySlot.get(slot)
+            if (occupyingPlayerId === undefined || assignPlayerToSlot(occupyingPlayerId, seen)) {
+                matchBySlot.set(slot, playerId)
+                return true
+            }
+        }
+        return false
+    }
+
+    for (const playerId of uniquePlayerIds) {
+        if (!assignPlayerToSlot(playerId, new Set())) {
+            return null
+        }
+    }
+
+    const ordered = [] as { playerId: string; slot: ContestSimEditorSlot }[]
+    for (const slot of DK_EDITOR_SLOTS) {
+        const playerId = matchBySlot.get(slot)
+        if (!playerId) return null
+        ordered.push({ playerId, slot })
+    }
+
+    return ordered
+}
 
 function isEligibleForSlot(player: PoolPlayer, slot: string): boolean {
     const posSet = new Set((player.positions ?? []).map(pos => pos.trim().toUpperCase()))
@@ -1883,18 +2021,28 @@ export default function ContestSimPage() {
                     </label>
                     <label>
                         Slate
-                        <select
-                            value={selectedSlate ?? ''}
-                            onChange={e => setSelectedSlate(e.target.value ? Number(e.target.value) : null)}
+                        <Select
+                            value={selectedSlate?.toString()}
+                            onValueChange={(value) => setSelectedSlate(value ? Number(value) : null)}
                             disabled={slatesLoading}
                         >
-                            {slateOptions.length === 0 && <option value="">No slates</option>}
-                            {slateOptions.map(s => (
-                                <option key={s.draft_group_id} value={s.draft_group_id}>
-                                    {formatSlateLabel(s)} (DG{s.draft_group_id})
-                                </option>
-                            ))}
-                        </select>
+                            <SelectTrigger className="contest-sim-select w-full">
+                                <SelectValue placeholder={slatesLoading ? 'Loading…' : 'Select slate'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {slateOptions.length === 0 ? (
+                                    <SelectItem value="_none" disabled>
+                                        No slates
+                                    </SelectItem>
+                                ) : (
+                                    slateOptions.map(s => (
+                                        <SelectItem key={s.draft_group_id} value={s.draft_group_id.toString()}>
+                                            {formatSlateLabel(s)} (DG{s.draft_group_id})
+                                        </SelectItem>
+                                    ))
+                                )}
+                            </SelectContent>
+                        </Select>
                     </label>
                 </div>
             </header>
@@ -1906,18 +2054,28 @@ export default function ContestSimPage() {
 
                     <label>
                         Saved Build
-                        <select
-                            value={selectedBuildId ?? ''}
-                            onChange={e => setSelectedBuildId(e.target.value || null)}
+                        <Select
+                            value={selectedBuildId ?? undefined}
+                            onValueChange={value => setSelectedBuildId(value || null)}
                             disabled={buildsLoading}
                         >
-                            {savedBuilds.length === 0 && <option value="">No builds</option>}
-                            {savedBuilds.map(b => (
-                                <option key={b.job_id} value={b.job_id}>
-                                    {b.job_id.slice(0, 8)} (DG{b.draft_group_id}, {b.lineups_count} lineups)
-                                </option>
-                            ))}
-                        </select>
+                            <SelectTrigger className="contest-sim-select w-full">
+                                <SelectValue placeholder={buildsLoading ? 'Loading…' : 'Select saved build'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {savedBuilds.length === 0 ? (
+                                    <SelectItem value="_none" disabled>
+                                        No builds
+                                    </SelectItem>
+                                ) : (
+                                    savedBuilds.map(b => (
+                                        <SelectItem key={b.job_id} value={b.job_id}>
+                                            {b.job_id.slice(0, 8)} (DG{b.draft_group_id}, {b.lineups_count} lineups)
+                                        </SelectItem>
+                                    ))
+                                )}
+                            </SelectContent>
+                        </Select>
                     </label>
 
                     <div className="lineup-count">
@@ -1928,53 +2086,63 @@ export default function ContestSimPage() {
 
                     <label>
                         Payout Archetype
-                        <select
-                            value={archetype}
-                            onChange={e => setArchetype(e.target.value)}
-                        >
-                            {config?.payout_archetypes.map(a => (
-                                <option key={a.key} value={a.key}>
-                                    {a.label} ({(a.first_place_pct * 100).toFixed(0)}% to 1st)
-                                </option>
-                            )) ?? (
+                        <Select value={archetype} onValueChange={setArchetype}>
+                            <SelectTrigger className="contest-sim-select w-full">
+                                <SelectValue placeholder="Select archetype" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {config?.payout_archetypes.length ? (
+                                    config.payout_archetypes.map(a => (
+                                        <SelectItem key={a.key} value={a.key}>
+                                            {a.label} ({(a.first_place_pct * 100).toFixed(0)}% to 1st)
+                                        </SelectItem>
+                                    ))
+                                ) : (
                                     <>
-                                        <option value="top_heavy">Top Heavy</option>
-                                        <option value="medium">Medium</option>
-                                        <option value="flat">Flat</option>
+                                        <SelectItem value="top_heavy">Top Heavy</SelectItem>
+                                        <SelectItem value="medium">Medium</SelectItem>
+                                        <SelectItem value="flat">Flat</SelectItem>
                                     </>
                                 )}
-                        </select>
+                            </SelectContent>
+                        </Select>
                     </label>
 
                     <label>
                         Field Size
-                        <select
-                            value={fieldSizeBucket}
-                            onChange={e => setFieldSizeBucket(e.target.value)}
-                        >
-                            {config?.field_sizes.map(f => (
-                                <option key={f.key} value={f.key}>
-                                    {f.label}
-                                </option>
-                            )) ?? (
+                        <Select value={fieldSizeBucket} onValueChange={setFieldSizeBucket}>
+                            <SelectTrigger className="contest-sim-select w-full">
+                                <SelectValue placeholder="Field size" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {config?.field_sizes.length ? (
+                                    config.field_sizes.map(f => (
+                                        <SelectItem key={f.key} value={f.key}>
+                                            {f.label}
+                                        </SelectItem>
+                                    ))
+                                ) : (
                                     <>
-                                        <option value="small">Small (1-10K)</option>
-                                        <option value="medium">Medium (10-50K)</option>
-                                        <option value="massive">Massive (50K+)</option>
+                                        <SelectItem value="small">Small (1-10K)</SelectItem>
+                                        <SelectItem value="medium">Medium (10-50K)</SelectItem>
+                                        <SelectItem value="massive">Massive (50K+)</SelectItem>
                                     </>
                                 )}
-                        </select>
+                            </SelectContent>
+                        </Select>
                     </label>
 
                     <label>
                         Field Model
-                        <select
-                            value={fieldMode}
-                            onChange={e => setFieldMode(e.target.value as 'self_play' | 'generated_field')}
-                        >
-                            <option value="self_play">Self-play (your lineups as field)</option>
-                            <option value="generated_field">Representative field (QuickBuild)</option>
-                        </select>
+                        <Select value={fieldMode} onValueChange={(value) => setFieldMode(value as typeof fieldMode)}>
+                            <SelectTrigger className="contest-sim-select w-full">
+                                <SelectValue placeholder="Field model" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="self_play">Self-play (your lineups as field)</SelectItem>
+                                <SelectItem value="generated_field">Representative field (QuickBuild)</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </label>
 
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -1990,17 +2158,22 @@ export default function ContestSimPage() {
                         <>
                             <label>
                                 Field Library Version
-                                <select
-                                    value={fieldLibraryVersion}
-                                    onChange={e => setFieldLibraryVersion(e.target.value)}
-                                >
-                                    {fieldLibraries.length === 0 && <option value="v0">v0</option>}
-                                    {fieldLibraries.map(l => (
-                                        <option key={l.version} value={l.version}>
-                                            {l.version} ({l.selected_k} lineups)
-                                        </option>
-                                    ))}
-                                </select>
+                                <Select value={fieldLibraryVersion} onValueChange={setFieldLibraryVersion}>
+                                    <SelectTrigger className="contest-sim-select w-full">
+                                        <SelectValue placeholder="Field library version" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {fieldLibraries.length === 0 ? (
+                                            <SelectItem value="v0">v0</SelectItem>
+                                        ) : (
+                                            fieldLibraries.map(l => (
+                                                <SelectItem key={l.version} value={l.version}>
+                                                    {l.version} ({l.selected_k} lineups)
+                                                </SelectItem>
+                                            ))
+                                        )}
+                                    </SelectContent>
+                                </Select>
                             </label>
 
                             <label>
@@ -2291,27 +2464,28 @@ export default function ContestSimPage() {
                             <div className="lineup-cards-toolbar">
                                 <div className="toolbar-group">
                                     <label>Sort:</label>
-                                    <select
-                                        className="contest-sim-select"
-                                        value={sortKey}
-                                        onChange={e => setSortKey(e.target.value as SortKey)}
-                                    >
-                                        <option value="expected_value">EV</option>
-                                        <option value="roi">ROI</option>
-                                        <option value="robust_floor">Robust Floor</option>
-                                        <option value="score_lcb95">Score LCB95</option>
-                                        <option value="score_cvar10">Score CVaR10</option>
-                                        <option value="select_score">Tail Select</option>
-                                        <option value="tail_score">Tail Score</option>
-                                        <option value="ucv90">UCVaR90</option>
-                                        <option value="win_rate">Win%</option>
-                                        <option value="top_1pct_rate">Top 1%</option>
-                                        <option value="cash_rate">Cash%</option>
-                                        <option value="p90">Ceiling (p90)</option>
-                                        <option value="mean">Mean</option>
-                                        <option value="total_own">Total Own%</option>
-                                        <option value="lineup_id">Lineup #</option>
-                                    </select>
+                                    <Select value={sortKey} onValueChange={value => setSortKey(value as SortKey)}>
+                                        <SelectTrigger className="contest-sim-select w-44">
+                                            <SelectValue placeholder="Sort metric" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="expected_value">EV</SelectItem>
+                                            <SelectItem value="roi">ROI</SelectItem>
+                                            <SelectItem value="robust_floor">Robust Floor</SelectItem>
+                                            <SelectItem value="score_lcb95">Score LCB95</SelectItem>
+                                            <SelectItem value="score_cvar10">Score CVaR10</SelectItem>
+                                            <SelectItem value="select_score">Tail Select</SelectItem>
+                                            <SelectItem value="tail_score">Tail Score</SelectItem>
+                                            <SelectItem value="ucv90">UCVaR90</SelectItem>
+                                            <SelectItem value="win_rate">Win%</SelectItem>
+                                            <SelectItem value="top_1pct_rate">Top 1%</SelectItem>
+                                            <SelectItem value="cash_rate">Cash%</SelectItem>
+                                            <SelectItem value="p90">Ceiling (p90)</SelectItem>
+                                            <SelectItem value="mean">Mean</SelectItem>
+                                            <SelectItem value="total_own">Total Own%</SelectItem>
+                                            <SelectItem value="lineup_id">Lineup #</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                     <button
                                         className="contest-sim-btn contest-sim-btn-ghost"
                                         onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
@@ -2334,17 +2508,21 @@ export default function ContestSimPage() {
 
                                 <div className="toolbar-group">
                                     <label>Max Own%:</label>
-                                    <select
-                                        className="contest-sim-select"
-                                        value={maxOwnership ?? ''}
-                                        onChange={e => setMaxOwnership(e.target.value ? Number(e.target.value) : null)}
+                                    <Select
+                                        value={maxOwnership == null ? 'all' : maxOwnership.toString()}
+                                        onValueChange={(value) => setMaxOwnership(value === 'all' ? null : Number(value))}
                                     >
-                                        <option value="">All</option>
-                                        <option value="50">≤50%</option>
-                                        <option value="75">≤75%</option>
-                                        <option value="100">≤100%</option>
-                                        <option value="150">≤150%</option>
-                                    </select>
+                                        <SelectTrigger className="contest-sim-select w-36">
+                                            <SelectValue placeholder="Any" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All</SelectItem>
+                                            <SelectItem value="50">≤50%</SelectItem>
+                                            <SelectItem value="75">≤75%</SelectItem>
+                                            <SelectItem value="100">≤100%</SelectItem>
+                                            <SelectItem value="150">≤150%</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
 
                                 <div className="toolbar-divider" />
@@ -2404,15 +2582,19 @@ export default function ContestSimPage() {
 
                                 <div className="toolbar-group">
                                     <label>Mode:</label>
-                                    <select
-                                        className="contest-sim-select"
+                                    <Select
                                         value={portfolioMode}
-                                        onChange={e => setPortfolioMode(e.target.value as typeof portfolioMode)}
+                                        onValueChange={(value) => setPortfolioMode(value as typeof portfolioMode)}
                                     >
-                                        <option value="browse_select">Browse / Select</option>
-                                        <option value="greedy_constraints">Greedy Constraints</option>
-                                        <option value="decorrelated_ev">Decorrelated EV</option>
-                                    </select>
+                                        <SelectTrigger className="contest-sim-select w-56">
+                                            <SelectValue placeholder="Mode" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="browse_select">Browse / Select</SelectItem>
+                                            <SelectItem value="greedy_constraints">Greedy Constraints</SelectItem>
+                                            <SelectItem value="decorrelated_ev">Decorrelated EV</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                     <label>Portfolio:</label>
                                     <NumericTextInput
                                         value={finalSetSize}
@@ -2441,14 +2623,18 @@ export default function ContestSimPage() {
                                 {portfolioMode !== 'browse_select' && (
                                     <div className="toolbar-group">
                                         <label>Worlds:</label>
-                                        <select
-                                            className="contest-sim-select"
+                                        <Select
                                             value={portfolioWorldsSource}
-                                            onChange={e => setPortfolioWorldsSource(e.target.value as typeof portfolioWorldsSource)}
+                                            onValueChange={(value) => setPortfolioWorldsSource(value as typeof portfolioWorldsSource)}
                                         >
-                                            <option value="gtv2">gtv2</option>
-                                            <option value="sim_v2">sim_v2</option>
-                                        </select>
+                                            <SelectTrigger className="contest-sim-select w-32">
+                                                <SelectValue placeholder="World source" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="gtv2">gtv2</SelectItem>
+                                                <SelectItem value="sim_v2">sim_v2</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                         {portfolioMode === 'decorrelated_ev' && (
                                             <>
                                                 <label>EV Ret:</label>
@@ -2626,46 +2812,59 @@ export default function ContestSimPage() {
                                         Next
                                     </button>
 
-                                    <select
-                                        value={pageSize}
-                                        onChange={e => setPageSize(Number(e.target.value))}
-                                        style={{ marginLeft: '1rem', padding: '0.2rem', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '4px' }}
+                                    <Select
+                                        value={pageSize.toString()}
+                                        onValueChange={(value) => setPageSize(Number(value))}
                                     >
-                                        <option value="20">20 / page</option>
-                                        <option value="50">50 / page</option>
-                                        <option value="100">100 / page</option>
-                                        <option value="500">500 / page</option>
-                                    </select>
+                                        <SelectTrigger className="contest-sim-select w-36" style={{ marginLeft: '1rem' }}>
+                                            <SelectValue placeholder="Page size" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="20">20 / page</SelectItem>
+                                            <SelectItem value="50">50 / page</SelectItem>
+                                            <SelectItem value="100">100 / page</SelectItem>
+                                            <SelectItem value="500">500 / page</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                             </div>
 
                             {/* Cards Grid - Use paginatedResults */}
                             <div className="lineup-cards-grid">
-                                {paginatedResults.map(result => (
-                                    <LineupCard
-                                        key={result.lineup_id}
-                                        result={result}
-                                        players={playerMap}
-                                        playerIdsOverride={getEffectivePlayerIds(result)}
-                                        selected={selectedLineups.has(result.lineup_id)}
-                                        onToggleSelect={() => toggleLineupSelection(result.lineup_id)}
-                                        isInFinalSet={finalSetIdSet.has(result.lineup_id)}
-                                        finalTag={null}
-                                        isEdited={Boolean(editedLineupsById[result.lineup_id])}
-                                        onToggleFinalSet={portfolioMode === 'browse_select' ? undefined : () => toggleFinalSetMembership(result.lineup_id)}
-                                        onClearFinalOverride={portfolioMode === 'browse_select' ? undefined : () => clearFinalOverride(result.lineup_id)}
-                                        hasFinalOverride={portfolioMode === 'browse_select' ? false : (manualIncludeFinal.has(result.lineup_id) || manualExcludeFinal.has(result.lineup_id))}
-                                        onEditLineup={() => openLineupEditor(result)}
-                                        onResetEditLineup={() => resetEditedLineup(result.lineup_id)}
-                                        highlighted={
-                                            result.lineup_id === simResult.stats.best_ev_lineup_id
-                                                ? 'best-ev'
-                                                : result.lineup_id === simResult.stats.best_top1pct_lineup_id
-                                                    ? 'best-ceiling'
-                                                    : null
-                                        }
-                                    />
-                                ))}
+                                {paginatedResults.map(result => {
+                                    const effectivePlayerIds = getEffectivePlayerIds(result)
+                                    const slotAssignments = getContestSimLineupSlotAssignments(effectivePlayerIds, playerMap)
+                                    const orderedPlayerIds = slotAssignments
+                                        ? slotAssignments.map(({ playerId }) => playerId)
+                                        : effectivePlayerIds
+
+                                    return (
+                                        <LineupCard
+                                            key={result.lineup_id}
+                                            result={result}
+                                            players={playerMap}
+                                            playerIdsOverride={orderedPlayerIds}
+                                            slotAssignments={slotAssignments ?? undefined}
+                                            selected={selectedLineups.has(result.lineup_id)}
+                                            onToggleSelect={() => toggleLineupSelection(result.lineup_id)}
+                                            isInFinalSet={finalSetIdSet.has(result.lineup_id)}
+                                            finalTag={null}
+                                            isEdited={Boolean(editedLineupsById[result.lineup_id])}
+                                            onToggleFinalSet={portfolioMode === 'browse_select' ? undefined : () => toggleFinalSetMembership(result.lineup_id)}
+                                            onClearFinalOverride={portfolioMode === 'browse_select' ? undefined : () => clearFinalOverride(result.lineup_id)}
+                                            hasFinalOverride={portfolioMode === 'browse_select' ? false : (manualIncludeFinal.has(result.lineup_id) || manualExcludeFinal.has(result.lineup_id))}
+                                            onEditLineup={() => openLineupEditor(result)}
+                                            onResetEditLineup={() => resetEditedLineup(result.lineup_id)}
+                                            highlighted={
+                                                result.lineup_id === simResult.stats.best_ev_lineup_id
+                                                    ? 'best-ev'
+                                                    : result.lineup_id === simResult.stats.best_top1pct_lineup_id
+                                                        ? 'best-ceiling'
+                                                        : null
+                                            }
+                                        />
+                                    )
+                                })}
                             </div>
 
                             {editingLineupId !== null && (

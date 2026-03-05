@@ -1147,7 +1147,10 @@ def get_game_ops(
     except HTTPException:
         rates_game = unified_game.copy()
 
-    minutes_effective = minutes_game.copy()
+    # For GameView, "effective" minutes/status should align with the unified
+    # projections run (live truth). Legacy minutes_v1 artifacts can lag behind
+    # and are kept as baseline-only context.
+    minutes_effective = unified_game.copy()
     manual_overrides_df = load_manual_overrides_df(slate_day, data_root=data_root)
     minutes_effective, _ = apply_manual_overrides_to_frame(
         minutes_effective,

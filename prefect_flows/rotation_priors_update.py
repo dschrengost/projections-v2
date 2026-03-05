@@ -292,12 +292,19 @@ def rotation_priors_update_flow(
 
     pbp_bundle_dir: Path | None = None
     if run_pbp_ingest:
-        resolved_vendor_url = str(pbp_vendor_daily_url or os.environ.get("PBP_VENDOR_DAILY_URL") or "").strip()
-        if pbp_fetch_daily_zip:
-            if not resolved_vendor_url:
-                raise ValueError(
-                    "pbp_fetch_daily_zip=True requires pbp_vendor_daily_url parameter or env PBP_VENDOR_DAILY_URL."
-                )
+        resolved_vendor_url = str(
+            pbp_vendor_daily_url or os.environ.get("PBP_VENDOR_DAILY_URL") or ""
+        ).strip()
+        should_fetch_daily_zip = bool(pbp_fetch_daily_zip)
+        if should_fetch_daily_zip and not resolved_vendor_url:
+            # Fail-open: keep the priors pipeline moving by ingesting existing local files.
+            logger.warning(
+                "[rotation-priors-update] pbp_fetch_daily_zip requested but no vendor URL was configured; "
+                "skipping zip fetch and continuing with existing pbp_input_glob=%s",
+                resolved_input_glob,
+            )
+            should_fetch_daily_zip = False
+        if should_fetch_daily_zip:
             pbp_vendor_fetch_daily_zip_task(
                 data_root=data_root,
                 season_id=season_id,

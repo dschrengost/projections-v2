@@ -1,7 +1,7 @@
 .gv-root {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.6rem;
 }
 
 .gv-header,
@@ -32,10 +32,73 @@
     linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.92));
 }
 
+.gv-manual-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.45);
+  z-index: 120;
+}
+
+.gv-manual-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: min(460px, 100%);
+  background: #0b1220;
+  border-left: 1px solid #1e293b;
+  z-index: 121;
+  padding: 0.7rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.gv-manual-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.gv-manual-drawer-header h3 {
+  margin: 0;
+}
+
+.gv-manual-drawer-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.gv-summary-combo-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.gv-summary-combo {
+  gap: 0.6rem;
+}
+
+.gv-summary-item {
+  flex: 1;
+  min-width: 130px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.gv-toolbar .gv-toolbar-fields,
+.gv-manual-drawer-fields .gv-toolbar-fields {
+  margin-bottom: 0.15rem;
+}
+
 .gv-toolbar,
 .gv-team-panel,
 .gv-message {
-  padding: 1rem;
+  padding: 0.7rem;
 }
 
 .gv-toolbar {
@@ -49,13 +112,13 @@
 .gv-field {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  min-width: 180px;
+  gap: 0.3rem;
+  min-width: 160px;
   flex: 1;
 }
 
 .gv-field-wide {
-  min-width: 240px;
+  min-width: 200px;
   flex: 2;
 }
 
@@ -72,7 +135,7 @@
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.9);
   color: #e2e8f0;
-  padding: 0.7rem 0.8rem;
+  padding: 0.45rem 0.6rem;
 }
 
 .gv-toolbar-note {
@@ -90,26 +153,26 @@
 
 .gv-summary-card {
   flex: 1;
-  min-width: 180px;
+  min-width: 160px;
   flex-direction: column;
-  padding: 0.9rem 1rem;
+  padding: 0.55rem 0.7rem;
 }
 
 .gv-summary-label {
   color: #94a3b8;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 .gv-summary-value {
-  font-size: 1.15rem;
+  font-size: 1rem;
   font-weight: 700;
   color: #f8fafc;
 }
 
 .gv-summary-value-small {
-  font-size: 1rem;
+  font-size: 0.86rem;
 }
 
 .gv-summary-subtle {
@@ -120,18 +183,18 @@
 .gv-team-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
+  gap: 0.7rem;
 }
 
 .gv-team-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.55rem;
 }
 
 .gv-team-head h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.9rem;
 }
 
 .gv-team-subtitle {
@@ -144,14 +207,14 @@
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.92);
   color: #e2e8f0;
-  padding: 0.5rem 0.9rem;
+  padding: 0.38rem 0.7rem;
   cursor: pointer;
   font-weight: 600;
 }
 
 .gv-button-small {
-  padding: 0.25rem 0.55rem;
-  font-size: 0.72rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.7rem;
 }
 
 .gv-button:disabled {
@@ -241,13 +304,13 @@
 .gv-player-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
 }
 
 .gv-player-table th,
 .gv-player-table td {
   border-bottom: 1px solid #1f2937;
-  padding: 0.4rem 0.35rem;
+  padding: 0.3rem 0.28rem;
   text-align: left;
   vertical-align: middle;
 }
@@ -263,7 +326,7 @@
 .gv-player-cell {
   display: flex;
   flex-direction: column;
-  gap: 0.12rem;
+  gap: 0.05rem;
 }
 
 .gv-player-name-row {
@@ -275,7 +338,7 @@
 
 .gv-row-note {
   color: #94a3b8;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
 .gv-inline-actions {
@@ -300,7 +363,7 @@
   background: #0b1220;
   border-left: 1px solid #1e293b;
   z-index: 110;
-  padding: 0.8rem;
+  padding: 0.6rem;
   overflow-y: auto;
 }
 
@@ -330,40 +393,40 @@
 }
 
 .gv2-drawer-section {
-  margin-top: 0.75rem;
+  margin-top: 0.55rem;
   border-top: 1px solid #1f2937;
-  padding-top: 0.6rem;
+  padding-top: 0.45rem;
 }
 
 .gv2-drawer-section h4 {
   margin: 0 0 0.45rem 0;
-  font-size: 0.9rem;
+  font-size: 0.84rem;
 }
 
 .gv2-metric-row {
   border: 1px solid #1f2937;
   border-radius: 6px;
-  padding: 0.38rem 0.5rem;
-  margin-bottom: 0.35rem;
+  padding: 0.3rem 0.42rem;
+  margin-bottom: 0.28rem;
 }
 
 .gv2-metric-head {
   display: flex;
   justify-content: space-between;
   gap: 0.6rem;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
 }
 
 .gv2-metric-quantiles {
-  margin-top: 0.2rem;
+  margin-top: 0.15rem;
   display: flex;
   gap: 0.6rem;
-  font-size: 0.7rem;
+  font-size: 0.67rem;
   color: #9ca3af;
 }
 
 .gv2-why-changed {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: #cbd5e1;
 }
 

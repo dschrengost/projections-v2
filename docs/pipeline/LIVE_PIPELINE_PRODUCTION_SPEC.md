@@ -339,6 +339,10 @@ Keep the current layered concept, but make the contracts stricter:
 
 ## 10. Model Runtime Architecture
 
+> **See also**: [INFERENCE_SERVER_SPEC.md](./INFERENCE_SERVER_SPEC.md) for the
+> detailed inference server design, Triton configuration, and GPU integration
+> roadmap.
+
 ### 10.1 Primary scoring path
 
 For live production, define one canonical scoring mode:
@@ -346,45 +350,62 @@ For live production, define one canonical scoring mode:
 1. transformer path
    - transformer-based path
    - CPU-backed today
-   - GPU-backed once hardware is installed and validated
+   - GPU-backed via Triton Inference Server once hardware is installed
 
-As of February 27, 2026, GPU inference is not yet available in production.
-The near-term plan is to continue using CPU inference while preparing the
-runtime, packaging, and observability needed for GPU cutover.
+As of March 3, 2026, GPU inference is not yet available in production.
+The near-term plan:
+
+1. Continue using CPU inference while GPU hardware arrives.
+2. Deploy Triton Inference Server with Python backend for warm model serving.
+3. Integrate Prefect scoring tasks with Triton gRPC endpoint.
+4. Validate latency targets before production cutover.
 
 ### 10.2 Latency budgets
 
 Set explicit latency budgets per stage:
 
-- scrape/ingest
-- freeze
-- feature build
-- score
-- finalize
-- publish
+| Stage | Target |
+|-------|--------|
+| Scrape/ingest | < 30s |
+| Freeze manifest | < 5s |
+| Feature build (per game) | < 5s |
+| Inference (per game, GPU) | < 8s |
+| Inference (per game, CPU fallback) | < 45s |
+| Finalize (full slate) | < 10s |
+| Postflight + publish | < 5s |
 
-The end-to-end budget for a late-news single-game update should be materially
-smaller than the current full-slate path.
+End-to-end targets:
 
-Initial target:
-
-- single-game late-news rebuild target: under 2 minutes, subject to what the
-  transformer path can reliably sustain in production
+| Scenario | Target |
+|----------|--------|
+| Single-game late-news rerun | < 30s |
+| 5-game concurrent rerun | < 60s |
+| Full-slate rebuild (8 games) | < 120s |
 
 ### 10.3 GPU integration requirements
 
 When the NVIDIA GPU is added:
 
 - benchmark CPU vs GPU by stage
-- avoid cold-start cost near lock
+- avoid cold-start cost near lock via warm Triton process
 - keep exact runtime/env manifests for CUDA and model serving
 - fail closed if the GPU path is unavailable and CPU inference cannot satisfy
   the live SLA
 
+See [INFERENCE_SERVER_SPEC.md](./INFERENCE_SERVER_SPEC.md) Section 8 for VRAM
+budget and mixed-precision configuration.
+
 ### 10.4 Warm process / serving model
 
-We should strongly consider a warm scoring process for the transformer model so
-late-news updates do not pay repeated model load overhead.
+Triton Inference Server keeps model weights loaded in GPU memory:
+
+- Model loaded once at Triton startup.
+- Requests pay only forward-pass cost, not model load.
+- Health checks ensure Triton is ready before submitting inference.
+- Systemd manages Triton lifecycle with auto-restart on failure.
+
+See [INFERENCE_SERVER_SPEC.md](./INFERENCE_SERVER_SPEC.md) Section 7 for warm
+process details.
 
 ### 10.5 No alternate-model fallback
 
@@ -394,10 +415,23 @@ transformer path misses SLA.
 Production behavior should instead be:
 
 1. prefer game-scoped reruns so the transformer only recomputes what changed
-2. keep the transformer process warm
+2. keep the transformer process warm via Triton
 3. block publish or hold prior projections if the required transformer update
    cannot complete safely
 4. expose the blocked state to the operator with clear freshness diagnostics
+
+### 10.6 Concurrent game handling
+
+Late-breaking news often affects 3-5 games simultaneously. The inference
+architecture supports this via:
+
+1. Prefect submits all affected games concurrently as separate requests.
+2. Triton queues requests and executes sequentially on GPU.
+3. Total wall-clock ≈ N × single-game latency (not N× parallel speedup).
+4. This avoids VRAM thrashing from true parallel execution.
+
+See [INFERENCE_SERVER_SPEC.md](./INFERENCE_SERVER_SPEC.md) Section 3.3 for
+concurrency model details.
 
 ## 11. MLOps Spec
 

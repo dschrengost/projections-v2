@@ -5,6 +5,10 @@ interface LineupCardProps {
     result: LineupEVResult
     players: Map<string, PoolPlayer>
     playerIdsOverride?: string[]
+    slotAssignments?: {
+        playerId: string
+        slot: string
+    }[]
     selected: boolean
     onToggleSelect: () => void
     highlighted?: 'best-ev' | 'best-ceiling' | null
@@ -22,6 +26,7 @@ export default function LineupCard({
     result,
     players,
     playerIdsOverride,
+    slotAssignments,
     selected,
     onToggleSelect,
     highlighted,
@@ -46,15 +51,19 @@ export default function LineupCard({
     // Get player info with fallbacks
     const getPlayer = (pid: string) => players.get(pid)
     const lineupPlayerIds = playerIdsOverride ?? result.player_ids
+    const orderedPlayerIds = slotAssignments?.length
+        ? slotAssignments.map(entry => entry.playerId)
+        : lineupPlayerIds
+    const slotLookup = new Map(slotAssignments?.map(entry => [entry.playerId, entry.slot]))
 
     // Calculate total ownership
-    const totalOwn = lineupPlayerIds.reduce((sum, pid) => {
+    const totalOwn = orderedPlayerIds.reduce((sum, pid) => {
         const p = getPlayer(pid)
         return sum + (p?.own_proj ?? 0)
     }, 0)
 
     // Calculate total salary
-    const totalSalary = lineupPlayerIds.reduce((sum, pid) => {
+    const totalSalary = orderedPlayerIds.reduce((sum, pid) => {
         const p = getPlayer(pid)
         return sum + (p?.salary ?? 0)
     }, 0)
@@ -137,13 +146,18 @@ export default function LineupCard({
                     </div>
 
                     <div className="players-list-compact">
-                        {lineupPlayerIds.map((pid, idx) => {
+                        {orderedPlayerIds.map((pid, idx) => {
                             const player = getPlayer(pid)
+                            const slot = slotLookup.get(pid)
                             const posLabel = player?.positions?.join('/') ?? '?'
 
                             return (
                                 <div key={`${pid}-${idx}`} className="player-row-compact">
-                                    <span className="p-pos">{posLabel}</span>
+                                    {slot ? (
+                                        <span className="lineup-slot-tag">{slot}</span>
+                                    ) : (
+                                        <span className="p-pos">{posLabel}</span>
+                                    )}
                                     <span className="p-name" title={player?.name}>{player?.name ?? pid}</span>
                                     <span className="p-salary">{player ? `$${(player.salary / 1000).toFixed(1)}k` : '-'}</span>
                                     <span className={`p-own ${player && (player.own_proj || 0) > 20 ? 'high-own' : ''}`}>

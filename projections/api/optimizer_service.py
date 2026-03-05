@@ -698,6 +698,104 @@ def _is_out_status(status: object) -> bool:
     return _normalize_status(status) in {"OUT", "O", "INACTIVE"}
 
 
+def _load_live_out_indicators(
+    game_date: str,
+    *,
+    data_root: Path,
+) -> tuple[set[int], set[tuple[str, str]]]:
+    """Load latest out-like indicators from official injuries + Rotowire lineups."""
+    official_out_player_ids: set[int] = set()
+    rotowire_out_keys: set[tuple[str, str]] = set()
+
+    injuries_base = data_root / "bronze" / "injuries_raw"
+    injury_candidates = sorted(
+        injuries_base.glob(f"season=*/date={game_date}/injuries.parquet")
+    )
+    if injury_candidates:
+        injury_path = max(injury_candidates, key=lambda p: p.stat().st_mtime)
+        try:
+            injuries = pd.read_parquet(injury_path)
+            if not injuries.empty and "status" in injuries.columns:
+                injuries = injuries.copy()
+                injuries["status_u"] = (
+                    injuries["status"].astype(str).str.upper().str.strip()
+                )
+                if "status_raw" in injuries.columns:
+                    injuries["status_raw_u"] = (
+                        injuries["status_raw"].astype(str).str.upper().str.strip()
+                    )
+                else:
+                    injuries["status_raw_u"] = ""
+                if "as_of_ts" in injuries.columns:
+                    injuries["_asof"] = pd.to_datetime(
+                        injuries["as_of_ts"], errors="coerce", utc=True
+                    )
+                elif "ingested_ts" in injuries.columns:
+                    injuries["_asof"] = pd.to_datetime(
+                        injuries["ingested_ts"], errors="coerce", utc=True
+                    )
+                else:
+                    injuries["_asof"] = pd.NaT
+                injuries = injuries.sort_values("_asof")
+                if "player_id" in injuries.columns:
+                    injuries["player_id"] = pd.to_numeric(
+                        injuries["player_id"], errors="coerce"
+                    ).astype("Int64")
+                    latest = injuries.dropna(subset=["player_id"]).drop_duplicates(
+                        subset=["player_id"], keep="last"
+                    )
+                    out_like = latest["status_u"].isin(
+                        {"OUT", "O", "D", "DOUBTFUL", "INACTIVE", "SUSPENDED"}
+                    ) | latest["status_raw_u"].str.contains("DOUBT", na=False)
+                    official_out_player_ids = set(
+                        latest.loc[out_like, "player_id"].astype(int).tolist()
+                    )
+        except Exception as exc:
+            logger.warning("Failed loading official injuries for %s: %s", game_date, exc)
+
+    rotowire_path = (
+        data_root
+        / "silver"
+        / "rotowire_lineups"
+        / f"date={game_date}"
+        / "lineups.parquet"
+    )
+    if rotowire_path.exists():
+        try:
+            rw = pd.read_parquet(rotowire_path)
+            if not rw.empty and "player_name" in rw.columns:
+                rw = rw.copy()
+                role_u = (
+                    rw["lineup_role"].astype(str).str.upper().str.strip()
+                    if "lineup_role" in rw.columns
+                    else pd.Series("", index=rw.index)
+                )
+                injury_u = (
+                    rw["injury_status"].astype(str).str.upper().str.strip()
+                    if "injury_status" in rw.columns
+                    else pd.Series("", index=rw.index)
+                )
+                out_like = role_u.eq("OUT") | injury_u.isin(
+                    {"OUT", "D", "DOUBT", "DOUBTFUL", "INACTIVE", "SUSPENDED"}
+                )
+                team_col = (
+                    "team_abbreviation"
+                    if "team_abbreviation" in rw.columns
+                    else ("team" if "team" in rw.columns else None)
+                )
+                if team_col is not None:
+                    rotowire_out_keys = set(
+                        zip(
+                            rw.loc[out_like, "player_name"].map(_normalize_name),
+                            rw.loc[out_like, team_col].map(_normalize_team),
+                        )
+                    )
+        except Exception as exc:
+            logger.warning("Failed loading Rotowire lineups for %s: %s", game_date, exc)
+
+    return official_out_player_ids, rotowire_out_keys
+
+
 def _overlay_ownership_columns(
     pool_df: pd.DataFrame,
     ownership_df: pd.DataFrame | None,
@@ -949,6 +1047,11 @@ def build_player_pool(
             own_rows,
         )
 
+    official_out_player_ids, rotowire_out_keys = _load_live_out_indicators(
+        game_date,
+        data_root=root,
+    )
+
     logger.info(
         "Player pool merge: %d projections x %d salaries → %d matched",
         len(proj_df),
@@ -1114,7 +1217,7 @@ def build_player_pool(
     # Game info columns (prefer _sal suffix from merge)
     matchup_col = "game_matchup_sal" if "game_matchup_sal" in merged.columns else "game_matchup"
     start_col = "game_start_utc_sal" if "game_start_utc_sal" in merged.columns else "game_start_utc"
-    status_col = "status_sal" if "status_sal" in merged.columns else "status"
+    status_cols = [c for c in ("status", "status_sal") if c in merged.columns]
     disabled_col = "is_disabled_sal" if "is_disabled_sal" in merged.columns else "is_disabled"
 
     for _, row in merged.iterrows():
@@ -1204,14 +1307,31 @@ def build_player_pool(
             "dk_id": dk_id,
         }
 
-        status_val = row.get(status_col) if status_col in row.index else None
+        source_out = False
+        try:
+            player_id_int = int(float(player_id))
+        except Exception:
+            player_id_int = None
+        if player_id_int is not None and player_id_int in official_out_player_ids:
+            source_out = True
+        if not source_out:
+            source_out = (
+                _normalize_name(player["name"]),
+                _normalize_team(player["team"]),
+            ) in rotowire_out_keys
+
+        status_vals = [row.get(col) for col in status_cols if col in row.index]
         disabled_val = row.get(disabled_col) if disabled_col in row.index else None
-        status_out = _is_out_status(status_val)
+        status_out = any(_is_out_status(value) for value in status_vals)
         disabled = _coerce_bool(disabled_val, default=False)
         # Legacy overrides may publish explicit activity fields.
-        row_is_out = _coerce_bool(row.get("is_out") if "is_out" in row.index else None, default=False)
+        row_is_out = any(
+            _coerce_bool(row.get(col), default=False)
+            for col in ("is_out", "is_out_sal")
+            if col in row.index
+        )
         row_is_active = _coerce_bool(row.get("is_active") if "is_active" in row.index else True, default=True)
-        is_out = bool(row_is_out or status_out)
+        is_out = bool(row_is_out or status_out or source_out)
         is_active = bool(row_is_active and (not disabled) and (not is_out))
         player["is_out"] = is_out
         player["is_active"] = is_active

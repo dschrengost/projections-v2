@@ -19,6 +19,14 @@ import { getSavedSimBuilds, loadSavedSimBuild, SavedSimBuildSummary } from '../a
 import { useSlateDateAndSlate } from '../hooks/useSlateDate'
 import { formatSlateLabel } from '../utils/slateFormat'
 import { computeRealSwaps, LineupSlots } from '../utils/lateSwapUtils'
+import { Button } from '@/components/ui/button'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 
 const DK_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL']
 const ENTRIES_PER_PAGE = 25
@@ -809,18 +817,23 @@ export default function EntryManagerPage() {
                     </label>
                     <label>
                         Slate
-                        <select
-                            value={selectedSlate ?? ''}
-                            onChange={e => setSelectedSlate(Number(e.target.value) || null)}
+                        <Select
+                            value={selectedSlate == null ? 'auto' : selectedSlate.toString()}
+                            onValueChange={value => setSelectedSlate(value === 'auto' ? null : Number(value))}
                             disabled={slatesLoading}
                         >
-                            <option value="">Auto (detect from upload)</option>
-                            {slateOptions.map(s => (
-                                <option key={s.draft_group_id} value={s.draft_group_id}>
-                                    {formatSlateLabel(s)} (DG{s.draft_group_id})
-                                </option>
-                            ))}
-                        </select>
+                            <SelectTrigger>
+                                <SelectValue placeholder={slatesLoading ? 'Loading slates…' : 'Select Slate'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="auto">Auto (detect from upload)</SelectItem>
+                                {slateOptions.map(s => (
+                                    <SelectItem key={s.draft_group_id} value={String(s.draft_group_id)}>
+                                        {formatSlateLabel(s)} (DG{s.draft_group_id})
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </label>
                 </div>
             </header>
@@ -833,11 +846,11 @@ export default function EntryManagerPage() {
 
             {/* Late Swap Results Panel */}
             {showResultsPanel && contestResults.length > 0 && (
-                <section className="late-swap-results-panel">
-                    <div className="results-header">
-                        <h4>Late Swap Results</h4>
-                        <button onClick={() => setShowResultsPanel(false)} className="close-btn">×</button>
-                    </div>
+                    <section className="late-swap-results-panel">
+                        <div className="results-header">
+                            <h4>Late Swap Results</h4>
+                            <Button variant="ghost" size="icon" className="close-btn" onClick={() => setShowResultsPanel(false)}>×</Button>
+                        </div>
                     <div className="results-list">
                         {contestResults.map(result => (
                             <div key={result.contestId} className="result-item">
@@ -890,11 +903,11 @@ export default function EntryManagerPage() {
 
             {/* Apply Build Results Panel */}
             {showApplyResultsPanel && applyBuildResults.length > 0 && (
-                <section className="late-swap-results-panel">
-                    <div className="results-header">
-                        <h4>Apply Build Results</h4>
-                        <button onClick={() => setShowApplyResultsPanel(false)} className="close-btn">×</button>
-                    </div>
+                    <section className="late-swap-results-panel">
+                        <div className="results-header">
+                            <h4>Apply Build Results</h4>
+                            <Button variant="ghost" size="icon" className="close-btn" onClick={() => setShowApplyResultsPanel(false)}>×</Button>
+                        </div>
                     <div className="results-list">
                         {applyBuildResults.map(result => (
                             <div key={result.contestId} className="result-item">
@@ -928,15 +941,16 @@ export default function EntryManagerPage() {
                             }
                         }}
                     />
-                    <button
+                    <Button
                         className="build-btn"
+                        variant="default"
                         onClick={handleRepairDraftGroups}
                         disabled={repairing || entryFiles.length === 0}
                         style={{ marginTop: '0.5rem' }}
                         title="Fix slate IDs for existing entry files (uses DK Contest ID mapping)"
                     >
                         {repairing ? 'Fixing...' : 'Fix Slate IDs'}
-                    </button>
+                    </Button>
                     {uploading && <div className="muted">Uploading...</div>}
 
                     <hr />
@@ -944,35 +958,51 @@ export default function EntryManagerPage() {
                     <h3>Apply Build</h3>
                     <label>
                         Source
-                        <select
+                        <Select
                             value={buildSource}
-                            onChange={e => setBuildSource(e.target.value as 'optimizer' | 'contest-sim')}
+                            onValueChange={value => setBuildSource(value as 'optimizer' | 'contest-sim')}
                         >
-                            <option value="optimizer">Optimizer Builds</option>
-                            <option value="contest-sim">Sim Lineups</option>
-                        </select>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select source" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="optimizer">Optimizer Builds</SelectItem>
+                                <SelectItem value="contest-sim">Sim Lineups</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </label>
                     <label>
                         Build
-                        <select
-                            value={selectedBuildId ?? ''}
-                            onChange={e => setSelectedBuildId(e.target.value || null)}
+                        <Select
+                            value={selectedBuildId ?? 'none'}
+                            onValueChange={value => setSelectedBuildId(value === 'none' ? null : value)}
                         >
-                            {buildOptions.length === 0 && <option value="">No builds</option>}
-                            {buildOptions.map(b => (
-                                <option key={b.id} value={b.id}>
-                                    {b.label}
-                                </option>
-                            ))}
-                        </select>
+                            <SelectTrigger>
+                                <SelectValue placeholder={buildOptions.length === 0 ? 'No builds' : 'Select build'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {buildOptions.length === 0 ? (
+                                    <SelectItem value="none" disabled>
+                                        No builds
+                                    </SelectItem>
+                                ) : (
+                                    buildOptions.map(b => (
+                                        <SelectItem key={b.id} value={b.id}>
+                                            {b.label}
+                                        </SelectItem>
+                                    ))
+                                )}
+                            </SelectContent>
+                        </Select>
                     </label>
                     {selectedBuildInfo && entryFile && (
                         <div className="muted">
                             Build slate DG{selectedBuildInfo.draft_group_id ?? '?'} | Contest slate DG{entryFile.draft_group_id}
                         </div>
                     )}
-                    <button
+                    <Button
                         className="build-btn"
+                        variant="default"
                         onClick={handleApplyBuild}
                         disabled={!selectedBuildId || applyLoading || applyBuildTargetInfo.contestCount === 0}
                     >
@@ -983,17 +1013,18 @@ export default function EntryManagerPage() {
                                     ? `Apply to All Contests (${applyBuildTargetInfo.totalEntries} entries)`
                                     : `Apply to ${applyBuildTargetInfo.contestCount} Contests (${applyBuildTargetInfo.totalEntries} entries)`
                                 : 'Apply Build'}
-                    </button>
+                    </Button>
                     {applyBuildTargetInfo.applyingAllByDefault && (
                         <div className="muted">No contests selected; applying across all uploaded contests.</div>
                     )}
-                    <button
+                    <Button
                         className="build-btn"
+                        variant="default"
                         onClick={handleLateSwap}
                         disabled={lateSwapLoading || entryFiles.length === 0}
                     >
                         {lateSwapLoading ? 'Late Swapping...' : 'Late Swap (Now)'}
-                    </button>
+                    </Button>
                     <div className="muted">Uses server time to lock started games.</div>
 
                     {/* Randomness Control */}
@@ -1025,67 +1056,81 @@ export default function EntryManagerPage() {
                         </label>
                         <small className="hint">Only optimize lineups containing an OUT player</small>
                     </div>
-                    <button
+                    <Button
                         className="export-btn primary"
+                        variant="default"
                         onClick={handleExportSelectedLineups}
                         disabled={!entryFile || selectedLineupCount === 0}
                     >
                         Export Selected
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                         className="export-btn"
+                        variant="outline"
                         onClick={handleExportCheckedContests}
                         disabled={checkedContestIds.length === 0}
                     >
                         {checkedContestIds.length > 1
                             ? `Export Checked Contests (${checkedContestEntryCount} lineups)`
                             : 'Export Checked Contest'}
-                    </button>
+                    </Button>
                     <div className="lineup-export-actions">
-                        <button
+                        <Button
                             className="lineups-action-btn"
+                            variant="outline"
                             onClick={selectAllLineups}
                             disabled={!entryFile}
                         >
                             Check All
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                             className="lineups-action-btn"
+                            variant="outline"
                             onClick={clearAllLineups}
                             disabled={!entryFile}
                         >
                             Uncheck All
-                        </button>
+                        </Button>
                         <span className="muted">{selectedLineupCount} selected</span>
                     </div>
-                    <button
+                    <Button
                         className="export-btn"
+                        variant="outline"
                         onClick={handleExportCurrentContest}
                         disabled={!selectedContestId || currentEntriesCount === 0}
                     >
                         Export Current Contest
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                         className="export-btn"
+                        variant="outline"
                         onClick={handleExport}
                         disabled={applyBuildTargetInfo.contestCount === 0 || applyBuildTargetInfo.totalEntries === 0}
                     >
                         {applyBuildTargetInfo.contestCount > 1
                             ? `Export All Uploaded (${applyBuildTargetInfo.totalEntries} lineups)`
                             : 'Export All Lineups'}
-                    </button>
+                    </Button>
                 </aside>
 
                 <section className="optimizer-pool">
                     <div className="pool-header">
                         <h3>Entry Files ({entryFiles.length})</h3>
                         <div className="saved-build-actions">
-                            <button className="load-btn" onClick={selectAllContests}>
+                            <Button
+                                className="load-btn"
+                                variant="outline"
+                                onClick={selectAllContests}
+                            >
                                 Select All
-                            </button>
-                            <button className="delete-btn" onClick={clearAllContests}>
+                            </Button>
+                            <Button
+                                className="delete-btn"
+                                variant="outline"
+                                onClick={clearAllContests}
+                            >
                                 Clear
-                            </button>
+                            </Button>
                             {entriesLoading && <span className="muted">Loading...</span>}
                         </div>
                     </div>
@@ -1129,30 +1174,37 @@ export default function EntryManagerPage() {
                                     <span className="saved-build-time">{entry.contest_name}</span>
                                 </div>
                                 <div className="saved-build-actions">
-                                    <button className="load-btn" onClick={() => setSelectedContestId(entry.contest_id)}>
+                                    <Button
+                                        className="load-btn"
+                                        variant="outline"
+                                        onClick={() => setSelectedContestId(entry.contest_id)}
+                                    >
                                         Load
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
                                         className="delete-btn"
+                                        variant="outline"
                                         onClick={() => handleDeleteContest(entry.contest_id)}
                                         title="Delete entry file"
                                     >
                                         Delete
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
                                         className="delete-btn"
+                                        variant="outline"
                                         onClick={() => moveContest(entry.contest_id, 'up')}
                                         title="Move earlier in apply order"
                                     >
                                         ↑
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
                                         className="delete-btn"
+                                        variant="outline"
                                         onClick={() => moveContest(entry.contest_id, 'down')}
                                         title="Move later in apply order"
                                     >
                                         ↓
-                                    </button>
+                                    </Button>
                                 </div>
                             </div>
                         ))}
@@ -1162,24 +1214,28 @@ export default function EntryManagerPage() {
                         <div className="lineups-section">
                             <div className="lineups-toolbar">
                                 <h3>{entryFile.contest_name}</h3>
-                                <div className="lineups-filters">
-                                    <span className="muted">
-                                        {entryFile.entries.length} entries · Draft group {entryFile.draft_group_id}
-                                    </span>
-                                    <button
+                                    <div className="lineups-filters">
+                                        <span className="muted">
+                                            {entryFile.entries.length} entries · Draft group {entryFile.draft_group_id}
+                                        </span>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
                                         className="lineups-action-btn"
                                         onClick={() => setEntryPage(p => Math.max(1, p - 1))}
                                         disabled={entryPageIndex <= 1}
                                     >
                                         Prev
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
                                         className="lineups-action-btn"
                                         onClick={() => setEntryPage(p => Math.min(entryPages, p + 1))}
                                         disabled={entryPageIndex >= entryPages}
                                     >
                                         Next
-                                    </button>
+                                    </Button>
                                     <span className="muted">Page {entryPageIndex} / {entryPages}</span>
                                 </div>
                             </div>
@@ -1238,17 +1294,21 @@ export default function EntryManagerPage() {
                                                 </div>
                                                 <div className="lineup-header-right">
                                                     {alternatives && alternatives.alternatives.length > 1 && (
-                                                        <select
-                                                            value={selectedAltIdx}
-                                                            onChange={(e) => handleAlternativeChange(Number(e.target.value))}
-                                                            className="alternative-select"
+                                                        <Select
+                                                            value={String(selectedAltIdx)}
+                                                            onValueChange={value => handleAlternativeChange(Number(value))}
                                                         >
-                                                            {alternatives.alternatives.map((alt, i) => (
-                                                                <option key={i} value={i}>
-                                                                    Alt {i + 1}: {alt.projected_score.toFixed(1)} pts
-                                                                </option>
-                                                            ))}
-                                                        </select>
+                                                            <SelectTrigger className="alternative-select">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {alternatives.alternatives.map((alt, i) => (
+                                                                    <SelectItem key={i} value={String(i)}>
+                                                                        Alt {i + 1}: {alt.projected_score.toFixed(1)} pts
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
                                                     )}
                                                     <span className="lineup-salary">{entry.entry_fee || ''}</span>
                                                 </div>

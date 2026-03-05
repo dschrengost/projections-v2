@@ -28,6 +28,7 @@ import { formatSlateLabel } from '../utils/slateFormat'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import {
     Select,
     SelectContent,
@@ -35,6 +36,14 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
+
+const DK_SLOT_ORDER = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL'] as const
+const DK_SLOT_PRIORITY = DK_SLOT_ORDER.reduce<Record<string, number>>((acc, slot, idx) => {
+    acc[slot] = idx
+    return acc
+}, {} as Record<string, number>)
+const DK_BASE_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C'] as const
+const DK_ALL_SLOTS = [...DK_SLOT_ORDER] as const
 
 type SortKey = 'name' | 'team' | 'salary' | 'proj' | 'own_proj' | 'value' | 'min' | 'fppm'
 
@@ -51,6 +60,150 @@ const parseMatchupTeams = (matchup?: string | null): string[] => {
         .split('@')
         .map(part => part.trim().toUpperCase())
         .filter(Boolean)
+}
+
+const getNormalizedPositions = (positions: string[] = []): string[] =>
+    positions
+        .flatMap(pos => pos.toUpperCase().split(/[^A-Z]/))
+        .filter(Boolean)
+
+const getLineupSlotOrder = (positions: string[] = []): number => {
+    const normalized = getNormalizedPositions(positions)
+    for (const slot of DK_SLOT_ORDER) {
+        if (normalized.includes(slot)) return DK_SLOT_PRIORITY[slot]
+    }
+    return DK_SLOT_ORDER.length
+}
+
+const getLineupSlotFlexDegree = (positions: string[] = []) => {
+    const normalized = new Set(getNormalizedPositions(positions))
+    let deg = 0
+    for (const slot of DK_BASE_SLOTS) {
+        if (normalized.has(slot)) deg += 1
+    }
+    if (normalized.has('PG') || normalized.has('SG')) deg += 1 // G
+    if (normalized.has('SF') || normalized.has('PF')) deg += 1 // F
+    return deg + 1 // UTIL
+}
+
+const isEligibleForDkSlot = (positions: string[] = [], slot: (typeof DK_ALL_SLOTS)[number]) => {
+    const normalized = new Set(getNormalizedPositions(positions))
+    if (slot === 'PG' || slot === 'SG' || slot === 'SF' || slot === 'PF' || slot === 'C') {
+        return normalized.has(slot)
+    }
+    if (slot === 'G') return normalized.has('PG') || normalized.has('SG')
+    if (slot === 'F') return normalized.has('SF') || normalized.has('PF')
+    if (slot === 'UTIL') return true
+    return false
+}
+
+const getDisplaySlotByAssignment = (
+    playerIds: string[],
+    map: Map<string, PoolPlayer>,
+): { playerId: string; slot: (typeof DK_SLOT_ORDER)[number] }[] | null => {
+    if (playerIds.length !== 8) return null
+    const unique = Array.from(new Set(playerIds))
+    if (unique.length !== 8) return null
+
+    const canUse = (id: string) => {
+        const p = map.get(id)
+        return p ? p.positions && p.positions.length > 0 : false
+    }
+    if (!unique.every(canUse)) return null
+
+    const greedy = () => {
+        const remaining = new Set(unique)
+        const assigned: { playerId: string; slot: typeof DK_SLOT_ORDER[number] }[] = []
+
+        for (const slot of DK_BASE_SLOTS) {
+            const candidates = Array.from(remaining).filter(id => {
+                const p = map.get(id)
+                return p ? isEligibleForDkSlot(p.positions, slot) : false
+            })
+            if (candidates.length === 0) return null
+            candidates.sort((a, b) => {
+                const aPos = map.get(a)?.positions
+                const bPos = map.get(b)?.positions
+                const aFlex = getLineupSlotFlexDegree(aPos)
+                const bFlex = getLineupSlotFlexDegree(bPos)
+                if (aFlex !== bFlex) return aFlex - bFlex
+                return a.localeCompare(b)
+            })
+            const pick = candidates[0]
+            assigned.push({ playerId: pick, slot })
+            remaining.delete(pick)
+        }
+
+        const pickMostFlexible = (slot: 'G' | 'F') => {
+            const isPred = slot === 'G'
+                ? (pos: string[]) => (getNormalizedPositions(pos).includes('PG') || getNormalizedPositions(pos).includes('SG'))
+                : (pos: string[]) => (getNormalizedPositions(pos).includes('SF') || getNormalizedPositions(pos).includes('PF'))
+            const candidates = Array.from(remaining).filter(id => {
+                const p = map.get(id)
+                return p ? isPred(p.positions) : false
+            })
+            if (candidates.length === 0) return false
+            candidates.sort((a, b) => {
+                const aPos = map.get(a)?.positions
+                const bPos = map.get(b)?.positions
+                const aFlex = getLineupSlotFlexDegree(aPos)
+                const bFlex = getLineupSlotFlexDegree(bPos)
+                if (aFlex !== bFlex) return bFlex - aFlex
+                return a.localeCompare(b)
+            })
+            const pick = candidates[0]
+            assigned.push({ playerId: pick, slot })
+            remaining.delete(pick)
+            return true
+        }
+
+        if (!pickMostFlexible('G')) return null
+        if (!pickMostFlexible('F')) return null
+        if (remaining.size === 0) return null
+        const [util] = Array.from(remaining).sort()
+        assigned.push({ playerId: util, slot: 'UTIL' })
+        return assigned
+    }
+
+    const greedyAssigned = greedy()
+    if (greedyAssigned) return greedyAssigned
+
+    const adj = new Map<string, (typeof DK_SLOT_ORDER)[number][]>()
+    for (const playerId of unique) {
+        const p = map.get(playerId)
+        if (!p) return null
+        const eligible: (typeof DK_SLOT_ORDER)[number][] = DK_ALL_SLOTS.filter(slot => isEligibleForDkSlot(p.positions, slot))
+        if (eligible.length === 0) return null
+        adj.set(playerId, eligible)
+    }
+
+    const matchR = new Map<(typeof DK_SLOT_ORDER)[number], string>()
+
+    const dfs = (playerId: string, seen: Set<(typeof DK_SLOT_ORDER)[number]>): boolean => {
+        const options = adj.get(playerId) || []
+        for (const slot of options) {
+            if (seen.has(slot)) continue
+            seen.add(slot)
+            const assignedPid = matchR.get(slot)
+            if (!assignedPid || dfs(assignedPid, seen)) {
+                matchR.set(slot, playerId)
+                return true
+            }
+        }
+        return false
+    }
+
+    for (const playerId of unique) {
+        if (!dfs(playerId, new Set())) return null
+    }
+
+    const assigned = [] as { playerId: string; slot: (typeof DK_SLOT_ORDER)[number] }[]
+    for (const slot of DK_SLOT_ORDER) {
+        const playerId = matchR.get(slot)
+        if (!playerId) return null
+        assigned.push({ playerId, slot })
+    }
+    return assigned
 }
 
 export default function OptimizerPage() {
@@ -1678,50 +1831,101 @@ export default function OptimizerPage() {
                     </div>
 
                     <div className="lineups-grid">
-                        {filteredLineups.slice(0, showCount).map((lu, idx) => (
-                            <div
-                                key={lu.lineup_id}
-                                className={`lineup-card ${selectedLineupIds.has(lu.lineup_id) ? 'selected' : ''}`}
-                            >
-                                <div className="lineup-header">
-                                    <label className="lineup-select">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedLineupIds.has(lu.lineup_id)}
-                                            onChange={() => toggleLineupSelection(lu.lineup_id)}
-                                            title="Select lineup"
-                                        />
-                                    </label>
-                                    <span>#{idx + 1}</span>
-                                    <span className="lineup-salary">
-                                        ${lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0).toLocaleString()}
-                                    </span>
-                                    <span className="lineup-proj">
-                                        {lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0).toFixed(1)} pts
-                                    </span>
-                                    <span className="lineup-p90">
-                                        p90: {(() => {
-                                            const p90 = lu.p90 ?? lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
-                                            return p90 > 0 ? p90.toFixed(1) : '—'
-                                        })()}
-                                    </span>
-                                    <span className="lineup-ownership">
-                                        {lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0).toFixed(1)}% own
-                                    </span>
-                                </div>
-                                <div className="lineup-players">
-                                    {lu.player_ids.map(id => {
+                        {filteredLineups.slice(0, showCount).map((lu, idx) => {
+                            const totalSalary = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0)
+                            const totalProj = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
+                            const totalP90 = lu.p90 ?? lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
+                            const totalOwn = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
+                            const isSelected = selectedLineupIds.has(lu.lineup_id)
+                            const filterValue = lineupFilter.trim().toLowerCase()
+                            const assignedSlots = getDisplaySlotByAssignment(lu.player_ids, playerMap)
+                            const orderedPlayers = assignedSlots
+                                ? assignedSlots.map(({ playerId, slot }) => ({
+                                    playerId,
+                                    p: playerMap.get(playerId),
+                                    slot,
+                                    slotOrder: DK_SLOT_PRIORITY[slot],
+                                }))
+                                : lu.player_ids
+                                    .map((id, index) => {
                                         const p = playerMap.get(id)
-                                        const isFiltered = lineupFilter && p && p.name.toLowerCase().includes(lineupFilter.toLowerCase())
-                                        return (
-                                            <span key={id} className={`lineup-player ${isFiltered ? 'highlight' : ''}`}>
-                                                {p ? `${p.name} (${p.positions[0]})` : id}
+                                        return {
+                                            playerId: id,
+                                            p,
+                                            slotOrder: getLineupSlotOrder(p?.positions),
+                                            slot: 'N/A',
+                                            index,
+                                            sortName: p?.name?.toLowerCase() ?? '',
+                                        }
+                                    })
+                                    .sort((a, b) => {
+                                        if (a.slotOrder !== b.slotOrder) return a.slotOrder - b.slotOrder
+                                        if (a.sortName !== b.sortName) return a.sortName.localeCompare(b.sortName)
+                                        return a.index - b.index
+                                    })
+                                    .map(({ playerId, p, slot }) => ({ playerId, p, slot }))
+
+                            return (
+                                <Card
+                                    key={lu.lineup_id}
+                                    className={`lineup-card ${isSelected ? 'selected' : ''}`}
+                                >
+                                    <CardHeader className="lineup-header">
+                                        <div className="lineup-card-meta">
+                                            <label className="lineup-select">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => toggleLineupSelection(lu.lineup_id)}
+                                                    title="Select lineup"
+                                                />
+                                            </label>
+                                            <span className="lineup-rank">#{idx + 1}</span>
+                                        </div>
+                                        <div className="lineup-metrics-grid">
+                                            <span className="lineup-metric">
+                                                <span className="lineup-metric-label">Salary</span>
+                                                <span className="lineup-salary">${totalSalary.toLocaleString()}</span>
                                             </span>
-                                        )
-                                    })}
-                                </div>
-                            </div>
-                        ))}
+                                            <span className="lineup-metric">
+                                                <span className="lineup-metric-label">Proj</span>
+                                                <span className="lineup-proj">{totalProj.toFixed(1)}</span>
+                                            </span>
+                                            <span className="lineup-metric">
+                                                <span className="lineup-metric-label">p90</span>
+                                                <span className="lineup-p90">{totalP90 > 0 ? totalP90.toFixed(1) : '—'}</span>
+                                            </span>
+                                            <span className="lineup-metric">
+                                                <span className="lineup-metric-label">Own%</span>
+                                                <span className="lineup-ownership">{totalOwn.toFixed(1)}</span>
+                                            </span>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent className="lineup-body">
+                                        <div className="lineup-players">
+                                            {orderedPlayers.map(({ playerId, p, slot }) => {
+                                                const isFiltered = filterValue && p && p.name.toLowerCase().includes(filterValue)
+                                                return (
+                                                    <span
+                                                        key={playerId}
+                                                        className={`lineup-player ${isFiltered ? 'highlight' : ''}`}
+                                                    >
+                                                        {p ? (
+                                                            <>
+                                                                <span className="lineup-slot-tag">{slot}</span>
+                                                                <span>{p.name}</span>
+                                                            </>
+                                                        ) : (
+                                                            playerId
+                                                        )}
+                                                    </span>
+                                                )
+                                            })}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )
+                        })}
                     </div>
                     {filteredLineups.length > showCount && (
                         <div className="lineups-footer">

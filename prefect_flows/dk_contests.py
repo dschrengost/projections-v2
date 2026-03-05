@@ -122,8 +122,6 @@ def download_results_task(*, target_date: str, data_root: Path) -> dict[str, str
         args=[
             "--date", target_date,
             "--data-root", _bronze_data_root(data_root),
-            "--auth-browser",
-            "--headless",
         ],
         data_root=data_root,
         timeout_s=1800,

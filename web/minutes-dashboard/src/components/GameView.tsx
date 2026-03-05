@@ -67,6 +67,7 @@ export const GameView: React.FC<GameViewProps> = ({
     const [lastGames, setLastGames] = useState<PlayerLastGameStat[]>([])
     const [lastGamesLoading, setLastGamesLoading] = useState(false)
     const [lastGamesError, setLastGamesError] = useState<string | null>(null)
+    const [manualDrawerOpen, setManualDrawerOpen] = useState(false)
 
     const asNumber = (value: unknown): number | null => {
         const parsed = Number(value)
@@ -379,10 +380,10 @@ export const GameView: React.FC<GameViewProps> = ({
     }
 
     return (
-        <div className="gv-root">
-            <div className="gv-header">
-                <div>
-                    <h2>Manual Availability</h2>
+            <div className="gv-root">
+                <div className="gv-header">
+                    <div>
+                        <h2>Manual Availability</h2>
                     <div className="gv-toolbar-note">
                         Only manual <code>IN</code> / <code>OUT</code> changes apply to canonical live inputs.
                     </div>
@@ -394,81 +395,103 @@ export const GameView: React.FC<GameViewProps> = ({
                             Open Late Swap
                         </button>
                     ) : null}
+                    <button type="button" className="gv-button gv-button-small" onClick={() => setManualDrawerOpen(true)}>
+                        Edit Manual Availability
+                    </button>
                     <button type="button" className="gv-button gv-button-refresh" onClick={() => void refresh()} disabled={loading}>
                         {loading ? 'Refreshing…' : 'Refresh'}
                     </button>
                 </div>
             </div>
 
-            <section className="gv-toolbar">
-                <div className="gv-toolbar-fields">
-                    <div className="gv-field">
-                        <label htmlFor="manual-availability-operator">Operator</label>
-                        <input
-                            id="manual-availability-operator"
-                            value={operator}
-                            onChange={(event) => setOperator(event.target.value)}
-                            placeholder="daniel"
-                            disabled={Boolean(readOnly)}
-                        />
-                    </div>
-                    <div className="gv-field">
-                        <label htmlFor="manual-availability-reason-code">Reason Code</label>
-                        <select
-                            id="manual-availability-reason-code"
-                            value={reasonCode}
-                            onChange={(event) => setReasonCode(event.target.value)}
-                            disabled={Boolean(readOnly)}
-                        >
-                            <option value="operator_report">Operator report</option>
-                            <option value="source_correction">Source correction</option>
-                            <option value="late_scratch">Late scratch</option>
-                            <option value="manual_reversal">Manual reversal</option>
-                        </select>
-                    </div>
-                    <div className="gv-field">
-                        <label htmlFor="manual-availability-source">Source Label</label>
-                        <input
-                            id="manual-availability-source"
-                            value={sourceLabel}
-                            onChange={(event) => setSourceLabel(event.target.value)}
-                            placeholder="twitter, beat writer, rotowire"
-                            disabled={Boolean(readOnly)}
-                        />
-                    </div>
-                    <div className="gv-field gv-field-wide">
-                        <label htmlFor="manual-availability-reason-text">Reason Note</label>
-                        <input
-                            id="manual-availability-reason-text"
-                            value={reasonText}
-                            onChange={(event) => setReasonText(event.target.value)}
-                            placeholder="Optional provenance or note"
-                            disabled={Boolean(readOnly)}
-                        />
-                    </div>
-                </div>
-                <div className="gv-toolbar-note">
-                    {operator.trim()
-                        ? `Actions will be recorded under ${operator.trim()}.`
-                        : 'Set an operator name before submitting manual overrides.'}
-                </div>
-            </section>
-
-            {error ? <div className="gv-message gv-message-error">{error}</div> : null}
-            {message ? <div className="gv-message">{message}</div> : null}
+            {manualDrawerOpen ? (
+                <>
+                    <div className="gv-manual-backdrop" onClick={() => setManualDrawerOpen(false)} />
+                    <section className="gv-manual-drawer">
+                        <div className="gv-manual-drawer-header">
+                            <div>
+                                <h3>Manual Availability Controls</h3>
+                                <div className="gv-toolbar-note">
+                                    Only manual <code>IN</code> / <code>OUT</code> changes apply to canonical live inputs.
+                                </div>
+                            </div>
+                            <button type="button" className="gv-button gv-button-small" onClick={() => setManualDrawerOpen(false)}>
+                                Close
+                            </button>
+                        </div>
+                        <div className="gv-manual-drawer-fields">
+                            <div className="gv-toolbar-fields">
+                                <div className="gv-field">
+                                    <label htmlFor="manual-availability-operator">Operator</label>
+                                    <input
+                                        id="manual-availability-operator"
+                                        value={operator}
+                                        onChange={(event) => setOperator(event.target.value)}
+                                        placeholder="daniel"
+                                        disabled={Boolean(readOnly)}
+                                    />
+                                </div>
+                                <div className="gv-field">
+                                    <label htmlFor="manual-availability-reason-code">Reason Code</label>
+                                    <select
+                                        id="manual-availability-reason-code"
+                                        value={reasonCode}
+                                        onChange={(event) => setReasonCode(event.target.value)}
+                                        disabled={Boolean(readOnly)}
+                                    >
+                                        <option value="operator_report">Operator report</option>
+                                        <option value="source_correction">Source correction</option>
+                                        <option value="late_scratch">Late scratch</option>
+                                        <option value="manual_reversal">Manual reversal</option>
+                                    </select>
+                                </div>
+                                <div className="gv-field">
+                                    <label htmlFor="manual-availability-source">Source Label</label>
+                                    <input
+                                        id="manual-availability-source"
+                                        value={sourceLabel}
+                                        onChange={(event) => setSourceLabel(event.target.value)}
+                                        placeholder="twitter, beat writer, rotowire"
+                                        disabled={Boolean(readOnly)}
+                                    />
+                                </div>
+                                <div className="gv-field gv-field-wide">
+                                    <label htmlFor="manual-availability-reason-text">Reason Note</label>
+                                    <input
+                                        id="manual-availability-reason-text"
+                                        value={reasonText}
+                                        onChange={(event) => setReasonText(event.target.value)}
+                                        placeholder="Optional provenance or note"
+                                        disabled={Boolean(readOnly)}
+                                    />
+                                </div>
+                            </div>
+                            <div className="gv-toolbar-note">
+                                {operator.trim()
+                                    ? `Actions will be recorded under ${operator.trim()}.`
+                                    : 'Set an operator name before submitting manual overrides.'}
+                            </div>
+                        </div>
+                    </section>
+                </>
+            ) : null}
 
             <section className="gv-summary">
-                <div className="gv-summary-card">
-                    <span className="gv-summary-label">Active Overrides</span>
-                    <span className="gv-summary-value">{activeOverrides.length}</span>
-                    <span className="gv-summary-subtle">
-                        {activeOverrides.length ? 'Manual availability is currently affecting this game.' : 'No active manual availability overrides.'}
-                    </span>
-                </div>
-                <div className="gv-summary-card">
-                    <span className="gv-summary-label">Players</span>
-                    <span className="gv-summary-value">{game?.players.length ?? 0}</span>
-                    <span className="gv-summary-subtle">Immediate effective view from <code>/api/ops/game</code>.</span>
+                <div className="gv-summary-card gv-summary-combo">
+                    <div className="gv-summary-combo-stats">
+                        <div className="gv-summary-item">
+                            <span className="gv-summary-label">Active Overrides</span>
+                            <span className="gv-summary-value">{activeOverrides.length}</span>
+                            <span className="gv-summary-subtle">
+                                {activeOverrides.length ? 'Manual availability is currently affecting this game.' : 'No active manual availability overrides.'}
+                            </span>
+                        </div>
+                        <div className="gv-summary-item">
+                            <span className="gv-summary-label">Players</span>
+                            <span className="gv-summary-value">{game?.players.length ?? 0}</span>
+                            <span className="gv-summary-subtle">Immediate effective view from <code>/api/ops/game</code>.</span>
+                        </div>
+                    </div>
                 </div>
             </section>
 

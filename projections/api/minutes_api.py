@@ -65,6 +65,7 @@ PLAYER_COLUMNS: tuple[str, ...] = (
     "player_id",
     "player_name",
     "status",
+    "is_out",
     "team_id",
     "team_name",
     "team_tricode",

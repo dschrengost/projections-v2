@@ -3811,6 +3811,7 @@ def finalize_projections_live_task(
             "opponent_team_name",
             "opponent_team_tricode",
             "status",
+            "is_out",
             "tip_ts",
             "is_projected_starter",
             "is_confirmed_starter",
@@ -3842,6 +3843,74 @@ def finalize_projections_live_task(
             df = df.drop(
                 columns=[c for c in df.columns if c.endswith("__src")], errors="ignore"
             )
+
+    status_series = (
+        df["status"].fillna("").astype(str).str.upper().str.strip()
+        if "status" in df.columns
+        else pd.Series("", index=df.index, dtype="string")
+    )
+    status_out_mask = (
+        status_series.isin({"OUT", "O", "INACTIVE", "D", "DOUBTFUL", "SUSPENDED"})
+        | status_series.str.contains("DOUBT", na=False)
+    )
+    is_out_series = (
+        pd.to_numeric(df["is_out"], errors="coerce").fillna(0).astype(int).eq(1)
+        if "is_out" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    out_mask = status_out_mask | is_out_series
+    if bool(out_mask.any()):
+        df["is_out"] = out_mask.astype(int)
+        if "status" in df.columns:
+            df.loc[out_mask, "status"] = "OUT"
+        else:
+            df["status"] = np.where(out_mask, "OUT", "")
+
+        zero_prefixes = (
+            "minutes",
+            "sim_minutes",
+            "dk_fpts",
+            "sim_dk_fpts",
+            "fpts_sim",
+            "pts_",
+            "reb_",
+            "ast_",
+            "stl_",
+            "blk_",
+            "tov_",
+            "sim_pts_",
+            "sim_reb_",
+            "sim_ast_",
+            "sim_stl_",
+            "sim_blk_",
+            "sim_tov_",
+            "p_play",
+        )
+        zero_exact = {
+            "value",
+            "play_prob",
+            "pred_own_pct",
+            "own_proj",
+            "minutes_sim_p_active",
+        }
+        id_like_cols = {
+            "game_id",
+            "team_id",
+            "player_id",
+            "opponent_team_id",
+            "n_worlds",
+            "season",
+        }
+        zero_cols: list[str] = []
+        for col in df.columns:
+            if col in id_like_cols:
+                continue
+            if not pd.api.types.is_numeric_dtype(df[col]):
+                continue
+            if col in zero_exact or col.startswith(zero_prefixes):
+                zero_cols.append(col)
+        if zero_cols:
+            df.loc[out_mask, zero_cols] = 0.0
 
     df = _merge_live_ownership_into_projections(
         df,
@@ -4045,6 +4114,15 @@ def _validate_publishable_run_artifacts(
 ) -> dict[str, Any]:
     stage_reports: dict[str, Any] = {}
     single_file_targets = {
+        "features_minutes_v1": (
+            data_root
+            / "live"
+            / "features_minutes_v1"
+            / game_date
+            / f"run={run_id}"
+            / "features.parquet",
+            ("game_id", "team_id", "player_id"),
+        ),
         "features_gtv2_v1": (
             data_root / "live" / FEATURES_ROOT / game_date / f"run={run_id}" / "features.parquet",
             ("game_id", "team_id", "player_id"),
@@ -4168,6 +4246,7 @@ def publish_atomic_task(
     control_plane.atomic_write_json(Path(manifest_path), manifest_payload)
     pointers: dict[str, str] = {}
     targets = {
+        "features_minutes_v1": data_root / "live" / "features_minutes_v1" / game_date,
         "features_gtv2_v1": data_root / "live" / FEATURES_ROOT / game_date,
         "scores_gtv2": data_root / "artifacts" / SCORES_ROOT / f"game_date={game_date}",
         "worlds_gtv2": data_root / "artifacts" / WORLDS_ROOT / f"game_date={game_date}",
