@@ -149,6 +149,9 @@ _REPORT_WINDOW_WAIT_INTERVAL_SECONDS = 30
 _STALE_INPUT_TOLERANCE_SECONDS = 30
 _ODDS_MATERIALITY_MAX_MINUTES_TO_TIP = 180.0
 _WORLD_CONTRACT_TOL = 1e-4
+_WORLD_REALISM_SHORT_MINUTES_DK_THRESHOLD = 35.0
+_WORLD_REALISM_GAME_PTS_MAX_THRESHOLD = 340.0
+_WORLD_REALISM_GAME_PTS_MIN_THRESHOLD = 110.0
 _RETRYABLE_SUBPROCESS_EXIT_CODES = frozenset({-11, -6, 134, 139})
 _SUBPROCESS_CRASH_RETRY_ATTEMPTS = 2
 _SUBPROCESS_CRASH_RETRY_DELAY_SECONDS = 5
@@ -1879,6 +1882,315 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
     }
 
 
+def _recompute_dk_fpts(worlds_df: pd.DataFrame) -> pd.Series:
+    pts = pd.to_numeric(worlds_df.get("pts", 0.0), errors="coerce").fillna(0.0)
+    reb = pd.to_numeric(worlds_df.get("reb", 0.0), errors="coerce").fillna(0.0)
+    ast = pd.to_numeric(worlds_df.get("ast", 0.0), errors="coerce").fillna(0.0)
+    stl = pd.to_numeric(worlds_df.get("stl", 0.0), errors="coerce").fillna(0.0)
+    blk = pd.to_numeric(worlds_df.get("blk", 0.0), errors="coerce").fillna(0.0)
+    tov = pd.to_numeric(worlds_df.get("tov", 0.0), errors="coerce").fillna(0.0)
+    base = pts + 1.25 * reb + 1.5 * ast + 2.0 * stl + 2.0 * blk - 0.5 * tov
+    qualifying = pd.concat([pts, reb, ast, stl, blk], axis=1).ge(10.0).sum(axis=1)
+    bonus_dd = qualifying.eq(2).astype(float) * 1.5
+    bonus_td = qualifying.ge(3).astype(float) * 3.0
+    return (base + bonus_dd + bonus_td).clip(lower=0.0)
+
+
+def _apply_low_minutes_tail_damping_to_worlds(
+    worlds_df: pd.DataFrame,
+    *,
+    minutes_threshold: float = 12.0,
+    min_scale: float = 0.55,
+    target_game_ids: set[int] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Shrink low-minute tail residuals toward each player's world mean."""
+    if worlds_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_worlds"}
+    required = {"game_id", "team_id", "player_id", "minutes", "pts", "reb", "ast", "dk_fpts"}
+    if not required.issubset(worlds_df.columns):
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_required_columns",
+            "missing_columns": sorted(required - set(worlds_df.columns)),
+        }
+    if minutes_threshold <= 0.0:
+        return worlds_df, {
+            "applied": False,
+            "reason": "invalid_minutes_threshold",
+            "minutes_threshold": float(minutes_threshold),
+        }
+
+    low = float(minutes_threshold)
+    floor_scale = float(np.clip(min_scale, 0.0, 1.0))
+    out = worlds_df.copy()
+    minutes = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    ramp = np.clip((low - minutes) / low, 0.0, 1.0)
+    scale = 1.0 - (1.0 - floor_scale) * ramp
+    damp_mask = (minutes > 0.0) & (minutes < low)
+
+    if target_game_ids:
+        game_ids = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
+        damp_mask = damp_mask & game_ids.isin(sorted(target_game_ids)).to_numpy(dtype=bool)
+
+    if not bool(damp_mask.any()):
+        return out, {
+            "applied": False,
+            "reason": "no_low_minutes_rows",
+            "minutes_threshold": low,
+            "min_scale": floor_scale,
+            "target_game_count": int(len(target_game_ids or set())),
+        }
+
+    key_cols = ["game_id", "team_id", "player_id"]
+    stat_cols = [c for c in ("pts", "reb", "ast", "stl", "blk", "tov") if c in out.columns]
+    for col in stat_cols:
+        x = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
+        mu = x.groupby([out[k] for k in key_cols], dropna=False).transform("mean")
+        new_vals = (mu + pd.Series(scale, index=out.index) * (x - mu)).clip(lower=0.0)
+        out[col] = np.where(damp_mask, new_vals.to_numpy(dtype=float), x.to_numpy(dtype=float))
+
+    if {"oreb", "dreb", "reb"}.issubset(out.columns):
+        oreb = pd.to_numeric(out["oreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        dreb = pd.to_numeric(out["dreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        reb = pd.to_numeric(out["reb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        split_sum = np.maximum(oreb + dreb, 1e-6)
+        oreb_share = np.divide(oreb, split_sum)
+        oreb_new = reb * oreb_share
+        dreb_new = reb * (1.0 - oreb_share)
+        out["oreb"] = np.where(damp_mask, oreb_new, oreb)
+        out["dreb"] = np.where(damp_mask, dreb_new, dreb)
+
+    out["dk_fpts"] = _recompute_dk_fpts(out)
+    report = {
+        "applied": True,
+        "minutes_threshold": low,
+        "min_scale": floor_scale,
+        "target_game_count": int(len(target_game_ids or set())),
+        "affected_rows": int(np.count_nonzero(damp_mask)),
+        "affected_players": int(
+            out.loc[damp_mask, key_cols].drop_duplicates().shape[0]
+            if np.count_nonzero(damp_mask) > 0
+            else 0
+        ),
+        "scale_mean": float(np.mean(scale[damp_mask])) if np.count_nonzero(damp_mask) > 0 else 1.0,
+        "scale_p10": float(np.quantile(scale[damp_mask], 0.10)) if np.count_nonzero(damp_mask) > 0 else 1.0,
+        "scale_p90": float(np.quantile(scale[damp_mask], 0.90)) if np.count_nonzero(damp_mask) > 0 else 1.0,
+    }
+    return out, report
+
+
+def _resample_extreme_game_worlds(
+    worlds_df: pd.DataFrame,
+    *,
+    random_seed: int,
+    max_passes: int = 1,
+    short_minutes_threshold: float = 12.0,
+    short_minutes_dk_threshold: float = _WORLD_REALISM_SHORT_MINUTES_DK_THRESHOLD,
+    game_pts_max: float = _WORLD_REALISM_GAME_PTS_MAX_THRESHOLD,
+    game_pts_min: float = _WORLD_REALISM_GAME_PTS_MIN_THRESHOLD,
+    target_game_ids: set[int] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Replace extreme game-world pairs with sampled in-game donor worlds."""
+    if worlds_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_worlds"}
+    required = {"world_idx", "game_id", "team_id", "player_id", "minutes", "pts", "dk_fpts"}
+    if not required.issubset(worlds_df.columns):
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_required_columns",
+            "missing_columns": sorted(required - set(worlds_df.columns)),
+        }
+
+    out = worlds_df.copy()
+    key_cols = ["game_id", "team_id", "player_id"]
+    pair_cols = ["world_idx", "game_id"]
+    max_iter = max(0, int(max_passes))
+    if max_iter == 0:
+        return out, {"applied": False, "reason": "disabled_max_passes"}
+
+    rng = np.random.default_rng(int(random_seed))
+    pass_reports: list[dict[str, Any]] = []
+    total_replaced = 0
+
+    for pass_idx in range(max_iter):
+        minutes = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0)
+        dk = pd.to_numeric(out["dk_fpts"], errors="coerce").fillna(0.0)
+        pts = pd.to_numeric(out["pts"], errors="coerce").fillna(0.0)
+        game_id = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
+
+        row_spike = (minutes < float(short_minutes_threshold)) & (
+            dk > float(short_minutes_dk_threshold)
+        )
+        if target_game_ids:
+            row_spike = row_spike & game_id.isin(sorted(target_game_ids))
+
+        pair_short = (
+            out.loc[row_spike, pair_cols]
+            .drop_duplicates()
+            .assign(short_spike=True)
+        )
+
+        game_pts = (
+            out.assign(_pts=pts)
+            .groupby(pair_cols, dropna=False, as_index=False)
+            .agg(game_pts=("_pts", "sum"))
+        )
+        if target_game_ids:
+            game_pts = game_pts.loc[
+                pd.to_numeric(game_pts["game_id"], errors="coerce")
+                .astype("Int64")
+                .isin(sorted(target_game_ids))
+            ].copy()
+        pair_hi = game_pts.loc[
+            game_pts["game_pts"] > float(game_pts_max), pair_cols
+        ].drop_duplicates().assign(game_hi=True)
+        pair_lo = game_pts.loc[
+            game_pts["game_pts"] < float(game_pts_min), pair_cols
+        ].drop_duplicates().assign(game_lo=True)
+
+        pair_flags = (
+            game_pts.loc[:, pair_cols]
+            .drop_duplicates()
+            .merge(pair_short, on=pair_cols, how="left")
+            .merge(pair_hi, on=pair_cols, how="left")
+            .merge(pair_lo, on=pair_cols, how="left")
+        )
+        for flag_col in ("short_spike", "game_hi", "game_lo"):
+            if flag_col not in pair_flags.columns:
+                pair_flags[flag_col] = False
+            else:
+                pair_flags[flag_col] = pair_flags[flag_col].eq(True)
+        pair_flags["is_bad"] = (
+            pair_flags["short_spike"] | pair_flags["game_hi"] | pair_flags["game_lo"]
+        )
+
+        bad_pairs = pair_flags.loc[pair_flags["is_bad"], pair_cols].copy()
+        if bad_pairs.empty:
+            break
+
+        good_by_game: dict[int, list[int]] = {}
+        for gid, grp in pair_flags.groupby("game_id", dropna=False):
+            gid_i = int(gid)
+            goods = grp.loc[~grp["is_bad"], "world_idx"].astype(int).tolist()
+            good_by_game[gid_i] = goods
+
+        replaced_this_pass = 0
+        skipped_no_donor = 0
+        skipped_key_mismatch = 0
+        for row in bad_pairs.sort_values(pair_cols).itertuples(index=False):
+            target_world = int(row.world_idx)
+            gid = int(row.game_id)
+            donors = good_by_game.get(gid, [])
+            if not donors:
+                skipped_no_donor += 1
+                continue
+            donor_world = int(rng.choice(donors))
+            target_rows = out.loc[
+                (pd.to_numeric(out["world_idx"], errors="coerce").astype("Int64") == target_world)
+                & (pd.to_numeric(out["game_id"], errors="coerce").astype("Int64") == gid)
+            ].copy()
+            donor_rows = out.loc[
+                (pd.to_numeric(out["world_idx"], errors="coerce").astype("Int64") == donor_world)
+                & (pd.to_numeric(out["game_id"], errors="coerce").astype("Int64") == gid)
+            ].copy()
+            if target_rows.empty or donor_rows.empty:
+                skipped_no_donor += 1
+                continue
+            target_rows = target_rows.sort_values(key_cols)
+            donor_rows = donor_rows.sort_values(key_cols)
+            if (
+                len(target_rows) != len(donor_rows)
+                or not target_rows[key_cols].reset_index(drop=True).equals(
+                    donor_rows[key_cols].reset_index(drop=True)
+                )
+            ):
+                skipped_key_mismatch += 1
+                continue
+            replace_cols = [c for c in out.columns if c != "world_idx"]
+            target_idx = target_rows.index.to_numpy()
+            for col in replace_cols:
+                out.loc[target_idx, col] = donor_rows[col].to_numpy()
+            replaced_this_pass += 1
+
+        pass_reports.append(
+            {
+                "pass_idx": int(pass_idx + 1),
+                "bad_pair_count": int(len(bad_pairs)),
+                "bad_short_spike_count": int(pair_flags["short_spike"].sum()),
+                "bad_game_hi_count": int(pair_flags["game_hi"].sum()),
+                "bad_game_lo_count": int(pair_flags["game_lo"].sum()),
+                "replaced_pair_count": int(replaced_this_pass),
+                "skipped_no_donor": int(skipped_no_donor),
+                "skipped_key_mismatch": int(skipped_key_mismatch),
+            }
+        )
+        total_replaced += int(replaced_this_pass)
+        if replaced_this_pass == 0:
+            break
+
+    report = {
+        "applied": bool(total_replaced > 0),
+        "random_seed": int(random_seed),
+        "max_passes": int(max_iter),
+        "target_game_count": int(len(target_game_ids or set())),
+        "short_minutes_threshold": float(short_minutes_threshold),
+        "short_minutes_dk_threshold": float(short_minutes_dk_threshold),
+        "game_pts_max": float(game_pts_max),
+        "game_pts_min": float(game_pts_min),
+        "total_replaced_pairs": int(total_replaced),
+        "passes": pass_reports,
+    }
+    if total_replaced == 0 and not pass_reports:
+        report["applied"] = False
+        report["reason"] = "no_outlier_pairs"
+    return out, report
+
+
+def _apply_world_realism_controls_to_worlds(
+    worlds_df: pd.DataFrame,
+    *,
+    enabled: bool,
+    random_seed: int,
+    low_minutes_tail_damping_enabled: bool,
+    low_minutes_tail_minutes_threshold: float,
+    low_minutes_tail_min_scale: float,
+    outlier_resample_enabled: bool,
+    outlier_resample_max_passes: int,
+    target_game_ids: set[int] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if not enabled:
+        return worlds_df, {"applied": False, "reason": "disabled"}
+
+    out = worlds_df.copy()
+    report: dict[str, Any] = {"applied": False}
+    if low_minutes_tail_damping_enabled:
+        out, damp_report = _apply_low_minutes_tail_damping_to_worlds(
+            out,
+            minutes_threshold=float(low_minutes_tail_minutes_threshold),
+            min_scale=float(low_minutes_tail_min_scale),
+            target_game_ids=target_game_ids,
+        )
+    else:
+        damp_report = {"applied": False, "reason": "disabled"}
+    report["low_minutes_tail_damping"] = damp_report
+
+    if outlier_resample_enabled:
+        out, resample_report = _resample_extreme_game_worlds(
+            out,
+            random_seed=int(random_seed),
+            max_passes=int(outlier_resample_max_passes),
+            target_game_ids=target_game_ids,
+        )
+    else:
+        resample_report = {"applied": False, "reason": "disabled"}
+    report["outlier_resample"] = resample_report
+    report["applied"] = bool(
+        bool((damp_report or {}).get("applied"))
+        or bool((resample_report or {}).get("applied"))
+    )
+    return out, report
+
+
 def _apply_props_uplift_calibration_to_worlds(
     worlds_df: pd.DataFrame,
     *,
@@ -2164,16 +2476,7 @@ def _apply_props_uplift_calibration_to_worlds(
         )
         report["stats"][stat_name]["top_adjustments"] = top_rows.to_dict(orient="records")
 
-    pts = pd.to_numeric(out["pts"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-    reb = pd.to_numeric(out["reb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-    ast = pd.to_numeric(out["ast"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-    stl = pd.to_numeric(out["stl"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-    blk = pd.to_numeric(out["blk"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-    tov = pd.to_numeric(out["tov"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-    base = pts + 1.25 * reb + 1.5 * ast + 2.0 * stl + 2.0 * blk - 0.5 * tov
-    qualifying = np.stack([pts, reb, ast, stl, blk], axis=1) >= 10.0
-    q_count = qualifying.sum(axis=1)
-    out["dk_fpts"] = np.clip(base + np.where(q_count == 2, 1.5, 0.0) + np.where(q_count >= 3, 3.0, 0.0), 0.0, None)
+    out["dk_fpts"] = _recompute_dk_fpts(out)
 
     report["total_adjustment_events"] = int(
         sum(int((report["stats"].get(s) or {}).get("applied_player_count", 0)) for s in stat_cfg)
@@ -3499,6 +3802,12 @@ def generate_worlds_gtv2_live_task(
     make_model_mode: str = "beta_binomial_all",
     make_model_use_learned_efficiency: bool = True,
     apply_props_uplift: bool = True,
+    apply_world_realism_controls: bool = True,
+    world_realism_low_minutes_tail_damping_enabled: bool = True,
+    world_realism_low_minutes_threshold: float = 12.0,
+    world_realism_low_minutes_min_scale: float = 0.55,
+    world_realism_outlier_resample_enabled: bool = True,
+    world_realism_outlier_resample_max_passes: int = 1,
 ) -> dict[str, str]:
     run_dir = (
         data_root
@@ -3552,6 +3861,10 @@ def generate_worlds_gtv2_live_task(
                 "inactive_nonzero_stats": 0,
                 "inactive_nonzero_fpts_proxy": 0,
                 "total_violations": 0,
+            },
+            "world_realism_controls": {
+                "applied": False,
+                "reason": "placeholder_mode",
             },
             "placeholder_mode": True,
         }
@@ -3643,6 +3956,25 @@ def generate_worlds_gtv2_live_task(
                 logger.info("Applied props uplift calibration: %s", props_uplift_report)
         else:
             props_uplift_report = {"applied": False, "reason": "disabled"}
+        worlds_df, world_realism_report = _apply_world_realism_controls_to_worlds(
+            worlds_df,
+            enabled=bool(apply_world_realism_controls),
+            random_seed=int(random_seed),
+            low_minutes_tail_damping_enabled=bool(
+                world_realism_low_minutes_tail_damping_enabled
+            ),
+            low_minutes_tail_minutes_threshold=float(
+                world_realism_low_minutes_threshold
+            ),
+            low_minutes_tail_min_scale=float(world_realism_low_minutes_min_scale),
+            outlier_resample_enabled=bool(world_realism_outlier_resample_enabled),
+            outlier_resample_max_passes=int(
+                world_realism_outlier_resample_max_passes
+            ),
+            target_game_ids=None,
+        )
+        if bool(world_realism_report.get("applied")):
+            logger.info("Applied world realism controls: %s", world_realism_report)
         _atomic_write_validated_parquet(
             worlds_df,
             worlds_path,
@@ -3682,6 +4014,7 @@ def generate_worlds_gtv2_live_task(
                 "use_learned_efficiency": bool(make_model_cfg.use_learned_efficiency),
             },
             "props_uplift_calibration": props_uplift_report,
+            "world_realism_controls": world_realism_report,
             "created_at": _utc_now_iso(),
         }
 
@@ -3942,6 +4275,13 @@ def materialize_unified_run_artifacts_task(
     run_id: str,
     data_root: Path,
     target_game_ids: list[int],
+    apply_world_realism_controls: bool = True,
+    world_realism_low_minutes_tail_damping_enabled: bool = True,
+    world_realism_low_minutes_threshold: float = 12.0,
+    world_realism_low_minutes_min_scale: float = 0.55,
+    world_realism_outlier_resample_enabled: bool = True,
+    world_realism_outlier_resample_max_passes: int = 1,
+    random_seed: int = 42,
 ) -> dict[str, Any]:
     target_ids = _normalize_game_ids(target_game_ids)
     if not target_ids:
@@ -4004,6 +4344,19 @@ def materialize_unified_run_artifacts_task(
     merged_worlds, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
         merged_worlds,
         features_df=merged_features,
+    )
+    merged_worlds, world_realism_report = _apply_world_realism_controls_to_worlds(
+        merged_worlds,
+        enabled=bool(apply_world_realism_controls),
+        random_seed=int(random_seed),
+        low_minutes_tail_damping_enabled=bool(
+            world_realism_low_minutes_tail_damping_enabled
+        ),
+        low_minutes_tail_minutes_threshold=float(world_realism_low_minutes_threshold),
+        low_minutes_tail_min_scale=float(world_realism_low_minutes_min_scale),
+        outlier_resample_enabled=bool(world_realism_outlier_resample_enabled),
+        outlier_resample_max_passes=int(world_realism_outlier_resample_max_passes),
+        target_game_ids=set(target_ids),
     )
     _atomic_write_validated_parquet(
         merged_worlds,
@@ -4089,6 +4442,7 @@ def materialize_unified_run_artifacts_task(
         "rows": int(len(merged_worlds)),
         "projection_rows": int(len(merged_world_projections)),
         "props_uplift_calibration": props_uplift_report,
+        "world_realism_controls": world_realism_report,
         "created_at": _utc_now_iso(),
     }
     world_summary_path.write_text(
@@ -4288,6 +4642,12 @@ def nba_live_pipeline_v3_flow(
     gtv2_flow_scale_clip_override: float | None = None,
     gtv2_make_model_mode: str = "beta_binomial_all",
     gtv2_make_model_use_learned_efficiency: bool = True,
+    gtv2_apply_world_realism_controls: bool = True,
+    gtv2_world_realism_low_minutes_tail_damping_enabled: bool = True,
+    gtv2_world_realism_low_minutes_threshold: float = 12.0,
+    gtv2_world_realism_low_minutes_min_scale: float = 0.55,
+    gtv2_world_realism_outlier_resample_enabled: bool = True,
+    gtv2_world_realism_outlier_resample_max_passes: int = 1,
     input_max_age_minutes: float = 360.0,
     require_action_props: bool = True,
     allow_rotowire_props_fallback: bool = True,
@@ -4662,6 +5022,22 @@ def nba_live_pipeline_v3_flow(
                 gtv2_make_model_use_learned_efficiency
             ),
             apply_props_uplift=bool(rerun_plan.get("mode") == "full_slate"),
+            apply_world_realism_controls=bool(gtv2_apply_world_realism_controls),
+            world_realism_low_minutes_tail_damping_enabled=bool(
+                gtv2_world_realism_low_minutes_tail_damping_enabled
+            ),
+            world_realism_low_minutes_threshold=float(
+                gtv2_world_realism_low_minutes_threshold
+            ),
+            world_realism_low_minutes_min_scale=float(
+                gtv2_world_realism_low_minutes_min_scale
+            ),
+            world_realism_outlier_resample_enabled=bool(
+                gtv2_world_realism_outlier_resample_enabled
+            ),
+            world_realism_outlier_resample_max_passes=int(
+                gtv2_world_realism_outlier_resample_max_passes
+            ),
         )
 
         ownership_dir = score_ownership_linestar_task(
@@ -4689,6 +5065,23 @@ def nba_live_pipeline_v3_flow(
                 run_id=run_id,
                 data_root=data_root,
                 target_game_ids=target_game_ids,
+                apply_world_realism_controls=bool(gtv2_apply_world_realism_controls),
+                world_realism_low_minutes_tail_damping_enabled=bool(
+                    gtv2_world_realism_low_minutes_tail_damping_enabled
+                ),
+                world_realism_low_minutes_threshold=float(
+                    gtv2_world_realism_low_minutes_threshold
+                ),
+                world_realism_low_minutes_min_scale=float(
+                    gtv2_world_realism_low_minutes_min_scale
+                ),
+                world_realism_outlier_resample_enabled=bool(
+                    gtv2_world_realism_outlier_resample_enabled
+                ),
+                world_realism_outlier_resample_max_passes=int(
+                    gtv2_world_realism_outlier_resample_max_passes
+                ),
+                random_seed=int(gtv2_seed),
             )
             (v3_run_dir / "unified_artifacts_report.json").write_text(
                 json.dumps(unified_report, indent=2, sort_keys=True),

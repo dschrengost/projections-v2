@@ -6240,16 +6240,17 @@ Correlation / concentration (no collapse observed):
      preserving nullable behavior in publish/report casting paths.
    - This remained stable through the `calibv3fix_20260303T163449Z` live publish.
 
-#### 16.16.8 Design rationale: uplift-only and targeted scope
+#### 16.16.8 Design rationale: bounded symmetric and targeted scope
 
-Why this pass is currently **uplift-only**:
+Why this pass is currently **bounded symmetric** (not uplift-only):
 
-1. The observed live error was strongly directional on this slate: high-line stars and
-   specialist `REB/AST` players were systematically undercalled.
-2. One-sided correction reduces emergency rollout risk by fixing the known sign of error
-   without introducing broad downward re-pricing from noisy market snapshots.
-3. It avoids conflict with existing minutes/play-prob suppression paths for low-availability
-   players (we did not want to create additional downward pressure while stabilizing stars).
+1. The live path now supports both upward and downward calibration for `PTS/REB/AST`
+   when market lines are present and player-level gap thresholds are met.
+2. Downward movement is intentionally capped/floored via per-stat guardrails
+   (`min_line_down`, `min_gap_down`, `weight_down`, `min_scale_down`,
+   `min_var_scale_down`) to avoid aggressive repricing from noisy snapshots.
+3. Active-row guards still apply (`minutes > 0`, fallback `dk_fpts > 0`), so inactive
+   rows remain unchanged and prior zero contracts are preserved.
 
 Why this pass is **not applied to all props-covered players**:
 
@@ -6257,11 +6258,47 @@ Why this pass is **not applied to all props-covered players**:
    are noisier and more volatile.
 2. Broad all-player forcing increases risk of distorting team-level concentration/correlation
    structure and can overfit to short-horizon market noise.
-3. The immediate production objective was to repair high-impact miss patterns (stars/high-line
-   undercalls) with minimal collateral regression.
+3. The immediate production objective remains targeted repair of high-impact miss patterns
+   with minimal collateral regression, while allowing controlled correction when players
+   are materially overcalled vs line.
 
 Implication:
 
-- Current calibration is an intentionally narrow, high-signal patch.
-- Next iteration should move toward a **bounded symmetric** framework (allow both up/down
-  movement) with confidence weighting and anti-overshoot caps before any all-player expansion.
+- Current calibration is a narrow, high-signal **bounded symmetric** patch.
+- Next iteration should add confidence weighting and stronger anti-overshoot controls
+  before any all-player expansion.
+
+#### 16.16.9 World realism controls (tail damping + bounded resample)
+
+To reduce physically implausible world tails (especially low-minute explosions), the
+live world path now applies **post-sampling realism controls** after props calibration:
+
+1. **Low-minute tail damping** (`_apply_low_minutes_tail_damping_to_worlds`)
+   - Applies to active rows with `minutes < threshold` (default `12.0`).
+   - Shrinks per-player world residuals toward that player's world mean for
+     `PTS/REB/AST/STL/BLK/TOV`.
+   - Uses a linear damping scale with floor (`min_scale`, default `0.55`), then
+     recomputes `dk_fpts`.
+
+2. **Bounded game-world outlier resampling** (`_resample_extreme_game_worlds`)
+   - Detects outlier `(world_idx, game_id)` pairs using:
+     - short-minute spike: `minutes < 12` and `dk_fpts > 35`
+     - game-total bounds: `game_pts > 340` or `game_pts < 110`
+   - Replaces flagged pairs with donor worlds from the same game that are not flagged.
+   - Runs for bounded passes (`max_passes`, default `1`) with deterministic seed.
+
+3. **Targeted merge behavior for game-scoped reruns**
+   - During merged reruns, realism controls are applied only to `target_game_ids` to avoid
+     mutating untouched games from the promoted baseline.
+
+Operational notes:
+
+- Controls are configurable at flow level:
+  - `gtv2_apply_world_realism_controls`
+  - `gtv2_world_realism_low_minutes_tail_damping_enabled`
+  - `gtv2_world_realism_low_minutes_threshold`
+  - `gtv2_world_realism_low_minutes_min_scale`
+  - `gtv2_world_realism_outlier_resample_enabled`
+  - `gtv2_world_realism_outlier_resample_max_passes`
+- Reports are written under `world_contracts_summary.json` as `world_realism_controls`
+  alongside `props_uplift_calibration`.
