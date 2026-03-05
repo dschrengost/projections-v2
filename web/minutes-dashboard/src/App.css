@@ -1324,21 +1324,13 @@ tbody tr:hover {
 
 .game-filters {
   margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid #334155;
-}
-
-.game-filters h4 {
-  margin: 0 0 0.5rem 0;
-  font-size: 0.85rem;
-  color: #94a3b8;
 }
 
 .game-filter-list {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  max-height: 200px;
+  max-height: min(48vh, 620px);
   overflow-y: auto;
 }
 
@@ -1434,6 +1426,49 @@ tbody tr:hover {
 
 .clear-exclusions:hover {
   background: rgba(79, 70, 229, 0.1);
+}
+
+.game-filter-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.74);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.game-filter-drawer {
+  width: min(760px, 94vw);
+  max-height: min(88vh, 760px);
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+  padding: 0.9rem;
+  box-shadow: 0 10px 40px rgba(2, 6, 23, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.game-filter-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.game-filter-drawer-header h4 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.game-filter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
 }
 
 /* Lock Icon */
