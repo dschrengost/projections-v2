@@ -187,7 +187,7 @@ def test_build_post_contest_replay_analytics_writes_all_artifacts(tmp_path: Path
         replay_analytics_service,
         "build_player_pool",
         lambda **kwargs: [
-            {"player_id": str(i), "name": name, "team": "A" if i < 9 else "B", "positions": ["UTIL"], "salary": 5000, "own_proj": 12.5, "proj": 30.0, "game_matchup": "A@B"}
+            {"player_id": str(i), "name": name, "team": ("A" if i % 2 == 0 else "B"), "positions": ["UTIL"], "salary": 5000, "own_proj": 12.5, "proj": 30.0, "game_matchup": "A@B"}
             for i, name in enumerate(
                 ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta", "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Omicron", "Pi"],
                 start=1,
@@ -233,6 +233,7 @@ def test_build_post_contest_replay_analytics_writes_all_artifacts(tmp_path: Path
             {name.lower(): str(i) for i, name in enumerate(["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta", "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Omicron", "Pi"], start=1)},
             {},
             {},
+            {},
         ),
     )
     monkeypatch.setattr(
@@ -254,7 +255,7 @@ def test_build_post_contest_replay_analytics_writes_all_artifacts(tmp_path: Path
     pd.DataFrame(
         [
             {"contest_id": 123, **{f"p{i}_id": i for i in range(1, 9)}},
-            {"contest_id": 123, **{f"p{i}_id": i + 8 for i in range(1, 9)}},
+            {"contest_id": 123, **{f"p{i}_id": (999999 if i == 8 else i + 8) for i in range(1, 9)}},
         ]
     ).to_csv(eval_path, index=False)
     manifest_path.write_text(json.dumps({"contest_ids": ["123"], "eval_lineups_path": str(eval_path), "created_at_utc": "2099-01-01T20:00:00Z"}))
@@ -282,3 +283,8 @@ def test_build_post_contest_replay_analytics_writes_all_artifacts(tmp_path: Path
     assert bundle.field_calibration_path.exists()
     assert bundle.regret_summary_path.exists()
     assert bundle.summary_path.exists()
+    summary = json.loads(bundle.summary_path.read_text())
+    assert summary["replay_trust_status"] == "broken"
+    assert summary["candidate_universe_source"] == "eval_lineups_csv"
+    assert summary["candidate_universe_lineup_count"] == 1
+    assert summary["resolution"]["candidate_missing_player_id_count"] == 1

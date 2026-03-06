@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from projections.contest_sim.field_library import FieldLibrary
 from projections.contest_sim.scoring_models import ContestConfig, ContestSimResult, SummaryStats
+from projections.post_contest.replay_models import ContestReplayEntry
 from projections.post_contest import replay_service
 
 
@@ -87,6 +87,11 @@ def test_prepare_post_contest_replay_builds_exact_opponent_field(tmp_path: Path,
         "_load_dk_nba_draftable_ids_by_player",
         lambda draft_group_id: ({}, {}),
     )
+    monkeypatch.setattr(
+        replay_service,
+        "_cached_world_player_ids",
+        lambda **kwargs: tuple(str(i) for i in range(1, 25)),
+    )
 
     prepared = replay_service.prepare_post_contest_replay(
         contest_id="123",
@@ -141,6 +146,11 @@ def test_run_post_contest_replay_passes_user_and_field_weights(tmp_path: Path, m
         "_load_dk_nba_draftable_ids_by_player",
         lambda draft_group_id: ({}, {}),
     )
+    monkeypatch.setattr(
+        replay_service,
+        "_cached_world_player_ids",
+        lambda **kwargs: tuple(str(i) for i in range(1, 17)),
+    )
 
     captured: dict[str, object] = {}
 
@@ -178,3 +188,40 @@ def test_run_post_contest_replay_passes_user_and_field_weights(tmp_path: Path, m
     assert captured["user_weights"] == [1]
     assert captured["field_weights"] == [2]
     assert captured["field_lineups"] == [sorted([str(i) for i in range(9, 17)])]
+
+
+def test_resolve_entries_marks_outside_world_namespace_as_unresolved(monkeypatch) -> None:
+    monkeypatch.setattr(
+        replay_service,
+        "_build_name_to_internal_map",
+        lambda **kwargs: (
+            {"alpha": "1"},
+            {},
+            {"1": "Alpha"},
+            {},
+        ),
+    )
+    entries = [
+        ContestReplayEntry(
+            entry_id="1",
+            entry_name="daniel",
+            rank=1,
+            points=100.0,
+            lineup_names=["Alpha"],
+            raw_lineup="PG Alpha",
+            lineup_key="alpha",
+            prize=0.0,
+        )
+    ]
+    resolved, stats = replay_service.resolve_entries_to_internal_ids(
+        entries,
+        game_date="2099-01-01",
+        draft_group_id=999,
+        canonical_player_ids=["2"],
+    )
+
+    assert resolved[0].player_ids == []
+    assert resolved[0].unresolved_names == ["Alpha"]
+    assert stats["outside_worlds_slot_count"] == 1
+    assert stats["unresolved_slot_count"] == 1
+    assert stats["outside_worlds_examples"][0]["resolved_player_id"] == "1"

@@ -15,7 +15,7 @@ from unidecode import unidecode
 from projections.api.contest_service import parse_contest_csv, parse_lineup
 from projections.api.optimizer_api import _load_dk_nba_draftable_ids_by_player
 from projections.api.optimizer_service import build_player_pool
-from projections.contest_sim.contest_sim_service import run_contest_simulation
+from projections.contest_sim.contest_sim_service import load_player_worlds, run_contest_simulation
 from projections.contest_sim.field_library import FieldLibrary, save_field_library
 from projections.names import normalize_player_name
 from projections.paths import get_data_root
@@ -143,6 +143,23 @@ def _raw_results_root(data_root: Path) -> Path:
 
 def _inventory_path(data_root: Path) -> Path:
     return data_root / "analytics" / "contest_results" / "contest_inventory.parquet"
+
+
+@lru_cache(maxsize=16)
+def _cached_world_player_ids(
+    *,
+    game_date: str,
+    data_root_str: str,
+    run_id: Optional[str],
+    worlds_source: str,
+) -> Tuple[str, ...]:
+    worlds = load_player_worlds(
+        game_date=game_date,
+        data_root=Path(data_root_str),
+        run_id=run_id,
+        worlds_source=worlds_source,  # type: ignore[arg-type]
+    )
+    return tuple(str(player_id) for player_id in worlds.player_index.keys())
 
 
 @lru_cache(maxsize=4)
@@ -483,6 +500,7 @@ def resolve_entries_to_internal_ids(
     draft_group_id: int,
     data_root: Optional[Path] = None,
     run_id: Optional[str] = None,
+    canonical_player_ids: Optional[Sequence[str]] = None,
 ) -> Tuple[List[ResolvedContestReplayEntry], Dict[str, Any]]:
     resolved_name_map, ambiguous_name_map, internal_to_name, resolved_signatures = _build_name_to_internal_map(
         game_date=game_date,
@@ -490,13 +508,16 @@ def resolve_entries_to_internal_ids(
         data_root=data_root,
         run_id=run_id,
     )
+    canonical_ids = {str(player_id) for player_id in (canonical_player_ids or [])}
 
     resolved_entries: List[ResolvedContestReplayEntry] = []
     unresolved_examples: List[Dict[str, Any]] = []
     ambiguous_examples: List[Dict[str, Any]] = []
     fuzzy_examples: List[Dict[str, Any]] = []
+    outside_world_examples: List[Dict[str, Any]] = []
     resolved_slot_count = 0
     unresolved_slot_count = 0
+    outside_world_slot_count = 0
 
     for entry in entries:
         player_ids: List[str] = []
@@ -509,6 +530,20 @@ def resolve_entries_to_internal_ids(
                 resolved_signatures=resolved_signatures,
             )
             if player_id is not None:
+                if canonical_ids and player_id not in canonical_ids:
+                    unresolved_names.append(name)
+                    unresolved_slot_count += 1
+                    outside_world_slot_count += 1
+                    outside_world_examples.append(
+                        {
+                            "entry_id": entry.entry_id,
+                            "entry_name": entry.entry_name,
+                            "method": "outside_worlds_namespace",
+                            "raw_name": name,
+                            "resolved_player_id": player_id,
+                        }
+                    )
+                    continue
                 player_ids.append(player_id)
                 resolved_slot_count += 1
                 if diag and diag.get("method") == "fuzzy":
@@ -555,11 +590,14 @@ def resolve_entries_to_internal_ids(
         "unresolved_slot_count": int(unresolved_slot_count),
         "slot_resolution_rate": float(resolved_slot_count / max(resolved_slot_count + unresolved_slot_count, 1)),
         "fuzzy_match_count": int(len(fuzzy_examples)),
+        "outside_worlds_slot_count": int(outside_world_slot_count),
         "unresolved_examples": unresolved_examples[:10],
         "ambiguous_examples": ambiguous_examples[:10],
         "fuzzy_examples": fuzzy_examples[:10],
+        "outside_worlds_examples": outside_world_examples[:10],
         "resolved_name_count": int(len(resolved_name_map)),
         "player_pool_size": int(len(internal_to_name)),
+        "canonical_world_player_count": int(len(canonical_ids)),
     }
     return resolved_entries, stats
 
@@ -624,6 +662,7 @@ def prepare_post_contest_replay(
     draft_group_id: Optional[int] = None,
     data_root: Optional[Path] = None,
     run_id: Optional[str] = None,
+    worlds_source: str = "gtv2",
     strict_resolution: bool = True,
 ) -> PreparedReplayContext:
     data_root = data_root or get_data_root()
@@ -639,19 +678,27 @@ def prepare_post_contest_replay(
             f"(observed_entries={len(entries)}, expected_field_size={meta.field_size})"
         )
 
+    canonical_player_ids = _cached_world_player_ids(
+        game_date=meta.game_date,
+        data_root_str=str(data_root),
+        run_id=run_id,
+        worlds_source=worlds_source,
+    )
     resolved_entries, resolution_stats = resolve_entries_to_internal_ids(
         entries,
         game_date=meta.game_date,
         draft_group_id=resolved_draft_group_id,
         data_root=data_root,
         run_id=run_id,
+        canonical_player_ids=canonical_player_ids,
     )
     unresolved_entries = [entry for entry in resolved_entries if entry.unresolved_names]
     if strict_resolution and unresolved_entries:
         sample = unresolved_entries[0]
         raise ValueError(
             "Could not resolve all lineup names to internal player IDs. "
-            f"First unresolved entry_id={sample.entry_id} names={sample.unresolved_names}"
+            f"First unresolved entry_id={sample.entry_id} names={sample.unresolved_names}; "
+            f"outside_worlds_slot_count={resolution_stats.get('outside_worlds_slot_count', 0)}"
         )
 
     user_entries = _select_user_entries(resolved_entries, user_pattern=user_pattern)
@@ -676,6 +723,8 @@ def prepare_post_contest_replay(
             "resolved_user_entry_count": int(len(user_entries_resolved)),
             "opponent_entry_count": int(len(opponent_entries)),
             "observed_field_size": int(len(entries)),
+            "unresolved_entry_count_total": int(len(unresolved_entries)),
+            "worlds_source": worlds_source,
         }
     )
 
@@ -775,6 +824,7 @@ def run_post_contest_replay(
         draft_group_id=draft_group_id,
         data_root=data_root,
         run_id=run_id,
+        worlds_source=worlds_source,
     )
     resolved_entry_fee = float(entry_fee if entry_fee is not None else prepared.meta.entry_fee)
     if resolved_entry_fee <= 0:

@@ -35,8 +35,13 @@ def _preview_entered_lineups(path: Path, limit: int = 25) -> List[Dict[str, Any]
     df = pd.read_parquet(path)
     if "lineup_source" in df.columns:
         df = df[df["lineup_source"].astype(str) == "entered"].copy()
-    if "sim_roi" in df.columns:
-        df = df.sort_values(["sim_roi", "sim_cash_rate"], ascending=[False, False], na_position="last")
+    sort_cols = [column for column in ("sim_roi", "sim_cash_rate") if column in df.columns]
+    if sort_cols:
+        df = df.sort_values(
+            sort_cols,
+            ascending=[False] * len(sort_cols),
+            na_position="last",
+        )
     df = df.head(limit)
     df = df.where(pd.notna(df), None)
     return df.to_dict(orient="records")

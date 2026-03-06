@@ -25,7 +25,6 @@ from projections.post_contest.replay_models import ContestReplayRun, PreparedRep
 from projections.post_contest.replay_service import (
     _build_name_to_internal_map,
     _resolve_name_to_player_id,
-    build_actual_field_library,
     replay_output_dir,
     run_post_contest_replay,
 )
@@ -112,6 +111,7 @@ def _load_actual_player_fpts_lookup(
     *,
     prepared: PreparedReplayContext,
     data_root: Path,
+    canonical_player_ids: Optional[Sequence[str]] = None,
 ) -> Dict[str, float]:
     if not prepared.meta.results_path:
         return {}
@@ -121,12 +121,20 @@ def _load_actual_player_fpts_lookup(
     results_df = parse_contest_csv(results_path)
     if "Player" not in results_df.columns or "FPTS" not in results_df.columns:
         return {}
-    resolved_name_map, ambiguous_name_map, _, resolved_signatures = _build_name_to_internal_map(
+    map_payload = _build_name_to_internal_map(
         game_date=prepared.meta.game_date,
         draft_group_id=int(prepared.meta.draft_group_id or 0),
         data_root=data_root,
         run_id=None,
     )
+    if len(map_payload) == 4:
+        resolved_name_map, ambiguous_name_map, _, resolved_signatures = map_payload
+    elif len(map_payload) == 3:
+        resolved_name_map, ambiguous_name_map, _ = map_payload
+        resolved_signatures = {}
+    else:
+        return {}
+    canonical_ids = {str(player_id) for player_id in (canonical_player_ids or [])}
     lookup: Dict[str, float] = {}
     player_rows = results_df[["Player", "FPTS"]].dropna().drop_duplicates(subset=["Player"])
     for _, row in player_rows.iterrows():
@@ -138,6 +146,8 @@ def _load_actual_player_fpts_lookup(
         )
         fpts = _coerce_float(row["FPTS"])
         if player_id is None or fpts is None or (diag and str(diag.get("method", "")).startswith("ambiguous")):
+            continue
+        if canonical_ids and str(player_id) not in canonical_ids:
             continue
         lookup[str(player_id)] = float(fpts)
     return lookup
@@ -258,6 +268,139 @@ def _lineup_actual_counts(entries: Sequence[Sequence[str]]) -> Dict[str, int]:
     for lineup in entries:
         counts[_lineup_key(lineup)] += 1
     return dict(counts)
+
+
+def _count_missing_player_ids(
+    *,
+    lineups: Sequence[Sequence[str]],
+    player_index: Dict[str, int],
+    limit: int = 10,
+) -> Tuple[int, List[Dict[str, Any]]]:
+    missing_slot_count = 0
+    examples: List[Dict[str, Any]] = []
+    for lineup in lineups:
+        normalized = [str(pid).strip() for pid in lineup if str(pid).strip()]
+        missing = [pid for pid in normalized if pid not in player_index]
+        if not missing:
+            continue
+        missing_slot_count += len(missing)
+        if len(examples) < limit:
+            examples.append(
+                {
+                    "lineup_key": _lineup_key(normalized),
+                    "missing_player_ids": missing[:8],
+                }
+            )
+    return int(missing_slot_count), examples
+
+
+def _filter_lineups_to_world_namespace(
+    *,
+    lineups: Sequence[Sequence[str]],
+    weights: Optional[Sequence[int]],
+    player_index: Dict[str, int],
+) -> Tuple[List[List[str]], List[int], Dict[str, Any]]:
+    if weights is None:
+        weights = [1] * len(lineups)
+    valid_lineups: List[List[str]] = []
+    valid_weights: List[int] = []
+    dropped_lineups = 0
+    missing_slot_count = 0
+    missing_examples: List[Dict[str, Any]] = []
+    for lineup, weight in zip(lineups, weights):
+        normalized = [str(pid).strip() for pid in lineup if str(pid).strip()]
+        missing = [pid for pid in normalized if pid not in player_index]
+        if missing:
+            dropped_lineups += 1
+            missing_slot_count += len(missing)
+            if len(missing_examples) < 10:
+                missing_examples.append(
+                    {
+                        "lineup_key": _lineup_key(normalized),
+                        "missing_player_ids": missing[:8],
+                    }
+                )
+            continue
+        valid_lineups.append(normalized)
+        valid_weights.append(int(weight))
+    diagnostics = {
+        "dropped_lineup_count": int(dropped_lineups),
+        "missing_player_id_count": int(missing_slot_count),
+        "missing_player_examples": missing_examples,
+    }
+    return valid_lineups, valid_weights, diagnostics
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(out):
+        return None
+    return out
+
+
+def _field_sanity_issues(field_summary: Dict[str, Any]) -> List[str]:
+    issues: List[str] = []
+    salary_mean = _safe_float(field_summary.get("actual_salary_total_mean"))
+    if salary_mean is None or salary_mean < 40000.0 or salary_mean > SALARY_CAP:
+        issues.append("actual_salary_total_mean_out_of_range")
+    teams_mean = _safe_float(field_summary.get("actual_num_teams_mean"))
+    if teams_mean is None or teams_mean < 2.0 or teams_mean > 8.0:
+        issues.append("actual_num_teams_mean_out_of_range")
+    own_sum_mean = _safe_float(field_summary.get("actual_projected_own_sum_mean"))
+    if own_sum_mean is None or own_sum_mean <= 0.0 or own_sum_mean > 800.0:
+        issues.append("actual_projected_own_sum_mean_out_of_range")
+    actual_field_size = _safe_float(field_summary.get("actual_field_size"))
+    actual_unique = _safe_float(field_summary.get("actual_unique_lineups"))
+    if actual_field_size is None or actual_field_size <= 0.0:
+        issues.append("actual_field_size_invalid")
+    if actual_unique is None or actual_unique <= 0.0:
+        issues.append("actual_unique_lineups_invalid")
+    if actual_field_size is not None and actual_unique is not None and actual_unique > actual_field_size:
+        issues.append("actual_unique_lineups_exceeds_field_size")
+    return issues
+
+
+def _replay_trust_status(
+    *,
+    resolution: Dict[str, Any],
+    field_summary: Dict[str, Any],
+    candidate_meta: Dict[str, Any],
+    entered_unique_count: int,
+    candidate_unique_count: int,
+    opponent_missing_player_id_count: int,
+    candidate_missing_player_id_count: int,
+) -> Tuple[str, List[str]]:
+    issues: List[str] = []
+    if int(resolution.get("unresolved_slot_count", 0)) > 0:
+        issues.append("unresolved_slots_present")
+    if int(resolution.get("outside_worlds_slot_count", 0)) > 0:
+        issues.append("outside_worlds_slots_present")
+    if opponent_missing_player_id_count > 0:
+        issues.append("opponent_lineups_missing_world_players")
+    if candidate_missing_player_id_count > 0:
+        issues.append("candidate_lineups_missing_world_players")
+    issues.extend(_field_sanity_issues(field_summary))
+    if candidate_unique_count > 0 and entered_unique_count > 0 and candidate_unique_count < entered_unique_count:
+        issues.append("candidate_universe_smaller_than_entered_set")
+
+    if issues:
+        return "broken", issues
+
+    warnings: List[str] = []
+    candidate_source = str(candidate_meta.get("candidate_source") or "none")
+    if candidate_source != "contest_sim_run_build":
+        warnings.append("candidate_universe_not_from_full_run_build")
+    if int(resolution.get("fuzzy_match_count", 0)) > 0:
+        warnings.append("fuzzy_name_resolution_used")
+    if _safe_float(field_summary.get("player_ownership_mae_pct")) is None:
+        warnings.append("missing_modeled_field_comparison")
+
+    return ("warning", warnings) if warnings else ("trusted", [])
 
 
 def _library_features_frame(
@@ -545,10 +688,18 @@ def _load_candidate_lineups_from_manifest(
                 pass
     eval_path = payload.get("eval_lineups_path")
     if not isinstance(eval_path, str) or not eval_path:
-        return [], {"candidate_manifest_path": str(manifest_path), "candidate_eval_path": None}
+        return [], {
+            "candidate_manifest_path": str(manifest_path),
+            "candidate_eval_path": None,
+            "candidate_source": "manifest_without_candidate_lineups",
+        }
     eval_file = Path(eval_path)
     if not eval_file.exists():
-        return [], {"candidate_manifest_path": str(manifest_path), "candidate_eval_path": str(eval_file)}
+        return [], {
+            "candidate_manifest_path": str(manifest_path),
+            "candidate_eval_path": str(eval_file),
+            "candidate_source": "missing_eval_lineups_csv",
+        }
     df = pd.read_csv(eval_file)
     if "contest_id" in df.columns:
         df = df[df["contest_id"].astype(str) == str(contest_id)].copy()
@@ -561,6 +712,7 @@ def _load_candidate_lineups_from_manifest(
     meta = {
         "candidate_manifest_path": str(manifest_path),
         "candidate_eval_path": str(eval_file),
+        "candidate_source": "eval_lineups_csv",
         "candidate_lineup_count_raw": int(len(lineups)),
         "candidate_export_id": payload.get("export_id"),
     }
@@ -685,6 +837,8 @@ def _regret_frame(
         "actual_best_entered_prize": actual_best_entered.get("realized_prize"),
         "candidate_pool_available": bool(not candidate_df.empty),
         "candidate_manifest_path": candidate_meta.get("candidate_manifest_path"),
+        "candidate_universe_source": candidate_meta.get("candidate_source"),
+        "candidate_universe_lineup_count": candidate_meta.get("candidate_unique_count"),
         "candidate_unique_count": int(candidate_df["lineup_key"].nunique()) if not candidate_df.empty else 0,
         "best_candidate_lineup_key": best_candidate.get("lineup_key"),
         "best_candidate_lineup_label": _lineup_label(best_candidate),
@@ -752,13 +906,13 @@ def build_post_contest_replay_analytics(
         run_id=run_id,
         worlds_source=worlds_source,
     )
+    world_player_ids = tuple(str(player_id) for player_id in player_worlds.player_index.keys())
     actual_minutes_lookup = _load_actual_minutes_lookup(game_date=prepared.meta.game_date, data_root=data_root)
-    actual_fpts_lookup = _load_actual_player_fpts_lookup(prepared=prepared, data_root=data_root)
-    actual_field = build_actual_field_library(
-        [entry for entry in prepared.resolved_entries if not entry.unresolved_names],
-        meta=prepared.meta,
+    actual_fpts_lookup = _load_actual_player_fpts_lookup(
+        prepared=prepared,
+        data_root=data_root,
+        canonical_player_ids=world_player_ids,
     )
-
     modeled_field: Optional[FieldLibrary] = None
     modeled_field_meta: Dict[str, Any] = {}
     if include_modeled_field:
@@ -791,6 +945,10 @@ def build_post_contest_replay_analytics(
     actual_entry_lineups = [entry.player_ids for entry in prepared.resolved_entries if not entry.unresolved_names]
     actual_field_counts = _lineup_actual_counts(actual_entry_lineups)
     opponent_field_counts = { _lineup_key(lineup): int(weight) for lineup, weight in zip(prepared.opponent_field_library.lineups, prepared.opponent_field_library.weights) }
+    opponent_missing_player_id_count, opponent_missing_player_examples = _count_missing_player_ids(
+        lineups=prepared.opponent_field_library.lineups,
+        player_index=player_worlds.player_index,
+    )
     user_actual_score_lookup = {
         _lineup_key(entry.player_ids): entry.points for entry in prepared.user_entries
     }
@@ -812,7 +970,13 @@ def build_post_contest_replay_analytics(
     entered_df = pd.DataFrame(entered_rows)
 
     candidate_rows: List[Dict[str, Any]] = []
-    candidate_meta: Dict[str, Any] = {}
+    candidate_meta: Dict[str, Any] = {
+        "candidate_source": "none",
+        "candidate_unique_count": 0,
+        "candidate_weight_sum": 0,
+        "candidate_missing_player_id_count": 0,
+        "candidate_missing_player_examples": [],
+    }
     if candidate_manifest_path is None:
         candidate_manifest_path = find_latest_export_manifest(
             game_date=prepared.meta.game_date,
@@ -821,11 +985,26 @@ def build_post_contest_replay_analytics(
             data_root=data_root,
         )
     if candidate_manifest_path is not None:
-        candidate_lineups_raw, candidate_meta = _load_candidate_lineups_from_manifest(
+        candidate_lineups_raw, loaded_candidate_meta = _load_candidate_lineups_from_manifest(
             candidate_manifest_path,
             contest_id=prepared.meta.contest_id,
         )
+        candidate_meta.update(loaded_candidate_meta)
         candidate_lineups, candidate_weights = _aggregate_lineups(candidate_lineups_raw)
+        candidate_lineups, candidate_weights, candidate_filter_diag = _filter_lineups_to_world_namespace(
+            lineups=candidate_lineups,
+            weights=candidate_weights,
+            player_index=player_worlds.player_index,
+        )
+        candidate_meta["candidate_missing_player_id_count"] = int(
+            candidate_filter_diag.get("missing_player_id_count", 0)
+        )
+        candidate_meta["candidate_missing_player_examples"] = candidate_filter_diag.get(
+            "missing_player_examples", []
+        )
+        candidate_meta["candidate_dropped_lineup_count"] = int(
+            candidate_filter_diag.get("dropped_lineup_count", 0)
+        )
         if candidate_lineups:
             candidate_simulation = run_contest_simulation(
                 user_lineups=candidate_lineups,
@@ -853,26 +1032,47 @@ def build_post_contest_replay_analytics(
             )
             candidate_meta["candidate_unique_count"] = int(len(candidate_lineups))
             candidate_meta["candidate_weight_sum"] = int(sum(candidate_weights))
+        elif int(candidate_meta.get("candidate_dropped_lineup_count", 0)) > 0:
+            candidate_meta.setdefault("candidate_source", "candidate_lineups_dropped_missing_world_ids")
 
     candidate_df = pd.DataFrame(candidate_rows)
-    lineup_df = pd.concat([entered_df, candidate_df], ignore_index=True, sort=False)
+    if entered_df.empty and candidate_df.empty:
+        lineup_df = pd.DataFrame()
+    elif entered_df.empty:
+        lineup_df = candidate_df.copy()
+    elif candidate_df.empty:
+        lineup_df = entered_df.copy()
+    else:
+        lineup_df = pd.concat([entered_df, candidate_df], ignore_index=True, sort=False)
 
-    field_df = pd.DataFrame(
-        [
-            _field_summary_row(
-                prepared=prepared,
-                actual_field=prepared.opponent_field_library,
-                modeled_field=modeled_field,
-                player_meta=player_meta,
-            )
-        ]
+    field_summary_row = _field_summary_row(
+        prepared=prepared,
+        actual_field=prepared.opponent_field_library,
+        modeled_field=modeled_field,
+        player_meta=player_meta,
     )
+    field_df = pd.DataFrame([field_summary_row])
     regret_df = _regret_frame(
         prepared=prepared,
         entered_df=entered_df,
         candidate_df=candidate_df,
         candidate_meta=candidate_meta,
     )
+    entered_unique_count = int(entered_df["lineup_key"].nunique()) if not entered_df.empty else 0
+    candidate_unique_count = int(candidate_df["lineup_key"].nunique()) if not candidate_df.empty else 0
+    replay_trust_status, replay_trust_issues = _replay_trust_status(
+        resolution=prepared.resolution_stats,
+        field_summary=field_summary_row,
+        candidate_meta=candidate_meta,
+        entered_unique_count=entered_unique_count,
+        candidate_unique_count=candidate_unique_count,
+        opponent_missing_player_id_count=opponent_missing_player_id_count,
+        candidate_missing_player_id_count=int(candidate_meta.get("candidate_missing_player_id_count", 0)),
+    )
+    field_df["replay_trust_status"] = replay_trust_status
+    field_df["replay_trust_issue_count"] = int(len(replay_trust_issues))
+    field_df["replay_trust_issues_json"] = json.dumps(replay_trust_issues)
+    field_df["opponent_missing_player_id_count"] = int(opponent_missing_player_id_count)
 
     out_dir = output_dir or replay_output_dir(
         game_date=prepared.meta.game_date,
@@ -892,6 +1092,20 @@ def build_post_contest_replay_analytics(
     field_df.to_parquet(field_path, index=False)
     regret_df.to_parquet(regret_path, index=False)
 
+    resolution_summary = dict(prepared.resolution_stats)
+    resolution_summary.update(
+        {
+            "opponent_missing_player_id_count": int(opponent_missing_player_id_count),
+            "opponent_missing_player_examples": opponent_missing_player_examples,
+            "candidate_missing_player_id_count": int(candidate_meta.get("candidate_missing_player_id_count", 0)),
+            "candidate_missing_player_examples": candidate_meta.get("candidate_missing_player_examples", []),
+            "replay_trust_status": replay_trust_status,
+            "replay_trust_issues": replay_trust_issues,
+        }
+    )
+    field_summary = field_df.iloc[0].where(pd.notna(field_df.iloc[0]), None).to_dict() if not field_df.empty else {}
+    regret_summary = regret_df.iloc[0].where(pd.notna(regret_df.iloc[0]), None).to_dict() if not regret_df.empty else {}
+
     summary_payload = {
         "contest_id": prepared.meta.contest_id,
         "game_date": prepared.meta.game_date,
@@ -900,9 +1114,15 @@ def build_post_contest_replay_analytics(
         "run_id": run_id,
         "worlds_source": worlds_source,
         "ownership_mode": ownership_mode,
+        "replay_trust_status": replay_trust_status,
+        "replay_trust_issues": replay_trust_issues,
+        "candidate_universe_source": candidate_meta.get("candidate_source"),
+        "candidate_universe_lineup_count": int(candidate_meta.get("candidate_unique_count", 0)),
+        "opponent_missing_player_id_count": int(opponent_missing_player_id_count),
+        "opponent_missing_player_examples": opponent_missing_player_examples,
         "modeled_field": modeled_field_meta,
         "candidate_meta": candidate_meta,
-        "resolution": prepared.resolution_stats,
+        "resolution": resolution_summary,
         "user_replay_summary": {
             "entered_lineup_count": int(len(entered_df)),
             "best_sim_roi": _best_lineup_row(entered_df, "sim_roi").get("sim_roi"),
@@ -912,8 +1132,8 @@ def build_post_contest_replay_analytics(
             "best_realized_prize": _actual_best_entered_row(entered_df).get("realized_prize"),
             "avg_realized_rank": float(entered_df["realized_rank"].dropna().mean()) if not entered_df.empty and "realized_rank" in entered_df.columns and entered_df["realized_rank"].dropna().any() else None,
         },
-        "field_summary": field_df.iloc[0].where(pd.notna(field_df.iloc[0]), None).to_dict() if not field_df.empty else {},
-        "regret_summary": regret_df.iloc[0].where(pd.notna(regret_df.iloc[0]), None).to_dict() if not regret_df.empty else {},
+        "field_summary": field_summary,
+        "regret_summary": regret_summary,
         "artifacts": {
             "player_calibration_path": str(player_path),
             "lineup_calibration_path": str(lineup_path),
@@ -925,6 +1145,7 @@ def build_post_contest_replay_analytics(
             "lineup_rows": int(len(lineup_df)),
             "entered_lineup_rows": int(len(entered_df)),
             "candidate_lineup_rows": int(len(candidate_df)),
+            "candidate_unique_lineups": int(candidate_unique_count),
         },
     }
     summary_path.write_text(json.dumps(summary_payload, indent=2, sort_keys=True))

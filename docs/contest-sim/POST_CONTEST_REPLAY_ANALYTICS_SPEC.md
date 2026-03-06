@@ -354,16 +354,82 @@ Recommended additional diagnostics in future summary payloads:
 - `opponent_missing_player_id_count`
 - `opponent_missing_player_examples`
 - `candidate_missing_player_id_count`
-  - `candidate_unique_count`
-  - `best_candidate_lineup_key`
-  - `best_candidate_sim_roi`
-  - `best_candidate_sim_cash_rate`
-  - `best_candidate_is_entered`
-- regret:
-  - `best_finalset_lineup_key`
-  - `best_finalset_sim_roi`
-  - `selection_regret_roi`
-  - `selection_regret_cash_rate`
+
+## 9.5 Current high-priority replay analytics fixes
+
+1. Candidate-source visibility
+   - Every replay run should record whether regret came from:
+     - full saved contest-sim run build,
+     - saved portfolio/export lineage,
+     - exported subset fallback.
+   - Current UI copy should not imply true candidate-pool regret when only the exported subset was
+     available.
+
+2. Replay trust status
+   - Analytics summary should classify runs into:
+     - `trusted`
+     - `warning`
+     - `broken`
+   - Example criteria:
+     - missing opponent IDs in worlds,
+     - impossible field feature aggregates,
+     - tiny candidate universe relative to entered set,
+     - unresolved lineup slots.
+
+3. Field-feature sanity validation
+   - Reject or flag runs where:
+     - `actual_salary_total_mean` is implausibly low,
+     - `actual_num_teams_mean` is implausibly low,
+     - `actual_projected_own_sum_mean` is zero or implausible,
+     - histogram distances are degenerate because the underlying features are malformed.
+
+4. Historical export-lineage backfill coverage
+   - Recent manifests were backfilled successfully when a clean saved-portfolio match existed.
+   - Remaining historical exports without lineage should be treated as lower-confidence regret runs.
+
+## 9.6 Implementation update (2026-03-06)
+
+Implemented in code:
+
+- replay trust classification is now emitted per run:
+  - `trusted`
+  - `warning`
+  - `broken`
+- trust checks include:
+  - unresolved/outside-world slot resolution diagnostics
+  - opponent missing-player IDs in worlds
+  - candidate missing-player IDs in worlds
+  - field-feature sanity checks
+  - candidate-universe size sanity relative to entered set
+- candidate-source visibility is now explicit in summary and regret outputs:
+  - `candidate_universe_source`
+  - `candidate_universe_lineup_count`
+- candidate lineups are filtered to worlds namespace before simulation/regret scoring
+
+Remaining high-value follow-ups:
+
+- run historical replay reruns for `2026-02-28` through `2026-03-05` using the new trust checks
+- add scorecard-level attribution rollups (projection vs field vs selection vs variance)
+- strengthen lock-time provenance checks in summary payloads (`as_of_ts`, world run lineage)
+
+## 9.7 Concrete known bad run
+
+The replay for:
+
+- `game_date=2026-03-03`
+- `contest_id=188511762`
+- `contest_name=NBA $25K mini-MAX [150 Entry Max]`
+
+is a known bad run for interpretation.
+
+Specific issues observed:
+
+- `candidate_unique_count = 6`
+- `entered_lineup_count = 40`
+- impossible field summary aggregates
+- opponent field IDs absent from worlds
+
+This run should be used as a regression test for the replay-field repair work.
 
 Current phase semantic note:
 

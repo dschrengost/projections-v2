@@ -361,6 +361,90 @@ Required follow-up:
 - constrain replay resolution to the canonical projection/worlds namespace,
 - do not silently accept fallback IDs that are absent from the worlds matrix,
 - surface opponent-field missing-player counts in replay diagnostics.
+
+## 5.9 Current high-priority fixes
+
+The highest-priority product and correctness fixes are:
+
+1. Opponent-field canonical ID repair
+   - Current blocker for trustworthy replay on some recent slates.
+   - Symptom: observed field contains player IDs absent from the worlds matrix.
+   - Effect: malformed opponent lineups, broken field summaries, inflated/deflated replay ROI.
+   - Required fix: resolve contest-result names only to canonical internal IDs present in the
+     projection/worlds namespace for that slate.
+
+2. Replay trust diagnostics
+   - Flashback must explicitly show when a replay is not trustworthy.
+   - Required summary fields:
+     - `opponent_missing_player_id_count`
+     - `opponent_missing_player_examples`
+     - `candidate_universe_source`
+     - `candidate_universe_lineup_count`
+     - `replay_trust_status`
+   - If field summaries are physically impossible, the run should be flagged, not interpreted.
+
+3. Candidate-universe provenance
+   - Fixed for new exports and partially backfilled for recent history.
+   - Replay must prefer:
+     - `source_run_build_id`
+     - then explicit override
+     - then exported subset fallback
+   - UI should show which source was used so selection-regret interpretation is grounded.
+
+4. Historical reruns for recent slates
+   - After opponent-field repair, recent high-value slates should be rerun.
+   - Priority window:
+     - `2026-02-28` through `2026-03-05`
+   - Priority contests:
+     - flagship / high-entry contests actually played by the user
+
+5. Field-summary sanity checks
+   - Current examples showed impossible values like near-zero salary totals and zero ownership sums.
+   - Required guardrail:
+     - fail or flag replay when field feature aggregates are outside plausible ranges.
+
+## 5.10 Implementation update (2026-03-06)
+
+Implemented in code:
+
+- replay resolution is now constrained to the canonical worlds namespace for the slate:
+  - slots resolving to player IDs outside worlds are marked unresolved and surfaced in diagnostics
+- replay analytics summary now emits:
+  - `replay_trust_status`
+  - `replay_trust_issues`
+  - `opponent_missing_player_id_count`
+  - `opponent_missing_player_examples`
+  - `candidate_universe_source`
+  - `candidate_universe_lineup_count`
+  - candidate missing-player diagnostics
+- candidate lineup universes are filtered against worlds before regret scoring
+- field sanity checks now feed replay trust classification (`trusted` / `warning` / `broken`)
+
+Still pending:
+
+- anchored-emulation completion for partial contest fields
+- historical reruns for priority slates after trust-hardening rollout
+- stricter as-of-lock world-bundle provenance checks in replay summary
+
+## 5.11 Concrete known bad example
+
+The `2026-03-03` `NBA $25K mini-MAX [150 Entry Max]` replay is currently not trustworthy.
+
+Observed failures:
+
+- `candidate_unique_count = 6` while the user entered `40` lineups
+- field summary values were physically impossible:
+  - near-zero salary totals
+  - near-zero team counts
+  - zero ownership sums
+- opponent field contained player IDs absent from the worlds matrix
+
+Interpretation:
+
+- entered-lineup scoring looked plausible,
+- opponent-field reconstruction did not,
+- selection regret and slate-level replay takeaways for that run should not be trusted until the
+  opponent-field repair is complete.
 - we often have the actual lineups,
 - even partial CSVs give strong constraints on duplication and ownership shape,
 - we no longer need to guess what the field wanted to do; we only need to simulate outcomes for the
