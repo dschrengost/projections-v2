@@ -94,6 +94,8 @@ def test_build_game_level_examples_and_collate_shapes() -> None:
     assert int(ex.player_valid_mask.sum()) == 12
     assert ex.force_active_worlds.shape == (2, MAX_PLAYERS_PER_TEAM)
     assert int(ex.force_active_worlds.sum()) == 10  # five starters per team
+    assert ex.starter_force_active_worlds.shape == (2, MAX_PLAYERS_PER_TEAM)
+    assert int(ex.starter_force_active_worlds.sum()) == 10
     assert ex.force_active_minutes_anchor.shape == (2, MAX_PLAYERS_PER_TEAM)
     assert float(ex.force_active_minutes_anchor.sum()) == 0.0
 
@@ -102,6 +104,8 @@ def test_build_game_level_examples_and_collate_shapes() -> None:
     assert batch["player_valid_mask"].shape == (1, 2, MAX_PLAYERS_PER_TEAM)
     assert batch["force_active_worlds"].shape == (1, 2, MAX_PLAYERS_PER_TEAM)
     assert int(batch["force_active_worlds"].sum().item()) == 10
+    assert batch["starter_force_active_worlds"].shape == (1, 2, MAX_PLAYERS_PER_TEAM)
+    assert int(batch["starter_force_active_worlds"].sum().item()) == 10
     assert batch["force_active_minutes_anchor"].shape == (1, 2, MAX_PLAYERS_PER_TEAM)
     assert float(batch["force_active_minutes_anchor"].sum().item()) == 0.0
 

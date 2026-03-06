@@ -298,7 +298,7 @@ def test_sample_worlds_for_batch_honors_force_active_worlds_mask() -> None:
         assert int(pid_rows["active"].min()) == 1
 
 
-def test_sample_worlds_for_batch_applies_props_anchor_floor_for_forced_active_players() -> None:
+def test_sample_worlds_for_batch_applies_props_anchor_floor_for_manual_and_low_minute_starter() -> None:
     cols = list(FLOW_TARGET_COLUMNS_V1)
 
     class _FlowHead:
@@ -339,6 +339,8 @@ def test_sample_worlds_for_batch_applies_props_anchor_floor_for_forced_active_pl
             # Ten-player rotation baseline: 24 min each per team (sum=240).
             minutes_flat[:, :10] = 24.0
             minutes_flat[:, 15:25] = 24.0
+            # Home slot0 simulates low-minute projected starter.
+            minutes_flat[:, 0] = 4.0
             team_idx = _team_index(bsz)
             return _Out(valid_flat=valid_flat, active_flat=active_flat, minutes_flat=minutes_flat, team_idx=team_idx)
 
@@ -349,15 +351,21 @@ def test_sample_worlds_for_batch_applies_props_anchor_floor_for_forced_active_pl
     player_valid_mask[:, 1, :10] = True
     force_active_worlds = torch.zeros((1, 2, 15), dtype=torch.bool)
     force_active_worlds[:, 0, 0] = True
+    force_active_worlds[:, 0, 1] = True
     force_active_worlds[:, 1, 0] = True
+    starter_force_active_worlds = torch.zeros((1, 2, 15), dtype=torch.bool)
+    starter_force_active_worlds[:, 0, 0] = True
+    starter_force_active_worlds[:, 0, 1] = True
     force_active_minutes_anchor = torch.zeros((1, 2, 15), dtype=torch.float32)
     force_active_minutes_anchor[:, 0, 0] = 40.0
+    force_active_minutes_anchor[:, 0, 1] = 40.0
     force_active_minutes_anchor[:, 1, 0] = 40.0
 
     batch: dict[str, torch.Tensor | list[str]] = {
         "player_features": torch.zeros((1, 2, 15, 2), dtype=torch.float32),
         "player_valid_mask": player_valid_mask,
         "force_active_worlds": force_active_worlds,
+        "starter_force_active_worlds": starter_force_active_worlds,
         "force_active_minutes_anchor": force_active_minutes_anchor,
         "game_features": torch.zeros((1, 0), dtype=torch.float32),
         "team_features": torch.zeros((1, 2, 0), dtype=torch.float32),
@@ -380,10 +388,20 @@ def test_sample_worlds_for_batch_applies_props_anchor_floor_for_forced_active_pl
     assert not worlds_df.empty
 
     # Default floor policy: 0.65 * 40 = 26 minutes.
-    for pid in (1001, 1016):
-        pid_rows = worlds_df.loc[worlds_df["player_id"] == pid]
-        assert int(pid_rows["active"].min()) == 1
-        assert float(pid_rows["minutes"].min()) >= 25.99
+    # 1001: starter + low-minute trigger (<10) => floor applies.
+    starter_rows = worlds_df.loc[worlds_df["player_id"] == 1001]
+    assert int(starter_rows["active"].min()) == 1
+    assert float(starter_rows["minutes"].min()) >= 25.99
+
+    # 1016: manual force-in (non-starter) => floor applies unconditionally.
+    manual_rows = worlds_df.loc[worlds_df["player_id"] == 1016]
+    assert int(manual_rows["active"].min()) == 1
+    assert float(manual_rows["minutes"].min()) >= 25.99
+
+    # 1002: starter with >=10 baseline minutes => no floor trigger.
+    starter_not_low_rows = worlds_df.loc[worlds_df["player_id"] == 1002]
+    assert int(starter_not_low_rows["active"].min()) == 1
+    assert float(starter_not_low_rows["minutes"].max()) < 26.0
 
     team_minutes = (
         worlds_df.groupby(["world_idx", "team_id"], as_index=False)["minutes"]

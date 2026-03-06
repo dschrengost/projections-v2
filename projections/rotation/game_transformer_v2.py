@@ -171,6 +171,7 @@ class GameLevelExample:
     player_ids: np.ndarray  # (2,15)
     team_ids: np.ndarray  # (2,)
     force_active_worlds: np.ndarray  # (2,15) hard guardrail mask for sampled worlds
+    starter_force_active_worlds: np.ndarray  # (2,15) starter-only force-active mask
     force_active_minutes_anchor: np.ndarray  # (2,15) props-implied minutes anchor
     y_minutes: np.ndarray  # (2,15)
     flow_targets: np.ndarray  # (2,15,S)
@@ -478,6 +479,7 @@ def build_game_level_examples(
     x_by_idx = x
     y_by_idx = y_minutes
     force_active_by_idx = force_active_worlds
+    starter_force_active_by_idx = starter_signal
     force_active_minutes_anchor_by_idx = force_active_minutes_anchor
     flow_by_idx = flow_values
     flow_observed_by_idx = flow_observed
@@ -498,6 +500,7 @@ def build_game_level_examples(
         player_ids = np.zeros((2, max_players_per_team), dtype=np.int64)
         team_ids = np.zeros((2,), dtype=np.int64)
         force_active_arr = np.zeros((2, max_players_per_team), dtype=bool)
+        starter_force_active_arr = np.zeros((2, max_players_per_team), dtype=bool)
         force_active_minutes_anchor_arr = np.zeros((2, max_players_per_team), dtype=np.float32)
         y_minutes_arr = np.zeros((2, max_players_per_team), dtype=np.float32)
         flow_arr = np.zeros((2, max_players_per_team, len(flow_cols)), dtype=np.float32)
@@ -530,6 +533,7 @@ def build_game_level_examples(
                 pd.to_numeric(team_rows["player_id"], errors="coerce").fillna(0).astype("int64").to_numpy(dtype=np.int64)
             )
             force_active_arr[side_idx, :n] = force_active_by_idx[local_idx]
+            starter_force_active_arr[side_idx, :n] = starter_force_active_by_idx[local_idx]
             force_active_minutes_anchor_arr[side_idx, :n] = force_active_minutes_anchor_by_idx[local_idx]
             y_minutes_arr[side_idx, :n] = y_by_idx[local_idx]
             if flow_cols:
@@ -574,6 +578,7 @@ def build_game_level_examples(
                 player_ids=player_ids,
                 team_ids=team_ids,
                 force_active_worlds=force_active_arr,
+                starter_force_active_worlds=starter_force_active_arr,
                 force_active_minutes_anchor=force_active_minutes_anchor_arr,
                 y_minutes=y_minutes_arr,
                 flow_targets=flow_arr,
@@ -606,6 +611,7 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
     player_ids = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.long)
     team_ids = torch.zeros((bsz, 2), dtype=torch.long)
     force_active_worlds = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.bool)
+    starter_force_active_worlds = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.bool)
     force_active_minutes_anchor = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.float32)
     y_minutes = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.float32)
     flow_targets = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM, n_flow), dtype=torch.float32)
@@ -623,6 +629,7 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
         player_ids[i] = torch.from_numpy(ex.player_ids.astype(np.int64, copy=False))
         team_ids[i] = torch.from_numpy(ex.team_ids.astype(np.int64, copy=False))
         force_active_worlds[i] = torch.from_numpy(ex.force_active_worlds.astype(bool, copy=False))
+        starter_force_active_worlds[i] = torch.from_numpy(ex.starter_force_active_worlds.astype(bool, copy=False))
         force_active_minutes_anchor[i] = torch.from_numpy(ex.force_active_minutes_anchor.astype(np.float32, copy=False))
         y_minutes[i] = torch.from_numpy(ex.y_minutes.astype(np.float32, copy=False))
         if n_flow > 0:
@@ -642,6 +649,7 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
         "player_ids": player_ids,
         "team_ids": team_ids,
         "force_active_worlds": force_active_worlds,
+        "starter_force_active_worlds": starter_force_active_worlds,
         "force_active_minutes_anchor": force_active_minutes_anchor,
         "y_minutes": y_minutes,
         "flow_targets": flow_targets,

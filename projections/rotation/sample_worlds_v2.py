@@ -38,6 +38,7 @@ JOIN_KEYS = ["game_id", "team_id", "player_id", "game_date"]
 DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_RATIO = 0.65
 DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MIN = 12.0
 DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MAX = 36.0
+DEFAULT_STARTER_LOW_MINUTES_TRIGGER = 10.0
 
 
 @dataclass(frozen=True)
@@ -874,6 +875,7 @@ def sample_worlds_for_batch(
     force_active_minutes_floor_ratio: float = DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_RATIO,
     force_active_minutes_floor_min: float = DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MIN,
     force_active_minutes_floor_max: float = DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MAX,
+    starter_low_minutes_trigger: float = DEFAULT_STARTER_LOW_MINUTES_TRIGGER,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     if not hasattr(model, "flow_head") or model.flow_head is None:  # type: ignore[attr-defined]
         raise RuntimeError("Model does not expose flow_head for inverse flow sampling")
@@ -894,6 +896,11 @@ def sample_worlds_for_batch(
         forced_active_worlds = forced_active_worlds.to(device=device, dtype=torch.bool)
     else:
         forced_active_worlds = torch.zeros_like(player_valid_mask, dtype=torch.bool, device=device)
+    starter_force_active_worlds = batch.get("starter_force_active_worlds")
+    if isinstance(starter_force_active_worlds, torch.Tensor):
+        starter_force_active_worlds = starter_force_active_worlds.to(device=device, dtype=torch.bool)
+    else:
+        starter_force_active_worlds = torch.zeros_like(player_valid_mask, dtype=torch.bool, device=device)
     forced_active_minutes_anchor = batch.get("force_active_minutes_anchor")
     if isinstance(forced_active_minutes_anchor, torch.Tensor):
         forced_active_minutes_anchor = forced_active_minutes_anchor.to(device=device, dtype=torch.float32)
@@ -914,6 +921,7 @@ def sample_worlds_for_batch(
         rep_player_features = player_features.repeat_interleave(n_worlds_chunk, dim=0)
         rep_player_valid_mask = player_valid_mask.repeat_interleave(n_worlds_chunk, dim=0)
         rep_forced_active_worlds = forced_active_worlds.repeat_interleave(n_worlds_chunk, dim=0)
+        rep_starter_force_active_worlds = starter_force_active_worlds.repeat_interleave(n_worlds_chunk, dim=0)
         rep_forced_active_minutes_anchor = forced_active_minutes_anchor.repeat_interleave(n_worlds_chunk, dim=0)
         rep_game_features = game_features.repeat_interleave(n_worlds_chunk, dim=0)
         rep_team_features = team_features.repeat_interleave(n_worlds_chunk, dim=0)
@@ -965,16 +973,27 @@ def sample_worlds_for_batch(
                 rep_forced_active_worlds.reshape(rep_forced_active_worlds.shape[0], -1)
                 & rep_player_valid_mask.reshape(rep_player_valid_mask.shape[0], -1)
             )
+            starter_forced_active_flat = (
+                rep_starter_force_active_worlds.reshape(rep_starter_force_active_worlds.shape[0], -1)
+                & rep_player_valid_mask.reshape(rep_player_valid_mask.shape[0], -1)
+            )
             forced_minutes_anchor_flat = (
                 rep_forced_active_minutes_anchor.reshape(rep_forced_active_minutes_anchor.shape[0], -1)
                 * forced_active_flat.to(dtype=rep_forced_active_minutes_anchor.dtype)
             )
             sampled_active_mask = out.active.active_mask | forced_active_flat
+            minutes_before_floor = out.minutes.minutes
+            starter_low_minutes_mask = (
+                starter_forced_active_flat
+                & minutes_before_floor.lt(float(starter_low_minutes_trigger))
+            )
+            manual_forced_mask = forced_active_flat & (~starter_forced_active_flat)
+            floor_target_mask = manual_forced_mask | starter_low_minutes_mask
             sampled_minutes = _apply_forced_active_minutes_floor(
-                minutes=out.minutes.minutes,
+                minutes=minutes_before_floor,
                 valid_mask=out.player_valid_mask,
                 team_index=out.player_team_index,
-                forced_active_mask=forced_active_flat,
+                forced_active_mask=floor_target_mask,
                 forced_minutes_anchor=forced_minutes_anchor_flat,
                 floor_ratio=float(force_active_minutes_floor_ratio),
                 floor_min=float(force_active_minutes_floor_min),

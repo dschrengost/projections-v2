@@ -6425,6 +6425,10 @@ Resolution (GTv2 worlds path):
      - `ratio = 0.65`
      - `floor_min = 12.0`
      - `floor_max = 36.0`
+   - application gate:
+     - manual `force_in` (non-starter path): apply floor whenever anchor is present
+     - projected/confirmed starters: apply floor only when sampled minutes are below
+       `starter_low_minutes_trigger` (default `10.0`)
 3. Preserve hard feasibility:
    - after floor application, per-team per-world minutes are rebalanced back to `240`
    - reductions are taken from reducible players (minutes above their own floor)
