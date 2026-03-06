@@ -187,7 +187,7 @@ def test_build_post_contest_replay_analytics_writes_all_artifacts(tmp_path: Path
         replay_analytics_service,
         "build_player_pool",
         lambda **kwargs: [
-            {"player_id": str(i), "name": name, "team": ("A" if i % 2 == 0 else "B"), "positions": ["UTIL"], "salary": 5000, "own_proj": 12.5, "proj": 30.0, "game_matchup": "A@B"}
+            {"player_id": f"{i}.0", "name": name, "team": ("A" if i % 2 == 0 else "B"), "positions": ["UTIL"], "salary": 5000, "own_proj": 12.5, "proj": 30.0, "game_matchup": "A@B"}
             for i, name in enumerate(
                 ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta", "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Omicron", "Pi"],
                 start=1,
@@ -295,3 +295,4 @@ def test_build_post_contest_replay_analytics_writes_all_artifacts(tmp_path: Path
     assert "best_entered_lineup_players" in regret_df.columns
     assert "best_candidate_lineup_players" in regret_df.columns
     assert "Alpha" in str(regret_df.iloc[0]["best_entered_lineup_players"])
+    assert "Alpha" in str(regret_df.iloc[0]["best_candidate_lineup_label"])

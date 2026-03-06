@@ -51,7 +51,11 @@ class ReplayAnalyticsBundle:
 
 
 def _lineup_key(player_ids: Sequence[str]) -> str:
-    return "|".join(sorted(str(pid) for pid in player_ids if str(pid)))
+    canonical_ids = [
+        _canonicalize_player_id(pid)
+        for pid in player_ids
+    ]
+    return "|".join(sorted(pid for pid in canonical_ids if pid))
 
 
 def _weighted_mean(values: Sequence[float], weights: Sequence[float]) -> float:
@@ -165,6 +169,18 @@ def _coerce_float(value: object) -> Optional[float]:
         return None
 
 
+def _canonicalize_player_id(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return ""
+    try:
+        return str(int(float(text)))
+    except (TypeError, ValueError):
+        return text[:-2] if text.endswith(".0") else text
+
+
 def replay_normalize_name(name: str) -> str:
     from projections.post_contest.replay_service import _normalize_name as _inner_normalize_name
 
@@ -191,7 +207,9 @@ def _player_pool_maps(
     meta_by_player: Dict[str, Dict[str, Any]] = {}
     name_by_player: Dict[str, str] = {}
     for row in pool:
-        player_id = str(row.get("player_id"))
+        player_id = _canonicalize_player_id(row.get("player_id"))
+        if not player_id:
+            continue
         meta_by_player[player_id] = dict(row)
         name_by_player[player_id] = str(row.get("name") or player_id)
     return meta_by_player, name_by_player
@@ -223,7 +241,7 @@ def _count_player_ownership_from_library(library: FieldLibrary) -> Dict[str, flo
 
 
 def _lineup_features(lineup: Sequence[str], player_meta: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    rows = [player_meta.get(str(pid), {}) for pid in lineup]
+    rows = [player_meta.get(_canonicalize_player_id(pid), {}) for pid in lineup]
     salary_values = [float(row.get("salary") or 0.0) for row in rows]
     own_values = [float(row.get("own_proj") or 0.0) for row in rows]
     teams = [str(row.get("team") or "") for row in rows if row.get("team")]
@@ -245,7 +263,7 @@ def _lineup_features(lineup: Sequence[str], player_meta: Dict[str, Dict[str, Any
 def _lineup_player_names(lineup: Sequence[str], player_meta: Dict[str, Dict[str, Any]]) -> List[str]:
     names: List[str] = []
     for player_id in lineup:
-        player_id_str = str(player_id)
+        player_id_str = _canonicalize_player_id(player_id) or str(player_id)
         meta = player_meta.get(player_id_str, {})
         names.append(str(meta.get("name") or player_id_str))
     return names
@@ -903,8 +921,19 @@ def _lineup_label(row: Dict[str, Any]) -> Optional[str]:
     entry_name = row.get("entry_name")
     if entry_name:
         return str(entry_name)
+    lineup_players = row.get("lineup_players")
+    if lineup_players:
+        return str(lineup_players)
+    player_names_json = row.get("player_names_json")
+    if player_names_json:
+        names = _decode_json_list(player_names_json)
+        if names:
+            return _format_lineup_players(names)
     player_ids_json = row.get("player_ids_json")
     if player_ids_json:
+        ids = _decode_json_list(player_ids_json)
+        if ids:
+            return _format_lineup_players(ids)
         return str(player_ids_json)
     lineup_key = row.get("lineup_key")
     return str(lineup_key) if lineup_key is not None else None
