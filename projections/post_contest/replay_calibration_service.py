@@ -214,8 +214,16 @@ def _optimizer_regret_frames(regret_df: pd.DataFrame, lineup_df: pd.DataFrame, f
     by_contest = regret_df.copy()
     if not field_df.empty and {"game_date", "contest_id", "draft_group_id", "actual_field_size"}.issubset(field_df.columns):
         join_cols = ["game_date", "contest_id", "draft_group_id"]
+        # Field calibration can contain multiple rows per contest key (e.g. multiple user runs).
+        # Collapse before joining to avoid cartesian multiplication of regret rows.
+        field_join = (
+            field_df[join_cols + ["actual_field_size"]]
+            .assign(actual_field_size=lambda df: pd.to_numeric(df["actual_field_size"], errors="coerce"))
+            .groupby(join_cols, dropna=False, as_index=False)
+            .agg(actual_field_size=("actual_field_size", "mean"))
+        )
         by_contest = by_contest.merge(
-            field_df[join_cols + ["actual_field_size"]],
+            field_join,
             on=join_cols,
             how="left",
         )

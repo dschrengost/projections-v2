@@ -225,3 +225,137 @@ def test_resolve_entries_marks_outside_world_namespace_as_unresolved(monkeypatch
     assert stats["outside_worlds_slot_count"] == 1
     assert stats["unresolved_slot_count"] == 1
     assert stats["outside_worlds_examples"][0]["resolved_player_id"] == "1"
+
+
+def test_prepare_post_contest_replay_allows_partial_field_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    results_path = (
+        tmp_path
+        / "bronze"
+        / "dk_contests"
+        / "nba_gpp_data"
+        / "2099-01-01"
+        / "results"
+        / "contest_123_results.csv"
+    )
+    lineup_a = "PG Alpha SG Beta SF Gamma PF Delta C Epsilon G Zeta F Eta UTIL Theta"
+    lineup_b = "PG Iota SG Kappa SF Lambda PF Mu C Nu G Xi F Omicron UTIL Pi"
+    _write_results_csv(
+        results_path,
+        [
+            {"Rank": 1, "EntryId": 11, "EntryName": "daniel", "Points": 300.5, "Lineup": lineup_a},
+            {"Rank": 2, "EntryId": 12, "EntryName": "villain", "Points": 295.0, "Lineup": lineup_b},
+        ],
+    )
+
+    inventory_path = tmp_path / "analytics" / "contest_results" / "contest_inventory.parquet"
+    inventory_path.parent.mkdir(parents=True, exist_ok=True)
+    row = {column: None for column in replay_service._INVENTORY_COLUMNS}
+    row.update(
+        {
+            "date": "2099-01-01",
+            "contest_id": "123",
+            "contest_name": "Test Contest",
+            "entry_fee": 1.0,
+            "current_entries_meta": 5,
+            "draft_group_id": 999,
+            "results_path": str(results_path),
+        }
+    )
+    pd.DataFrame([row]).to_parquet(inventory_path, index=False)
+
+    all_names = [
+        "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta",
+        "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Omicron", "Pi",
+    ]
+    monkeypatch.setattr(
+        replay_service,
+        "build_player_pool",
+        lambda **kwargs: [
+            {"player_id": str(idx), "name": name, "dk_id": idx}
+            for idx, name in enumerate(all_names, start=1)
+        ],
+    )
+    monkeypatch.setattr(
+        replay_service,
+        "_load_dk_nba_draftable_ids_by_player",
+        lambda draft_group_id: ({}, {}),
+    )
+    monkeypatch.setattr(
+        replay_service,
+        "_cached_world_player_ids",
+        lambda **kwargs: tuple(str(i) for i in range(1, 17)),
+    )
+
+    prepared = replay_service.prepare_post_contest_replay(
+        contest_id="123",
+        game_date="2099-01-01",
+        user_pattern="daniel",
+        draft_group_id=999,
+        data_root=tmp_path,
+        allow_partial_field=True,
+    )
+
+    assert prepared.meta.field_size == 2
+    assert prepared.resolution_stats["partial_field_detected"] is True
+    assert prepared.resolution_stats["expected_field_size"] == 5
+    assert prepared.resolution_stats["observed_field_size"] == 2
+    assert prepared.resolution_stats["effective_field_size"] == 2
+
+
+def test_prepare_post_contest_replay_non_strict_resolution_keeps_resolved_entries(tmp_path: Path, monkeypatch) -> None:
+    results_path = (
+        tmp_path
+        / "bronze"
+        / "dk_contests"
+        / "nba_gpp_data"
+        / "2099-01-01"
+        / "results"
+        / "contest_123_results.csv"
+    )
+    lineup_a = "PG Alpha SG Beta SF Gamma PF Delta C Epsilon G Zeta F Eta UTIL Theta"
+    lineup_b = "PG Iota SG Kappa SF Lambda PF Mu C Nu G Xi F Omicron UTIL Pi"
+    lineup_bad = "PG Unknown SG Beta SF Gamma PF Delta C Epsilon G Zeta F Eta UTIL Theta"
+    _write_results_csv(
+        results_path,
+        [
+            {"Rank": 1, "EntryId": 11, "EntryName": "daniel", "Points": 300.5, "Lineup": lineup_a},
+            {"Rank": 2, "EntryId": 12, "EntryName": "villain a", "Points": 295.0, "Lineup": lineup_b},
+            {"Rank": 3, "EntryId": 13, "EntryName": "villain b", "Points": 294.0, "Lineup": lineup_bad},
+        ],
+    )
+
+    all_names = [
+        "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta",
+        "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Omicron", "Pi",
+    ]
+    monkeypatch.setattr(
+        replay_service,
+        "build_player_pool",
+        lambda **kwargs: [
+            {"player_id": str(idx), "name": name, "dk_id": idx}
+            for idx, name in enumerate(all_names, start=1)
+        ],
+    )
+    monkeypatch.setattr(
+        replay_service,
+        "_load_dk_nba_draftable_ids_by_player",
+        lambda draft_group_id: ({}, {}),
+    )
+    monkeypatch.setattr(
+        replay_service,
+        "_cached_world_player_ids",
+        lambda **kwargs: tuple(str(i) for i in range(1, 17)),
+    )
+
+    prepared = replay_service.prepare_post_contest_replay(
+        contest_id="123",
+        game_date="2099-01-01",
+        user_pattern="daniel",
+        draft_group_id=999,
+        data_root=tmp_path,
+        strict_resolution=False,
+    )
+
+    assert len(prepared.user_entries) == 1
+    assert prepared.resolution_stats["unresolved_entry_count_total"] == 1
+    assert prepared.resolution_stats["opponent_entry_count"] == 1

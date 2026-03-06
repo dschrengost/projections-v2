@@ -145,3 +145,31 @@ def test_build_replay_calibration_artifacts_aggregates_outputs(tmp_path: Path) -
     assert bundle.optimizer_regret_by_bucket_path.exists()
     assert bundle.optimizer_regret_examples_path.exists()
     assert bundle.summary_path.exists()
+
+
+def test_optimizer_regret_frames_dedupes_field_join_rows() -> None:
+    regret_df = pd.DataFrame(
+        [
+            {
+                "game_date": "2099-01-01",
+                "contest_id": "123",
+                "draft_group_id": 999,
+                "candidate_pool_available": True,
+                "selection_regret_roi": 0.1,
+                "selection_regret_cash_rate": 0.02,
+            }
+        ]
+    )
+    lineup_df = pd.DataFrame()
+    field_df = pd.DataFrame(
+        [
+            {"game_date": "2099-01-01", "contest_id": "123", "draft_group_id": 999, "actual_field_size": 1000},
+            {"game_date": "2099-01-01", "contest_id": "123", "draft_group_id": 999, "actual_field_size": 1000},
+        ]
+    )
+
+    by_contest, by_bucket, _ = replay_calibration_service._optimizer_regret_frames(regret_df, lineup_df, field_df)
+
+    assert len(by_contest) == 1
+    assert len(by_bucket) == 1
+    assert by_bucket.iloc[0]["contest_count"] == 1

@@ -664,6 +664,7 @@ def prepare_post_contest_replay(
     run_id: Optional[str] = None,
     worlds_source: str = "gtv2",
     strict_resolution: bool = True,
+    allow_partial_field: bool = False,
 ) -> PreparedReplayContext:
     data_root = data_root or get_data_root()
     meta, entries = load_contest_entries(contest_id=contest_id, game_date=game_date, data_root=data_root)
@@ -672,11 +673,15 @@ def prepare_post_contest_replay(
         raise ValueError(
             f"draft_group_id is required for replay preparation (contest_id={contest_id})"
         )
-    if meta.field_size > len(entries):
+    observed_field_size = int(len(entries))
+    expected_field_size = int(meta.field_size)
+    partial_field_detected = expected_field_size > observed_field_size
+    if partial_field_detected and not allow_partial_field:
         raise ValueError(
             "Partial contest field detected; anchored emulation is not implemented yet "
-            f"(observed_entries={len(entries)}, expected_field_size={meta.field_size})"
+            f"(observed_entries={observed_field_size}, expected_field_size={expected_field_size})"
         )
+    effective_field_size = observed_field_size if partial_field_detected else expected_field_size
 
     canonical_player_ids = _cached_world_player_ids(
         game_date=meta.game_date,
@@ -722,9 +727,21 @@ def prepare_post_contest_replay(
             "user_entry_count": int(len(user_entries)),
             "resolved_user_entry_count": int(len(user_entries_resolved)),
             "opponent_entry_count": int(len(opponent_entries)),
-            "observed_field_size": int(len(entries)),
+            "observed_field_size": observed_field_size,
+            "expected_field_size": expected_field_size,
+            "effective_field_size": int(effective_field_size),
+            "partial_field_detected": bool(partial_field_detected),
             "unresolved_entry_count_total": int(len(unresolved_entries)),
             "worlds_source": worlds_source,
+        }
+    )
+    extra = dict(meta.extra)
+    extra.update(
+        {
+            "observed_field_size": observed_field_size,
+            "expected_field_size": expected_field_size,
+            "effective_field_size": int(effective_field_size),
+            "partial_field_detected": bool(partial_field_detected),
         }
     )
 
@@ -734,11 +751,11 @@ def prepare_post_contest_replay(
         contest_name=meta.contest_name,
         draft_group_id=resolved_draft_group_id,
         entry_fee=meta.entry_fee,
-        field_size=meta.field_size,
+        field_size=int(effective_field_size),
         results_path=meta.results_path,
         source=meta.source,
         source_mode=meta.source_mode,
-        extra=dict(meta.extra),
+        extra=extra,
     )
     return PreparedReplayContext(
         meta=meta,
@@ -816,6 +833,8 @@ def run_post_contest_replay(
     worlds_source: str = "gtv2",
     ownership_mode: str = "field_only",
     data_root: Optional[Path] = None,
+    strict_resolution: bool = True,
+    allow_partial_field: bool = False,
 ) -> ContestReplayRun:
     prepared = prepare_post_contest_replay(
         contest_id=contest_id,
@@ -825,6 +844,8 @@ def run_post_contest_replay(
         data_root=data_root,
         run_id=run_id,
         worlds_source=worlds_source,
+        strict_resolution=strict_resolution,
+        allow_partial_field=allow_partial_field,
     )
     resolved_entry_fee = float(entry_fee if entry_fee is not None else prepared.meta.entry_fee)
     if resolved_entry_fee <= 0:
@@ -856,5 +877,7 @@ def run_post_contest_replay(
         "entry_fee": resolved_entry_fee,
         "worlds_source": worlds_source,
         "ownership_mode": ownership_mode,
+        "strict_resolution": bool(strict_resolution),
+        "allow_partial_field": bool(allow_partial_field),
     }
     return ContestReplayRun(prepared=prepared, simulation=simulation, run_meta=run_meta)

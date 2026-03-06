@@ -407,10 +407,16 @@ def _replay_trust_status(
     candidate_missing_player_id_count: int,
 ) -> Tuple[str, List[str]]:
     issues: List[str] = []
+    if bool(resolution.get("partial_field_detected", False)):
+        issues.append("partial_field_detected")
     if int(resolution.get("unresolved_slot_count", 0)) > 0:
         issues.append("unresolved_slots_present")
     if int(resolution.get("outside_worlds_slot_count", 0)) > 0:
         issues.append("outside_worlds_slots_present")
+    if int(resolution.get("resolved_user_entry_count", 0)) <= 0:
+        issues.append("no_resolved_user_entries")
+    if int(resolution.get("opponent_entry_count", 0)) <= 0:
+        issues.append("no_resolved_opponent_entries")
     if opponent_missing_player_id_count > 0:
         issues.append("opponent_lineups_missing_world_players")
     if candidate_missing_player_id_count > 0:
@@ -1044,6 +1050,8 @@ def build_post_contest_replay_analytics(
     modeled_field_version: str = "v1_calibrated",
     include_modeled_field: bool = True,
     candidate_manifest_path: Optional[Path] = None,
+    strict_resolution: bool = False,
+    allow_partial_field: bool = True,
 ) -> ReplayAnalyticsBundle:
     data_root = data_root or get_data_root()
     replay_run: ContestReplayRun = run_post_contest_replay(
@@ -1057,6 +1065,8 @@ def build_post_contest_replay_analytics(
         worlds_source=worlds_source,
         ownership_mode=ownership_mode,
         data_root=data_root,
+        strict_resolution=strict_resolution,
+        allow_partial_field=allow_partial_field,
     )
     prepared = replay_run.prepared
     resolved_draft_group_id = int(prepared.meta.draft_group_id or 0)
