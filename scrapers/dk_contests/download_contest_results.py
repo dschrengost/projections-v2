@@ -135,9 +135,10 @@ class ContestResultsDownloader:
         if content_encoding == "gzip":
             try:
                 import gzip
-                response_text = gzip.decompress(response.content).decode('utf-8')
-            except Exception as e:
-                return False, f"failed to decompress gzip response: {e}"
+                response_text = gzip.decompress(response.content).decode("utf-8")
+            except Exception:
+                # Some DK responses advertise gzip but arrive as plain CSV text.
+                response_text = response.text
         # Handle zip archive responses (may contain multiple CSVs)
         elif response.content.startswith(b'PK'):
             try:
