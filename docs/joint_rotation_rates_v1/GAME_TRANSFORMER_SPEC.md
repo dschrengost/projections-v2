@@ -6369,3 +6369,37 @@ Downstream impact assessment:
   - no further tuning was applied immediately after this rollout;
   - remaining residuals are tracked as a future **model-native stat-shape realism** problem,
     not a reason for another broad post-processing pass.
+
+#### 16.16.11 Active-world hard guardrails for starters and manual force-in (2026-03-06)
+
+Live GTv2 worlds now enforce two hard active-world guardrails:
+
+1. Any player flagged as a starter must be active in 100% of sampled worlds.
+2. Any player with an active manual availability override `force_in` must be active in 100% of sampled worlds.
+
+Scope and source-of-truth:
+
+- This is implemented only in the GTv2 worlds path used by the transformer model.
+- Starter detection intentionally treats projected and confirmed starter signals as equivalent for this guardrail.
+- Effective starter signal is the OR of available starter columns:
+  - `lineup_starter_announced`
+  - `is_projected_starter`
+  - `is_confirmed_starter`
+- Manual force-in comes from the single manual override path (`override_type == "force_in"`), filtered to active overrides as-of run timestamp.
+
+Implementation details:
+
+1. `prefect_flows/live_nba_pipeline_v3.py`
+   - `_attach_gtv2_force_active_worlds(...)` computes `force_active_worlds` per player row:
+     - `starter_mask OR manual_force_in_mask`.
+2. `projections/rotation/game_transformer_v2.py`
+   - `build_game_level_examples(...)` carries `force_active_worlds` into game examples and batch tensors.
+3. `projections/rotation/sample_worlds_v2.py`
+   - `sample_worlds_for_batch(...)` hard-enforces:
+     - `sampled_active_mask = model_sampled_active_mask OR forced_active_mask`.
+   - The enforced mask is then used for emitted world `active`, flow zeroing for inactive players, backbone coupling, and contract checks.
+
+Operational result:
+
+- The guardrail guarantees 100% active-world membership for starters and manual `force_in` players in GTv2 sampled worlds.
+- Projected vs confirmed starter is not differentiated by this guardrail; both force active worlds.

@@ -170,6 +170,7 @@ class GameLevelExample:
     player_valid_mask: np.ndarray  # (2,15)
     player_ids: np.ndarray  # (2,15)
     team_ids: np.ndarray  # (2,)
+    force_active_worlds: np.ndarray  # (2,15) hard guardrail mask for sampled worlds
     y_minutes: np.ndarray  # (2,15)
     flow_targets: np.ndarray  # (2,15,S)
     flow_observed_mask: np.ndarray  # (2,15,S)
@@ -408,6 +409,42 @@ def build_game_level_examples(
         minutes_label_col = fallback
 
     y_minutes = pd.to_numeric(df[minutes_label_col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
+    starter_signal = np.zeros(len(df), dtype=bool)
+    for starter_col in ("lineup_starter_announced", "is_projected_starter", "is_confirmed_starter"):
+        if starter_col in df.columns:
+            starter_signal |= (
+                pd.to_numeric(df[starter_col], errors="coerce")
+                .fillna(0.0)
+                .to_numpy(dtype=np.float32)
+                >= 0.5
+            )
+    manual_force_in = np.zeros(len(df), dtype=bool)
+    if "force_active_worlds" in df.columns:
+        manual_force_in = (
+            pd.to_numeric(df["force_active_worlds"], errors="coerce")
+            .fillna(0.0)
+            .to_numpy(dtype=np.float32)
+            >= 0.5
+        )
+    elif "manual_override_type" in df.columns:
+        override_type = (
+            df["manual_override_type"]
+            .astype("string")
+            .fillna("")
+            .str.strip()
+            .str.lower()
+            .to_numpy(dtype=object)
+        )
+        manual_force_in = override_type == "force_in"
+        if "manual_override_active" in df.columns:
+            override_active = (
+                pd.to_numeric(df["manual_override_active"], errors="coerce")
+                .fillna(0.0)
+                .to_numpy(dtype=np.float32)
+                >= 0.5
+            )
+            manual_force_in &= override_active
+    force_active_worlds = starter_signal | manual_force_in
     flow_cols = list(flow_label_columns or [])
     if flow_cols:
         flow_raw = _numeric_frame_with_nans_for_missing(df, flow_cols).to_numpy(dtype=np.float32, copy=False)
@@ -422,6 +459,7 @@ def build_game_level_examples(
 
     x_by_idx = x
     y_by_idx = y_minutes
+    force_active_by_idx = force_active_worlds
     flow_by_idx = flow_values
     flow_observed_by_idx = flow_observed
     lineup_by_idx = lineup_available
@@ -440,6 +478,7 @@ def build_game_level_examples(
         player_valid = np.zeros((2, max_players_per_team), dtype=bool)
         player_ids = np.zeros((2, max_players_per_team), dtype=np.int64)
         team_ids = np.zeros((2,), dtype=np.int64)
+        force_active_arr = np.zeros((2, max_players_per_team), dtype=bool)
         y_minutes_arr = np.zeros((2, max_players_per_team), dtype=np.float32)
         flow_arr = np.zeros((2, max_players_per_team, len(flow_cols)), dtype=np.float32)
         flow_obs_arr = np.zeros((2, max_players_per_team, len(flow_cols)), dtype=bool)
@@ -470,6 +509,7 @@ def build_game_level_examples(
             player_ids[side_idx, :n] = (
                 pd.to_numeric(team_rows["player_id"], errors="coerce").fillna(0).astype("int64").to_numpy(dtype=np.int64)
             )
+            force_active_arr[side_idx, :n] = force_active_by_idx[local_idx]
             y_minutes_arr[side_idx, :n] = y_by_idx[local_idx]
             if flow_cols:
                 flow_arr[side_idx, :n, :] = flow_by_idx[local_idx, :]
@@ -512,6 +552,7 @@ def build_game_level_examples(
                 player_valid_mask=player_valid,
                 player_ids=player_ids,
                 team_ids=team_ids,
+                force_active_worlds=force_active_arr,
                 y_minutes=y_minutes_arr,
                 flow_targets=flow_arr,
                 flow_observed_mask=flow_obs_arr,
@@ -542,6 +583,7 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
     player_valid_mask = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.bool)
     player_ids = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.long)
     team_ids = torch.zeros((bsz, 2), dtype=torch.long)
+    force_active_worlds = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.bool)
     y_minutes = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.float32)
     flow_targets = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM, n_flow), dtype=torch.float32)
     flow_observed_mask = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM, n_flow), dtype=torch.bool)
@@ -557,6 +599,7 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
         player_valid_mask[i] = torch.from_numpy(ex.player_valid_mask.astype(bool, copy=False))
         player_ids[i] = torch.from_numpy(ex.player_ids.astype(np.int64, copy=False))
         team_ids[i] = torch.from_numpy(ex.team_ids.astype(np.int64, copy=False))
+        force_active_worlds[i] = torch.from_numpy(ex.force_active_worlds.astype(bool, copy=False))
         y_minutes[i] = torch.from_numpy(ex.y_minutes.astype(np.float32, copy=False))
         if n_flow > 0:
             flow_targets[i] = torch.from_numpy(ex.flow_targets.astype(np.float32, copy=False))
@@ -574,6 +617,7 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
         "player_valid_mask": player_valid_mask,
         "player_ids": player_ids,
         "team_ids": team_ids,
+        "force_active_worlds": force_active_worlds,
         "y_minutes": y_minutes,
         "flow_targets": flow_targets,
         "flow_observed_mask": flow_observed_mask,

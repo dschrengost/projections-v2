@@ -58,7 +58,7 @@ from projections.pipeline.parity_manifest import (
 )
 from projections.pipeline.v3_postflight import run_postflight_gate
 from projections.pipeline.v3_preflight import run_preflight_gate
-from projections.ops.manual_availability import manual_override_report
+from projections.ops.manual_availability import list_manual_overrides, manual_override_report
 from projections.rotation.game_transformer_v2 import (
     GameLevelDataset,
     GameTransformerV2Config,
@@ -509,6 +509,62 @@ def _build_gtv2_inference_examples(
     if not examples:
         raise RuntimeError("no valid game examples produced for GTV2 inference")
     return examples
+
+
+def _attach_gtv2_force_active_worlds(
+    features_df: pd.DataFrame,
+    *,
+    game_date: str,
+    data_root: Path,
+    as_of_ts: str | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    out = features_df.copy()
+    if out.empty:
+        out["force_active_worlds"] = pd.Series(dtype="int8")
+        return out, {"starter_rows": 0, "manual_force_in_rows": 0, "total_force_active_rows": 0}
+
+    starter_mask = np.zeros(len(out), dtype=bool)
+    for col in ("lineup_starter_announced", "is_projected_starter", "is_confirmed_starter"):
+        if col in out.columns:
+            starter_mask |= (
+                pd.to_numeric(out[col], errors="coerce")
+                .fillna(0.0)
+                .to_numpy(dtype=float)
+                >= 0.5
+            )
+
+    manual_force_in_mask = np.zeros(len(out), dtype=bool)
+    try:
+        overrides = list_manual_overrides(
+            pd.Timestamp(game_date).date(),
+            data_root=data_root,
+            active_only=True,
+            as_of_ts=as_of_ts,
+        )
+    except Exception:
+        overrides = []
+    force_in_keys: set[str] = set()
+    for row in overrides:
+        if str(row.get("override_type", "")).strip().lower() != "force_in":
+            continue
+        game_id_raw = pd.to_numeric(pd.Series([row.get("game_id")]), errors="coerce").iloc[0]
+        player_id_raw = pd.to_numeric(pd.Series([row.get("player_id")]), errors="coerce").iloc[0]
+        if pd.isna(game_id_raw) or pd.isna(player_id_raw):
+            continue
+        force_in_keys.add(f"{int(game_id_raw)}|{int(player_id_raw)}")
+    if force_in_keys and {"game_id", "player_id"}.issubset(out.columns):
+        game_ids = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
+        player_ids = pd.to_numeric(out["player_id"], errors="coerce").astype("Int64")
+        keys = (game_ids.astype("string") + "|" + player_ids.astype("string")).fillna("")
+        manual_force_in_mask = keys.isin(force_in_keys).to_numpy(dtype=bool)
+
+    force_active_mask = starter_mask | manual_force_in_mask
+    out["force_active_worlds"] = force_active_mask.astype("int8")
+    return out, {
+        "starter_rows": int(starter_mask.sum()),
+        "manual_force_in_rows": int(manual_force_in_mask.sum()),
+        "total_force_active_rows": int(force_active_mask.sum()),
+    }
 
 
 def _selected_props_source_from_checklist(checklist: dict[str, Any]) -> str | None:
@@ -3787,6 +3843,7 @@ def generate_worlds_gtv2_live_task(
     *,
     game_date: str,
     run_id: str,
+    run_as_of_ts: str | None = None,
     features_path: Path,
     scores_path: Path,
     bundle_dir: Path,
@@ -3893,7 +3950,14 @@ def generate_worlds_gtv2_live_task(
             device=device,
             flow_scale_clip_override=flow_scale_clip_override,
         )
-        features_df = pd.read_parquet(features_path)
+        features_df_raw = pd.read_parquet(features_path)
+        features_df, force_active_diag = _attach_gtv2_force_active_worlds(
+            features_df_raw,
+            game_date=game_date,
+            data_root=data_root,
+            as_of_ts=run_as_of_ts,
+        )
+        logger.info("Applied force-active world guardrails: %s", force_active_diag)
         examples = _build_gtv2_inference_examples(
             features_df=features_df,
             game_date=game_date,
@@ -4013,6 +4077,7 @@ def generate_worlds_gtv2_live_task(
                 "mode": str(make_model_cfg.mode),
                 "use_learned_efficiency": bool(make_model_cfg.use_learned_efficiency),
             },
+            "force_active_guardrails": force_active_diag,
             "props_uplift_calibration": props_uplift_report,
             "world_realism_controls": world_realism_report,
             "created_at": _utc_now_iso(),
@@ -5005,6 +5070,7 @@ def nba_live_pipeline_v3_flow(
         worlds_outputs = generate_worlds_gtv2_live_task(
             game_date=resolved_game_date,
             run_id=run_id,
+            run_as_of_ts=as_of_ts,
             features_path=features_path,
             scores_path=scores_path,
             bundle_dir=bundle_dir,

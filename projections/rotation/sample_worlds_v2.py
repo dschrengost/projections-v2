@@ -810,6 +810,11 @@ def sample_worlds_for_batch(
 
     player_features = batch["player_features"].to(device=device)  # type: ignore[index]
     player_valid_mask = batch["player_valid_mask"].to(device=device)  # type: ignore[index]
+    forced_active_worlds = batch.get("force_active_worlds")
+    if isinstance(forced_active_worlds, torch.Tensor):
+        forced_active_worlds = forced_active_worlds.to(device=device, dtype=torch.bool)
+    else:
+        forced_active_worlds = torch.zeros_like(player_valid_mask, dtype=torch.bool, device=device)
     game_features = batch["game_features"].to(device=device)  # type: ignore[index]
     team_features = batch["team_features"].to(device=device)  # type: ignore[index]
 
@@ -824,6 +829,7 @@ def sample_worlds_for_batch(
         n_worlds_chunk = min(chunk, total_worlds - world_offset)
         rep_player_features = player_features.repeat_interleave(n_worlds_chunk, dim=0)
         rep_player_valid_mask = player_valid_mask.repeat_interleave(n_worlds_chunk, dim=0)
+        rep_forced_active_worlds = forced_active_worlds.repeat_interleave(n_worlds_chunk, dim=0)
         rep_game_features = game_features.repeat_interleave(n_worlds_chunk, dim=0)
         rep_team_features = team_features.repeat_interleave(n_worlds_chunk, dim=0)
 
@@ -870,8 +876,13 @@ def sample_worlds_for_batch(
                 flow_raw,
                 flow_target_columns=flow_target_columns,
             )
+            forced_active_flat = (
+                rep_forced_active_worlds.reshape(rep_forced_active_worlds.shape[0], -1)
+                & rep_player_valid_mask.reshape(rep_player_valid_mask.shape[0], -1)
+            )
+            sampled_active_mask = out.active.active_mask | forced_active_flat
             # Enforce DNP semantics: inactive players contribute zero counting stats.
-            flow_projected = flow_projected * out.active.active_mask.unsqueeze(-1).to(dtype=flow_projected.dtype)
+            flow_projected = flow_projected * sampled_active_mask.unsqueeze(-1).to(dtype=flow_projected.dtype)
             usage_share_logits: torch.Tensor | None = None
             if getattr(out, "usage_share", None) is not None:
                 usage_share_logits = torch.stack(
@@ -929,7 +940,7 @@ def sample_worlds_for_batch(
                     flow_values=flow_projected,
                     valid_mask=out.player_valid_mask,
                     team_index=out.player_team_index,
-                    active_mask=out.active.active_mask,
+                    active_mask=sampled_active_mask,
                     flow_target_columns=flow_target_columns,
                     backbone_fga=budget_fga,
                     backbone_fta=budget_fta,
@@ -949,7 +960,7 @@ def sample_worlds_for_batch(
                 )
 
         minutes = out.minutes.minutes.reshape(bsz, n_worlds_chunk, -1)
-        active = out.active.active_mask.reshape(bsz, n_worlds_chunk, -1)
+        active = sampled_active_mask.reshape(bsz, n_worlds_chunk, -1)
         flow_vals = flow_projected.reshape(bsz, n_worlds_chunk, out.player_states.shape[1], len(flow_target_columns))
         valid_flat = out.player_valid_mask.reshape(bsz, n_worlds_chunk, -1)
         team_flat = out.player_team_index.reshape(bsz, n_worlds_chunk, -1)
