@@ -444,6 +444,7 @@ def _build_decision_guidance(
     *,
     replay_trust_status: str,
     replay_trust_issues: Sequence[str],
+    resolution: Dict[str, Any],
     user_replay_summary: Dict[str, Any],
     field_summary: Dict[str, Any],
     regret_summary: Dict[str, Any],
@@ -459,6 +460,15 @@ def _build_decision_guidance(
         )
         if replay_trust_issues:
             reasons.append(f"trust_issues={','.join(replay_trust_issues)}")
+        outside_world_slots = int(resolution.get("outside_worlds_slot_count", 0) or 0)
+        if outside_world_slots > 0:
+            messages.append(
+                f"Resolved names are leaking outside worlds namespace (outside_worlds_slot_count={outside_world_slots}); "
+                "prioritize player-id mapping/projection coverage before interpreting regret."
+            )
+            if primary == "mixed":
+                primary = "projection_or_mapping"
+            reasons.append("outside_worlds_namespace_gap")
 
     selection_regret = _safe_float(regret_summary.get("selection_regret_roi"))
     if selection_regret is not None:
@@ -468,7 +478,15 @@ def _build_decision_guidance(
             )
             primary = "selection"
             reasons.append("selection_regret_high")
-        elif selection_regret <= 0.005:
+        elif selection_regret <= -0.03:
+            messages.append(
+                f"Candidate set underperformed entered lineups (selection_regret_roi={selection_regret:.3f}); "
+                "this points to candidate generation quality, not selection execution."
+            )
+            if primary == "mixed":
+                primary = "candidate_generation"
+            reasons.append("selection_regret_negative")
+        elif abs(selection_regret) <= 0.005:
             messages.append(
                 f"Selection regret is low (selection_regret_roi={selection_regret:.3f}); selection is likely not the main issue."
             )
@@ -988,6 +1006,24 @@ def _regret_frame(
     candidate_only = candidate_df.copy()
     best_candidate = _best_lineup_row(candidate_only, "sim_roi")
     best_finalset = best_entered
+    entered_sim_roi = pd.to_numeric(entered_df["sim_roi"], errors="coerce") if "sim_roi" in entered_df.columns else pd.Series(dtype=float)
+    actual_avg_roi = (
+        float(entered_sim_roi.dropna().mean())
+        if not entered_sim_roi.empty and entered_sim_roi.dropna().size > 0
+        else None
+    )
+    counterfactual_avg_roi: Optional[float] = None
+    if not candidate_df.empty and "sim_roi" in candidate_df.columns:
+        candidate_roi = pd.to_numeric(candidate_df["sim_roi"], errors="coerce")
+        if "candidate_weight" in candidate_df.columns:
+            weights = pd.to_numeric(candidate_df["candidate_weight"], errors="coerce").fillna(0.0)
+            valid = candidate_roi.notna() & (weights > 0)
+            if valid.any():
+                counterfactual_avg_roi = float(np.average(candidate_roi[valid], weights=weights[valid]))
+        if counterfactual_avg_roi is None:
+            valid = candidate_roi.dropna()
+            if valid.size > 0:
+                counterfactual_avg_roi = float(valid.mean())
     row = {
         "game_date": prepared.meta.game_date,
         "contest_id": prepared.meta.contest_id,
@@ -1020,6 +1056,8 @@ def _regret_frame(
         "best_finalset_lineup_label": _lineup_label(best_finalset),
         "best_finalset_lineup_players": _lineup_players_text(best_finalset),
         "best_finalset_sim_roi": best_finalset.get("sim_roi"),
+        "actual_avg_roi": actual_avg_roi,
+        "counterfactual_avg_roi": counterfactual_avg_roi,
         "selection_regret_roi": (
             float(best_candidate.get("sim_roi")) - float(best_finalset.get("sim_roi"))
             if best_candidate.get("sim_roi") is not None and best_finalset.get("sim_roi") is not None
@@ -1294,6 +1332,7 @@ def build_post_contest_replay_analytics(
     decision_guidance, attribution_summary = _build_decision_guidance(
         replay_trust_status=replay_trust_status,
         replay_trust_issues=replay_trust_issues,
+        resolution=resolution_summary,
         user_replay_summary=user_replay_summary,
         field_summary=field_summary,
         regret_summary=regret_summary,

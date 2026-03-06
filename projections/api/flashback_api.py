@@ -17,6 +17,7 @@ from projections.post_contest import (
     build_replay_calibration_artifacts,
     find_latest_export_manifest,
 )
+from projections.post_contest.replay_service import replay_output_dir
 
 router = APIRouter()
 
@@ -210,16 +211,65 @@ class FlashbackRunRequest(BaseModel):
     ownership_mode: str = Field(default="field_only")
     modeled_field_version: str = Field(default="v1_calibrated")
     include_modeled_field: bool = True
+    force_rebuild: bool = False
+    load_existing_only: bool = False
 
 
 class FlashbackRunResponse(BaseModel):
     summary: Dict[str, Any] = Field(default_factory=dict)
     previews: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
+    loaded_from_cache: bool = False
 
 
 class FlashbackCalibrationResponse(BaseModel):
     summary: Dict[str, Any] = Field(default_factory=dict)
     previews: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
+
+
+def _existing_flashback_paths(*, game_date: str, contest_id: str, user_pattern: str) -> Dict[str, Path]:
+    analytics_dir = replay_output_dir(
+        game_date=game_date,
+        contest_id=contest_id,
+        user_pattern=user_pattern,
+        data_root=paths.data_path(),
+    ) / "analytics"
+    return {
+        "summary": analytics_dir / "summary.json",
+        "lineup": analytics_dir / "lineup_calibration.parquet",
+        "player": analytics_dir / "player_calibration.parquet",
+        "field": analytics_dir / "field_calibration.parquet",
+        "regret": analytics_dir / "regret_summary.parquet",
+    }
+
+
+def _load_existing_flashback_response(
+    *,
+    game_date: str,
+    contest_id: str,
+    user_pattern: str,
+) -> Optional[FlashbackRunResponse]:
+    artifact_paths = _existing_flashback_paths(
+        game_date=game_date,
+        contest_id=contest_id,
+        user_pattern=user_pattern,
+    )
+    summary_path = artifact_paths["summary"]
+    lineup_path = artifact_paths["lineup"]
+    player_path = artifact_paths["player"]
+    field_path = artifact_paths["field"]
+    regret_path = artifact_paths["regret"]
+    required = [summary_path, lineup_path, player_path, field_path, regret_path]
+    if not all(path.exists() for path in required):
+        return None
+    summary = _load_json(summary_path)
+    previews = {
+        "entered_lineups": _preview_entered_lineups(lineup_path, limit=25),
+        "player_calibration": _preview_parquet(player_path, limit=15),
+        "lineup_calibration": _preview_parquet(lineup_path, limit=15),
+        "field_calibration": _preview_parquet(field_path, limit=5),
+        "regret_summary": _preview_parquet(regret_path, limit=5),
+    }
+    return FlashbackRunResponse(summary=summary, previews=previews, loaded_from_cache=True)
 
 
 @router.get("/contests", response_model=List[FlashbackContestSummaryResponse])
@@ -290,6 +340,25 @@ async def list_flashback_contests(date: str, user_pattern: str) -> List[Flashbac
 
 @router.post("/run", response_model=FlashbackRunResponse)
 async def run_flashback(request: FlashbackRunRequest) -> FlashbackRunResponse:
+    if not request.force_rebuild:
+        existing = _load_existing_flashback_response(
+            game_date=request.game_date,
+            contest_id=request.contest_id,
+            user_pattern=request.user_pattern,
+        )
+        if existing is not None:
+            return existing
+        if request.load_existing_only:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "No existing flashback artifacts found for this date/contest/user. "
+                    "Run flashback first or disable load_existing_only."
+                ),
+            )
+    elif request.load_existing_only:
+        raise HTTPException(status_code=400, detail="force_rebuild and load_existing_only cannot both be true")
+
     try:
         bundle = build_post_contest_replay_analytics(
             contest_id=request.contest_id,
@@ -316,7 +385,7 @@ async def run_flashback(request: FlashbackRunRequest) -> FlashbackRunResponse:
         "field_calibration": _preview_parquet(bundle.field_calibration_path, limit=5),
         "regret_summary": _preview_parquet(bundle.regret_summary_path, limit=5),
     }
-    return FlashbackRunResponse(summary=summary, previews=previews)
+    return FlashbackRunResponse(summary=summary, previews=previews, loaded_from_cache=False)
 
 
 @router.post("/calibration/run", response_model=FlashbackCalibrationResponse)

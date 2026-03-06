@@ -296,3 +296,64 @@ def test_build_post_contest_replay_analytics_writes_all_artifacts(tmp_path: Path
     assert "best_candidate_lineup_players" in regret_df.columns
     assert "Alpha" in str(regret_df.iloc[0]["best_entered_lineup_players"])
     assert "Alpha" in str(regret_df.iloc[0]["best_candidate_lineup_label"])
+    assert "actual_avg_roi" in regret_df.columns
+    assert "counterfactual_avg_roi" in regret_df.columns
+
+
+def test_build_decision_guidance_handles_negative_selection_regret() -> None:
+    messages, attribution = replay_analytics_service._build_decision_guidance(
+        replay_trust_status="broken",
+        replay_trust_issues=["outside_worlds_slots_present"],
+        resolution={"outside_worlds_slot_count": 42},
+        user_replay_summary={"avg_sim_roi": 1.0, "avg_realized_score_sim_percentile": 0.2},
+        field_summary={},
+        regret_summary={"selection_regret_roi": -0.25},
+    )
+
+    joined = " ".join(messages)
+    assert "outside worlds namespace" in joined
+    assert "Candidate set underperformed entered lineups" in joined
+    assert attribution["primary"] in {"candidate_generation", "projection_or_mapping"}
+    assert "selection_regret_negative" in attribution["reasons"]
+
+
+def test_regret_frame_populates_avg_roi_fields() -> None:
+    prepared = PreparedReplayContext(
+        meta=ContestReplayMeta(
+            game_date="2099-01-01",
+            contest_id="123",
+            contest_name="Test Contest",
+            draft_group_id=999,
+            entry_fee=1.0,
+            field_size=3,
+        ),
+        entries=[],
+        resolved_entries=[],
+        user_entries=[],
+        user_lineups=[],
+        user_weights=[],
+        opponent_field_library=FieldLibrary(lineups=[], weights=[], meta={"source": "test"}),
+        resolution_stats={},
+    )
+    entered_df = pd.DataFrame(
+        [
+            {"lineup_key": "a", "sim_roi": 1.0, "sim_cash_rate": 0.2, "realized_rank": 10},
+            {"lineup_key": "b", "sim_roi": 3.0, "sim_cash_rate": 0.4, "realized_rank": 20},
+        ]
+    )
+    candidate_df = pd.DataFrame(
+        [
+            {"lineup_key": "c", "sim_roi": 2.0, "sim_cash_rate": 0.3, "candidate_weight": 1},
+            {"lineup_key": "d", "sim_roi": 6.0, "sim_cash_rate": 0.7, "candidate_weight": 3},
+        ]
+    )
+
+    regret = replay_analytics_service._regret_frame(
+        prepared=prepared,
+        entered_df=entered_df,
+        candidate_df=candidate_df,
+        candidate_meta={},
+    )
+    row = regret.iloc[0]
+    assert float(row["actual_avg_roi"]) == 2.0
+    assert float(row["counterfactual_avg_roi"]) == 5.0

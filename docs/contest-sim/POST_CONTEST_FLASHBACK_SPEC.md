@@ -1700,3 +1700,59 @@ These names were appearing with IDs absent from worlds in replay field construct
 - [backfill_export_lineage.py](/home/daniel/projects/projections-v2/projections/cli/backfill_export_lineage.py)
 - [POST_CONTEST_FLASHBACK_SPEC.md](/home/daniel/projects/projections-v2/docs/contest-sim/POST_CONTEST_FLASHBACK_SPEC.md)
 - [POST_CONTEST_REPLAY_ANALYTICS_SPEC.md](/home/daniel/projects/projections-v2/docs/contest-sim/POST_CONTEST_REPLAY_ANALYTICS_SPEC.md)
+
+### Session Update (2026-03-06): Cache-First UI/API + Trust Messaging Corrections
+
+This section documents the latest production behavior and should be treated as authoritative for
+the flashback page/API user flow.
+
+#### API behavior
+
+`POST /api/flashback/run` is now cache-first by default.
+
+- If replay artifacts already exist for `(game_date, contest_id, user_pattern)`, the endpoint now
+  returns those artifacts immediately instead of rebuilding.
+- Rebuild happens only when artifacts are missing or `force_rebuild=true`.
+
+New request flags:
+
+- `force_rebuild: bool = false`
+- `load_existing_only: bool = false`
+
+Validation rules:
+
+- If `load_existing_only=true` and no artifacts exist, return `404`.
+- `force_rebuild=true` and `load_existing_only=true` together return `400`.
+
+New response field:
+
+- `loaded_from_cache: bool`
+
+#### Flashback UI behavior
+
+When a user selects date/user/contest in the flashback page, the UI now auto-loads existing replay
+artifacts (`load_existing_only=true`) and hydrates preview/summary tables without requiring a new
+replay run.
+
+The Run button behavior remains available but now reports whether the response came from cache vs a
+fresh rebuild.
+
+#### Replay analytics interpretation corrections
+
+Two analytics contract fixes were made and must be preserved:
+
+1. `regret_summary` now includes both:
+   - `actual_avg_roi`
+   - `counterfactual_avg_roi`
+
+2. Decision guidance no longer treats strongly negative `selection_regret_roi` as “selection is
+   fine”.
+   - negative regret now maps to candidate-generation underperformance,
+   - outside-world namespace leakage is called out explicitly as a primary trust blocker for
+     projection/mapping coverage.
+
+#### Operational note
+
+Current trust status on recent slates remains mostly `broken` due to outside-world namespace gaps.
+Cache-first loading improves UX/runtime but does not by itself restore replay trust; trust recovery
+still depends on the projection/mapping coverage fixes described above.

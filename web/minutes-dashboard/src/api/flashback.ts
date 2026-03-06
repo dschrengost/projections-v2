@@ -26,11 +26,14 @@ export interface FlashbackRunRequest {
   ownership_mode?: string
   modeled_field_version?: string
   include_modeled_field?: boolean
+  force_rebuild?: boolean
+  load_existing_only?: boolean
 }
 
 export interface FlashbackRunResponse {
   summary: Record<string, unknown>
   previews: Record<string, Array<Record<string, unknown>>>
+  loaded_from_cache?: boolean
 }
 
 export interface FlashbackCalibrationResponse {

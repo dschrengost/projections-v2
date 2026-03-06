@@ -254,6 +254,46 @@ export default function FlashbackPage() {
     setEntryFee(contest.entry_fee != null ? String(contest.entry_fee) : '')
   }, [selectedContestId, contests])
 
+  useEffect(() => {
+    if (selectedContestId === 'manual') return
+    const normalizedGameDate = normalizeGameDateInput(gameDate)
+    if (!ISO_DATE_RE.test(normalizedGameDate)) return
+    if (!contestId.trim() || !userPattern.trim()) return
+    let cancelled = false
+    setFlashback(null)
+    ;(async () => {
+      try {
+        const response = await runFlashback({
+          game_date: normalizedGameDate,
+          contest_id: contestId.trim(),
+          user_pattern: userPattern.trim(),
+          draft_group_id: draftGroupId.trim() ? Number(draftGroupId) : undefined,
+          entry_fee: entryFee.trim() ? Number(entryFee) : undefined,
+          archetype: 'medium',
+          worlds_source: 'gtv2',
+          ownership_mode: 'field_only',
+          modeled_field_version: 'v1_calibrated',
+          include_modeled_field: true,
+          load_existing_only: true,
+        })
+        if (cancelled) return
+        setFlashback(response)
+        setError(null)
+        setSuccess('Loaded existing flashback artifacts.')
+      } catch (err) {
+        if (cancelled) return
+        const message = err instanceof Error ? err.message : 'Failed to load existing flashback artifacts.'
+        if (message.includes('No existing flashback artifacts found')) {
+          return
+        }
+        setError(message)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedContestId, gameDate, contestId, userPattern, draftGroupId, entryFee])
+
   const replaySummary = (flashback?.summary ?? {}) as Record<string, unknown>
   const replayCounts = (replaySummary.counts ?? {}) as Record<string, unknown>
   const replayArtifacts = (replaySummary.artifacts ?? {}) as Record<string, unknown>
@@ -376,7 +416,7 @@ export default function FlashbackPage() {
         include_modeled_field: true,
       })
       setFlashback(response)
-      setSuccess('Flashback replay completed.')
+      setSuccess(response.loaded_from_cache ? 'Loaded existing flashback artifacts.' : 'Flashback replay completed.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Flashback replay failed.')
     } finally {
