@@ -24,6 +24,7 @@ from projections.paths import get_data_root
 from projections.post_contest.replay_models import ContestReplayRun, PreparedReplayContext
 from projections.post_contest.replay_service import (
     _build_name_to_internal_map,
+    _resolve_name_to_player_id,
     build_actual_field_library,
     replay_output_dir,
     run_post_contest_replay,
@@ -120,7 +121,7 @@ def _load_actual_player_fpts_lookup(
     results_df = parse_contest_csv(results_path)
     if "Player" not in results_df.columns or "FPTS" not in results_df.columns:
         return {}
-    resolved_name_map, ambiguous_name_map, _ = _build_name_to_internal_map(
+    resolved_name_map, ambiguous_name_map, _, resolved_signatures = _build_name_to_internal_map(
         game_date=prepared.meta.game_date,
         draft_group_id=int(prepared.meta.draft_group_id or 0),
         data_root=data_root,
@@ -129,12 +130,14 @@ def _load_actual_player_fpts_lookup(
     lookup: Dict[str, float] = {}
     player_rows = results_df[["Player", "FPTS"]].dropna().drop_duplicates(subset=["Player"])
     for _, row in player_rows.iterrows():
-        normalized = replay_normalize_name(str(row["Player"]))
-        if not normalized or normalized in ambiguous_name_map:
-            continue
-        player_id = resolved_name_map.get(normalized)
+        player_id, diag = _resolve_name_to_player_id(
+            raw_name=str(row["Player"]),
+            resolved_name_map=resolved_name_map,
+            ambiguous_name_map=ambiguous_name_map,
+            resolved_signatures=resolved_signatures,
+        )
         fpts = _coerce_float(row["FPTS"])
-        if player_id is None or fpts is None:
+        if player_id is None or fpts is None or (diag and str(diag.get("method", "")).startswith("ambiguous")):
             continue
         lookup[str(player_id)] = float(fpts)
     return lookup
@@ -515,6 +518,31 @@ def _load_candidate_lineups_from_manifest(
     contest_id: str,
 ) -> Tuple[List[List[str]], Dict[str, Any]]:
     payload = json.loads(manifest_path.read_text())
+    source_run_build_id = str(payload.get("source_run_build_id") or "").strip()
+    game_date = str(payload.get("game_date") or "").strip()
+    if source_run_build_id and game_date:
+        build_path = get_data_root() / "builds" / "contest_sim" / game_date / f"{source_run_build_id}.json"
+        if build_path.exists():
+            try:
+                build = json.loads(build_path.read_text())
+                raw_lineups = list(build.get("lineups") or [])
+                lineups = [
+                    [str(pid).strip() for pid in lineup if str(pid).strip()]
+                    for lineup in raw_lineups
+                ]
+                lineups = [lineup for lineup in lineups if lineup]
+                return lineups, {
+                    "candidate_manifest_path": str(manifest_path),
+                    "candidate_eval_path": None,
+                    "candidate_source": "contest_sim_run_build",
+                    "candidate_run_build_id": source_run_build_id,
+                    "candidate_run_build_path": str(build_path),
+                    "candidate_portfolio_build_id": payload.get("source_portfolio_build_id"),
+                    "candidate_lineup_count_raw": int(len(lineups)),
+                    "candidate_export_id": payload.get("export_id"),
+                }
+            except Exception:
+                pass
     eval_path = payload.get("eval_lineups_path")
     if not isinstance(eval_path, str) or not eval_path:
         return [], {"candidate_manifest_path": str(manifest_path), "candidate_eval_path": None}
@@ -615,6 +643,19 @@ def _actual_best_entered_row(df: pd.DataFrame) -> Dict[str, Any]:
     return df.loc[idx].to_dict()
 
 
+def _lineup_label(row: Dict[str, Any]) -> Optional[str]:
+    if not row:
+        return None
+    entry_name = row.get("entry_name")
+    if entry_name:
+        return str(entry_name)
+    player_ids_json = row.get("player_ids_json")
+    if player_ids_json:
+        return str(player_ids_json)
+    lineup_key = row.get("lineup_key")
+    return str(lineup_key) if lineup_key is not None else None
+
+
 def _regret_frame(
     *,
     prepared: PreparedReplayContext,
@@ -633,21 +674,25 @@ def _regret_frame(
         "draft_group_id": prepared.meta.draft_group_id,
         "entered_unique_count": int(entered_df["lineup_key"].nunique()) if not entered_df.empty else 0,
         "best_entered_lineup_key": best_entered.get("lineup_key"),
+        "best_entered_lineup_label": _lineup_label(best_entered),
         "best_entered_sim_roi": best_entered.get("sim_roi"),
         "best_entered_sim_cash_rate": best_entered.get("sim_cash_rate"),
         "best_entered_realized_rank": best_entered.get("realized_rank"),
         "best_entered_realized_prize": best_entered.get("realized_prize"),
         "actual_best_entered_lineup_key": actual_best_entered.get("lineup_key"),
+        "actual_best_entered_lineup_label": _lineup_label(actual_best_entered),
         "actual_best_entered_rank": actual_best_entered.get("realized_rank"),
         "actual_best_entered_prize": actual_best_entered.get("realized_prize"),
         "candidate_pool_available": bool(not candidate_df.empty),
         "candidate_manifest_path": candidate_meta.get("candidate_manifest_path"),
         "candidate_unique_count": int(candidate_df["lineup_key"].nunique()) if not candidate_df.empty else 0,
         "best_candidate_lineup_key": best_candidate.get("lineup_key"),
+        "best_candidate_lineup_label": _lineup_label(best_candidate),
         "best_candidate_sim_roi": best_candidate.get("sim_roi"),
         "best_candidate_sim_cash_rate": best_candidate.get("sim_cash_rate"),
         "best_candidate_is_entered": bool(best_candidate.get("is_entered")) if best_candidate else False,
         "best_finalset_lineup_key": best_finalset.get("lineup_key"),
+        "best_finalset_lineup_label": _lineup_label(best_finalset),
         "best_finalset_sim_roi": best_finalset.get("sim_roi"),
         "selection_regret_roi": (
             float(best_candidate.get("sim_roi")) - float(best_finalset.get("sim_roi"))
@@ -857,6 +902,18 @@ def build_post_contest_replay_analytics(
         "ownership_mode": ownership_mode,
         "modeled_field": modeled_field_meta,
         "candidate_meta": candidate_meta,
+        "resolution": prepared.resolution_stats,
+        "user_replay_summary": {
+            "entered_lineup_count": int(len(entered_df)),
+            "best_sim_roi": _best_lineup_row(entered_df, "sim_roi").get("sim_roi"),
+            "avg_sim_roi": float(entered_df["sim_roi"].dropna().mean()) if not entered_df.empty and "sim_roi" in entered_df.columns and entered_df["sim_roi"].dropna().any() else None,
+            "best_sim_cash_rate": _best_lineup_row(entered_df, "sim_cash_rate").get("sim_cash_rate"),
+            "best_realized_rank": _actual_best_entered_row(entered_df).get("realized_rank"),
+            "best_realized_prize": _actual_best_entered_row(entered_df).get("realized_prize"),
+            "avg_realized_rank": float(entered_df["realized_rank"].dropna().mean()) if not entered_df.empty and "realized_rank" in entered_df.columns and entered_df["realized_rank"].dropna().any() else None,
+        },
+        "field_summary": field_df.iloc[0].where(pd.notna(field_df.iloc[0]), None).to_dict() if not field_df.empty else {},
+        "regret_summary": regret_df.iloc[0].where(pd.notna(regret_df.iloc[0]), None).to_dict() if not regret_df.empty else {},
         "artifacts": {
             "player_calibration_path": str(player_path),
             "lineup_calibration_path": str(lineup_path),

@@ -679,12 +679,62 @@ class EntryFileState(BaseModel):
     client_revision: int
     header: List[str]
     entries: List[Dict[str, str]]
+    source_build_source: Optional[str] = None
+    source_build_id: Optional[str] = None
+    source_build_kind: Optional[str] = None
+    source_build_name: Optional[str] = None
+    source_portfolio_build_id: Optional[str] = None
+    source_run_build_id: Optional[str] = None
+    source_selection_mode: Optional[str] = None
 
 
 class ApplyBuildRequest(BaseModel):
     build_source: Optional[str] = Field(default=None, description="optimizer|contest-sim")
     build_id: Optional[str] = None
     lineups: Optional[List[List[str]]] = None
+
+
+def _entry_state_source_payload(entry_state: EntryFileState) -> Dict[str, object]:
+    payload: Dict[str, object] = {
+        "source_build_source": entry_state.source_build_source,
+        "source_build_id": entry_state.source_build_id,
+        "source_build_kind": entry_state.source_build_kind,
+        "source_build_name": entry_state.source_build_name,
+        "source_portfolio_build_id": entry_state.source_portfolio_build_id,
+        "source_run_build_id": entry_state.source_run_build_id,
+        "source_selection_mode": entry_state.source_selection_mode,
+    }
+    return {key: value for key, value in payload.items() if value not in (None, "", [])}
+
+
+def _aggregate_export_sources(entry_states: List[EntryFileState]) -> Dict[str, object]:
+    per_contest_sources: List[Dict[str, object]] = []
+    for entry_state in entry_states:
+        payload = _entry_state_source_payload(entry_state)
+        if not payload:
+            continue
+        payload["contest_id"] = str(entry_state.contest_id)
+        per_contest_sources.append(payload)
+
+    if not per_contest_sources:
+        return {}
+
+    aggregated: Dict[str, object] = {"source_entry_files": per_contest_sources}
+    for field in [
+        "source_build_source",
+        "source_build_id",
+        "source_build_kind",
+        "source_build_name",
+        "source_portfolio_build_id",
+        "source_run_build_id",
+        "source_selection_mode",
+    ]:
+        values = sorted({str(item[field]) for item in per_contest_sources if item.get(field) not in (None, "")})
+        if len(values) == 1:
+            aggregated[field] = values[0]
+        elif values:
+            aggregated[f"{field}s"] = values
+    return aggregated
 
 
 class LateSwapRequest(BaseModel):
@@ -1201,6 +1251,13 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     entry_state = EntryFileState.model_validate_json(path.read_text())
+    entry_state.source_build_source = None
+    entry_state.source_build_id = None
+    entry_state.source_build_kind = None
+    entry_state.source_build_name = None
+    entry_state.source_portfolio_build_id = None
+    entry_state.source_run_build_id = None
+    entry_state.source_selection_mode = None
 
     if request.lineups:
         lineups = request.lineups
@@ -1224,6 +1281,10 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
                 ),
             )
         lineups = [lu["player_ids"] for lu in build["lineups"]]
+        entry_state.source_build_source = "optimizer"
+        entry_state.source_build_id = str(request.build_id)
+        entry_state.source_build_kind = str(build.get("kind") or "run")
+        entry_state.source_build_name = str(build.get("name") or "") or None
     elif request.build_source == "contest-sim":
         if not request.build_id:
             raise HTTPException(status_code=400, detail="build_id required for contest-sim source")
@@ -1246,6 +1307,28 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
                 ),
             )
         lineups = build.get("lineups", [])
+        entry_state.source_build_source = "contest-sim"
+        entry_state.source_build_id = str(request.build_id)
+        entry_state.source_build_kind = str(build.get("kind") or "run")
+        entry_state.source_build_name = str(build.get("name") or "") or None
+        if str(build.get("kind") or "") == "portfolio":
+            entry_state.source_portfolio_build_id = str(request.build_id)
+            source_run_build_id = (
+                build.get("request", {}).get("source_build_id")
+                if isinstance(build.get("request"), dict)
+                else None
+            )
+            entry_state.source_run_build_id = str(source_run_build_id) if source_run_build_id else None
+            selection_mode = (
+                build.get("request", {}).get("selection_mode")
+                if isinstance(build.get("request"), dict)
+                else None
+            )
+            entry_state.source_selection_mode = str(selection_mode) if selection_mode else None
+        else:
+            entry_state.source_portfolio_build_id = None
+            entry_state.source_run_build_id = str(request.build_id)
+            entry_state.source_selection_mode = None
     else:
         raise HTTPException(status_code=400, detail="Must provide lineups or build_source/build_id")
 
@@ -1775,6 +1858,7 @@ async def export_entry_file(
         "k_runtime_holdouts": 3,
         "num_worlds_runtime": 10000,
         **worlds_info,
+        **_entry_state_source_payload(entry_state),
     }
 
     try:
@@ -1848,6 +1932,7 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest, force: 
 
     # First pass: load all entries and validate
     all_entries: List[Dict[str, str]] = []
+    entry_states: List[EntryFileState] = []
     draft_group_ids: set[int] = set()
     sites: set[str] = set()
     export_header: List[str] | None = None
@@ -1856,6 +1941,7 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest, force: 
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
         entry_state = EntryFileState.model_validate_json(path.read_text())
+        entry_states.append(entry_state)
         contest_header = _export_header_for_entry_state(entry_state)
         if export_header is None:
             export_header = contest_header
@@ -1919,6 +2005,7 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest, force: 
         "k_runtime_holdouts": 3,
         "num_worlds_runtime": 10000,
         **worlds_info,
+        **_aggregate_export_sources(entry_states),
     }
 
     try:

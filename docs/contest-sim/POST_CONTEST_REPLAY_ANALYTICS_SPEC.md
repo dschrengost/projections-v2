@@ -45,8 +45,10 @@ regret datasets.
 ## 3. Non-goals
 
 - Direct online training in this phase.
-- UI/dashboard implementation in this phase.
 - Anchored emulation for partial contest scrapes in this phase.
+
+The implementation now includes a first-pass dashboard surface, but this spec remains the source of
+truth for which replay analytics outputs that UI should prioritize.
 
 ---
 
@@ -258,6 +260,100 @@ Required columns:
 - candidate pool:
   - `candidate_pool_available`
   - `candidate_manifest_path`
+
+## 9.1 Replay summary payload contract
+
+Each flashback run should also emit a compact `summary.json` payload for the UI with:
+
+- `counts`
+- `artifacts`
+- `resolution`
+- `user_replay_summary`
+- `field_summary`
+- `regret_summary`
+
+`resolution` should include scalar diagnostics and preview examples:
+
+- `resolved_entry_count`
+- `unresolved_entry_count`
+- `resolved_slot_count`
+- `unresolved_slot_count`
+- `slot_resolution_rate`
+- `ambiguous_name_count`
+- `fuzzy_match_count`
+- `unresolved_examples`
+- `ambiguous_examples`
+- `fuzzy_examples`
+
+`user_replay_summary` should include compact entered-set metrics:
+
+- `entered_lineup_count`
+- `best_sim_roi`
+- `avg_sim_roi`
+- `best_sim_cash_rate`
+- `best_realized_rank`
+- `best_realized_prize`
+- `avg_realized_rank`
+
+The dashboard should prioritize these summaries over raw parquet previews.
+
+## 9.2 Candidate-regret provenance
+
+When an export manifest contains `source_run_build_id`, replay analytics should use the saved
+contest-sim run build as the candidate universe for regret analysis. This is preferred over
+`eval_lineups.csv`, which only reflects the exported subset.
+
+Priority order:
+
+1. `source_run_build_id` from export manifest
+2. explicit `candidate_manifest_path` override
+3. `eval_lineups.csv` fallback
+
+This changes regret semantics from export-subset regret toward true candidate-pool regret when
+lineage is available.
+
+## 9.3 Historical lineage backfill
+
+Recent historical exports can be repaired by matching export CSV lineups back to saved portfolio
+builds on the same slate.
+
+Backfill output should stamp:
+
+- `source_build_id`
+- `source_portfolio_build_id`
+- `source_run_build_id`
+- `source_selection_mode`
+- `lineage_backfill`
+
+`lineage_backfill` should record:
+
+- `matched_by`
+- `matched_at_utc`
+- `match_ratio`
+- `exact_lineup_multiset_match`
+- `created_delta_seconds`
+- `mapped_export_lineup_count`
+- `unmapped_export_rows`
+
+This is acceptable for recent recovery windows, but explicit export provenance remains the
+authoritative path.
+
+## 9.4 Known replay-quality caveat
+
+Even with correct export lineage, replay can still be degraded if the observed contest field
+contains player IDs that are absent from the worlds matrix.
+
+Implications:
+
+- entered-lineup regret can be sourced from the correct full candidate universe,
+- but opponent-field scoring may still be slightly distorted until replay field-resolution is
+  constrained to canonical world/player IDs.
+
+Recommended additional diagnostics in future summary payloads:
+
+- `opponent_missing_player_id_count`
+- `opponent_missing_player_examples`
+- `candidate_missing_player_id_count`
   - `candidate_unique_count`
   - `best_candidate_lineup_key`
   - `best_candidate_sim_roi`

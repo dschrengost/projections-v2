@@ -41,6 +41,14 @@ This spec makes three hard decisions:
    - anchored emulation: partial contest field available,
    - synthetic fallback: no usable field CSV, use current generated-field library.
 
+This draft now also treats match quality and replay attribution as first-class outputs. Replay is
+not usable unless the user can see:
+
+- entered lineup replay ROI and rates,
+- field-vs-modeled drift,
+- optimizer regret,
+- player-name resolution quality and unresolved examples.
+
 ### 1.3 Non-negotiable requirements
 
 - Use only information available as of contest lock when generating user/field outcomes.
@@ -70,6 +78,9 @@ This spec makes three hard decisions:
 5. Keep the output interpretable:
    "you finished 4,112th, but your lineup had 18.4% cash rate and 1.07 sim ROI against the actual
    field" is the product, not just a rank histogram.
+
+6. Resolution quality must be observable:
+   if DK names do not map cleanly to internal `player_id`s, the product must say so directly.
 
 ---
 
@@ -233,11 +244,123 @@ completed_field = observed_exact + reweighted_synthetic_remainder
 
 This is the closest defensible approximation when our scrape is incomplete.
 
-## 5.4 Why this is credible
+## 5.4 Name resolution requirements
+
+Contest flashback depends on mapping raw DraftKings lineup strings to internal `player_id`s. That
+layer must be observable, not silent.
+
+Resolution order:
+
+1. exact normalized name match,
+2. slate-constrained DK draftable-name match,
+3. unique first-initial plus last-name signature match,
+4. conservative fuzzy match inside the slate player pool,
+5. explicit override from alias control-plane file.
+
+Control-plane alias overrides:
+
+```text
+$PROJECTIONS_DATA_ROOT/control_plane/contest_results/player_alias_overrides.json
+```
+
+The UI and API should surface:
+
+- slot resolution rate,
+- unresolved slot count,
+- ambiguous match count,
+- fuzzy match count,
+- preview rows for unresolved, ambiguous, and fuzzy examples.
+
+If match quality is weak, player-level calibration should be treated as low-confidence for that run.
+
+## 5.5 Why this is credible
 
 The field composition problem is much easier post contest than pre contest because:
 
 - we know exactly which slate and payout structure ran,
+
+## 5.6 User-facing replay surface
+
+The Flashback page should present a replay in this order:
+
+1. entered lineups with `sim_roi`, `sim_cash_rate`, `sim_top1pct_rate`, and `sim_win_rate`,
+2. replay takeaways for the user's entered set,
+3. match-quality diagnostics,
+4. regret summary,
+5. field summary,
+6. preview tables for player, lineup, field, and regret datasets.
+
+The page is not just a parquet preview tool. It must answer:
+
+- were my lineups good ex ante?
+- was this mostly variance, projection error, field error, or selection error?
+- can I trust the player-name resolution for this replay?
+
+## 5.7 Export provenance requirements
+
+To make replay regret meaningful, export artifacts must persist the contest-sim lineage that produced
+the final uploaded set.
+
+`EntryFileState` should retain:
+
+- `source_build_source`
+- `source_build_id`
+- `source_build_kind`
+- `source_build_name`
+- `source_portfolio_build_id`
+- `source_run_build_id`
+- `source_selection_mode`
+
+Export manifests should copy that provenance so flashback can prefer the full saved contest-sim run
+candidate universe over `eval_lineups.csv` from the final exported subset.
+
+Historical exports without provenance can be backfilled heuristically when:
+
+- the export CSV can be reconstructed to internal player IDs,
+- a saved portfolio build on the same slate has the same exported lineup multiset,
+- or the exported lineup set is a clean subset of a nearby saved portfolio build.
+
+Backfill tool:
+
+```text
+projections.cli.backfill_export_lineage
+```
+
+For the recent recovery window, the system successfully backfilled recent manifests and linked them
+to:
+
+- `source_portfolio_build_id`
+- `source_run_build_id`
+- `source_selection_mode`
+- `lineage_backfill`
+
+This is good enough for recent-history replay regret, but new exports should not rely on heuristic
+matching.
+
+## 5.8 Known repair gap: observed field IDs vs world namespace
+
+Recent investigation showed a separate replay-quality issue in the observed opponent field:
+some contest-result player names resolve to IDs that are not present in the pre-lock worlds bundle.
+
+This affects only a small subset of opponent-field slots, but it can still contaminate replay
+quality and regret if left untreated.
+
+Observed examples on `2026-03-05` included:
+
+- `EJ Harkless`
+- `Keshad Johnson`
+- `Tolu Smith`
+- `Jonathan Isaac`
+- `Kyrie Irving`
+
+The saved contest-sim source runs themselves were clean. The issue is in replay field-resolution for
+certain fringe players from contest results CSVs.
+
+Required follow-up:
+
+- constrain replay resolution to the canonical projection/worlds namespace,
+- do not silently accept fallback IDs that are absent from the worlds matrix,
+- surface opponent-field missing-player counts in replay diagnostics.
 - we often have the actual lineups,
 - even partial CSVs give strong constraints on duplication and ownership shape,
 - we no longer need to guess what the field wanted to do; we only need to simulate outcomes for the

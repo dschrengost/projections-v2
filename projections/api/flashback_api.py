@@ -29,6 +29,19 @@ def _preview_parquet(path: Path, limit: int = 12) -> List[Dict[str, Any]]:
     return df.to_dict(orient="records")
 
 
+def _preview_entered_lineups(path: Path, limit: int = 25) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    df = pd.read_parquet(path)
+    if "lineup_source" in df.columns:
+        df = df[df["lineup_source"].astype(str) == "entered"].copy()
+    if "sim_roi" in df.columns:
+        df = df.sort_values(["sim_roi", "sim_cash_rate"], ascending=[False, False], na_position="last")
+    df = df.head(limit)
+    df = df.where(pd.notna(df), None)
+    return df.to_dict(orient="records")
+
+
 def _load_json(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -292,6 +305,7 @@ async def run_flashback(request: FlashbackRunRequest) -> FlashbackRunResponse:
 
     summary = _load_json(bundle.summary_path)
     previews = {
+        "entered_lineups": _preview_entered_lineups(bundle.lineup_calibration_path, limit=25),
         "player_calibration": _preview_parquet(bundle.player_calibration_path, limit=15),
         "lineup_calibration": _preview_parquet(bundle.lineup_calibration_path, limit=15),
         "field_calibration": _preview_parquet(bundle.field_calibration_path, limit=5),

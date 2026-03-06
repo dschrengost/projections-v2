@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import re
@@ -16,6 +17,7 @@ from projections.api.optimizer_api import _load_dk_nba_draftable_ids_by_player
 from projections.api.optimizer_service import build_player_pool
 from projections.contest_sim.contest_sim_service import run_contest_simulation
 from projections.contest_sim.field_library import FieldLibrary, save_field_library
+from projections.names import normalize_player_name
 from projections.paths import get_data_root
 from projections.post_contest.replay_models import (
     ContestReplayEntry,
@@ -53,9 +55,43 @@ _INVENTORY_COLUMNS = [
 
 
 def _normalize_name(name: str) -> str:
-    text = unidecode(str(name or "")).lower().strip()
-    text = re.sub(r"[^a-z0-9]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+    return normalize_player_name(unidecode(str(name or "")).strip())
+
+
+def _name_signature(normalized_name: str) -> str:
+    parts = [part for part in str(normalized_name or "").split() if part]
+    if len(parts) < 2:
+        return ""
+    return f"{parts[0][0]} {parts[-1]}"
+
+
+def _last_name(normalized_name: str) -> str:
+    parts = [part for part in str(normalized_name or "").split() if part]
+    return parts[-1] if parts else ""
+
+
+def _alias_override_path(data_root: Optional[Path]) -> Path:
+    root = data_root or get_data_root()
+    return root / "control_plane" / "contest_results" / "player_alias_overrides.json"
+
+
+def _load_alias_overrides(data_root: Optional[Path]) -> Dict[str, str]:
+    path = _alias_override_path(data_root)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for raw_name, canonical_name in payload.items():
+        normalized_raw = _normalize_name(str(raw_name))
+        normalized_canonical = _normalize_name(str(canonical_name))
+        if normalized_raw and normalized_canonical:
+            out[normalized_raw] = normalized_canonical
+    return out
 
 
 def _coerce_int(value: object) -> Optional[int]:
@@ -70,6 +106,16 @@ def _coerce_int(value: object) -> Optional[int]:
         return int(float(text))
     except (TypeError, ValueError):
         return None
+
+
+def _canonicalize_player_id(value: object) -> str:
+    coerced = _coerce_int(value)
+    if coerced is not None:
+        return str(coerced)
+    text = str(value or "").strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text
 
 
 def _coerce_float(value: object) -> Optional[float]:
@@ -292,7 +338,7 @@ def _build_name_to_internal_map(
     draft_group_id: int,
     data_root: Optional[Path] = None,
     run_id: Optional[str] = None,
-) -> Tuple[Dict[str, str], Dict[str, List[str]], Dict[str, str]]:
+) -> Tuple[Dict[str, str], Dict[str, List[str]], Dict[str, str], Dict[str, str]]:
     pool = build_player_pool(
         game_date=game_date,
         draft_group_id=draft_group_id,
@@ -307,7 +353,9 @@ def _build_name_to_internal_map(
     internal_to_dk_player_id: Dict[str, int] = {}
     internal_to_name: Dict[str, str] = {}
     for player in pool:
-        player_id = str(player.get("player_id"))
+        player_id = _canonicalize_player_id(player.get("player_id"))
+        if not player_id:
+            continue
         internal_to_name[player_id] = str(player.get("name") or player_id)
         dk_id_raw = player.get("dk_id")
         dk_id = _coerce_int(dk_id_raw)
@@ -321,16 +369,35 @@ def _build_name_to_internal_map(
         logger.warning("Draftables file missing for draft_group_id=%s", draft_group_id)
 
     candidate_ids: Dict[str, set[str]] = defaultdict(set)
+    signature_ids: Dict[str, set[str]] = defaultdict(set)
     for player_id, player_name in internal_to_name.items():
         normalized = _normalize_name(player_name)
         if normalized:
             candidate_ids[normalized].add(player_id)
+            signature = _name_signature(normalized)
+            if signature:
+                signature_ids[signature].add(player_id)
         dk_player_id = internal_to_dk_player_id.get(player_id)
         if dk_player_id is not None:
             dk_name = dk_names_by_player.get(dk_player_id)
             normalized_dk = _normalize_name(dk_name) if dk_name else ""
             if normalized_dk:
                 candidate_ids[normalized_dk].add(player_id)
+                signature = _name_signature(normalized_dk)
+                if signature:
+                    signature_ids[signature].add(player_id)
+
+    alias_overrides = _load_alias_overrides(data_root)
+    for raw_alias, canonical_name in alias_overrides.items():
+        player_id = None
+        if canonical_name in candidate_ids and len(candidate_ids[canonical_name]) == 1:
+            player_id = next(iter(candidate_ids[canonical_name]))
+        elif canonical_name in internal_to_name.values():
+            matching = [pid for pid, name in internal_to_name.items() if _normalize_name(name) == canonical_name]
+            if len(matching) == 1:
+                player_id = matching[0]
+        if player_id is not None:
+            candidate_ids[raw_alias].add(player_id)
 
     resolved: Dict[str, str] = {}
     ambiguous: Dict[str, List[str]] = {}
@@ -340,7 +407,73 @@ def _build_name_to_internal_map(
             resolved[normalized_name] = ordered[0]
         else:
             ambiguous[normalized_name] = ordered
-    return resolved, ambiguous, internal_to_name
+
+    resolved_signatures: Dict[str, str] = {}
+    for signature, player_ids in signature_ids.items():
+        ordered = sorted(player_ids)
+        if len(ordered) == 1:
+            resolved_signatures[signature] = ordered[0]
+    return resolved, ambiguous, internal_to_name, resolved_signatures
+
+
+def _resolve_name_to_player_id(
+    *,
+    raw_name: str,
+    resolved_name_map: Dict[str, str],
+    ambiguous_name_map: Dict[str, List[str]],
+    resolved_signatures: Dict[str, str],
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    normalized = _normalize_name(raw_name)
+    if not normalized:
+        return None, {"method": "empty", "raw_name": raw_name}
+
+    player_id = resolved_name_map.get(normalized)
+    if player_id is not None:
+        return player_id, {"method": "exact", "raw_name": raw_name, "normalized_name": normalized}
+
+    if normalized in ambiguous_name_map:
+        return None, {
+            "method": "ambiguous_exact",
+            "raw_name": raw_name,
+            "normalized_name": normalized,
+            "candidate_player_ids": ambiguous_name_map[normalized],
+        }
+
+    signature = _name_signature(normalized)
+    if signature and signature in resolved_signatures:
+        return resolved_signatures[signature], {
+            "method": "signature",
+            "raw_name": raw_name,
+            "normalized_name": normalized,
+            "signature": signature,
+        }
+
+    candidates = difflib.get_close_matches(normalized, list(resolved_name_map.keys()), n=2, cutoff=0.84)
+    if candidates:
+        best = candidates[0]
+        second = candidates[1] if len(candidates) > 1 else None
+        best_score = difflib.SequenceMatcher(None, normalized, best).ratio()
+        second_score = difflib.SequenceMatcher(None, normalized, second).ratio() if second else 0.0
+        same_last_name = _last_name(normalized) and _last_name(normalized) == _last_name(best)
+        if best_score >= 0.93 or (same_last_name and best_score >= 0.87 and (best_score - second_score) >= 0.03):
+            return resolved_name_map[best], {
+                "method": "fuzzy",
+                "raw_name": raw_name,
+                "normalized_name": normalized,
+                "matched_name": best,
+                "score": round(best_score, 4),
+            }
+        return None, {
+            "method": "ambiguous_fuzzy",
+            "raw_name": raw_name,
+            "normalized_name": normalized,
+            "matched_name": best,
+            "score": round(best_score, 4),
+            "runner_up": second,
+            "runner_up_score": round(second_score, 4) if second else None,
+        }
+
+    return None, {"method": "unresolved", "raw_name": raw_name, "normalized_name": normalized}
 
 
 def resolve_entries_to_internal_ids(
@@ -351,7 +484,7 @@ def resolve_entries_to_internal_ids(
     data_root: Optional[Path] = None,
     run_id: Optional[str] = None,
 ) -> Tuple[List[ResolvedContestReplayEntry], Dict[str, Any]]:
-    resolved_name_map, ambiguous_name_map, internal_to_name = _build_name_to_internal_map(
+    resolved_name_map, ambiguous_name_map, internal_to_name, resolved_signatures = _build_name_to_internal_map(
         game_date=game_date,
         draft_group_id=draft_group_id,
         data_root=data_root,
@@ -361,24 +494,40 @@ def resolve_entries_to_internal_ids(
     resolved_entries: List[ResolvedContestReplayEntry] = []
     unresolved_examples: List[Dict[str, Any]] = []
     ambiguous_examples: List[Dict[str, Any]] = []
+    fuzzy_examples: List[Dict[str, Any]] = []
+    resolved_slot_count = 0
+    unresolved_slot_count = 0
 
     for entry in entries:
         player_ids: List[str] = []
         unresolved_names: List[str] = []
         for name in entry.lineup_names:
-            normalized = _normalize_name(name)
-            player_id = resolved_name_map.get(normalized)
+            player_id, diag = _resolve_name_to_player_id(
+                raw_name=name,
+                resolved_name_map=resolved_name_map,
+                ambiguous_name_map=ambiguous_name_map,
+                resolved_signatures=resolved_signatures,
+            )
             if player_id is not None:
                 player_ids.append(player_id)
+                resolved_slot_count += 1
+                if diag and diag.get("method") == "fuzzy":
+                    fuzzy_examples.append(
+                        {
+                            "entry_id": entry.entry_id,
+                            "entry_name": entry.entry_name,
+                            **diag,
+                        }
+                    )
                 continue
             unresolved_names.append(name)
-            if normalized in ambiguous_name_map:
+            unresolved_slot_count += 1
+            if diag and diag.get("method") in {"ambiguous_exact", "ambiguous_fuzzy"}:
                 ambiguous_examples.append(
                     {
                         "entry_id": entry.entry_id,
                         "entry_name": entry.entry_name,
-                        "name": name,
-                        "candidate_player_ids": ambiguous_name_map[normalized],
+                        **diag,
                     }
                 )
             else:
@@ -386,7 +535,7 @@ def resolve_entries_to_internal_ids(
                     {
                         "entry_id": entry.entry_id,
                         "entry_name": entry.entry_name,
-                        "name": name,
+                        **(diag or {"name": name}),
                     }
                 )
         resolved_entries.append(
@@ -402,8 +551,13 @@ def resolve_entries_to_internal_ids(
         "resolved_entry_count": int(sum(1 for entry in resolved_entries if not entry.unresolved_names)),
         "unresolved_entry_count": int(sum(1 for entry in resolved_entries if entry.unresolved_names)),
         "ambiguous_name_count": int(len(ambiguous_examples)),
+        "resolved_slot_count": int(resolved_slot_count),
+        "unresolved_slot_count": int(unresolved_slot_count),
+        "slot_resolution_rate": float(resolved_slot_count / max(resolved_slot_count + unresolved_slot_count, 1)),
+        "fuzzy_match_count": int(len(fuzzy_examples)),
         "unresolved_examples": unresolved_examples[:10],
         "ambiguous_examples": ambiguous_examples[:10],
+        "fuzzy_examples": fuzzy_examples[:10],
         "resolved_name_count": int(len(resolved_name_map)),
         "player_pool_size": int(len(internal_to_name)),
     }

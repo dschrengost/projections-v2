@@ -53,6 +53,25 @@ function formatPrimitive(value: unknown): string {
   return String(value)
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function objectArray(value: unknown): PreviewRow[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is PreviewRow => isPlainObject(item))
+}
+
+function scalarEntries(values: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(values).filter(([, value]) => {
+      if (value === null || value === undefined || value === '') return false
+      if (Array.isArray(value)) return false
+      return !isPlainObject(value)
+    }),
+  )
+}
+
 function SummaryGrid({ summary }: { summary: Record<string, unknown> }) {
   const items = Object.entries(summary)
   if (!items.length) return null
@@ -115,6 +134,96 @@ function PreviewTable({ title, rows }: { title: string; rows: PreviewRow[] }) {
   )
 }
 
+function MetricCards({ title, values }: { title: string; values: Record<string, unknown> }) {
+  const items = Object.entries(scalarEntries(values))
+  if (!items.length) return null
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <SummaryGrid summary={Object.fromEntries(items)} />
+      </CardContent>
+    </Card>
+  )
+}
+
+function InsightList({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {items.map((item, idx) => (
+            <div
+              key={`${title}-${idx}`}
+              className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 py-2 text-sm text-[hsl(var(--foreground))]"
+            >
+              {item}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function EnteredLineupsTable({ rows }: { rows: PreviewRow[] }) {
+  const columns = [
+    'entry_name',
+    'realized_rank',
+    'realized_points',
+    'sim_roi',
+    'sim_cash_rate',
+    'sim_top1pct_rate',
+    'sim_win_rate',
+    'realized_score_sim_percentile',
+    'opponent_dupe_count',
+  ]
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader>
+        <CardTitle>Your entered lineups</CardTitle>
+        <CardDescription>Replay ROI and realized result for your entered contest lineups.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {!rows.length ? (
+          <div className="text-sm text-[hsl(var(--muted-foreground))]">No entered-lineup rows yet.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-[hsl(var(--border))]">
+                  {columns.map((column) => (
+                    <th key={column} className="px-2 py-2 font-medium text-[hsl(var(--muted-foreground))]">
+                      {column}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, idx) => (
+                  <tr key={`entered-${idx}`} className="border-b border-[hsl(var(--border))]/60">
+                    {columns.map((column) => (
+                      <td key={`entered-${idx}-${column}`} className="px-2 py-2 align-top text-[hsl(var(--foreground))]">
+                        {formatPrimitive(row[column])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function FlashbackPage() {
   const [gameDate, setGameDate] = useState(todayString())
   const [userPattern, setUserPattern] = useState('')
@@ -143,7 +252,60 @@ export default function FlashbackPage() {
   const replaySummary = (flashback?.summary ?? {}) as Record<string, unknown>
   const replayCounts = (replaySummary.counts ?? {}) as Record<string, unknown>
   const replayArtifacts = (replaySummary.artifacts ?? {}) as Record<string, unknown>
+  const replayResolution = (replaySummary.resolution ?? {}) as Record<string, unknown>
+  const userReplaySummary = (replaySummary.user_replay_summary ?? {}) as Record<string, unknown>
+  const fieldSummary = (replaySummary.field_summary ?? {}) as Record<string, unknown>
+  const regretSummary = (replaySummary.regret_summary ?? {}) as Record<string, unknown>
   const calibrationSummary = (calibration?.summary ?? {}) as Record<string, unknown>
+  const calibrationArtifactCounts = isPlainObject(calibrationSummary.artifact_counts)
+    ? calibrationSummary.artifact_counts
+    : {}
+  const unresolvedExamples = objectArray(replayResolution.unresolved_examples)
+  const ambiguousExamples = objectArray(replayResolution.ambiguous_examples)
+  const fuzzyExamples = objectArray(replayResolution.fuzzy_examples)
+
+  const replayInsights = useMemo(() => {
+    const items: string[] = []
+    const bestSimRoi = Number(userReplaySummary.best_sim_roi)
+    if (Number.isFinite(bestSimRoi)) {
+      items.push(
+        bestSimRoi > 0
+          ? `Your best entered lineup had positive sim ROI (${bestSimRoi.toFixed(3)}). A weak realized finish there is more likely variance than lineup quality.`
+          : `Your best entered lineup had negative sim ROI (${bestSimRoi.toFixed(3)}). That points to an ex ante lineup-quality miss, not just variance.`,
+      )
+    }
+    const avgSimRoi = Number(userReplaySummary.avg_sim_roi)
+    if (Number.isFinite(avgSimRoi)) {
+      items.push(`Average entered-lineup sim ROI was ${avgSimRoi.toFixed(3)} across this contest replay.`)
+    }
+    const selectionRegret = Number(regretSummary.selection_regret_roi)
+    if (Number.isFinite(selectionRegret)) {
+      items.push(
+        selectionRegret > 0.02
+          ? `Selection regret was ${selectionRegret.toFixed(3)} ROI. Better candidate lineups existed than the set you entered.`
+          : `Selection regret was ${selectionRegret.toFixed(3)} ROI. Final lineup selection was not the main miss on this contest.`,
+      )
+    }
+    const slotResolutionRate = Number(replayResolution.slot_resolution_rate)
+    if (Number.isFinite(slotResolutionRate)) {
+      items.push(
+        slotResolutionRate >= 0.995
+          ? `Player-slot resolution was strong at ${(slotResolutionRate * 100).toFixed(1)}%. Player-level replay diagnostics should be trustworthy.`
+          : `Player-slot resolution was only ${(slotResolutionRate * 100).toFixed(1)}%. Review unresolved names before trusting player-level calibration.`,
+      )
+    }
+    const ownershipMae = Number(fieldSummary.player_ownership_mae_pct)
+    if (Number.isFinite(ownershipMae)) {
+      items.push(`Modeled-vs-actual player ownership MAE was ${ownershipMae.toFixed(2)} percentage points.`)
+    }
+    return items
+  }, [
+    fieldSummary.player_ownership_mae_pct,
+    regretSummary.selection_regret_roi,
+    replayResolution.slot_resolution_rate,
+    userReplaySummary.avg_sim_roi,
+    userReplaySummary.best_sim_roi,
+  ])
 
   async function handleLoadContests() {
     const normalizedGameDate = normalizeGameDateInput(gameDate)
@@ -317,6 +479,18 @@ export default function FlashbackPage() {
       ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
+        <EnteredLineupsTable rows={flashback?.previews.entered_lineups ?? []} />
+        <MetricCards title="Replay takeaways" values={userReplaySummary} />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <InsightList title="How to read this replay" items={replayInsights} />
+        <MetricCards title="Match quality" values={replayResolution} />
+        <MetricCards title="Regret summary" values={regretSummary} />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <MetricCards title="Field summary" values={fieldSummary} />
         <Card>
           <CardHeader>
             <CardTitle>Replay summary</CardTitle>
@@ -333,9 +507,15 @@ export default function FlashbackPage() {
             <CardDescription>Global replay-calibration aggregate over all available flashback analytics runs.</CardDescription>
           </CardHeader>
           <CardContent>
-            <SummaryGrid summary={calibrationSummary.artifact_counts as Record<string, unknown> ?? {}} />
+            <SummaryGrid summary={calibrationArtifactCounts} />
           </CardContent>
         </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <PreviewTable title="Unresolved player-name matches" rows={unresolvedExamples} />
+        <PreviewTable title="Ambiguous player-name matches" rows={ambiguousExamples} />
+        <PreviewTable title="Fuzzy player-name matches" rows={fuzzyExamples} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
