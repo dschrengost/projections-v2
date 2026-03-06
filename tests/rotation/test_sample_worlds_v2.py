@@ -296,3 +296,99 @@ def test_sample_worlds_for_batch_honors_force_active_worlds_mask() -> None:
         pid_rows = worlds_df.loc[worlds_df["player_id"] == pid]
         assert len(pid_rows) == 4
         assert int(pid_rows["active"].min()) == 1
+
+
+def test_sample_worlds_for_batch_applies_props_anchor_floor_for_forced_active_players() -> None:
+    cols = list(FLOW_TARGET_COLUMNS_V1)
+
+    class _FlowHead:
+        def sample(self, z: torch.Tensor, **_: object) -> torch.Tensor:
+            return torch.ones_like(z, dtype=torch.float32)
+
+    class _Out:
+        def __init__(
+            self,
+            valid_flat: torch.Tensor,
+            active_flat: torch.Tensor,
+            minutes_flat: torch.Tensor,
+            team_idx: torch.Tensor,
+        ):
+            self.player_states = torch.zeros((valid_flat.shape[0], 30, 4), dtype=torch.float32)
+            self.team_states = torch.zeros((valid_flat.shape[0], 2, 4), dtype=torch.float32)
+            self.game_state = torch.zeros((valid_flat.shape[0], 4), dtype=torch.float32)
+            self.player_valid_mask = valid_flat
+            self.player_team_index = team_idx
+            self.active = type("Active", (), {"active_mask": active_flat})()
+            self.minutes = type("Minutes", (), {"minutes": minutes_flat})()
+            self.flow = None
+            self.backbone = None
+            self.usage_share = None
+            self.efficiency = None
+
+    class _Model:
+        def __init__(self) -> None:
+            self.flow_head = _FlowHead()
+            self.flow_target_columns = cols
+            self.enable_possession_backbone = False
+
+        def __call__(self, pf: torch.Tensor, pvm: torch.Tensor, **_: object) -> _Out:
+            bsz = int(pf.shape[0])
+            valid_flat = pvm.reshape(bsz, -1).to(dtype=torch.bool)
+            active_flat = torch.zeros_like(valid_flat, dtype=torch.bool)
+            minutes_flat = torch.zeros((bsz, 30), dtype=torch.float32)
+            # Ten-player rotation baseline: 24 min each per team (sum=240).
+            minutes_flat[:, :10] = 24.0
+            minutes_flat[:, 15:25] = 24.0
+            team_idx = _team_index(bsz)
+            return _Out(valid_flat=valid_flat, active_flat=active_flat, minutes_flat=minutes_flat, team_idx=team_idx)
+
+    player_ids = torch.arange(1001, 1031, dtype=torch.long).reshape(1, 2, 15)
+    team_ids = torch.tensor([[10, 20]], dtype=torch.long)
+    player_valid_mask = torch.zeros((1, 2, 15), dtype=torch.bool)
+    player_valid_mask[:, 0, :10] = True
+    player_valid_mask[:, 1, :10] = True
+    force_active_worlds = torch.zeros((1, 2, 15), dtype=torch.bool)
+    force_active_worlds[:, 0, 0] = True
+    force_active_worlds[:, 1, 0] = True
+    force_active_minutes_anchor = torch.zeros((1, 2, 15), dtype=torch.float32)
+    force_active_minutes_anchor[:, 0, 0] = 40.0
+    force_active_minutes_anchor[:, 1, 0] = 40.0
+
+    batch: dict[str, torch.Tensor | list[str]] = {
+        "player_features": torch.zeros((1, 2, 15, 2), dtype=torch.float32),
+        "player_valid_mask": player_valid_mask,
+        "force_active_worlds": force_active_worlds,
+        "force_active_minutes_anchor": force_active_minutes_anchor,
+        "game_features": torch.zeros((1, 0), dtype=torch.float32),
+        "team_features": torch.zeros((1, 2, 0), dtype=torch.float32),
+        "player_ids": player_ids,
+        "team_ids": team_ids,
+        "game_id_norm": ["1001"],
+        "game_date": ["2026-01-18"],
+    }
+
+    worlds_df, checks = sample_worlds_for_batch(
+        _Model(),
+        batch,
+        device=torch.device("cpu"),
+        num_worlds=3,
+        chunk_size=3,
+        active_temperature=1.0,
+        strict_contracts=True,
+    )
+    assert checks["total_violations"] == 0
+    assert not worlds_df.empty
+
+    # Default floor policy: 0.65 * 40 = 26 minutes.
+    for pid in (1001, 1016):
+        pid_rows = worlds_df.loc[worlds_df["player_id"] == pid]
+        assert int(pid_rows["active"].min()) == 1
+        assert float(pid_rows["minutes"].min()) >= 25.99
+
+    team_minutes = (
+        worlds_df.groupby(["world_idx", "team_id"], as_index=False)["minutes"]
+        .sum()
+        .sort_values(["world_idx", "team_id"])
+        .reset_index(drop=True)
+    )
+    assert (team_minutes["minutes"] - 240.0).abs().max() <= 1e-3

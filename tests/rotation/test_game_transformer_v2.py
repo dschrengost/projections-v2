@@ -94,12 +94,16 @@ def test_build_game_level_examples_and_collate_shapes() -> None:
     assert int(ex.player_valid_mask.sum()) == 12
     assert ex.force_active_worlds.shape == (2, MAX_PLAYERS_PER_TEAM)
     assert int(ex.force_active_worlds.sum()) == 10  # five starters per team
+    assert ex.force_active_minutes_anchor.shape == (2, MAX_PLAYERS_PER_TEAM)
+    assert float(ex.force_active_minutes_anchor.sum()) == 0.0
 
     batch = collate_game_level_examples([ex])
     assert batch["player_features"].shape == (1, 2, MAX_PLAYERS_PER_TEAM, len(feature_columns))
     assert batch["player_valid_mask"].shape == (1, 2, MAX_PLAYERS_PER_TEAM)
     assert batch["force_active_worlds"].shape == (1, 2, MAX_PLAYERS_PER_TEAM)
     assert int(batch["force_active_worlds"].sum().item()) == 10
+    assert batch["force_active_minutes_anchor"].shape == (1, 2, MAX_PLAYERS_PER_TEAM)
+    assert float(batch["force_active_minutes_anchor"].sum().item()) == 0.0
 
 
 def test_build_game_level_examples_force_active_worlds_includes_manual_force_in() -> None:
@@ -130,6 +134,38 @@ def test_build_game_level_examples_force_active_worlds_includes_manual_force_in(
     }
     assert by_pid[106] is True
     assert int(np.sum(force_flat[valid_flat])) == 11
+
+
+def test_build_game_level_examples_force_active_minutes_anchor_from_props() -> None:
+    df = _toy_frame()
+    df["an_implied_minutes"] = 0.0
+    df["an_has_implied_minutes"] = 0
+    df.loc[df["player_id"] == 101, "an_implied_minutes"] = 35.0
+    df.loc[df["player_id"] == 101, "an_has_implied_minutes"] = 1
+    feature_columns = ["f1", "f2"]
+    mean = np.array([0.0, 0.0], dtype=np.float32)
+    std = np.array([1.0, 1.0], dtype=np.float32)
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=feature_columns,
+        feature_mean=mean,
+        feature_std=std,
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        minutes_label_col="minutes_label",
+    )
+    ex = examples[0]
+    valid_flat = np.concatenate([ex.player_valid_mask[0], ex.player_valid_mask[1]], axis=0)
+    anchors_flat = np.concatenate([ex.force_active_minutes_anchor[0], ex.force_active_minutes_anchor[1]], axis=0)
+    player_flat = np.concatenate([ex.player_ids[0], ex.player_ids[1]], axis=0)
+    by_pid = {
+        int(pid): float(anchors_flat[idx])
+        for idx, pid in enumerate(player_flat)
+        if bool(valid_flat[idx])
+    }
+    assert by_pid[101] == pytest.approx(35.0)
+    assert by_pid[102] == pytest.approx(0.0)
 
 
 def test_game_transformer_v2_forward_shapes_and_team_minute_constraints() -> None:

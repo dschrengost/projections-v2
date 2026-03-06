@@ -35,6 +35,9 @@ from projections.rotation.set_model import zfill_game_id_series
 logger = logging.getLogger(__name__)
 
 JOIN_KEYS = ["game_id", "team_id", "player_id", "game_date"]
+DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_RATIO = 0.65
+DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MIN = 12.0
+DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MAX = 36.0
 
 
 @dataclass(frozen=True)
@@ -175,6 +178,79 @@ def _softmax_alloc_weights(
     elig_count = elig.to(dtype=probs.dtype).sum(dim=1, keepdim=True).clamp(min=1.0)
     uniform = elig.to(dtype=probs.dtype) / elig_count
     return torch.where(denom > 1e-8, probs / denom.clamp(min=1e-8), uniform)
+
+
+def _apply_forced_active_minutes_floor(
+    *,
+    minutes: torch.Tensor,
+    valid_mask: torch.Tensor,
+    team_index: torch.Tensor,
+    forced_active_mask: torch.Tensor,
+    forced_minutes_anchor: torch.Tensor,
+    floor_ratio: float,
+    floor_min: float,
+    floor_max: float,
+    team_total_minutes: float = 240.0,
+    max_minutes_per_player: float = 48.0,
+) -> torch.Tensor:
+    """Apply props-anchored floors for forced-active players while preserving team totals."""
+    if minutes.ndim != 2:
+        raise ValueError("minutes must have shape (N,30)")
+    if valid_mask.shape != minutes.shape or team_index.shape != minutes.shape:
+        raise ValueError("valid_mask/team_index must have shape (N,30)")
+    if forced_active_mask.shape != minutes.shape or forced_minutes_anchor.shape != minutes.shape:
+        raise ValueError("forced_active_mask/forced_minutes_anchor must have shape (N,30)")
+
+    out = torch.clamp(minutes, min=0.0, max=float(max_minutes_per_player))
+    valid = valid_mask.to(dtype=torch.bool)
+    forced = forced_active_mask.to(dtype=torch.bool) & valid
+
+    anchor = torch.clamp(forced_minutes_anchor.to(dtype=out.dtype), min=0.0, max=float(max_minutes_per_player))
+    floor_vals = torch.clamp(
+        anchor * float(floor_ratio),
+        min=float(floor_min),
+        max=float(floor_max),
+    )
+    floor_vals = torch.clamp(floor_vals, min=0.0, max=float(max_minutes_per_player))
+    # Apply only when we actually have a props-implied anchor.
+    floor_vals = torch.where(forced & anchor.gt(0.0), floor_vals, torch.zeros_like(floor_vals))
+    out = torch.where(valid, out, torch.zeros_like(out))
+
+    team_total = float(team_total_minutes)
+    for side in (0, 1):
+        side_mask = valid & team_index.eq(side)
+        side_f = side_mask.to(dtype=out.dtype)
+        if not bool(side_mask.any()):
+            continue
+
+        floor_side = floor_vals * side_f
+        # Keep floors feasible: if team floor mass exceeds 240, down-scale proportionally.
+        floor_sum = floor_side.sum(dim=1, keepdim=True)
+        floor_scale = torch.where(
+            floor_sum > team_total,
+            floor_sum.new_full(floor_sum.shape, team_total) / floor_sum.clamp(min=1e-8),
+            torch.ones_like(floor_sum),
+        )
+        floor_side = torch.clamp(floor_side * floor_scale, min=0.0, max=float(max_minutes_per_player))
+
+        out = torch.maximum(out, floor_side)
+        out = torch.clamp(out, min=0.0, max=float(max_minutes_per_player))
+
+        team_sum = (out * side_f).sum(dim=1, keepdim=True)
+        excess = torch.clamp(team_sum - team_total, min=0.0)
+        if bool(excess.gt(1e-8).any()):
+            reducible = torch.clamp(out - floor_side, min=0.0) * side_f
+            reducible_sum = reducible.sum(dim=1, keepdim=True)
+            frac = torch.where(
+                reducible_sum > 1e-8,
+                excess / reducible_sum.clamp(min=1e-8),
+                torch.zeros_like(excess),
+            )
+            frac = torch.clamp(frac, min=0.0, max=1.0)
+            out = out - reducible * frac
+            out = torch.clamp(out, min=0.0, max=float(max_minutes_per_player))
+
+    return torch.where(valid, out, torch.zeros_like(out))
 
 
 def _align_flow_to_backbone_budgets(
@@ -795,6 +871,9 @@ def sample_worlds_for_batch(
     make_model_config: MakeModelConfig | None = None,
     allocation_source: str = "emergent",
     allocation_blend_alpha: float = 0.5,
+    force_active_minutes_floor_ratio: float = DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_RATIO,
+    force_active_minutes_floor_min: float = DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MIN,
+    force_active_minutes_floor_max: float = DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MAX,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     if not hasattr(model, "flow_head") or model.flow_head is None:  # type: ignore[attr-defined]
         raise RuntimeError("Model does not expose flow_head for inverse flow sampling")
@@ -815,6 +894,11 @@ def sample_worlds_for_batch(
         forced_active_worlds = forced_active_worlds.to(device=device, dtype=torch.bool)
     else:
         forced_active_worlds = torch.zeros_like(player_valid_mask, dtype=torch.bool, device=device)
+    forced_active_minutes_anchor = batch.get("force_active_minutes_anchor")
+    if isinstance(forced_active_minutes_anchor, torch.Tensor):
+        forced_active_minutes_anchor = forced_active_minutes_anchor.to(device=device, dtype=torch.float32)
+    else:
+        forced_active_minutes_anchor = torch.zeros_like(player_valid_mask, dtype=torch.float32, device=device)
     game_features = batch["game_features"].to(device=device)  # type: ignore[index]
     team_features = batch["team_features"].to(device=device)  # type: ignore[index]
 
@@ -830,6 +914,7 @@ def sample_worlds_for_batch(
         rep_player_features = player_features.repeat_interleave(n_worlds_chunk, dim=0)
         rep_player_valid_mask = player_valid_mask.repeat_interleave(n_worlds_chunk, dim=0)
         rep_forced_active_worlds = forced_active_worlds.repeat_interleave(n_worlds_chunk, dim=0)
+        rep_forced_active_minutes_anchor = forced_active_minutes_anchor.repeat_interleave(n_worlds_chunk, dim=0)
         rep_game_features = game_features.repeat_interleave(n_worlds_chunk, dim=0)
         rep_team_features = team_features.repeat_interleave(n_worlds_chunk, dim=0)
 
@@ -880,7 +965,21 @@ def sample_worlds_for_batch(
                 rep_forced_active_worlds.reshape(rep_forced_active_worlds.shape[0], -1)
                 & rep_player_valid_mask.reshape(rep_player_valid_mask.shape[0], -1)
             )
+            forced_minutes_anchor_flat = (
+                rep_forced_active_minutes_anchor.reshape(rep_forced_active_minutes_anchor.shape[0], -1)
+                * forced_active_flat.to(dtype=rep_forced_active_minutes_anchor.dtype)
+            )
             sampled_active_mask = out.active.active_mask | forced_active_flat
+            sampled_minutes = _apply_forced_active_minutes_floor(
+                minutes=out.minutes.minutes,
+                valid_mask=out.player_valid_mask,
+                team_index=out.player_team_index,
+                forced_active_mask=forced_active_flat,
+                forced_minutes_anchor=forced_minutes_anchor_flat,
+                floor_ratio=float(force_active_minutes_floor_ratio),
+                floor_min=float(force_active_minutes_floor_min),
+                floor_max=float(force_active_minutes_floor_max),
+            )
             # Enforce DNP semantics: inactive players contribute zero counting stats.
             flow_projected = flow_projected * sampled_active_mask.unsqueeze(-1).to(dtype=flow_projected.dtype)
             usage_share_logits: torch.Tensor | None = None
@@ -959,7 +1058,7 @@ def sample_worlds_for_batch(
                     allocation_blend_alpha=float(allocation_blend_alpha),
                 )
 
-        minutes = out.minutes.minutes.reshape(bsz, n_worlds_chunk, -1)
+        minutes = sampled_minutes.reshape(bsz, n_worlds_chunk, -1)
         active = sampled_active_mask.reshape(bsz, n_worlds_chunk, -1)
         flow_vals = flow_projected.reshape(bsz, n_worlds_chunk, out.player_states.shape[1], len(flow_target_columns))
         valid_flat = out.player_valid_mask.reshape(bsz, n_worlds_chunk, -1)

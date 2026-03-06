@@ -6403,3 +6403,44 @@ Operational result:
 
 - The guardrail guarantees 100% active-world membership for starters and manual `force_in` players in GTv2 sampled worlds.
 - Projected vs confirmed starter is not differentiated by this guardrail; both force active worlds.
+
+#### 16.16.12 Props-implied minutes floor for forced-active players (2026-03-06)
+
+Problem observed after 16.16.11:
+
+- Forced-active semantics fixed `active=1` world presence but did not guarantee realistic minute
+  allocation for returning/inactive-history players.
+- Example failure mode: player appears in 100% worlds but receives very low minutes despite
+  credible market expectation.
+
+Resolution (GTv2 worlds path):
+
+1. Add a per-player forced-active minutes anchor derived from Action props implied minutes:
+   - source columns: `an_implied_minutes`, `an_has_implied_minutes`
+   - clipped to `[0, 48]`
+   - only considered when `an_has_implied_minutes == 1`
+2. During world sampling, apply a conservative floor for forced-active players with anchor:
+   - `floor = clip(anchor * ratio, floor_min, floor_max)`
+   - default policy:
+     - `ratio = 0.65`
+     - `floor_min = 12.0`
+     - `floor_max = 36.0`
+3. Preserve hard feasibility:
+   - after floor application, per-team per-world minutes are rebalanced back to `240`
+   - reductions are taken from reducible players (minutes above their own floor)
+   - invalid/non-roster slots remain zeroed
+
+Implementation points:
+
+- `projections/rotation/game_transformer_v2.py`
+  - `GameLevelExample.force_active_minutes_anchor`
+  - `build_game_level_examples(...)` computes and carries anchor tensor.
+  - `collate_game_level_examples(...)` emits batch key `force_active_minutes_anchor`.
+- `projections/rotation/sample_worlds_v2.py`
+  - `_apply_forced_active_minutes_floor(...)` applies floor + team-total rebalance.
+  - `sample_worlds_for_batch(...)` applies floor before contract checks and world row emission.
+
+Operational effect:
+
+- Forced-active starters/manual `force_in` with props implied minutes no longer collapse to
+  unrealistically low minutes in sampled worlds, while maintaining strict world contracts.
