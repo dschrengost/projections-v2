@@ -247,6 +247,18 @@ Operational rules:
 - If auth expires, refresh the storage state manually rather than debugging a full headless login
   flow on the server.
 
+Normalized index refresh:
+
+```bash
+uv run python -m projections.cli.refresh_contest_results_index \
+  --start-date 2026-02-28 \
+  --end-date 2026-03-05
+```
+
+This rebuilds `analytics/contest_results/contest_inventory.parquet` and
+`analytics/contest_results/user_entries.parquet` for the requested date window from landed raw DK
+result files.
+
 ## Monitoring
 
 - **Prefect UI**: http://localhost:4200
