@@ -23,6 +23,23 @@ import {
 type PreviewRow = Record<string, unknown>
 
 const todayString = () => new Date().toISOString().slice(0, 10)
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function normalizeGameDateInput(value: string): string {
+  const text = value.trim()
+  if (!text) return ''
+  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  }
+  const slashMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slashMatch) {
+    const [, month, day, year] = slashMatch
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  }
+  return text
+}
 
 function formatPrimitive(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—'
@@ -129,15 +146,21 @@ export default function FlashbackPage() {
   const calibrationSummary = (calibration?.summary ?? {}) as Record<string, unknown>
 
   async function handleLoadContests() {
-    if (!gameDate || !userPattern.trim()) {
+    const normalizedGameDate = normalizeGameDateInput(gameDate)
+    setGameDate(normalizedGameDate)
+    if (!normalizedGameDate || !userPattern.trim()) {
       setError('Date and user pattern are required to load contests.')
+      return
+    }
+    if (!ISO_DATE_RE.test(normalizedGameDate)) {
+      setError('Date must be in YYYY-MM-DD format.')
       return
     }
     setLoadingContests(true)
     setError(null)
     setSuccess(null)
     try {
-      const result = await listFlashbackContests(gameDate, userPattern.trim())
+      const result = await listFlashbackContests(normalizedGameDate, userPattern.trim())
       setContests(result)
       if (result.length > 0) {
         setSelectedContestId(result[0].contest_id)
@@ -153,8 +176,14 @@ export default function FlashbackPage() {
   }
 
   async function handleRunReplay() {
-    if (!contestId.trim() || !gameDate.trim() || !userPattern.trim()) {
+    const normalizedGameDate = normalizeGameDateInput(gameDate)
+    setGameDate(normalizedGameDate)
+    if (!contestId.trim() || !normalizedGameDate.trim() || !userPattern.trim()) {
       setError('Date, contest id, and user pattern are required.')
+      return
+    }
+    if (!ISO_DATE_RE.test(normalizedGameDate)) {
+      setError('Date must be in YYYY-MM-DD format.')
       return
     }
     setRunningReplay(true)
@@ -162,7 +191,7 @@ export default function FlashbackPage() {
     setSuccess(null)
     try {
       const response = await runFlashback({
-        game_date: gameDate,
+        game_date: normalizedGameDate,
         contest_id: contestId.trim(),
         user_pattern: userPattern.trim(),
         draft_group_id: draftGroupId.trim() ? Number(draftGroupId) : undefined,
@@ -220,7 +249,11 @@ export default function FlashbackPage() {
         <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <div className="space-y-2">
             <label className="text-xs font-medium uppercase tracking-[0.12em] text-[hsl(var(--muted-foreground))]">Date</label>
-            <Input type="date" value={gameDate} onChange={(e) => setGameDate(e.target.value)} />
+            <Input
+              value={gameDate}
+              onChange={(e) => setGameDate(normalizeGameDateInput(e.target.value))}
+              placeholder="YYYY-MM-DD"
+            />
           </div>
           <div className="space-y-2">
             <label className="text-xs font-medium uppercase tracking-[0.12em] text-[hsl(var(--muted-foreground))]">User pattern</label>
