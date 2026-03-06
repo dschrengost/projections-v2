@@ -524,6 +524,19 @@ Mode 3 is acceptable only for anchored/synthetic runs, not preferred for exact r
 - Compare exact replay vs synthetic generated-field estimates.
 - Use this to improve pre-lock field generation and dupe modeling.
 
+### Phase 5: Acquisition hardening and automation
+
+- Split the control plane into:
+  - `acquire_dk_results`
+  - `normalize_dk_results`
+  - `run_flashback_for_played_contests`
+  - `aggregate_replay_calibration`
+- Keep DK authentication isolated to acquisition only.
+- Use browser-state handoff as the primary DraftKings auth mechanism.
+- Allow downstream replay/calibration jobs to run from already-landed raw files even if acquisition
+  fails on a given night.
+- Add explicit alerting when browser state has expired or acquisition coverage is incomplete.
+
 ---
 
 ## 11. Concrete Module Plan
@@ -573,6 +586,31 @@ Exact replay when full CSVs exist; anchored completion only when the scrape is p
   only?
 - Should replay support contest-specific payout curves exactly, or standardize some very large contests
   for speed?
+
+### Immediate operational next steps
+
+1. Implement browser-state handoff for DK contest acquisition.
+2. Store the authenticated browser state in a control-plane path outside the repo.
+3. Update nightly acquisition to reuse that state file instead of attempting fresh headless login.
+4. Refresh normalized `contest_inventory` and `user_entries` from landed raw files after each
+   acquisition run.
+5. Trigger flashback replay and calibration jobs from normalized outputs, not from live DK access.
+
+### Browser-state handoff recommendation
+
+Preferred near-term auth approach:
+
+1. Log into DraftKings in a real browser session.
+2. Export a Playwright-compatible `storage_state.json` or equivalent cookie/session file.
+3. Sync that state file to the server.
+4. Point nightly DK acquisition at that state file.
+5. Refresh the state manually when DraftKings expires the session.
+
+Why this is the recommended path:
+
+- materially more reliable than full headless DK login automation,
+- constrains auth fragility to one reusable state file,
+- keeps replay, normalization, and calibration independent from live login state once files land.
 
 ---
 

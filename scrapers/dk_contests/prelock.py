@@ -18,17 +18,12 @@ import duckdb  # type: ignore
 import requests
 from dotenv import load_dotenv
 
+from auth import resolve_request_cookie, resolve_storage_state_path
+
 
 DATA_ROOT = Path("nba_gpp_data")
 DEFAULT_DB = Path("analytics/contests.duckdb")
 COOKIE_ENV_VAR = "DK_RESULTS_COOKIE"
-
-
-def _format_cookie(raw_cookie: Optional[str]) -> Optional[str]:
-    if not raw_cookie:
-        return None
-    segs = [s.strip() for s in raw_cookie.split(";") if s.strip()]
-    return "; ".join(segs) if segs else None
 
 
 def _session(cookie: Optional[str]) -> requests.Session:
@@ -196,6 +191,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--data-root", default=str(DATA_ROOT))
     p.add_argument("--db", default=str(DEFAULT_DB))
     p.add_argument("--no-network", action="store_true", help="Disable network fetch; use cache only")
+    p.add_argument("--storage-state", type=Path, help="Optional Playwright storage_state.json path")
     return p.parse_args()
 
 
@@ -216,7 +212,11 @@ def main() -> None:
 
     sess = None
     if not args.no_network:
-        cookie = _format_cookie(os.getenv(COOKIE_ENV_VAR))
+        storage_state_path = resolve_storage_state_path(args.storage_state)
+        cookie = resolve_request_cookie(
+            storage_state_path=storage_state_path,
+            cookie_env_var=COOKIE_ENV_VAR,
+        )
         if not cookie:
             print("Warning: no DK_RESULTS_COOKIE set; endpoint may return empty/unauthorized.")
         sess = _session(cookie)

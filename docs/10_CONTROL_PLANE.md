@@ -214,6 +214,39 @@ Timers trigger pipeline runs on schedule:
 | `live-pipeline.timer` | `live-pipeline.service` | Game-time schedule |
 | `nightly-eval.timer` | `nightly-eval.service` | 3 AM daily |
 
+## DraftKings Contest Acquisition Auth
+
+`prefect_flows/dk_contests.py` is the control-plane entrypoint for nightly DraftKings contest
+acquisition. DK auth should use browser-state handoff, not fresh headless login on every run.
+
+Canonical auth state:
+
+- env var: `DK_STORAGE_STATE_PATH`
+- default path: `$PROJECTIONS_DATA_ROOT/control_plane/dk_auth/storage_state.json`
+
+Recommended workflow:
+
+1. Capture browser state from a real browser session:
+
+```bash
+uv run python scrapers/dk_contests/auth.py --interactive
+```
+
+2. This writes reusable Playwright storage state to the canonical control-plane path and refreshes
+   `DK_RESULTS_COOKIE` in the selected env file unless `--no-save-env` is set.
+
+3. Nightly DK acquisition scripts reuse that state automatically:
+   - `scrapers/dk_contests/download_contest_results.py`
+   - `scrapers/dk_contests/payouts_scraper.py`
+   - `scrapers/dk_contests/prelock.py`
+
+Operational rules:
+
+- Only the acquisition stage should depend on DK auth.
+- Replay, normalization, and calibration jobs must run from landed files and normalized derivatives.
+- If auth expires, refresh the storage state manually rather than debugging a full headless login
+  flow on the server.
+
 ## Monitoring
 
 - **Prefect UI**: http://localhost:4200

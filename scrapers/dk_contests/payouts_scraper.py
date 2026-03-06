@@ -18,6 +18,8 @@ from typing import Dict, List, Optional, Tuple
 import duckdb  # type: ignore
 import requests
 
+from auth import resolve_request_cookie, resolve_storage_state_path
+
 
 DATA_ROOT = Path("nba_gpp_data")
 DEFAULT_DB = Path("analytics/contests.duckdb")
@@ -136,6 +138,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--data-root", default=str(DATA_ROOT))
     p.add_argument("--db", default=str(DEFAULT_DB))
     p.add_argument("--cookie", help="Optional Cookie header value (falls back to DK_RESULTS_COOKIE)")
+    p.add_argument("--storage-state", type=Path, help="Optional Playwright storage_state.json path")
     return p.parse_args()
 
 
@@ -159,7 +162,12 @@ def main() -> None:
     results_dir = day_dir / "payouts"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    cookie = args.cookie or os.getenv("DK_RESULTS_COOKIE") or ""
+    storage_state_path = resolve_storage_state_path(args.storage_state)
+    cookie = resolve_request_cookie(
+        cookie=args.cookie,
+        storage_state_path=storage_state_path,
+        cookie_env_var="DK_RESULTS_COOKIE",
+    ) or ""
     sess = _session(cookie=cookie)
 
     for cid in ids:
@@ -181,4 +189,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

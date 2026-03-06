@@ -319,6 +319,17 @@ Failure policy:
 - analytics should still write partial artifacts only if replay itself completed,
 - candidate regret is optional and should degrade gracefully when no export manifest is found.
 
+Control-plane rule:
+
+- replay analytics and calibration must never depend on live DraftKings authentication,
+- they operate only on landed raw bronze files and normalized derivatives,
+- the only auth-dependent upstream stage is contest acquisition.
+
+Recommended next step:
+
+- adopt browser-state handoff for DK acquisition so nightly replay analytics runs from landed files
+  rather than attempting fresh headless login on the same host.
+
 ---
 
 ## 12. Downstream Uses

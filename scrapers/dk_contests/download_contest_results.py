@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 import requests
 from dotenv import load_dotenv
 
-from auth import authenticate_with_browser
+from auth import authenticate_with_browser, resolve_request_cookie, resolve_storage_state_path
 
 
 load_dotenv()
@@ -23,18 +23,6 @@ DEFAULT_DATA_ROOT = Path("nba_gpp_data")
 RESULTS_ENDPOINT = "https://www.draftkings.com/contest/exportfullstandingscsv/{contest_id}"
 REQUEST_TIMEOUT = 30
 COOKIE_ENV_VAR = "DK_RESULTS_COOKIE"
-
-
-def _format_cookie(raw_cookie: Optional[str]) -> Optional[str]:
-    """Normalize a raw cookie string for use in headers."""
-    if not raw_cookie:
-        return None
-
-    segments = [segment.strip() for segment in raw_cookie.split(";") if segment.strip()]
-    if not segments:
-        return None
-
-    return "; ".join(segments)
 
 
 def _default_session(cookie: Optional[str] = None) -> requests.Session:
@@ -52,9 +40,8 @@ def _default_session(cookie: Optional[str] = None) -> requests.Session:
             "Referer": "https://www.draftkings.com/",
         }
     )
-    formatted_cookie = _format_cookie(cookie)
-    if formatted_cookie:
-        session.headers["Cookie"] = formatted_cookie
+    if cookie:
+        session.headers["Cookie"] = cookie
     return session
 
 
@@ -307,6 +294,11 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to a file containing the Cookie header value",
     )
     parser.add_argument(
+        "--storage-state",
+        type=Path,
+        help="Optional Playwright storage_state.json path for request cookies",
+    )
+    parser.add_argument(
         "--auth-browser",
         action="store_true",
         help="Use browser automation to authenticate and get fresh cookies",
@@ -341,30 +333,28 @@ def main() -> None:
         csv_path = _resolve_csv_path(data_root, args.date)
 
     cookie_value: Optional[str] = None
+    storage_state_path = resolve_storage_state_path(args.storage_state)
 
-    # Handle browser authentication
     if args.auth_browser or args.auth_interactive:
         print("Initiating browser authentication...")
         try:
             headless_mode = args.headless and not args.no_headless and not args.auth_interactive
             cookie_value = authenticate_with_browser(
                 headless=headless_mode,
-                interactive=args.auth_interactive
+                interactive=args.auth_interactive,
+                storage_state_path=storage_state_path,
             )
             print("Browser authentication successful!")
-        except Exception as e:
-            print(f"Browser authentication failed: {e}")
+        except Exception as exc:
+            print(f"Browser authentication failed: {exc}")
             return
     else:
-        # Use existing cookie methods
-        if args.cookie:
-            cookie_value = args.cookie
-        elif args.cookie_file:
-            cookie_value = args.cookie_file.read_text(encoding="utf-8").strip()
-        else:
-            cookie_value = os.getenv(COOKIE_ENV_VAR)
-
-    cookie_value = _format_cookie(cookie_value)
+        cookie_value = resolve_request_cookie(
+            cookie=args.cookie,
+            cookie_file=args.cookie_file,
+            storage_state_path=storage_state_path,
+            cookie_env_var=COOKIE_ENV_VAR,
+        )
 
     if cookie_value:
         print("Using DraftKings cookie from provided configuration")
