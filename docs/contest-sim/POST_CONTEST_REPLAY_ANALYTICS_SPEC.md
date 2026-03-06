@@ -287,11 +287,19 @@ Primary use:
 Replay analytics may use:
 
 - raw contest results CSVs from `bronze/dk_contests/nba_gpp_data/...`
+- normalized contest inventory and user-entry tables from `analytics/contest_results/...`
 - replay-prepared exact field outputs
 - player world matrices from contest sim world loaders
 - boxscore minute labels from `labels/season=*/boxscore_labels.parquet`
 - DK contest export manifests and `eval_lineups.csv` from `contests/dk/...`
 - generated field libraries from contest sim cache/build manager
+
+Serving/freshness rule:
+
+- normalized analytics tables are the preferred index for dashboards and APIs,
+- raw contest results are the freshness fallback when normalized tables lag the scrape,
+- replay analytics outputs should continue to materialize normalized parquet artifacts so downstream
+  calibration jobs never depend on ad hoc CSV scans.
 
 ---
 

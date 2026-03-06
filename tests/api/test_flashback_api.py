@@ -54,6 +54,45 @@ def test_list_flashback_contests(tmp_path: Path, monkeypatch) -> None:
     assert payload[0]["entry_count"] == 2
 
 
+def test_list_flashback_contests_falls_back_to_raw_results(tmp_path: Path, monkeypatch) -> None:
+    raw_dir = tmp_path / "bronze" / "dk_contests" / "nba_gpp_data" / "2099-01-01"
+    results_dir = raw_dir / "results"
+    results_dir.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "contest_id": 123,
+                "contest_name": "NBA And-One",
+                "draft_group_id": 999,
+                "entry_fee": 3.0,
+                "current_entries": 1000,
+            }
+        ]
+    ).to_csv(raw_dir / "nba_gpp_2099-01-01.csv", index=False)
+    pd.DataFrame(
+        [
+            {"Rank": 12, "EntryId": 1, "EntryName": "daniel (1/2)", "Lineup": "PG A SG B SF C PF D C E G F F G UTIL H"},
+            {"Rank": 20, "EntryId": 2, "EntryName": "other", "Lineup": "PG A SG B SF C PF D C E G F F G UTIL H"},
+            {"Rank": 33, "EntryId": 3, "EntryName": "daniel (2/2)", "Lineup": "PG A SG B SF C PF D C E G F F G UTIL H"},
+        ]
+    ).to_csv(results_dir / "contest_123_results.csv", index=False)
+
+    monkeypatch.setattr(flashback_api, "_user_entries_path", lambda: tmp_path / "missing.parquet")
+    monkeypatch.setattr(flashback_api.paths, "data_path", lambda *parts: tmp_path.joinpath(*parts))
+    monkeypatch.setattr(flashback_api, "find_latest_export_manifest", lambda **kwargs: None)
+
+    client = TestClient(create_app())
+    response = client.get("/api/flashback/contests", params={"date": "2099-01-01", "user_pattern": "daniel"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["contest_id"] == "123"
+    assert payload[0]["entry_count"] == 2
+    assert payload[0]["contest_name"] == "NBA And-One"
+    assert payload[0]["draft_group_id"] == 999
+
+
 def test_run_flashback_returns_summary_and_previews(tmp_path: Path, monkeypatch) -> None:
     analytics_dir = tmp_path / "analytics"
     analytics_dir.mkdir(parents=True)

@@ -286,6 +286,13 @@ Add a normalized replay layer:
 - duplicate group key,
 - observed ownership aggregates when available.
 
+Serving rule:
+
+- normalized replay tables are the preferred serving layer for API/UI reads,
+- raw bronze results remain the freshness fallback when normalized tables are stale or missing,
+- replay execution may read raw bronze inputs directly, but downstream analytics and dashboards
+  should materialize normalized contracts.
+
 ## 6.3 Replay-ready field library contract
 
 For the simulator, represent the contest as:
@@ -363,6 +370,12 @@ bronze results csv
    - variance/luck diagnostics,
    - portfolio aggregation.
 
+6. Flashback serving/index layer
+   - fast path from normalized `analytics/contest_results/*` tables,
+   - fallback path from raw `bronze/dk_contests/nba_gpp_data/<date>/results/*.csv`,
+   - same response contract regardless of source,
+   - explicit freshness-over-speed tradeoff in favor of raw fallback.
+
 ## 7.3 Reuse of existing modules
 
 The current contest-sim system already has most of the hard runtime pieces:
@@ -380,6 +393,14 @@ New work is primarily:
 - lock-time world provenance,
 - anchored completion logic for partial scrapes,
 - product/UI semantics for replay vs generated-field.
+
+Operational note:
+
+- contest discovery should not hard-fail when normalized contest tables lag behind the nightly raw
+  scrape,
+- the API should fall back to raw results discovery for the requested date,
+- this makes flashback usable for the latest scraped contests while preserving normalized parquet as
+  the stable serving/index layer.
 
 ---
 
