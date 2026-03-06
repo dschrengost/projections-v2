@@ -1,3 +1,5 @@
+import { apiUrl } from './client'
+
 const API_BASE = '/api/flashback'
 
 export interface FlashbackContestSummary {
@@ -38,7 +40,7 @@ export interface FlashbackCalibrationResponse {
 
 export async function listFlashbackContests(date: string, userPattern: string): Promise<FlashbackContestSummary[]> {
   const params = new URLSearchParams({ date, user_pattern: userPattern })
-  const resp = await fetch(`${API_BASE}/contests?${params.toString()}`)
+  const resp = await fetch(apiUrl(`${API_BASE}/contests?${params.toString()}`))
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }))
     throw new Error(err.detail || 'Failed to load flashback contests')
@@ -47,7 +49,7 @@ export async function listFlashbackContests(date: string, userPattern: string): 
 }
 
 export async function runFlashback(request: FlashbackRunRequest): Promise<FlashbackRunResponse> {
-  const resp = await fetch(`${API_BASE}/run`, {
+  const resp = await fetch(apiUrl(`${API_BASE}/run`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -60,7 +62,7 @@ export async function runFlashback(request: FlashbackRunRequest): Promise<Flashb
 }
 
 export async function runFlashbackCalibration(): Promise<FlashbackCalibrationResponse> {
-  const resp = await fetch(`${API_BASE}/calibration/run`, {
+  const resp = await fetch(apiUrl(`${API_BASE}/calibration/run`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   })
