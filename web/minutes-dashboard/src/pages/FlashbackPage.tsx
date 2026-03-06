@@ -62,6 +62,11 @@ function objectArray(value: unknown): PreviewRow[] {
   return value.filter((item): item is PreviewRow => isPlainObject(item))
 }
 
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+}
+
 function scalarEntries(values: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(values).filter(([, value]) => {
@@ -256,6 +261,8 @@ export default function FlashbackPage() {
   const userReplaySummary = (replaySummary.user_replay_summary ?? {}) as Record<string, unknown>
   const fieldSummary = (replaySummary.field_summary ?? {}) as Record<string, unknown>
   const regretSummary = (replaySummary.regret_summary ?? {}) as Record<string, unknown>
+  const attributionSummary = (replaySummary.attribution_summary ?? {}) as Record<string, unknown>
+  const serverDecisionGuidance = stringArray(replaySummary.decision_guidance)
   const calibrationSummary = (calibration?.summary ?? {}) as Record<string, unknown>
   const calibrationArtifactCounts = isPlainObject(calibrationSummary.artifact_counts)
     ? calibrationSummary.artifact_counts
@@ -265,6 +272,9 @@ export default function FlashbackPage() {
   const fuzzyExamples = objectArray(replayResolution.fuzzy_examples)
 
   const replayInsights = useMemo(() => {
+    if (serverDecisionGuidance.length > 0) {
+      return serverDecisionGuidance
+    }
     const items: string[] = []
     const bestSimRoi = Number(userReplaySummary.best_sim_roi)
     if (Number.isFinite(bestSimRoi)) {
@@ -300,6 +310,7 @@ export default function FlashbackPage() {
     }
     return items
   }, [
+    serverDecisionGuidance,
     fieldSummary.player_ownership_mae_pct,
     regretSummary.selection_regret_roi,
     replayResolution.slot_resolution_rate,
@@ -487,6 +498,7 @@ export default function FlashbackPage() {
         <InsightList title="How to read this replay" items={replayInsights} />
         <MetricCards title="Match quality" values={replayResolution} />
         <MetricCards title="Regret summary" values={regretSummary} />
+        <MetricCards title="Attribution summary" values={attributionSummary} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">

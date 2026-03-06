@@ -242,6 +242,19 @@ def _lineup_features(lineup: Sequence[str], player_meta: Dict[str, Dict[str, Any
     }
 
 
+def _lineup_player_names(lineup: Sequence[str], player_meta: Dict[str, Dict[str, Any]]) -> List[str]:
+    names: List[str] = []
+    for player_id in lineup:
+        player_id_str = str(player_id)
+        meta = player_meta.get(player_id_str, {})
+        names.append(str(meta.get("name") or player_id_str))
+    return names
+
+
+def _format_lineup_players(names: Sequence[str]) -> str:
+    return " | ".join(str(name) for name in names if str(name).strip())
+
+
 def _simulation_result_map(results: Sequence[LineupEVResult]) -> Dict[str, LineupEVResult]:
     return {_lineup_key(result.player_ids): result for result in results}
 
@@ -401,6 +414,83 @@ def _replay_trust_status(
         warnings.append("missing_modeled_field_comparison")
 
     return ("warning", warnings) if warnings else ("trusted", [])
+
+
+def _build_decision_guidance(
+    *,
+    replay_trust_status: str,
+    replay_trust_issues: Sequence[str],
+    user_replay_summary: Dict[str, Any],
+    field_summary: Dict[str, Any],
+    regret_summary: Dict[str, Any],
+) -> Tuple[List[str], Dict[str, Any]]:
+    messages: List[str] = []
+    primary = "mixed"
+    confidence = "low" if replay_trust_status != "trusted" else "medium"
+    reasons: List[str] = []
+
+    if replay_trust_status != "trusted":
+        messages.append(
+            "Replay trust is not fully clean; resolve trust issues before using this run for model tuning."
+        )
+        if replay_trust_issues:
+            reasons.append(f"trust_issues={','.join(replay_trust_issues)}")
+
+    selection_regret = _safe_float(regret_summary.get("selection_regret_roi"))
+    if selection_regret is not None:
+        if selection_regret >= 0.03:
+            messages.append(
+                f"Selection appears to be a meaningful leak (selection_regret_roi={selection_regret:.3f})."
+            )
+            primary = "selection"
+            reasons.append("selection_regret_high")
+        elif selection_regret <= 0.005:
+            messages.append(
+                f"Selection regret is low (selection_regret_roi={selection_regret:.3f}); selection is likely not the main issue."
+            )
+
+    ownership_mae = _safe_float(field_summary.get("player_ownership_mae_pct"))
+    if ownership_mae is not None:
+        if ownership_mae >= 8.0:
+            messages.append(
+                f"Field model miss looks material (player_ownership_mae_pct={ownership_mae:.2f})."
+            )
+            if primary == "mixed":
+                primary = "field_model"
+            reasons.append("field_ownership_mae_high")
+        elif ownership_mae <= 4.0:
+            messages.append(
+                f"Field ownership fit looks reasonable (player_ownership_mae_pct={ownership_mae:.2f})."
+            )
+
+    avg_sim_roi = _safe_float(user_replay_summary.get("avg_sim_roi"))
+    avg_realized_sim_pct = _safe_float(user_replay_summary.get("avg_realized_score_sim_percentile"))
+    if avg_sim_roi is not None and avg_realized_sim_pct is not None:
+        if avg_sim_roi > 0.0 and avg_realized_sim_pct < 0.35:
+            messages.append(
+                "Lineups were positive in sim but realized in the lower tail; this run looks variance-heavy."
+            )
+            if primary == "mixed":
+                primary = "variance"
+            reasons.append("positive_sim_negative_realized_tail")
+        elif avg_sim_roi < 0.0 and (selection_regret is None or selection_regret < 0.01):
+            messages.append(
+                "Lineups were weak in sim with low selection regret; focus on projection/sim quality and candidate generation."
+            )
+            if primary == "mixed":
+                primary = "projection_or_generation"
+            reasons.append("negative_sim_low_selection_regret")
+
+    if replay_trust_status == "trusted":
+        confidence = "high"
+    if not messages:
+        messages.append("No dominant failure mode detected from summary metrics; inspect player/lineup calibration tables.")
+
+    return messages, {
+        "primary": primary,
+        "confidence": confidence,
+        "reasons": reasons,
+    }
 
 
 def _library_features_frame(
@@ -592,6 +682,7 @@ def _entered_lineup_rows(
         key = _lineup_key(entry.player_ids)
         sim = result_map.get(key)
         features = _lineup_features(entry.player_ids, player_meta)
+        player_names = _lineup_player_names(entry.player_ids, player_meta)
         rows.append(
             {
                 "game_date": prepared.meta.game_date,
@@ -601,6 +692,8 @@ def _entered_lineup_rows(
                 "lineup_source": "entered",
                 "is_entered": True,
                 "player_ids_json": json.dumps(entry.player_ids),
+                "player_names_json": json.dumps(player_names),
+                "lineup_players": _format_lineup_players(player_names),
                 "entry_id": entry.entry_id,
                 "entry_name": entry.entry_name,
                 "realized_points": entry.points,
@@ -721,10 +814,16 @@ def _load_candidate_lineups_from_manifest(
 
 def _aggregate_lineups(lineups: Iterable[Sequence[str]]) -> Tuple[List[List[str]], List[int]]:
     counts: Counter[Tuple[str, ...]] = Counter()
+    ordered_lineups: Dict[Tuple[str, ...], List[str]] = {}
     for lineup in lineups:
-        counts[tuple(sorted(str(pid) for pid in lineup))] += 1
-    unique_lineups = [list(key) for key in counts.keys()]
-    weights = [int(count) for count in counts.values()]
+        normalized = [str(pid).strip() for pid in lineup if str(pid).strip()]
+        key = tuple(sorted(normalized))
+        if not key:
+            continue
+        counts[key] += 1
+        ordered_lineups.setdefault(key, normalized)
+    unique_lineups = [ordered_lineups[key] for key in counts.keys()]
+    weights = [int(counts[key]) for key in counts.keys()]
     return unique_lineups, weights
 
 
@@ -744,6 +843,7 @@ def _candidate_lineup_rows(
     for lineup, weight in zip(candidate_lineups, candidate_weights):
         key = _lineup_key(lineup)
         sim = sim_map.get(key)
+        player_names = _lineup_player_names(lineup, player_meta)
         rows.append(
             {
                 "game_date": prepared.meta.game_date,
@@ -753,6 +853,8 @@ def _candidate_lineup_rows(
                 "lineup_source": "candidate",
                 "is_entered": key in entered_keys,
                 "player_ids_json": json.dumps(list(lineup)),
+                "player_names_json": json.dumps(player_names),
+                "lineup_players": _format_lineup_players(player_names),
                 "entry_id": None,
                 "entry_name": None,
                 "realized_points": None,
@@ -808,6 +910,37 @@ def _lineup_label(row: Dict[str, Any]) -> Optional[str]:
     return str(lineup_key) if lineup_key is not None else None
 
 
+def _decode_json_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if not isinstance(value, str) or not value.strip():
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    return []
+
+
+def _lineup_players_text(row: Dict[str, Any]) -> Optional[str]:
+    if not row:
+        return None
+    lineup_players = row.get("lineup_players")
+    if lineup_players:
+        return str(lineup_players)
+    names = _decode_json_list(row.get("player_names_json"))
+    if names:
+        return _format_lineup_players(names)
+    ids = _decode_json_list(row.get("player_ids_json"))
+    if ids:
+        return _format_lineup_players(ids)
+    return None
+
+
 def _regret_frame(
     *,
     prepared: PreparedReplayContext,
@@ -827,12 +960,14 @@ def _regret_frame(
         "entered_unique_count": int(entered_df["lineup_key"].nunique()) if not entered_df.empty else 0,
         "best_entered_lineup_key": best_entered.get("lineup_key"),
         "best_entered_lineup_label": _lineup_label(best_entered),
+        "best_entered_lineup_players": _lineup_players_text(best_entered),
         "best_entered_sim_roi": best_entered.get("sim_roi"),
         "best_entered_sim_cash_rate": best_entered.get("sim_cash_rate"),
         "best_entered_realized_rank": best_entered.get("realized_rank"),
         "best_entered_realized_prize": best_entered.get("realized_prize"),
         "actual_best_entered_lineup_key": actual_best_entered.get("lineup_key"),
         "actual_best_entered_lineup_label": _lineup_label(actual_best_entered),
+        "actual_best_entered_lineup_players": _lineup_players_text(actual_best_entered),
         "actual_best_entered_rank": actual_best_entered.get("realized_rank"),
         "actual_best_entered_prize": actual_best_entered.get("realized_prize"),
         "candidate_pool_available": bool(not candidate_df.empty),
@@ -842,11 +977,13 @@ def _regret_frame(
         "candidate_unique_count": int(candidate_df["lineup_key"].nunique()) if not candidate_df.empty else 0,
         "best_candidate_lineup_key": best_candidate.get("lineup_key"),
         "best_candidate_lineup_label": _lineup_label(best_candidate),
+        "best_candidate_lineup_players": _lineup_players_text(best_candidate),
         "best_candidate_sim_roi": best_candidate.get("sim_roi"),
         "best_candidate_sim_cash_rate": best_candidate.get("sim_cash_rate"),
         "best_candidate_is_entered": bool(best_candidate.get("is_entered")) if best_candidate else False,
         "best_finalset_lineup_key": best_finalset.get("lineup_key"),
         "best_finalset_lineup_label": _lineup_label(best_finalset),
+        "best_finalset_lineup_players": _lineup_players_text(best_finalset),
         "best_finalset_sim_roi": best_finalset.get("sim_roi"),
         "selection_regret_roi": (
             float(best_candidate.get("sim_roi")) - float(best_finalset.get("sim_roi"))
@@ -1103,8 +1240,25 @@ def build_post_contest_replay_analytics(
             "replay_trust_issues": replay_trust_issues,
         }
     )
+    user_replay_summary = {
+        "entered_lineup_count": int(len(entered_df)),
+        "best_sim_roi": _best_lineup_row(entered_df, "sim_roi").get("sim_roi"),
+        "avg_sim_roi": float(entered_df["sim_roi"].dropna().mean()) if not entered_df.empty and "sim_roi" in entered_df.columns and entered_df["sim_roi"].dropna().any() else None,
+        "best_sim_cash_rate": _best_lineup_row(entered_df, "sim_cash_rate").get("sim_cash_rate"),
+        "best_realized_rank": _actual_best_entered_row(entered_df).get("realized_rank"),
+        "best_realized_prize": _actual_best_entered_row(entered_df).get("realized_prize"),
+        "avg_realized_rank": float(entered_df["realized_rank"].dropna().mean()) if not entered_df.empty and "realized_rank" in entered_df.columns and entered_df["realized_rank"].dropna().any() else None,
+        "avg_realized_score_sim_percentile": float(entered_df["realized_score_sim_percentile"].dropna().mean()) if not entered_df.empty and "realized_score_sim_percentile" in entered_df.columns and entered_df["realized_score_sim_percentile"].dropna().any() else None,
+    }
     field_summary = field_df.iloc[0].where(pd.notna(field_df.iloc[0]), None).to_dict() if not field_df.empty else {}
     regret_summary = regret_df.iloc[0].where(pd.notna(regret_df.iloc[0]), None).to_dict() if not regret_df.empty else {}
+    decision_guidance, attribution_summary = _build_decision_guidance(
+        replay_trust_status=replay_trust_status,
+        replay_trust_issues=replay_trust_issues,
+        user_replay_summary=user_replay_summary,
+        field_summary=field_summary,
+        regret_summary=regret_summary,
+    )
 
     summary_payload = {
         "contest_id": prepared.meta.contest_id,
@@ -1123,15 +1277,9 @@ def build_post_contest_replay_analytics(
         "modeled_field": modeled_field_meta,
         "candidate_meta": candidate_meta,
         "resolution": resolution_summary,
-        "user_replay_summary": {
-            "entered_lineup_count": int(len(entered_df)),
-            "best_sim_roi": _best_lineup_row(entered_df, "sim_roi").get("sim_roi"),
-            "avg_sim_roi": float(entered_df["sim_roi"].dropna().mean()) if not entered_df.empty and "sim_roi" in entered_df.columns and entered_df["sim_roi"].dropna().any() else None,
-            "best_sim_cash_rate": _best_lineup_row(entered_df, "sim_cash_rate").get("sim_cash_rate"),
-            "best_realized_rank": _actual_best_entered_row(entered_df).get("realized_rank"),
-            "best_realized_prize": _actual_best_entered_row(entered_df).get("realized_prize"),
-            "avg_realized_rank": float(entered_df["realized_rank"].dropna().mean()) if not entered_df.empty and "realized_rank" in entered_df.columns and entered_df["realized_rank"].dropna().any() else None,
-        },
+        "user_replay_summary": user_replay_summary,
+        "decision_guidance": decision_guidance,
+        "attribution_summary": attribution_summary,
         "field_summary": field_summary,
         "regret_summary": regret_summary,
         "artifacts": {

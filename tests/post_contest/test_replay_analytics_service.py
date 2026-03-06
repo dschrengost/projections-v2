@@ -288,3 +288,10 @@ def test_build_post_contest_replay_analytics_writes_all_artifacts(tmp_path: Path
     assert summary["candidate_universe_source"] == "eval_lineups_csv"
     assert summary["candidate_universe_lineup_count"] == 1
     assert summary["resolution"]["candidate_missing_player_id_count"] == 1
+    assert "decision_guidance" in summary
+    assert "attribution_summary" in summary
+
+    regret_df = pd.read_parquet(bundle.regret_summary_path)
+    assert "best_entered_lineup_players" in regret_df.columns
+    assert "best_candidate_lineup_players" in regret_df.columns
+    assert "Alpha" in str(regret_df.iloc[0]["best_entered_lineup_players"])
