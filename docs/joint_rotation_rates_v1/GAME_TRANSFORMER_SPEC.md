@@ -6448,3 +6448,67 @@ Operational effect:
 
 - Forced-active starters/manual `force_in` with props implied minutes no longer collapse to
   unrealistically low minutes in sampled worlds, while maintaining strict world contracts.
+
+#### 16.16.13 Regime-aware priors roadmap (requires retrain) (2026-03-06)
+
+Problem:
+
+- Current rolling priors are mostly context-agnostic historical means (windowed by player/team),
+  which can miss role shifts driven by temporary injury regimes and can blur active-minute signal
+  with OUT/rest/DNP outcomes.
+
+Target:
+
+- Make priors explicitly regime-aware so the model can distinguish:
+  - normal rotation usage,
+  - temporary next-man-up usage under teammate absences,
+  - active-but-DNP / inactive streak risk.
+
+Planned prior families:
+
+1. **Active-only minute priors**
+   - `minutes_when_active_prior_{5,10,20}`
+   - `active_rate_prior_{5,10,20}`
+   - `active_dnp_rate_prior_{5,10,20}`
+   - Purpose: prevent zero-minute outcomes from flattening true active workload priors.
+
+2. **Injury-vacancy conditioned priors**
+   - Team regime descriptors:
+     - `out_minutes_prior_{w}`
+     - `out_starters_count_prior_{w}`
+     - optional position-bucket vacancy (`out_minutes_G/W/B_prior_{w}`)
+   - Player response priors:
+     - `minutes_delta_given_vacancy_prior_{w}`
+     - `usage_delta_given_vacancy_prior_{w}` (if/when usage priors are included)
+   - Purpose: encode the “minutes spike because teammates were out” regime directly.
+
+3. **Hierarchical fallback/shrinkage**
+   - Fallback chain for sparse players:
+     - player-regime -> team-role-regime -> league-role-regime -> global baseline
+   - Purpose: stabilize priors for call-ups / low-sample players without collapsing to naive constants.
+
+Leakage and contract requirements:
+
+- All regime priors must remain pre-game:
+  - strict shift (`t-1` max source row),
+  - pre-tip as-of constraints aligned with existing anti-leak policy.
+- Preserve existing missingness flags and source-date diagnostics so audits can verify freshness.
+
+Required implementation areas:
+
+1. `scripts/rotation/build_rotation_priors_v1.py`
+   - Extend prior builder with active-only and vacancy-conditioned priors.
+   - Emit corresponding `_missing`, `_n_games`, and source-date fields.
+2. `projections/rotation/live_features_v1.py`
+   - Join and type-normalize new prior fields.
+   - Ensure fallback stamping behavior preserves regime semantics.
+3. `projections/pipeline/gtv2_live_features.py` + bundle contract
+   - Add new fields to training/live feature contract parity.
+4. Retraining + promotion
+   - Rebuild training dataset, retrain GTv2, run strict contract/eval gates, then promote.
+
+Rollout guidance:
+
+- Phase 1 (lowest risk): active-only priors + DNP-rate priors.
+- Phase 2: vacancy-conditioned deltas.
+- Phase 3: hierarchical regime fallback and calibration tuning.
