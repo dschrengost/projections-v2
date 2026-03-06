@@ -1707,6 +1707,75 @@ def _sanitize_frame_to_expected_keys(
     )
 
 
+def _left_overlay_from_source_by_keys(
+    base_df: pd.DataFrame,
+    *,
+    source_df: pd.DataFrame,
+    key_cols: Sequence[str],
+    value_cols: Sequence[str],
+    label: str,
+) -> pd.DataFrame:
+    key_cols = tuple(str(col) for col in key_cols)
+    value_cols = [str(col) for col in value_cols if str(col) in source_df.columns]
+    if base_df.empty or source_df.empty or not value_cols:
+        return base_df
+
+    missing_base = [col for col in key_cols if col not in base_df.columns]
+    missing_source = [col for col in key_cols if col not in source_df.columns]
+    if missing_base or missing_source:
+        raise RuntimeError(
+            f"{label} missing join columns; "
+            f"base_missing={missing_base} source_missing={missing_source}"
+        )
+
+    base = base_df.copy()
+    source = source_df.loc[:, list(key_cols) + value_cols].copy()
+    for col in key_cols:
+        base[col] = pd.to_numeric(base[col], errors="coerce")
+        source[col] = pd.to_numeric(source[col], errors="coerce")
+
+    source = source.dropna(subset=list(key_cols))
+    if source.empty:
+        return base
+    source = source.drop_duplicates(subset=list(key_cols), keep="last").reset_index(
+        drop=True
+    )
+    for col in key_cols:
+        source[col] = source[col].astype("int64", copy=False)
+
+    base_valid_mask = ~base.loc[:, list(key_cols)].isna().any(axis=1)
+    if not bool(base_valid_mask.any()):
+        return base
+    base_valid_positions = np.flatnonzero(base_valid_mask.to_numpy())
+    base_keys_valid = base.loc[base_valid_mask, list(key_cols)].copy()
+    for col in key_cols:
+        base_keys_valid[col] = base_keys_valid[col].astype("int64", copy=False)
+
+    source_key_index = pd.MultiIndex.from_frame(
+        source.loc[:, list(key_cols)], names=list(key_cols)
+    )
+    base_key_index = pd.MultiIndex.from_frame(base_keys_valid, names=list(key_cols))
+    key_indexer = source_key_index.get_indexer(base_key_index)
+    hit_mask = key_indexer >= 0
+    if not bool(hit_mask.any()):
+        return base
+
+    hit_base_positions = base_valid_positions[hit_mask]
+    hit_source_positions = key_indexer[hit_mask]
+
+    for col in value_cols:
+        if col not in base.columns:
+            base[col] = pd.NA
+        source_values = source[col].to_numpy(copy=False)[hit_source_positions]
+        source_notna = pd.notna(source_values)
+        if not bool(source_notna.any()):
+            continue
+        col_idx = base.columns.get_loc(col)
+        base.iloc[hit_base_positions[source_notna], col_idx] = source_values[source_notna]
+
+    return base
+
+
 def _validate_parquet_key_contract(
     path: Path,
     *,
@@ -4451,26 +4520,14 @@ def materialize_unified_run_artifacts_task(
         for col in merged_world_projections.columns
         if col not in {"game_date", "game_id", "team_id", "player_id"}
     ]
-    merged_final = merged_final.merge(
-        merged_world_projections.loc[:, projection_join_keys + projection_value_cols],
-        on=projection_join_keys,
-        how="left",
-        suffixes=("", "__world"),
-    )
-    for col in projection_value_cols:
-        src_col = f"{col}__world"
-        if src_col not in merged_final.columns:
-            continue
-        if col in merged_final.columns:
-            merged_final[col] = merged_final[src_col].where(
-                pd.notna(merged_final[src_col]),
-                merged_final[col],
-            )
-        else:
-            merged_final[col] = merged_final[src_col]
-    merged_final = merged_final.drop(
-        columns=[f"{col}__world" for col in projection_value_cols],
-        errors="ignore",
+    merged_final = _left_overlay_from_source_by_keys(
+        merged_final,
+        source_df=merged_world_projections.loc[
+            :, projection_join_keys + projection_value_cols
+        ],
+        key_cols=projection_join_keys,
+        value_cols=projection_value_cols,
+        label="materialize_unified_run_artifacts_task/world_projection_overlay",
     )
     if "dk_fpts_mean" in merged_final.columns and "salary" in merged_final.columns:
         salary = pd.to_numeric(merged_final["salary"], errors="coerce")
