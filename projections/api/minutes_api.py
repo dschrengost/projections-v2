@@ -33,6 +33,7 @@ from projections.api.evaluation_api import router as evaluation_router
 from projections.api.optimizer_api import router as optimizer_router
 from projections.api.contest_api import router as contest_router
 from projections.api.contest_sim_api import router as contest_sim_router
+from projections.api.flashback_api import router as flashback_router
 from projections.api.entry_manager_api import router as entry_manager_router
 from projections.api.diagnostics_api import router as diagnostics_router
 from projections.api.live_status_api import router as live_status_router
@@ -868,6 +869,7 @@ def create_app(
     app.include_router(optimizer_router, prefix="/api/optimizer", tags=["optimizer"])
     app.include_router(contest_router, prefix="/api/contest", tags=["contest"])
     app.include_router(contest_sim_router, prefix="/api/contest-sim", tags=["contest-sim"])
+    app.include_router(flashback_router, prefix="/api/flashback", tags=["flashback"])
     app.include_router(entry_manager_router, prefix="/api/entry-manager", tags=["entry-manager"])
     app.include_router(diagnostics_router)
     app.include_router(live_status_router)

@@ -14,6 +14,7 @@ import EvaluationPage from './pages/EvaluationPage'
 import OptimizerPage from './pages/OptimizerPage'
 import ContestPage from './pages/ContestPage'
 import ContestSimPage from './pages/ContestSimPage'
+import FlashbackPage from './pages/FlashbackPage'
 import DiagnosticsPage from './pages/DiagnosticsPage'
 import EntryManagerPage from './pages/EntryManagerPage'
 import LivePage from './pages/LivePage'
@@ -154,6 +155,7 @@ type TabKey =
   | 'entry-manager'
   | 'contest'
   | 'contest-sim'
+  | 'flashback'
   | 'diagnostics'
   | 'props'
 
@@ -167,6 +169,7 @@ const initialTab = (): TabKey => {
   if (window.location.pathname.includes('/runs')) return 'pipeline'
   if (window.location.pathname.includes('props')) return 'props'
   if (window.location.pathname.includes('diagnostics')) return 'diagnostics'
+  if (window.location.pathname.includes('flashback')) return 'flashback'
   if (window.location.pathname.includes('contest-sim')) return 'contest-sim'
   if (window.location.pathname.includes('contest')) return 'contest'
   if (window.location.pathname.includes('entry-manager')) return 'entry-manager'
@@ -253,6 +256,7 @@ function App() {
       'entry-manager': '/entry-manager',
       contest: '/contest',
       'contest-sim': '/contest-sim',
+      flashback: '/flashback',
       diagnostics: '/diagnostics',
       props: '/props',
     }
@@ -629,6 +633,12 @@ function App() {
         Contest Sim
       </button>
       <button
+        className={activeTab === 'flashback' ? 'active' : ''}
+        onClick={() => setActiveTab('flashback')}
+      >
+        Flashback
+      </button>
+      <button
         className={activeTab === 'props' ? 'active' : ''}
         onClick={() => setActiveTab('props')}
       >
@@ -712,6 +722,15 @@ function App() {
       <div className="app-shell">
         {nav}
         <ContestSimPage />
+      </div>
+    )
+  }
+
+  if (activeTab === 'flashback') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <FlashbackPage />
       </div>
     )
   }

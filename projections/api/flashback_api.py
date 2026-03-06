@@ -1,0 +1,189 @@
+"""FastAPI router for post-contest flashback endpoints."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from projections import paths
+from projections.post_contest import (
+    build_post_contest_replay_analytics,
+    build_replay_calibration_artifacts,
+    find_latest_export_manifest,
+)
+
+router = APIRouter()
+
+
+def _preview_parquet(path: Path, limit: int = 12) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    df = pd.read_parquet(path).head(limit)
+    df = df.where(pd.notna(df), None)
+    return df.to_dict(orient="records")
+
+
+def _load_json(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _user_entries_path() -> Path:
+    return paths.data_path("analytics", "contest_results", "user_entries.parquet")
+
+
+class FlashbackContestSummaryResponse(BaseModel):
+    game_date: str
+    contest_id: str
+    contest_name: str
+    draft_group_id: Optional[int] = None
+    entry_fee: Optional[float] = None
+    entry_count: int
+    best_rank: Optional[int] = None
+    best_prize: Optional[float] = None
+    candidate_manifest_available: bool = False
+
+
+class FlashbackRunRequest(BaseModel):
+    game_date: str
+    contest_id: str
+    user_pattern: str
+    draft_group_id: Optional[int] = None
+    run_id: Optional[str] = None
+    entry_fee: Optional[float] = None
+    archetype: str = Field(default="medium")
+    worlds_source: str = Field(default="gtv2")
+    ownership_mode: str = Field(default="field_only")
+    modeled_field_version: str = Field(default="v1_calibrated")
+    include_modeled_field: bool = True
+
+
+class FlashbackRunResponse(BaseModel):
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    previews: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
+
+
+class FlashbackCalibrationResponse(BaseModel):
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    previews: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
+
+
+@router.get("/contests", response_model=List[FlashbackContestSummaryResponse])
+async def list_flashback_contests(date: str, user_pattern: str) -> List[FlashbackContestSummaryResponse]:
+    path = _user_entries_path()
+    if not path.exists():
+        return []
+    df = pd.read_parquet(
+        path,
+        columns=[
+            "date",
+            "contest_id",
+            "draft_group_id",
+            "contest_name",
+            "entry_fee",
+            "entry_name",
+            "rank",
+            "prize_pool",
+            "first_place_prize",
+        ],
+    )
+    frame = df[
+        (df["date"].astype(str) == str(date))
+        & (df["entry_name"].astype(str).str.contains(user_pattern, case=False, na=False))
+    ].copy()
+    if frame.empty:
+        return []
+    grouped = (
+        frame.groupby(["date", "contest_id", "contest_name", "draft_group_id", "entry_fee"], dropna=False)
+        .agg(
+            entry_count=("entry_name", "size"),
+            best_rank=("rank", "min"),
+        )
+        .reset_index()
+        .sort_values(["best_rank", "entry_count"], ascending=[True, False])
+    )
+    out: List[FlashbackContestSummaryResponse] = []
+    for _, row in grouped.iterrows():
+        draft_group_id = int(row["draft_group_id"]) if pd.notna(row["draft_group_id"]) else None
+        manifest_available = False
+        if draft_group_id:
+            manifest_available = (
+                find_latest_export_manifest(
+                    game_date=str(row["date"]),
+                    draft_group_id=draft_group_id,
+                    contest_id=str(row["contest_id"]),
+                    data_root=paths.data_path(),
+                )
+                is not None
+            )
+        out.append(
+            FlashbackContestSummaryResponse(
+                game_date=str(row["date"]),
+                contest_id=str(row["contest_id"]),
+                contest_name=str(row["contest_name"]),
+                draft_group_id=draft_group_id,
+                entry_fee=float(row["entry_fee"]) if pd.notna(row["entry_fee"]) else None,
+                entry_count=int(row["entry_count"]),
+                best_rank=int(row["best_rank"]) if pd.notna(row["best_rank"]) else None,
+                best_prize=None,
+                candidate_manifest_available=manifest_available,
+            )
+        )
+    return out
+
+
+@router.post("/run", response_model=FlashbackRunResponse)
+async def run_flashback(request: FlashbackRunRequest) -> FlashbackRunResponse:
+    try:
+        bundle = build_post_contest_replay_analytics(
+            contest_id=request.contest_id,
+            game_date=request.game_date,
+            user_pattern=request.user_pattern,
+            draft_group_id=request.draft_group_id,
+            run_id=request.run_id,
+            entry_fee=request.entry_fee,
+            archetype=request.archetype,
+            worlds_source=request.worlds_source,
+            ownership_mode=request.ownership_mode,
+            data_root=paths.data_path(),
+            modeled_field_version=request.modeled_field_version,
+            include_modeled_field=request.include_modeled_field,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    summary = _load_json(bundle.summary_path)
+    previews = {
+        "player_calibration": _preview_parquet(bundle.player_calibration_path, limit=15),
+        "lineup_calibration": _preview_parquet(bundle.lineup_calibration_path, limit=15),
+        "field_calibration": _preview_parquet(bundle.field_calibration_path, limit=5),
+        "regret_summary": _preview_parquet(bundle.regret_summary_path, limit=5),
+    }
+    return FlashbackRunResponse(summary=summary, previews=previews)
+
+
+@router.post("/calibration/run", response_model=FlashbackCalibrationResponse)
+async def run_flashback_calibration() -> FlashbackCalibrationResponse:
+    try:
+        bundle = build_replay_calibration_artifacts(data_root=paths.data_path())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    summary = _load_json(bundle.summary_path)
+    previews = {
+        "player_fpts_calibration": _preview_parquet(bundle.player_fpts_calibration_path, limit=12),
+        "player_minutes_calibration": _preview_parquet(bundle.player_minutes_calibration_path, limit=12),
+        "ownership_recalibration": _preview_parquet(bundle.ownership_recalibration_path, limit=12),
+        "field_model_calibration": _preview_parquet(bundle.field_model_calibration_path, limit=12),
+        "optimizer_regret_by_bucket": _preview_parquet(bundle.optimizer_regret_by_bucket_path, limit=12),
+    }
+    return FlashbackCalibrationResponse(summary=summary, previews=previews)
