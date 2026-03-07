@@ -215,8 +215,11 @@ if [[ -f "$FRONTEND_DIR/package.json" ]]; then
         echo "[deploy] Installing frontend deps (attempt ${attempt}/3)..."
         TMP_NPM_CACHE=""
         TMP_NPM_CACHE=$(mktemp -d)
-        _run_frontend_install "$FRONTEND_DIR" "$TMP_NPM_CACHE"
-        NPM_INSTALL_EXIT=$?
+        if _run_frontend_install "$FRONTEND_DIR" "$TMP_NPM_CACHE"; then
+            NPM_INSTALL_EXIT=0
+        else
+            NPM_INSTALL_EXIT=$?
+        fi
         rm -rf "$TMP_NPM_CACHE"
         if [[ $NPM_INSTALL_EXIT -eq 0 ]]; then
             NPM_INSTALL_OK=1
