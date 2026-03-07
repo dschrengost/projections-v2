@@ -142,17 +142,162 @@ cd "$PROD_REPO"
 
 # --- Post-sync: frontend build ---
 FRONTEND_DIR="$PROD_REPO/web/minutes-dashboard"
+
+_run_frontend_install() {
+    local root_dir="$1"
+    local cache_dir="$2"
+    local had_lock=0
+    local install_failed=0
+    local -a install_cmd
+    local -a cache_env=("--cache" "$cache_dir" "--prefer-offline")
+
+    cd "$root_dir"
+    if [[ -f package-lock.json ]]; then
+        install_cmd=(npm ci)
+        had_lock=1
+    else
+        install_cmd=(npm install)
+    fi
+
+    if [[ -n "${cache_dir}" ]]; then
+        export NPM_CONFIG_CACHE="$cache_dir"
+    else
+        unset NPM_CONFIG_CACHE
+    fi
+
+    if [[ $had_lock -eq 1 ]]; then
+        "${install_cmd[@]}" "${cache_env[@]}" --no-audit --no-fund || install_failed=$?
+        if [[ $install_failed -ne 0 ]]; then
+            npm install --no-audit --no-fund "${cache_env[@]}" || install_failed=$?
+        fi
+    else
+        "${install_cmd[@]}" --no-audit --no-fund "${cache_env[@]}" || install_failed=$?
+    fi
+
+    return "$install_failed"
+}
+
+_run_frontend_build() {
+    local root_dir="$1"
+    local attempt="$2"
+    local build_failed=0
+
+    cd "$root_dir"
+    NODE_OPTIONS="--max_old_space_size=4096" \
+        npm run build >"/tmp/projections-deploy-prod-build-${attempt}.log" 2>&1 || build_failed=$?
+
+    return "$build_failed"
+}
+
+_copy_or_build_frontend_from_dev() {
+    local prod_dir="$1"
+    local dev_dir="$2"
+
+    if [[ ! -d "$dev_dir/dist" ]]; then
+        return 1
+    fi
+
+    if [[ "$dev_dir/dist" -nt "$prod_dir/dist" ]]; then
+        rsync -a --delete "$dev_dir/dist/" "$prod_dir/dist/"
+        return $?
+    fi
+
+    rsync -a --delete "$dev_dir/dist/" "$prod_dir/dist/"
+    return $?
+}
+
 if [[ -f "$FRONTEND_DIR/package.json" ]]; then
     echo "[deploy] Building frontend in PROD..."
-    cd "$FRONTEND_DIR"
-    if [[ -f package-lock.json ]]; then
-        echo "[deploy] Installing frontend deps with npm ci..."
-        npm ci
+    cd "$PROD_REPO"
+
+    NPM_INSTALL_OK=0
+    for attempt in 1 2 3; do
+        echo "[deploy] Installing frontend deps (attempt ${attempt}/3)..."
+        TMP_NPM_CACHE=""
+        TMP_NPM_CACHE=$(mktemp -d)
+        _run_frontend_install "$FRONTEND_DIR" "$TMP_NPM_CACHE"
+        NPM_INSTALL_EXIT=$?
+        rm -rf "$TMP_NPM_CACHE"
+        if [[ $NPM_INSTALL_EXIT -eq 0 ]]; then
+            NPM_INSTALL_OK=1
+            break
+        fi
+        echo "[deploy] Frontend install failed with exit code $NPM_INSTALL_EXIT"
+        if [[ $attempt -lt 3 ]]; then
+            echo "[deploy] Retrying frontend install with clean cache..."
+        fi
+    done
+
+    if [[ $NPM_INSTALL_OK -ne 1 ]]; then
+        echo "[deploy] WARNING: frontend dependency install failed in PROD after retries."
+        echo "[deploy] Attempting fallback: copying a built dist from DEV if available."
+        cd "$DEV_REPO/web/minutes-dashboard"
+        DEV_NPM_LOG="/tmp/projections-deploy-dev-npm.log"
+        DEV_BUILD_LOG="/tmp/projections-deploy-dev-build.log"
+        if [[ -f package-lock.json ]]; then
+            npm ci --no-audit --no-fund >"$DEV_NPM_LOG" 2>&1 || npm install --no-audit --no-fund >"$DEV_NPM_LOG" 2>&1
+        else
+            npm install --no-audit --no-fund >"$DEV_NPM_LOG" 2>&1
+        fi
+        if ! npm run build >"$DEV_BUILD_LOG" 2>&1; then
+            echo "[deploy] WARNING: DEV frontend build failed, falling back to existing DEV dist.\n   logs:"
+            echo "   npm: $DEV_NPM_LOG"
+            echo "   build: $DEV_BUILD_LOG"
+        fi
+
+        if _copy_or_build_frontend_from_dev "$FRONTEND_DIR" "$DEV_REPO/web/minutes-dashboard"; then
+            echo "[deploy] Reused DEV frontend dist for PROD fallback."
+            cd "$PROD_REPO"
+        else
+            echo "[deploy] ERROR: fallback frontend copy failed. Check logs in /tmp/projections-deploy-dev-npm-*.log"
+            exit 1
+        fi
     else
-        echo "[deploy] Installing frontend deps with npm install..."
-        npm install
+        BUILD_OK=0
+        for attempt in 1 2 3; do
+            if _run_frontend_build "$FRONTEND_DIR" "$attempt"; then
+                BUILD_OK=1
+                break
+            fi
+            echo "[deploy] Frontend build failed on attempt $attempt."
+            if [[ $attempt -lt 3 ]]; then
+                echo "[deploy] Frontend build retrying (attempt $((attempt + 1))/3)..."
+            fi
+        done
+
+        if [[ $BUILD_OK -ne 1 ]]; then
+            echo "[deploy] WARNING: frontend build failed in PROD after retries."
+            echo "[deploy] Attempting fallback: copying a built dist from DEV if available."
+            cd "$DEV_REPO/web/minutes-dashboard"
+            DEV_BUILD_LOG="/tmp/projections-deploy-dev-build.log"
+            DEV_NPM_LOG="/tmp/projections-deploy-dev-npm.log"
+            if [[ -f package-lock.json ]]; then
+                npm ci --no-audit --no-fund >"$DEV_NPM_LOG" 2>&1 || npm install --no-audit --no-fund >"$DEV_NPM_LOG" 2>&1
+            else
+                npm install --no-audit --no-fund >"$DEV_NPM_LOG" 2>&1
+            fi
+            NODE_OPTIONS="--max_old_space_size=4096" npm run build >"$DEV_BUILD_LOG" 2>&1 || BUILD_OK=0
+
+            if _copy_or_build_frontend_from_dev "$FRONTEND_DIR" "$DEV_REPO/web/minutes-dashboard"; then
+                echo "[deploy] Reused DEV frontend dist for PROD fallback."
+                BUILD_OK=1
+            else
+                echo "[deploy] ERROR: fallback frontend copy failed."
+                echo "   npm: $DEV_NPM_LOG"
+                echo "   build: $DEV_BUILD_LOG"
+                echo "   prod build logs:"
+                for failed_attempt in 1 2 3; do
+                    echo "   /tmp/projections-deploy-prod-build-${failed_attempt}.log"
+                done
+                exit 1
+            fi
+        fi
+
+        if [[ $BUILD_OK -ne 1 ]]; then
+            echo "[deploy] ERROR: unable to produce a frontend dist for PROD."
+            exit 1
+        fi
     fi
-    npm run build
     cd "$PROD_REPO"
 else
     echo "[deploy] WARNING: frontend package.json not found at $FRONTEND_DIR"
