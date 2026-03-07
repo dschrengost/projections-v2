@@ -1179,14 +1179,12 @@ tbody tr:hover {
 }
 
 .optimizer-layout {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 1.25rem;
-  align-items: start;
+  position: relative;
+  min-width: 0;
 }
 
 .optimizer-layout.has-results {
-  grid-template-columns: 260px 1fr 320px;
+  grid-template-columns: 1fr;
 }
 
 .optimizer-main-column {
@@ -1200,16 +1198,85 @@ tbody tr:hover {
 .optimizer-sidebar {
   background: #1e293b;
   border: 1px solid #334155;
-  border-radius: 8px;
-  padding: 1rem;
+  border-radius: 0 10px 10px 0;
+  padding: 0.75rem 0.85rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.6rem;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(310px, 92vw);
+  max-height: 100vh;
+  overflow-y: auto;
+  transform: translateX(-105%);
+  transition: transform 0.2s ease;
+  z-index: 1200;
+  box-shadow: 0 16px 48px rgba(2, 6, 23, 0.55);
+}
+
+.optimizer-sidebar.open {
+  transform: translateX(0);
+}
+
+.optimizer-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.settings-drawer-toggle {
+  height: 2.2rem;
+  min-width: 122px;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.7rem;
+}
+
+.settings-drawer-toggle.active {
+  border-color: #3b82f6;
+  color: #93c5fd;
+}
+
+.settings-drawer-close {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.settings-drawer-close:hover {
+  background: #1f2937;
+}
+
+.optimizer-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.58);
+  border: none;
+  z-index: 1100;
+}
+
+.optimizer-sidebar input:not([type="range"]):not([type="checkbox"]),
+.optimizer-sidebar select {
+  height: 2rem;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.45rem;
 }
 
 .optimizer-sidebar h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
+  margin: 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
   color: #e2e8f0;
 }
 
@@ -1217,7 +1284,7 @@ tbody tr:hover {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   color: #94a3b8;
 }
 
@@ -1786,73 +1853,99 @@ tbody tr:hover {
 
 .lineups-toolbar {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 0.75rem 1rem;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0.6rem 0.75rem;
   background: #1e293b;
   border: 1px solid #334155;
   border-radius: 8px 8px 0 0;
-  gap: 1rem;
+  gap: 0.5rem;
+}
+
+.lineups-toolbar-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.lineups-toolbar-top-right {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .lineups-toolbar h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.9rem;
   color: #e2e8f0;
   white-space: nowrap;
 }
 
-.lineups-filters {
+.lineups-filter-row,
+.lineups-action-row,
+.lineups-group-row {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.45rem;
   align-items: center;
   flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
-.lineups-filters input {
-  padding: 0.4rem 0.6rem;
+.lineups-filter-row input {
+  padding: 0.3rem 0.45rem;
   border: 1px solid #334155;
   border-radius: 4px;
   background: #0f172a;
   color: #f8fafc;
-  width: 200px;
+  width: 92px;
+  height: 2rem;
+  font-size: 0.82rem;
 }
 
-.lineups-filters select {
-  padding: 0.4rem 0.5rem;
+.lineups-filter-row input[type="text"] {
+  width: 260px;
+}
+
+.lineups-toolbar select {
+  padding: 0.3rem 0.42rem;
   border: 1px solid #334155;
   border-radius: 4px;
   background: #0f172a;
   color: #f8fafc;
+  height: 2rem;
+  font-size: 0.82rem;
 }
 
-.lineups-filters .clear-filter {
-  padding: 0.4rem 0.8rem;
+.lineups-toolbar .clear-filter {
+  padding: 0.3rem 0.6rem;
   background: #7f1d1d;
   border: 1px solid #b91c1c;
   border-radius: 4px;
   color: #fecaca;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
+  height: 2rem;
 }
 
 .lineups-selected-count {
   color: #94a3b8;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   white-space: nowrap;
+  margin-right: 0.2rem;
 }
 
 .lineups-action-btn {
-  padding: 0.4rem 0.8rem;
+  padding: 0.28rem 0.55rem;
   background: #0f172a;
   border: 1px solid #334155;
   border-radius: 4px;
   color: #e2e8f0;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   white-space: nowrap;
+  height: 2rem;
 }
 
 .lineup-export-actions {

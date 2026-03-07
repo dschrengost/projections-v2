@@ -256,7 +256,7 @@ export default function OptimizerPage() {
 
     // Build config
     const [maxPool, setMaxPool] = useState(5000)
-    const [builds, setBuilds] = useState(22)
+    const [builds] = useState(22)
     const [minUniq, setMinUniq] = useState(1)
     const [maxExposurePct, setMaxExposurePct] = useState(0)
     const [nearDupJaccard, setNearDupJaccard] = useState(0)
@@ -294,6 +294,7 @@ export default function OptimizerPage() {
     const [excludedGames, setExcludedGames] = useState<Set<string>>(new Set())
     const [excludedTeams, setExcludedTeams] = useState<Set<string>>(new Set())
     const [showGameFilterDrawer, setShowGameFilterDrawer] = useState(false)
+    const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false)
 
     // Get current slate's games
     const currentSlateGames = useMemo(() => {
@@ -1113,6 +1114,13 @@ export default function OptimizerPage() {
                             </SelectContent>
                         </Select>
                     </div>
+                    <Button
+                        variant="outline"
+                        className={`settings-drawer-toggle ${settingsDrawerOpen ? 'active' : ''}`}
+                        onClick={() => setSettingsDrawerOpen(prev => !prev)}
+                    >
+                        {settingsDrawerOpen ? 'Hide settings' : 'Build settings'}
+                    </Button>
                 </div>
             </div>
 
@@ -1124,8 +1132,18 @@ export default function OptimizerPage() {
 
             <div className="optimizer-layout">
                 {/* Settings Sidebar */}
-                <aside className="optimizer-sidebar space-y-4">
-                    <h3 className="text-sm font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Build Settings</h3>
+                <aside className={`optimizer-sidebar space-y-4 ${settingsDrawerOpen ? 'open' : ''}`}>
+                    <div className="optimizer-sidebar-header">
+                        <h3 className="text-sm font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Build Settings</h3>
+                        <button
+                            type="button"
+                            className="settings-drawer-close"
+                            onClick={() => setSettingsDrawerOpen(false)}
+                            aria-label="Close settings drawer"
+                        >
+                            ×
+                        </button>
+                    </div>
 
                     <div className="space-y-1">
                         <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Max Lineups</label>
@@ -1136,17 +1154,6 @@ export default function OptimizerPage() {
                             min={100}
                             max={100000}
                             step={500}
-                        />
-                    </div>
-
-                    <div className="space-y-1">
-                        <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Workers</label>
-                        <Input
-                            type="number"
-                            value={builds}
-                            onChange={e => setBuilds(Number(e.target.value))}
-                            min={1}
-                            max={24}
                         />
                     </div>
 
@@ -1514,6 +1521,14 @@ export default function OptimizerPage() {
                         </Button>
                     )}
                 </aside>
+                {settingsDrawerOpen && (
+                    <button
+                        type="button"
+                        className="optimizer-settings-backdrop"
+                        aria-label="Close build settings"
+                        onClick={() => setSettingsDrawerOpen(false)}
+                    />
+                )}
 
                 <div className="optimizer-main-column">
                     {/* Player Pool Table */}
@@ -1832,8 +1847,35 @@ export default function OptimizerPage() {
                     {lineups.length > 0 && (
                         <section className="lineups-section">
                             <div className="lineups-toolbar">
-                                <h3>Lineups ({filteredLineups.length} of {lineups.length})</h3>
-                                <div className="lineups-filters">
+                                <div className="lineups-toolbar-top">
+                                    <h3>Lineups ({filteredLineups.length} of {lineups.length})</h3>
+                                    <div className="lineups-toolbar-top-right">
+                                        <select
+                                            value={showCount}
+                                            onChange={e => setShowCount(Number(e.target.value))}
+                                        >
+                                            <option value={25}>Show 25</option>
+                                            <option value={50}>Show 50</option>
+                                            <option value={100}>Show 100</option>
+                                            <option value={200}>Show 200</option>
+                                        </select>
+                                        <select
+                                            value={lineupSort}
+                                            onChange={e => setLineupSort(e.target.value as typeof lineupSort)}
+                                        >
+                                            <option value="default">Original Order</option>
+                                            <option value="proj-desc">Proj ↓</option>
+                                            <option value="proj-asc">Proj ↑</option>
+                                            <option value="p90-desc">p90 ↓</option>
+                                            <option value="p90-asc">p90 ↑</option>
+                                            <option value="own-desc">Own% ↓</option>
+                                            <option value="own-asc">Own% ↑</option>
+                                            <option value="salary-desc">Salary ↓</option>
+                                            <option value="salary-asc">Salary ↑</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="lineups-filter-row">
                                     <input
                                         type="text"
                                         placeholder="Filter by player name..."
@@ -1845,7 +1887,6 @@ export default function OptimizerPage() {
                                         placeholder="Min proj"
                                         value={minLineupProj ?? ''}
                                         onChange={e => setMinLineupProj(e.target.value ? Number(e.target.value) : null)}
-                                        style={{ width: '80px' }}
                                         title="Minimum projection total"
                                     />
                                     <input
@@ -1853,7 +1894,6 @@ export default function OptimizerPage() {
                                         placeholder="Max own%"
                                         value={maxLineupOwn ?? ''}
                                         onChange={e => setMaxLineupOwn(e.target.value ? Number(e.target.value) : null)}
-                                        style={{ width: '80px' }}
                                         title="Maximum ownership total"
                                     />
                                     <input
@@ -1861,32 +1901,8 @@ export default function OptimizerPage() {
                                         placeholder="Min p90"
                                         value={minLineupP90 ?? ''}
                                         onChange={e => setMinLineupP90(e.target.value ? Number(e.target.value) : null)}
-                                        style={{ width: '80px' }}
                                         title="Minimum p90 ceiling"
                                     />
-                                    <select
-                                        value={showCount}
-                                        onChange={e => setShowCount(Number(e.target.value))}
-                                    >
-                                        <option value={25}>Show 25</option>
-                                        <option value={50}>Show 50</option>
-                                        <option value={100}>Show 100</option>
-                                        <option value={200}>Show 200</option>
-                                    </select>
-                                    <select
-                                        value={lineupSort}
-                                        onChange={e => setLineupSort(e.target.value as typeof lineupSort)}
-                                    >
-                                        <option value="default">Original Order</option>
-                                        <option value="proj-desc">Proj ↓</option>
-                                        <option value="proj-asc">Proj ↑</option>
-                                        <option value="p90-desc">p90 ↓</option>
-                                        <option value="p90-asc">p90 ↑</option>
-                                        <option value="own-desc">Own% ↓</option>
-                                        <option value="own-asc">Own% ↑</option>
-                                        <option value="salary-desc">Salary ↓</option>
-                                        <option value="salary-asc">Salary ↑</option>
-                                    </select>
                                     {(lineupFilter || minLineupProj || maxLineupOwn || minLineupP90) && (
                                         <button className="clear-filter" onClick={() => {
                                             setLineupFilter('')
@@ -1897,6 +1913,8 @@ export default function OptimizerPage() {
                                             Clear Filters
                                         </button>
                                     )}
+                                </div>
+                                <div className="lineups-action-row">
                                     <span className="lineups-selected-count">
                                         {selectedLineupIds.size} selected
                                     </span>
@@ -1928,6 +1946,8 @@ export default function OptimizerPage() {
                                     >
                                         Export selected CSV
                                     </button>
+                                </div>
+                                <div className="lineups-group-row">
                                     <select
                                         value={activeLineupGroupId}
                                         onChange={e => setActiveLineupGroupId(e.target.value)}
