@@ -8,6 +8,7 @@ import {
     PlayerLastGameStat,
     upsertManualAvailabilityOverride,
 } from '../api/manualAvailability'
+import type { LiveSlateAnalyticsPlayer } from '../api/live'
 import { PlayerDetailsDrawer, PlayerDrawerData } from './PlayerDetailsDrawer'
 import { PlayerRow } from '../types'
 import { formatFpts, formatMinutes, formatPercent, formatTime, getStatusBadge } from '../utils'
@@ -23,6 +24,7 @@ type GameViewProps = {
     onOverridesSaved?: () => void
     onOpenLateSwap?: () => void
     onRunCompleted?: (runId: string | null) => void
+    playerAnalyticsById?: Record<string, LiveSlateAnalyticsPlayer>
 }
 
 const toId = (value: unknown) => String(value ?? '')
@@ -49,6 +51,7 @@ export const GameView: React.FC<GameViewProps> = ({
     readOnly,
     onOverridesSaved,
     onOpenLateSwap,
+    playerAnalyticsById,
 }) => {
     const targetDate = date || rows[0]?.game_date || new Date().toISOString().slice(0, 10)
     const [game, setGame] = useState<OpsGameResponse | null>(null)
@@ -327,6 +330,13 @@ export const GameView: React.FC<GameViewProps> = ({
     }, [targetDate, selectedPlayerId])
 
     const actionDisabled = Boolean(readOnly) || !operator.trim()
+    const hasSlateAnalytics = Boolean(playerAnalyticsById && Object.keys(playerAnalyticsById).length > 0)
+
+    const formatSlatePct = (value?: number | null) =>
+        value == null ? '—' : `${value.toFixed(1)}%`
+
+    const formatSigned = (value?: number | null) =>
+        value == null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`
 
     const submitOverride = async (player: OpsGamePlayer, overrideType: 'force_out' | 'force_in') => {
         if (actionDisabled) return
@@ -574,6 +584,10 @@ export const GameView: React.FC<GameViewProps> = ({
                                         <th>P50</th>
                                         <th>P90</th>
                                         <th>FPTS</th>
+                                        {hasSlateAnalytics ? <th>Opt%</th> : null}
+                                        {hasSlateAnalytics ? <th>Ceil Lev</th> : null}
+                                        {hasSlateAnalytics ? <th>Boom%</th> : null}
+                                        {hasSlateAnalytics ? <th>Bust%</th> : null}
                                         <th>Play</th>
                                         <th>Override</th>
                                     </tr>
@@ -585,6 +599,7 @@ export const GameView: React.FC<GameViewProps> = ({
                                         const isBusy = busyPlayerId === player.player_id
                                         const manualOverride = player.manual_override
                                         const baseline = player.effective || {}
+                                        const slateMetrics = playerAnalyticsById?.[String(player.player_id)]
                                         return (
                                             <tr key={player.player_id} onClick={() => setSelectedPlayerId(player.player_id)}>
                                                 <td>
@@ -607,6 +622,10 @@ export const GameView: React.FC<GameViewProps> = ({
                                                 <td>{formatMinutes(effective.minutes_p50 ?? undefined)}</td>
                                                 <td>{formatMinutes(effective.minutes_p90 ?? undefined)}</td>
                                                 <td>{formatFpts(asNumber(baseline.fpts_sim_uncond_mean ?? baseline.dk_fpts_mean ?? baseline.sim_dk_fpts_mean) ?? undefined)}</td>
+                                                {hasSlateAnalytics ? <td>{formatSlatePct(slateMetrics?.optimal_pct)}</td> : null}
+                                                {hasSlateAnalytics ? <td>{formatSigned(slateMetrics?.ceiling_leverage)}</td> : null}
+                                                {hasSlateAnalytics ? <td>{formatSlatePct(slateMetrics?.boom_pct)}</td> : null}
+                                                {hasSlateAnalytics ? <td>{formatSlatePct(slateMetrics?.bust_pct)}</td> : null}
                                                 <td>{formatPercent(effective.play_prob ?? undefined)}</td>
                                                 <td>
                                                     <div className="gv-inline-actions" onClick={(event) => event.stopPropagation()}>

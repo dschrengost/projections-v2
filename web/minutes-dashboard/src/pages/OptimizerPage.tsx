@@ -45,7 +45,19 @@ const DK_SLOT_PRIORITY = DK_SLOT_ORDER.reduce<Record<string, number>>((acc, slot
 const DK_BASE_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C'] as const
 const DK_ALL_SLOTS = [...DK_SLOT_ORDER] as const
 
-type SortKey = 'name' | 'team' | 'salary' | 'proj' | 'own_proj' | 'value' | 'min' | 'fppm'
+type SortKey =
+    | 'name'
+    | 'team'
+    | 'salary'
+    | 'proj'
+    | 'own_proj'
+    | 'value'
+    | 'min'
+    | 'fppm'
+    | 'optimal_pct'
+    | 'ceiling_leverage'
+    | 'boom_pct'
+    | 'bust_pct'
 
 type LineupGroup = {
     id: string
@@ -720,6 +732,10 @@ export default function OptimizerPage() {
                     right = useStrategyOverrides ? b.effective_minutes ?? b.model_minutes ?? 0 : b.model_minutes ?? 0
                     break
                 case 'fppm': left = a.fppm ?? 0; right = b.fppm ?? 0; break
+                case 'optimal_pct': left = a.optimal_pct ?? 0; right = b.optimal_pct ?? 0; break
+                case 'ceiling_leverage': left = a.ceiling_leverage ?? 0; right = b.ceiling_leverage ?? 0; break
+                case 'boom_pct': left = a.boom_pct ?? 0; right = b.boom_pct ?? 0; break
+                case 'bust_pct': left = a.bust_pct ?? 0; right = b.bust_pct ?? 0; break
                 default: left = a.proj; right = b.proj
             }
             if (typeof left === 'number' && typeof right === 'number') {
@@ -1036,6 +1052,12 @@ export default function OptimizerPage() {
 
     const formatOwn = (val: number | undefined | null) =>
         val != null ? val.toFixed(1) + '%' : '—'
+
+    const formatPct = (val: number | undefined | null) =>
+        val != null ? `${val.toFixed(1)}%` : '—'
+
+    const formatSigned = (val: number | undefined | null) =>
+        val != null ? `${val >= 0 ? '+' : ''}${val.toFixed(1)}` : '—'
 
     const formatMin = (val: number | undefined | null) =>
         val != null ? val.toFixed(1) : '—'
@@ -1567,6 +1589,30 @@ export default function OptimizerPage() {
                                         >
                                             Own%<SortIcon col="own_proj" />
                                         </th>
+                                        <th
+                                            onClick={() => toggleSort('optimal_pct')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Opt%<SortIcon col="optimal_pct" />
+                                        </th>
+                                        <th
+                                            onClick={() => toggleSort('ceiling_leverage')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Ceil Lev<SortIcon col="ceiling_leverage" />
+                                        </th>
+                                        <th
+                                            onClick={() => toggleSort('boom_pct')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Boom%<SortIcon col="boom_pct" />
+                                        </th>
+                                        <th
+                                            onClick={() => toggleSort('bust_pct')}
+                                            className="sortable cursor-pointer select-none"
+                                        >
+                                            Bust%<SortIcon col="bust_pct" />
+                                        </th>
                                         {showStrategyColumns && <th className="text-center">Override</th>}
                                         <th
                                             onClick={() => toggleSort('value')}
@@ -1676,6 +1722,10 @@ export default function OptimizerPage() {
                                                     {formatProj(p.proj)}
                                                 </td>
                                                 <td className="tabular-nums">{formatOwn(p.own_proj)}</td>
+                                                <td className="tabular-nums">{formatPct(p.optimal_pct)}</td>
+                                                <td className="tabular-nums">{formatSigned(p.ceiling_leverage)}</td>
+                                                <td className="tabular-nums">{formatPct(p.boom_pct)}</td>
+                                                <td className="tabular-nums">{formatPct(p.bust_pct)}</td>
                                                 {showStrategyColumns && (
                                                     <td className="text-center">
                                                         <Button
@@ -1701,7 +1751,7 @@ export default function OptimizerPage() {
                                     })}
                                     {filteredPool.length === 0 && !poolLoading && (
                                         <tr>
-                                            <td colSpan={showStrategyColumns ? 16 : 11} className="text-center text-[hsl(var(--muted-foreground))] py-8">
+                                            <td colSpan={showStrategyColumns ? 20 : 15} className="text-center text-[hsl(var(--muted-foreground))] py-8">
                                                 No players found
                                             </td>
                                         </tr>

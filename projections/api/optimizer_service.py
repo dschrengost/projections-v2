@@ -41,6 +41,7 @@ from projections.optimizer.objective import (
     set_active_late_swap_bonus,
     LateSwapBonusConfig,
 )
+from projections.api.slate_analytics_service import load_or_compute_slate_player_analytics
 
 logger = logging.getLogger(__name__)
 
@@ -957,6 +958,7 @@ def build_player_pool(
     include_unmatched_salaries: bool = False,
     allow_zero_projections: bool = False,
     exclude_inactive_players: bool = True,
+    include_slate_analytics: bool = False,
 ) -> List[Dict[str, Any]]:
     """Build optimizer-ready player pool by merging projections with salaries.
 
@@ -1387,6 +1389,37 @@ def build_player_pool(
         pool.append(player)
 
     logger.info("Built player pool with %d optimizer-ready players", len(pool))
+
+    if include_slate_analytics and pool:
+        try:
+            analytics_payload = load_or_compute_slate_player_analytics(
+                game_date=game_date,
+                draft_group_id=draft_group_id,
+                pool_rows=pool,
+                run_id=run_id,
+                data_root=root,
+            )
+            analytics_by_pid = {
+                str(row.get("player_id")): row
+                for row in analytics_payload.get("players", [])
+                if isinstance(row, dict) and row.get("player_id") is not None
+            }
+            for player in pool:
+                metrics = analytics_by_pid.get(str(player.get("player_id")))
+                if not metrics:
+                    continue
+                player["optimal_pct"] = float(metrics.get("optimal_pct") or 0.0)
+                player["ceiling_leverage"] = float(metrics.get("ceiling_leverage") or 0.0)
+                player["boom_pct"] = float(metrics.get("boom_pct") or 0.0)
+                player["bust_pct"] = float(metrics.get("bust_pct") or 0.0)
+        except Exception as exc:
+            logger.warning(
+                "Failed to attach slate analytics for %s/dg=%d: %s",
+                game_date,
+                draft_group_id,
+                exc,
+            )
+
     return pool
 
 

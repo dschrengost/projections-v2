@@ -49,6 +49,10 @@ export interface PoolPlayer {
     is_active?: boolean | null
     is_out?: boolean | null
     fppm?: number | null
+    optimal_pct?: number | null
+    ceiling_leverage?: number | null
+    boom_pct?: number | null
+    bust_pct?: number | null
 }
 
 

@@ -95,6 +95,10 @@ class PoolPlayer(BaseModel):
     used_fppm_fallback: Optional[bool] = None
     fppm: Optional[float] = None
     is_active: Optional[bool] = None
+    optimal_pct: Optional[float] = None
+    ceiling_leverage: Optional[float] = None
+    boom_pct: Optional[float] = None
+    bust_pct: Optional[float] = None
 
 
 class QuickBuildRequest(BaseModel):
@@ -462,6 +466,7 @@ async def get_player_pool(
     use_strategy_overrides: bool = Query(default=False, description="Apply persistent strategy overrides"),
     use_user_overrides: bool = Query(default=False, description="Legacy alias for use_strategy_overrides"),
     ownership_mode: str = Query(default="renormalize", description="Ownership mode: raw or renormalize"),
+    include_slate_analytics: bool = Query(default=True, description="Attach per-player slate analytics fields"),
 ):
     """Get merged player pool (projections + salaries + positions).
     
@@ -485,6 +490,7 @@ async def get_player_pool(
             exclude_games=exclude_list,
             use_user_overrides=strategy_overrides_enabled,
             ownership_mode=ownership_mode,
+            include_slate_analytics=include_slate_analytics,
         )
         return pool
     except FileNotFoundError as exc:

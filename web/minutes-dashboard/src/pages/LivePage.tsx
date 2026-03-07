@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiUrl } from '../api/client'
-import { fetchLiveStatus, type LiveGameStatus, type LiveRunEvent, type LiveStatusResponse } from '../api/live'
+import {
+  fetchLiveSlateAnalytics,
+  fetchLiveStatus,
+  type LiveGameStatus,
+  type LiveRunEvent,
+  type LiveSlateAnalyticsPlayer,
+  type LiveSlateAnalyticsResponse,
+  type LiveStatusResponse,
+} from '../api/live'
 import { GameView } from '../components/GameView'
 import type { MinutesResponse, PlayerRow } from '../types'
 import { formatRunIdToEST, formatTime } from '../utils'
@@ -151,6 +159,8 @@ const statusTone = (status: string) => {
 }
 
 const prettyStatus = (value: string) => value.replaceAll('_', ' ')
+const formatPct = (value?: number | null) => (value == null ? '—' : `${value.toFixed(1)}%`)
+const formatSigned = (value?: number | null) => (value == null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`)
 
 export default function LivePage({
   date,
@@ -162,6 +172,7 @@ export default function LivePage({
 }: LivePageProps) {
   const [rows, setRows] = useState<PlayerRow[]>([])
   const [status, setStatus] = useState<LiveStatusResponse | null>(null)
+  const [slateAnalytics, setSlateAnalytics] = useState<LiveSlateAnalyticsResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -179,11 +190,22 @@ export default function LivePage({
         throw new Error((body as { detail?: string }).detail || `Failed to fetch minutes: ${minutesRes.status}`)
       }
       const minutesPayload = (await minutesRes.json()) as MinutesResponse
+      let analyticsPayload: LiveSlateAnalyticsResponse | null = null
+      try {
+        analyticsPayload = await fetchLiveSlateAnalytics(date, {
+          runId: liveStatus.latest_published_run_id,
+          topN: 8,
+        })
+      } catch (analyticsErr) {
+        console.warn('Failed to load slate analytics', analyticsErr)
+      }
       setRows(minutesPayload.players ?? [])
       setStatus(liveStatus)
+      setSlateAnalytics(analyticsPayload)
     } catch (err) {
       setRows([])
       setStatus(null)
+      setSlateAnalytics(null)
       setError((err as Error).message)
     } finally {
       setLoading(false)
@@ -199,6 +221,14 @@ export default function LivePage({
     () => games.find((game) => game.gameId === selectedGameId) ?? null,
     [games, selectedGameId],
   )
+  const playerAnalyticsById = useMemo(() => {
+    const byId: Record<string, LiveSlateAnalyticsPlayer> = {}
+    for (const player of slateAnalytics?.players ?? []) {
+      if (!player.player_id) continue
+      byId[String(player.player_id)] = player
+    }
+    return byId
+  }, [slateAnalytics])
 
   const currentTruthLabel = status?.latest_published_run_id
     ? formatRunIdToEST(status.latest_published_run_id) || status.latest_published_run_id
@@ -240,6 +270,7 @@ export default function LivePage({
             rows={rows}
             gameId={selectedGameId}
             date={date}
+            playerAnalyticsById={playerAnalyticsById}
             onGameChange={onOpenGame}
             onOverridesSaved={() => void load()}
             onOpenLateSwap={onOpenLateSwap}
@@ -302,6 +333,49 @@ export default function LivePage({
         <div className="live-event-strip">
           {(status?.run_event_strip ?? []).map(renderRunEvent)}
           {!loading && (status?.run_event_strip.length ?? 0) === 0 ? <div className="muted">No run history found.</div> : null}
+        </div>
+      </section>
+
+      <section className="live-analytics">
+        <div className="live-section-head">
+          <h2>Slate Analytics</h2>
+          <span className="muted">
+            {slateAnalytics
+              ? `DG ${slateAnalytics.draft_group_id} · ${
+                  slateAnalytics.generated_at ? `Updated ${formatTime(slateAnalytics.generated_at)}` : 'Cached'
+                }`
+              : 'No slate analytics available'}
+          </span>
+        </div>
+        <div className="live-analytics-grid">
+          {([
+            { key: 'optimal_pct', label: 'Optimal %', formatter: formatPct },
+            { key: 'ceiling_leverage', label: 'Ceiling Leverage', formatter: formatSigned },
+            { key: 'boom_pct', label: 'Boom %', formatter: formatPct },
+            { key: 'bust_pct', label: 'Bust %', formatter: formatPct },
+          ] as const).map((metric) => {
+            const rowsForMetric = slateAnalytics?.leaders?.[metric.key] ?? []
+            return (
+              <div key={metric.key} className="live-analytics-card">
+                <div className="live-analytics-card-head">
+                  <strong>{metric.label}</strong>
+                </div>
+                <div className="live-analytics-list">
+                  {rowsForMetric.slice(0, 8).map((player, idx) => (
+                    <div key={`${metric.key}-${player.player_id}-${idx}`} className="live-analytics-row">
+                      <span className="live-analytics-rank">#{idx + 1}</span>
+                      <span className="live-analytics-name">
+                        {player.name}
+                        <span className="muted"> {player.team ?? ''}</span>
+                      </span>
+                      <span className="live-analytics-value">{metric.formatter(player[metric.key])}</span>
+                    </div>
+                  ))}
+                  {!loading && rowsForMetric.length === 0 ? <div className="muted">No data.</div> : null}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </section>
 

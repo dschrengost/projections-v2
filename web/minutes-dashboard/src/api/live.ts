@@ -51,6 +51,36 @@ export type LiveStatusResponse = {
   run_event_strip: LiveRunEvent[]
 }
 
+export type LiveSlateAnalyticsPlayer = {
+  player_id: string
+  name: string
+  team?: string | null
+  salary?: number | null
+  own_proj?: number | null
+  optimal_pct?: number | null
+  ceiling_leverage?: number | null
+  boom_pct?: number | null
+  bust_pct?: number | null
+  p90?: number | null
+}
+
+export type LiveSlateAnalyticsResponse = {
+  game_date: string
+  draft_group_id: number
+  run_id?: string | null
+  generated_at?: string | null
+  sample_worlds?: number | null
+  sample_seed?: number | null
+  optimal_worlds_solved?: number | null
+  players: LiveSlateAnalyticsPlayer[]
+  leaders: {
+    optimal_pct: LiveSlateAnalyticsPlayer[]
+    ceiling_leverage: LiveSlateAnalyticsPlayer[]
+    boom_pct: LiveSlateAnalyticsPlayer[]
+    bust_pct: LiveSlateAnalyticsPlayer[]
+  }
+}
+
 export async function fetchLiveStatus(date: string): Promise<LiveStatusResponse> {
   const res = await fetch(apiUrl(`/api/live/status?date=${encodeURIComponent(date)}`))
   if (!res.ok) {
@@ -58,4 +88,20 @@ export async function fetchLiveStatus(date: string): Promise<LiveStatusResponse>
     throw new Error((body as { detail?: string }).detail || `Failed to fetch live status: ${res.status}`)
   }
   return (await res.json()) as LiveStatusResponse
+}
+
+export async function fetchLiveSlateAnalytics(
+  date: string,
+  options?: { draftGroupId?: number | null; runId?: string | null; topN?: number },
+): Promise<LiveSlateAnalyticsResponse> {
+  const params = new URLSearchParams({ date })
+  if (options?.draftGroupId) params.set('draft_group_id', String(options.draftGroupId))
+  if (options?.runId) params.set('run_id', options.runId)
+  if (options?.topN) params.set('top_n', String(options.topN))
+  const res = await fetch(apiUrl(`/api/live/slate-analytics?${params.toString()}`))
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error((body as { detail?: string }).detail || `Failed to fetch live slate analytics: ${res.status}`)
+  }
+  return (await res.json()) as LiveSlateAnalyticsResponse
 }

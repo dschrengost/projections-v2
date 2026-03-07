@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -8,13 +9,64 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from projections import paths
+from projections.api.optimizer_service import build_player_pool, get_slates_for_date
+from projections.api.slate_analytics_service import load_or_compute_slate_player_analytics
 from projections.ops.manual_availability import manual_override_report
 
 router = APIRouter(prefix="/api/live", tags=["live"])
+logger = logging.getLogger(__name__)
 
 _RUN_ROOTS: tuple[str, ...] = ("nba_live_v3", "nba_live")
 _PUBLISHED_POINTER_CANDIDATES: tuple[str, ...] = ("latest_run.json", "LATEST/current.json")
 _SOURCE_KEYS: tuple[str, ...] = ("injuries", "lineups", "odds", "props", "roster")
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None
+
+
+def _resolve_default_draft_group_id(game_date: str, requested_draft_group_id: int | None) -> int:
+    if requested_draft_group_id is not None:
+        return int(requested_draft_group_id)
+
+    slates = get_slates_for_date(game_date, slate_type="all")
+    if not slates:
+        raise HTTPException(status_code=404, detail=f"No slates found for {game_date}.")
+
+    def _rank(slate: dict[str, Any]) -> tuple[int, int, int, str]:
+        slate_type = str(slate.get("slate_type") or "").strip().lower()
+        games = slate.get("games") if isinstance(slate.get("games"), list) else []
+        n_games = len(games)
+        n_contests = int(slate.get("n_contests") or 0)
+        earliest = str(slate.get("earliest_start") or "")
+        # Prefer main slates, then broadest slate, then earliest-starting.
+        return (0 if slate_type == "main" else 1, -n_games, -n_contests, earliest)
+
+    selected = sorted(slates, key=_rank)[0]
+    draft_group_id = selected.get("draft_group_id")
+    if draft_group_id is None:
+        raise HTTPException(status_code=404, detail=f"Unable to resolve draft group for {game_date}.")
+    return int(draft_group_id)
+
+
+def _build_metric_leaders(
+    players: list[dict[str, Any]],
+    *,
+    key: str,
+    top_n: int,
+    reverse: bool = True,
+) -> list[dict[str, Any]]:
+    ranked = [
+        row
+        for row in players
+        if isinstance(row, dict) and _safe_float(row.get(key)) is not None
+    ]
+    ranked.sort(key=lambda row: float(row.get(key) or 0.0), reverse=reverse)
+    return ranked[: max(1, int(top_n))]
 
 
 def _parse_date(value: str | None) -> date:
@@ -377,4 +429,63 @@ def get_live_status(
         "status_source_label": "candidate" if has_distinct_candidate else "published",
         "games": games,
         "run_event_strip": run_event_strip,
+    }
+
+
+@router.get("/slate-analytics")
+def get_slate_analytics(
+    date: str | None = Query(None, description="Slate date (YYYY-MM-DD). Defaults to today."),
+    draft_group_id: int | None = Query(None, description="Optional DK draft group id"),
+    run_id: str | None = Query(None, description="Optional projections run_id"),
+    top_n: int = Query(8, ge=3, le=30, description="Leaderboard depth per metric"),
+) -> dict[str, Any]:
+    slate_day = _parse_date(date)
+    game_date = slate_day.isoformat()
+    data_root = paths.data_path()
+    dg_id = _resolve_default_draft_group_id(game_date, draft_group_id)
+
+    try:
+        pool = build_player_pool(
+            game_date=game_date,
+            draft_group_id=dg_id,
+            site="dk",
+            run_id=run_id,
+            include_slate_analytics=False,
+        )
+        analytics_payload = load_or_compute_slate_player_analytics(
+            game_date=game_date,
+            draft_group_id=dg_id,
+            pool_rows=pool,
+            run_id=run_id,
+            data_root=data_root,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to build slate analytics for %s/dg=%s: %s", game_date, dg_id, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to build slate analytics: {exc}") from exc
+
+    players = [
+        row
+        for row in (analytics_payload.get("players") or [])
+        if isinstance(row, dict)
+    ]
+
+    return {
+        "game_date": game_date,
+        "draft_group_id": int(dg_id),
+        "run_id": analytics_payload.get("run_id"),
+        "generated_at": analytics_payload.get("generated_at"),
+        "sample_worlds": analytics_payload.get("sample_worlds"),
+        "sample_seed": analytics_payload.get("sample_seed"),
+        "optimal_worlds_solved": analytics_payload.get("optimal_worlds_solved"),
+        "players": players,
+        "leaders": {
+            "optimal_pct": _build_metric_leaders(players, key="optimal_pct", top_n=top_n, reverse=True),
+            "ceiling_leverage": _build_metric_leaders(players, key="ceiling_leverage", top_n=top_n, reverse=True),
+            "boom_pct": _build_metric_leaders(players, key="boom_pct", top_n=top_n, reverse=True),
+            "bust_pct": _build_metric_leaders(players, key="bust_pct", top_n=top_n, reverse=True),
+        },
     }

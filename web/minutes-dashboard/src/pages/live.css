@@ -160,6 +160,65 @@
   gap: 0.6rem;
 }
 
+.live-analytics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.live-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.55rem;
+}
+
+.live-analytics-card {
+  border: 1px solid #334155;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(56, 189, 248, 0.08), transparent 45%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.92));
+  padding: 0.65rem 0.7rem;
+}
+
+.live-analytics-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.45rem;
+}
+
+.live-analytics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.live-analytics-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.83rem;
+}
+
+.live-analytics-rank {
+  color: #a3e635;
+  font-weight: 700;
+  min-width: 2.1rem;
+}
+
+.live-analytics-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-analytics-value {
+  font-variant-numeric: tabular-nums;
+  color: #f1f5f9;
+}
+
 .live-board-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -264,7 +323,8 @@
 
 @media (max-width: 720px) {
   .live-rail,
-  .live-source-grid {
+  .live-source-grid,
+  .live-analytics-grid {
     grid-template-columns: 1fr;
   }
 
