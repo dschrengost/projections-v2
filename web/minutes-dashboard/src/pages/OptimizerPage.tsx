@@ -2075,7 +2075,7 @@ export default function OptimizerPage() {
                                     </button>
                                 </div>
                             )}
-                        </div>
+                        </section>
                     )}
                 </div>
             </div>
