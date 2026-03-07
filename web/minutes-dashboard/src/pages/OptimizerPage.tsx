@@ -1515,27 +1515,28 @@ export default function OptimizerPage() {
                     )}
                 </aside>
 
-                {/* Player Pool Table */}
-                <section className="optimizer-pool">
-                    <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                            Player Pool
-                            <span className="ml-2 font-normal text-[hsl(var(--foreground))]">({pool.length})</span>
-                        </h3>
-                        <Input
-                            type="text"
-                            placeholder="Filter players…"
-                            value={filter}
-                            onChange={e => setFilter(e.target.value)}
-                            className="w-[220px]"
-                        />
-                    </div>
+                <div className="optimizer-main-column">
+                    {/* Player Pool Table */}
+                    <section className="optimizer-pool">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-sm font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
+                                Player Pool
+                                <span className="ml-2 font-normal text-[hsl(var(--foreground))]">({pool.length})</span>
+                            </h3>
+                            <Input
+                                type="text"
+                                placeholder="Filter players…"
+                                value={filter}
+                                onChange={e => setFilter(e.target.value)}
+                                className="w-[220px]"
+                            />
+                        </div>
 
-                    {poolLoading ? (
-                        <div className="text-sm text-[hsl(var(--muted-foreground))] py-8 text-center">Loading player pool…</div>
-                    ) : (
-                        <div className="table-wrapper">
-                            <table>
+                        {poolLoading ? (
+                            <div className="text-sm text-[hsl(var(--muted-foreground))] py-8 text-center">Loading player pool…</div>
+                        ) : (
+                            <div className="table-wrapper">
+                                <table>
                                 <thead>
                                     <tr>
                                         <th className="w-10 text-center">Lock</th>
@@ -1757,326 +1758,327 @@ export default function OptimizerPage() {
                                         </tr>
                                     )}
                                 </tbody>
-                            </table>
-                        </div>
-                    )}
-                </section>
-            </div>
+                                </table>
+                            </div>
+                        )}
+                    </section>
 
-            {/* Saved Builds Panel */}
-            {savedBuilds.length > 0 && (
-                <section className="saved-builds-section">
-                    <div className="saved-builds-header">
-                        <h3>Saved Builds ({savedBuilds.length})</h3>
-                        <div className="saved-builds-header-actions">
-                            {selectedBuildIds.size >= 2 && (
-                                <button className="join-builds-btn" onClick={handleJoinBuilds}>
-                                    Join {selectedBuildIds.size} Builds
-                                </button>
-                            )}
-                            {savedBuildsLoading && <span className="muted">Loading...</span>}
-                        </div>
-                    </div>
-                    <div className="saved-builds-list">
-                        {savedBuilds.map(build => {
-                            const isSelected = selectedBuildIds.has(build.job_id)
-                            return (
-                                <div key={build.job_id} className={`saved-build-card ${isSelected ? 'selected' : ''}`}>
-                                    <input
-                                        type="checkbox"
-                                        className="saved-build-checkbox"
-                                        checked={isSelected}
-                                        onChange={() => toggleBuildSelection(build.job_id)}
-                                        title="Select to join"
-                                    />
-                                    <div className="saved-build-info">
-                                        <span className="saved-build-count">{build.lineups_count} lineups</span>
-                                        <span className="saved-build-time">
-                                            {new Date(build.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        </span>
-                                        {build.stats?.wall_time_s && (
-                                            <span className="saved-build-stats">
-                                                {(build.stats.wall_time_s as number).toFixed(1)}s
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="saved-build-actions">
-                                        <button
-                                            className="export-btn-sm"
-                                            onClick={() => handleExportBuild(build.job_id)}
-                                            title="Export CSV"
-                                        >
-                                            ⬇
+                    {/* Saved Builds Panel */}
+                    {savedBuilds.length > 0 && (
+                        <section className="saved-builds-section">
+                            <div className="saved-builds-header">
+                                <h3>Saved Builds ({savedBuilds.length})</h3>
+                                <div className="saved-builds-header-actions">
+                                    {selectedBuildIds.size >= 2 && (
+                                        <button className="join-builds-btn" onClick={handleJoinBuilds}>
+                                            Join {selectedBuildIds.size} Builds
                                         </button>
-                                        <button
-                                            className="load-btn"
-                                            onClick={() => handleLoadSavedBuild(build.job_id)}
-                                        >
-                                            Load
-                                        </button>
-                                        <button
-                                            className="delete-btn"
-                                            onClick={() => handleDeleteSavedBuild(build.job_id)}
-                                        >
-                                            ×
-                                        </button>
-                                    </div>
+                                    )}
+                                    {savedBuildsLoading && <span className="muted">Loading...</span>}
                                 </div>
-                            )
-                        })}
-                    </div>
-                </section>
-            )}
-
-            {/* Lineups Section */}
-            {lineups.length > 0 && (
-                <section className="lineups-section">
-                    <div className="lineups-toolbar">
-                        <h3>Lineups ({filteredLineups.length} of {lineups.length})</h3>
-                        <div className="lineups-filters">
-                            <input
-                                type="text"
-                                placeholder="Filter by player name..."
-                                value={lineupFilter}
-                                onChange={e => setLineupFilter(e.target.value)}
-                            />
-                            <input
-                                type="number"
-                                placeholder="Min proj"
-                                value={minLineupProj ?? ''}
-                                onChange={e => setMinLineupProj(e.target.value ? Number(e.target.value) : null)}
-                                style={{ width: '80px' }}
-                                title="Minimum projection total"
-                            />
-                            <input
-                                type="number"
-                                placeholder="Max own%"
-                                value={maxLineupOwn ?? ''}
-                                onChange={e => setMaxLineupOwn(e.target.value ? Number(e.target.value) : null)}
-                                style={{ width: '80px' }}
-                                title="Maximum ownership total"
-                            />
-                            <input
-                                type="number"
-                                placeholder="Min p90"
-                                value={minLineupP90 ?? ''}
-                                onChange={e => setMinLineupP90(e.target.value ? Number(e.target.value) : null)}
-                                style={{ width: '80px' }}
-                                title="Minimum p90 ceiling"
-                            />
-                            <select
-                                value={showCount}
-                                onChange={e => setShowCount(Number(e.target.value))}
-                            >
-                                <option value={25}>Show 25</option>
-                                <option value={50}>Show 50</option>
-                                <option value={100}>Show 100</option>
-                                <option value={200}>Show 200</option>
-                            </select>
-                            <select
-                                value={lineupSort}
-                                onChange={e => setLineupSort(e.target.value as typeof lineupSort)}
-                            >
-                                <option value="default">Original Order</option>
-                                <option value="proj-desc">Proj ↓</option>
-                                <option value="proj-asc">Proj ↑</option>
-                                <option value="p90-desc">p90 ↓</option>
-                                <option value="p90-asc">p90 ↑</option>
-                                <option value="own-desc">Own% ↓</option>
-                                <option value="own-asc">Own% ↑</option>
-                                <option value="salary-desc">Salary ↓</option>
-                                <option value="salary-asc">Salary ↑</option>
-                            </select>
-                            {(lineupFilter || minLineupProj || maxLineupOwn || minLineupP90) && (
-                                <button className="clear-filter" onClick={() => {
-                                    setLineupFilter('')
-                                    setMinLineupProj(null)
-                                    setMaxLineupOwn(null)
-                                    setMinLineupP90(null)
-                                }}>
-                                    Clear Filters
-                                </button>
-                            )}
-                            <span className="lineups-selected-count">
-                                {selectedLineupIds.size} selected
-                            </span>
-                            <button
-                                className="lineups-action-btn"
-                                onClick={selectAllVisible}
-                                disabled={filteredLineups.length === 0}
-                            >
-                                Select showing
-                            </button>
-                            <button
-                                className="lineups-action-btn"
-                                onClick={selectAllFiltered}
-                                disabled={filteredLineups.length === 0}
-                            >
-                                Select filtered
-                            </button>
-                            <button
-                                className="lineups-action-btn"
-                                onClick={clearSelection}
-                                disabled={selectedLineupIds.size === 0}
-                            >
-                                Clear selection
-                            </button>
-                            <button
-                                className="lineups-action-btn primary"
-                                onClick={exportSelectedCSV}
-                                disabled={selectedLineupIds.size === 0}
-                            >
-                                Export selected CSV
-                            </button>
-                            <select
-                                value={activeLineupGroupId}
-                                onChange={e => setActiveLineupGroupId(e.target.value)}
-                                title="Lineup groups"
-                            >
-                                <option value="">No group</option>
-                                {lineupGroups.map(g => (
-                                    <option key={g.id} value={g.id}>
-                                        {g.name} ({g.lineup_ids.length})
-                                    </option>
-                                ))}
-                            </select>
-                            <button
-                                className="lineups-action-btn"
-                                onClick={createGroupFromSelection}
-                                disabled={selectedLineupIds.size === 0}
-                            >
-                                Save group
-                            </button>
-                            <button
-                                className="lineups-action-btn"
-                                onClick={selectActiveGroupLineups}
-                                disabled={!activeLineupGroupId}
-                            >
-                                Select group
-                            </button>
-                            <button
-                                className="lineups-action-btn primary"
-                                onClick={exportActiveGroupCSV}
-                                disabled={!activeLineupGroupId}
-                            >
-                                Export group CSV
-                            </button>
-                            <button
-                                className="lineups-action-btn danger"
-                                onClick={deleteActiveGroup}
-                                disabled={!activeLineupGroupId}
-                            >
-                                Delete group
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="lineups-grid">
-                        {filteredLineups.slice(0, showCount).map((lu, idx) => {
-                            const totalSalary = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0)
-                            const totalProj = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
-                            const totalP90 = lu.p90 ?? lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
-                            const totalOwn = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
-                            const isSelected = selectedLineupIds.has(lu.lineup_id)
-                            const filterValue = lineupFilter.trim().toLowerCase()
-                            const assignedSlots = getDisplaySlotByAssignment(lu.player_ids, playerMap)
-                            const orderedPlayers = assignedSlots
-                                ? assignedSlots.map(({ playerId, slot }) => ({
-                                    playerId,
-                                    p: playerMap.get(playerId),
-                                    slot,
-                                    slotOrder: DK_SLOT_PRIORITY[slot],
-                                }))
-                                : lu.player_ids
-                                    .map((id, index) => {
-                                        const p = playerMap.get(id)
-                                        return {
-                                            playerId: id,
-                                            p,
-                                            slotOrder: getLineupSlotOrder(p?.positions),
-                                            slot: 'N/A',
-                                            index,
-                                            sortName: p?.name?.toLowerCase() ?? '',
-                                        }
-                                    })
-                                    .sort((a, b) => {
-                                        if (a.slotOrder !== b.slotOrder) return a.slotOrder - b.slotOrder
-                                        if (a.sortName !== b.sortName) return a.sortName.localeCompare(b.sortName)
-                                        return a.index - b.index
-                                    })
-                                    .map(({ playerId, p, slot }) => ({ playerId, p, slot }))
-
-                            return (
-                                <Card
-                                    key={lu.lineup_id}
-                                    className={`lineup-card ${isSelected ? 'selected' : ''}`}
-                                >
-                                    <CardHeader className="lineup-header">
-                                        <div className="lineup-card-meta">
-                                            <label className="lineup-select">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isSelected}
-                                                    onChange={() => toggleLineupSelection(lu.lineup_id)}
-                                                    title="Select lineup"
-                                                />
-                                            </label>
-                                            <span className="lineup-rank">#{idx + 1}</span>
-                                        </div>
-                                        <div className="lineup-metrics-grid">
-                                            <span className="lineup-metric">
-                                                <span className="lineup-metric-label">Salary</span>
-                                                <span className="lineup-salary">${totalSalary.toLocaleString()}</span>
-                                            </span>
-                                            <span className="lineup-metric">
-                                                <span className="lineup-metric-label">Proj</span>
-                                                <span className="lineup-proj">{totalProj.toFixed(1)}</span>
-                                            </span>
-                                            <span className="lineup-metric">
-                                                <span className="lineup-metric-label">p90</span>
-                                                <span className="lineup-p90">{totalP90 > 0 ? totalP90.toFixed(1) : '—'}</span>
-                                            </span>
-                                            <span className="lineup-metric">
-                                                <span className="lineup-metric-label">Own%</span>
-                                                <span className="lineup-ownership">{totalOwn.toFixed(1)}</span>
-                                            </span>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent className="lineup-body">
-                                        <div className="lineup-players">
-                                            {orderedPlayers.map(({ playerId, p, slot }) => {
-                                                const isFiltered = filterValue && p && p.name.toLowerCase().includes(filterValue)
-                                                return (
-                                                    <span
-                                                        key={playerId}
-                                                        className={`lineup-player ${isFiltered ? 'highlight' : ''}`}
-                                                    >
-                                                        {p ? (
-                                                            <>
-                                                                <span className="lineup-slot-tag">{slot}</span>
-                                                                <span>{p.name}</span>
-                                                            </>
-                                                        ) : (
-                                                            playerId
-                                                        )}
+                            </div>
+                            <div className="saved-builds-list">
+                                {savedBuilds.map(build => {
+                                    const isSelected = selectedBuildIds.has(build.job_id)
+                                    return (
+                                        <div key={build.job_id} className={`saved-build-card ${isSelected ? 'selected' : ''}`}>
+                                            <input
+                                                type="checkbox"
+                                                className="saved-build-checkbox"
+                                                checked={isSelected}
+                                                onChange={() => toggleBuildSelection(build.job_id)}
+                                                title="Select to join"
+                                            />
+                                            <div className="saved-build-info">
+                                                <span className="saved-build-count">{build.lineups_count} lineups</span>
+                                                <span className="saved-build-time">
+                                                    {new Date(build.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </span>
+                                                {build.stats?.wall_time_s && (
+                                                    <span className="saved-build-stats">
+                                                        {(build.stats.wall_time_s as number).toFixed(1)}s
                                                     </span>
-                                                )
-                                            })}
+                                                )}
+                                            </div>
+                                            <div className="saved-build-actions">
+                                                <button
+                                                    className="export-btn-sm"
+                                                    onClick={() => handleExportBuild(build.job_id)}
+                                                    title="Export CSV"
+                                                >
+                                                    ⬇
+                                                </button>
+                                                <button
+                                                    className="load-btn"
+                                                    onClick={() => handleLoadSavedBuild(build.job_id)}
+                                                >
+                                                    Load
+                                                </button>
+                                                <button
+                                                    className="delete-btn"
+                                                    onClick={() => handleDeleteSavedBuild(build.job_id)}
+                                                >
+                                                    ×
+                                                </button>
+                                            </div>
                                         </div>
-                                    </CardContent>
-                                </Card>
-                            )
-                        })}
-                    </div>
-                    {filteredLineups.length > showCount && (
-                        <div className="lineups-footer">
-                            <button onClick={() => setShowCount(prev => prev + 50)}>
-                                Load More ({filteredLineups.length - showCount} remaining)
-                            </button>
+                                    )
+                                })}
+                            </div>
+                        </section>
+                    )}
+
+                    {/* Lineups Section */}
+                    {lineups.length > 0 && (
+                        <section className="lineups-section">
+                            <div className="lineups-toolbar">
+                                <h3>Lineups ({filteredLineups.length} of {lineups.length})</h3>
+                                <div className="lineups-filters">
+                                    <input
+                                        type="text"
+                                        placeholder="Filter by player name..."
+                                        value={lineupFilter}
+                                        onChange={e => setLineupFilter(e.target.value)}
+                                    />
+                                    <input
+                                        type="number"
+                                        placeholder="Min proj"
+                                        value={minLineupProj ?? ''}
+                                        onChange={e => setMinLineupProj(e.target.value ? Number(e.target.value) : null)}
+                                        style={{ width: '80px' }}
+                                        title="Minimum projection total"
+                                    />
+                                    <input
+                                        type="number"
+                                        placeholder="Max own%"
+                                        value={maxLineupOwn ?? ''}
+                                        onChange={e => setMaxLineupOwn(e.target.value ? Number(e.target.value) : null)}
+                                        style={{ width: '80px' }}
+                                        title="Maximum ownership total"
+                                    />
+                                    <input
+                                        type="number"
+                                        placeholder="Min p90"
+                                        value={minLineupP90 ?? ''}
+                                        onChange={e => setMinLineupP90(e.target.value ? Number(e.target.value) : null)}
+                                        style={{ width: '80px' }}
+                                        title="Minimum p90 ceiling"
+                                    />
+                                    <select
+                                        value={showCount}
+                                        onChange={e => setShowCount(Number(e.target.value))}
+                                    >
+                                        <option value={25}>Show 25</option>
+                                        <option value={50}>Show 50</option>
+                                        <option value={100}>Show 100</option>
+                                        <option value={200}>Show 200</option>
+                                    </select>
+                                    <select
+                                        value={lineupSort}
+                                        onChange={e => setLineupSort(e.target.value as typeof lineupSort)}
+                                    >
+                                        <option value="default">Original Order</option>
+                                        <option value="proj-desc">Proj ↓</option>
+                                        <option value="proj-asc">Proj ↑</option>
+                                        <option value="p90-desc">p90 ↓</option>
+                                        <option value="p90-asc">p90 ↑</option>
+                                        <option value="own-desc">Own% ↓</option>
+                                        <option value="own-asc">Own% ↑</option>
+                                        <option value="salary-desc">Salary ↓</option>
+                                        <option value="salary-asc">Salary ↑</option>
+                                    </select>
+                                    {(lineupFilter || minLineupProj || maxLineupOwn || minLineupP90) && (
+                                        <button className="clear-filter" onClick={() => {
+                                            setLineupFilter('')
+                                            setMinLineupProj(null)
+                                            setMaxLineupOwn(null)
+                                            setMinLineupP90(null)
+                                        }}>
+                                            Clear Filters
+                                        </button>
+                                    )}
+                                    <span className="lineups-selected-count">
+                                        {selectedLineupIds.size} selected
+                                    </span>
+                                    <button
+                                        className="lineups-action-btn"
+                                        onClick={selectAllVisible}
+                                        disabled={filteredLineups.length === 0}
+                                    >
+                                        Select showing
+                                    </button>
+                                    <button
+                                        className="lineups-action-btn"
+                                        onClick={selectAllFiltered}
+                                        disabled={filteredLineups.length === 0}
+                                    >
+                                        Select filtered
+                                    </button>
+                                    <button
+                                        className="lineups-action-btn"
+                                        onClick={clearSelection}
+                                        disabled={selectedLineupIds.size === 0}
+                                    >
+                                        Clear selection
+                                    </button>
+                                    <button
+                                        className="lineups-action-btn primary"
+                                        onClick={exportSelectedCSV}
+                                        disabled={selectedLineupIds.size === 0}
+                                    >
+                                        Export selected CSV
+                                    </button>
+                                    <select
+                                        value={activeLineupGroupId}
+                                        onChange={e => setActiveLineupGroupId(e.target.value)}
+                                        title="Lineup groups"
+                                    >
+                                        <option value="">No group</option>
+                                        {lineupGroups.map(g => (
+                                            <option key={g.id} value={g.id}>
+                                                {g.name} ({g.lineup_ids.length})
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        className="lineups-action-btn"
+                                        onClick={createGroupFromSelection}
+                                        disabled={selectedLineupIds.size === 0}
+                                    >
+                                        Save group
+                                    </button>
+                                    <button
+                                        className="lineups-action-btn"
+                                        onClick={selectActiveGroupLineups}
+                                        disabled={!activeLineupGroupId}
+                                    >
+                                        Select group
+                                    </button>
+                                    <button
+                                        className="lineups-action-btn primary"
+                                        onClick={exportActiveGroupCSV}
+                                        disabled={!activeLineupGroupId}
+                                    >
+                                        Export group CSV
+                                    </button>
+                                    <button
+                                        className="lineups-action-btn danger"
+                                        onClick={deleteActiveGroup}
+                                        disabled={!activeLineupGroupId}
+                                    >
+                                        Delete group
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="lineups-grid">
+                                {filteredLineups.slice(0, showCount).map((lu, idx) => {
+                                    const totalSalary = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.salary ?? 0), 0)
+                                    const totalProj = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.proj ?? 0), 0)
+                                    const totalP90 = lu.p90 ?? lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.p90 ?? 0), 0)
+                                    const totalOwn = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
+                                    const isSelected = selectedLineupIds.has(lu.lineup_id)
+                                    const filterValue = lineupFilter.trim().toLowerCase()
+                                    const assignedSlots = getDisplaySlotByAssignment(lu.player_ids, playerMap)
+                                    const orderedPlayers = assignedSlots
+                                        ? assignedSlots.map(({ playerId, slot }) => ({
+                                            playerId,
+                                            p: playerMap.get(playerId),
+                                            slot,
+                                            slotOrder: DK_SLOT_PRIORITY[slot],
+                                        }))
+                                        : lu.player_ids
+                                            .map((id, index) => {
+                                                const p = playerMap.get(id)
+                                                return {
+                                                    playerId: id,
+                                                    p,
+                                                    slotOrder: getLineupSlotOrder(p?.positions),
+                                                    slot: 'N/A',
+                                                    index,
+                                                    sortName: p?.name?.toLowerCase() ?? '',
+                                                }
+                                            })
+                                            .sort((a, b) => {
+                                                if (a.slotOrder !== b.slotOrder) return a.slotOrder - b.slotOrder
+                                                if (a.sortName !== b.sortName) return a.sortName.localeCompare(b.sortName)
+                                                return a.index - b.index
+                                            })
+                                            .map(({ playerId, p, slot }) => ({ playerId, p, slot }))
+
+                                    return (
+                                        <Card
+                                            key={lu.lineup_id}
+                                            className={`lineup-card ${isSelected ? 'selected' : ''}`}
+                                        >
+                                            <CardHeader className="lineup-header">
+                                                <div className="lineup-card-meta">
+                                                    <label className="lineup-select">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={() => toggleLineupSelection(lu.lineup_id)}
+                                                            title="Select lineup"
+                                                        />
+                                                    </label>
+                                                    <span className="lineup-rank">#{idx + 1}</span>
+                                                </div>
+                                                <div className="lineup-metrics-grid">
+                                                    <span className="lineup-metric">
+                                                        <span className="lineup-metric-label">Salary</span>
+                                                        <span className="lineup-salary">${totalSalary.toLocaleString()}</span>
+                                                    </span>
+                                                    <span className="lineup-metric">
+                                                        <span className="lineup-metric-label">Proj</span>
+                                                        <span className="lineup-proj">{totalProj.toFixed(1)}</span>
+                                                    </span>
+                                                    <span className="lineup-metric">
+                                                        <span className="lineup-metric-label">p90</span>
+                                                        <span className="lineup-p90">{totalP90 > 0 ? totalP90.toFixed(1) : '—'}</span>
+                                                    </span>
+                                                    <span className="lineup-metric">
+                                                        <span className="lineup-metric-label">Own%</span>
+                                                        <span className="lineup-ownership">{totalOwn.toFixed(1)}</span>
+                                                    </span>
+                                                </div>
+                                            </CardHeader>
+                                            <CardContent className="lineup-body">
+                                                <div className="lineup-players">
+                                                    {orderedPlayers.map(({ playerId, p, slot }) => {
+                                                        const isFiltered = filterValue && p && p.name.toLowerCase().includes(filterValue)
+                                                        return (
+                                                            <span
+                                                                key={playerId}
+                                                                className={`lineup-player ${isFiltered ? 'highlight' : ''}`}
+                                                            >
+                                                                {p ? (
+                                                                    <>
+                                                                        <span className="lineup-slot-tag">{slot}</span>
+                                                                        <span>{p.name}</span>
+                                                                    </>
+                                                                ) : (
+                                                                    playerId
+                                                                )}
+                                                            </span>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    )
+                                })}
+                            </div>
+                            {filteredLineups.length > showCount && (
+                                <div className="lineups-footer">
+                                    <button onClick={() => setShowCount(prev => prev + 50)}>
+                                        Load More ({filteredLineups.length - showCount} remaining)
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
-                </section>
-            )}
+                </div>
+            </div>
         </div>
     )
 }

@@ -1189,6 +1189,13 @@ tbody tr:hover {
   grid-template-columns: 260px 1fr 320px;
 }
 
+.optimizer-main-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
 /* Sidebar */
 .optimizer-sidebar {
   background: #1e293b;
@@ -1658,7 +1665,7 @@ tbody tr:hover {
 
 /* Saved Builds Panel */
 .saved-builds-section {
-  margin-top: 1rem;
+  margin-top: 0;
   background: #1e293b;
   border: 1px solid #334155;
   border-radius: 8px;
@@ -1774,7 +1781,7 @@ tbody tr:hover {
 
 /* Lineups Section - Below player pool */
 .lineups-section {
-  margin-top: 1.5rem;
+  margin-top: 0;
 }
 
 .lineups-toolbar {
