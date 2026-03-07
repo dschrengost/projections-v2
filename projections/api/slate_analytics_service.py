@@ -18,7 +18,7 @@ from projections.projections_bundle import resolve_unified_projections_run
 
 logger = logging.getLogger(__name__)
 
-_ANALYTICS_VERSION = "v1"
+_ANALYTICS_VERSION = "v2"
 _DEFAULT_SAMPLE_WORLDS = 96
 _DEFAULT_SAMPLE_SEED = 42
 _DEFAULT_SOLVER_TIME_LIMIT_S = 0.18
@@ -373,4 +373,3 @@ def load_or_compute_slate_player_analytics(
         logger.warning("Failed to write slate analytics cache %s: %s", cache_file, exc)
 
     return payload
-

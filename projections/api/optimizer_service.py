@@ -1338,6 +1338,9 @@ def build_player_pool(
         player["is_out"] = is_out
         player["is_active"] = is_active
 
+        if exclude_inactive_players and not is_active:
+            continue
+
         # Optional fields
         if own_col and pd.notna(row.get(own_col)):
             player["own_proj"] = float(effective_own if use_user_overrides else row[own_col])
