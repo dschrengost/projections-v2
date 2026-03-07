@@ -17,6 +17,10 @@ DEFAULT_DATA_ROOT="/home/daniel/projections-data"
 
 DRY_RUN=""
 SYNC_POINTERS=0
+RESTART_DASHBOARD=1
+
+DASHBOARD_SERVICE="minutes-dashboard.service"
+DASHBOARD_PORT="8501"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -26,9 +30,12 @@ while [[ $# -gt 0 ]]; do
         --sync-pointers)
             SYNC_POINTERS=1
             ;;
+        --skip-dashboard-restart)
+            RESTART_DASHBOARD=0
+            ;;
         *)
             echo "[deploy] ERROR: unknown argument: $1" >&2
-            echo "Usage: ./scripts/deploy/deploy_live.sh [--dry-run] [--sync-pointers]" >&2
+            echo "Usage: ./scripts/deploy/deploy_live.sh [--dry-run] [--sync-pointers] [--skip-dashboard-restart]" >&2
             exit 1
             ;;
     esac
@@ -104,6 +111,81 @@ if [[ -n "$DRY_RUN" ]]; then
     echo "[deploy] DRY RUN complete - no changes made"
     exit 0
 fi
+
+_listener_pid_for_port() {
+    local port="$1"
+    ss -ltnpH "( sport = :${port} )" 2>/dev/null \
+        | sed -nE 's/.*pid=([0-9]+).*/\1/p' \
+        | head -n 1
+}
+
+_restart_dashboard_service_clean() {
+    local service="$1"
+    local port="$2"
+
+    if ! systemctl --user cat "$service" >/dev/null 2>&1; then
+        echo "[deploy] WARNING: $service not found in user systemd; skipping dashboard restart."
+        return 0
+    fi
+
+    echo "[deploy] Restarting $service with orphan cleanup (port ${port})..."
+    systemctl --user stop "$service" || true
+
+    # Kill stray uvicorn processes that can survive outside the service cgroup.
+    pkill -f "projections.api.minutes_api:create_app.*--port ${port}" || true
+    if command -v fuser >/dev/null 2>&1; then
+        fuser -k "${port}/tcp" >/dev/null 2>&1 || true
+    fi
+
+    local listener_pid=""
+    for _ in {1..30}; do
+        listener_pid="$(_listener_pid_for_port "$port")"
+        if [[ -z "$listener_pid" ]]; then
+            break
+        fi
+        sleep 0.2
+    done
+
+    if [[ -n "$listener_pid" ]]; then
+        echo "[deploy] ERROR: port ${port} still in use by PID ${listener_pid} after cleanup."
+        ss -ltnpH "( sport = :${port} )" || true
+        return 1
+    fi
+
+    systemctl --user reset-failed "$service" >/dev/null 2>&1 || true
+    systemctl --user start "$service"
+
+    local main_pid=""
+    local healthy=0
+    for _ in {1..40}; do
+        main_pid="$(systemctl --user show -p MainPID --value "$service" 2>/dev/null || true)"
+        listener_pid="$(_listener_pid_for_port "$port")"
+        if systemctl --user is-active --quiet "$service" \
+            && [[ -n "$main_pid" && "$main_pid" != "0" ]] \
+            && [[ "$listener_pid" == "$main_pid" ]]; then
+            healthy=1
+            break
+        fi
+        sleep 0.25
+    done
+
+    if [[ "$healthy" -ne 1 ]]; then
+        echo "[deploy] ERROR: $service failed to come up cleanly."
+        systemctl --user status "$service" --no-pager -l | sed -n '1,30p' || true
+        ss -ltnpH "( sport = :${port} )" || true
+        return 1
+    fi
+
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fsS "http://127.0.0.1:${port}/api/version" >/dev/null; then
+            echo "[deploy] ERROR: health check failed for /api/version on port ${port}."
+            return 1
+        fi
+    fi
+
+    echo "[deploy] $service healthy (pid=${main_pid}, port=${port})"
+    return 0
+}
 
 # --- Runtime selector sync ---
 DATA_ROOT="${PROJECTIONS_DATA_ROOT:-$DEFAULT_DATA_ROOT}"
@@ -304,6 +386,12 @@ if [[ -f "$FRONTEND_DIR/package.json" ]]; then
     cd "$PROD_REPO"
 else
     echo "[deploy] WARNING: frontend package.json not found at $FRONTEND_DIR"
+fi
+
+if [[ "$RESTART_DASHBOARD" -eq 1 ]]; then
+    _restart_dashboard_service_clean "$DASHBOARD_SERVICE" "$DASHBOARD_PORT"
+else
+    echo "[deploy] Skipping dashboard restart (--skip-dashboard-restart)"
 fi
 
 # --- Write deploy marker ---

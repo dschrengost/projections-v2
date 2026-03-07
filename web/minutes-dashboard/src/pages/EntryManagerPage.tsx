@@ -149,6 +149,7 @@ export default function EntryManagerPage() {
     const [onlyOutLineups, setOnlyOutLineups] = useState(false)
     const [applyBuildResults, setApplyBuildResults] = useState<ApplyBuildResult[]>([])
     const [showApplyResultsPanel, setShowApplyResultsPanel] = useState(false)
+    const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false)
 
     useEffect(() => {
         const loadSlates = async () => {
@@ -835,6 +836,13 @@ export default function EntryManagerPage() {
                             </SelectContent>
                         </Select>
                     </label>
+                    <Button
+                        variant="outline"
+                        className={`settings-drawer-toggle ${settingsDrawerOpen ? 'active' : ''}`}
+                        onClick={() => setSettingsDrawerOpen(prev => !prev)}
+                    >
+                        {settingsDrawerOpen ? 'Hide settings' : 'Entry settings'}
+                    </Button>
                 </div>
             </header>
 
@@ -927,8 +935,18 @@ export default function EntryManagerPage() {
             )}
 
             <div className="optimizer-layout">
-                <aside className="optimizer-sidebar">
-                    <h3>Upload Entry CSV</h3>
+                <aside className={`optimizer-sidebar ${settingsDrawerOpen ? 'open' : ''}`}>
+                    <div className="optimizer-sidebar-header">
+                        <h3>Upload Entry CSV</h3>
+                        <button
+                            type="button"
+                            className="settings-drawer-close"
+                            onClick={() => setSettingsDrawerOpen(false)}
+                            aria-label="Close entry settings drawer"
+                        >
+                            ×
+                        </button>
+                    </div>
                     <input
                         type="file"
                         accept=".csv"
@@ -1112,6 +1130,14 @@ export default function EntryManagerPage() {
                             : 'Export All Lineups'}
                     </Button>
                 </aside>
+                {settingsDrawerOpen && (
+                    <button
+                        type="button"
+                        className="optimizer-settings-backdrop"
+                        aria-label="Close entry settings"
+                        onClick={() => setSettingsDrawerOpen(false)}
+                    />
+                )}
 
                 <section className="optimizer-pool">
                     <div className="pool-header">
