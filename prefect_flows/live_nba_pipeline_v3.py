@@ -148,6 +148,7 @@ _REPORT_WINDOW_WAIT_TIMEOUT_SECONDS = 300
 _REPORT_WINDOW_WAIT_INTERVAL_SECONDS = 30
 _STALE_INPUT_TOLERANCE_SECONDS = 30
 _ODDS_MATERIALITY_MAX_MINUTES_TO_TIP = 180.0
+_PROPS_PLAYER_SET_EXPANSION_MAX_MINUTES_TO_TIP = 360.0
 _WORLD_CONTRACT_TOL = 1e-4
 _WORLD_REALISM_SHORT_MINUTES_DK_THRESHOLD = 35.0
 _WORLD_REALISM_GAME_PTS_MAX_THRESHOLD = 340.0
@@ -689,10 +690,12 @@ def _probe_rotowire_props_snapshot_summary(
     rotowire_props_root: Path,
     game_date: pd.Timestamp,
     data_root: Path,
+    run_as_of_ts: pd.Timestamp | None = None,
     timeout_s: int = 180,
 ) -> dict[str, Any]:
     probe_code = """
 import json
+import hashlib
 import sys
 from pathlib import Path
 
@@ -705,6 +708,7 @@ from projections.features.action_props import (
 
 root = Path(sys.argv[1])
 day = pd.Timestamp(sys.argv[2])
+run_as_of = pd.to_datetime(sys.argv[3], utc=True, errors="coerce")
 frames = []
 for offset in (0, 1):
     current_day = day + pd.Timedelta(days=offset)
@@ -712,9 +716,17 @@ for offset in (0, 1):
         rotowire_props_root=root,
         game_date=current_day,
     )
+    if not pd.isna(run_as_of):
+        asof = pd.to_datetime(long_df.get("action_props_as_of_ts"), utc=True, errors="coerce")
+        long_df = long_df.loc[asof.notna() & (asof <= run_as_of)].copy()
     snap_df = build_action_props_feature_snapshots(long_df)
     if not snap_df.empty:
-        frames.append(snap_df.loc[:, ["team_tricode", "action_props_as_of_ts"]].copy())
+        keep_cols = [
+            c
+            for c in ("team_tricode", "action_props_as_of_ts", "player_name_norm", "an_has_any_props")
+            if c in snap_df.columns
+        ]
+        frames.append(snap_df.loc[:, keep_cols].copy())
 
 if frames:
     combined = pd.concat(frames, ignore_index=True)
@@ -722,15 +734,31 @@ if frames:
     combined["action_props_as_of_ts"] = pd.to_datetime(
         combined["action_props_as_of_ts"], utc=True, errors="coerce"
     )
-    combined = combined.dropna(subset=["team_tricode", "action_props_as_of_ts"])
+    combined = combined.dropna(subset=["team_tricode", "action_props_as_of_ts", "player_name_norm"])
+    if "an_has_any_props" in combined.columns:
+        combined = combined.loc[
+            pd.to_numeric(combined["an_has_any_props"], errors="coerce").fillna(0.0)
+            > 0.0
+        ].copy()
 else:
-    combined = pd.DataFrame(columns=["team_tricode", "action_props_as_of_ts"])
+    combined = pd.DataFrame(
+        columns=["team_tricode", "action_props_as_of_ts", "player_name_norm"]
+    )
 
 team_latest = (
     combined.groupby("team_tricode", sort=False)["action_props_as_of_ts"].max().to_dict()
     if not combined.empty
     else {}
 )
+team_player_digest = {}
+team_player_count = {}
+if not combined.empty:
+    players_by_team = combined.groupby("team_tricode", sort=False)["player_name_norm"]
+    for team, players in players_by_team:
+        names = sorted({str(v).strip() for v in players if str(v).strip()})
+        payload = json.dumps(names, separators=(",", ":"), ensure_ascii=True)
+        team_player_digest[str(team)] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        team_player_count[str(team)] = int(len(names))
 latest = combined["action_props_as_of_ts"].max() if not combined.empty else None
 payload = {
     "parsed_rows": int(len(combined)),
@@ -743,6 +771,8 @@ payload = {
         for team, ts in team_latest.items()
         if ts is not None and not pd.isna(ts)
     },
+    "team_player_digest": team_player_digest,
+    "team_player_count": team_player_count,
 }
 print(json.dumps(payload))
 """.strip()
@@ -754,6 +784,11 @@ print(json.dumps(payload))
         probe_code,
         str(rotowire_props_root),
         pd.Timestamp(game_date).normalize().date().isoformat(),
+        (
+            pd.Timestamp(run_as_of_ts).isoformat()
+            if run_as_of_ts is not None and not pd.isna(run_as_of_ts)
+            else ""
+        ),
     ]
     last_error = "rotowire props probe did not run"
     for attempt in range(1, _SUBPROCESS_CRASH_RETRY_ATTEMPTS + 1):
@@ -776,6 +811,8 @@ print(json.dumps(payload))
                     "latest_action_props_as_of_ts": None,
                     "teams": [],
                     "team_latest_as_of_ts": {},
+                    "team_player_digest": {},
+                    "team_player_count": {},
                     "parse_error": "rotowire props probe returned empty stdout",
                 }
             try:
@@ -805,6 +842,8 @@ print(json.dumps(payload))
         "latest_action_props_as_of_ts": None,
         "teams": [],
         "team_latest_as_of_ts": {},
+        "team_player_digest": {},
+        "team_player_count": {},
         "parse_error": last_error,
     }
 
@@ -1071,6 +1110,12 @@ def _compute_per_game_input_digests(
                     "latest_as_of_ts"
                 ),
                 "source_used": dict(sources.get("props", {})).get("source_used"),
+                "player_set_digest": dict(sources.get("props", {})).get(
+                    "player_set_digest"
+                ),
+                "player_set_count": dict(sources.get("props", {})).get(
+                    "player_set_count"
+                ),
             },
             "roster": _source_digest_payload(dict(sources.get("roster", {}))),
             "manual_overrides": _source_digest_payload(
@@ -1447,15 +1492,39 @@ def _build_rerun_plan(
             )
             continue
         material = False
+        material_reason: str | None = None
         if any(
             source in {"injuries", "lineups", "roster"} for source in changed_sources
         ):
             material = True
+            material_reason = "always_material_source_changed"
         elif "odds" in changed_sources and float(minutes_to_tip) <= float(
             _ODDS_MATERIALITY_MAX_MINUTES_TO_TIP
         ):
             material = True
+            material_reason = "odds_change_within_tip_window"
+        elif "props" in changed_sources and float(minutes_to_tip) <= float(
+            _PROPS_PLAYER_SET_EXPANSION_MAX_MINUTES_TO_TIP
+        ):
+            props_delta = dict(change.get("source_deltas", {})).get("props", {})
+            props_previous = dict(props_delta.get("previous", {}))
+            props_current = dict(props_delta.get("current", {}))
+            prev_digest = str(props_previous.get("player_set_digest") or "").strip()
+            curr_digest = str(props_current.get("player_set_digest") or "").strip()
+            prev_count_num = pd.to_numeric(
+                props_previous.get("player_set_count"), errors="coerce"
+            )
+            curr_count_num = pd.to_numeric(
+                props_current.get("player_set_count"), errors="coerce"
+            )
+            prev_count = int(prev_count_num) if pd.notna(prev_count_num) else 0
+            curr_count = int(curr_count_num) if pd.notna(curr_count_num) else 0
+            if curr_digest and curr_digest != prev_digest and curr_count > prev_count:
+                material = True
+                material_reason = "props_player_set_expanded"
         if material:
+            if material_reason is not None:
+                change["material_reason"] = material_reason
             material_targets.append(game_id)
         else:
             ignored_changes.append(
@@ -1482,6 +1551,10 @@ def _build_rerun_plan(
                     _ODDS_MATERIALITY_MAX_MINUTES_TO_TIP
                 ),
                 "props_auto_trigger_enabled": False,
+                "props_player_set_expansion_enabled": True,
+                "props_player_set_expansion_max_minutes_to_tip": float(
+                    _PROPS_PLAYER_SET_EXPANSION_MAX_MINUTES_TO_TIP
+                ),
             },
         }
     if len(material_targets) >= len(current_game_ids):
@@ -1505,6 +1578,10 @@ def _build_rerun_plan(
                 _ODDS_MATERIALITY_MAX_MINUTES_TO_TIP
             ),
             "props_auto_trigger_enabled": False,
+            "props_player_set_expansion_enabled": True,
+            "props_player_set_expansion_max_minutes_to_tip": float(
+                _PROPS_PLAYER_SET_EXPANSION_MAX_MINUTES_TO_TIP
+            ),
         },
     }
 
@@ -2860,6 +2937,7 @@ def _build_feature_input_checklist(
             rotowire_props_root=rotowire_props_root,
             game_date=day,
             data_root=data_root,
+            run_as_of_ts=run_ts,
         )
     rotowire_parse_error = rotowire_props_summary.get("parse_error")
 
@@ -3116,6 +3194,33 @@ def _build_feature_input_checklist(
         rotowire_props_team_latest,
         time_col="action_props_as_of_ts",
     )
+    rotowire_props_team_player_digest = {
+        _normalize_props_team_abbr(team): str(digest)
+        for team, digest in (
+            dict(rotowire_props_summary.get("team_player_digest", {})).items()
+        )
+        if str(team).strip() and str(digest).strip()
+    }
+    rotowire_props_team_player_count = {
+        _normalize_props_team_abbr(team): int(num)
+        for team, count in (
+            dict(rotowire_props_summary.get("team_player_count", {})).items()
+        )
+        if str(team).strip()
+        and pd.notna(num := pd.to_numeric(count, errors="coerce"))
+    }
+    slate_teams_by_game: dict[int, list[str]] = {}
+    for row in slate_df.itertuples(index=False):
+        gid_num = pd.to_numeric(getattr(row, "game_id", None), errors="coerce")
+        if pd.isna(gid_num):
+            continue
+        teams = []
+        for attr in ("home_team_tricode", "away_team_tricode"):
+            team = _normalize_props_team_abbr(getattr(row, attr, None))
+            if team:
+                teams.append(team)
+        if teams:
+            slate_teams_by_game[int(gid_num)] = sorted(set(teams))
     per_game_freshness: dict[str, dict[str, Any]] = {}
     for gid in slate_game_ids:
         tip_ts = schedule_tip_by_game.get(int(gid))
@@ -3140,6 +3245,24 @@ def _build_feature_input_checklist(
             injuries_digest = None
         rotowire_props_ts = rotowire_props_latest_by_game.get(int(gid))
         props_latest = rotowire_props_ts
+        props_player_payload: list[dict[str, Any]] = []
+        props_player_count = 0
+        for team in slate_teams_by_game.get(int(gid), []):
+            team_digest = rotowire_props_team_player_digest.get(team)
+            if not team_digest:
+                continue
+            team_count = int(rotowire_props_team_player_count.get(team, 0))
+            props_player_payload.append(
+                {
+                    "team_tricode": team,
+                    "player_set_digest": team_digest,
+                    "player_set_count": team_count,
+                }
+            )
+            props_player_count += team_count
+        props_player_set_digest = (
+            _stable_digest(props_player_payload) if props_player_payload else None
+        )
         per_game_freshness[str(int(gid))] = {
             "game_id": int(gid),
             "tip_ts": _ts_to_iso(tip_ts),
@@ -3191,6 +3314,8 @@ def _build_feature_input_checklist(
                     "latest_as_of_ts": _ts_to_iso(props_latest),
                     "age_minutes": _age_minutes(run_ts, props_latest),
                     "rotowire_latest_as_of_ts": _ts_to_iso(rotowire_props_ts),
+                    "player_set_digest": props_player_set_digest,
+                    "player_set_count": int(props_player_count),
                 },
                 "manual_overrides": dict(
                     manual_override_summary.get("per_game", {}).get(str(int(gid)), {})
