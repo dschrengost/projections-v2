@@ -1417,12 +1417,14 @@ async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest
 
     try:
         _refresh_draftables_for_late_swap(entry_state.draft_group_id)
+        # Force strategy overrides for late swap so operator adjustments are
+        # always reflected in swap candidates during live lock windows.
         player_pool = build_player_pool(
             game_date=entry_state.game_date,
             draft_group_id=entry_state.draft_group_id,
             site=entry_state.site,
             run_id=request.run_id,
-            use_user_overrides=request.use_user_overrides,
+            use_user_overrides=True,
             ownership_mode=request.ownership_mode,
             include_unmatched_salaries=True,
             allow_zero_projections=True,
