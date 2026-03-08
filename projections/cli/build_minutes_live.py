@@ -1333,11 +1333,14 @@ def _build_minutes_live_logic(
                         ingested_ts = pd.to_datetime(rotowire_status["ingested_ts"], utc=True, errors="coerce")
                     else:
                         ingested_ts = pd.Series(pd.NaT, index=rotowire_status.index, dtype="datetime64[ns, UTC]")
-                    starter_ts_by_name = (
+                    starter_ts_frame = (
                         pd.DataFrame({"name_norm": name_norm_series, "ingested_ts": ingested_ts})
                         .dropna(subset=["name_norm"])
-                        .groupby("name_norm", sort=False)["ingested_ts"]
-                        .max()
+                        .sort_values(["name_norm", "ingested_ts"], kind="mergesort")
+                    )
+                    starter_ts_by_name = (
+                        starter_ts_frame.drop_duplicates(subset=["name_norm"], keep="last")
+                        .set_index("name_norm")["ingested_ts"]
                     )
 
                     # Separate confirmed/projected starters from explicit outs.

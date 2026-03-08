@@ -525,17 +525,17 @@ def load_rotowire_props_long_from_bronze(
         if df.empty or not required_cols.issubset(df.columns):
             continue
         selected = df.reindex(columns=selected_cols)
-        selected = selected.astype({col: "object" for col in selected.columns}, copy=False)
-        for record in selected.to_dict(orient="records"):
-            player_name = record["player_name"]
-            team = record["team"]
-            prop_type = record["prop_type"]
-            line = record["line"]
-            book = record["book"]
-            scraped_at = record["scraped_at"]
-            over_odds = record["over_odds"]
-            implied_over_prob = record["implied_over_prob"]
-            game_id = record["game_id"]
+        for (
+            player_name,
+            team,
+            prop_type,
+            line,
+            book,
+            scraped_at,
+            over_odds,
+            implied_over_prob,
+            game_id,
+        ) in selected.itertuples(index=False, name=None):
             prop_key = _canonical_rotowire_prop_key(prop_type)
             if prop_key not in _SUPPORTED_PROP_KEYS:
                 continue
@@ -594,32 +594,86 @@ def load_rotowire_props_long_from_bronze(
     if not rows:
         return empty.copy()
 
-    work = pd.DataFrame.from_records(rows)
+    grouped_map: dict[
+        tuple[pd.Timestamp, str, str, str, str, pd.Timestamp],
+        dict[str, object],
+    ] = {}
+    for row in rows:
+        key = (
+            pd.Timestamp(row["game_date"]),
+            str(row["team_tricode"]),
+            str(row["player_name"]),
+            str(row["player_name_norm"]),
+            str(row["prop_key"]),
+            pd.Timestamp(row["action_props_as_of_ts"]),
+        )
+        bucket = grouped_map.get(key)
+        if bucket is None:
+            bucket = {
+                "line_sum": 0.0,
+                "line_sumsq": 0.0,
+                "line_count": 0,
+                "p_over_sum": 0.0,
+                "p_over_count": 0,
+                "books_seen": set(),
+                "action_game_id": row["action_game_id"],
+                "source_file": row["source_file"],
+            }
+            grouped_map[key] = bucket
 
-    grouped = (
-        work.groupby(
-            [
-                "game_date",
-                "team_tricode",
-                "player_name",
-                "player_name_norm",
-                "prop_key",
-                "action_props_as_of_ts",
-            ],
-            as_index=False,
+        line_value = float(row["line"])
+        p_over_value = float(row["p_over"])
+        bucket["line_sum"] = float(bucket["line_sum"]) + line_value
+        bucket["line_sumsq"] = float(bucket["line_sumsq"]) + (line_value * line_value)
+        bucket["line_count"] = int(bucket["line_count"]) + 1
+        bucket["p_over_sum"] = float(bucket["p_over_sum"]) + p_over_value
+        bucket["p_over_count"] = int(bucket["p_over_count"]) + 1
+
+        book_value = row.get("book")
+        if pd.notna(book_value) and str(book_value).strip():
+            books_seen = bucket["books_seen"]
+            if isinstance(books_seen, set):
+                books_seen.add(str(book_value).strip())
+
+    grouped_rows: list[dict[str, object]] = []
+    for (
+        game_date_value,
+        team_tricode_value,
+        player_name_value,
+        player_name_norm_value,
+        prop_key_value,
+        as_of_value,
+    ), bucket in grouped_map.items():
+        line_count = max(int(bucket["line_count"]), 1)
+        p_over_count = max(int(bucket["p_over_count"]), 1)
+        line_mean = float(bucket["line_sum"]) / float(line_count)
+        p_over_mean = float(bucket["p_over_sum"]) / float(p_over_count)
+        variance = (float(bucket["line_sumsq"]) / float(line_count)) - (line_mean * line_mean)
+        line_std = float(np.sqrt(max(variance, 0.0)))
+        books_seen = bucket.get("books_seen")
+        books_value = float(len(books_seen)) if isinstance(books_seen, set) else 0.0
+
+        grouped_rows.append(
+            {
+                "game_date": game_date_value,
+                "team_tricode": team_tricode_value,
+                "player_name": player_name_value,
+                "player_name_norm": player_name_norm_value,
+                "prop_key": prop_key_value,
+                "line": line_mean,
+                "p_over": p_over_mean,
+                "line_std": line_std,
+                "books": books_value,
+                "action_props_as_of_ts": as_of_value,
+                "action_game_id": bucket.get("action_game_id"),
+                "source_file": bucket.get("source_file"),
+            }
         )
-        .agg(
-            line=("line", "mean"),
-            p_over=("p_over", "mean"),
-            line_std=("line", lambda s: float(np.std(pd.to_numeric(s, errors="coerce"), ddof=0))),
-            books=("book", "nunique"),
-            action_game_id=("action_game_id", "first"),
-            source_file=("source_file", "first"),
-        )
-    )
+
+    grouped = pd.DataFrame.from_records(grouped_rows, columns=list(_ACTION_PROPS_LONG_COLUMNS))
     grouped["line_std"] = pd.to_numeric(grouped["line_std"], errors="coerce").fillna(0.0)
     grouped["books"] = pd.to_numeric(grouped["books"], errors="coerce").fillna(0.0)
-    return grouped[list(_ACTION_PROPS_LONG_COLUMNS)].copy()
+    return grouped.copy()
 
 
 def load_action_props_feature_snapshots_for_date_live(
