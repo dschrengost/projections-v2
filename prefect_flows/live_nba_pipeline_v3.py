@@ -1929,21 +1929,36 @@ def _merge_parquet_for_target_games(
 ) -> pd.DataFrame:
     current_df = pd.DataFrame()
     fallback_loaded_current = False
+    allow_stale_merge_fallback = (
+        str(os.environ.get("PROJECTIONS_ALLOW_STALE_MERGE_FALLBACK", "0"))
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
     if current_path.exists():
         try:
             current_df = pd.read_parquet(current_path)
-        except Exception:
+        except Exception as exc:
             fallback = _load_fallback_merge_baseline(
                 current_path=current_path,
                 failed_previous_path=current_path,
             )
             if fallback is None:
                 raise
-            current_df, fallback_path = fallback
+            fallback_df, fallback_path = fallback
+            if not allow_stale_merge_fallback:
+                raise RuntimeError(
+                    "[materialize] current run parquet unreadable: "
+                    f"{current_path}; fallback candidate={fallback_path}. "
+                    "Refusing implicit stale fallback (fail-closed). "
+                    "Set PROJECTIONS_ALLOW_STALE_MERGE_FALLBACK=1 for "
+                    "emergency stale fallback mode."
+                ) from exc
+            current_df = fallback_df
             fallback_loaded_current = True
             print(
-                "[materialize] current run parquet unreadable; "
-                f"falling back from {current_path} to {fallback_path}"
+                "[materialize][stale-fallback] current run parquet unreadable; "
+                f"using fallback {fallback_path} instead of {current_path}"
             )
     if previous_path is None or not previous_path.exists():
         merged = current_df
