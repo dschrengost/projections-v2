@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Iterable, List, Tuple
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import typer
 
 from projections import paths
@@ -244,8 +246,14 @@ def _read_parquet_tree(path: Path) -> pd.DataFrame:
     files = sorted(path.rglob("*.parquet"))
     if not files:
         raise FileNotFoundError(f"No parquet files discovered under {path}")
-    frames = [pd.read_parquet(file) for file in files]
-    return pd.concat(frames, ignore_index=True)
+    if len(files) == 1:
+        return pd.read_parquet(files[0])
+    # Read physical parquet files directly, then concatenate via Arrow to avoid
+    # pandas 2.2.x native crashes observed in DataFrame.concat block merges.
+    tables = [pq.ParquetFile(str(file)).read() for file in files]
+    return pa.concat_tables(tables, promote_options="permissive").to_pandas(
+        ignore_metadata=True,
+    )
 
 
 def _read_parquet_if_exists(path: Path | None) -> pd.DataFrame | None:
@@ -1283,7 +1291,6 @@ def _build_minutes_live_logic(
     # Backfill mode: preserve historical lineup fields from roster_nightly as fallback,
     # because Rotowire partitions are often unavailable historically.
     if not roster_df.empty:
-        roster_df = roster_df.copy()
         if not backfill_mode:
             for column in ("lineup_role", "lineup_status", "lineup_roster_status"):
                 if column in roster_df.columns:

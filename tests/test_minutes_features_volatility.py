@@ -35,6 +35,25 @@ def test_trend_features_include_volatility_signals() -> None:
     assert first_player["season_phase"].is_monotonic_increasing
 
 
+def test_trend_features_handle_nullable_extension_dtypes() -> None:
+    df = pd.DataFrame(
+        {
+            "player_id": pd.Series([1, 1, 1], dtype="Int64"),
+            "team_id": pd.Series([7, 7, 7], dtype="Int64"),
+            "season": pd.Series([2025, 2025, 2025], dtype="Int64"),
+            "game_date": pd.to_datetime(["2025-01-01", "2025-01-02", "2025-01-03"]),
+            "minutes": pd.Series([24.0, pd.NA, 30.0], dtype="Float64"),
+            "starter_flag": pd.Series([True, pd.NA, False], dtype="boolean"),
+        }
+    )
+
+    enriched = trend_features.attach_trend_features(df)
+
+    assert len(enriched) == 3
+    assert "sum_min_7d" in enriched.columns
+    assert enriched["sum_min_7d"].notna().all()
+
+
 def test_depth_same_pos_active_counts_active_teammates() -> None:
     base = pd.DataFrame(
         {
@@ -60,6 +79,41 @@ def test_depth_same_pos_active_counts_active_teammates() -> None:
     assert (guard_depth == 1).all()
     big_depth = enriched.loc[enriched["archetype"] == "B", "depth_same_pos_active"].iloc[0]
     assert big_depth == 0
+
+
+def test_depth_features_fallback_overlay_uses_game_level_key() -> None:
+    base = pd.DataFrame(
+        {
+            "game_id": [9001],
+            "team_id": [10],
+            "player_id": [100],
+            "game_date": pd.to_datetime(["2025-01-02"]),
+        }
+    )
+    roster = pd.DataFrame(
+        {
+            "game_id": [9001],
+            "team_id": [10],
+            "player_id": [100],
+            # Deliberately mismatched game_date so the primary merge misses.
+            "game_date": pd.to_datetime(["2025-01-01"]),
+            "active_flag": [True],
+            "listed_pos": ["G"],
+            "lineup_status": ["Confirmed"],
+            "is_projected_starter": [1],
+            "is_confirmed_starter": [1],
+            "as_of_ts": [pd.Timestamp("2025-01-01T18:00:00Z")],
+        }
+    )
+
+    enriched = depth_features.attach_depth_features(base, roster)
+    row = enriched.iloc[0]
+
+    assert bool(row["active_flag"]) is True
+    assert row["lineup_status"] == "Confirmed"
+    assert int(row["is_projected_starter"]) == 1
+    assert int(row["is_confirmed_starter"]) == 1
+    assert pd.notna(row["roster_as_of_ts"])
 
 
 def test_game_env_scores_from_spread() -> None:

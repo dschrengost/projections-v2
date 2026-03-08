@@ -141,7 +141,9 @@ def deduplicate_latest(
     deduped = sorted_df.drop_duplicates(subset=list(key_cols), keep="last")
     if deduped.duplicated(subset=list(key_cols)).any():
         raise AssertionError("Failed to enforce unique keys after deduplication")
-    return deduped.reset_index(drop=True)
+    # Keep original index labels to avoid an unnecessary deep copy via
+    # reset_index(), which has intermittently crashed in native pandas blocks.
+    return deduped
 
 
 def write_ids_csv(df: pd.DataFrame, path: Path, *, key_cols: Sequence[str] = KEY_COLUMNS) -> None:

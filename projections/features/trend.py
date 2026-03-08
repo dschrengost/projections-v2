@@ -43,6 +43,18 @@ def attach_trend_features(df: pd.DataFrame) -> pd.DataFrame:
     """Attach min_last*, roll_mean_*, roll_iqr_5, z_vs_10 features."""
 
     working = df.copy()
+    # Normalize extension dtypes to numpy/object-backed arrays before heavy
+    # groupby/rolling work; this avoids intermittent native pandas crashes.
+    for col in ("player_id", "team_id", "season"):
+        if col in working.columns:
+            working[col] = pd.to_numeric(working[col], errors="coerce")
+    if "minutes" in working.columns:
+        working["minutes"] = pd.to_numeric(working["minutes"], errors="coerce").fillna(0.0).astype(float)
+    if "game_date" in working.columns:
+        working["game_date"] = pd.to_datetime(working["game_date"], errors="coerce")
+    if "starter_flag" in working.columns:
+        working["starter_flag"] = working["starter_flag"].fillna(False).astype(bool)
+
     grouped = working.groupby("player_id", group_keys=False)
     shifted_minutes = grouped["minutes"].shift(1)
 

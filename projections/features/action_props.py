@@ -524,17 +524,18 @@ def load_rotowire_props_long_from_bronze(
             continue
         if df.empty or not required_cols.issubset(df.columns):
             continue
-        for (
-            player_name,
-            team,
-            prop_type,
-            line,
-            book,
-            scraped_at,
-            over_odds,
-            implied_over_prob,
-            game_id,
-        ) in df.reindex(columns=selected_cols).itertuples(index=False, name=None):
+        selected = df.reindex(columns=selected_cols)
+        selected = selected.astype({col: "object" for col in selected.columns}, copy=False)
+        for record in selected.to_dict(orient="records"):
+            player_name = record["player_name"]
+            team = record["team"]
+            prop_type = record["prop_type"]
+            line = record["line"]
+            book = record["book"]
+            scraped_at = record["scraped_at"]
+            over_odds = record["over_odds"]
+            implied_over_prob = record["implied_over_prob"]
+            game_id = record["game_id"]
             prop_key = _canonical_rotowire_prop_key(prop_type)
             if prop_key not in _SUPPORTED_PROP_KEYS:
                 continue

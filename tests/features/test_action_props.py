@@ -353,6 +353,34 @@ def test_load_rotowire_props_long_from_bronze_maps_supported_markets(tmp_path) -
     assert int(out.loc[out["prop_key"] == "pts", "books"].iloc[0]) == 2
 
 
+def test_load_rotowire_props_long_from_bronze_handles_datetime_scraped_at(tmp_path) -> None:
+    day = "2025-01-01"
+    frame = pd.DataFrame(
+        {
+            "player_name": ["Jalen Brunson"],
+            "team": ["NYK"],
+            "prop_type": ["pts"],
+            "line": [25.5],
+            "book": ["draftkings"],
+            "scraped_at": pd.to_datetime(["2025-01-01T20:00:00Z"], utc=True),
+            "over_odds": [-110],
+            "implied_over_prob": [0.5],
+            "game_id": ["999"],
+        }
+    )
+    out_path = tmp_path / "game_date=2025-01-01" / "props_datetime.parquet"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(out_path, index=False)
+
+    out = load_rotowire_props_long_from_bronze(
+        rotowire_props_root=tmp_path,
+        game_date=pd.Timestamp(day),
+    )
+    assert len(out) == 1
+    assert out.loc[0, "prop_key"] == "pts"
+    assert pd.Timestamp(out.loc[0, "action_props_as_of_ts"]) == pd.Timestamp("2025-01-01T20:00:00Z")
+
+
 def test_live_action_props_loader_falls_back_to_rotowire(tmp_path) -> None:
     day = "2025-01-01"
     rw = pd.DataFrame(

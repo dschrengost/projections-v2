@@ -48,6 +48,9 @@ def attach_depth_features(
     roster["active_flag"] = roster["active_flag"].astype(bool)
     roster["listed_pos"] = roster["listed_pos"].fillna("W").str.upper()
     roster["archetype"] = roster["listed_pos"].map(ARCHETYPE_MAP).fillna("W")
+    for col in ("listed_pos", "archetype", "lineup_role", "lineup_status", "lineup_roster_status"):
+        if col in roster.columns:
+            roster[col] = roster[col].astype(object)
 
     active = roster[roster["active_flag"]]
     archetype_counts = (
@@ -90,14 +93,12 @@ def attach_depth_features(
         on=["team_id", "game_date", "player_id"],
         how="left",
     )
-    # Fallback: always merge lineup metadata directly on (game_id, team_id, player_id) if any values are missing.
-    if {"game_id", "team_id", "player_id"}.issubset(roster.columns):
-        alt_cols = [
+    # Fallback: overlay lineup metadata by (game_id, team_id, player_id) without
+    # DataFrame.merge, which has intermittently crashed in native pandas internals.
+    if {"game_id", "team_id", "player_id"}.issubset(roster.columns) and {"game_id", "team_id", "player_id"}.issubset(merged.columns):
+        lookup_cols = [
             col
             for col in (
-                "game_id",
-                "team_id",
-                "player_id",
                 "active_flag",
                 "lineup_status",
                 "is_projected_starter",
@@ -106,28 +107,32 @@ def attach_depth_features(
             )
             if col in roster.columns
         ]
-        alt_positions = roster[alt_cols].drop_duplicates(subset=["game_id", "team_id", "player_id"])
-        alt_positions = alt_positions.rename(columns={"as_of_ts": "roster_as_of_ts_alt"})
-        merged = merged.merge(
-            alt_positions,
-            on=["game_id", "team_id", "player_id"],
-            how="left",
-            suffixes=("", "_alt"),
-        )
-        # Only apply fallback if we are missing lineup metadata after the merge.
-        missing_meta = merged[["lineup_status", "is_projected_starter", "is_confirmed_starter"]].isna().any(axis=None)
-        if missing_meta:
-            for col in ("active_flag", "lineup_status", "is_projected_starter", "is_confirmed_starter"):
-                alt_col = f"{col}_alt"
-                if alt_col in merged.columns:
-                    merged[col] = merged[col].combine_first(merged[alt_col])
-            if "roster_as_of_ts_alt" in merged.columns:
-                merged["roster_as_of_ts"] = merged["roster_as_of_ts"].combine_first(merged["roster_as_of_ts_alt"])
-        # Clean up alt columns
-        for col in ("active_flag", "lineup_status", "is_projected_starter", "is_confirmed_starter", "roster_as_of_ts"):
-            alt_col = f"{col}_alt"
-            if alt_col in merged.columns:
-                merged.drop(columns=[alt_col], inplace=True)
+        if lookup_cols:
+            key_cols = ["game_id", "team_id", "player_id"]
+            alt_positions = roster[key_cols + lookup_cols].copy()
+            if "as_of_ts" in alt_positions.columns:
+                alt_positions = alt_positions.sort_values("as_of_ts")
+            alt_positions = alt_positions.drop_duplicates(subset=key_cols, keep="last")
+            if not alt_positions.empty:
+                alt_indexed = alt_positions.set_index(key_cols)
+                merged_indexed = merged.set_index(key_cols, drop=False)
+                for source_col, target_col in (
+                    ("active_flag", "active_flag"),
+                    ("lineup_status", "lineup_status"),
+                    ("is_projected_starter", "is_projected_starter"),
+                    ("is_confirmed_starter", "is_confirmed_starter"),
+                    ("as_of_ts", "roster_as_of_ts"),
+                ):
+                    if source_col not in alt_indexed.columns:
+                        continue
+                    aligned = alt_indexed[source_col].reindex(merged_indexed.index)
+                    if target_col in merged_indexed.columns:
+                        fill_mask = merged_indexed[target_col].isna()
+                        if fill_mask.any():
+                            merged_indexed.loc[fill_mask, target_col] = aligned.loc[fill_mask]
+                    else:
+                        merged_indexed[target_col] = aligned
+                merged = merged_indexed.reset_index(drop=True)
     if "tip_ts" in merged:
         tip_ts = pd.to_datetime(merged["tip_ts"], utc=True, errors="coerce")
         roster_ts = pd.to_datetime(merged["roster_as_of_ts"], utc=True, errors="coerce")
