@@ -18,6 +18,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _merge_parquet_for_target_games,
     _run_python_module,
     _report_window_status,
+    _repair_world_frame_contract_fields,
     _sanitize_frame_to_expected_keys,
     _summarize_world_contracts_from_frame,
     _resolve_season_month,
@@ -1216,6 +1217,47 @@ def test_summarize_world_contracts_from_frame_tolerates_small_float_drift() -> N
     assert checks["team_minutes_not_240"] == 0
     assert checks["team_minutes_total_checks"] == 4
     assert checks["team_minutes_max_abs_drift"] == pytest.approx(0.00003)
+
+
+def test_repair_world_frame_contract_fields_normalizes_game_id_and_makes() -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 0, 0],
+            "game_id": [5723706, 22500922, 22500922, 22500922],
+            "game_id_norm": ["0022500922", "0022500922", "0022500922", "0022500922"],
+            "team_id": [1610612747, 1610612747, 1610612752, 1610612752],
+            "player_id": [1, 2, 3, 4],
+            "active": [1, 1, 1, 1],
+            "minutes": [120.0, 120.0, 120.0, 120.0],
+            "fga2": [4.0, 5.0, 6.0, 7.0],
+            "fg2m": [5.0, 4.0, 6.0, 7.0],
+            "fga3": [0.001, 3.0, 4.0, 5.0],
+            "fg3m": [0.9, 1.0, 2.0, 3.0],
+            "fta": [2.0, 4.0, 3.0, 1.0],
+            "ftm": [5.0, 2.0, 1.0, 0.5],
+            "oreb": [1.0, 1.0, 1.0, 1.0],
+            "dreb": [2.0, 3.0, 4.0, 5.0],
+            "ast": [1.0, 2.0, 3.0, 4.0],
+            "stl": [0.0, 0.0, 0.0, 0.0],
+            "blk": [0.0, 0.0, 0.0, 0.0],
+            "tov": [0.0, 0.0, 0.0, 0.0],
+            "dk_fpts": [0.0, 0.0, 0.0, 0.0],
+        }
+    )
+
+    repaired, report = _repair_world_frame_contract_fields(worlds)
+    checks = _summarize_world_contracts_from_frame(repaired)
+
+    assert bool(report["applied"]) is True
+    assert report["game_id_from_norm_rows"] == 1
+    assert report["fg2m_clipped_to_fga2_rows"] == 1
+    assert report["fg3m_clipped_to_fga3_rows"] == 1
+    assert report["ftm_clipped_to_fta_rows"] == 1
+    assert int(repaired["game_id"].nunique()) == 1
+    assert checks["team_minutes_not_240"] == 0
+    assert checks["fg2m_gt_fga2"] == 0
+    assert checks["fg3m_gt_fga3"] == 0
+    assert checks["ftm_gt_fta"] == 0
 
 
 def test_feature_input_checklist_fails_when_required_snapshot_missing(

@@ -2084,6 +2084,84 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
     }
 
 
+def _repair_world_frame_contract_fields(
+    worlds_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Repair known contract-field corruption patterns in sampled worlds."""
+    if worlds_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_worlds"}
+
+    # Mutate in place to avoid an extra full-frame copy on large live slates.
+    out = worlds_df
+    report: dict[str, Any] = {
+        "applied": False,
+        "game_id_from_norm_rows": 0,
+        "fg2m_clipped_to_fga2_rows": 0,
+        "fg3m_clipped_to_fga3_rows": 0,
+        "ftm_clipped_to_fta_rows": 0,
+    }
+
+    if "game_id" in out.columns and "game_id_norm" in out.columns:
+        game_id = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
+        game_id_norm = pd.to_numeric(out["game_id_norm"], errors="coerce").astype("Int64")
+        replace_mask = game_id_norm.notna() & game_id.ne(game_id_norm)
+        replaced = int(replace_mask.sum())
+        if replaced > 0:
+            out["game_id"] = game_id.where(~replace_mask, game_id_norm)
+            report["game_id_from_norm_rows"] = replaced
+            report["applied"] = True
+
+    def _clip_makes_to_attempts(
+        attempts_col: str,
+        makes_col: str,
+        report_key: str,
+    ) -> None:
+        if attempts_col not in out.columns or makes_col not in out.columns:
+            return
+        attempts = pd.to_numeric(out[attempts_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        makes = pd.to_numeric(out[makes_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        attempts = np.clip(attempts, a_min=0.0, a_max=None)
+        makes = np.clip(makes, a_min=0.0, a_max=None)
+        over_mask = makes > (attempts + _WORLD_CONTRACT_TOL)
+        clipped = int(np.count_nonzero(over_mask))
+        if clipped > 0:
+            makes = np.minimum(makes, attempts)
+            report["applied"] = True
+            report[report_key] = clipped
+        out[attempts_col] = attempts
+        out[makes_col] = makes
+
+    _clip_makes_to_attempts("fga2", "fg2m", "fg2m_clipped_to_fga2_rows")
+    _clip_makes_to_attempts("fga3", "fg3m", "fg3m_clipped_to_fga3_rows")
+    _clip_makes_to_attempts("fta", "ftm", "ftm_clipped_to_fta_rows")
+
+    if {"fga2", "fga3"}.issubset(out.columns):
+        out["fga"] = (
+            pd.to_numeric(out["fga2"], errors="coerce").fillna(0.0)
+            + pd.to_numeric(out["fga3"], errors="coerce").fillna(0.0)
+        )
+    if {"fg2m", "fg3m"}.issubset(out.columns):
+        out["fgm"] = (
+            pd.to_numeric(out["fg2m"], errors="coerce").fillna(0.0)
+            + pd.to_numeric(out["fg3m"], errors="coerce").fillna(0.0)
+        )
+    if {"fg2m", "fg3m", "ftm"}.issubset(out.columns):
+        out["pts"] = (
+            2.0 * pd.to_numeric(out["fg2m"], errors="coerce").fillna(0.0)
+            + 3.0 * pd.to_numeric(out["fg3m"], errors="coerce").fillna(0.0)
+            + pd.to_numeric(out["ftm"], errors="coerce").fillna(0.0)
+        )
+    if {"oreb", "dreb"}.issubset(out.columns):
+        out["reb"] = (
+            pd.to_numeric(out["oreb"], errors="coerce").fillna(0.0)
+            + pd.to_numeric(out["dreb"], errors="coerce").fillna(0.0)
+        )
+    if {"pts", "reb", "ast", "stl", "blk", "tov"}.issubset(out.columns):
+        out["dk_fpts"] = _recompute_dk_fpts(out)
+
+    return out, report
+
+
 def _recompute_dk_fpts(worlds_df: pd.DataFrame) -> pd.Series:
     pts = pd.to_numeric(worlds_df.get("pts", 0.0), errors="coerce").fillna(0.0)
     reb = pd.to_numeric(worlds_df.get("reb", 0.0), errors="coerce").fillna(0.0)
@@ -4233,6 +4311,14 @@ def generate_worlds_gtv2_live_task(
         )
         if bool(world_realism_report.get("applied")):
             logger.info("Applied world realism controls: %s", world_realism_report)
+        worlds_df, world_contract_repair_report = _repair_world_frame_contract_fields(
+            worlds_df
+        )
+        if bool(world_contract_repair_report.get("applied")):
+            logger.warning(
+                "Applied world contract field repair before publish: %s",
+                world_contract_repair_report,
+            )
         _atomic_write_validated_parquet(
             worlds_df,
             worlds_path,
@@ -4274,6 +4360,7 @@ def generate_worlds_gtv2_live_task(
             "force_active_guardrails": force_active_diag,
             "props_uplift_calibration": props_uplift_report,
             "world_realism_controls": world_realism_report,
+            "world_contract_field_repair": world_contract_repair_report,
             "created_at": _utc_now_iso(),
         }
 
@@ -4617,6 +4704,9 @@ def materialize_unified_run_artifacts_task(
         outlier_resample_max_passes=int(world_realism_outlier_resample_max_passes),
         target_game_ids=set(target_ids),
     )
+    merged_worlds, world_contract_repair_report = _repair_world_frame_contract_fields(
+        merged_worlds
+    )
     _atomic_write_validated_parquet(
         merged_worlds,
         worlds_dir / f"run={run_id}" / "worlds.parquet",
@@ -4690,6 +4780,7 @@ def materialize_unified_run_artifacts_task(
         "projection_rows": int(len(merged_world_projections)),
         "props_uplift_calibration": props_uplift_report,
         "world_realism_controls": world_realism_report,
+        "world_contract_field_repair": world_contract_repair_report,
         "created_at": _utc_now_iso(),
     }
     world_summary_path.write_text(
