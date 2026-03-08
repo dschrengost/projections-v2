@@ -1927,10 +1927,30 @@ def _merge_parquet_for_target_games(
     previous_path: Path | None,
     target_game_ids: list[int],
 ) -> pd.DataFrame:
-    current_df = (
-        pd.read_parquet(current_path) if current_path.exists() else pd.DataFrame()
-    )
+    current_df = pd.DataFrame()
+    fallback_loaded_current = False
+    if current_path.exists():
+        try:
+            current_df = pd.read_parquet(current_path)
+        except Exception:
+            fallback = _load_fallback_merge_baseline(
+                current_path=current_path,
+                failed_previous_path=current_path,
+            )
+            if fallback is None:
+                raise
+            current_df, fallback_path = fallback
+            fallback_loaded_current = True
+            print(
+                "[materialize] current run parquet unreadable; "
+                f"falling back from {current_path} to {fallback_path}"
+            )
     if previous_path is None or not previous_path.exists():
+        merged = current_df
+    elif fallback_loaded_current:
+        # When current_path is unreadable, the fallback frame already comes from a
+        # historical baseline run. Skip extra merge against previous_path to avoid
+        # duplicate key rows and keep output publishable.
         merged = current_df
     else:
         try:

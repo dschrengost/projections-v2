@@ -904,6 +904,48 @@ def test_merge_parquet_for_target_games_falls_back_when_promoted_baseline_is_cor
     assert merged["value"].tolist() == [100, 250, 300]
 
 
+def test_merge_parquet_for_target_games_falls_back_when_current_run_is_corrupt(
+    tmp_path: Path,
+) -> None:
+    dataset_dir = tmp_path / "artifacts" / "gtv2_worlds" / "game_date=2026-02-24"
+    older_full = dataset_dir / "run=20260224T210000Z" / "worlds.parquet"
+    promoted_full = dataset_dir / "run=20260224T213000Z" / "worlds.parquet"
+    current_corrupt = dataset_dir / "run=20260224T220000Z" / "worlds.parquet"
+
+    _write(
+        older_full,
+        pd.DataFrame(
+            {
+                "game_id": [1, 2, 3],
+                "player_id": [10, 20, 30],
+                "value": [100, 200, 300],
+            }
+        ),
+    )
+    _write(
+        promoted_full,
+        pd.DataFrame(
+            {
+                "game_id": [1, 2, 3],
+                "player_id": [10, 20, 30],
+                "value": [101, 201, 301],
+            }
+        ),
+    )
+    current_corrupt.parent.mkdir(parents=True, exist_ok=True)
+    current_corrupt.write_text("not a parquet file", encoding="utf-8")
+
+    merged = _merge_parquet_for_target_games(
+        current_path=current_corrupt,
+        previous_path=promoted_full,
+        target_game_ids=[2],
+    )
+
+    merged = merged.sort_values(["game_id", "player_id"]).reset_index(drop=True)
+    assert merged["game_id"].tolist() == [1, 2, 3]
+    assert merged["value"].tolist() == [101, 201, 301]
+
+
 def test_atomic_write_validated_parquet_round_trips(tmp_path: Path) -> None:
     path = tmp_path / "artifact.parquet"
     df = pd.DataFrame({"game_id": [1, 2], "team_id": [10, 20], "player_id": [100, 200]})
