@@ -33,6 +33,22 @@ FLOOR_MINUTES = 1.0
 FLOOR_FPTS = 1.0
 
 
+def _normalize_player_id(value: object) -> str:
+    text = str(value).strip()
+    if not text:
+        return ""
+    numeric = pd.to_numeric(text, errors="coerce")
+    if pd.notna(numeric):
+        try:
+            as_float = float(numeric)
+            as_int = int(round(as_float))
+            if np.isfinite(as_float) and abs(as_float - as_int) < 1e-9:
+                return str(as_int)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return text
+
+
 def get_overrides_root() -> Path:
     data_root = Path(os.environ.get("PROJECTIONS_DATA_ROOT", "/home/daniel/projections-data"))
     return data_root / "user_overrides"
@@ -91,7 +107,7 @@ class PlayerStrategyOverride:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PlayerStrategyOverride":
         return cls(
-            player_id=str(data["player_id"]),
+            player_id=_normalize_player_id(data["player_id"]),
             minutes_delta=data.get("minutes_delta"),
             fpts_delta=data.get("fpts_delta"),
             minutes=data.get("minutes"),
@@ -112,16 +128,19 @@ class SlateStrategyOverrides:
     updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
     def get_override(self, player_id: str) -> Optional[PlayerStrategyOverride]:
-        return self.overrides.get(str(player_id))
+        return self.overrides.get(_normalize_player_id(player_id))
 
     def set_override(self, override: PlayerStrategyOverride) -> None:
-        self.overrides[override.player_id] = override
+        normalized_pid = _normalize_player_id(override.player_id)
+        override.player_id = normalized_pid
+        self.overrides[normalized_pid] = override
         self.updated_at = datetime.utcnow().isoformat()
         self.client_revision += 1
 
     def remove_override(self, player_id: str) -> bool:
-        if str(player_id) in self.overrides:
-            del self.overrides[str(player_id)]
+        normalized_pid = _normalize_player_id(player_id)
+        if normalized_pid in self.overrides:
+            del self.overrides[normalized_pid]
             self.updated_at = datetime.utcnow().isoformat()
             self.client_revision += 1
             return True
@@ -145,7 +164,7 @@ class SlateStrategyOverrides:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SlateStrategyOverrides":
         overrides = {
-            str(pid): PlayerStrategyOverride.from_dict(payload)
+            _normalize_player_id(pid): PlayerStrategyOverride.from_dict(payload)
             for pid, payload in data.get("overrides", {}).items()
         }
         return cls(
@@ -298,17 +317,30 @@ def apply_strategy_overrides_to_worlds(
     if adjusted_fpts.size == 0 or not overrides.overrides:
         return adjusted_fpts, adjusted_minutes, diagnostics
 
+    normalized_player_index = {_normalize_player_id(pid): idx for pid, idx in player_index.items()}
+    normalized_model_minutes = (
+        {_normalize_player_id(pid): value for pid, value in model_minutes_by_player.items()}
+        if model_minutes_by_player is not None
+        else None
+    )
+    normalized_model_fpts = (
+        {_normalize_player_id(pid): value for pid, value in model_fpts_by_player.items()}
+        if model_fpts_by_player is not None
+        else None
+    )
+
     for pid, override in overrides.overrides.items():
-        col_idx = player_index.get(str(pid))
+        normalized_pid = _normalize_player_id(pid)
+        col_idx = normalized_player_index.get(normalized_pid)
         if col_idx is None:
             continue
 
         model_minutes = None
-        if model_minutes_by_player is not None:
-            model_minutes = model_minutes_by_player.get(str(pid))
+        if normalized_model_minutes is not None:
+            model_minutes = normalized_model_minutes.get(normalized_pid)
         model_fpts = None
-        if model_fpts_by_player is not None:
-            model_fpts = model_fpts_by_player.get(str(pid))
+        if normalized_model_fpts is not None:
+            model_fpts = normalized_model_fpts.get(normalized_pid)
 
         minutes_delta = override.resolved_minutes_delta(model_minutes=model_minutes)
         fpts_delta = override.resolved_fpts_delta(model_fpts=model_fpts)
@@ -316,7 +348,7 @@ def apply_strategy_overrides_to_worlds(
             continue
 
         diagnostics["matched_override_count"] = int(diagnostics["matched_override_count"]) + 1
-        diagnostics["applied_player_ids"].append(str(pid))
+        diagnostics["applied_player_ids"].append(normalized_pid)
 
         fpts_col = adjusted_fpts[:, col_idx]
         if adjusted_minutes is not None:
@@ -455,8 +487,10 @@ def apply_strategy_overrides(
     df["used_fppm_fallback"] = False
     df["strategy_override_source"] = "model"
 
+    player_id_norm = df["player_id"].map(_normalize_player_id)
     for pid, override in overrides.overrides.items():
-        mask = df["player_id"].astype(str) == str(pid)
+        normalized_pid = _normalize_player_id(pid)
+        mask = player_id_norm == normalized_pid
         if not mask.any():
             continue
         idx = df.index[mask][0]

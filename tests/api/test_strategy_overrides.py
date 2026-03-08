@@ -132,3 +132,55 @@ def test_build_player_pool_uses_adjusted_world_summaries_when_strategy_overrides
     assert abs(player["effective_proj"] - ((20.0 + 30.0 + 0.0) / 3.0)) < 1e-6
     assert player["proj"] == player["effective_proj"]
 
+
+def test_apply_strategy_overrides_matches_float_like_player_ids() -> None:
+    overrides = strategy_overrides.SlateStrategyOverrides(
+        game_date="2026-03-01",
+        draft_group_id=123,
+        overrides={
+            "1626171": strategy_overrides.PlayerStrategyOverride(
+                player_id="1626171",
+                fpts_delta=15.0,
+            )
+        },
+    )
+    df = pd.DataFrame(
+        [
+            {
+                "player_id": 1626171.0,
+                "player_name": "Bobby Portis",
+                "proj_fpts": 20.0,
+                "minutes": 20.0,
+            }
+        ]
+    )
+    out = strategy_overrides.apply_strategy_overrides(df, overrides)
+    row = out.iloc[0]
+    assert bool(row["has_override"])
+    assert float(row["override_fpts_delta"]) == 15.0
+    assert float(row["effective_fpts"]) > float(row["model_fpts"])
+
+
+def test_apply_strategy_overrides_to_worlds_matches_float_like_player_index() -> None:
+    overrides = strategy_overrides.SlateStrategyOverrides(
+        game_date="2026-03-01",
+        draft_group_id=123,
+        overrides={
+            "1626171": strategy_overrides.PlayerStrategyOverride(
+                player_id="1626171",
+                minutes_delta=5.0,
+            )
+        },
+    )
+    adjusted_fpts, adjusted_minutes, diagnostics = strategy_overrides.apply_strategy_overrides_to_worlds(
+        fpts_matrix=np.array([[10.0], [20.0], [0.0]], dtype=np.float64),
+        minutes_matrix=np.array([[10.0], [20.0], [0.0]], dtype=np.float64),
+        player_index={"1626171.0": 0},
+        overrides=overrides,
+        model_minutes_by_player={"1626171": 15.0},
+        model_fpts_by_player={"1626171": 10.0},
+    )
+    np.testing.assert_allclose(adjusted_fpts[:, 0], np.array([15.0, 25.0, 0.0]))
+    assert adjusted_minutes is not None
+    np.testing.assert_allclose(adjusted_minutes[:, 0], np.array([15.0, 25.0, 0.0]))
+    assert diagnostics["matched_override_count"] == 1
