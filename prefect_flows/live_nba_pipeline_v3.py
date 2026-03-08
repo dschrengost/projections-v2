@@ -2696,7 +2696,13 @@ def _apply_props_uplift_calibration_to_worlds(
         # Keep report-only fields (e.g. direction/line_gap/player_name) out of the
         # simulation frame to avoid suffix collisions across per-stat passes.
         scale_apply = scale_df.loc[:, key_cols + ["mu", "sf_mean", "sf_var"]]
-        out = out.merge(scale_apply, on=key_cols, how="left")
+        out = _left_overlay_from_source_by_keys(
+            out,
+            source_df=scale_apply,
+            key_cols=key_cols,
+            value_cols=("mu", "sf_mean", "sf_var"),
+            label=f"props_uplift/{stat_name}_scale_overlay",
+        )
         mu = pd.to_numeric(out["mu"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         sf_mean = pd.to_numeric(out["sf_mean"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
         sf_var = pd.to_numeric(out["sf_var"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
