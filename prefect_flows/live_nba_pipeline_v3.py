@@ -2159,6 +2159,8 @@ def _repair_world_frame_contract_fields(
         "fg2m_clipped_to_fga2_rows": 0,
         "fg3m_clipped_to_fga3_rows": 0,
         "ftm_clipped_to_fta_rows": 0,
+        "dropped_bad_world_game_pairs": 0,
+        "dropped_bad_world_rows": 0,
     }
     stat_repair_mask = np.zeros(len(out), dtype=bool)
 
@@ -2241,6 +2243,42 @@ def _repair_world_frame_contract_fields(
             out.loc[stat_repair_mask, "dk_fpts"] = _recompute_dk_fpts(
                 out.loc[stat_repair_mask]
             ).to_numpy(dtype=float)
+
+    if {"world_idx", "game_id", "team_id", "minutes"}.issubset(out.columns):
+        world_idx = pd.to_numeric(out["world_idx"], errors="coerce").astype("Int64")
+        game_id = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
+        team_id = pd.to_numeric(out["team_id"], errors="coerce").astype("Int64")
+        minutes = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0)
+        group_frame = pd.DataFrame(
+            {
+                "world_idx": world_idx,
+                "game_id": game_id,
+                "team_id": team_id,
+                "minutes": minutes,
+            }
+        )
+        valid_group_keys = group_frame[["world_idx", "game_id", "team_id"]].notna().all(axis=1)
+        if bool(valid_group_keys.any()):
+            team_minutes = (
+                group_frame.loc[valid_group_keys]
+                .groupby(["world_idx", "game_id", "team_id"], dropna=False)["minutes"]
+                .sum()
+                .reset_index()
+            )
+            bad_team_minutes = team_minutes.loc[
+                team_minutes["minutes"].sub(240.0).abs() > _WORLD_CONTRACT_TOL,
+                ["world_idx", "game_id"],
+            ].drop_duplicates()
+            if not bad_team_minutes.empty:
+                bad_pairs = pd.MultiIndex.from_frame(bad_team_minutes)
+                row_pairs = pd.MultiIndex.from_arrays([world_idx, game_id])
+                drop_mask = row_pairs.isin(bad_pairs)
+                dropped_rows = int(np.count_nonzero(drop_mask))
+                if 0 < dropped_rows < len(out):
+                    out = out.loc[~drop_mask].reset_index(drop=True)
+                    report["applied"] = True
+                    report["dropped_bad_world_game_pairs"] = int(len(bad_team_minutes))
+                    report["dropped_bad_world_rows"] = dropped_rows
 
     return out, report
 

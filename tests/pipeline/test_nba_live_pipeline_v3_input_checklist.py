@@ -1386,6 +1386,42 @@ def test_repair_world_frame_contract_fields_preserves_uplifted_totals_without_re
     assert repaired["dk_fpts"].tolist() == pytest.approx(original_dk.tolist())
 
 
+def test_repair_world_frame_contract_fields_drops_bad_world_game_minutes_slices() -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 0, 0, 1, 1, 1, 1],
+            "game_id": [22500932] * 8,
+            "team_id": [1610612751, 1610612751, 1610612763, 1610612763] * 2,
+            "player_id": [1, 2, 3, 4, 1, 2, 3, 4],
+            "active": [1] * 8,
+            "minutes": [120.0, 120.0, 120.0, 120.0, 100.0, 100.0, 120.0, 120.0],
+            "fga2": [0.0] * 8,
+            "fg2m": [0.0] * 8,
+            "fga3": [0.0] * 8,
+            "fg3m": [0.0] * 8,
+            "fta": [0.0] * 8,
+            "ftm": [0.0] * 8,
+            "pts": [0.0] * 8,
+            "reb": [0.0] * 8,
+            "ast": [0.0] * 8,
+            "stl": [0.0] * 8,
+            "blk": [0.0] * 8,
+            "tov": [0.0] * 8,
+            "dk_fpts": [0.0] * 8,
+        }
+    )
+
+    repaired, report = _repair_world_frame_contract_fields(worlds)
+    checks = _summarize_world_contracts_from_frame(repaired)
+
+    assert bool(report["applied"]) is True
+    assert report["dropped_bad_world_game_pairs"] == 1
+    assert report["dropped_bad_world_rows"] == 4
+    assert int(len(repaired)) == 4
+    assert int(pd.to_numeric(repaired["world_idx"], errors="coerce").nunique()) == 1
+    assert checks["team_minutes_not_240"] == 0
+
+
 def test_atomic_write_validated_parquet_retries_transient_validation_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
