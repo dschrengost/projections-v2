@@ -18,7 +18,7 @@ from projections.projections_bundle import resolve_unified_projections_run
 
 logger = logging.getLogger(__name__)
 
-_ANALYTICS_VERSION = "v2"
+_ANALYTICS_VERSION = "v3"
 _DEFAULT_SAMPLE_WORLDS = 96
 _DEFAULT_SAMPLE_SEED = 42
 _DEFAULT_SOLVER_TIME_LIMIT_S = 0.18
@@ -245,12 +245,15 @@ def _build_player_rows(
     p90 = np.nanquantile(aligned, 0.90, axis=0)
     p90 = np.where(np.isfinite(p90), p90, 0.0)
 
-    boom_line = (salary / 1000.0) * 5.0
+    boom5x_line = (salary / 1000.0) * 5.0
+    boom6x_line = (salary / 1000.0) * 6.0
     bust_line = (salary / 1000.0) * 3.0
     with np.errstate(invalid="ignore"):
-        boom_pct = np.nanmean(aligned >= boom_line, axis=0) * 100.0
+        boom5x_pct = np.nanmean(aligned >= boom5x_line, axis=0) * 100.0
+        boom6x_pct = np.nanmean(aligned >= boom6x_line, axis=0) * 100.0
         bust_pct = np.nanmean(aligned < bust_line, axis=0) * 100.0
-    boom_pct = np.where(np.isfinite(boom_pct), boom_pct, 0.0)
+    boom5x_pct = np.where(np.isfinite(boom5x_pct), boom5x_pct, 0.0)
+    boom6x_pct = np.where(np.isfinite(boom6x_pct), boom6x_pct, 0.0)
     bust_pct = np.where(np.isfinite(bust_pct), bust_pct, 0.0)
 
     p90_rank = pd.Series(p90).rank(method="average", pct=True).to_numpy(dtype=np.float64) * 100.0
@@ -269,7 +272,9 @@ def _build_player_rows(
                 "own_proj": float(own[i]),
                 "optimal_pct": float(optimal_pct_by_pid.get(pid, 0.0)),
                 "ceiling_leverage": float(ceiling_leverage[i]),
-                "boom_pct": float(boom_pct[i]),
+                "boom_pct": float(boom5x_pct[i]),  # kept for backwards compatibility
+                "boom5x_pct": float(boom5x_pct[i]),
+                "boom6x_pct": float(boom6x_pct[i]),
                 "bust_pct": float(bust_pct[i]),
                 "p90": float(p90[i]),
             }

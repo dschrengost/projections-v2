@@ -60,6 +60,8 @@ export type LiveSlateAnalyticsPlayer = {
   optimal_pct?: number | null
   ceiling_leverage?: number | null
   boom_pct?: number | null
+  boom5x_pct?: number | null
+  boom6x_pct?: number | null
   bust_pct?: number | null
   p90?: number | null
 }

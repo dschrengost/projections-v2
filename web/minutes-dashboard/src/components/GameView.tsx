@@ -585,9 +585,9 @@ export const GameView: React.FC<GameViewProps> = ({
                                         <th>P90</th>
                                         <th>FPTS</th>
                                         {hasSlateAnalytics ? <th>Opt%</th> : null}
-                                        {hasSlateAnalytics ? <th>Ceil Lev</th> : null}
-                                        {hasSlateAnalytics ? <th>Boom%</th> : null}
-                                        {hasSlateAnalytics ? <th>Bust%</th> : null}
+                                        {hasSlateAnalytics ? <th>Own%</th> : null}
+                                        {hasSlateAnalytics ? <th>5x%</th> : null}
+                                        {hasSlateAnalytics ? <th>6x%</th> : null}
                                         <th>Play</th>
                                         <th>Override</th>
                                     </tr>
@@ -623,9 +623,9 @@ export const GameView: React.FC<GameViewProps> = ({
                                                 <td>{formatMinutes(effective.minutes_p90 ?? undefined)}</td>
                                                 <td>{formatFpts(asNumber(baseline.fpts_sim_uncond_mean ?? baseline.dk_fpts_mean ?? baseline.sim_dk_fpts_mean) ?? undefined)}</td>
                                                 {hasSlateAnalytics ? <td>{formatSlatePct(slateMetrics?.optimal_pct)}</td> : null}
-                                                {hasSlateAnalytics ? <td>{formatSigned(slateMetrics?.ceiling_leverage)}</td> : null}
-                                                {hasSlateAnalytics ? <td>{formatSlatePct(slateMetrics?.boom_pct)}</td> : null}
-                                                {hasSlateAnalytics ? <td>{formatSlatePct(slateMetrics?.bust_pct)}</td> : null}
+                                                {hasSlateAnalytics ? <td>{formatSlatePct(slateMetrics?.own_proj)}</td> : null}
+                                                {hasSlateAnalytics ? <td>{formatSlatePct(slateMetrics?.boom5x_pct)}</td> : null}
+                                                {hasSlateAnalytics ? <td>{formatSlatePct(slateMetrics?.boom6x_pct)}</td> : null}
                                                 <td>{formatPercent(effective.play_prob ?? undefined)}</td>
                                                 <td>
                                                     <div className="gv-inline-actions" onClick={(event) => event.stopPropagation()}>
