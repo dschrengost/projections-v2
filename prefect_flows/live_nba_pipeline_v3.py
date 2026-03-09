@@ -2143,6 +2143,7 @@ def _repair_world_frame_contract_fields(
         "fg3m_clipped_to_fga3_rows": 0,
         "ftm_clipped_to_fta_rows": 0,
     }
+    stat_repair_mask = np.zeros(len(out), dtype=bool)
 
     if "game_id" in out.columns and "game_id_norm" in out.columns:
         game_id = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
@@ -2161,16 +2162,30 @@ def _repair_world_frame_contract_fields(
     ) -> None:
         if attempts_col not in out.columns or makes_col not in out.columns:
             return
-        attempts = pd.to_numeric(out[attempts_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-        makes = pd.to_numeric(out[makes_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-        attempts = np.clip(attempts, a_min=0.0, a_max=None)
-        makes = np.clip(makes, a_min=0.0, a_max=None)
+        attempts_raw = (
+            pd.to_numeric(out[attempts_col], errors="coerce")
+            .fillna(0.0)
+            .to_numpy(dtype=float)
+        )
+        makes_raw = (
+            pd.to_numeric(out[makes_col], errors="coerce")
+            .fillna(0.0)
+            .to_numpy(dtype=float)
+        )
+        attempts = np.clip(attempts_raw, a_min=0.0, a_max=None)
+        makes = np.clip(makes_raw, a_min=0.0, a_max=None)
         over_mask = makes > (attempts + _WORLD_CONTRACT_TOL)
         clipped = int(np.count_nonzero(over_mask))
         if clipped > 0:
             makes = np.minimum(makes, attempts)
             report["applied"] = True
             report[report_key] = clipped
+        changed_mask = (np.abs(attempts - attempts_raw) > _WORLD_CONTRACT_TOL) | (
+            np.abs(makes - makes_raw) > _WORLD_CONTRACT_TOL
+        )
+        if bool(np.any(changed_mask)):
+            report["applied"] = True
+            stat_repair_mask[:] = stat_repair_mask | changed_mask
         out[attempts_col] = attempts
         out[makes_col] = makes
 
@@ -2178,29 +2193,37 @@ def _repair_world_frame_contract_fields(
     _clip_makes_to_attempts("fga3", "fg3m", "fg3m_clipped_to_fga3_rows")
     _clip_makes_to_attempts("fta", "ftm", "ftm_clipped_to_fta_rows")
 
-    if {"fga2", "fga3"}.issubset(out.columns):
-        out["fga"] = (
-            pd.to_numeric(out["fga2"], errors="coerce").fillna(0.0)
-            + pd.to_numeric(out["fga3"], errors="coerce").fillna(0.0)
-        )
-    if {"fg2m", "fg3m"}.issubset(out.columns):
-        out["fgm"] = (
-            pd.to_numeric(out["fg2m"], errors="coerce").fillna(0.0)
-            + pd.to_numeric(out["fg3m"], errors="coerce").fillna(0.0)
-        )
-    if {"fg2m", "fg3m", "ftm"}.issubset(out.columns):
-        out["pts"] = (
-            2.0 * pd.to_numeric(out["fg2m"], errors="coerce").fillna(0.0)
-            + 3.0 * pd.to_numeric(out["fg3m"], errors="coerce").fillna(0.0)
-            + pd.to_numeric(out["ftm"], errors="coerce").fillna(0.0)
-        )
-    if {"oreb", "dreb"}.issubset(out.columns):
-        out["reb"] = (
-            pd.to_numeric(out["oreb"], errors="coerce").fillna(0.0)
-            + pd.to_numeric(out["dreb"], errors="coerce").fillna(0.0)
-        )
-    if {"pts", "reb", "ast", "stl", "blk", "tov"}.issubset(out.columns):
-        out["dk_fpts"] = _recompute_dk_fpts(out)
+    # Recompute derived aggregates only for rows that were stat-repaired.
+    # This preserves intentional post-model overlays (e.g. props uplift on pts/reb)
+    # when no shot-attempt repair was needed.
+    if bool(np.any(stat_repair_mask)):
+        if {"fga2", "fga3"}.issubset(out.columns):
+            out.loc[stat_repair_mask, "fga"] = (
+                pd.to_numeric(out.loc[stat_repair_mask, "fga2"], errors="coerce").fillna(0.0)
+                + pd.to_numeric(out.loc[stat_repair_mask, "fga3"], errors="coerce").fillna(0.0)
+            )
+        if {"fg2m", "fg3m"}.issubset(out.columns):
+            out.loc[stat_repair_mask, "fgm"] = (
+                pd.to_numeric(out.loc[stat_repair_mask, "fg2m"], errors="coerce").fillna(0.0)
+                + pd.to_numeric(out.loc[stat_repair_mask, "fg3m"], errors="coerce").fillna(0.0)
+            )
+        if {"fg2m", "fg3m", "ftm"}.issubset(out.columns):
+            out.loc[stat_repair_mask, "pts"] = (
+                2.0
+                * pd.to_numeric(out.loc[stat_repair_mask, "fg2m"], errors="coerce").fillna(0.0)
+                + 3.0
+                * pd.to_numeric(out.loc[stat_repair_mask, "fg3m"], errors="coerce").fillna(0.0)
+                + pd.to_numeric(out.loc[stat_repair_mask, "ftm"], errors="coerce").fillna(0.0)
+            )
+        if {"oreb", "dreb"}.issubset(out.columns):
+            out.loc[stat_repair_mask, "reb"] = (
+                pd.to_numeric(out.loc[stat_repair_mask, "oreb"], errors="coerce").fillna(0.0)
+                + pd.to_numeric(out.loc[stat_repair_mask, "dreb"], errors="coerce").fillna(0.0)
+            )
+        if {"pts", "reb", "ast", "stl", "blk", "tov"}.issubset(out.columns):
+            out.loc[stat_repair_mask, "dk_fpts"] = _recompute_dk_fpts(
+                out.loc[stat_repair_mask]
+            ).to_numpy(dtype=float)
 
     return out, report
 

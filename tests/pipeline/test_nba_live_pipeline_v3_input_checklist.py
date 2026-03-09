@@ -1343,6 +1343,47 @@ def test_repair_world_frame_contract_fields_normalizes_game_id_and_makes() -> No
     assert checks["ftm_gt_fta"] == 0
 
 
+def test_repair_world_frame_contract_fields_preserves_uplifted_totals_without_repairs() -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 1],
+            "game_id": [22500931, 22500931],
+            "team_id": [1610612739, 1610612739],
+            "player_id": [1628378, 1628378],
+            "active": [1, 1],
+            "minutes": [30.0, 31.0],
+            "fga2": [6.0, 7.0],
+            "fg2m": [4.0, 5.0],
+            "fga3": [8.0, 8.0],
+            "fg3m": [4.0, 4.0],
+            "fta": [6.0, 5.0],
+            "ftm": [5.0, 4.0],
+            "oreb": [1.0, 1.0],
+            "dreb": [3.0, 4.0],
+            "pts": [31.0, 33.0],  # Intentionally uplifted beyond boxscore-derived totals.
+            "reb": [7.0, 8.0],  # Intentionally uplifted beyond oreb+dreb.
+            "ast": [6.0, 7.0],
+            "stl": [1.0, 1.0],
+            "blk": [0.0, 0.0],
+            "tov": [2.0, 3.0],
+            "dk_fpts": [49.0, 51.0],  # Intentionally uplifted and should be preserved.
+        }
+    )
+    original_pts = worlds["pts"].copy()
+    original_reb = worlds["reb"].copy()
+    original_dk = worlds["dk_fpts"].copy()
+
+    repaired, report = _repair_world_frame_contract_fields(worlds)
+
+    assert bool(report["applied"]) is False
+    assert report["fg2m_clipped_to_fga2_rows"] == 0
+    assert report["fg3m_clipped_to_fga3_rows"] == 0
+    assert report["ftm_clipped_to_fta_rows"] == 0
+    assert repaired["pts"].tolist() == pytest.approx(original_pts.tolist())
+    assert repaired["reb"].tolist() == pytest.approx(original_reb.tolist())
+    assert repaired["dk_fpts"].tolist() == pytest.approx(original_dk.tolist())
+
+
 def test_feature_input_checklist_fails_when_required_snapshot_missing(
     tmp_path: Path,
 ) -> None:
