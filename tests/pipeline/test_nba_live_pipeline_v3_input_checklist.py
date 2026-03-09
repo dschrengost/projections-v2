@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 import subprocess
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -20,6 +21,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _report_window_status,
     _repair_world_frame_contract_fields,
     _sanitize_frame_to_expected_keys,
+    _stream_validate_parquet,
     _summarize_world_contracts_from_frame,
     _resolve_season_month,
     publish_atomic_task,
@@ -1382,6 +1384,43 @@ def test_repair_world_frame_contract_fields_preserves_uplifted_totals_without_re
     assert repaired["pts"].tolist() == pytest.approx(original_pts.tolist())
     assert repaired["reb"].tolist() == pytest.approx(original_reb.tolist())
     assert repaired["dk_fpts"].tolist() == pytest.approx(original_dk.tolist())
+
+
+def test_atomic_write_validated_parquet_retries_transient_validation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_path = tmp_path / "artifact.parquet"
+    df = pd.DataFrame({"game_id": [1, 2], "team_id": [10, 20], "player_id": [100, 200]})
+    calls = {"count": 0}
+    original = _stream_validate_parquet
+
+    def flaky_validate(
+        path: Path,
+        *,
+        expected_rows: int | None = None,
+        required_cols: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError(
+                f"failed to stream-validate parquet contents: {path}"
+            ) from OSError("Corrupt snappy compressed data.")
+        return original(path, expected_rows=expected_rows, required_cols=required_cols)
+
+    monkeypatch.setattr(
+        "prefect_flows.live_nba_pipeline_v3._stream_validate_parquet",
+        flaky_validate,
+    )
+
+    report = _atomic_write_validated_parquet(
+        df,
+        out_path,
+        required_cols=("game_id", "team_id", "player_id"),
+    )
+    assert out_path.exists()
+    assert calls["count"] == 2
+    assert report["rows"] == 2
 
 
 def test_feature_input_checklist_fails_when_required_snapshot_missing(

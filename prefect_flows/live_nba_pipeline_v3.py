@@ -1660,26 +1660,43 @@ def _atomic_write_validated_parquet(
     *,
     required_cols: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(
-        f".tmp.{control_plane.canonical_run_id()}.{os.getpid()}.parquet"
-    )
-    try:
-        df.to_parquet(tmp, index=False)
-        validation = _stream_validate_parquet(
-            tmp,
-            expected_rows=int(len(df)),
-            required_cols=required_cols,
+    def _is_retryable_validation_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return (
+            "corrupt snappy compressed data" in text
+            or "failed to stream-validate parquet contents" in text
+            or "failed to open parquet for validation" in text
         )
-        tmp.replace(path)
-        return validation
-    except Exception:
+
+    max_attempts = 3
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in range(1, max_attempts + 1):
+        tmp = path.with_suffix(
+            f".tmp.{control_plane.canonical_run_id()}.{os.getpid()}.{attempt}.parquet"
+        )
         try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
-        raise
+            df.to_parquet(tmp, index=False)
+            validation = _stream_validate_parquet(
+                tmp,
+                expected_rows=int(len(df)),
+                required_cols=required_cols,
+            )
+            tmp.replace(path)
+            return validation
+        except Exception as exc:
+            retryable = _is_retryable_validation_error(exc)
+            is_last_attempt = attempt >= max_attempts
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            if (not retryable) or is_last_attempt:
+                raise
+            time.sleep(0.2 * attempt)
+
+    # Unreachable, loop either returns on success or raises on terminal failure.
+    raise RuntimeError(f"unreachable atomic parquet write state for {path}")
 
 
 def _distinct_game_count(df: pd.DataFrame) -> int:
