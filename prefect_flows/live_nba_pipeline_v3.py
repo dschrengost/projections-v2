@@ -299,6 +299,8 @@ def _ensure_placeholder_bundle(
     transform_manifest: dict[str, Any],
     integrity: dict[str, Any],
 ) -> Path:
+    # Placeholder mode must never mutate production bundles. Callers should pass
+    # a run-scoped scratch directory (not the promoted bundle directory).
     bundle_dir.mkdir(parents=True, exist_ok=True)
     stub = bundle_dir / "bundle_stub.txt"
     if not stub.exists():
@@ -3801,7 +3803,7 @@ def build_features_gtv2_live_task(
             "artifact_hash": str(v3_meta.get("bundle_hash")),
         }
         parity_path = _ensure_placeholder_bundle(
-            bundle_dir=bundle_dir,
+            bundle_dir=run_dir / "_placeholder_bundle",
             features_df=features_df,
             transform_manifest=transform_manifest,
             integrity=integrity,
@@ -5054,6 +5056,15 @@ def nba_live_pipeline_v3_flow(
     )
     bundle_hash = _bundle_artifact_hash(bundle_dir)
     resolved_allow_rotowire_props_fallback = bool(allow_rotowire_props_fallback)
+    allow_nonpublishing_replay = os.environ.get(
+        "PROJECTIONS_ALLOW_NONPUBLISHING_REPLAY", ""
+    ).strip().lower() in {"1", "true", "yes"}
+    if replay_mode and (not promote_pointers) and (not allow_nonpublishing_replay):
+        raise RuntimeError(
+            "Refusing replay_mode run with promote_pointers=False: this computes artifacts "
+            "but does not publish atomic pointers. Set PROJECTIONS_ALLOW_NONPUBLISHING_REPLAY=1 "
+            "only for intentional dry-run debugging."
+        )
     rotation_cfg_path = PROJECT_ROOT / "config" / "rotation_set_minutes_live.json"
     if rotation_cfg_path.exists():
         try:
@@ -5332,8 +5343,18 @@ def nba_live_pipeline_v3_flow(
                 None if rerun_plan.get("mode") == "full_slate" else target_game_ids
             ),
         )
-        parity_manifest_path = resolve_parity_manifest_path(bundle_dir)
         runtime_manifest_path = features_path.parent / "feature_runtime_manifest.json"
+        runtime_payload = json.loads(
+            runtime_manifest_path.read_text(encoding="utf-8")
+        )
+        parity_manifest_path = Path(
+            str(runtime_payload.get("parity_manifest_path", ""))
+        ).expanduser()
+        if not parity_manifest_path.exists():
+            raise RuntimeError(
+                "runtime parity manifest path missing after feature build: "
+                f"{parity_manifest_path}"
+            )
 
         score_run_dir = (
             data_root
