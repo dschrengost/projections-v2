@@ -15,7 +15,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
@@ -29,8 +29,42 @@ from projections.api.optimizer_api import (
 )
 from projections.api.optimizer_service import build_player_pool, load_saved_build
 from projections.dk.slates import build_contest_id_to_draft_group
-from projections.optimizer.cpsat_solver import solve_cpsat_iterative_counts
-from projections.optimizer.optimizer_types import Constraints, OwnershipPenaltySettings
+from projections.late_swap.candidate_generation import (
+    CandidateGenerationInput,
+    generate_candidates_for_entries,
+)
+from projections.late_swap.diagnostics import (
+    build_exposure_diagnostics,
+    derive_target_count_by_player,
+    exposure_counts_from_entries,
+    exposure_counts_from_selection,
+    summarize_selection,
+    validate_policy_feasibility,
+)
+from projections.late_swap.lock_state import build_lock_state
+from projections.late_swap.models import (
+    LateSwapCandidateSummary,
+    LateSwapCandidate,
+    LateSwapCommitRequest,
+    LateSwapExportRequest,
+    LateSwapLockStateSummary,
+    LateSwapPinCandidatesRequest,
+    LateSwapPolicy,
+    LateSwapPolicyUpdateRequest,
+    LateSwapPreviewRequest,
+    LateSwapPreviewResponse,
+    LateSwapSourceProfile,
+    LateSwapSession,
+    LateSwapSessionCreateRequest,
+    utc_now_iso,
+)
+from projections.late_swap.portfolio_selector import (
+    SelectorInput,
+    select_grouped_portfolio,
+)
+from projections.late_swap.scoring import apply_candidate_scores
+from projections.late_swap import session_store
+from projections.optimizer.cpsat_solver import solve_cpsat_iterative_counts  # noqa: F401
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -602,7 +636,7 @@ def _detect_draft_group_candidates(
     candidates: list[DraftGroupCandidate] = []
 
     for path in files:
-        m = re.search(r"draftables_raw_(\\d+)\\.json$", path.name)
+        m = re.search(r"draftables_raw_(\d+)\.json$", path.name)
         if not m:
             continue
         try:
@@ -686,6 +720,9 @@ class EntryFileState(BaseModel):
     source_portfolio_build_id: Optional[str] = None
     source_run_build_id: Optional[str] = None
     source_selection_mode: Optional[str] = None
+    source_late_swap_session_id: Optional[str] = None
+    source_late_swap_mode: Optional[str] = None
+    source_late_swap_committed_at: Optional[str] = None
 
 
 class ApplyBuildRequest(BaseModel):
@@ -703,6 +740,9 @@ def _entry_state_source_payload(entry_state: EntryFileState) -> Dict[str, object
         "source_portfolio_build_id": entry_state.source_portfolio_build_id,
         "source_run_build_id": entry_state.source_run_build_id,
         "source_selection_mode": entry_state.source_selection_mode,
+        "source_late_swap_session_id": entry_state.source_late_swap_session_id,
+        "source_late_swap_mode": entry_state.source_late_swap_mode,
+        "source_late_swap_committed_at": entry_state.source_late_swap_committed_at,
     }
     return {key: value for key, value in payload.items() if value not in (None, "", [])}
 
@@ -728,6 +768,9 @@ def _aggregate_export_sources(entry_states: List[EntryFileState]) -> Dict[str, o
         "source_portfolio_build_id",
         "source_run_build_id",
         "source_selection_mode",
+        "source_late_swap_session_id",
+        "source_late_swap_mode",
+        "source_late_swap_committed_at",
     ]:
         values = sorted({str(item[field]) for item in per_contest_sources if item.get(field) not in (None, "")})
         if len(values) == 1:
@@ -797,6 +840,386 @@ class LateSwapResult(BaseModel):
     alternatives_by_entry_id: Dict[str, EntryAlternatives] = Field(default_factory=dict)
     selection_summary: Optional[LateSwapSummary] = None
     solver_summary: Optional[SolverSummary] = None
+
+
+def _new_late_swap_session_id() -> str:
+    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{ts}_{secrets.token_hex(4)}"
+
+
+def _entry_scoped_id(contest_id: str, entry: Dict[str, str], idx: int) -> str:
+    entry_key = str(entry.get("entry_key") or entry.get("entry_id") or f"row-{idx + 1}")
+    return f"{contest_id}:{entry_key}"
+
+
+def _split_scoped_entry_id(scoped_entry_id: str) -> tuple[str, str]:
+    if ":" not in scoped_entry_id:
+        raise ValueError(f"Invalid scoped entry id: {scoped_entry_id}")
+    contest_id, entry_key = scoped_entry_id.split(":", 1)
+    return contest_id, entry_key
+
+
+def _load_entry_states_for_contests(game_date: str, contest_ids: List[str]) -> List[EntryFileState]:
+    states: List[EntryFileState] = []
+    for contest_id in contest_ids:
+        path = _entry_path(game_date, contest_id)
+        if not path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Entry file {contest_id} not found for {game_date}",
+            )
+        states.append(EntryFileState.model_validate_json(path.read_text()))
+    return states
+
+
+def _build_source_profile(entry_states: List[EntryFileState]) -> dict[str, object]:
+    source_build_ids = sorted(
+        {
+            str(state.source_build_id)
+            for state in entry_states
+            if state.source_build_id not in (None, "")
+        }
+    )
+    source_portfolio_build_ids = sorted(
+        {
+            str(state.source_portfolio_build_id)
+            for state in entry_states
+            if state.source_portfolio_build_id not in (None, "")
+        }
+    )
+    source_selection_modes = sorted(
+        {
+            str(state.source_selection_mode)
+            for state in entry_states
+            if state.source_selection_mode not in (None, "")
+        }
+    )
+    source_kinds = {
+        (
+            str(state.source_build_source or ""),
+            str(state.source_build_kind or ""),
+            str(state.source_portfolio_build_id or ""),
+        )
+        for state in entry_states
+    }
+    return {
+        "entries_total": sum(len(state.entries) for state in entry_states),
+        "contests_total": len(entry_states),
+        "source_build_ids": source_build_ids,
+        "source_portfolio_build_ids": source_portfolio_build_ids,
+        "source_selection_modes": source_selection_modes,
+        "mixed_sources": len(source_kinds) > 1,
+    }
+
+
+def _merge_candidate_summaries(left: dict[str, object], right: dict[str, object]) -> dict[str, object]:
+    out = dict(left)
+    numeric_fields = [
+        "entries_total",
+        "entries_with_candidates",
+        "requested_total",
+        "generated_total",
+        "deduped_total",
+        "rejected_unassignable_total",
+        "rejected_salary_total",
+        "rejected_swap_limit_total",
+    ]
+    for field in numeric_fields:
+        out[field] = int(out.get(field, 0)) + int(right.get(field, 0))
+    pass_counts = dict(out.get("pass_counts", {}))
+    for key, value in dict(right.get("pass_counts", {})).items():
+        pass_counts[str(key)] = int(pass_counts.get(str(key), 0)) + int(value)
+    out["pass_counts"] = pass_counts
+    return out
+
+
+def _session_preview(
+    *,
+    session: LateSwapSession,
+    request: LateSwapPreviewRequest,
+) -> tuple[LateSwapSession, dict[str, list[LateSwapCandidate]]]:
+    entry_states = _load_entry_states_for_contests(session.game_date, session.contest_ids)
+    stale_reasons: list[str] = []
+    for state in entry_states:
+        expected_revision = int(session.source_entry_revisions.get(str(state.contest_id), -1))
+        if expected_revision >= 0 and int(state.client_revision) != expected_revision:
+            stale_reasons.append(
+                f"contest {state.contest_id} revision drifted ({expected_revision} -> {state.client_revision})"
+            )
+
+    entries_by_id: dict[str, dict[str, str]] = {}
+    contest_by_entry_id: dict[str, str] = {}
+    draft_group_by_entry_id: dict[str, int] = {}
+    player_name_by_id: dict[str, str] = {}
+    player_team_by_id: dict[str, str] = {}
+    player_game_by_id: dict[str, str] = {}
+
+    candidates_by_entry_id: dict[str, list[LateSwapCandidate]] = {}
+    candidate_summary: dict[str, object] = {}
+    lock_summary: dict[str, Any] = {
+        "entries_total": 0,
+        "locked_slots_total": 0,
+        "entries_fully_locked": 0,
+        "entries_with_unmapped_locked_slots": 0,
+        "locked_slots_by_entry_id": {},
+        "unmapped_locked_by_entry_id": {},
+        "player_locked_floor_count": {},
+    }
+    current_counts_total: dict[str, int] = {}
+    out_ids_total: set[str] = set()
+
+    states_by_dg: dict[int, list[tuple[EntryFileState, str, dict[str, str]]]] = {}
+    for state in entry_states:
+        for idx, entry in enumerate(state.entries):
+            scoped_id = _entry_scoped_id(str(state.contest_id), entry, idx)
+            entries_by_id[scoped_id] = entry
+            contest_by_entry_id[scoped_id] = str(state.contest_id)
+            draft_group_by_entry_id[scoped_id] = int(state.draft_group_id)
+            states_by_dg.setdefault(int(state.draft_group_id), []).append((state, scoped_id, entry))
+
+    now_utc = datetime.now(timezone.utc)
+    for draft_group_id, items in states_by_dg.items():
+        try:
+            _refresh_draftables_for_late_swap(draft_group_id)
+        except Exception:
+            pass
+        player_pool = build_player_pool(
+            game_date=session.game_date,
+            draft_group_id=draft_group_id,
+            site="dk",
+            run_id=request.run_id,
+            use_user_overrides=bool(request.use_user_overrides),
+            ownership_mode=request.ownership_mode,
+            include_unmatched_salaries=True,
+            allow_zero_projections=True,
+            exclude_inactive_players=False,
+        )
+        if len(player_pool) < 8:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Player pool too small for draft_group_id={draft_group_id}",
+            )
+
+        (
+            internal_to_dk_player_id,
+            internal_to_name,
+            draftable_ids_by_player,
+            dk_names_by_player,
+        ) = _build_dk_maps(session.game_date, draft_group_id, player_pool)
+        dk_to_internal = {dk_id: pid for pid, dk_id in internal_to_dk_player_id.items()}
+        draftable_to_internal: Dict[int, str] = {}
+        for dk_id, slot_map in draftable_ids_by_player.items():
+            internal_id = dk_to_internal.get(dk_id)
+            if not internal_id:
+                continue
+            for draftable_id in slot_map.values():
+                draftable_to_internal.setdefault(int(draftable_id), internal_id)
+
+        internal_start_times: Dict[str, Optional[datetime]] = {}
+        banned_ids_global: set[str] = set()
+        out_ids: set[str] = set()
+        for player in player_pool:
+            pid = str(player.get("player_id"))
+            player_name_by_id[pid] = str(player.get("name") or pid)
+            player_team_by_id[pid] = str(player.get("team") or "")
+            player_game_by_id[pid] = str(player.get("matchup") or "")
+            start_raw = str(player.get("game_start_utc") or "")
+            start_time = _parse_game_start(start_raw)
+            internal_start_times[pid] = start_time
+            if start_time and start_time <= now_utc:
+                banned_ids_global.add(pid)
+            if player.get("is_active") is False or player.get("is_out") is True:
+                banned_ids_global.add(pid)
+            if player.get("is_out") is True:
+                out_ids.add(pid)
+        out_ids_total.update(out_ids)
+
+        draftable_start_times = _load_draftable_start_times(draft_group_id)
+        group_entries = [entry for _state, _entry_id, entry in items]
+        group_ids = [entry_id for _state, entry_id, _entry in items]
+
+        lock_states, group_lock_summary = build_lock_state(
+            entries=group_entries,
+            dk_slots=DK_NBA_SLOTS,
+            entry_id_resolver=lambda _entry, idx: group_ids[idx],
+            extract_draftable_id=_extract_draftable_id,
+            is_dk_locked=_is_dk_locked,
+            draftable_to_internal=draftable_to_internal,
+            draftable_start_times=draftable_start_times,
+            internal_start_times=internal_start_times,
+            now_utc=now_utc,
+        )
+        lock_state_by_id = {item.entry_id: item for item in lock_states}
+
+        generated, generated_summary = generate_candidates_for_entries(
+            CandidateGenerationInput(
+                entries_by_entry_id={entry_id: entries_by_id[entry_id] for entry_id in group_ids},
+                contest_by_entry_id=contest_by_entry_id,
+                lock_state_by_entry_id=lock_state_by_id,
+                policy=session.policy,
+                dk_slots=DK_NBA_SLOTS,
+                player_pool=player_pool,
+                internal_to_dk_player_id=internal_to_dk_player_id,
+                internal_to_name=internal_to_name,
+                draftable_ids_by_player=draftable_ids_by_player,
+                dk_names_by_player=dk_names_by_player,
+                draftable_to_internal=draftable_to_internal,
+                extract_draftable_id=_extract_draftable_id,
+                banned_ids_global=banned_ids_global,
+                out_ids=out_ids,
+                only_out_lineups=request.only_out_lineups,
+            )
+        )
+        for entry_id, cands in generated.items():
+            candidates_by_entry_id[entry_id] = cands
+
+        candidate_summary = _merge_candidate_summaries(
+            candidate_summary,
+            generated_summary.model_dump(mode="json"),
+        )
+        lock_summary["entries_total"] += int(group_lock_summary.entries_total)
+        lock_summary["locked_slots_total"] += int(group_lock_summary.locked_slots_total)
+        lock_summary["entries_fully_locked"] += int(group_lock_summary.entries_fully_locked)
+        lock_summary["entries_with_unmapped_locked_slots"] += int(
+            group_lock_summary.entries_with_unmapped_locked_slots
+        )
+        lock_summary["locked_slots_by_entry_id"].update(group_lock_summary.locked_slots_by_entry_id)
+        lock_summary["unmapped_locked_by_entry_id"].update(group_lock_summary.unmapped_locked_by_entry_id)
+        for pid, count in group_lock_summary.player_locked_floor_count.items():
+            lock_summary["player_locked_floor_count"][pid] = (
+                int(lock_summary["player_locked_floor_count"].get(pid, 0)) + int(count)
+            )
+
+        current_counts = exposure_counts_from_entries(
+            entries_by_entry_id={entry_id: entries_by_id[entry_id] for entry_id in group_ids},
+            dk_slots=DK_NBA_SLOTS,
+            extract_draftable_id=_extract_draftable_id,
+            draftable_to_internal=draftable_to_internal,
+        )
+        for pid, count in current_counts.items():
+            current_counts_total[pid] = int(current_counts_total.get(pid, 0)) + int(count)
+
+    candidates_by_entry_id = apply_candidate_scores(
+        candidates_by_entry_id=candidates_by_entry_id,
+        policy=session.policy,
+    )
+
+    team_keys_by_candidate_id: dict[str, set[str]] = {}
+    game_keys_by_candidate_id: dict[str, set[str]] = {}
+    coverage_by_player: dict[str, int] = {}
+    for entry_id, candidates in candidates_by_entry_id.items():
+        entry_presence: dict[str, bool] = {}
+        for candidate in candidates:
+            team_keys_by_candidate_id[candidate.candidate_id] = {
+                player_team_by_id.get(pid, "")
+                for pid in candidate.player_ids
+                if player_team_by_id.get(pid, "")
+            }
+            game_keys_by_candidate_id[candidate.candidate_id] = {
+                player_game_by_id.get(pid, "")
+                for pid in candidate.player_ids
+                if player_game_by_id.get(pid, "")
+            }
+            for pid in set(candidate.player_ids):
+                entry_presence[str(pid)] = True
+        for pid in entry_presence:
+            coverage_by_player[pid] = int(coverage_by_player.get(pid, 0)) + 1
+
+    total_entries = len(entries_by_id)
+    source_target_counts = dict(current_counts_total)
+    target_counts = derive_target_count_by_player(
+        policy=session.policy,
+        total_entries=total_entries,
+        source_target_count_by_player=source_target_counts,
+        current_committed_count_by_player=current_counts_total,
+    )
+
+    feasibility_errors, feasibility_warnings = validate_policy_feasibility(
+        policy=session.policy,
+        total_entries=total_entries,
+        locked_floor_count_by_player=lock_summary["player_locked_floor_count"],
+        candidate_coverage_count_by_player=coverage_by_player,
+    )
+
+    selector_result = select_grouped_portfolio(
+        SelectorInput(
+            candidates_by_entry_id=candidates_by_entry_id,
+            policy=session.policy,
+            locked_floor_count_by_player=lock_summary["player_locked_floor_count"],
+            target_count_by_player=target_counts,
+            pinned_candidates_by_entry_id=session.pinned_candidates_by_entry_id,
+            team_keys_by_candidate_id=team_keys_by_candidate_id,
+            game_keys_by_candidate_id=game_keys_by_candidate_id,
+        )
+    )
+
+    proposed_counts = exposure_counts_from_selection(
+        selected_candidate_ids_by_entry_id=selector_result.selected_candidate_ids_by_entry_id,
+        candidates_by_entry_id=candidates_by_entry_id,
+    )
+    diagnostics = build_exposure_diagnostics(
+        policy=session.policy,
+        total_entries=total_entries,
+        player_name_by_id=player_name_by_id,
+        source_target_count_by_player=source_target_counts,
+        locked_floor_count_by_player=lock_summary["player_locked_floor_count"],
+        current_committed_count_by_player=current_counts_total,
+        proposed_final_count_by_player=proposed_counts,
+    )
+    diagnostics.errors.extend(feasibility_errors)
+    diagnostics.warnings.extend(feasibility_warnings)
+    diagnostics.warnings.extend(selector_result.warnings)
+    diagnostics.selector_notes.extend(selector_result.notes)
+    if stale_reasons:
+        diagnostics.stale_reasons.extend(stale_reasons)
+
+    selection_summary = summarize_selection(
+        selected_candidate_ids_by_entry_id=selector_result.selected_candidate_ids_by_entry_id,
+        candidates_by_entry_id=candidates_by_entry_id,
+        objective_value=selector_result.objective_value,
+        status=selector_result.status,
+        current_committed_count_by_player=current_counts_total,
+        proposed_final_count_by_player=proposed_counts,
+    )
+    if feasibility_errors:
+        selection_summary.infeasibility_count = len(feasibility_errors)
+        if selector_result.status == "infeasible":
+            selection_summary.status = "infeasible"
+
+    lock_summary["locked_slots_pct"] = (
+        100.0
+        * float(lock_summary["locked_slots_total"])
+        / float(max(1, total_entries * len(DK_NBA_SLOTS)))
+    )
+
+    session.lock_state = LateSwapLockStateSummary.model_validate(lock_summary)
+    session.candidate_summary = LateSwapCandidateSummary.model_validate(candidate_summary or {})
+    session.selected_candidates_by_entry_id = dict(selector_result.selected_candidate_ids_by_entry_id)
+    session.selection_summary = selection_summary
+    session.diagnostics = diagnostics
+    session.warnings = list(dict.fromkeys([*session.warnings, *diagnostics.warnings]))
+    session.updated_at = utc_now_iso()
+    session.status = "preview_ready" if not selector_result.infeasible else "failed"
+
+    return session, candidates_by_entry_id
+
+
+def _load_session_any_date(session_id: str) -> LateSwapSession:
+    root = paths.data_path() / "late_swap"
+    if not root.exists():
+        raise FileNotFoundError(f"Late swap session not found: {session_id}")
+    for date_dir in sorted(root.iterdir(), reverse=True):
+        if not date_dir.is_dir():
+            continue
+        try:
+            return session_store.load_session(
+                game_date=str(date_dir.name),
+                session_id=session_id,
+                site="dk",
+            )
+        except Exception:
+            continue
+    raise FileNotFoundError(f"Late swap session not found: {session_id}")
 
 
 class ExportEntriesRequest(BaseModel):
@@ -1258,6 +1681,9 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
     entry_state.source_portfolio_build_id = None
     entry_state.source_run_build_id = None
     entry_state.source_selection_mode = None
+    entry_state.source_late_swap_session_id = None
+    entry_state.source_late_swap_mode = None
+    entry_state.source_late_swap_committed_at = None
 
     if request.lineups:
         lineups = request.lineups
@@ -1408,321 +1834,451 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
     return entry_state
 
 
+def _build_preview_response(
+    session: LateSwapSession,
+    candidates_by_entry_id: dict[str, list[LateSwapCandidate]],
+) -> LateSwapPreviewResponse:
+    return LateSwapPreviewResponse(
+        session=session,
+        candidates_by_entry_id=candidates_by_entry_id,
+        selected_candidates_by_entry_id=session.selected_candidates_by_entry_id,
+    )
+
+
+@router.post("/late-swap/sessions", response_model=LateSwapSession)
+async def create_late_swap_session(request: LateSwapSessionCreateRequest):
+    contest_ids = [str(cid) for cid in request.contest_ids if str(cid).strip()]
+    if not contest_ids:
+        raise HTTPException(status_code=400, detail="contest_ids cannot be empty")
+    entry_states = _load_entry_states_for_contests(request.date, contest_ids)
+    session = LateSwapSession(
+        session_id=_new_late_swap_session_id(),
+        game_date=request.date,
+        site="dk",
+        contest_ids=contest_ids,
+        draft_group_ids=sorted({int(state.draft_group_id) for state in entry_states}),
+        created_at=utc_now_iso(),
+        updated_at=utc_now_iso(),
+        status="draft",
+        source_entry_revisions={
+            str(state.contest_id): int(state.client_revision)
+            for state in entry_states
+        },
+        source_profile=LateSwapSourceProfile.model_validate(_build_source_profile(entry_states)),
+        policy=request.policy or LateSwapPolicy.with_mode_defaults("preserve_targets"),
+    )
+    session_store.create_session(
+        session,
+        request_payload=request.model_dump(mode="json", by_alias=True),
+    )
+    return session
+
+
+@router.get("/late-swap/sessions", response_model=List[LateSwapSession])
+async def list_late_swap_sessions(date: str, limit: int = 30):
+    return session_store.list_sessions(game_date=date, site="dk", limit=limit)
+
+
+@router.get("/late-swap/sessions/{session_id}", response_model=LateSwapPreviewResponse)
+async def get_late_swap_session(session_id: str, date: str | None = None):
+    try:
+        session = (
+            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            if date
+            else _load_session_any_date(session_id)
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    candidates = session_store.load_candidates(
+        game_date=session.game_date,
+        session_id=session.session_id,
+        site=session.site,
+    )
+    return _build_preview_response(session, candidates)
+
+
+@router.post("/late-swap/sessions/{session_id}/preview", response_model=LateSwapPreviewResponse)
+async def preview_late_swap_session(
+    session_id: str,
+    date: str | None = None,
+    request: LateSwapPreviewRequest = Body(default=LateSwapPreviewRequest()),
+):
+    try:
+        session = (
+            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            if date
+            else _load_session_any_date(session_id)
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        updated_session, candidates = _session_preview(session=session, request=request)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Late swap preview failed for session=%s", session_id)
+        session.status = "failed"
+        session.updated_at = utc_now_iso()
+        session.warnings = [*session.warnings, f"preview_failed: {exc}"]
+        session_store.save_session(session)
+        raise HTTPException(status_code=500, detail=f"Late swap preview failed: {exc}") from exc
+
+    session_store.save_candidates(
+        game_date=updated_session.game_date,
+        session_id=updated_session.session_id,
+        site=updated_session.site,
+        candidates_by_entry_id=candidates,
+    )
+    session_store.save_session(updated_session)
+    return _build_preview_response(updated_session, candidates)
+
+
+@router.post("/late-swap/sessions/{session_id}/pin-candidates", response_model=LateSwapPreviewResponse)
+async def pin_late_swap_candidates(
+    session_id: str,
+    date: str | None = None,
+    request: LateSwapPinCandidatesRequest = Body(...),
+):
+    try:
+        session = (
+            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            if date
+            else _load_session_any_date(session_id)
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    candidates = session_store.load_candidates(
+        game_date=session.game_date,
+        session_id=session.session_id,
+        site=session.site,
+    )
+    candidate_ids_by_entry = {
+        entry_id: {candidate.candidate_id for candidate in entry_candidates}
+        for entry_id, entry_candidates in candidates.items()
+    }
+    next_pins = {} if request.clear_existing else dict(session.pinned_candidates_by_entry_id)
+    for entry_id, candidate_id in request.pins.items():
+        if candidate_id not in candidate_ids_by_entry.get(entry_id, set()):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Pinned candidate not found for entry {entry_id}: {candidate_id}",
+            )
+        next_pins[str(entry_id)] = str(candidate_id)
+
+    session.pinned_candidates_by_entry_id = next_pins
+    session.updated_at = utc_now_iso()
+    session.status = "stale"
+    session_store.save_session(session)
+    updated_session, candidates = _session_preview(session=session, request=LateSwapPreviewRequest())
+    session_store.save_candidates(
+        game_date=updated_session.game_date,
+        session_id=updated_session.session_id,
+        site=updated_session.site,
+        candidates_by_entry_id=candidates,
+    )
+    session_store.save_session(updated_session)
+    return _build_preview_response(updated_session, candidates)
+
+
+@router.post("/late-swap/sessions/{session_id}/policy", response_model=LateSwapSession)
+async def update_late_swap_policy(
+    session_id: str,
+    date: str | None = None,
+    request: LateSwapPolicyUpdateRequest = Body(...),
+):
+    try:
+        session = (
+            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            if date
+            else _load_session_any_date(session_id)
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    session.policy = request.policy
+    session.status = "stale"
+    session.updated_at = utc_now_iso()
+    session_store.save_session(session)
+    return session
+
+
+@router.post("/late-swap/sessions/{session_id}/commit", response_model=LateSwapSession)
+async def commit_late_swap_session(
+    session_id: str,
+    date: str | None = None,
+    request: LateSwapCommitRequest = Body(default=LateSwapCommitRequest()),
+):
+    try:
+        session = (
+            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            if date
+            else _load_session_any_date(session_id)
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    candidates = session_store.load_candidates(
+        game_date=session.game_date,
+        session_id=session.session_id,
+        site=session.site,
+    )
+    candidate_lookup: dict[str, LateSwapCandidate] = {}
+    for entry_candidates in candidates.values():
+        for candidate in entry_candidates:
+            candidate_lookup[candidate.candidate_id] = candidate
+    if not session.selected_candidates_by_entry_id:
+        raise HTTPException(status_code=400, detail="Session has no selected preview to commit")
+
+    entry_states = {
+        str(state.contest_id): state
+        for state in _load_entry_states_for_contests(session.game_date, session.contest_ids)
+    }
+    now_iso = utc_now_iso()
+    updated_contests: set[str] = set()
+    for scoped_entry_id, candidate_id in session.selected_candidates_by_entry_id.items():
+        candidate = candidate_lookup.get(candidate_id)
+        if candidate is None:
+            continue
+        contest_id, entry_key = _split_scoped_entry_id(scoped_entry_id)
+        state = entry_states.get(contest_id)
+        if state is None:
+            continue
+        for idx, entry in enumerate(state.entries):
+            scoped = _entry_scoped_id(contest_id, entry, idx)
+            if scoped != scoped_entry_id:
+                continue
+            for slot in DK_NBA_SLOTS:
+                entry[slot] = str(candidate.slot_values.get(slot, entry.get(slot, "")))
+            updated_contests.add(contest_id)
+            break
+
+    for contest_id in updated_contests:
+        state = entry_states[contest_id]
+        state.client_revision = int(state.client_revision) + 1
+        state.updated_at = now_iso
+        state.source_late_swap_session_id = session.session_id
+        state.source_late_swap_mode = session.policy.mode
+        state.source_late_swap_committed_at = now_iso
+        _entry_path(session.game_date, contest_id).write_text(state.model_dump_json(indent=2))
+        session.source_entry_revisions[contest_id] = int(state.client_revision)
+
+    session.status = "committed"
+    session.updated_at = now_iso
+    if request.note:
+        session.warnings = [*session.warnings, f"commit_note: {request.note}"]
+    session_store.save_session(session)
+    return session
+
+
+@router.post("/late-swap/sessions/{session_id}/export")
+async def export_late_swap_session(
+    session_id: str,
+    date: str | None = None,
+    request: LateSwapExportRequest = Body(default=LateSwapExportRequest()),
+):
+    try:
+        session = (
+            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            if date
+            else _load_session_any_date(session_id)
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    contest_ids = [str(cid) for cid in (request.contest_ids or session.contest_ids)]
+    if not contest_ids:
+        raise HTTPException(status_code=400, detail="No contests available for export")
+
+    if not request.include_uncommitted_preview:
+        return await export_entries_batch(
+            date=session.game_date,
+            request=ExportEntriesRequest(contest_ids=contest_ids),
+            force=False,
+        )
+
+    candidates = session_store.load_candidates(
+        game_date=session.game_date,
+        session_id=session.session_id,
+        site=session.site,
+    )
+    candidate_lookup: dict[str, LateSwapCandidate] = {}
+    for entry_candidates in candidates.values():
+        for candidate in entry_candidates:
+            candidate_lookup[candidate.candidate_id] = candidate
+
+    entry_states = _load_entry_states_for_contests(session.game_date, contest_ids)
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    header = _export_header_for_entry_state(entry_states[0])
+    writer.writerow(header)
+    exported_entries = 0
+    for state in entry_states:
+        for idx, entry in enumerate(state.entries):
+            scoped_id = _entry_scoped_id(str(state.contest_id), entry, idx)
+            candidate_id = session.selected_candidates_by_entry_id.get(scoped_id)
+            if candidate_id:
+                candidate = candidate_lookup.get(candidate_id)
+                if candidate:
+                    temp_entry = dict(entry)
+                    for slot in DK_NBA_SLOTS:
+                        temp_entry[slot] = str(candidate.slot_values.get(slot, temp_entry.get(slot, "")))
+                    writer.writerow(_export_row_for_header(temp_entry, header))
+                    exported_entries += 1
+                    continue
+            writer.writerow(_export_row_for_header(entry, header))
+            exported_entries += 1
+
+    csv_text = output.getvalue()
+    session_root = session_store.session_dir(
+        game_date=session.game_date,
+        session_id=session.session_id,
+        site=session.site,
+    )
+    session_root.mkdir(parents=True, exist_ok=True)
+    preview_csv = session_root / "preview_export.csv"
+    preview_manifest = session_root / "preview_export_manifest.json"
+    preview_csv.write_text(csv_text, encoding="utf-8")
+    preview_manifest.write_text(
+        json.dumps(
+            {
+                "session_id": session.session_id,
+                "created_at": utc_now_iso(),
+                "game_date": session.game_date,
+                "contest_ids": contest_ids,
+                "lineup_count": exported_entries,
+                "policy_mode": session.policy.mode,
+                "target_source": session.policy.target_source,
+                "warnings": session.warnings,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=entries_{session.game_date}_{session.session_id}_preview.csv",
+            "X-Late-Swap-Session-Id": session.session_id,
+            "X-Entry-Count": str(exported_entries),
+            "Access-Control-Expose-Headers": "X-Late-Swap-Session-Id, X-Entry-Count",
+        },
+    )
+
+
 @router.post("/entries/{contest_id}/late-swap", response_model=LateSwapResult)
 async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest):
     path = _entry_path(date, contest_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
-    entry_state = EntryFileState.model_validate_json(path.read_text())
 
-    try:
-        _refresh_draftables_for_late_swap(entry_state.draft_group_id)
-        # Force strategy overrides for late swap so operator adjustments are
-        # always reflected in swap candidates during live lock windows.
-        player_pool = build_player_pool(
-            game_date=entry_state.game_date,
-            draft_group_id=entry_state.draft_group_id,
-            site=entry_state.site,
-            run_id=request.run_id,
-            use_user_overrides=True,
-            ownership_mode=request.ownership_mode,
-            include_unmatched_salaries=True,
-            allow_zero_projections=True,
-            exclude_inactive_players=False,
-        )
-    except Exception as exc:
-        logger.exception("Failed to build player pool for late swap: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+    entry_state_before = EntryFileState.model_validate_json(path.read_text())
+    policy = LateSwapPolicy.with_mode_defaults("preserve_targets")
+    policy.candidate_count_per_entry = max(6, min(20, int(request.n_alternatives) + 1))
 
-    if len(player_pool) < 8:
-        raise HTTPException(status_code=400, detail="Player pool too small for late swap")
-
-    internal_to_dk_player_id, internal_to_name, draftable_ids_by_player, dk_names_by_player = _build_dk_maps(
-        entry_state.game_date,
-        entry_state.draft_group_id,
-        player_pool,
+    session = LateSwapSession(
+        session_id=_new_late_swap_session_id(),
+        game_date=date,
+        site="dk",
+        contest_ids=[contest_id],
+        draft_group_ids=[int(entry_state_before.draft_group_id)],
+        created_at=utc_now_iso(),
+        updated_at=utc_now_iso(),
+        status="draft",
+        source_entry_revisions={contest_id: int(entry_state_before.client_revision)},
+        source_profile=LateSwapSourceProfile.model_validate(_build_source_profile([entry_state_before])),
+        policy=policy,
     )
-    dk_to_internal = {dk_id: pid for pid, dk_id in internal_to_dk_player_id.items()}
+    session_store.create_session(
+        session,
+        request_payload={
+            "legacy": True,
+            "contest_id": contest_id,
+            "date": date,
+            "request": request.model_dump(mode="json"),
+        },
+    )
 
-    draftable_to_internal: Dict[int, str] = {}
-    for dk_id, slot_map in draftable_ids_by_player.items():
-        internal_id = dk_to_internal.get(dk_id)
-        if not internal_id:
-            continue
-        for draftable_id in slot_map.values():
-            draftable_to_internal.setdefault(int(draftable_id), internal_id)
+    preview_request = LateSwapPreviewRequest(
+        run_id=request.run_id,
+        ownership_mode=request.ownership_mode,
+        use_user_overrides=True,
+        only_out_lineups=request.only_out_lineups,
+    )
+    session, candidates_by_entry_id = _session_preview(session=session, request=preview_request)
+    session_store.save_candidates(
+        game_date=session.game_date,
+        session_id=session.session_id,
+        site=session.site,
+        candidates_by_entry_id=candidates_by_entry_id,
+    )
+    session_store.save_session(session)
 
-    start_times: Dict[str, Optional[datetime]] = {}
-    for p in player_pool:
-        pid = str(p.get("player_id"))
-        start_raw = str(p.get("game_start_utc") or "")
-        start_times[pid] = _parse_game_start(start_raw)
-    draftable_start_times = _load_draftable_start_times(entry_state.draft_group_id)
+    # Legacy compatibility keeps auto-commit behavior.
+    await commit_late_swap_session(
+        session_id=session.session_id,
+        date=session.game_date,
+        request=LateSwapCommitRequest(note="legacy_auto_commit"),
+    )
+    entry_state_after = EntryFileState.model_validate_json(path.read_text())
 
-    inactive_ids: set[str] = set()
-    out_ids: set[str] = set()
-    for p in player_pool:
-        pid = str(p.get("player_id"))
-        # When overrides are enabled, the pool may contain inactive/out players; ban them unless locked.
-        if p.get("is_active") is False or p.get("is_out") is True:
-            inactive_ids.add(pid)
-        # Track OUT players separately for only_out_lineups filtering
-        if p.get("is_out") is True:
-            out_ids.add(pid)
-
-    now_utc = datetime.now(timezone.utc)
-    available_ids = {str(p.get("player_id")) for p in player_pool}
-    missing_locked_ids: List[str] = []
-    updated_entries: List[Dict[str, str]] = []
-    locked_slots_by_entry_id: Dict[str, List[str]] = {}
     alternatives_by_entry_id: Dict[str, EntryAlternatives] = {}
-    total_locked = 0
-    entries_total = 0
-    entries_swapped = 0
-    entries_held = 0
-    entries_unmapped = 0
-    entries_unknown = 0
-    entries_skipped_no_out = 0
-    solver_status_counts: Dict[str, int] = {}
-    solver_gaps: List[float] = []
-    proj_by_internal = {str(p.get("player_id")): float(p.get("proj", 0.0)) for p in player_pool}
-
-    for idx, entry in enumerate(entry_state.entries):
-        entry_key = entry.get("entry_key") or entry.get("entry_id") or f"row-{idx + 1}"
-        entries_total += 1
-        locked_ids: List[str] = []
-        locked_slots: List[str] = []
-        lock_slots: Dict[str, str] = {}
-        for slot in DK_NBA_SLOTS:
-            slot_value = entry.get(slot, "")
-            draftable_id = _extract_draftable_id(slot_value)
-            if draftable_id is None and not slot_value:
-                continue
-            
-            # Check if DK marked this player as locked (from earlier games)
-            is_dk_locked = _is_dk_locked(slot_value)
-            
-            internal_id = draftable_to_internal.get(draftable_id) if draftable_id else None
-            slot_start = draftable_start_times.get(draftable_id) if draftable_id else None
-            if slot_start is None and internal_id:
-                slot_start = start_times.get(internal_id)
-            
-            # Lock if: DK says locked OR game has started
-            is_locked = bool(is_dk_locked or (slot_start and slot_start <= now_utc))
-            
-            if is_locked:
-                locked_slots.append(slot)
-                if internal_id:
-                    locked_ids.append(internal_id)
-                    lock_slots[slot] = internal_id
-                elif draftable_id is not None:
-                    missing_locked_ids.append(str(draftable_id))
-                logger.debug(
-                    "Late swap: Locking slot=%s draftable=%s (dk_locked=%s, game_started=%s)",
-                    slot, draftable_id, is_dk_locked, slot_start <= now_utc if slot_start else False,
-                )
-            elif slot_start is None and draftable_id and not is_dk_locked:
-                logger.warning(
-                    "Late swap: No start time for slot=%s draftable=%s internal=%s entry=%s",
-                    slot, draftable_id, internal_id, entry_key,
-                )
-
-        locked_ids = [pid for pid in dict.fromkeys(locked_ids) if pid in available_ids]
-        total_locked += len(locked_slots)
-
-        locked_slots_by_entry_id[entry_key] = locked_slots
-
-        # If we can't map any locked slots to a player_id, do not attempt to late swap this entry.
-        if any(slot not in lock_slots for slot in locked_slots):
-            updated_entries.append(entry)
-            entries_unmapped += 1
-            continue
-
-        # Collect all player IDs in this entry for only_out_lineups filtering
-        entry_player_ids: set[str] = set()
-        for slot in DK_NBA_SLOTS:
-            slot_value = entry.get(slot, "")
-            draftable_id = _extract_draftable_id(slot_value)
-            if draftable_id is not None:
-                internal_id = draftable_to_internal.get(draftable_id)
-                if internal_id:
-                    entry_player_ids.add(internal_id)
-
-        # If only_out_lineups is enabled, skip entries without any OUT players
-        if request.only_out_lineups and not (entry_player_ids & out_ids):
-            updated_entries.append(entry)
-            entries_skipped_no_out += 1
-            entries_held += 1
-            continue
-
-        # Once every slot is locked, there is nothing left to optimize.
-        if len(locked_slots) == len(DK_NBA_SLOTS):
-            current_proj = _compute_entry_projection(entry, proj_by_internal, draftable_to_internal)
-            if current_proj is not None:
-                alternatives_by_entry_id[entry_key] = EntryAlternatives(
-                    entry_id=entry_key,
-                    locked_slots=locked_slots,
-                    alternatives=[
-                        LineupAlternative(
-                            lineup_idx=-1,
-                            projected_score=current_proj,
-                            slot_values={slot: entry.get(slot, "") for slot in DK_NBA_SLOTS},
-                            player_swaps=[],
-                        )
-                    ],
-                    selected_idx=0,
-                )
-            else:
-                entries_unknown += 1
-            entries_held += 1
-            updated_entries.append(entry)
-            continue
-
-        # Generate N alternatives instead of just 1
-        constraints = Constraints(
-            N_lineups=request.n_alternatives,
-            unique_players=1,
-            randomness_pct=request.randomness_pct or 0.0,
-            min_salary=0,
-        )
-        constraints.lock_ids = locked_ids
-        constraints.lock_slots = lock_slots
-        started_ids = {
-            pid for pid, start_time in start_times.items()
-            if start_time and start_time <= now_utc
-        }
-        ban_ids = (started_ids | inactive_ids) - set(locked_ids)
-        constraints.ban_ids = sorted(ban_ids)
-        constraints.ownership_penalty = OwnershipPenaltySettings(enabled=False)
-        constraints.validate(entry_state.site, stddev_available=any("stddev" in p for p in player_pool))
-
-        lineups, diagnostics = solve_cpsat_iterative_counts(
-            player_pool,
-            constraints,
-            seed=0,
-            site=entry_state.site,
-        )
-        if not lineups:
-            detail = diagnostics.get("message") if isinstance(diagnostics, dict) else None
-            raise HTTPException(status_code=400, detail=detail or "Late swap optimizer failed to generate lineups")
-
-        if isinstance(diagnostics, dict):
-            status = diagnostics.get("status")
-            if status:
-                solver_status_counts[status] = solver_status_counts.get(status, 0) + 1
-            gap = diagnostics.get("achieved_gap")
-            if isinstance(gap, (float, int)):
-                solver_gaps.append(float(gap))
-
-        # Build alternatives list with projected scores
+    locked_slots_by_entry_id: Dict[str, List[str]] = {}
+    skipped_no_out = 0
+    for scoped_entry_id, candidates in candidates_by_entry_id.items():
+        _contest, local_entry_id = _split_scoped_entry_id(scoped_entry_id)
+        selected_candidate_id = session.selected_candidates_by_entry_id.get(scoped_entry_id)
+        selected_idx = 0
         alternatives: List[LineupAlternative] = []
-        for lineup_idx, lineup in enumerate(lineups):
-            slot_values = _slot_values_from_lineup_players(
-                lineup.players,
-                internal_to_dk_player_id,
-                internal_to_name,
-                draftable_ids_by_player,
-                dk_names_by_player,
-            )
-            if not slot_values:
-                continue  # Skip unassignable lineups
-
-            # Overlay locked slots with original entry values
-            for slot in locked_slots:
-                slot_values[slot] = entry.get(slot, "")
-
-            # Compute player-level swaps vs original entry (only for non-locked slots)
-            player_swaps = _compute_player_swaps(entry, slot_values, player_pool, draftable_to_internal)
-            # Filter out swaps for locked slots
-            player_swaps = [swap for swap in player_swaps if swap.slot not in locked_slots]
-
+        for idx, candidate in enumerate(candidates):
+            if candidate.candidate_id == selected_candidate_id:
+                selected_idx = idx
             alternatives.append(
                 LineupAlternative(
-                    lineup_idx=lineup_idx,
-                    projected_score=lineup.total_proj,
-                    slot_values=slot_values,
-                    player_swaps=player_swaps,
-                )
-            )
-
-        current_proj = _compute_entry_projection(entry, proj_by_internal, draftable_to_internal)
-        if current_proj is not None:
-            alternatives.append(
-                LineupAlternative(
-                    lineup_idx=-1,
-                    projected_score=current_proj,
-                    slot_values={slot: entry.get(slot, "") for slot in DK_NBA_SLOTS},
+                    lineup_idx=idx,
+                    projected_score=float(candidate.projected_score or 0.0),
+                    slot_values=dict(candidate.slot_values),
                     player_swaps=[],
                 )
             )
-
-        if not alternatives:
-            raise HTTPException(status_code=400, detail="Late swap failed to assign any lineup to DK slots")
-
-        # Sort by projected score and auto-select the best (first).
-        alternatives.sort(key=lambda a: a.projected_score, reverse=True)
-        best_idx = 0
-        best_alternative = alternatives[0]
-
-        alternatives_by_entry_id[entry_key] = EntryAlternatives(
-            entry_id=entry_key,
+        hold_candidate = next((cand for cand in candidates if cand.generated_by == "hold"), None)
+        if hold_candidate and "skipped_only_out_filter" in hold_candidate.reason_codes:
+            skipped_no_out += 1
+        locked_slots = list(session.lock_state.locked_slots_by_entry_id.get(scoped_entry_id, []))
+        alternatives_by_entry_id[local_entry_id] = EntryAlternatives(
+            entry_id=local_entry_id,
             locked_slots=locked_slots,
             alternatives=alternatives,
-            selected_idx=best_idx,
+            selected_idx=selected_idx,
         )
+        locked_slots_by_entry_id[local_entry_id] = locked_slots
 
-        if current_proj is None:
-            entries_unknown += 1
-
-        if best_alternative.player_swaps:
-            entries_swapped += 1
-        else:
-            entries_held += 1
-
-        updated_entries.append(
-            {
-                "entry_id": entry.get("entry_id", ""),
-                "entry_key": entry_key,
-                "contest_id": entry_state.contest_id,
-                "contest_name": entry_state.contest_name,
-                "entry_fee": entry_state.entry_fee,
-                # Preserve original slot values for locked slots, use optimizer output for others
-                **{
-                    slot: (
-                        entry.get(slot, "")  # Keep original for locked slots
-                        if slot in locked_slots
-                        else best_alternative.slot_values.get(slot, "")  # Use optimizer for unlocked
-                    )
-                    for slot in DK_NBA_SLOTS
-                },
-            }
-        )
-
-    entry_state.entries = updated_entries
-    entry_state.client_revision += 1
-    entry_state.updated_at = datetime.utcnow().isoformat()
-    path.write_text(entry_state.model_dump_json(indent=2))
+    selection_summary = session.selection_summary
+    entries_total = int(selection_summary.entries_total) if selection_summary else len(entry_state_after.entries)
+    entries_swapped = int(selection_summary.entries_swapped) if selection_summary else 0
+    entries_held = int(selection_summary.entries_held) if selection_summary else entries_total
+    status_key = selection_summary.status if selection_summary else "fallback_hold"
 
     return LateSwapResult(
-        entry_state=entry_state,
-        locked_count=total_locked,
-        updated_entries=len(updated_entries),
-        missing_locked_ids=sorted(set(missing_locked_ids)),
+        entry_state=entry_state_after,
+        locked_count=int(session.lock_state.locked_slots_total),
+        updated_entries=len(entry_state_after.entries),
+        missing_locked_ids=[],
         locked_slots_by_entry_id=locked_slots_by_entry_id,
         alternatives_by_entry_id=alternatives_by_entry_id,
         selection_summary=LateSwapSummary(
             entries_total=entries_total,
             entries_swapped=entries_swapped,
             entries_held=entries_held,
-            entries_unmapped=entries_unmapped,
-            entries_unknown=entries_unknown,
-            entries_skipped_no_out=entries_skipped_no_out,
+            entries_unmapped=int(session.lock_state.entries_with_unmapped_locked_slots),
+            entries_unknown=0,
+            entries_skipped_no_out=skipped_no_out,
         ),
-        solver_summary=SolverSummary(
-            status_counts=solver_status_counts,
-            avg_gap=(sum(solver_gaps) / len(solver_gaps)) if solver_gaps else None,
-            max_gap=max(solver_gaps) if solver_gaps else None,
-        ),
+        solver_summary=SolverSummary(status_counts={str(status_key): 1}, avg_gap=None, max_gap=None),
     )
 
 

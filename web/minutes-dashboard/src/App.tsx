@@ -17,6 +17,7 @@ import ContestSimPage from './pages/ContestSimPage'
 import FlashbackPage from './pages/FlashbackPage'
 import DiagnosticsPage from './pages/DiagnosticsPage'
 import EntryManagerPage from './pages/EntryManagerPage'
+import LateSwapPage from './pages/LateSwapPage'
 import LivePage from './pages/LivePage'
 import PropsPage from './pages/PropsPage'
 import { getSlates, Slate } from './api/optimizer'
@@ -152,6 +153,7 @@ type TabKey =
   | 'pipeline'
   | 'evaluation'
   | 'optimizer'
+  | 'late-swap'
   | 'entry-manager'
   | 'contest'
   | 'contest-sim'
@@ -172,6 +174,7 @@ const initialTab = (): TabKey => {
   if (window.location.pathname.includes('flashback')) return 'flashback'
   if (window.location.pathname.includes('contest-sim')) return 'contest-sim'
   if (window.location.pathname.includes('contest')) return 'contest'
+  if (window.location.pathname.includes('late-swap')) return 'late-swap'
   if (window.location.pathname.includes('entry-manager')) return 'entry-manager'
   if (window.location.pathname.includes('optimizer')) return 'optimizer'
   if (window.location.pathname.includes('pipeline')) return 'pipeline'
@@ -253,6 +256,7 @@ function App() {
       pipeline: '/runs',
       evaluation: '/evaluation',
       optimizer: '/optimizer',
+      'late-swap': '/late-swap',
       'entry-manager': '/entry-manager',
       contest: '/contest',
       'contest-sim': '/contest-sim',
@@ -615,6 +619,12 @@ function App() {
         Optimizer
       </button>
       <button
+        className={activeTab === 'late-swap' ? 'active' : ''}
+        onClick={() => setActiveTab('late-swap')}
+      >
+        Late Swap
+      </button>
+      <button
         className={activeTab === 'entry-manager' ? 'active' : ''}
         onClick={() => setActiveTab('entry-manager')}
       >
@@ -666,7 +676,7 @@ function App() {
             setActiveTab('live')
           }}
           onCloseGame={() => setLiveGameId(null)}
-          onOpenLateSwap={() => setActiveTab('entry-manager')}
+          onOpenLateSwap={() => setActiveTab('late-swap')}
         />
       </div>
     )
@@ -704,6 +714,15 @@ function App() {
       <div className="app-shell">
         {nav}
         <EntryManagerPage />
+      </div>
+    )
+  }
+
+  if (activeTab === 'late-swap') {
+    return (
+      <div className="app-shell">
+        {nav}
+        <LateSwapPage />
       </div>
     )
   }
@@ -955,7 +974,7 @@ function App() {
             date={selectedDate}
             runId={runId}
             onGameChange={setSelectedGameId}
-            onOpenLateSwap={() => setActiveTab('entry-manager')}
+            onOpenLateSwap={() => setActiveTab('late-swap')}
             onRunCompleted={(nextRunId) => {
               if (nextRunId) {
                 setRunId(nextRunId)
