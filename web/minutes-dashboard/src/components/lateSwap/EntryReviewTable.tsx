@@ -1,4 +1,14 @@
 import { LateSwapCandidate } from '../../api/late_swap'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table'
 
 interface EntryReviewTableProps {
     candidatesByEntryId: Record<string, LateSwapCandidate[]>
@@ -41,45 +51,51 @@ export function EntryReviewTable({
     })
 
     return (
-        <section className="late-swap-entry-table">
-            <h3>Entry Review</h3>
-            <div className="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Contest</th>
-                            <th>Entry</th>
-                            <th>Locked Slots</th>
-                            <th>Selected Candidate</th>
-                            <th>Swaps</th>
-                            <th>Projected</th>
-                            <th>State</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+        <Card className="late-swap-entry-table">
+            <CardHeader>
+                <CardTitle>Entry Review</CardTitle>
+            </CardHeader>
+            <CardContent className="table-wrap">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Contest</TableHead>
+                            <TableHead>Entry</TableHead>
+                            <TableHead>Locked Slots</TableHead>
+                            <TableHead>Selected Candidate</TableHead>
+                            <TableHead>Swaps</TableHead>
+                            <TableHead>Projected</TableHead>
+                            <TableHead>State</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
                         {rows.map((row) => (
-                            <tr
+                            <TableRow
                                 key={row.scopedEntryId}
                                 className={selectedEntryId === row.scopedEntryId ? 'active' : ''}
                                 onClick={() => onSelectEntry(row.scopedEntryId)}
                             >
-                                <td>{row.contestId}</td>
-                                <td>{row.entryId}</td>
-                                <td>{row.lockedSlots}</td>
-                                <td>{row.selected.generated_by}</td>
-                                <td>{row.selected.swap_count}</td>
-                                <td>{row.selected.projected_score?.toFixed(2) ?? '-'}</td>
-                                <td>{row.state}</td>
-                            </tr>
+                                <TableCell>{row.contestId}</TableCell>
+                                <TableCell>{row.entryId}</TableCell>
+                                <TableCell>{row.lockedSlots}</TableCell>
+                                <TableCell>{row.selected.generated_by}</TableCell>
+                                <TableCell>{row.selected.swap_count}</TableCell>
+                                <TableCell>{row.selected.projected_score?.toFixed(2) ?? '-'}</TableCell>
+                                <TableCell>
+                                    <Badge variant={row.state === 'swapped' ? 'secondary' : row.state === 'pinned' ? 'default' : 'muted'}>
+                                        {row.state}
+                                    </Badge>
+                                </TableCell>
+                            </TableRow>
                         ))}
                         {rows.length === 0 && (
-                            <tr>
-                                <td colSpan={7}>No entry previews available.</td>
-                            </tr>
+                            <TableRow>
+                                <TableCell colSpan={7}>No entry previews available.</TableCell>
+                            </TableRow>
                         )}
-                    </tbody>
-                </table>
-            </div>
-        </section>
+                    </TableBody>
+                </Table>
+            </CardContent>
+        </Card>
     )
 }

@@ -1,4 +1,7 @@
 import { LateSwapSession } from '../../api/late_swap'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 
 interface LateSwapHeaderProps {
     date: string
@@ -16,34 +19,31 @@ export function LateSwapHeader({
     session,
 }: LateSwapHeaderProps) {
     return (
-        <section className="late-swap-header">
-            <div>
-                <h2>Late Swap Workbench</h2>
-                <p>
-                    Sessionized grouped late swap with preview, diagnostics, and explicit commit.
-                </p>
-            </div>
-            <div className="late-swap-header-meta">
-                <label>
-                    Date
-                    <input
+        <Card className="late-swap-header">
+            <CardHeader className="late-swap-header-head">
+                <CardTitle>Late Swap Workbench</CardTitle>
+                <CardDescription>
+                    Sessionized grouped late swap with preview diagnostics and explicit commit.
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="late-swap-header-meta">
+                <label className="late-swap-label">
+                    <span>Date</span>
+                    <Input
                         type="date"
                         value={date}
                         onChange={(event) => onDateChange(event.target.value)}
+                        className="w-[170px]"
                     />
                 </label>
-                <div className="late-swap-chip">
-                    Contests Selected: <strong>{selectedContestCount}</strong>
-                </div>
-                <div className="late-swap-chip">
-                    Entries: <strong>{selectedEntryCount}</strong>
-                </div>
+                <Badge variant="outline">Contests: {selectedContestCount}</Badge>
+                <Badge variant="outline">Entries: {selectedEntryCount}</Badge>
                 {session && (
-                    <div className={`late-swap-chip status-${session.status}`}>
-                        Session: <strong>{session.status}</strong>
-                    </div>
+                    <Badge variant={session.status === 'failed' ? 'default' : 'secondary'}>
+                        Session: {session.status}
+                    </Badge>
                 )}
-            </div>
-        </section>
+            </CardContent>
+        </Card>
     )
 }

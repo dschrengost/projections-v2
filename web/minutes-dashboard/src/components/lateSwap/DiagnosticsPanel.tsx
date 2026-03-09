@@ -1,4 +1,6 @@
 import { LateSwapDiagnostics } from '../../api/late_swap'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface DiagnosticsPanelProps {
     diagnostics: LateSwapDiagnostics | null | undefined
@@ -7,10 +9,12 @@ interface DiagnosticsPanelProps {
 export function DiagnosticsPanel({ diagnostics }: DiagnosticsPanelProps) {
     if (!diagnostics) {
         return (
-            <section className="late-swap-diagnostics">
-                <h3>Diagnostics</h3>
-                <p>No diagnostics available yet.</p>
-            </section>
+            <Card className="late-swap-diagnostics">
+                <CardHeader>
+                    <CardTitle>Diagnostics</CardTitle>
+                </CardHeader>
+                <CardContent>No diagnostics available yet.</CardContent>
+            </Card>
         )
     }
 
@@ -20,28 +24,34 @@ export function DiagnosticsPanel({ diagnostics }: DiagnosticsPanelProps) {
     ]
 
     return (
-        <section className="late-swap-diagnostics">
-            <h3>Diagnostics</h3>
-            <div className="diagnostic-columns">
-                <div>
+        <Card className="late-swap-diagnostics">
+            <CardHeader>
+                <CardTitle>Diagnostics</CardTitle>
+            </CardHeader>
+            <CardContent className="diagnostic-columns">
+                <div className="diag-card">
                     <h4>Warnings</h4>
-                    <ul>
+                    <div className="diag-items">
                         {warningItems.map((warning, idx) => (
-                            <li key={`${warning}-${idx}`}>{warning}</li>
+                            <Badge key={`${warning}-${idx}`} variant="muted" className="diag-badge">
+                                {warning}
+                            </Badge>
                         ))}
-                        {warningItems.length === 0 && <li>None</li>}
-                    </ul>
+                        {warningItems.length === 0 && <span className="muted-empty">None</span>}
+                    </div>
                 </div>
-                <div>
+                <div className="diag-card">
                     <h4>Errors</h4>
-                    <ul>
+                    <div className="diag-items">
                         {diagnostics.errors.map((error, idx) => (
-                            <li key={`${error}-${idx}`}>{error}</li>
+                            <Badge key={`${error}-${idx}`} variant="default" className="diag-badge">
+                                {error}
+                            </Badge>
                         ))}
-                        {diagnostics.errors.length === 0 && <li>None</li>}
-                    </ul>
+                        {diagnostics.errors.length === 0 && <span className="muted-empty">None</span>}
+                    </div>
                 </div>
-            </div>
-        </section>
+            </CardContent>
+        </Card>
     )
 }

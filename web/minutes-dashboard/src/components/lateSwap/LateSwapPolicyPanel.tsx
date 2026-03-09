@@ -1,5 +1,16 @@
 import { useState } from 'react'
 import { LateSwapMode, LateSwapPolicy } from '../../api/late_swap'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 
 export interface LateSwapContestOption {
     contestId: string
@@ -79,8 +90,11 @@ export function LateSwapPolicyPanel({
     }
 
     return (
-        <section className="late-swap-policy-panel">
-            <h3>Session & Policy</h3>
+        <Card className="late-swap-policy-panel">
+            <CardHeader>
+                <CardTitle>Session & Policy</CardTitle>
+            </CardHeader>
+            <CardContent>
 
             <div className="contest-picker">
                 {contestOptions.map((contest) => {
@@ -93,8 +107,8 @@ export function LateSwapPolicyPanel({
                                 onChange={() => onToggleContest(contest.contestId)}
                                 disabled={disabled}
                             />
-                            <span>{contest.contestName}</span>
-                            <small>{contest.entryCount}</small>
+                            <span className="contest-name">{contest.contestName}</span>
+                            <Badge variant="muted">{contest.entryCount}</Badge>
                         </label>
                     )
                 })}
@@ -102,41 +116,46 @@ export function LateSwapPolicyPanel({
 
             <div className="mode-grid">
                 {MODE_OPTIONS.map((opt) => (
-                    <button
+                    <Button
                         type="button"
                         key={opt.mode}
+                        variant={policy.mode === opt.mode ? 'secondary' : 'outline'}
                         className={`mode-card ${policy.mode === opt.mode ? 'active' : ''}`}
                         onClick={() => onPolicyChange({ ...policy, mode: opt.mode })}
                         disabled={disabled}
                     >
                         <strong>{opt.label}</strong>
                         <span>{opt.summary}</span>
-                    </button>
+                    </Button>
                 ))}
             </div>
 
             <div className="policy-controls">
                 <label>
-                    Target Source
-                    <select
+                    <span>Target Source</span>
+                    <Select
                         value={policy.target_source}
-                        onChange={(event) =>
+                        onValueChange={(value) =>
                             onPolicyChange({
                                 ...policy,
-                                target_source: event.target.value as LateSwapPolicy['target_source'],
+                                target_source: value as LateSwapPolicy['target_source'],
                             })
                         }
-                        disabled={disabled}
                     >
-                        <option value="source_portfolio">Source Portfolio</option>
-                        <option value="current_entries">Current Entries</option>
-                        <option value="explicit">Explicit</option>
-                        <option value="none">None</option>
-                    </select>
+                        <SelectTrigger disabled={disabled}>
+                            <SelectValue placeholder="Target source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="source_portfolio">Source Portfolio</SelectItem>
+                            <SelectItem value="current_entries">Current Entries</SelectItem>
+                            <SelectItem value="explicit">Explicit</SelectItem>
+                            <SelectItem value="none">None</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </label>
                 <label>
-                    Candidates / Entry
-                    <input
+                    <span>Candidates / Entry</span>
+                    <Input
                         type="number"
                         min={6}
                         max={20}
@@ -146,8 +165,8 @@ export function LateSwapPolicyPanel({
                     />
                 </label>
                 <label>
-                    Min Uniques
-                    <input
+                    <span>Min Uniques</span>
+                    <Input
                         type="number"
                         min={0}
                         value={policy.min_uniques}
@@ -156,8 +175,8 @@ export function LateSwapPolicyPanel({
                     />
                 </label>
                 <label>
-                    Max Duplicates
-                    <input
+                    <span>Max Duplicates</span>
+                    <Input
                         type="number"
                         min={1}
                         value={policy.max_duplicate_lineups}
@@ -166,8 +185,8 @@ export function LateSwapPolicyPanel({
                     />
                 </label>
                 <label>
-                    Swap Cost λ
-                    <input
+                    <span>Swap Cost λ</span>
+                    <Input
                         type="number"
                         step={0.01}
                         value={policy.swap_cost_lambda}
@@ -176,8 +195,8 @@ export function LateSwapPolicyPanel({
                     />
                 </label>
                 <label>
-                    Target Deviation λ
-                    <input
+                    <span>Target Deviation λ</span>
+                    <Input
                         type="number"
                         step={0.01}
                         value={policy.target_deviation_lambda}
@@ -190,66 +209,67 @@ export function LateSwapPolicyPanel({
             <div className="bound-editor">
                 <h4>Player Exposure Bounds</h4>
                 <div className="bound-row">
-                    <input
+                    <Input
                         type="text"
                         placeholder="Player ID"
                         value={boundPlayerId}
                         onChange={(event) => setBoundPlayerId(event.target.value)}
                         disabled={disabled}
                     />
-                    <input
+                    <Input
                         type="number"
                         placeholder="Min %"
                         value={boundMin}
                         onChange={(event) => setBoundMin(event.target.value)}
                         disabled={disabled}
                     />
-                    <input
+                    <Input
                         type="number"
                         placeholder="Max %"
                         value={boundMax}
                         onChange={(event) => setBoundMax(event.target.value)}
                         disabled={disabled}
                     />
-                    <button type="button" onClick={addOrUpdateBound} disabled={disabled}>
+                    <Button type="button" variant="secondary" onClick={addOrUpdateBound} disabled={disabled}>
                         Set
-                    </button>
+                    </Button>
                 </div>
                 <ul>
                     {Object.entries(policy.exposure_bounds).map(([pid, bounds]) => (
                         <li key={pid}>
-                            <span>{pid}</span>
-                            <span>
+                            <Badge variant="outline">{pid}</Badge>
+                            <small>
                                 min {bounds.min ?? '-'} / max {bounds.max ?? '-'}
-                            </span>
-                            <button type="button" onClick={() => removeBound(pid)} disabled={disabled}>
+                            </small>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => removeBound(pid)} disabled={disabled}>
                                 Remove
-                            </button>
+                            </Button>
                         </li>
                     ))}
                 </ul>
             </div>
 
             <div className="policy-actions">
-                <button type="button" onClick={onCreateSession} disabled={disabled || selectedContestIds.size === 0}>
+                <Button type="button" onClick={onCreateSession} disabled={disabled || selectedContestIds.size === 0}>
                     Create Session
-                </button>
-                <button type="button" onClick={onApplyPolicy} disabled={disabled}>
+                </Button>
+                <Button type="button" variant="secondary" onClick={onApplyPolicy} disabled={disabled}>
                     Save Policy
-                </button>
-                <button type="button" onClick={onPreview} disabled={disabled}>
+                </Button>
+                <Button type="button" variant="outline" onClick={onPreview} disabled={disabled}>
                     Refresh Preview
-                </button>
-                <button type="button" onClick={onCommit} disabled={disabled}>
+                </Button>
+                <Button type="button" variant="destructive" onClick={onCommit} disabled={disabled}>
                     Commit Preview
-                </button>
-                <button type="button" onClick={() => onExport(true)} disabled={disabled}>
+                </Button>
+                <Button type="button" variant="outline" onClick={() => onExport(true)} disabled={disabled}>
                     Export Preview CSV
-                </button>
-                <button type="button" onClick={() => onExport(false)} disabled={disabled}>
+                </Button>
+                <Button type="button" variant="outline" onClick={() => onExport(false)} disabled={disabled}>
                     Export Committed CSV
-                </button>
+                </Button>
             </div>
-        </section>
+            </CardContent>
+        </Card>
     )
 }

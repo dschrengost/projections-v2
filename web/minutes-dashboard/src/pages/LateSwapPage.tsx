@@ -22,6 +22,15 @@ import { ExposureDashboard } from '../components/lateSwap/ExposureDashboard'
 import { LateSwapHeader } from '../components/lateSwap/LateSwapHeader'
 import { LateSwapPolicyPanel } from '../components/lateSwap/LateSwapPolicyPanel'
 import { SwapSummaryPanel } from '../components/lateSwap/SwapSummaryPanel'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 import './LateSwapPage.css'
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -255,23 +264,36 @@ export default function LateSwapPage() {
             />
 
             <div className="late-swap-session-strip">
-                <label>
-                    Session
-                    <select
-                        value={session?.session_id ?? ''}
-                        onChange={(event) => {
-                            const value = event.target.value
-                            if (value) void loadSession(value, selectedDate)
-                        }}
-                    >
-                        <option value="">Select Session</option>
-                        {sessions.map((item) => (
-                            <option key={item.session_id} value={item.session_id}>
-                                {item.session_id} · {item.status} · {item.contest_ids.length} contests
-                            </option>
-                        ))}
-                    </select>
-                </label>
+                <Card className="session-strip-card">
+                    <CardContent className="session-strip-card-content">
+                        <label className="late-swap-label">
+                            <span>Session</span>
+                            <Select
+                                value={session?.session_id ?? '__none__'}
+                                onValueChange={(value) => {
+                                    if (value !== '__none__') void loadSession(value, selectedDate)
+                                }}
+                            >
+                                <SelectTrigger className="w-[360px] max-w-full">
+                                    <SelectValue placeholder="Select Session" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="__none__">Select Session</SelectItem>
+                                    {sessions.map((item) => (
+                                        <SelectItem key={item.session_id} value={item.session_id}>
+                                            {item.session_id} · {item.status} · {item.contest_ids.length} contests
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </label>
+                        {session && (
+                            <Badge variant={session.status === 'failed' ? 'default' : 'outline'}>
+                                {session.status}
+                            </Badge>
+                        )}
+                    </CardContent>
+                </Card>
                 {error && <span className="late-swap-error">{error}</span>}
             </div>
 

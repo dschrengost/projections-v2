@@ -1,5 +1,15 @@
 import { useMemo, useState } from 'react'
 import { ExposureStateRow } from '../../api/late_swap'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table'
 
 interface ExposureDashboardProps {
     rows: ExposureStateRow[]
@@ -30,9 +40,9 @@ export function ExposureDashboard({ rows }: ExposureDashboardProps) {
     }, [rows, onlyOverCap, onlyForced, onlyChanged, top20])
 
     return (
-        <section className="late-swap-exposure">
-            <div className="panel-header">
-                <h3>Exposure Dashboard</h3>
+        <Card className="late-swap-exposure">
+            <CardHeader className="panel-header-row">
+                <CardTitle>Exposure Dashboard</CardTitle>
                 <div className="filters">
                     <label>
                         <input
@@ -67,40 +77,52 @@ export function ExposureDashboard({ rows }: ExposureDashboardProps) {
                         Top 20
                     </label>
                 </div>
-            </div>
-            <div className="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Player</th>
-                            <th>Target%</th>
-                            <th>Lock Floor%</th>
-                            <th>Current%</th>
-                            <th>Proposed%</th>
-                            <th>Δ Target</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+            </CardHeader>
+            <CardContent className="table-wrap">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Player</TableHead>
+                            <TableHead>Target%</TableHead>
+                            <TableHead>Lock Floor%</TableHead>
+                            <TableHead>Current%</TableHead>
+                            <TableHead>Proposed%</TableHead>
+                            <TableHead>Δ Target</TableHead>
+                            <TableHead>Status</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
                         {filtered.map((row) => (
-                            <tr key={row.player_id}>
-                                <td>{row.player_name}</td>
-                                <td>{row.source_target_pct?.toFixed(1) ?? '-'}</td>
-                                <td>{row.locked_floor_pct.toFixed(1)}</td>
-                                <td>{row.current_committed_pct.toFixed(1)}</td>
-                                <td>{row.proposed_final_pct.toFixed(1)}</td>
-                                <td>{row.delta_vs_target_pct?.toFixed(1) ?? '-'}</td>
-                                <td>{row.status}</td>
-                            </tr>
+                            <TableRow key={row.player_id}>
+                                <TableCell>{row.player_name}</TableCell>
+                                <TableCell>{row.source_target_pct?.toFixed(1) ?? '-'}</TableCell>
+                                <TableCell>{row.locked_floor_pct.toFixed(1)}</TableCell>
+                                <TableCell>{row.current_committed_pct.toFixed(1)}</TableCell>
+                                <TableCell>{row.proposed_final_pct.toFixed(1)}</TableCell>
+                                <TableCell>{row.delta_vs_target_pct?.toFixed(1) ?? '-'}</TableCell>
+                                <TableCell>
+                                    <Badge
+                                        variant={
+                                            row.forced_over_cap_by_locks
+                                                ? 'default'
+                                                : row.status === 'within_target'
+                                                    ? 'muted'
+                                                    : 'secondary'
+                                        }
+                                    >
+                                        {row.status}
+                                    </Badge>
+                                </TableCell>
+                            </TableRow>
                         ))}
                         {filtered.length === 0 && (
-                            <tr>
-                                <td colSpan={7}>No exposures to display for current filters.</td>
-                            </tr>
+                            <TableRow>
+                                <TableCell colSpan={7}>No exposures to display for current filters.</TableCell>
+                            </TableRow>
                         )}
-                    </tbody>
-                </table>
-            </div>
-        </section>
+                    </TableBody>
+                </Table>
+            </CardContent>
+        </Card>
     )
 }

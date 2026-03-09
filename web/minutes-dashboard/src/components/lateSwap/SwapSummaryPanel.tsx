@@ -1,4 +1,5 @@
 import { LateSwapSelectionSummary } from '../../api/late_swap'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface SwapSummaryPanelProps {
     summary: LateSwapSelectionSummary | null | undefined
@@ -7,17 +8,21 @@ interface SwapSummaryPanelProps {
 export function SwapSummaryPanel({ summary }: SwapSummaryPanelProps) {
     if (!summary) {
         return (
-            <section className="late-swap-summary">
-                <h3>Swap Summary</h3>
-                <p>No preview summary yet.</p>
-            </section>
+            <Card className="late-swap-summary">
+                <CardHeader>
+                    <CardTitle>Swap Summary</CardTitle>
+                </CardHeader>
+                <CardContent>No preview summary yet.</CardContent>
+            </Card>
         )
     }
 
     return (
-        <section className="late-swap-summary">
-            <h3>Swap Summary</h3>
-            <div className="summary-grid">
+        <Card className="late-swap-summary">
+            <CardHeader>
+                <CardTitle>Swap Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="summary-grid">
                 <div>
                     <span>Entries</span>
                     <strong>{summary.entries_total}</strong>
@@ -54,7 +59,7 @@ export function SwapSummaryPanel({ summary }: SwapSummaryPanelProps) {
                     <span>Infeasibilities</span>
                     <strong>{summary.infeasibility_count}</strong>
                 </div>
-            </div>
-        </section>
+            </CardContent>
+        </Card>
     )
 }
