@@ -2,6 +2,11 @@
 
 ## Spec Status: DRAFT v0.2 (2026-02-23)
 
+Related production specs:
+
+- [Inference Server Spec](../pipeline/INFERENCE_SERVER_SPEC.md)
+- [Live Pipeline Production Spec](../pipeline/LIVE_PIPELINE_PRODUCTION_SPEC.md)
+
 ---
 
 ## 1. Motivation

@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import hashlib
 import os
-import random
 import shutil
 import subprocess
 import sys
@@ -44,6 +43,13 @@ from projections import model_selectors, paths
 from projections.etl import storage as bronze_storage
 from projections.names import normalize_player_name
 from projections.pipeline import control_plane, writer_guard
+from projections.pipeline.gtv2_inference_runtime import (
+    build_gtv2_inference_examples as shared_build_gtv2_inference_examples,
+    load_gtv2_model as shared_load_gtv2_model,
+    resolve_torch_device as shared_resolve_torch_device,
+    score_gtv2_features_df as shared_score_gtv2_features_df,
+    set_inference_seed as shared_set_inference_seed,
+)
 from projections.pipeline.gtv2_live_features import (
     build_gtv2_live_features,
     load_gtv2_feature_spec,
@@ -56,14 +62,18 @@ from projections.pipeline.parity_manifest import (
     stable_json_sha256,
     write_parity_manifest,
 )
+from projections.pipeline.triton_inference_client import (
+    TritonEndpointConfig,
+    TritonInferenceError,
+    check_triton_health,
+    infer_json_action,
+)
 from projections.pipeline.v3_postflight import run_postflight_gate
 from projections.pipeline.v3_preflight import run_preflight_gate
 from projections.ops.manual_availability import list_manual_overrides, manual_override_report
 from projections.rotation.game_transformer_v2 import (
     GameLevelDataset,
     GameTransformerV2Config,
-    build_game_level_examples,
-    build_game_transformer_v2,
     collate_game_level_examples,
 )
 from projections.rotation.sample_worlds_v2 import (
@@ -265,6 +275,82 @@ def _resolve_bundle_dir(*, data_root: Path, gtv2_bundle_dir: str | None) -> Path
     ).resolve()
 
 
+def _load_gtv2_inference_server_config() -> dict[str, Any]:
+    config_path = PROJECT_ROOT / "config" / "gtv2_inference_server.json"
+    cfg: dict[str, Any] = {
+        "enabled": False,
+        "backend": "local",
+        "triton_endpoint": "localhost:8000",
+        "model_name": "gtv2_scorer",
+        "model_version": None,
+        "timeout_seconds": 90.0,
+        "healthcheck_timeout_seconds": 3.0,
+    }
+    if config_path.exists():
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"invalid inference server config payload: {config_path}")
+        cfg.update(payload)
+    if cfg.get("triton_url") and not cfg.get("triton_endpoint"):
+        cfg["triton_endpoint"] = cfg.get("triton_url")
+    return cfg
+
+
+def _resolve_gtv2_inference_backend(
+    *,
+    requested: str | None,
+    config_payload: dict[str, Any],
+) -> str:
+    mode = str(requested or "auto").strip().lower()
+    if mode not in {"auto", "local", "triton"}:
+        raise RuntimeError(
+            "gtv2_inference_backend must be one of: auto, local, triton"
+        )
+    if mode != "auto":
+        return mode
+    cfg_backend = str(config_payload.get("backend", "local")).strip().lower()
+    if bool(config_payload.get("enabled")) and cfg_backend == "triton":
+        return "triton"
+    return "local"
+
+
+def _resolve_triton_endpoint_config(
+    *,
+    config_payload: dict[str, Any],
+    endpoint_override: str | None,
+    model_name_override: str | None,
+    model_version_override: str | None,
+    timeout_seconds_override: float | None,
+) -> TritonEndpointConfig:
+    endpoint = (
+        endpoint_override
+        or str(config_payload.get("triton_endpoint") or "").strip()
+        or str(config_payload.get("triton_url") or "").strip()
+        or "localhost:8000"
+    )
+    model_name = (
+        model_name_override
+        or str(config_payload.get("model_name") or "").strip()
+        or "gtv2_scorer"
+    )
+    model_version = (
+        model_version_override
+        or str(config_payload.get("model_version") or "").strip()
+        or None
+    )
+    timeout_seconds = float(
+        timeout_seconds_override
+        if timeout_seconds_override is not None
+        else config_payload.get("timeout_seconds", 90.0)
+    )
+    return TritonEndpointConfig(
+        endpoint=endpoint,
+        model_name=model_name,
+        model_version=model_version,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def _placeholder_feature_frame(*, game_date: str, as_of_ts: str) -> pd.DataFrame:
     game_id = 900001
     team_a = 100
@@ -334,11 +420,7 @@ def _bundle_artifact_hash(bundle_dir: Path) -> str:
 
 
 def _set_inference_seed(seed: int) -> None:
-    _configure_torch_runtime_for_inference()
-    random.seed(int(seed))
-    np.random.seed(int(seed))
-    torch.manual_seed(int(seed))
-    torch.cuda.manual_seed_all(int(seed))
+    shared_set_inference_seed(int(seed))
 
 
 def _configure_torch_runtime_for_inference() -> None:
@@ -384,9 +466,7 @@ def _configure_torch_runtime_for_inference() -> None:
 
 
 def _resolve_torch_device(device: str | None) -> torch.device:
-    if device:
-        return torch.device(str(device))
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return shared_resolve_torch_device(device)
 
 
 def _load_gtv2_model(
@@ -395,25 +475,11 @@ def _load_gtv2_model(
     device: torch.device,
     flow_scale_clip_override: float | None = None,
 ) -> tuple[GameTransformerV2Config, torch.nn.Module]:
-    config_path = Path(bundle_dir) / "config.json"
-    model_path = Path(bundle_dir) / "model.pt"
-    if not config_path.exists():
-        raise RuntimeError(f"missing bundle config: {config_path}")
-    if not model_path.exists():
-        raise RuntimeError(f"missing bundle model: {model_path}")
-
-    config = GameTransformerV2Config.load(config_path)
-    model = build_game_transformer_v2(config)
-    state = torch.load(model_path, map_location=device)
-    model.load_state_dict(state)
-
-    # Inference-only scale_clip override (H1 experiment support)
-    if flow_scale_clip_override is not None:
-        model.flow_head.set_scale_clip(float(flow_scale_clip_override))
-
-    model = model.to(device=device)
-    model.eval()
-    return config, model
+    return shared_load_gtv2_model(
+        bundle_dir=Path(bundle_dir),
+        device=device,
+        flow_scale_clip_override=flow_scale_clip_override,
+    )
 
 
 def _coerce_frame_to_manifest_schema(
@@ -479,45 +545,11 @@ def _build_gtv2_inference_examples(
     game_date: str,
     config: GameTransformerV2Config,
 ) -> list[Any]:
-    frame = features_df.copy()
-    frame["game_date"] = pd.Timestamp(game_date).normalize()
-    frame["minutes"] = 0.0
-
-    examples = build_game_level_examples(
-        frame,
-        feature_columns=list(config.feature_columns),
-        feature_mean=np.asarray(config.feature_mean, dtype=np.float32),
-        feature_std=np.asarray(config.feature_std, dtype=np.float32),
-        game_feature_columns=list(config.game_feature_columns),
-        team_feature_columns=list(config.team_feature_columns),
-        flow_label_columns=[],
-        minutes_label_col="minutes",
-        min_valid_players_per_team=max(1, int(config.min_active_count)),
-        overflow_protected_prior_play_prob_floor=float(
-            config.overflow_protected_prior_play_prob_floor
-        ),
-        overflow_protected_prior_minutes_floor=float(
-            config.overflow_protected_prior_minutes_floor
-        ),
-        overflow_risk_weight_consecutive_active_dnp=float(
-            config.overflow_risk_weight_consecutive_active_dnp
-        ),
-        overflow_risk_weight_active_but_dnp_rate_last10=float(
-            config.overflow_risk_weight_active_but_dnp_rate_last10
-        ),
-        overflow_risk_weight_inactive_streak_len=float(
-            config.overflow_risk_weight_inactive_streak_len
-        ),
-        overflow_keep_weight_prior_play_prob=float(
-            config.overflow_keep_weight_prior_play_prob
-        ),
-        overflow_keep_weight_prior_minutes=float(
-            config.overflow_keep_weight_prior_minutes
-        ),
+    return shared_build_gtv2_inference_examples(
+        features_df=features_df,
+        game_date=game_date,
+        config=config,
     )
-    if not examples:
-        raise RuntimeError("no valid game examples produced for GTV2 inference")
-    return examples
 
 
 def _attach_gtv2_force_active_worlds(
@@ -1601,6 +1633,31 @@ def _filter_to_target_games(
         return df.copy()
     gids = pd.to_numeric(df["game_id"], errors="coerce").astype("Int64")
     return df.loc[gids.isin(target_game_ids)].copy()
+
+
+def _split_frame_by_game(df: pd.DataFrame) -> list[tuple[int, pd.DataFrame]]:
+    if df.empty or "game_id" not in df.columns:
+        return []
+    gids = pd.to_numeric(df["game_id"], errors="coerce").astype("Int64")
+    game_ids = _normalize_game_ids(gids.dropna().astype(int).tolist())
+    out: list[tuple[int, pd.DataFrame]] = []
+    for game_id in game_ids:
+        game_df = df.loc[gids == int(game_id)].copy()
+        if game_df.empty:
+            continue
+        out.append((int(game_id), game_df))
+    return out
+
+
+def _per_game_request_seed(base_seed: int, game_id: int) -> int:
+    """
+    Derive a deterministic per-game seed so per-game Triton requests do not
+    replay identical RNG streams across different games.
+    """
+    mixed = (int(base_seed) * 1_000_003 + int(game_id) * 97_531) & 0x7FFFFFFF
+    if mixed == 0:
+        return max(1, int(base_seed))
+    return int(mixed)
 
 
 def _sort_for_stable_write(df: pd.DataFrame) -> pd.DataFrame:
@@ -3869,6 +3926,17 @@ def build_features_gtv2_live_task(
             out_path,
             required_cols=("game_id", "team_id", "player_id"),
         )
+        # Keep publish-stage contracts stable even in placeholder mode by also
+        # writing the canonical minutes features artifact.
+        base_minutes_run_dir = (
+            data_root / "live" / "features_minutes_v1" / game_date / f"run={run_id}"
+        )
+        base_minutes_run_dir.mkdir(parents=True, exist_ok=True)
+        _atomic_write_validated_parquet(
+            features_df,
+            base_minutes_run_dir / "features.parquet",
+            required_cols=("game_id", "team_id", "player_id"),
+        )
 
         transform_manifest = {
             "feature_builder": "placeholder_gtv2_live_v1",
@@ -4092,6 +4160,12 @@ def score_gtv2_live_task(
     bundle_dir: Path,
     data_root: Path,
     placeholder_mode: bool,
+    inference_backend: str = "local",
+    triton_endpoint: str | None = None,
+    triton_model_name: str = "gtv2_scorer",
+    triton_model_version: str | None = None,
+    triton_timeout_seconds: float = 90.0,
+    triton_healthcheck_timeout_seconds: float = 3.0,
     gtv2_device: str | None = None,
     random_seed: int = 42,
 ) -> Path:
@@ -4135,84 +4209,115 @@ def score_gtv2_live_task(
         )
         return out_path
 
-    _set_inference_seed(int(random_seed))
-    device = _resolve_torch_device(gtv2_device)
-    config, model = _load_gtv2_model(bundle_dir, device=device)
+    backend = str(inference_backend).strip().lower()
+    if backend not in {"local", "triton"}:
+        raise RuntimeError(f"unsupported inference backend for score task: {backend}")
 
     features_df = pd.read_parquet(features_path)
-    examples = _build_gtv2_inference_examples(
-        features_df=features_df,
-        game_date=game_date,
-        config=config,
-    )
-    loader = DataLoader(
-        GameLevelDataset(examples),
-        batch_size=4,
-        shuffle=False,
-        num_workers=0,
-        collate_fn=collate_game_level_examples,
-    )
-
-    rows: list[dict[str, Any]] = []
-    with torch.no_grad():
-        for batch in loader:
-            player_features = batch["player_features"].to(device=device)
-            player_valid_mask = batch["player_valid_mask"].to(device=device)
-            game_features = batch["game_features"].to(device=device)
-            team_features = batch["team_features"].to(device=device)
-
-            out = model(
-                player_features,
-                player_valid_mask,
-                game_features=game_features,
-                team_features=team_features,
-                sample_active=False,
-                run_flow=False,
+    triton_request_count = 0
+    if backend == "triton":
+        if not triton_endpoint:
+            raise RuntimeError("triton backend selected but triton_endpoint is empty")
+        ready, detail = check_triton_health(
+            triton_endpoint,
+            timeout_seconds=float(triton_healthcheck_timeout_seconds),
+        )
+        if not ready:
+            raise RuntimeError(
+                f"triton readiness check failed for score task: endpoint={triton_endpoint} detail={detail}"
             )
-
-            valid = batch["player_valid_mask"].cpu().numpy().astype(bool)
-            player_ids = batch["player_ids"].cpu().numpy().astype(np.int64)
-            team_ids = batch["team_ids"].cpu().numpy().astype(np.int64)
-            game_ids = [int(v) for v in batch["game_id_norm"]]
-            game_dates = [str(v) for v in batch["game_date"]]
-
-            minutes = out.minutes.minutes.detach().cpu().numpy()
-            active_mask = out.active.active_mask.detach().cpu().numpy().astype(bool)
-            player_logits = out.active.player_logits.detach().cpu().numpy()
-            active_prob = 1.0 / (1.0 + np.exp(-np.clip(player_logits, -40.0, 40.0)))
-
-            for b_idx in range(minutes.shape[0]):
-                valid_flat = np.concatenate([valid[b_idx, 0], valid[b_idx, 1]], axis=0)
-                player_flat = np.concatenate(
-                    [player_ids[b_idx, 0], player_ids[b_idx, 1]], axis=0
+        endpoint_cfg = TritonEndpointConfig(
+            endpoint=str(triton_endpoint),
+            model_name=str(triton_model_name),
+            model_version=(
+                str(triton_model_version).strip() if triton_model_version else None
+            ),
+            timeout_seconds=float(triton_timeout_seconds),
+        )
+        game_frames = _split_frame_by_game(features_df)
+        if not game_frames:
+            raise RuntimeError("triton scoring received no game rows")
+        score_frames: list[pd.DataFrame] = []
+        last_response: dict[str, Any] = {}
+        for game_id_value, game_features_df in game_frames:
+            game_seed = _per_game_request_seed(int(random_seed), int(game_id_value))
+            game_suffix = f"game_{int(game_id_value)}"
+            game_features_path = run_dir / f"features_score_{game_suffix}.parquet"
+            game_scores_path = run_dir / f"scores_{game_suffix}.parquet"
+            _atomic_write_validated_parquet(
+                game_features_df,
+                game_features_path,
+                required_cols=("game_date", "game_id", "team_id", "player_id"),
+            )
+            triton_request_count += 1
+            try:
+                response = infer_json_action(
+                    cfg=endpoint_cfg,
+                    request_payload={
+                        "action": "score",
+                        "game_date": str(game_date),
+                        "features_path": str(game_features_path),
+                        "out_path": str(game_scores_path),
+                        "bundle_dir": str(bundle_dir),
+                        "random_seed": int(game_seed),
+                        "device": str(gtv2_device or ""),
+                        "batch_size": 4,
+                    },
                 )
-                team_flat = np.concatenate(
-                    [
-                        np.full((15,), int(team_ids[b_idx, 0]), dtype=np.int64),
-                        np.full((15,), int(team_ids[b_idx, 1]), dtype=np.int64),
-                    ],
-                    axis=0,
+            except TritonInferenceError as exc:
+                raise RuntimeError(
+                    f"triton score request failed for game_id={int(game_id_value)}: {exc}"
+                ) from exc
+            if not bool(response.get("ok")):
+                raise RuntimeError(
+                    "triton score response indicated failure for "
+                    f"game_id={int(game_id_value)}: {response}"
                 )
-                for idx in np.where(valid_flat)[0]:
-                    rows.append(
-                        {
-                            "game_date": game_dates[b_idx],
-                            "game_id": game_ids[b_idx],
-                            "team_id": int(team_flat[idx]),
-                            "player_id": int(player_flat[idx]),
-                            "minutes_deterministic": float(minutes[b_idx, idx]),
-                            "active_deterministic": int(bool(active_mask[b_idx, idx])),
-                            "active_logit": float(player_logits[b_idx, idx]),
-                            "active_prob_proxy": float(active_prob[b_idx, idx]),
-                        }
-                    )
+            if not game_scores_path.exists():
+                raise RuntimeError(
+                    "triton score response ok but output parquet missing for "
+                    f"game_id={int(game_id_value)}: {game_scores_path}"
+                )
+            game_scores = pd.read_parquet(game_scores_path)
+            if game_scores.empty:
+                raise RuntimeError(
+                    f"triton scoring produced zero rows for game_id={int(game_id_value)}"
+                )
+            score_frames.append(game_scores)
+            last_response = dict(response)
+        if not score_frames:
+            raise RuntimeError("triton scoring produced zero game outputs")
+        scores = pd.concat(score_frames, ignore_index=True)
+        scores = scores.sort_values(
+            ["game_date", "game_id", "team_id", "player_id"]
+        ).reset_index(drop=True)
+        device_for_summary = str(
+            last_response.get("device") or gtv2_device or "triton"
+        )
+    else:
+        _set_inference_seed(int(random_seed))
+        device = _resolve_torch_device(gtv2_device)
+        config, model = _load_gtv2_model(bundle_dir, device=device)
+        game_frames = _split_frame_by_game(features_df)
+        if not game_frames:
+            raise RuntimeError("local scoring received no game rows")
+        score_frames: list[pd.DataFrame] = []
+        for _game_id_value, game_features_df in game_frames:
+            game_scores = shared_score_gtv2_features_df(
+                features_df=game_features_df,
+                game_date=game_date,
+                config=config,
+                model=model,
+                device=device,
+                batch_size=1,
+            )
+            score_frames.append(game_scores)
+        scores = pd.concat(score_frames, ignore_index=True)
+        scores = scores.sort_values(
+            ["game_date", "game_id", "team_id", "player_id"]
+        ).reset_index(drop=True)
+        device_for_summary = str(device)
 
-    scores = pd.DataFrame(rows)
-    if scores.empty:
-        raise RuntimeError("GTV2 scoring produced zero rows")
-    scores = scores.sort_values(
-        ["game_date", "game_id", "team_id", "player_id"]
-    ).reset_index(drop=True)
     _atomic_write_validated_parquet(
         scores,
         out_path,
@@ -4225,8 +4330,10 @@ def score_gtv2_live_task(
                 "rows": int(len(scores)),
                 "games": int(scores["game_id"].nunique()),
                 "players": int(scores["player_id"].nunique()),
-                "device": str(device),
+                "device": device_for_summary,
+                "inference_backend": backend,
                 "bundle_dir": str(bundle_dir),
+                "triton_request_count": int(triton_request_count),
                 "created_at": _utc_now_iso(),
             },
             indent=2,
@@ -4249,6 +4356,12 @@ def generate_worlds_gtv2_live_task(
     data_root: Path,
     sim_worlds: int,
     placeholder_mode: bool,
+    inference_backend: str = "local",
+    triton_endpoint: str | None = None,
+    triton_model_name: str = "gtv2_scorer",
+    triton_model_version: str | None = None,
+    triton_timeout_seconds: float = 90.0,
+    triton_healthcheck_timeout_seconds: float = 3.0,
     gtv2_device: str | None = None,
     world_chunk_size: int = 64,
     active_temperature: float = 1.0,
@@ -4299,7 +4412,9 @@ def generate_worlds_gtv2_live_task(
             required_cols=("game_date", "game_id", "team_id", "player_id"),
         )
         _atomic_write_validated_parquet(
-            pd.DataFrame(columns=["world_idx"]),
+            pd.DataFrame(
+                columns=["world_idx", "game_id", "team_id", "player_id"]
+            ),
             worlds_path,
             required_cols=("world_idx",),
         )
@@ -4326,8 +4441,14 @@ def generate_worlds_gtv2_live_task(
         }
     else:
         logger = get_run_logger()
+        backend = str(inference_backend).strip().lower()
+        if backend not in {"local", "triton"}:
+            raise RuntimeError(
+                f"unsupported inference backend for worlds task: {backend}"
+            )
         _set_inference_seed(int(random_seed))
         device = _resolve_torch_device(gtv2_device)
+        device_for_summary = str(device)
         make_model_cfg = MakeModelConfig(
             mode=str(make_model_mode),
             use_learned_efficiency=bool(make_model_use_learned_efficiency),
@@ -4343,12 +4464,6 @@ def generate_worlds_gtv2_live_task(
             logger.warning("This is a non-default setting for H1 hypothesis testing.")
             logger.warning("Production runs should use the trained default (2.0).")
             logger.warning("=" * 80)
-
-        config, model = _load_gtv2_model(
-            bundle_dir,
-            device=device,
-            flow_scale_clip_override=flow_scale_clip_override,
-        )
         features_df_raw = pd.read_parquet(features_path)
         features_df, force_active_diag = _attach_gtv2_force_active_worlds(
             features_df_raw,
@@ -4357,40 +4472,159 @@ def generate_worlds_gtv2_live_task(
             as_of_ts=run_as_of_ts,
         )
         logger.info("Applied force-active world guardrails: %s", force_active_diag)
-        examples = _build_gtv2_inference_examples(
-            features_df=features_df,
-            game_date=game_date,
-            config=config,
-        )
-        loader = DataLoader(
-            GameLevelDataset(examples),
-            batch_size=1,
-            shuffle=False,
-            num_workers=0,
-            collate_fn=collate_game_level_examples,
-        )
-
-        world_frames: list[pd.DataFrame] = []
-        contract_counter: Counter[str] = Counter()
-        for batch in loader:
-            df_batch, checks = sample_worlds_for_batch(
-                model,
-                batch,
-                device=device,
-                num_worlds=int(sim_worlds),
-                chunk_size=max(1, int(world_chunk_size)),
-                active_temperature=float(active_temperature),
-                strict_contracts=bool(strict_world_contracts),
-                make_model_config=make_model_cfg,
+        contract_checks_seed: dict[str, Any]
+        triton_request_count = 0
+        if backend == "triton":
+            if not triton_endpoint:
+                raise RuntimeError(
+                    "triton backend selected but triton_endpoint is empty"
+                )
+            ready, detail = check_triton_health(
+                triton_endpoint,
+                timeout_seconds=float(triton_healthcheck_timeout_seconds),
             )
-            world_frames.append(df_batch)
-            contract_counter.update(checks)
+            if not ready:
+                raise RuntimeError(
+                    "triton readiness check failed for worlds task: "
+                    f"endpoint={triton_endpoint} detail={detail}"
+                )
 
-        worlds_df = (
-            pd.concat(world_frames, ignore_index=True)
-            if world_frames
-            else pd.DataFrame()
-        )
+            raw_worlds_path = run_dir / "worlds_raw.parquet"
+            endpoint_cfg = TritonEndpointConfig(
+                endpoint=str(triton_endpoint),
+                model_name=str(triton_model_name),
+                model_version=(
+                    str(triton_model_version).strip()
+                    if triton_model_version
+                    else None
+                ),
+                timeout_seconds=float(triton_timeout_seconds),
+            )
+            game_frames = _split_frame_by_game(features_df)
+            if not game_frames:
+                raise RuntimeError("triton worlds generation received no game rows")
+            world_frames: list[pd.DataFrame] = []
+            contract_counter: Counter[str] = Counter()
+            last_response: dict[str, Any] = {}
+            for game_id_value, game_features_df in game_frames:
+                game_seed = _per_game_request_seed(int(random_seed), int(game_id_value))
+                game_suffix = f"game_{int(game_id_value)}"
+                game_features_path = (
+                    run_dir / f"features_for_worlds_{game_suffix}.parquet"
+                )
+                game_worlds_path = run_dir / f"worlds_raw_{game_suffix}.parquet"
+                _atomic_write_validated_parquet(
+                    game_features_df,
+                    game_features_path,
+                    required_cols=("game_id", "team_id", "player_id"),
+                )
+                triton_request_count += 1
+                try:
+                    response = infer_json_action(
+                        cfg=endpoint_cfg,
+                        request_payload={
+                            "action": "worlds",
+                            "game_date": str(game_date),
+                            "features_path": str(game_features_path),
+                            "out_path": str(game_worlds_path),
+                            "bundle_dir": str(bundle_dir),
+                            "random_seed": int(game_seed),
+                            "device": str(gtv2_device or ""),
+                            "num_worlds": int(sim_worlds),
+                            "world_chunk_size": int(world_chunk_size),
+                            "active_temperature": float(active_temperature),
+                            "strict_world_contracts": bool(strict_world_contracts),
+                            "flow_scale_clip_override": (
+                                float(flow_scale_clip_override)
+                                if flow_scale_clip_override is not None
+                                else None
+                            ),
+                            "make_model_mode": str(make_model_mode),
+                            "make_model_use_learned_efficiency": bool(
+                                make_model_use_learned_efficiency
+                            ),
+                        },
+                    )
+                except TritonInferenceError as exc:
+                    raise RuntimeError(
+                        f"triton worlds request failed for game_id={int(game_id_value)}: {exc}"
+                    ) from exc
+                if not bool(response.get("ok")):
+                    raise RuntimeError(
+                        "triton worlds response indicated failure for "
+                        f"game_id={int(game_id_value)}: {response}"
+                    )
+                if not game_worlds_path.exists():
+                    raise RuntimeError(
+                        "triton worlds response ok but output parquet missing for "
+                        f"game_id={int(game_id_value)}: {game_worlds_path}"
+                    )
+                game_worlds_df = pd.read_parquet(game_worlds_path)
+                if game_worlds_df.empty:
+                    raise RuntimeError(
+                        f"triton worlds generation produced zero rows for game_id={int(game_id_value)}"
+                    )
+                world_frames.append(game_worlds_df)
+                raw_checks = response.get("contract_checks")
+                if isinstance(raw_checks, dict):
+                    for key, value in raw_checks.items():
+                        try:
+                            contract_counter[str(key)] += int(value)
+                        except Exception:  # noqa: BLE001
+                            continue
+                last_response = dict(response)
+            worlds_df = pd.concat(world_frames, ignore_index=True)
+            _atomic_write_validated_parquet(
+                worlds_df,
+                raw_worlds_path,
+                required_cols=("world_idx", "game_id", "team_id", "player_id"),
+            )
+            contract_checks_seed = dict(contract_counter)
+            device_for_summary = str(
+                last_response.get("device")
+                or last_response.get("effective_device")
+                or device
+            )
+        else:
+            config, model = _load_gtv2_model(
+                bundle_dir,
+                device=device,
+                flow_scale_clip_override=flow_scale_clip_override,
+            )
+            examples = _build_gtv2_inference_examples(
+                features_df=features_df,
+                game_date=game_date,
+                config=config,
+            )
+            loader = DataLoader(
+                GameLevelDataset(examples),
+                batch_size=1,
+                shuffle=False,
+                num_workers=0,
+                collate_fn=collate_game_level_examples,
+            )
+            world_frames: list[pd.DataFrame] = []
+            contract_counter: Counter[str] = Counter()
+            for batch in loader:
+                df_batch, checks = sample_worlds_for_batch(
+                    model,
+                    batch,
+                    device=device,
+                    num_worlds=int(sim_worlds),
+                    chunk_size=max(1, int(world_chunk_size)),
+                    active_temperature=float(active_temperature),
+                    strict_contracts=bool(strict_world_contracts),
+                    make_model_config=make_model_cfg,
+                )
+                world_frames.append(df_batch)
+                contract_counter.update(checks)
+            worlds_df = (
+                pd.concat(world_frames, ignore_index=True)
+                if world_frames
+                else pd.DataFrame()
+            )
+            contract_checks_seed = dict(contract_counter)
+
         if worlds_df.empty:
             raise RuntimeError("GTV2 worlds generation produced zero rows")
         worlds_df, world_key_report = _sanitize_frame_to_expected_keys(
@@ -4467,7 +4701,7 @@ def generate_worlds_gtv2_live_task(
             projections_path,
             required_cols=("game_date", "game_id", "team_id", "player_id"),
         )
-        contract_checks = dict(contract_counter)
+        contract_checks = dict(contract_checks_seed)
         contract_checks.update(_summarize_world_contracts_from_frame(worlds_df))
         contract_summary = {
             "contract_checks": contract_checks,
@@ -4475,7 +4709,8 @@ def generate_worlds_gtv2_live_task(
             "world_rows": int(len(worlds_df)),
             "projection_rows": int(len(projections)),
             "bundle_dir": str(bundle_dir),
-            "device": str(device),
+            "device": device_for_summary,
+            "inference_backend": backend,
             "key_sanitization": {
                 "worlds": world_key_report,
                 "projections": projection_key_report,
@@ -4484,12 +4719,25 @@ def generate_worlds_gtv2_live_task(
                 "mode": str(make_model_cfg.mode),
                 "use_learned_efficiency": bool(make_model_cfg.use_learned_efficiency),
             },
+            "triton_request_count": int(triton_request_count),
             "force_active_guardrails": force_active_diag,
             "props_uplift_calibration": props_uplift_report,
             "world_realism_controls": world_realism_report,
             "world_contract_field_repair": world_contract_repair_report,
             "created_at": _utc_now_iso(),
         }
+        if backend == "triton":
+            contract_summary["triton"] = {
+                "endpoint": str(triton_endpoint),
+                "model_name": str(triton_model_name),
+                "model_version": (
+                    str(triton_model_version).strip()
+                    if triton_model_version
+                    else None
+                ),
+                "timeout_seconds": float(triton_timeout_seconds),
+                "request_count": int(triton_request_count),
+            }
 
     worlds_summary_path.write_text(
         json.dumps(contract_summary, indent=2, sort_keys=True),
@@ -5100,6 +5348,12 @@ def nba_live_pipeline_v3_flow(
     as_of_ts_override: str | None = None,
     gtv2_bundle_dir: str | None = None,
     gtv2_device: str | None = None,
+    gtv2_inference_backend: str = "auto",
+    gtv2_triton_endpoint: str | None = None,
+    gtv2_triton_model_name: str | None = None,
+    gtv2_triton_model_version: str | None = None,
+    gtv2_triton_timeout_seconds: float | None = None,
+    gtv2_triton_healthcheck_timeout_seconds: float | None = None,
     gtv2_world_chunk_size: int = 64,
     gtv2_active_temperature: float = 1.0,
     gtv2_seed: int = 42,
@@ -5133,6 +5387,31 @@ def nba_live_pipeline_v3_flow(
         data_root=data_root, gtv2_bundle_dir=gtv2_bundle_dir
     )
     bundle_hash = _bundle_artifact_hash(bundle_dir)
+    inference_server_cfg = _load_gtv2_inference_server_config()
+    resolved_inference_backend = _resolve_gtv2_inference_backend(
+        requested=gtv2_inference_backend,
+        config_payload=inference_server_cfg,
+    )
+    resolved_triton_cfg = _resolve_triton_endpoint_config(
+        config_payload=inference_server_cfg,
+        endpoint_override=gtv2_triton_endpoint,
+        model_name_override=gtv2_triton_model_name,
+        model_version_override=gtv2_triton_model_version,
+        timeout_seconds_override=gtv2_triton_timeout_seconds,
+    )
+    resolved_triton_healthcheck_timeout_seconds = float(
+        gtv2_triton_healthcheck_timeout_seconds
+        if gtv2_triton_healthcheck_timeout_seconds is not None
+        else inference_server_cfg.get("healthcheck_timeout_seconds", 3.0)
+    )
+    if resolved_inference_backend == "triton":
+        logger.info(
+            "Using triton inference backend: endpoint=%s model=%s version=%s timeout=%.1fs",
+            resolved_triton_cfg.endpoint,
+            resolved_triton_cfg.model_name,
+            resolved_triton_cfg.model_version,
+            resolved_triton_cfg.timeout_seconds,
+        )
     resolved_allow_rotowire_props_fallback = bool(allow_rotowire_props_fallback)
     allow_nonpublishing_replay = os.environ.get(
         "PROJECTIONS_ALLOW_NONPUBLISHING_REPLAY", ""
@@ -5174,13 +5453,17 @@ def nba_live_pipeline_v3_flow(
     # Runtime stamp for reproducibility and incident triage.
     enforce_clean_tree()
     enforce_prod_sanity()
+    runtime_config_paths: dict[str, Path] = {
+        "minutes_current_run": minutes_selector_path,
+        "rates_current_run": rates_selector_path,
+        "gtv2_bundle_dir": bundle_dir,
+    }
+    inference_server_cfg_path = PROJECT_ROOT / "config" / "gtv2_inference_server.json"
+    if inference_server_cfg_path.exists():
+        runtime_config_paths["gtv2_inference_server"] = inference_server_cfg_path
     log_runtime_stamp(
         entrypoint="prefect:nba-live-pipeline-v3",
-        config_paths={
-            "minutes_current_run": minutes_selector_path,
-            "rates_current_run": rates_selector_path,
-            "gtv2_bundle_dir": bundle_dir,
-        },
+        config_paths=runtime_config_paths,
         project_root=PROJECT_ROOT,
         logger=logger,
     )
@@ -5482,6 +5765,14 @@ def nba_live_pipeline_v3_flow(
             bundle_dir=bundle_dir,
             data_root=data_root,
             placeholder_mode=bool(placeholder_mode),
+            inference_backend=str(resolved_inference_backend),
+            triton_endpoint=str(resolved_triton_cfg.endpoint),
+            triton_model_name=str(resolved_triton_cfg.model_name),
+            triton_model_version=resolved_triton_cfg.model_version,
+            triton_timeout_seconds=float(resolved_triton_cfg.timeout_seconds),
+            triton_healthcheck_timeout_seconds=float(
+                resolved_triton_healthcheck_timeout_seconds
+            ),
             gtv2_device=gtv2_device,
             random_seed=int(gtv2_seed),
         )
@@ -5496,6 +5787,14 @@ def nba_live_pipeline_v3_flow(
             data_root=data_root,
             sim_worlds=int(sim_worlds),
             placeholder_mode=bool(placeholder_mode),
+            inference_backend=str(resolved_inference_backend),
+            triton_endpoint=str(resolved_triton_cfg.endpoint),
+            triton_model_name=str(resolved_triton_cfg.model_name),
+            triton_model_version=resolved_triton_cfg.model_version,
+            triton_timeout_seconds=float(resolved_triton_cfg.timeout_seconds),
+            triton_healthcheck_timeout_seconds=float(
+                resolved_triton_healthcheck_timeout_seconds
+            ),
             gtv2_device=gtv2_device,
             world_chunk_size=int(gtv2_world_chunk_size),
             active_temperature=float(gtv2_active_temperature),
@@ -5680,6 +5979,17 @@ def nba_live_pipeline_v3_flow(
             "features_path": str(features_path),
             "projections_path": str(projections_dir / "projections.parquet"),
             "bundle_dir": str(bundle_dir),
+            "inference_backend": str(resolved_inference_backend),
+            "triton_endpoint": (
+                str(resolved_triton_cfg.endpoint)
+                if resolved_inference_backend == "triton"
+                else ""
+            ),
+            "triton_model_name": (
+                str(resolved_triton_cfg.model_name)
+                if resolved_inference_backend == "triton"
+                else ""
+            ),
             "pointer_count": str(len(pointer_payload)),
             "rerun_mode": str(rerun_plan.get("mode")),
             "rerun_reason": str(rerun_plan.get("reason")),

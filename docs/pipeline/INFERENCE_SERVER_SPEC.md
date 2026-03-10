@@ -1,6 +1,6 @@
 # Inference Server Spec
 
-## Spec Status: DRAFT v0.1 (2026-03-03)
+## Spec Status: LIVING v0.3 (2026-03-10)
 
 ---
 
@@ -30,13 +30,13 @@ This design has latency problems:
 1. Add a dedicated inference server (Triton) for GPU-accelerated scoring.
 2. Keep Prefect as the orchestration layer for scraping, feature building,
    finalization, and publish gates.
-3. Enable concurrent game scoring with warm model weights.
+3. Enable per-game sequential scoring with warm model weights.
 4. Define explicit latency budgets and failure modes.
 
 ### 1.3 Non-negotiable requirements
 
 - Transformer inference latency < 8s per game for 25k worlds on GPU.
-- 3-5 concurrent game requests complete in < 40s total.
+- 3-5 affected games complete in < 60s total.
 - Late-breaking news triggers targeted game re-scoring, not full-slate rebuild.
 - Inference failures are visible to operators and do not silently publish stale
   data.
@@ -101,19 +101,21 @@ This design has latency problems:
 ### 3.2 Request flow
 
 1. Prefect task builds feature tensor for affected game(s).
-2. Prefect task sends inference request(s) to Triton via gRPC.
-3. Triton queues and executes requests sequentially on GPU.
+2. Prefect task splits features by game and sends one request at a time to
+   Triton via HTTP.
+3. Triton executes each request on GPU with warm weights.
 4. Triton returns world tensors to Prefect task.
-5. Prefect task writes run-scoped artifacts and proceeds to finalize.
+5. Prefect task merges per-game outputs, writes run-scoped artifacts, and
+   proceeds to finalize.
 
 ### 3.3 Concurrency model
 
 The 3060 has 12GB VRAM. Running multiple games truly in parallel would thrash
 memory. Instead:
 
-- Triton accepts concurrent requests but executes them sequentially.
+- Prefect submits one game request at a time from each run.
+- Triton still keeps queueing semantics if multiple runs overlap.
 - Queue depth is bounded (5-8 games) to prevent unbounded backlog.
-- Prefect submits all affected games concurrently; Triton serializes execution.
 - Total wall-clock for 5 games ≈ 5 × single-game latency.
 
 ---
@@ -153,16 +155,11 @@ Using Triton's Python backend preserves the existing PyTorch code while gaining:
 name: "gtv2_scorer"
 backend: "python"
 
-max_batch_size: 0  # Dynamic batching disabled; game-level requests
+max_batch_size: 0
 
 input [
   {
-    name: "features"
-    data_type: TYPE_FP32
-    dims: [-1, -1]  # (num_players, num_features)
-  },
-  {
-    name: "game_metadata"
+    name: "request_json"
     data_type: TYPE_STRING
     dims: [1]
   }
@@ -170,12 +167,7 @@ input [
 
 output [
   {
-    name: "worlds"
-    data_type: TYPE_FP32
-    dims: [-1, -1, -1]  # (num_worlds, num_players, num_stats)
-  },
-  {
-    name: "summary"
+    name: "response_json"
     data_type: TYPE_STRING
     dims: [1]
   }
@@ -191,8 +183,12 @@ instance_group [
 
 parameters [
   {
+    key: "project_root"
+    value: { string_value: "/home/daniel/projects/projections-v2" }
+  },
+  {
     key: "bundle_dir"
-    value: { string_value: "/path/to/promoted/gtv2/bundle" }
+    value: { string_value: "/home/daniel/projections-data/artifacts/game_transformer_v2/bundle_current" }
   },
   {
     key: "num_worlds"
@@ -249,7 +245,7 @@ def score_game_triton(
     ...
 ```
 
-### 5.2 Concurrent game scoring
+### 5.2 Sequential game scoring
 
 ```python
 @task
@@ -259,21 +255,16 @@ def score_affected_games(
     triton_url: str,
 ) -> dict[str, dict]:
     """
-    Submit all affected games concurrently.
-    Triton serializes execution; Prefect gathers results.
+    Submit affected games sequentially (one request in flight at a time).
+    This keeps peak VRAM pressure bounded on 12GB GPUs.
     """
-    futures = []
+    results = {}
     for game_id in affected_games:
-        fut = score_game_triton.submit(
+        results[game_id] = score_game_triton(
             game_id=game_id,
             features=features_by_game[game_id],
             triton_url=triton_url,
         )
-        futures.append((game_id, fut))
-
-    results = {}
-    for game_id, fut in futures:
-        results[game_id] = fut.result()
 
     return results
 ```
@@ -309,7 +300,7 @@ and can retry manually or investigate.
 | Scenario | Target |
 |----------|--------|
 | Single-game late-news rerun | < 30s |
-| 5-game concurrent rerun | < 60s |
+| 5-game sequential burst rerun | < 60s |
 | Full-slate rebuild (8 games) | < 120s |
 
 ### 6.3 Measurement
@@ -403,56 +394,59 @@ This prevents memory fragmentation during long-running sessions.
 
 ## 9. Deployment and Operations
 
-### 9.1 Systemd service
-
-```ini
-# /home/daniel/.config/systemd/user/triton-inference.service
-
-[Unit]
-Description=Triton Inference Server for GTV2
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/home/daniel/prod/projections-v2
-Environment="CUDA_VISIBLE_DEVICES=0"
-ExecStart=/usr/bin/tritonserver \
-    --model-repository=/home/daniel/projections-data/triton_models \
-    --http-port=8000 \
-    --grpc-port=8001 \
-    --metrics-port=8002 \
-    --log-verbose=1
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=default.target
-```
-
-### 9.2 Management commands
+### 9.1 Docker-first runbook
 
 ```bash
-# Start server
-systemctl --user start triton-inference.service
+# Build runtime image (includes torch + parquet deps)
+./scripts/triton/run_triton_gtv2.sh build
 
-# Check status
-systemctl --user status triton-inference.service
+# Start Triton container (defaults: 18000/18001/18002)
+./scripts/triton/run_triton_gtv2.sh start
 
-# View logs
-journalctl --user -u triton-inference.service -f
+# Readiness/model check
+./scripts/triton/run_triton_gtv2.sh smoke
 
-# Restart after model update
-systemctl --user restart triton-inference.service
+# Inspect status/logs
+./scripts/triton/run_triton_gtv2.sh status
+./scripts/triton/run_triton_gtv2.sh logs
+
+# Stop
+./scripts/triton/run_triton_gtv2.sh stop
 ```
 
-### 9.3 Model updates
+`run_triton_gtv2.sh` mounts:
+
+- `/home/daniel/projections-data/triton_models` → `/models`
+- `/home/daniel/projects/projections-v2` (read-only)
+- `/home/daniel/projections-data` (read-write)
+- Runs container as host UID/GID to avoid root-owned output artifacts.
+
+This keeps Triton path resolution identical to host paths used by Prefect.
+
+### 9.2 Systemd (optional)
+
+Use [`scripts/triton/triton-inference.service.example`](../../scripts/triton/triton-inference.service.example).
+
+### 9.3 Management commands
+
+```bash
+cp scripts/triton/triton-inference.service.example \
+  ~/.config/systemd/user/triton-inference.service
+systemctl --user daemon-reload
+systemctl --user enable --now triton-inference.service
+systemctl --user status triton-inference.service
+journalctl --user -u triton-inference.service -f
+```
+
+### 9.4 Model updates
 
 When promoting a new GTV2 bundle:
 
 1. Copy bundle to new version directory in model repository.
 2. Update `config/gtv2_inference_current.json` with new version.
-3. Restart Triton to load new version.
-4. Verify health and run smoke test.
+3. Re-run `scripts/triton/setup_gtv2_model_repo.py` to refresh `config.pbtxt`.
+4. Restart Triton container/service.
+5. Verify health and run smoke test.
 
 Triton supports model reload without full restart, but for simplicity,
 restart-based updates are acceptable at current scale.
@@ -566,12 +560,12 @@ If GPU is unavailable (driver issue, hardware failure):
 ### 13.2 Integration tests
 
 - Prefect task → Triton → response roundtrip.
-- Concurrent game submission.
+- Sequential per-game submission.
 - Timeout and retry behavior.
 
 ### 13.3 Load tests
 
-- 5 concurrent games, measure total latency.
+- 5-game sequential burst, measure total latency.
 - 10 sequential games, measure throughput.
 - Memory usage over extended session.
 
@@ -580,9 +574,9 @@ If GPU is unavailable (driver issue, hardware failure):
 ```bash
 # Verify Triton is serving and model responds
 uv run python scripts/triton/smoke_test_gtv2.py \
-    --triton-url localhost:8001 \
-    --game-date 2026-03-03 \
-    --game-id 0022500890
+    --triton-endpoint localhost:18000 \
+    --game-date 2026-03-10 \
+    --num-worlds 256
 ```
 
 ---
@@ -591,26 +585,27 @@ uv run python scripts/triton/smoke_test_gtv2.py \
 
 ### Phase 1: Infrastructure setup
 
-- [ ] Install Triton Inference Server.
-- [ ] Configure model repository structure.
-- [ ] Write Python backend wrapper for GTV2.
-- [ ] Add systemd service for Triton.
-- [ ] Verify health endpoints and basic metrics.
+- [x] Install Triton Inference Server (Docker runtime + NVIDIA toolkit).
+- [x] Configure model repository structure.
+- [x] Write Python backend wrapper for GTV2.
+- [x] Add systemd service template for Triton.
+- [x] Verify health endpoints and basic metrics.
 
 ### Phase 2: Prefect integration
 
-- [ ] Add `score_game_triton` task.
-- [ ] Add Triton health check to scoring stage.
-- [ ] Wire concurrent game submission.
-- [ ] Add timeout and retry logic.
-- [ ] Update `live_nba_pipeline_v3.py` to use Triton path.
+- [x] Add `score_game_triton` task.
+- [x] Add Triton health check to scoring stage.
+- [x] Wire per-game sequential submission.
+- [x] Add timeout and retry logic.
+- [x] Update `live_nba_pipeline_v3.py` to use Triton path.
 
 ### Phase 3: Validation
 
 - [ ] Benchmark single-game latency (GPU vs CPU baseline).
-- [ ] Benchmark 5-game concurrent latency.
+- [ ] Benchmark 5-game sequential burst latency.
 - [ ] Run on live slate with `promote_pointers=false`.
 - [ ] Compare world outputs to CPU baseline for parity.
+- [x] Run Triton smoke test for both actions (`score`, `worlds`) on live features.
 
 ### Phase 4: Production cutover
 
@@ -635,14 +630,13 @@ uv run python scripts/triton/smoke_test_gtv2.py \
 
 ```json
 {
-  "triton_url": "localhost:8001",
+  "enabled": true,
+  "backend": "triton",
+  "triton_endpoint": "localhost:18000",
   "model_name": "gtv2_scorer",
   "model_version": "1",
-  "timeout_seconds": 30,
-  "num_worlds": 25000,
-  "world_chunk_size": 5000,
-  "device": "cuda:0",
-  "enable_fp16": true
+  "timeout_seconds": 90.0,
+  "healthcheck_timeout_seconds": 3.0
 }
 ```
 
@@ -652,9 +646,9 @@ uv run python scripts/triton/smoke_test_gtv2.py \
 
 ```json
 {
-  "bundle_dir": "/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/phase3_seed42_20260301",
-  "bundle_hash": "abc123...",
-  "promoted_at": "2026-03-01T12:00:00Z",
+  "bundle_dir": "/home/daniel/projections-data/artifacts/game_transformer_v2/bundle_current",
+  "bundle_hash": null,
+  "promoted_at": null,
   "model_version": "1"
 }
 ```
@@ -692,8 +686,8 @@ Key integration points:
 2. **Python backend vs TorchScript**: Start with Python backend to preserve
    existing code. TorchScript export is Phase 2 optimization.
 
-3. **Concurrent game handling**: Sequential GPU execution with concurrent
-   request queueing. True parallel execution would thrash VRAM.
+3. **Game handling mode**: Per-game sequential submission from Prefect to keep
+   GPU memory pressure predictable. True parallel execution would thrash VRAM.
 
 ### 17.2 Open
 
@@ -713,20 +707,29 @@ Key integration points:
 
 ## 18. Agent Handoff
 
-### 18.1 Current state (2026-03-03)
+### 18.1 Current state (2026-03-10)
 
 - GameTransformerV2 model is trained and promoted.
-- CPU inference is working in `live_nba_pipeline_v3.py`.
-- GPU hardware (RTX 3060 12GB) is on order.
-- No Triton infrastructure exists yet.
+- Local (in-process) inference is working in `live_nba_pipeline_v3.py`.
+- GPU hardware (RTX 3060 12GB) installed on 2026-03-10.
+- Dockerized Triton runtime image is implemented:
+  - `scripts/triton/Dockerfile`
+  - `scripts/triton/requirements-gtv2-runtime.txt`
+  - `scripts/triton/run_triton_gtv2.sh`
+- Triton integration code is implemented:
+  - `projections/pipeline/triton_inference_client.py`
+  - `scripts/triton/model_repository/gtv2_scorer/`
+  - `scripts/triton/setup_gtv2_model_repo.py`
+  - `scripts/triton/smoke_test_gtv2.py`
+  - `prefect_flows/live_nba_pipeline_v3.py` backend switch (`local|triton`)
+- End-to-end Triton smoke (`score` + `worlds`) succeeded on 2026-03-10.
 
 ### 18.2 Next steps
 
-1. Set up Triton development environment once GPU arrives.
-2. Write Python backend wrapper that loads GTV2 bundle.
-3. Benchmark GPU vs CPU inference latency.
-4. Integrate with Prefect scoring tasks.
-5. Validate on live slate before production cutover.
+1. Run one full slate with `promote_pointers=false` and capture latency metrics.
+2. Compare `worlds_raw.parquet` parity vs local backend on the same frozen features.
+3. Enable systemd service for automatic Triton start/restart.
+4. Decide CPU fallback policy (`strict` vs explicit degraded mode).
 
 ### 18.3 Dependencies
 
@@ -744,7 +747,7 @@ sub-10-second per-game latency target for GameTransformerV2 world generation.
 Key decisions:
 
 - Triton with Python backend for MVP; TensorRT optimization later.
-- Sequential GPU execution with concurrent request queueing.
+- Per-game sequential submission from Prefect (single in-flight request per run).
 - Prefect remains the orchestrator; Triton is a service dependency.
 - Fail-closed on inference failure; no alternate-model fallback.
 - Explicit latency budgets: < 8s per game, < 60s for 5-game burst.

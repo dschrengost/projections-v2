@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "backend": "triton",
+  "triton_endpoint": "localhost:18000",
+  "model_name": "gtv2_scorer",
+  "model_version": "1",
+  "timeout_seconds": 90.0,
+  "healthcheck_timeout_seconds": 3.0
+}

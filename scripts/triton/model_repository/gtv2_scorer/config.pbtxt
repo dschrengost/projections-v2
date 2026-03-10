@@ -1,0 +1,51 @@
+name: "gtv2_scorer"
+backend: "python"
+
+max_batch_size: 0
+
+input [
+  {
+    name: "request_json"
+    data_type: TYPE_STRING
+    dims: [1]
+  }
+]
+
+output [
+  {
+    name: "response_json"
+    data_type: TYPE_STRING
+    dims: [1]
+  }
+]
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+    gpus: [0]
+  }
+]
+
+parameters [
+  {
+    key: "project_root"
+    value: { string_value: "/home/daniel/projects/projections-v2" }
+  },
+  {
+    key: "bundle_dir"
+    value: { string_value: "/home/daniel/projections-data/artifacts/game_transformer_v2/bundle_current" }
+  },
+  {
+    key: "device"
+    value: { string_value: "cuda:0" }
+  },
+  {
+    key: "num_worlds"
+    value: { string_value: "25000" }
+  },
+  {
+    key: "world_chunk_size"
+    value: { string_value: "5000" }
+  }
+]

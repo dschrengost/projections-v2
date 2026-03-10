@@ -1,0 +1,5 @@
+numpy>=1.26,<2.0
+pandas>=2.2,<2.3
+pyarrow>=10.0.1,<22.0
+torch>=2.2
+PyYAML>=6.0

@@ -379,7 +379,7 @@ End-to-end targets:
 | Scenario | Target |
 |----------|--------|
 | Single-game late-news rerun | < 30s |
-| 5-game concurrent rerun | < 60s |
+| 5-game sequential burst rerun | < 60s |
 | Full-slate rebuild (8 games) | < 120s |
 
 ### 10.3 GPU integration requirements
@@ -420,15 +420,18 @@ Production behavior should instead be:
    cannot complete safely
 4. expose the blocked state to the operator with clear freshness diagnostics
 
-### 10.6 Concurrent game handling
+### 10.6 Per-game sequential handling
 
 Late-breaking news often affects 3-5 games simultaneously. The inference
 architecture supports this via:
 
-1. Prefect submits all affected games concurrently as separate requests.
-2. Triton queues requests and executes sequentially on GPU.
+1. Prefect fans out inference one game at a time inside the scoring/worlds
+   tasks.
+2. Only one game request is active per pipeline run, so GPU memory stays
+   bounded.
 3. Total wall-clock ≈ N × single-game latency (not N× parallel speedup).
-4. This avoids VRAM thrashing from true parallel execution.
+4. This intentionally trades peak throughput for VRAM stability and allows
+   higher world counts without OOM pressure.
 
 See [INFERENCE_SERVER_SPEC.md](./INFERENCE_SERVER_SPEC.md) Section 3.3 for
 concurrency model details.
