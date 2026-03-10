@@ -349,16 +349,21 @@ For live production, define one canonical scoring mode:
 
 1. transformer path
    - transformer-based path
-   - CPU-backed today
-   - GPU-backed via Triton Inference Server once hardware is installed
+   - GPU-backed via Triton Inference Server (production default as of March 10, 2026)
+   - local in-process backend retained as explicit degraded/debug path
 
-As of March 3, 2026, GPU inference is not yet available in production.
-The near-term plan:
+Current measured baseline (March 10, 2026):
 
-1. Continue using CPU inference while GPU hardware arrives.
-2. Deploy Triton Inference Server with Python backend for warm model serving.
-3. Integrate Prefect scoring tasks with Triton gRPC endpoint.
-4. Validate latency targets before production cutover.
+1. Single-game worlds request (`25k` worlds, `chunk=5000`) on RTX 3060 12GB
+   historical progression:
+   - pre-optimization: `~132s`
+   - after early sampler optimizations: `~15-16s`
+   - latest local sampler-core benchmark (`sample_worlds_for_batch`): `~2.20s`
+2. Full 5-game replay-mode flow (`25k` worlds, sequential per game):
+   `156.8s` total wall-clock (run `02af2e57-5b65-4882-bd73-41c824626b91`).
+3. GPU is now active in production runs; primary bottleneck shifted from
+   cold-start/model load overhead to remaining sampler validation/projection
+   hotspots.
 
 ### 10.2 Latency budgets
 
@@ -382,11 +387,19 @@ End-to-end targets:
 | 5-game sequential burst rerun | < 60s |
 | Full-slate rebuild (8 games) | < 120s |
 
-### 10.3 GPU integration requirements
+Observed on March 10, 2026 (latest documented):
 
-When the NVIDIA GPU is added:
+- Inference per game (`25k` worlds): `~15-16s` on documented replay run, and
+  `~2.20s` in latest local sampler-core benchmark.
+- 5-game sequential burst full flow: `156.8s` total on a real slate replay.
+- The `< 8s` per-game GPU budget remains a stretch target and requires further
+  optimization work.
 
-- benchmark CPU vs GPU by stage
+### 10.3 GPU runtime requirements (ongoing)
+
+With the NVIDIA GPU now installed:
+
+- keep CPU-vs-GPU benchmark snapshots for every major inference runtime change
 - avoid cold-start cost near lock via warm Triton process
 - keep exact runtime/env manifests for CUDA and model serving
 - fail closed if the GPU path is unavailable and CPU inference cannot satisfy
@@ -432,9 +445,29 @@ architecture supports this via:
 3. Total wall-clock ≈ N × single-game latency (not N× parallel speedup).
 4. This intentionally trades peak throughput for VRAM stability and allows
    higher world counts without OOM pressure.
+5. Measured on RTX 3060 12GB:
+   - `world_chunk_size=5000` keeps VRAM around `~2.8-2.9GB`.
+   - `world_chunk_size=25000` pushes VRAM to `~10.7GB` with no meaningful speed
+     gain in our tests.
 
 See [INFERENCE_SERVER_SPEC.md](./INFERENCE_SERVER_SPEC.md) Section 3.3 for
 concurrency model details.
+
+### 10.7 Remaining optimization headroom
+
+Current prioritized opportunities:
+
+1. Validate the tensor-native beta-binomial path under Triton, then reduce
+   contract-check synchronization overhead (`check_world_contracts`) and further
+   optimize minutes projection (`project_minutes_capped_simplex`).
+2. Evaluate mixed precision and/or `torch.compile` for sampler subgraphs once
+   parity checks are in place.
+3. Add structured per-stage timing and Triton request IDs into run artifacts so
+   regressions are detected immediately.
+4. Re-run full replay-mode flow and capture refreshed wall-clock baselines after
+   latest sampler optimizations.
+5. Revisit controlled parallelism (for example two in-flight games) only after
+   memory/latency guardrails are automated.
 
 ## 11. MLOps Spec
 

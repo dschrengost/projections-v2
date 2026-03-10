@@ -74,6 +74,42 @@ def _select_topk_without_replacement(
     return selected & eligible_mask
 
 
+def _select_topk_without_replacement_batched(
+    logits: torch.Tensor,
+    eligible_mask: torch.Tensor,
+    k_per_row: torch.Tensor,
+    *,
+    sample: bool,
+    temperature: float,
+) -> torch.Tensor:
+    """Vectorized without-replacement top-k selection for a team mask."""
+
+    if logits.ndim != 2 or eligible_mask.ndim != 2:
+        raise ValueError("logits and eligible_mask must have shape (B,P)")
+    if logits.shape != eligible_mask.shape:
+        raise ValueError("logits and eligible_mask must have matching shape")
+    if k_per_row.ndim != 1 or k_per_row.shape[0] != logits.shape[0]:
+        raise ValueError("k_per_row must have shape (B,)")
+    if temperature <= 0:
+        raise ValueError("temperature must be > 0")
+
+    work = logits.to(dtype=torch.float32) / float(temperature)
+    if sample:
+        work = work + _sample_gumbel(work.shape, device=work.device)
+
+    num_players = int(logits.shape[1])
+    if num_players <= 0:
+        return torch.zeros_like(eligible_mask, dtype=torch.bool)
+    num_eligible = eligible_mask.sum(dim=1).to(dtype=torch.long)
+    k_eff = torch.minimum(k_per_row.to(dtype=torch.long).clamp(min=0), num_eligible)
+    team_scores = work.masked_fill(~eligible_mask, float("-inf"))
+    topk_idx = torch.topk(team_scores, k=num_players, dim=1, largest=True).indices
+    take = torch.arange(num_players, device=logits.device).unsqueeze(0) < k_eff.unsqueeze(1)
+    selected = torch.zeros_like(eligible_mask, dtype=torch.bool)
+    selected.scatter_(1, topk_idx, take)
+    return selected & eligible_mask
+
+
 @dataclass(frozen=True)
 class JointActiveSetOutputs:
     count_logits: torch.Tensor
@@ -198,20 +234,17 @@ class JointActiveSetHead(nn.Module):
         else:
             bsz, num_players = eligible.shape
             active_mask = torch.zeros((bsz, num_players), dtype=torch.bool, device=player_states.device)
-            for b_idx in range(bsz):
-                for team_idx in (0, 1):
-                    team_mask = eligible[b_idx] & (player_team_index[b_idx] == team_idx)
-                    if not bool(team_mask.any()):
-                        continue
-                    k_team = int(sampled_counts[b_idx, team_idx].item())
-                    selected = _select_topk_without_replacement(
-                        player_logits[b_idx],
-                        team_mask,
-                        k_team,
-                        sample=bool(sample),
-                        temperature=float(temperature),
-                    )
-                    active_mask[b_idx] = active_mask[b_idx] | selected
+            for team_idx in (0, 1):
+                team_mask = eligible & (player_team_index == team_idx)
+                k_team = sampled_counts[:, team_idx].to(dtype=torch.long)
+                selected = _select_topk_without_replacement_batched(
+                    player_logits,
+                    team_mask,
+                    k_team,
+                    sample=bool(sample),
+                    temperature=float(temperature),
+                )
+                active_mask = active_mask | selected
 
         return JointActiveSetOutputs(
             count_logits=count_logits,

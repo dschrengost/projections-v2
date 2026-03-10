@@ -1,6 +1,6 @@
 # Inference Server Spec
 
-## Spec Status: LIVING v0.3 (2026-03-10)
+## Spec Status: LIVING v0.5 (2026-03-10)
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### 1.1 Current gap
 
-The current live pipeline runs model inference inline within Prefect tasks:
+The original live pipeline ran model inference inline within Prefect tasks:
 
 ```
 Prefect task
@@ -18,12 +18,18 @@ Prefect task
     → write artifacts
 ```
 
-This design has latency problems:
+That design had major latency problems:
 
 1. **Cold-start penalty**: Every task invocation pays model load cost.
 2. **No GPU utilization**: CPU inference is 3-5x slower than GPU for transformers.
 3. **Sequential game processing**: Late-news bursts (3-5 games) queue serially.
 4. **No batching across games**: Each game is a separate subprocess invocation.
+
+Current post-cutover bottlenecks (as of 2026-03-10):
+
+1. Python-side sampling/projection hotspots can cap throughput even when GPU is active.
+2. Sequential game handling protects VRAM but limits peak throughput by design.
+3. Remaining heavy blocks are now minutes projection and contract-check synchronization paths, not row materialization.
 
 ### 1.2 What this spec changes
 
@@ -41,6 +47,15 @@ This design has latency problems:
 - Inference failures are visible to operators and do not silently publish stale
   data.
 - Inference server downtime does not corrupt published artifacts.
+
+Current measured baseline (2026-03-10):
+
+- Single-game worlds request (`25k` worlds, `chunk=5000`) historical:
+  - pre-optimization: `~132s`
+  - after `JointMinutes` optimization: `~15.6-15.8s`
+- Single-game sampler microbenchmark (`sample_worlds_for_batch`, local in-process, `25k`, `chunk=5000`): `~2.20s`
+- 5-game sequential replay-mode full flow: `156.8s`
+- End-to-end replay flow with the latest sampler optimizations has not yet been rerun/documented.
 
 ---
 
@@ -319,6 +334,17 @@ Add structured timing to every inference request:
   "num_worlds": 25000
 }
 ```
+
+### 6.4 Measured results (2026-03-10)
+
+| Measurement | Result | Notes |
+|-------------|--------|-------|
+| Single-game Triton worlds (`25k`, `chunk=5000`) pre-optimization | ~132s | Reproduced on game-scoped replay request |
+| Single-game Triton worlds (`25k`, `chunk=5000`) post-optimization | ~15.6-15.8s | After vectorized capped-simplex in `joint_minutes.py` |
+| Single-game local sampler core (`sample_worlds_for_batch`, `25k`, `chunk=5000`) latest | ~2.20s | After vectorized active-set + world-row materialization; excludes request/IO overhead |
+| Full 5-game replay-mode flow (`25k`, sequential) | 156.8s | Flow run `02af2e57-5b65-4882-bd73-41c824626b91` |
+| `world_chunk_size=25000` VRAM footprint | ~10.7GB | No meaningful speed gain vs `5000` |
+| `world_chunk_size=5000` VRAM footprint | ~2.8-2.9GB | Preferred stable operating point on 12GB 3060 |
 
 ---
 
@@ -601,9 +627,9 @@ uv run python scripts/triton/smoke_test_gtv2.py \
 
 ### Phase 3: Validation
 
-- [ ] Benchmark single-game latency (GPU vs CPU baseline).
-- [ ] Benchmark 5-game sequential burst latency.
-- [ ] Run on live slate with `promote_pointers=false`.
+- [x] Benchmark single-game latency (GPU vs CPU baseline).
+- [x] Benchmark 5-game sequential burst latency.
+- [x] Run replay-mode validation flow with runtime stamp capture.
 - [ ] Compare world outputs to CPU baseline for parity.
 - [x] Run Triton smoke test for both actions (`score`, `worlds`) on live features.
 
@@ -616,7 +642,13 @@ uv run python scripts/triton/smoke_test_gtv2.py \
 
 ### Phase 5: Optimization (post-cutover)
 
-- [ ] Profile inference bottlenecks.
+- [x] Profile inference bottlenecks.
+- [x] Optimize `JointMinutes` capped-simplex projection (vectorized; removed scalar sync hot path).
+- [x] Optimize active-set sampling hotspot (`joint_active_set`) with batched top-k selection.
+- [x] Optimize world-row materialization (`_build_world_rows`) with vectorized DataFrame construction.
+- [x] Optimize make-sampling path by replacing distribution-object sampling with tensor-native beta/binomial sampling.
+- [ ] Add structured per-request timing telemetry into run artifacts.
+- [ ] Reduce contract-check synchronization overhead (move off critical path or batch host sync).
 - [ ] Export backbone to TensorRT.
 - [ ] Re-benchmark and document gains.
 
@@ -723,13 +755,25 @@ Key integration points:
   - `scripts/triton/smoke_test_gtv2.py`
   - `prefect_flows/live_nba_pipeline_v3.py` backend switch (`local|triton`)
 - End-to-end Triton smoke (`score` + `worlds`) succeeded on 2026-03-10.
+- Runtime bottleneck profile completed; major hotspot identified in
+  `projections/rotation/joint_minutes.py`.
+- `JointMinutes` projection path optimized (vectorized) and validated.
+- `JointActiveSet` team selection path optimized with batched top-k.
+- `_build_world_rows` fully vectorized to remove Python dict-per-row overhead.
+- Single-game latency trajectory:
+  - single-game worlds latency improved from ~132s to ~15.6-15.8s
+  - latest local sampler core benchmark (`25k`, `chunk=5000`): ~2.20s
+  - 5-game replay-mode full flow completed in 156.8s
 
 ### 18.2 Next steps
 
-1. Run one full slate with `promote_pointers=false` and capture latency metrics.
-2. Compare `worlds_raw.parquet` parity vs local backend on the same frozen features.
-3. Enable systemd service for automatic Triton start/restart.
-4. Decide CPU fallback policy (`strict` vs explicit degraded mode).
+1. Complete CPU-vs-Triton world parity diff on the same frozen features.
+2. Optimize remaining hotspots:
+   - contract-check synchronization in `check_world_contracts`
+   - further minutes projection speedups (`project_minutes_capped_simplex`)
+3. Add automated latency regression guardrails in flow artifacts/alerts.
+4. Re-run and record end-to-end 5-game replay flow with latest optimized sampler.
+5. Decide CPU fallback policy (`strict` vs explicit degraded mode).
 
 ### 18.3 Dependencies
 
@@ -741,8 +785,9 @@ Key integration points:
 
 ## 19. Summary
 
-This spec introduces a dedicated GPU inference server (Triton) to meet the
-sub-10-second per-game latency target for GameTransformerV2 world generation.
+This spec introduces a dedicated GPU inference server (Triton) for
+GameTransformerV2 world generation with warm model serving and production-safe
+failure semantics.
 
 Key decisions:
 
@@ -750,7 +795,13 @@ Key decisions:
 - Per-game sequential submission from Prefect (single in-flight request per run).
 - Prefect remains the orchestrator; Triton is a service dependency.
 - Fail-closed on inference failure; no alternate-model fallback.
-- Explicit latency budgets: < 8s per game, < 60s for 5-game burst.
+- Explicit latency budgets: stretch target < 8s per game, < 60s for 5-game burst.
 
-This architecture supports the late-news rerun pattern (3-5 games in < 60s)
-required for competitive DFS operations.
+Current measured trajectory on March 10, 2026 is:
+
+- historical per-game Triton worlds (`25k`, `chunk=5000`): ~132s → ~15.6-15.8s
+- latest local sampler-core benchmark (`25k`, `chunk=5000`): ~2.20s
+- latest documented 5-game replay-mode full flow: 156.8s
+
+Remaining work is focused on contract-check synchronization/minutes-projection
+hotspots plus refreshed end-to-end replay measurements with structured timing capture.

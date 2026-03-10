@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -7,6 +8,9 @@ from projections.rotation.game_transformer_v2 import FLOW_TARGET_COLUMNS_V1
 from projections.rotation.sample_worlds_v2 import (
     MakeModelConfig,
     _align_flow_to_backbone_budgets,
+    _build_world_rows,
+    _compute_dk_fpts,
+    _flow_idx,
     check_world_contracts,
     project_flow_stats_to_contract,
     sample_worlds_for_batch,
@@ -22,6 +26,154 @@ def _team_index(num_worlds: int) -> torch.Tensor:
         ],
         dim=1,
     )
+
+
+def _build_world_rows_reference(
+    *,
+    batch: dict[str, torch.Tensor | list[str]],
+    world_offset: int,
+    minutes: torch.Tensor,
+    active_mask: torch.Tensor,
+    flow_values: torch.Tensor,
+    flow_target_columns: list[str],
+) -> pd.DataFrame:
+    bsz = int(batch["player_features"].shape[0])  # type: ignore[index]
+    n_worlds = int(minutes.shape[1])
+    valid = batch["player_valid_mask"].cpu().numpy().astype(bool)  # type: ignore[index]
+    player_ids = batch["player_ids"].cpu().numpy().astype(np.int64)  # type: ignore[index]
+    team_ids = batch["team_ids"].cpu().numpy().astype(np.int64)  # type: ignore[index]
+    game_ids = [str(v) for v in batch["game_id_norm"]]  # type: ignore[index]
+    game_dates = [str(v) for v in batch["game_date"]]  # type: ignore[index]
+
+    mins_np = minutes.cpu().numpy()
+    active_np = active_mask.cpu().numpy().astype(bool)
+    flow_np = flow_values.cpu().numpy()
+
+    idx = {name: _flow_idx(flow_target_columns, name) for name in FLOW_TARGET_COLUMNS_V1}
+    pf_idx = flow_target_columns.index("pf") if "pf" in flow_target_columns else None
+
+    rows: list[dict[str, object]] = []
+    for b_idx in range(bsz):
+        valid_flat = np.concatenate([valid[b_idx, 0], valid[b_idx, 1]], axis=0)
+        player_flat = np.concatenate([player_ids[b_idx, 0], player_ids[b_idx, 1]], axis=0)
+        team_flat = np.concatenate(
+            [
+                np.full((15,), int(team_ids[b_idx, 0]), dtype=np.int64),
+                np.full((15,), int(team_ids[b_idx, 1]), dtype=np.int64),
+            ],
+            axis=0,
+        )
+        for w_idx in range(n_worlds):
+            flow_world = flow_np[b_idx, w_idx]
+            fga2 = flow_world[:, idx["fga2"]]
+            fg2m = flow_world[:, idx["fg2m"]]
+            fga3 = flow_world[:, idx["fga3"]]
+            fg3m = flow_world[:, idx["fg3m"]]
+            fta = flow_world[:, idx["fta"]]
+            ftm = flow_world[:, idx["ftm"]]
+            oreb = flow_world[:, idx["oreb"]]
+            dreb = flow_world[:, idx["dreb"]]
+            ast = flow_world[:, idx["ast"]]
+            stl = flow_world[:, idx["stl"]]
+            blk = flow_world[:, idx["blk"]]
+            tov = flow_world[:, idx["tov"]]
+            pf = flow_world[:, int(pf_idx)] if pf_idx is not None else np.zeros_like(fga2)
+            fga = fga2 + fga3
+            fgm = fg2m + fg3m
+            pts = 2.0 * fg2m + 3.0 * fg3m + ftm
+            reb = oreb + dreb
+            dk = _compute_dk_fpts(
+                pts=torch.from_numpy(pts),
+                reb=torch.from_numpy(reb),
+                ast=torch.from_numpy(ast),
+                stl=torch.from_numpy(stl),
+                blk=torch.from_numpy(blk),
+                tov=torch.from_numpy(tov),
+            ).numpy()
+            for p_idx in np.where(valid_flat)[0]:
+                rows.append(
+                    {
+                        "world_idx": int(world_offset + w_idx),
+                        "game_id": int(game_ids[b_idx]),
+                        "game_id_norm": str(game_ids[b_idx]),
+                        "game_date": str(game_dates[b_idx]),
+                        "team_id": int(team_flat[p_idx]),
+                        "player_id": int(player_flat[p_idx]),
+                        "active": int(bool(active_np[b_idx, w_idx, p_idx])),
+                        "minutes": float(mins_np[b_idx, w_idx, p_idx]),
+                        "fga2": float(fga2[p_idx]),
+                        "fg2m": float(fg2m[p_idx]),
+                        "fga3": float(fga3[p_idx]),
+                        "fg3m": float(fg3m[p_idx]),
+                        "fta": float(fta[p_idx]),
+                        "ftm": float(ftm[p_idx]),
+                        "oreb": float(oreb[p_idx]),
+                        "dreb": float(dreb[p_idx]),
+                        "ast": float(ast[p_idx]),
+                        "stl": float(stl[p_idx]),
+                        "blk": float(blk[p_idx]),
+                        "tov": float(tov[p_idx]),
+                        "pf": float(pf[p_idx]),
+                        "fga": float(fga[p_idx]),
+                        "fgm": float(fgm[p_idx]),
+                        "fg3a": float(fga3[p_idx]),
+                        "pts": float(pts[p_idx]),
+                        "reb": float(reb[p_idx]),
+                        "plus_minus": 0.0,
+                        "dk_fpts": float(dk[p_idx]),
+                    }
+                )
+    return pd.DataFrame.from_records(rows)
+
+
+def test_build_world_rows_vectorized_matches_reference() -> None:
+    torch.manual_seed(7)
+    cols = list(FLOW_TARGET_COLUMNS_V1)
+    bsz = 2
+    n_worlds = 4
+    n_targets = len(cols)
+
+    player_ids = torch.arange(1, 1 + bsz * 2 * 15, dtype=torch.long).reshape(bsz, 2, 15)
+    valid = torch.zeros((bsz, 2, 15), dtype=torch.bool)
+    valid[0, 0, :11] = True
+    valid[0, 1, :9] = True
+    valid[1, 0, :10] = True
+    valid[1, 1, :8] = True
+
+    batch: dict[str, torch.Tensor | list[str]] = {
+        "player_features": torch.zeros((bsz, 2, 15, 3), dtype=torch.float32),
+        "player_valid_mask": valid,
+        "player_ids": player_ids,
+        "team_ids": torch.tensor([[100, 200], [300, 400]], dtype=torch.long),
+        "game_id_norm": ["0000001001", "0000001002"],
+        "game_date": ["2026-03-10", "2026-03-11"],
+    }
+    minutes = torch.rand((bsz, n_worlds, 30), dtype=torch.float32) * 48.0
+    active = torch.rand((bsz, n_worlds, 30), dtype=torch.float32) > 0.35
+    flow = torch.rand((bsz, n_worlds, 30, n_targets), dtype=torch.float32) * 6.0
+
+    out = _build_world_rows(
+        batch=batch,
+        world_offset=12,
+        minutes=minutes,
+        active_mask=active,
+        flow_values=flow,
+        flow_target_columns=cols,
+    )
+    ref = _build_world_rows_reference(
+        batch=batch,
+        world_offset=12,
+        minutes=minutes,
+        active_mask=active,
+        flow_values=flow,
+        flow_target_columns=cols,
+    )
+
+    sort_cols = ["world_idx", "game_id", "team_id", "player_id"]
+    out = out.sort_values(sort_cols).reset_index(drop=True)
+    ref = ref.sort_values(sort_cols).reset_index(drop=True)
+    assert len(out) == len(ref) == int(valid.sum().item()) * n_worlds
+    pd.testing.assert_frame_equal(out, ref, check_dtype=False, check_exact=False, rtol=1e-6, atol=1e-6)
 
 
 def test_project_flow_stats_to_contract_clamps_and_caps_makes() -> None:

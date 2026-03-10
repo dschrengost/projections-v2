@@ -221,8 +221,6 @@ def _apply_forced_active_minutes_floor(
     for side in (0, 1):
         side_mask = valid & team_index.eq(side)
         side_f = side_mask.to(dtype=out.dtype)
-        if not bool(side_mask.any()):
-            continue
 
         floor_side = floor_vals * side_f
         # Keep floors feasible: if team floor mass exceeds 240, down-scale proportionally.
@@ -239,17 +237,16 @@ def _apply_forced_active_minutes_floor(
 
         team_sum = (out * side_f).sum(dim=1, keepdim=True)
         excess = torch.clamp(team_sum - team_total, min=0.0)
-        if bool(excess.gt(1e-8).any()):
-            reducible = torch.clamp(out - floor_side, min=0.0) * side_f
-            reducible_sum = reducible.sum(dim=1, keepdim=True)
-            frac = torch.where(
-                reducible_sum > 1e-8,
-                excess / reducible_sum.clamp(min=1e-8),
-                torch.zeros_like(excess),
-            )
-            frac = torch.clamp(frac, min=0.0, max=1.0)
-            out = out - reducible * frac
-            out = torch.clamp(out, min=0.0, max=float(max_minutes_per_player))
+        reducible = torch.clamp(out - floor_side, min=0.0) * side_f
+        reducible_sum = reducible.sum(dim=1, keepdim=True)
+        frac = torch.where(
+            reducible_sum > 1e-8,
+            excess / reducible_sum.clamp(min=1e-8),
+            torch.zeros_like(excess),
+        )
+        frac = torch.clamp(frac, min=0.0, max=1.0)
+        out = out - reducible * frac
+        out = torch.clamp(out, min=0.0, max=float(max_minutes_per_player))
 
     return torch.where(valid, out, torch.zeros_like(out))
 
@@ -449,8 +446,12 @@ def _align_flow_to_backbone_budgets(
         frac = torch.clamp(clipped_attempts - n_floor, min=0.0, max=1.0)
         n_int = n_floor + torch.bernoulli(frac)
 
-        p = torch.distributions.Beta(alpha, beta).sample()
-        makes_int = torch.distributions.Binomial(total_count=n_int, probs=p).sample()
+        # Beta(alpha,beta) sample via Gamma ratio to avoid per-call distribution object overhead.
+        gamma_alpha = torch._standard_gamma(alpha)
+        gamma_beta = torch._standard_gamma(beta)
+        p = gamma_alpha / (gamma_alpha + gamma_beta).clamp(min=eps)
+        p = torch.clamp(p, min=eps, max=1.0 - eps)
+        makes_int = torch.binomial(n_int, p)
         scale = torch.where(
             n_int > 0.0,
             clipped_attempts / n_int.clamp(min=1.0),
@@ -520,21 +521,21 @@ def check_world_contracts(
     minutes_valid = minutes * valid.to(dtype=minutes.dtype)
     flow_valid = flow_values * valid.unsqueeze(-1).to(dtype=flow_values.dtype)
 
-    out: dict[str, int] = {}
-    out["minutes_negative"] = int(((minutes_valid < -float(tol))).sum().item())
-    out["minutes_over_48"] = int(((minutes_valid > (48.0 + float(tol)))).sum().item())
-    out["invalid_player_nonzero_minutes"] = int(
-        ((~valid) & (minutes.abs() > float(tol))).sum().item()
+    metrics_t: dict[str, torch.Tensor] = {
+        "minutes_negative": (minutes_valid < -float(tol)).sum(),
+        "minutes_over_48": (minutes_valid > (48.0 + float(tol))).sum(),
+        "invalid_player_nonzero_minutes": ((~valid) & (minutes.abs() > float(tol))).sum(),
+        "negative_stats": (flow_valid < -float(tol)).sum(),
+    }
+    team0_mask = valid & (team_index == 0)
+    team1_mask = valid & (team_index == 1)
+    team0_sum = (minutes * team0_mask.to(dtype=minutes.dtype)).sum(dim=1)
+    team1_sum = (minutes * team1_mask.to(dtype=minutes.dtype)).sum(dim=1)
+    metrics_t["team_minutes_not_240"] = (
+        (team0_sum - 240.0).abs().gt(float(tol)).sum()
+        + (team1_sum - 240.0).abs().gt(float(tol)).sum()
     )
 
-    minutes_team_sum_violations = 0
-    for side in (0, 1):
-        mask = valid & (team_index == side)
-        team_sum = (minutes * mask.to(dtype=minutes.dtype)).sum(dim=1)
-        minutes_team_sum_violations += int((team_sum - 240.0).abs().gt(float(tol)).sum().item())
-    out["team_minutes_not_240"] = int(minutes_team_sum_violations)
-
-    out["negative_stats"] = int((flow_valid < -float(tol)).sum().item())
     fg2m_idx = _flow_idx(flow_target_columns, "fg2m")
     fga2_idx = _flow_idx(flow_target_columns, "fga2")
     fg3m_idx = _flow_idx(flow_target_columns, "fg3m")
@@ -542,18 +543,32 @@ def check_world_contracts(
     ftm_idx = _flow_idx(flow_target_columns, "ftm")
     fta_idx = _flow_idx(flow_target_columns, "fta")
 
-    out["fg2m_gt_fga2"] = int((flow_valid[..., fg2m_idx] > flow_valid[..., fga2_idx] + float(tol)).sum().item())
-    out["fg3m_gt_fga3"] = int((flow_valid[..., fg3m_idx] > flow_valid[..., fga3_idx] + float(tol)).sum().item())
-    out["ftm_gt_fta"] = int((flow_valid[..., ftm_idx] > flow_valid[..., fta_idx] + float(tol)).sum().item())
+    metrics_t["fg2m_gt_fga2"] = (
+        flow_valid[..., fg2m_idx] > flow_valid[..., fga2_idx] + float(tol)
+    ).sum()
+    metrics_t["fg3m_gt_fga3"] = (
+        flow_valid[..., fg3m_idx] > flow_valid[..., fga3_idx] + float(tol)
+    ).sum()
+    metrics_t["ftm_gt_fta"] = (
+        flow_valid[..., ftm_idx] > flow_valid[..., fta_idx] + float(tol)
+    ).sum()
     if active_mask is not None:
         inactive = (~active_mask.to(dtype=torch.bool)) & valid
         inactive_nonzero_stats = (
             flow_values.abs() * inactive.unsqueeze(-1).to(dtype=flow_values.dtype)
         ) > float(tol)
-        out["inactive_nonzero_stats"] = int(inactive_nonzero_stats.sum().item())
-        out["inactive_nonzero_fpts_proxy"] = int(
-            (flow_values.sum(dim=-1).abs() * inactive.to(dtype=flow_values.dtype) > float(tol)).sum().item()
-        )
+        metrics_t["inactive_nonzero_stats"] = inactive_nonzero_stats.sum()
+        metrics_t["inactive_nonzero_fpts_proxy"] = (
+            flow_values.sum(dim=-1).abs() * inactive.to(dtype=flow_values.dtype) > float(tol)
+        ).sum()
+
+    metric_keys = list(metrics_t.keys())
+    metric_vals = torch.stack(
+        [metrics_t[key].to(dtype=torch.int64, device=minutes.device) for key in metric_keys], dim=0
+    ).cpu()
+    out: dict[str, int] = {
+        key: int(val) for key, val in zip(metric_keys, metric_vals.tolist(), strict=False)
+    }
     out["total_violations"] = int(sum(out.values()))
     return out
 
@@ -631,96 +646,120 @@ def _build_world_rows(
     active_mask: torch.Tensor,
     flow_values: torch.Tensor,
     flow_target_columns: list[str],
-) -> list[dict[str, Any]]:
+) -> pd.DataFrame:
     bsz = int(batch["player_features"].shape[0])  # type: ignore[index]
     n_worlds = int(minutes.shape[1])
+    if bsz <= 0 or n_worlds <= 0:
+        return pd.DataFrame()
+
     valid = batch["player_valid_mask"].cpu().numpy().astype(bool)
     player_ids = batch["player_ids"].cpu().numpy().astype(np.int64)
     team_ids = batch["team_ids"].cpu().numpy().astype(np.int64)
-    game_ids = [str(v) for v in batch["game_id_norm"]]  # type: ignore[index]
-    game_dates = [str(v) for v in batch["game_date"]]  # type: ignore[index]
+    game_id_norm = np.asarray([str(v) for v in batch["game_id_norm"]], dtype=object)  # type: ignore[index]
+    game_dates = np.asarray([str(v) for v in batch["game_date"]], dtype=object)  # type: ignore[index]
+    game_ids = np.asarray([int(v) for v in game_id_norm], dtype=np.int64)
 
     mins_np = minutes.cpu().numpy()
-    active_np = active_mask.cpu().numpy().astype(bool)
+    active_np = active_mask.cpu().numpy().astype(np.int8)
     flow_np = flow_values.cpu().numpy()
 
+    valid_flat = valid.reshape(bsz, -1)
+    players_flat = player_ids.reshape(bsz, -1)
+    team_flat = np.repeat(team_ids.astype(np.int64), repeats=player_ids.shape[-1], axis=1)
+    n_players_total = int(valid_flat.shape[1])
+
+    # Expand batch metadata to one row per (batch, world, player), then mask invalid players.
+    bw_game_idx = np.repeat(np.arange(bsz, dtype=np.int64), n_worlds)
+    bw_world_idx = np.tile(np.arange(n_worlds, dtype=np.int64), bsz)
+    valid_mask = np.repeat(valid_flat, repeats=n_worlds, axis=0).reshape(-1)
+    if not bool(valid_mask.any()):
+        return pd.DataFrame()
+
+    world_idx_all = np.repeat(world_offset + bw_world_idx, repeats=n_players_total)
+    game_idx_all = np.repeat(bw_game_idx, repeats=n_players_total)
+    player_id_all = np.repeat(players_flat, repeats=n_worlds, axis=0).reshape(-1)
+    team_id_all = np.repeat(team_flat, repeats=n_worlds, axis=0).reshape(-1)
+
     idx = {name: _flow_idx(flow_target_columns, name) for name in FLOW_TARGET_COLUMNS_V1}
-    has_pf = "pf" in flow_target_columns
-    pf_idx = flow_target_columns.index("pf") if has_pf else None
+    pf_idx = flow_target_columns.index("pf") if "pf" in flow_target_columns else None
+    flow_flat = flow_np.reshape(-1, flow_np.shape[-1])
 
-    rows: list[dict[str, Any]] = []
-    for b_idx in range(bsz):
-        valid_flat = np.concatenate([valid[b_idx, 0], valid[b_idx, 1]], axis=0)
-        player_flat = np.concatenate([player_ids[b_idx, 0], player_ids[b_idx, 1]], axis=0)
-        team_flat = np.concatenate(
-            [
-                np.full((15,), int(team_ids[b_idx, 0]), dtype=np.int64),
-                np.full((15,), int(team_ids[b_idx, 1]), dtype=np.int64),
-            ],
-            axis=0,
-        )
-        for w_idx in range(n_worlds):
-            flow_world = flow_np[b_idx, w_idx]
-            fga2 = flow_world[:, idx["fga2"]]
-            fg2m = flow_world[:, idx["fg2m"]]
-            fga3 = flow_world[:, idx["fga3"]]
-            fg3m = flow_world[:, idx["fg3m"]]
-            fta = flow_world[:, idx["fta"]]
-            ftm = flow_world[:, idx["ftm"]]
-            oreb = flow_world[:, idx["oreb"]]
-            dreb = flow_world[:, idx["dreb"]]
-            ast = flow_world[:, idx["ast"]]
-            stl = flow_world[:, idx["stl"]]
-            blk = flow_world[:, idx["blk"]]
-            tov = flow_world[:, idx["tov"]]
-            pf = flow_world[:, int(pf_idx)] if pf_idx is not None else np.zeros_like(fga2)
-            fga = fga2 + fga3
-            fgm = fg2m + fg3m
-            pts = 2.0 * fg2m + 3.0 * fg3m + ftm
-            reb = oreb + dreb
+    fga2 = flow_flat[:, idx["fga2"]]
+    fg2m = flow_flat[:, idx["fg2m"]]
+    fga3 = flow_flat[:, idx["fga3"]]
+    fg3m = flow_flat[:, idx["fg3m"]]
+    fta = flow_flat[:, idx["fta"]]
+    ftm = flow_flat[:, idx["ftm"]]
+    oreb = flow_flat[:, idx["oreb"]]
+    dreb = flow_flat[:, idx["dreb"]]
+    ast = flow_flat[:, idx["ast"]]
+    stl = flow_flat[:, idx["stl"]]
+    blk = flow_flat[:, idx["blk"]]
+    tov = flow_flat[:, idx["tov"]]
+    pf = flow_flat[:, int(pf_idx)] if pf_idx is not None else np.zeros_like(fga2)
+    fga = fga2 + fga3
+    fgm = fg2m + fg3m
+    pts = np.float32(2.0) * fg2m + np.float32(3.0) * fg3m + ftm
+    reb = oreb + dreb
 
-            dk = _compute_dk_fpts(
-                pts=torch.from_numpy(pts),
-                reb=torch.from_numpy(reb),
-                ast=torch.from_numpy(ast),
-                stl=torch.from_numpy(stl),
-                blk=torch.from_numpy(blk),
-                tov=torch.from_numpy(tov),
-            ).numpy()
-            for p_idx in np.where(valid_flat)[0]:
-                rows.append(
-                    {
-                        "world_idx": int(world_offset + w_idx),
-                        "game_id": int(game_ids[b_idx]),
-                        "game_id_norm": str(game_ids[b_idx]),
-                        "game_date": str(game_dates[b_idx]),
-                        "team_id": int(team_flat[p_idx]),
-                        "player_id": int(player_flat[p_idx]),
-                        "active": int(bool(active_np[b_idx, w_idx, p_idx])),
-                        "minutes": float(mins_np[b_idx, w_idx, p_idx]),
-                        "fga2": float(fga2[p_idx]),
-                        "fg2m": float(fg2m[p_idx]),
-                        "fga3": float(fga3[p_idx]),
-                        "fg3m": float(fg3m[p_idx]),
-                        "fta": float(fta[p_idx]),
-                        "ftm": float(ftm[p_idx]),
-                        "oreb": float(oreb[p_idx]),
-                        "dreb": float(dreb[p_idx]),
-                        "ast": float(ast[p_idx]),
-                        "stl": float(stl[p_idx]),
-                        "blk": float(blk[p_idx]),
-                        "tov": float(tov[p_idx]),
-                        "pf": float(pf[p_idx]),
-                        "fga": float(fga[p_idx]),
-                        "fgm": float(fgm[p_idx]),
-                        "fg3a": float(fga3[p_idx]),
-                        "pts": float(pts[p_idx]),
-                        "reb": float(reb[p_idx]),
-                        "plus_minus": 0.0,
-                        "dk_fpts": float(dk[p_idx]),
-                    }
-                )
-    return rows
+    # Numpy vectorized DK scoring to avoid per-player torch roundtrips.
+    dk_base = (
+        pts
+        + np.float32(1.25) * reb
+        + np.float32(1.5) * ast
+        + np.float32(2.0) * stl
+        + np.float32(2.0) * blk
+        - np.float32(0.5) * tov
+    )
+    qualifying = (
+        (pts >= 10.0).astype(np.int8)
+        + (reb >= 10.0).astype(np.int8)
+        + (ast >= 10.0).astype(np.int8)
+        + (stl >= 10.0).astype(np.int8)
+        + (blk >= 10.0).astype(np.int8)
+    )
+    dk = dk_base + (qualifying == 2).astype(dk_base.dtype) * np.float32(1.5) + (
+        qualifying >= 3
+    ).astype(dk_base.dtype) * np.float32(3.0)
+
+    mins_flat = mins_np.reshape(-1)
+    active_flat = active_np.reshape(-1)
+    mask = valid_mask
+    n_rows = int(mask.sum())
+    out = pd.DataFrame(
+        {
+            "world_idx": world_idx_all[mask],
+            "game_id": game_ids[game_idx_all[mask]],
+            "game_id_norm": game_id_norm[game_idx_all[mask]],
+            "game_date": game_dates[game_idx_all[mask]],
+            "team_id": team_id_all[mask],
+            "player_id": player_id_all[mask],
+            "active": active_flat[mask],
+            "minutes": mins_flat[mask],
+            "fga2": fga2[mask],
+            "fg2m": fg2m[mask],
+            "fga3": fga3[mask],
+            "fg3m": fg3m[mask],
+            "fta": fta[mask],
+            "ftm": ftm[mask],
+            "oreb": oreb[mask],
+            "dreb": dreb[mask],
+            "ast": ast[mask],
+            "stl": stl[mask],
+            "blk": blk[mask],
+            "tov": tov[mask],
+            "pf": pf[mask],
+            "fga": fga[mask],
+            "fgm": fgm[mask],
+            "fg3a": fga3[mask],
+            "pts": pts[mask],
+            "reb": reb[mask],
+            "plus_minus": np.zeros(n_rows, dtype=np.float32),
+            "dk_fpts": dk[mask],
+        },
+        copy=False,
+    )
+    return out
 
 
 def _q(values: np.ndarray, q: float) -> float:
@@ -1101,7 +1140,7 @@ def sample_worlds_for_batch(
             poss_sym_valid_parts.append(valid_flat.reshape(-1, valid_flat.shape[-1]).cpu())
             poss_sym_team_parts.append(team_flat.reshape(-1, team_flat.shape[-1]).cpu())
 
-        chunk_rows = _build_world_rows(
+        chunk_df = _build_world_rows(
             batch=batch,
             world_offset=int(world_offset),
             minutes=minutes,
@@ -1109,8 +1148,8 @@ def sample_worlds_for_batch(
             flow_values=flow_vals,
             flow_target_columns=flow_target_columns,
         )
-        if chunk_rows:
-            frames.append(pd.DataFrame.from_records(chunk_rows))
+        if not chunk_df.empty:
+            frames.append(chunk_df)
 
     # -- Possession symmetry diagnostics (when backbone is enabled) --
     if has_backbone and poss_sym_flow_parts:

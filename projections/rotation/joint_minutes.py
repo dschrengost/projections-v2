@@ -32,63 +32,92 @@ def _project_single_team_capped_simplex(
         raise ValueError("max_iter must be > 0")
 
     bsz, num_players = preferences.shape
-    out = torch.zeros((bsz, num_players), dtype=preferences.dtype, device=preferences.device)
     active = active_mask.to(dtype=torch.bool)
+    active_f = active.to(dtype=torch.float32)
 
     total = float(total_minutes)
     cap = float(max_minutes_per_player)
     tol = float(eps)
 
-    for b_idx in range(bsz):
-        mask = active[b_idx]
-        num_active = int(mask.sum().item())
-        if num_active <= 0:
-            continue
-        target_total = total
-        if float(num_active) * cap + tol < total:
-            if not bool(allow_scale_down_infeasible):
-                raise ValueError(
-                    f"Infeasible capped simplex projection: active_count={num_active}, cap={cap}, total={total}"
-                )
-            target_total = float(num_active) * cap
+    u = preferences.to(dtype=torch.float32)
+    active_count = active.sum(dim=1).to(dtype=torch.float32)
+    valid_rows = active_count > 0
+    feasible_totals = active_count * cap
 
-        u = preferences[b_idx, mask].to(dtype=torch.float32)
-        lower = torch.min(u - cap)
-        upper = torch.max(u)
+    if not bool(allow_scale_down_infeasible):
+        infeasible = valid_rows & (feasible_totals + tol < total)
+        if bool(infeasible.any()):
+            first_idx = int(torch.nonzero(infeasible, as_tuple=False)[0].item())
+            raise ValueError(
+                f"Infeasible capped simplex projection: active_count={int(active_count[first_idx].item())}, "
+                f"cap={cap}, total={total}"
+            )
 
-        for _ in range(int(max_iter)):
-            lam = 0.5 * (lower + upper)
-            m = torch.clamp(u - lam, min=0.0, max=cap)
-            m_sum = float(m.sum().item())
-            if m_sum > target_total:
-                lower = lam
-            else:
-                upper = lam
+    target_total = torch.full((bsz,), float(total), dtype=torch.float32, device=u.device)
+    if bool(allow_scale_down_infeasible):
+        target_total = torch.minimum(target_total, feasible_totals)
+    target_total = torch.where(valid_rows, target_total, torch.zeros_like(target_total))
 
+    lower = torch.where(active, u - cap, torch.full_like(u, torch.inf)).amin(dim=1)
+    upper = torch.where(active, u, torch.full_like(u, -torch.inf)).amax(dim=1)
+    lower = torch.where(valid_rows, lower, torch.zeros_like(lower))
+    upper = torch.where(valid_rows, upper, torch.zeros_like(upper))
+
+    for _ in range(int(max_iter)):
         lam = 0.5 * (lower + upper)
-        m = torch.clamp(u - lam, min=0.0, max=cap)
+        m = torch.clamp(u - lam.unsqueeze(1), min=0.0, max=cap) * active_f
+        m_sum = m.sum(dim=1)
+        too_high = valid_rows & (m_sum > target_total)
+        lower = torch.where(too_high, lam, lower)
+        upper = torch.where(too_high, upper, lam)
 
-        # Small numeric cleanup to hit exact team totals after finite-iter bisection.
-        diff = target_total - float(m.sum().item())
-        if abs(diff) > tol:
-            free = (m > tol) & (m < cap - tol)
-            if bool(free.any()):
-                m = m.clone()
-                m[free] = m[free] + diff / float(free.sum().item())
-                m = torch.clamp(m, min=0.0, max=cap)
-            else:
-                m = m.clone()
-                if diff > 0:
-                    slack = cap - m
-                    idx = torch.argmax(slack)
-                    m[idx] = torch.clamp(m[idx] + diff, min=0.0, max=cap)
-                else:
-                    idx = torch.argmax(m)
-                    m[idx] = torch.clamp(m[idx] + diff, min=0.0, max=cap)
+    lam = 0.5 * (lower + upper)
+    out_f32 = torch.clamp(u - lam.unsqueeze(1), min=0.0, max=cap) * active_f
 
-        out[b_idx, mask] = m.to(dtype=preferences.dtype)
+    # Small numeric cleanup to hit exact team totals after finite-iter bisection.
+    diff = target_total - out_f32.sum(dim=1)
+    adjust_rows = valid_rows & diff.abs().gt(tol)
+    if bool(adjust_rows.any()):
+        free = ((out_f32 > tol) & (out_f32 < (cap - tol))) & active
+        free_count = free.sum(dim=1).to(dtype=torch.float32)
+        free_rows = adjust_rows & free_count.gt(0)
+        if bool(free_rows.any()):
+            delta = diff / free_count.clamp(min=1.0)
+            out_f32 = torch.where(
+                free_rows.unsqueeze(1) & free,
+                out_f32 + delta.unsqueeze(1),
+                out_f32,
+            )
+            out_f32 = torch.clamp(out_f32, min=0.0, max=cap)
 
-    return out
+        # Final residual correction for rows with no free coordinates.
+        residual = target_total - out_f32.sum(dim=1)
+        residual_rows = valid_rows & residual.abs().gt(tol)
+        if bool(residual_rows.any()):
+            add_rows = residual_rows & residual.gt(0)
+            if bool(add_rows.any()):
+                slack = (cap - out_f32) * active_f
+                idx_add = torch.argmax(slack, dim=1)
+                row_idx = torch.nonzero(add_rows, as_tuple=False).squeeze(1)
+                out_f32[row_idx, idx_add[row_idx]] = torch.clamp(
+                    out_f32[row_idx, idx_add[row_idx]] + residual[row_idx],
+                    min=0.0,
+                    max=cap,
+                )
+
+            sub_rows = residual_rows & residual.lt(0)
+            if bool(sub_rows.any()):
+                avail = out_f32 * active_f
+                idx_sub = torch.argmax(avail, dim=1)
+                row_idx = torch.nonzero(sub_rows, as_tuple=False).squeeze(1)
+                out_f32[row_idx, idx_sub[row_idx]] = torch.clamp(
+                    out_f32[row_idx, idx_sub[row_idx]] + residual[row_idx],
+                    min=0.0,
+                    max=cap,
+                )
+
+    out_f32 = out_f32 * active_f
+    return out_f32.to(dtype=preferences.dtype)
 
 
 def project_minutes_capped_simplex(
