@@ -31,6 +31,10 @@ deployments:
     placeholder_mode: false
     promote_pointers: true
     replay_mode: false
+    gtv2_inference_backend: triton
+    gtv2_device: cuda:0
+    gtv2_triton_timeout_seconds: 600.0
+    gtv2_world_chunk_size: 5000
     gtv2_make_model_mode: beta_binomial_all
     gtv2_make_model_use_learned_efficiency: true
     require_action_props: true

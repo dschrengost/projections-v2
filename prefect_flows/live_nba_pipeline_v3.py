@@ -2314,10 +2314,12 @@ def _repair_world_frame_contract_fields(
                 "minutes": minutes,
             }
         )
-        valid_group_keys = group_frame[["world_idx", "game_id", "team_id"]].notna().all(axis=1)
-        if bool(valid_group_keys.any()):
+        # Use dropna over boolean .loc indexing to avoid pandas index-alignment
+        # edge cases on large/sparse indices observed in production.
+        valid_group_frame = group_frame.dropna(subset=["world_idx", "game_id", "team_id"])
+        if not valid_group_frame.empty:
             team_minutes = (
-                group_frame.loc[valid_group_keys]
+                valid_group_frame
                 .groupby(["world_idx", "game_id", "team_id"], dropna=False)["minutes"]
                 .sum()
                 .reset_index()
@@ -5354,7 +5356,7 @@ def nba_live_pipeline_v3_flow(
     gtv2_triton_model_version: str | None = None,
     gtv2_triton_timeout_seconds: float | None = None,
     gtv2_triton_healthcheck_timeout_seconds: float | None = None,
-    gtv2_world_chunk_size: int = 64,
+    gtv2_world_chunk_size: int = 5000,
     gtv2_active_temperature: float = 1.0,
     gtv2_seed: int = 42,
     gtv2_strict_world_contracts: bool = True,

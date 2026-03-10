@@ -22,7 +22,7 @@ app = typer.Typer(add_completion=False)
 @app.command()
 def main(
     deployment: str = typer.Option(
-        "nba-live-pipeline/nba-live-pipeline",
+        "nba-live-pipeline-v3/nba-live-pipeline",
         "--deployment",
         help="Deployment name in <flow>/<deployment> form.",
     ),
@@ -45,4 +45,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-
