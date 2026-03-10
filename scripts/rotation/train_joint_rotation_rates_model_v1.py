@@ -131,6 +131,24 @@ def _set_seed(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
 
 
+def _resolve_training_device(device_arg: str) -> torch.device:
+    value = str(device_arg).strip().lower()
+    if value in {"", "auto"}:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is not None and bool(mps_backend.is_available()):
+            return torch.device("mps")
+        return torch.device("cpu")
+    if value.startswith("cuda") and not torch.cuda.is_available():
+        raise ValueError(f"--device={device_arg!r} requested CUDA, but CUDA is not available")
+    if value == "mps":
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is None or not bool(mps_backend.is_available()):
+            raise ValueError("--device='mps' requested, but MPS is not available")
+    return torch.device(device_arg)
+
+
 def _coerce_join_keys(df: pd.DataFrame, *, name: str, require_game_date: bool) -> pd.DataFrame:
     out = df.copy()
     for col in KEY_COLS:
@@ -733,7 +751,7 @@ def main() -> None:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--device", type=str, default="auto", help="Torch device: auto, cpu, cuda, cuda:0, mps.")
     parser.add_argument("--val-start-date", type=str, default=None)
     parser.add_argument("--val-end-date", type=str, default=None)
     parser.add_argument("--val-days", type=int, default=14)
@@ -776,7 +794,15 @@ def main() -> None:
     args = parser.parse_args()
 
     _set_seed(int(args.seed))
-    device = torch.device(args.device)
+    device = _resolve_training_device(str(args.device))
+    if device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        device_name = torch.cuda.get_device_name(device)
+        print(f"[joint_train] device={device} ({device_name})")
+    else:
+        print(f"[joint_train] device={device}")
     if float(args.gate_bce_weight) < 0:
         raise ValueError("--gate-bce-weight must be >= 0")
     if float(args.minutes_out_weight) < 0:
@@ -914,7 +940,7 @@ def main() -> None:
     )
     print(f"[joint_train] examples: train={len(train_examples)} val={len(val_examples)}")
 
-    loader_kwargs: dict[str, Any] = {}
+    loader_kwargs: dict[str, Any] = {"pin_memory": bool(device.type == "cuda")}
     if int(args.num_workers) > 0:
         # Avoid Linux fork-related worker crashes with torch + large object graphs.
         loader_kwargs["multiprocessing_context"] = "spawn"

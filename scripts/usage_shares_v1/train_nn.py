@@ -105,6 +105,24 @@ def get_git_sha() -> str | None:
     return None
 
 
+def _resolve_training_device(device_arg: str) -> torch.device:
+    value = str(device_arg).strip().lower()
+    if value in {"", "auto"}:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is not None and bool(mps_backend.is_available()):
+            return torch.device("mps")
+        return torch.device("cpu")
+    if value.startswith("cuda") and not torch.cuda.is_available():
+        raise ValueError(f"--device={device_arg!r} requested CUDA, but CUDA is not available")
+    if value == "mps":
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is None or not bool(mps_backend.is_available()):
+            raise ValueError("--device='mps' requested, but MPS is not available")
+    return torch.device(device_arg)
+
+
 # =============================================================================
 # Dataset and Model
 # =============================================================================
@@ -449,6 +467,8 @@ def main(
     weight_decay: float = typer.Option(1e-4),
     hidden_sizes: str = typer.Option("128,64"),
     embed_dim: int = typer.Option(8),
+    device: str = typer.Option("auto"),
+    num_workers: int = typer.Option(0),
 ) -> None:
     """Train neural network models for usage shares prediction."""
     
@@ -462,8 +482,17 @@ def main(
     hidden_list = [int(h.strip()) for h in hidden_sizes.split(",")]
     run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    typer.echo(f"[nn] Using device: {device}")
+    if num_workers < 0:
+        raise typer.BadParameter("--num-workers must be >= 0")
+    training_device = _resolve_training_device(device)
+    if training_device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        device_name = torch.cuda.get_device_name(training_device)
+        typer.echo(f"[nn] Using device: {training_device} ({device_name})")
+    else:
+        typer.echo(f"[nn] Using device: {training_device}")
     
     typer.echo(f"[nn] Loading data from {start.date()} to {end.date()}...")
     df = load_training_data(root, start, end)
@@ -516,8 +545,28 @@ def main(
     
     typer.echo(f"[nn] Train groups: {len(train_dataset)}, Val groups: {len(val_dataset)}")
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_groups, shuffle=True, collate_fn=collate_groups)
-    val_loader = DataLoader(val_dataset, batch_size=batch_groups, shuffle=False, collate_fn=collate_groups)
+    loader_kwargs: dict[str, Any] = {
+        "num_workers": int(num_workers),
+        "pin_memory": bool(training_device.type == "cuda"),
+    }
+    if int(num_workers) > 0:
+        loader_kwargs["multiprocessing_context"] = "spawn"
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 2
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_groups,
+        shuffle=True,
+        collate_fn=collate_groups,
+        **loader_kwargs,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_groups,
+        shuffle=False,
+        collate_fn=collate_groups,
+        **loader_kwargs,
+    )
     
     model = UsageSharesNN(
         n_numeric=len(available_numeric),
@@ -526,7 +575,7 @@ def main(
         embed_dim=embed_dim,
         hidden_sizes=hidden_list,
         n_targets=len(target_list),
-    ).to(device)
+    ).to(training_device)
     
     typer.echo(f"[nn] Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
@@ -536,8 +585,8 @@ def main(
     best_epoch = 0
     
     for epoch in range(epochs):
-        train_losses = train_epoch(model, train_loader, optimizer, target_list, device)
-        val_metrics = evaluate_with_shared_metrics(model, val_loader, val_df, target_list, device, alpha)
+        train_losses = train_epoch(model, train_loader, optimizer, target_list, training_device)
+        val_metrics = evaluate_with_shared_metrics(model, val_loader, val_df, target_list, training_device, alpha)
         
         avg_val_kl = np.mean([m.KL for m in val_metrics.values()]) if val_metrics else 0
         
@@ -551,7 +600,7 @@ def main(
     
     typer.echo(f"\n[nn] Best epoch: {best_epoch + 1} with val_KL={best_val_kl:.4f}")
     
-    final_metrics = evaluate_with_shared_metrics(model, val_loader, val_df, target_list, device, alpha)
+    final_metrics = evaluate_with_shared_metrics(model, val_loader, val_df, target_list, training_device, alpha)
     all_metrics: dict[str, dict[str, Any]] = {}
     
     typer.echo("\n=== SUMMARY (same baseline as LGBM) ===")
@@ -618,6 +667,8 @@ def main(
         "min_minutes_actual": min_minutes_actual,
         "seed": seed,
         "epochs": epochs,
+        "device": str(training_device),
+        "num_workers": int(num_workers),
         "targets": target_list,
         "n_train_groups": len(train_dataset),
         "n_val_groups": len(val_dataset),

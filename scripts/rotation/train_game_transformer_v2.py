@@ -246,6 +246,24 @@ def _set_seed(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
 
 
+def _resolve_training_device(device_arg: str) -> torch.device:
+    value = str(device_arg).strip().lower()
+    if value in {"", "auto"}:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is not None and bool(mps_backend.is_available()):
+            return torch.device("mps")
+        return torch.device("cpu")
+    if value.startswith("cuda") and not torch.cuda.is_available():
+        raise ValueError(f"--device={device_arg!r} requested CUDA, but CUDA is not available")
+    if value == "mps":
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is None or not bool(mps_backend.is_available()):
+            raise ValueError("--device='mps' requested, but MPS is not available")
+    return torch.device(device_arg)
+
+
 def _coerce_join_keys(df: pd.DataFrame, *, name: str) -> pd.DataFrame:
     out = df.copy()
     for col in ["game_id", "team_id", "player_id"]:
@@ -1505,8 +1523,6 @@ def _run_epoch(
                     fg2m_em = emergent_flow[..., fg2m_i]
                     fg3m_em = emergent_flow[..., fg3m_i]
                     fga_em = emergent_flow[..., fga2_i] + emergent_flow[..., fga3_i]
-                    fgm_em = fg2m_em + fg3m_em
-                    missed_fg_em = torch.clamp(fga_em - fgm_em, min=0.0)
                     fta_em = emergent_flow[..., fta_i]
                     ftm_em = emergent_flow[..., ftm_i]
                     oreb_em = emergent_flow[..., oreb_i]
@@ -1903,7 +1919,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--device", type=str, default="auto", help="Torch device: auto, cpu, cuda, cuda:0, mps.")
 
     parser.add_argument("--d-model", type=int, default=192)
     parser.add_argument("--hidden-dim", type=int, default=256)
@@ -2457,12 +2473,29 @@ def main() -> None:
         overflow_keep_weight_prior_minutes=float(args.overflow_keep_weight_prior_minutes),
     )
 
+    device = _resolve_training_device(str(args.device))
+    if device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        device_name = torch.cuda.get_device_name(device)
+        print(f"[train_gtv2] device={device} ({device_name})", flush=True)
+    else:
+        print(f"[train_gtv2] device={device}", flush=True)
+
+    loader_kwargs: dict[str, Any] = {"pin_memory": bool(device.type == "cuda")}
+    if max(0, int(args.num_workers)) > 0:
+        loader_kwargs["multiprocessing_context"] = "spawn"
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 2
+
     train_loader = DataLoader(
         GameLevelDataset(train_examples),
         batch_size=max(1, int(args.batch_size)),
         shuffle=True,
         num_workers=max(0, int(args.num_workers)),
         collate_fn=collate_game_level_examples,
+        **loader_kwargs,
     )
     val_loader = DataLoader(
         GameLevelDataset(val_examples),
@@ -2470,6 +2503,7 @@ def main() -> None:
         shuffle=False,
         num_workers=max(0, int(args.num_workers)),
         collate_fn=collate_game_level_examples,
+        **loader_kwargs,
     )
 
     include_pf_in_flow_targets = False
@@ -2519,7 +2553,6 @@ def main() -> None:
         overflow_keep_weight_prior_minutes=float(args.overflow_keep_weight_prior_minutes),
     )
 
-    device = torch.device(str(args.device))
     model = build_game_transformer_v2(config).to(device=device)
     init_model_pt = Path(args.init_model_pt).expanduser().resolve() if args.init_model_pt else None
     if init_model_pt is not None:

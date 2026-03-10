@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 import typer
 
+from projections.lgbm_device import apply_lgbm_compute_params, resolve_lgbm_device_type
 from projections.paths import data_path
 from projections.rates_v1.features import get_rates_feature_sets
 from projections.rates_v1.preprocess import (
@@ -290,6 +291,7 @@ def _train_one(
     train_df: pd.DataFrame,
     cal_df: pd.DataFrame,
     features: list[str],
+    lgb_params: dict[str, object],
     sample_weight: np.ndarray | None = None,
 ) -> tuple[lgb.Booster | None, dict]:
     train_mask = train_df[label_col].notna()
@@ -318,7 +320,7 @@ def _train_one(
         callbacks.append(lgb.early_stopping(stopping_rounds=200, verbose=False))
 
     booster = lgb.train(
-        params=BASE_PARAMS,
+        params=lgb_params,
         train_set=train_set,
         valid_sets=valid_sets,
         num_boost_round=5000,
@@ -385,6 +387,16 @@ def main(
         "--recency-min-weight",
         help="Optional floor for recency weights (default 0).",
     ),
+    lgbm_device: str = typer.Option(
+        "auto",
+        "--lgbm-device",
+        help="LightGBM device_type: auto, cpu, cuda, gpu.",
+    ),
+    lgbm_num_threads: int = typer.Option(
+        0,
+        "--lgbm-num-threads",
+        help="LightGBM num_threads override (<=0 keeps LightGBM default).",
+    ),
 ) -> None:
     root = data_root or data_path()
     start = pd.Timestamp(start_date).normalize() if start_date else None
@@ -434,6 +446,18 @@ def main(
         f"date_window=({start_date} to {end_date}) train_end={train_cutoff.date()} cal_end={cal_cutoff.date()} "
         f"features={feature_set_key}"
     )
+    if int(lgbm_num_threads) < 0:
+        raise typer.BadParameter("--lgbm-num-threads must be >= 0")
+    resolved_lgbm_device = resolve_lgbm_device_type(str(lgbm_device), log_fn=typer.echo)
+    lgb_params = apply_lgbm_compute_params(
+        BASE_PARAMS,
+        device_type=resolved_lgbm_device,
+        num_threads=int(lgbm_num_threads) if int(lgbm_num_threads) > 0 else None,
+    )
+    typer.echo(
+        f"[train] LightGBM backend: requested={str(lgbm_device).strip().lower() or 'auto'} "
+        f"resolved={resolved_lgbm_device}"
+    )
 
     # Configure MLFlow - prefer env var, fall back to localhost
     tracking_uri = None
@@ -451,7 +475,10 @@ def main(
         "end_date": end_date or "None",
         "recency_half_life_days": recency_half_life_days if recency_half_life_days is not None else "None",
         "recency_min_weight": recency_min_weight,
-        **{f"lgb_{k}": v for k, v in BASE_PARAMS.items()},
+        "lgbm_device_requested": str(lgbm_device),
+        "lgbm_device_resolved": resolved_lgbm_device,
+        "lgbm_num_threads": int(lgbm_num_threads),
+        **{f"lgb_{k}": v for k, v in lgb_params.items()},
     })
 
     df = _load_training_base(root, start, end)
@@ -519,6 +546,7 @@ def main(
             train_df,
             cal_df,
             feature_cols,
+            lgb_params=lgb_params,
             sample_weight=train_sample_weight,
         )
         if booster is None:
@@ -547,7 +575,12 @@ def main(
         "targets": TARGETS,
         "label_map": TARGET_LABEL_MAP,
         "feature_cols": feature_cols,
-        "params": BASE_PARAMS,
+        "params": lgb_params,
+        "lgbm_device": {
+            "requested": str(lgbm_device),
+            "resolved": resolved_lgbm_device,
+            "num_threads": int(lgbm_num_threads),
+        },
         "train_rows": len(train_df),
         "cal_rows": len(cal_df),
         "val_rows": len(val_df),

@@ -68,6 +68,24 @@ NUMERIC_FEATURES = [
 ]
 
 
+def _resolve_training_device(device_arg: str) -> torch.device:
+    value = str(device_arg).strip().lower()
+    if value in {"", "auto"}:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is not None and bool(mps_backend.is_available()):
+            return torch.device("mps")
+        return torch.device("cpu")
+    if value.startswith("cuda") and not torch.cuda.is_available():
+        raise ValueError(f"--device={device_arg!r} requested CUDA, but CUDA is not available")
+    if value == "mps":
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is None or not bool(mps_backend.is_available()):
+            raise ValueError("--device='mps' requested, but MPS is not available")
+    return torch.device(device_arg)
+
+
 class ResidualMLP(nn.Module):
     """Simple MLP to predict delta from baseline log-weights."""
 
@@ -267,6 +285,8 @@ def main(
     hidden_dims: str = typer.Option("128,64"),
     dropout: float = typer.Option(0.1),
     seed: int = typer.Option(1337),
+    device: str = typer.Option("auto"),
+    num_workers: int = typer.Option(0),
 ) -> None:
     """Train NN residual-on-baseline models."""
 
@@ -285,8 +305,17 @@ def main(
     hidden = tuple(int(d) for d in hidden_dims.split(","))
     run_id = run_id or f"nn_residual_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    typer.echo(f"[nn-residual] Device: {device}")
+    if num_workers < 0:
+        raise typer.BadParameter("--num-workers must be >= 0")
+    training_device = _resolve_training_device(device)
+    if training_device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        device_name = torch.cuda.get_device_name(training_device)
+        typer.echo(f"[nn-residual] Device: {training_device} ({device_name})")
+    else:
+        typer.echo(f"[nn-residual] Device: {training_device}")
 
     typer.echo(f"[nn-residual] Loading data from {start.date()} to {end.date()}...")
     df = load_training_data(root, start, end)
@@ -331,13 +360,22 @@ def main(
             scaler_std=train_ds.scaler_std,
         )
 
+        loader_kwargs: dict[str, Any] = {
+            "num_workers": int(num_workers),
+            "pin_memory": bool(training_device.type == "cuda"),
+        }
+        if int(num_workers) > 0:
+            loader_kwargs["multiprocessing_context"] = "spawn"
+            loader_kwargs["persistent_workers"] = True
+            loader_kwargs["prefetch_factor"] = 2
+
         train_loader = DataLoader(
             train_ds, batch_size=batch_groups, shuffle=True,
-            collate_fn=collate_groups, num_workers=0,
+            collate_fn=collate_groups, **loader_kwargs,
         )
         val_loader = DataLoader(
             val_ds, batch_size=batch_groups, shuffle=False,
-            collate_fn=collate_groups, num_workers=0,
+            collate_fn=collate_groups, **loader_kwargs,
         )
 
         # Model
@@ -345,7 +383,7 @@ def main(
             n_numeric=len(feature_cols),
             hidden_dims=hidden,
             dropout=dropout,
-        ).to(device)
+        ).to(training_device)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
@@ -364,10 +402,10 @@ def main(
 
             for batch in train_loader:
                 batch = GroupBatch(
-                    features=batch.features.to(device),
-                    baseline_logw=batch.baseline_logw.to(device),
-                    true_shares=batch.true_shares.to(device),
-                    mask=batch.mask.to(device),
+                    features=batch.features.to(training_device),
+                    baseline_logw=batch.baseline_logw.to(training_device),
+                    true_shares=batch.true_shares.to(training_device),
+                    mask=batch.mask.to(training_device),
                     n_players=batch.n_players,
                 )
 
@@ -402,10 +440,10 @@ def main(
             with torch.no_grad():
                 for batch in val_loader:
                     batch = GroupBatch(
-                        features=batch.features.to(device),
-                        baseline_logw=batch.baseline_logw.to(device),
-                        true_shares=batch.true_shares.to(device),
-                        mask=batch.mask.to(device),
+                        features=batch.features.to(training_device),
+                        baseline_logw=batch.baseline_logw.to(training_device),
+                        true_shares=batch.true_shares.to(training_device),
+                        mask=batch.mask.to(training_device),
                         n_players=batch.n_players,
                     )
 
@@ -458,10 +496,10 @@ def main(
             with torch.no_grad():
                 for batch in val_loader:
                     batch = GroupBatch(
-                        features=batch.features.to(device),
-                        baseline_logw=batch.baseline_logw.to(device),
-                        true_shares=batch.true_shares.to(device),
-                        mask=batch.mask.to(device),
+                    features=batch.features.to(training_device),
+                    baseline_logw=batch.baseline_logw.to(training_device),
+                    true_shares=batch.true_shares.to(training_device),
+                    mask=batch.mask.to(training_device),
                         n_players=batch.n_players,
                     )
 
@@ -511,7 +549,7 @@ def main(
             
             # NN delta prediction
             with torch.no_grad():
-                X_t = torch.from_numpy(X).to(device)
+                X_t = torch.from_numpy(X).to(training_device)
                 delta_pred = model(X_t).cpu().numpy()
             
             # Combine
@@ -573,6 +611,8 @@ def main(
         "val_range": [val_start_ts.date().isoformat(), val_end_ts.date().isoformat()],
         "targets": target_list,
         "seed": seed,
+        "device": str(training_device),
+        "num_workers": int(num_workers),
         "created_at": datetime.now().isoformat(),
     }
     (artifacts_dir / "meta.json").write_text(json.dumps(meta, indent=2))

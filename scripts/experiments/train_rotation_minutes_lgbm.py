@@ -27,6 +27,7 @@ import joblib
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from projections.lgbm_device import apply_lgbm_compute_params, resolve_lgbm_device_type
 from projections.models.calibration import SigmoidCalibrator
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
@@ -215,9 +216,30 @@ def main() -> int:
         help="Optional artifact id/path to load feature_columns.json only",
     )
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--lgbm-device",
+        type=str,
+        choices=["auto", "cpu", "cuda", "gpu"],
+        default="auto",
+        help="LightGBM device_type backend selection (default: auto).",
+    )
+    parser.add_argument(
+        "--lgbm-num-threads",
+        type=int,
+        default=1,
+        help="LightGBM num_threads (<=0 keeps LightGBM default).",
+    )
 
     args = parser.parse_args()
     _set_seed(args.seed)
+    if int(args.lgbm_num_threads) < 0:
+        raise ValueError("--lgbm-num-threads must be >= 0")
+    resolved_lgbm_device = resolve_lgbm_device_type(str(args.lgbm_device), log_fn=logger.info)
+    logger.info(
+        "LightGBM backend: requested=%s resolved=%s",
+        str(args.lgbm_device).strip().lower() or "auto",
+        resolved_lgbm_device,
+    )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -324,17 +346,24 @@ def main() -> int:
         fit_df = train_df
         cal_df = train_df.iloc[:0].copy()
 
+    clf_params = apply_lgbm_compute_params(
+        {
+            "objective": "binary",
+            "n_estimators": 600,
+            "learning_rate": 0.05,
+            "num_leaves": 63,
+            "min_data_in_leaf": 64,
+            "subsample": 0.85,
+            "colsample_bytree": 0.85,
+            "reg_lambda": 0.1,
+            "random_state": int(args.seed),
+            "n_jobs": 1,
+        },
+        device_type=resolved_lgbm_device,
+        num_threads=int(args.lgbm_num_threads) if int(args.lgbm_num_threads) > 0 else None,
+    )
     clf = lgb.LGBMClassifier(
-        objective="binary",
-        n_estimators=600,
-        learning_rate=0.05,
-        num_leaves=63,
-        min_data_in_leaf=64,
-        subsample=0.85,
-        colsample_bytree=0.85,
-        reg_lambda=0.1,
-        random_state=int(args.seed),
-        n_jobs=1,
+        **clf_params,
     )
     clf.fit(fit_df[feature_cols], fit_df["y_rot"])
 
@@ -373,18 +402,23 @@ def main() -> int:
     train_pos = train_df["y_rot"] == 1
     if int(train_pos.sum()) == 0:
         raise ValueError("No positive rot8 rows in training set (y_rot==1); cannot train regressor")
-    reg = lgb.LGBMRegressor(
-        objective="regression",
-        n_estimators=600,
-        learning_rate=0.05,
-        num_leaves=63,
-        min_data_in_leaf=64,
-        subsample=0.85,
-        colsample_bytree=0.85,
-        reg_lambda=0.1,
-        random_state=int(args.seed),
-        n_jobs=1,
+    reg_params = apply_lgbm_compute_params(
+        {
+            "objective": "regression",
+            "n_estimators": 600,
+            "learning_rate": 0.05,
+            "num_leaves": 63,
+            "min_data_in_leaf": 64,
+            "subsample": 0.85,
+            "colsample_bytree": 0.85,
+            "reg_lambda": 0.1,
+            "random_state": int(args.seed),
+            "n_jobs": 1,
+        },
+        device_type=resolved_lgbm_device,
+        num_threads=int(args.lgbm_num_threads) if int(args.lgbm_num_threads) > 0 else None,
     )
+    reg = lgb.LGBMRegressor(**reg_params)
     reg.fit(train_df.loc[train_pos, feature_cols], train_df.loc[train_pos, "minutes_actual"])
 
     # Save artifacts.
@@ -429,6 +463,9 @@ def main() -> int:
         "n_train_team_games": int(train_df.groupby(["game_id", "team_id"]).ngroups),
         "n_val_team_games": int(val_df.groupby(["game_id", "team_id"]).ngroups),
         "n_features": int(len(feature_cols)),
+        "lgbm_device_requested": str(args.lgbm_device),
+        "lgbm_device_resolved": resolved_lgbm_device,
+        "lgbm_num_threads": int(args.lgbm_num_threads),
     }
     (args.out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     logger.info(f"Wrote artifacts to {args.out_dir}")

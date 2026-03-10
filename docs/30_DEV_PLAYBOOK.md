@@ -57,6 +57,26 @@ uv run ruff check --fix .
 uv run ruff format .
 ```
 
+### GPU Training
+
+Training is CUDA-first where supported, but Triton remains inference-only.
+
+```bash
+# Verify CUDA visibility
+nvidia-smi
+uv run python -c "import torch; print('cuda_available=', torch.cuda.is_available())"
+
+# PyTorch trainers (auto selects cuda -> mps -> cpu)
+uv run python scripts/rotation/train_game_transformer_v2.py --device auto
+uv run python scripts/usage_shares_v1/train_nn.py --device auto --num-workers 4
+
+# LightGBM trainers (auto probes cuda and falls back to cpu)
+uv run python scripts/rates/train_rates_v1.py --lgbm-device auto
+uv run python scripts/ownership/train_ownership_v1.py --lgbm-device auto
+```
+
+Reference: `docs/pipeline/GPU_TRAINING_SPEC.md`
+
 ### CLI Tools (Development Only)
 
 These commands are for local development and debugging. **Production execution

@@ -22,6 +22,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+from projections.lgbm_device import apply_lgbm_compute_params, resolve_lgbm_device_type
 from projections.paths import data_path
 from projections.ownership_v1.calibration import SoftmaxCalibrator
 from projections.ownership_v1.features import (
@@ -460,17 +461,22 @@ def train_model(
         }
         seed = int(params.get("seed", 1337))
         num_threads = int(params.get("num_threads", 1))
+        clf_params = apply_lgbm_compute_params(
+            clf_params,
+            device_type=str(params.get("device_type", "cpu")),
+            num_threads=num_threads if num_threads > 0 else None,
+        )
         clf_params.update(
             {
                 "seed": seed,
                 "feature_fraction_seed": seed,
                 "bagging_seed": seed,
                 "data_random_seed": seed,
-                "deterministic": True,
-                "force_row_wise": True,
-                "num_threads": num_threads,
             }
         )
+        if str(params.get("device_type", "cpu")).strip().lower() == "cpu":
+            clf_params["deterministic"] = True
+            clf_params["force_row_wise"] = True
         
         train_data_clf = lgb.Dataset(X_train, label=y_train_clf)
         val_data_clf = lgb.Dataset(X_val, label=y_val_clf, reference=train_data_clf)
@@ -689,6 +695,13 @@ def main():
         action="store_true",
         help="Use stronger regularization params (recommended for <5k samples)",
     )
+    parser.add_argument(
+        "--lgbm-device",
+        type=str,
+        choices=["auto", "cpu", "cuda", "gpu"],
+        default="auto",
+        help="LightGBM device_type backend selection (default: auto).",
+    )
 
     args = parser.parse_args()
     
@@ -717,6 +730,10 @@ def main():
     print(f"Training base: {args.training_base}")
     print(f"Validation seasons: {args.val_seasons}")
     print(f"Feature set: {args.feature_set} ({len(features)} features)")
+    if int(args.num_threads) < 0:
+        raise ValueError("--num-threads must be >= 0")
+    resolved_lgbm_device = resolve_lgbm_device_type(args.lgbm_device, log_fn=print)
+    print(f"LightGBM backend: requested={args.lgbm_device} resolved={resolved_lgbm_device}")
 
     # Load and prepare data
     print("\nLoading training data...")
@@ -797,7 +814,14 @@ def main():
     params["data_random_seed"] = args.seed
     params["deterministic"] = True
     params["force_row_wise"] = True
-    params["num_threads"] = args.num_threads
+    params = apply_lgbm_compute_params(
+        params,
+        device_type=resolved_lgbm_device,
+        num_threads=int(args.num_threads),
+    )
+    if resolved_lgbm_device == "cpu":
+        params["deterministic"] = True
+        params["force_row_wise"] = True
     
     print("\nTraining model...")
     model, metrics = train_model(train_df, val_df, features, params=params)

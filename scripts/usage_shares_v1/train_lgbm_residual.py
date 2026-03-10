@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 import typer
 
+from projections.lgbm_device import apply_lgbm_compute_params, resolve_lgbm_device_type
 from projections.paths import data_path
 from projections.usage_shares_v1.features import (
     CATEGORICAL_COLS,
@@ -116,6 +117,7 @@ def train_residual_model(
     shrink: float,
     seed: int,
     num_threads: int,
+    lgbm_device_type: str,
 ) -> ResidualTrainingResult:
     """Train a residual LightGBM model for one target."""
     
@@ -173,9 +175,13 @@ def train_residual_model(
         "reg_lambda": 0.5,  # More regularization
         "reg_alpha": 0.1,
         "random_state": seed,
-        "n_jobs": num_threads,
         "verbose": -1,
     }
+    params = apply_lgbm_compute_params(
+        params,
+        device_type=lgbm_device_type,
+        num_threads=int(num_threads),
+    )
     
     model = lgb.LGBMRegressor(**params)
     model.fit(X_train, y_train_residual)
@@ -215,6 +221,7 @@ def main(
     val_days: int = typer.Option(30),
     seed: int = typer.Option(1337),
     num_threads: int = typer.Option(-1),
+    lgbm_device: str = typer.Option("auto", help="LightGBM device_type: auto, cpu, cuda, gpu."),
 ) -> None:
     """Train LightGBM residual-on-baseline models."""
     
@@ -225,6 +232,11 @@ def main(
     target_list = [t.strip() for t in targets.split(",")]
     shrink_list = [float(s.strip()) for s in shrink.split(",")]
     run_id = run_id or f"residual_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    resolved_lgbm_device = resolve_lgbm_device_type(str(lgbm_device), log_fn=typer.echo)
+    typer.echo(
+        f"[lgbm-residual] backend requested={str(lgbm_device).strip().lower() or 'auto'} "
+        f"resolved={resolved_lgbm_device}"
+    )
     
     typer.echo(f"[lgbm-residual] Loading data from {start.date()} to {end.date()}...")
     df = load_training_data(root, start, end)
@@ -295,7 +307,15 @@ def main(
         
         for s in shrink_list:
             result = train_residual_model(
-                train_df, val_df, target, available_features, alpha, s, seed, num_threads
+                train_df,
+                val_df,
+                target,
+                available_features,
+                alpha,
+                s,
+                seed,
+                num_threads,
+                resolved_lgbm_device,
             )
             
             improvement = (1 - result.val_metrics.share_MAE / baseline_metrics.share_MAE) * 100
@@ -339,6 +359,11 @@ def main(
         "shrink_values": {t: best_models[t][1] for t in best_models},
         "alpha": alpha,
         "feature_cols": available_features,
+        "lgbm_device": {
+            "requested": str(lgbm_device),
+            "resolved": resolved_lgbm_device,
+            "num_threads": int(num_threads),
+        },
     }
     (lgbm_dir / "config.json").write_text(json.dumps(config, indent=2))
     
@@ -357,6 +382,11 @@ def main(
         "shrink_values": {t: best_models[t][1] for t in best_models},
         "min_minutes_actual": min_minutes_actual,
         "seed": seed,
+        "lgbm_device": {
+            "requested": str(lgbm_device),
+            "resolved": resolved_lgbm_device,
+            "num_threads": int(num_threads),
+        },
         "targets": target_list,
         "leakage_check": {"n_leaky": n_leaky, "n_checked": n_checked, "missing_frac": round(missing_frac, 4)},
         "created_at": datetime.now().isoformat(),

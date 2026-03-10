@@ -16,18 +16,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import torch
 
 from projections import paths
-
-try:
-    from pytorch_tabular import TabularModel
-    from pytorch_tabular.config import DataConfig, OptimizerConfig, TrainerConfig
-    from pytorch_tabular.models import FTTransformerConfig
-except ImportError as exc:  # pragma: no cover - runtime dependency
-    raise SystemExit(
-        "pytorch-tabular is not installed. Install with: uv add pytorch-tabular"
-    ) from exc
-
 
 KEY_COLS = ["game_id", "team_id", "player_id", "game_date"]
 RATE_TARGETS = [
@@ -147,6 +138,26 @@ def _infer_default_feature_columns(df: pd.DataFrame, *, targets: list[str]) -> l
     return cols
 
 
+def _resolve_accelerator(accelerator_arg: str) -> str:
+    value = str(accelerator_arg).strip().lower()
+    if value in {"", "auto"}:
+        if torch.cuda.is_available():
+            return "gpu"
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is not None and bool(mps_backend.is_available()):
+            return "mps"
+        return "cpu"
+    if value in {"cpu", "gpu", "cuda", "mps"}:
+        if value in {"gpu", "cuda"} and not torch.cuda.is_available():
+            raise ValueError(f"--accelerator={accelerator_arg!r} requested GPU, but CUDA is not available")
+        if value == "mps":
+            mps_backend = getattr(torch.backends, "mps", None)
+            if mps_backend is None or not bool(mps_backend.is_available()):
+                raise ValueError("--accelerator='mps' requested, but MPS is not available")
+        return "gpu" if value == "cuda" else value
+    raise ValueError(f"Unsupported --accelerator={accelerator_arg!r}; expected auto/cpu/gpu/cuda/mps")
+
+
 def _prepare_features(
     df: pd.DataFrame,
     *,
@@ -197,7 +208,7 @@ def main() -> None:
     parser.add_argument("--num-heads", type=int, default=8)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--accelerator", type=str, default="cpu", help="pytorch-lightning accelerator (cpu/gpu/auto).")
+    parser.add_argument("--accelerator", type=str, default="auto", help="pytorch-lightning accelerator (auto/cpu/gpu/cuda/mps).")
     parser.add_argument("--devices", type=int, default=1, help="Device count for trainer.")
     parser.add_argument(
         "--out-dir",
@@ -207,6 +218,14 @@ def main() -> None:
     )
     parser.add_argument("--run-tag", type=str, default="fttransformer_tabular_baseline")
     args = parser.parse_args()
+    try:
+        from pytorch_tabular import TabularModel
+        from pytorch_tabular.config import DataConfig, OptimizerConfig, TrainerConfig
+        from pytorch_tabular.models import FTTransformerConfig
+    except ImportError as exc:  # pragma: no cover - runtime dependency
+        raise SystemExit(
+            "pytorch-tabular is not installed. Install with: uv add pytorch-tabular"
+        ) from exc
 
     dataset_dir = Path(args.dataset_dir).expanduser().resolve()
     if not dataset_dir.exists():
@@ -223,6 +242,13 @@ def main() -> None:
 
     print(f"[tabular_train] dataset_dir={dataset_dir}")
     print(f"[tabular_train] run_dir={run_dir}")
+    resolved_accelerator = _resolve_accelerator(str(args.accelerator))
+    using_cuda = resolved_accelerator == "gpu" and torch.cuda.is_available()
+    if using_cuda:
+        device_name = torch.cuda.get_device_name(torch.cuda.current_device())
+        print(f"[tabular_train] accelerator={resolved_accelerator} ({device_name})")
+    else:
+        print(f"[tabular_train] accelerator={resolved_accelerator}")
 
     features = _coerce_keys(pd.read_parquet(dataset_dir / "features.parquet"))
     labels_minutes = _coerce_keys(pd.read_parquet(dataset_dir / "labels_minutes.parquet"))
@@ -294,14 +320,14 @@ def main() -> None:
         continuous_cols=continuous_cols,
         categorical_cols=categorical_cols,
         num_workers=max(0, int(args.num_workers)),
-        pin_memory=False,
+        pin_memory=using_cuda,
         normalize_continuous_features=True,
         handle_missing_values=True,
     )
     trainer_config = TrainerConfig(
         batch_size=int(args.batch_size),
         max_epochs=int(args.max_epochs),
-        accelerator=str(args.accelerator),
+        accelerator=resolved_accelerator,
         devices=int(args.devices),
         progress_bar="none",
         checkpoints="valid_loss",

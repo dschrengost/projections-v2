@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 import typer
 
+from projections.lgbm_device import apply_lgbm_compute_params, resolve_lgbm_device_type
 from projections.paths import data_path
 from projections.usage_shares_v1.features import (
     CATEGORICAL_COLS,
@@ -118,6 +119,7 @@ def train_target_model(
     alpha: float,
     seed: int,
     num_threads: int,
+    lgbm_device_type: str,
 ) -> TrainingResult:
     """Train a single LightGBM model for one target."""
     
@@ -171,9 +173,13 @@ def train_target_model(
         "colsample_bytree": 0.8,
         "reg_lambda": 0.1,
         "random_state": seed,
-        "n_jobs": num_threads,
         "verbose": -1,
     }
+    params = apply_lgbm_compute_params(
+        params,
+        device_type=lgbm_device_type,
+        num_threads=int(num_threads),
+    )
     
     model = lgb.LGBMRegressor(**params)
     model.fit(X_train, y_train)
@@ -242,6 +248,10 @@ def main(
         4,
         help="Number of threads for LightGBM.",
     ),
+    lgbm_device: str = typer.Option(
+        "auto",
+        help="LightGBM device_type: auto, cpu, cuda, gpu.",
+    ),
 ) -> None:
     """Train LightGBM models for usage shares prediction."""
     
@@ -250,6 +260,11 @@ def main(
     end = pd.Timestamp(end_date).normalize()
     target_list = [t.strip() for t in targets.split(",")]
     run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+    resolved_lgbm_device = resolve_lgbm_device_type(str(lgbm_device), log_fn=typer.echo)
+    typer.echo(
+        f"[lgbm] backend requested={str(lgbm_device).strip().lower() or 'auto'} "
+        f"resolved={resolved_lgbm_device}"
+    )
     
     typer.echo(f"[lgbm] Loading data from {start.date()} to {end.date()}...")
     df = load_training_data(root, start, end)
@@ -306,7 +321,7 @@ def main(
         
         typer.echo(f"[lgbm] Training {target}...")
         result = train_target_model(
-            train_df, val_df, target, feature_cols, alpha, seed, num_threads
+            train_df, val_df, target, feature_cols, alpha, seed, num_threads, resolved_lgbm_device
         )
         results[target] = result
         
@@ -348,6 +363,8 @@ def main(
         "subsample": 0.8,
         "colsample_bytree": 0.8,
         "reg_lambda": 0.1,
+        "device_type": resolved_lgbm_device,
+        "num_threads": int(num_threads),
     }
     params_path.write_text(json.dumps(params_dict, indent=2))
     
@@ -378,6 +395,11 @@ def main(
         "alpha": alpha,
         "min_minutes_actual": min_minutes_actual,
         "seed": seed,
+        "lgbm_device": {
+            "requested": str(lgbm_device),
+            "resolved": resolved_lgbm_device,
+            "num_threads": int(num_threads),
+        },
         "targets": list(results.keys()),
         "n_train_rows": len(train_df),
         "n_val_rows": len(val_df),

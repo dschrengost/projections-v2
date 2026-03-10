@@ -16,7 +16,7 @@ OT / label totals handling:
 Example:
   uv run python scripts/rotation/train_rotation_set_model_v1.py \
     --dataset-dir /home/daniel/projections-data/training/datasets/rotation_train_v1_20260103 \
-    --model deepsets --epochs 2 --batch-size 32 --lr 1e-3 --device cpu
+    --model deepsets --epochs 2 --batch-size 32 --lr 1e-3 --device auto
 """
 
 from __future__ import annotations
@@ -91,6 +91,24 @@ def _set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def _resolve_training_device(device_arg: str) -> torch.device:
+    value = str(device_arg).strip().lower()
+    if value in {"", "auto"}:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is not None and bool(mps_backend.is_available()):
+            return torch.device("mps")
+        return torch.device("cpu")
+    if value.startswith("cuda") and not torch.cuda.is_available():
+        raise ValueError(f"--device={device_arg!r} requested CUDA, but CUDA is not available")
+    if value == "mps":
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is None or not bool(mps_backend.is_available()):
+            raise ValueError("--device='mps' requested, but MPS is not available")
+    return torch.device(device_arg)
 
 
 def _infer_label_column(labels_df: pd.DataFrame) -> str:
@@ -1253,8 +1271,9 @@ def main() -> None:
     parser.add_argument("--model", type=str, choices=["deepsets", "settransformer"], default="deepsets")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=0, help="DataLoader workers.")
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--device", type=str, default="auto", help="Torch device: auto, cpu, cuda, cuda:0, mps.")
     parser.add_argument("--out-dir", type=str, default="artifacts/rotation_set_minutes")
     parser.add_argument(
         "--alloc-activation",
@@ -1568,7 +1587,15 @@ def main() -> None:
     args = parser.parse_args()
 
     _set_seed(int(args.seed))
-    device = torch.device(args.device)
+    device = _resolve_training_device(str(args.device))
+    if device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        device_name = torch.cuda.get_device_name(device)
+        print(f"[rotation_set_minutes] device={device} ({device_name})")
+    else:
+        print(f"[rotation_set_minutes] device={device}")
 
     dataset_dir = Path(args.dataset_dir).expanduser().resolve()
     features_path = dataset_dir / "features.parquet"
@@ -1761,20 +1788,28 @@ def main() -> None:
             f"max={_vac.max():.2f}",
         )
 
+    loader_kwargs: dict[str, Any] = {"pin_memory": bool(device.type == "cuda")}
+    if int(args.num_workers) > 0:
+        # Avoid Linux fork-related worker crashes with torch + large object graphs.
+        loader_kwargs["multiprocessing_context"] = "spawn"
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 2
     train_loader = DataLoader(
         TeamGameDataset(train_examples),
         batch_size=int(args.batch_size),
         shuffle=True,
         collate_fn=_collate_team_games,
-        num_workers=0,
+        num_workers=max(0, int(args.num_workers)),
         generator=torch.Generator().manual_seed(int(args.seed)),
+        **loader_kwargs,
     )
     val_loader = DataLoader(
         TeamGameDataset(val_examples),
         batch_size=int(args.batch_size),
         shuffle=False,
         collate_fn=_collate_team_games,
-        num_workers=0,
+        num_workers=max(0, int(args.num_workers)),
+        **loader_kwargs,
     )
 
     config = RotationSetModelConfig(
@@ -1884,6 +1919,8 @@ def main() -> None:
         raise ValueError("--player-team-embedding-dim must be > 0")
     if player_team_hash_buckets <= 1:
         raise ValueError("--player-team-hash-buckets must be > 1")
+    if int(args.num_workers) < 0:
+        raise ValueError("--num-workers must be >= 0")
 
     # Validation for gate supervision / anti-smear params
     if rotation_minutes_threshold < 0:

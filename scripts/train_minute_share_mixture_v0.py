@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# ruff: noqa: E402
 """Train the minute share mixture model v0.
 
 Two-stage model:
@@ -24,7 +25,6 @@ import logging
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -36,16 +36,15 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from projections.lgbm_device import apply_lgbm_compute_params, resolve_lgbm_device_type
 from projections.minutes_v1.datasets import (
     KEY_COLUMNS,
     ensure_columns,
-    load_feature_frame,
 )
 from projections.models.feature_contract import assert_no_leakage
 from projections.models.minute_share_mixture import (
     NUM_STATES,
     STATE_NAMES,
-    MixtureBundle,
     get_state_counts,
     minutes_to_state,
     predict_expected_minutes,
@@ -163,6 +162,16 @@ def main(
         "--seed",
         help="Random seed.",
     ),
+    lgbm_device: str = typer.Option(
+        "auto",
+        "--lgbm-device",
+        help="LightGBM device_type backend selection (auto/cpu/cuda/gpu).",
+    ),
+    lgbm_num_threads: int = typer.Option(
+        0,
+        "--lgbm-num-threads",
+        help="LightGBM num_threads override (<=0 keeps LightGBM default).",
+    ),
     target_col: str = typer.Option(
         "minutes",
         "--target",
@@ -190,6 +199,13 @@ def main(
     # Compute validation split
     val_start = end_date - timedelta(days=val_days - 1)
     train_end = val_start - timedelta(days=1)
+    if int(lgbm_num_threads) < 0:
+        raise typer.BadParameter("--lgbm-num-threads must be >= 0")
+    resolved_lgbm_device = resolve_lgbm_device_type(str(lgbm_device), log_fn=typer.echo)
+    typer.echo(
+        f"[train] LightGBM backend: requested={str(lgbm_device).strip().lower() or 'auto'} "
+        f"resolved={resolved_lgbm_device}"
+    )
     
     typer.echo(f"[train] Training: {start_date.date()} to {train_end.date()}")
     typer.echo(f"[train] Validation: {val_start.date()} to {end_date.date()}")
@@ -271,6 +287,16 @@ def main(
         X_train,
         y_train,
         random_state=seed,
+        classifier_params=apply_lgbm_compute_params(
+            {},
+            device_type=resolved_lgbm_device,
+            num_threads=int(lgbm_num_threads) if int(lgbm_num_threads) > 0 else None,
+        ),
+        regressor_params=apply_lgbm_compute_params(
+            {},
+            device_type=resolved_lgbm_device,
+            num_threads=int(lgbm_num_threads) if int(lgbm_num_threads) > 0 else None,
+        ),
     )
     
     # Update training metadata
@@ -280,6 +306,11 @@ def main(
         "val_start": val_start.isoformat(),
         "val_end": end_date.isoformat(),
         "val_days": val_days,
+        "lgbm_device": {
+            "requested": str(lgbm_device),
+            "resolved": resolved_lgbm_device,
+            "num_threads": int(lgbm_num_threads),
+        },
     })
     
     # Evaluate on validation set
