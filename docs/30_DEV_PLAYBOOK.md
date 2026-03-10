@@ -173,10 +173,10 @@ uv run python -m projections.cli.rot_eval \
 
 ```bash
 # Trigger the canonical live pipeline
-uv run prefect deployment run nba-live-pipeline/nba-live-pipeline
+uv run prefect deployment run nba-live-pipeline-v3/nba-live-pipeline
 
 # Trigger for a specific date
-uv run prefect deployment run nba-live-pipeline/nba-live-pipeline \
+uv run prefect deployment run nba-live-pipeline-v3/nba-live-pipeline \
     --param game_date=2025-01-01
 
 # Check deployment status

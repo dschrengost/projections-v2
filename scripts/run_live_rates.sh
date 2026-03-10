@@ -14,7 +14,7 @@ set -euo pipefail
 
 if [[ "${PROJECTIONS_ALLOW_LEGACY_SHELL_RUNNERS:-}" != "1" ]]; then
     echo "[legacy-runner] ERROR: scripts/run_live_rates.sh is disabled in production." >&2
-    echo "[legacy-runner] Use Prefect: /home/daniel/.local/bin/uv run prefect deployment run nba-live-pipeline/nba-live-pipeline" >&2
+    echo "[legacy-runner] Use Prefect: /home/daniel/.local/bin/uv run prefect deployment run nba-live-pipeline-v3/nba-live-pipeline" >&2
     exit 2
 fi
 

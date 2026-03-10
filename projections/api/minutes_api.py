@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,10 @@ PARQUET_FILENAME = "minutes.parquet"
 SUMMARY_FILENAME = "summary.json"
 FPTS_FILENAME = "fpts.parquet"
 SIM_PROJECTIONS_FILENAME = "sim_v2_projections.parquet"
+LIVE_PIPELINE_DEPLOYMENT_CANDIDATES: tuple[str, ...] = (
+    "nba-live-pipeline-v3/nba-live-pipeline",
+    "nba-live-pipeline/nba-live-pipeline",
+)
 
 # Expose sim minutes (unconditional + conditional) for the UI.
 PLAYER_COLUMNS: tuple[str, ...] = (
@@ -225,6 +231,194 @@ def _parse_date(value: str | None) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.") from exc
+
+
+def _extract_prefect_api_url_from_env_blob(raw: str) -> str | None:
+    for token in shlex.split(raw or ""):
+        if token.startswith("PREFECT_API_URL="):
+            value = token.split("=", 1)[1].strip()
+            if value:
+                return value
+    return None
+
+
+def _load_prefect_api_url_from_env_file(path: Path) -> str | None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if not line.startswith("PREFECT_API_URL="):
+            continue
+        value = line.split("=", 1)[1].strip().strip('"').strip("'")
+        if value:
+            return value
+    return None
+
+
+def _load_prefect_api_url_from_systemd_unit(path: Path) -> str | None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("EnvironmentFile="):
+            env_path_raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+            optional = env_path_raw.startswith("-")
+            env_path = Path(env_path_raw[1:] if optional else env_path_raw).expanduser()
+            value = _load_prefect_api_url_from_env_file(env_path)
+            if value:
+                return value
+            continue
+        if not line.startswith("Environment="):
+            continue
+        payload = line.split("=", 1)[1].strip()
+        for token in shlex.split(payload):
+            if token.startswith("PREFECT_API_URL="):
+                value = token.split("=", 1)[1].strip()
+                if value:
+                    return value
+    return None
+
+
+def _resolve_prefect_api_url() -> tuple[str | None, str]:
+    direct = str(os.environ.get("PREFECT_API_URL", "")).strip()
+    if direct:
+        return direct, "process_env"
+
+    worker_env_path = Path.home() / ".config" / "projections" / "prefect-worker.env"
+    from_file = _load_prefect_api_url_from_env_file(worker_env_path)
+    if from_file:
+        return from_file, str(worker_env_path)
+
+    worker_unit_path = Path.home() / ".config" / "systemd" / "user" / "prefect-worker.service"
+    from_worker_unit = _load_prefect_api_url_from_systemd_unit(worker_unit_path)
+    if from_worker_unit:
+        return from_worker_unit, str(worker_unit_path)
+
+    try:
+        result = subprocess.run(
+            [
+                "systemctl",
+                "--user",
+                "show",
+                "prefect-worker.service",
+                "-p",
+                "Environment",
+                "--value",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+        )
+    except Exception:
+        return None, "unset"
+    if result.returncode != 0:
+        return None, "unset"
+    from_systemd = _extract_prefect_api_url_from_env_blob(result.stdout)
+    if from_systemd:
+        return from_systemd, "systemd:prefect-worker.service"
+    return None, "unset"
+
+
+def _format_exception_detail(exc: Exception) -> str:
+    message = str(exc).strip()
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return f"{type(exc).__name__}: {exc!r}"
+
+
+def _trigger_prefect_deployment(
+    *,
+    deployment_name: str,
+    parameters: dict[str, Any],
+    tags: list[str],
+    error_context: str | None = None,
+) -> tuple[str, str | None, str]:
+    resolved_api_url, api_url_source = _resolve_prefect_api_url()
+    prior_api_url = os.environ.get("PREFECT_API_URL")
+    injected_api_url = False
+    if prior_api_url is None and resolved_api_url:
+        os.environ["PREFECT_API_URL"] = resolved_api_url
+        injected_api_url = True
+
+    try:
+        from prefect.deployments import run_deployment
+
+        flow_run = run_deployment(
+            deployment_name,
+            parameters=parameters,
+            tags=tags,
+            as_subflow=False,
+        )
+    except Exception as exc:
+        context = f" {error_context}" if error_context else ""
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Failed to trigger Prefect deployment {deployment_name}{context}: "
+                f"{_format_exception_detail(exc)} "
+                f"(prefect_api_url={resolved_api_url or 'unset'}, source={api_url_source})"
+            ),
+        ) from exc
+    finally:
+        if injected_api_url:
+            os.environ.pop("PREFECT_API_URL", None)
+
+    flow_run_id = getattr(flow_run, "id", None)
+    if flow_run_id is None:
+        context = f" {error_context}" if error_context else ""
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Failed to trigger Prefect deployment {deployment_name}{context}: "
+                "run_deployment returned no flow run id "
+                f"(prefect_api_url={resolved_api_url or 'unset'}, source={api_url_source})"
+            ),
+        )
+
+    return str(flow_run_id), resolved_api_url, api_url_source
+
+
+def _trigger_live_pipeline_deployment(
+    *,
+    parameters: dict[str, Any],
+    tags: list[str],
+    error_context: str | None = None,
+) -> tuple[str, str]:
+    deployment_errors: list[str] = []
+    for deployment_name in LIVE_PIPELINE_DEPLOYMENT_CANDIDATES:
+        try:
+            flow_run_id, _, _ = _trigger_prefect_deployment(
+                deployment_name=deployment_name,
+                parameters=parameters,
+                tags=tags,
+                error_context=error_context,
+            )
+            return flow_run_id, deployment_name
+        except HTTPException as exc:
+            detail = str(exc.detail)
+            if "ObjectNotFound" in detail:
+                deployment_errors.append(f"{deployment_name}: {detail}")
+                continue
+            raise
+    raise HTTPException(
+        status_code=500,
+        detail=(
+            "Failed to trigger live pipeline deployment; no matching deployment name found. "
+            f"candidates={list(LIVE_PIPELINE_DEPLOYMENT_CANDIDATES)} "
+            f"errors={deployment_errors}"
+        ),
+    )
 
 
 def _resolve_run_dir(day_dir: Path, run_id: str | None) -> Path:
@@ -1733,27 +1927,17 @@ def create_app(
         """Manually trigger the canonical Prefect deployment for the given date."""
         slate_day = _parse_date(date)
 
-        try:
-            from prefect.deployments import run_deployment
-
-            flow_run = run_deployment(
-                "nba-live-pipeline/nba-live-pipeline",
-                parameters={"game_date": slate_day.isoformat()},
-                tags=["manual", "api-trigger"],
-                as_subflow=False,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to trigger Prefect deployment nba-live-pipeline/nba-live-pipeline: {exc}",
-            ) from exc
+        flow_run_id, deployment_name = _trigger_live_pipeline_deployment(
+            parameters={"game_date": slate_day.isoformat()},
+            tags=["manual", "api-trigger"],
+        )
 
         return JSONResponse(
             {
                 "status": "triggered",
-                "deployment": "nba-live-pipeline/nba-live-pipeline",
+                "deployment": deployment_name,
                 "game_date": slate_day.isoformat(),
-                "flow_run_id": str(flow_run.id),
+                "flow_run_id": flow_run_id,
             }
         )
 
@@ -1793,39 +1977,27 @@ def create_app(
                 f"deployment: {exc}"
             )
 
-        try:
-            from prefect.deployments import run_deployment
-
-            flow_run = run_deployment(
-                "nba-live-pipeline/nba-live-pipeline",
-                parameters={
-                    "game_date": slate_day.isoformat(),
-                    "manual_target_game_ids": [target_game_id],
-                },
-                tags=[
-                    "manual",
-                    "api-trigger",
-                    "targeted-rerun",
-                    f"game-{target_game_id}",
-                ],
-                as_subflow=False,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "Failed to trigger targeted Prefect deployment "
-                    f"nba-live-pipeline/nba-live-pipeline for game_id={target_game_id}: {exc}"
-                ),
-            ) from exc
+        flow_run_id, deployment_name = _trigger_live_pipeline_deployment(
+            parameters={
+                "game_date": slate_day.isoformat(),
+                "manual_target_game_ids": [target_game_id],
+            },
+            tags=[
+                "manual",
+                "api-trigger",
+                "targeted-rerun",
+                f"game-{target_game_id}",
+            ],
+            error_context=f"for game_id={target_game_id}",
+        )
 
         return JSONResponse(
             {
                 "status": "triggered",
-                "deployment": "nba-live-pipeline/nba-live-pipeline",
+                "deployment": deployment_name,
                 "game_date": slate_day.isoformat(),
                 "target_game_ids": [target_game_id],
-                "flow_run_id": str(flow_run.id),
+                "flow_run_id": flow_run_id,
                 "validation_warning": validation_warning,
             }
         )
