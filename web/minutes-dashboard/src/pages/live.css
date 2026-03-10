@@ -238,6 +238,37 @@
   border-color: #84cc16;
 }
 
+.live-game-card:focus-visible {
+  outline: 2px solid #84cc16;
+  outline-offset: 2px;
+}
+
+.live-game-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.live-game-rerun-btn {
+  border: 1px solid rgba(132, 204, 22, 0.55);
+  background: rgba(22, 101, 52, 0.35);
+  color: #d9f99d;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.live-game-rerun-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .live-matchup,
 .live-game-title {
   font-size: 0.95rem;
@@ -279,6 +310,23 @@
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+}
+
+.live-rerun-status {
+  margin: 0.1rem 0 0.45rem;
+  border: 1px solid rgba(51, 65, 85, 0.7);
+  border-radius: 10px;
+  padding: 0.35rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: #bfdbfe;
+  font-size: 0.76rem;
+}
+
+.live-rerun-status-error {
+  border-color: rgba(127, 29, 29, 0.9);
+  color: #fecaca;
 }
 
 .live-card-footer {

@@ -720,6 +720,8 @@ Status note:
    the latest published run and are explicitly notified about the blocked or
    in-progress state.
 7. Operators should be able to trigger single-game pipeline / inference runs.
+   - Implemented on March 10, 2026 via the Live game-card `Rebuild game`
+     action and `POST /api/trigger/game`.
 8. Rotowire takes precedence for explicit `OUT` signals in the live pipeline.
 
 ### 17.2 Long-running service options

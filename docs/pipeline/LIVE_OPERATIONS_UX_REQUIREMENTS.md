@@ -157,6 +157,12 @@ Required control:
 
 - `Rebuild game`
 
+Implementation status (March 10, 2026):
+
+- Live game cards include a `Rebuild game` action.
+- Backend trigger endpoint: `POST /api/trigger/game?date=YYYY-MM-DD&game_id=<id>`.
+- Flow execution parameter: `manual_target_game_ids=[<id>]` for game-scoped reruns.
+
 Recommended supporting fields:
 
 - game id / matchup

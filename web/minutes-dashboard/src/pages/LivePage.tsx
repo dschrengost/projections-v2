@@ -3,6 +3,7 @@ import { apiUrl } from '../api/client'
 import {
   fetchLiveSlateAnalytics,
   fetchLiveStatus,
+  triggerLiveGameRerun,
   type LiveGameStatus,
   type LiveRunEvent,
   type LiveSlateAnalyticsPlayer,
@@ -30,6 +31,12 @@ type GameCardData = {
   homeTeam: string
   tipTs?: string
   status?: LiveGameStatus
+}
+
+type GameRerunState = {
+  phase: 'triggering' | 'queued' | 'failed'
+  message: string
+  flowRunId?: string
 }
 
 const toId = (value: unknown) => String(value ?? '')
@@ -175,6 +182,7 @@ export default function LivePage({
   const [slateAnalytics, setSlateAnalytics] = useState<LiveSlateAnalyticsResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [rerunStateByGame, setRerunStateByGame] = useState<Record<string, GameRerunState>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -211,6 +219,46 @@ export default function LivePage({
       setLoading(false)
     }
   }, [date])
+
+  const triggerRerunForGame = useCallback(
+    async (game: GameCardData) => {
+      const gameId = String(game.gameId || '').trim()
+      if (!gameId) return
+      const confirmed = window.confirm(`Trigger targeted rerun for ${game.label}?`)
+      if (!confirmed) return
+      setRerunStateByGame((prev) => ({
+        ...prev,
+        [gameId]: {
+          phase: 'triggering',
+          message: 'Queuing targeted rerun…',
+        },
+      }))
+      try {
+        const response = await triggerLiveGameRerun(date, gameId)
+        const warning = response.validation_warning ? ` · ${response.validation_warning}` : ''
+        setRerunStateByGame((prev) => ({
+          ...prev,
+          [gameId]: {
+            phase: 'queued',
+            message: `Queued targeted rerun${warning}`,
+            flowRunId: response.flow_run_id,
+          },
+        }))
+        window.setTimeout(() => {
+          void load()
+        }, 1000)
+      } catch (err) {
+        setRerunStateByGame((prev) => ({
+          ...prev,
+          [gameId]: {
+            phase: 'failed',
+            message: (err as Error).message,
+          },
+        }))
+      }
+    },
+    [date, load],
+  )
 
   useEffect(() => {
     void load()
@@ -389,12 +437,21 @@ export default function LivePage({
           {games.map((game) => {
             const gameStatus = game.status
             const tone = statusTone(status?.candidate_status || 'waiting_for_fresh_input')
+            const rerunState = rerunStateByGame[game.gameId]
+            const rerunBusy = rerunState?.phase === 'triggering'
             return (
-              <button
+              <article
                 key={game.gameId}
-                type="button"
                 className="live-game-card"
+                role="button"
+                tabIndex={0}
                 onClick={() => onOpenGame(game.gameId)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onOpenGame(game.gameId)
+                  }
+                }}
               >
                 <div className="live-game-card-head">
                   <div>
@@ -403,9 +460,22 @@ export default function LivePage({
                       {game.tipTs ? formatTime(game.tipTs) : 'Tip unknown'} · {formatTipCountdown(gameStatus?.minutes_to_tip)}
                     </div>
                   </div>
-                  <span className={`live-chip ${tone}`}>
-                    {prettyStatus(status?.candidate_status || 'waiting_for_fresh_input')}
-                  </span>
+                  <div className="live-game-card-actions">
+                    <button
+                      type="button"
+                      className="live-game-rerun-btn"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void triggerRerunForGame(game)
+                      }}
+                      disabled={rerunBusy}
+                    >
+                      {rerunBusy ? 'Queuing…' : 'Rebuild game'}
+                    </button>
+                    <span className={`live-chip ${tone}`}>
+                      {prettyStatus(status?.candidate_status || 'waiting_for_fresh_input')}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="live-game-card-badges">
@@ -418,8 +488,14 @@ export default function LivePage({
                     <span key={`${game.gameId}-${badge}`} className="live-badge">
                       {prettyStatus(badge)}
                     </span>
-                  ))}
+                    ))}
                 </div>
+                {rerunState ? (
+                  <div className={`live-rerun-status ${rerunState.phase === 'failed' ? 'live-rerun-status-error' : ''}`}>
+                    <span>{rerunState.message}</span>
+                    {rerunState.flowRunId ? <span className="muted">Run {formatRunIdToEST(rerunState.flowRunId) || rerunState.flowRunId}</span> : null}
+                  </div>
+                ) : null}
 
                 <div className="live-source-grid">
                   <div>
@@ -447,7 +523,7 @@ export default function LivePage({
                     {gameStatus?.rerun_targeted ? ' · Targeted' : ''}
                   </span>
                 </div>
-              </button>
+              </article>
             )
           })}
 

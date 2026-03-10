@@ -1440,6 +1440,7 @@ def _build_rerun_plan(
     current_bundle_hash: str,
     current_minutes_selector_path: Path,
     current_rates_selector_path: Path,
+    manual_target_game_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     current_games = dict((current_source_freshness or {}).get("per_game", {}))
     current_game_ids = sorted(
@@ -1502,6 +1503,52 @@ def _build_rerun_plan(
             "reason": "slate_composition_changed",
             "target_game_ids": current_game_ids,
             "ignored_changes": [],
+        }
+
+    requested_manual_targets = _normalize_game_ids(manual_target_game_ids)
+    if requested_manual_targets:
+        current_game_set = set(current_game_ids)
+        applied_manual_targets = sorted(
+            game_id for game_id in requested_manual_targets if game_id in current_game_set
+        )
+        invalid_manual_targets = sorted(
+            game_id for game_id in requested_manual_targets if game_id not in current_game_set
+        )
+        if not applied_manual_targets:
+            return {
+                "policy_version": 1,
+                "game_date": game_date,
+                "mode": "skip",
+                "reason": "manual_targets_not_on_slate",
+                "target_game_ids": [],
+                "ignored_changes": [],
+                "manual_trigger": {
+                    "requested_game_ids": requested_manual_targets,
+                    "applied_game_ids": [],
+                    "invalid_game_ids": invalid_manual_targets,
+                    "source": "operator",
+                },
+            }
+        manual_mode = (
+            "full_slate"
+            if len(applied_manual_targets) >= len(current_game_ids)
+            else "game_scoped"
+        )
+        return {
+            "policy_version": 1,
+            "game_date": game_date,
+            "mode": manual_mode,
+            "reason": "manual_operator_trigger",
+            "target_game_ids": (
+                current_game_ids if manual_mode == "full_slate" else applied_manual_targets
+            ),
+            "ignored_changes": [],
+            "manual_trigger": {
+                "requested_game_ids": requested_manual_targets,
+                "applied_game_ids": applied_manual_targets,
+                "invalid_game_ids": invalid_manual_targets,
+                "source": "operator",
+            },
         }
 
     changed_games = list(input_change_set.get("changed_games", []))
@@ -5342,6 +5389,7 @@ def publish_atomic_task(
 def nba_live_pipeline_v3_flow(
     *,
     game_date: str | None = None,
+    manual_target_game_ids: list[int] | None = None,
     sim_worlds: int = 25000,
     run_id_override: str | None = None,
     promote_pointers: bool = True,
@@ -5646,6 +5694,7 @@ def nba_live_pipeline_v3_flow(
             current_bundle_hash=bundle_hash,
             current_minutes_selector_path=minutes_selector_path,
             current_rates_selector_path=rates_selector_path,
+            manual_target_game_ids=manual_target_game_ids,
         )
         target_game_ids = _normalize_game_ids(rerun_plan.get("target_game_ids"))
 

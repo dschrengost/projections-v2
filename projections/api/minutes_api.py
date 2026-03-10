@@ -1757,6 +1757,79 @@ def create_app(
             }
         )
 
+    @app.post("/api/trigger/game")
+    def trigger_pipeline_game(game_id: int, date: str | None = None) -> JSONResponse:
+        """Manually trigger a single-game scoped rerun for the given date/game_id."""
+        slate_day = _parse_date(date)
+        target_game_id = int(game_id)
+        validation_warning: str | None = None
+        available_game_ids: list[int] = []
+
+        try:
+            from projections.api.live_status_api import get_live_status
+
+            live_status = get_live_status(date=slate_day.isoformat())
+            available_game_ids = sorted(
+                int(value)
+                for value in pd.to_numeric(
+                    [game.get("game_id") for game in live_status.get("games", [])],
+                    errors="coerce",
+                )
+                if not pd.isna(value)
+            )
+            if available_game_ids and target_game_id not in available_game_ids:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"game_id={target_game_id} not found on slate {slate_day.isoformat()}. "
+                        f"Available game_ids={available_game_ids}"
+                    ),
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            validation_warning = (
+                "Unable to validate target game_id against live status before triggering "
+                f"deployment: {exc}"
+            )
+
+        try:
+            from prefect.deployments import run_deployment
+
+            flow_run = run_deployment(
+                "nba-live-pipeline/nba-live-pipeline",
+                parameters={
+                    "game_date": slate_day.isoformat(),
+                    "manual_target_game_ids": [target_game_id],
+                },
+                tags=[
+                    "manual",
+                    "api-trigger",
+                    "targeted-rerun",
+                    f"game-{target_game_id}",
+                ],
+                as_subflow=False,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Failed to trigger targeted Prefect deployment "
+                    f"nba-live-pipeline/nba-live-pipeline for game_id={target_game_id}: {exc}"
+                ),
+            ) from exc
+
+        return JSONResponse(
+            {
+                "status": "triggered",
+                "deployment": "nba-live-pipeline/nba-live-pipeline",
+                "game_date": slate_day.isoformat(),
+                "target_game_ids": [target_game_id],
+                "flow_run_id": str(flow_run.id),
+                "validation_warning": validation_warning,
+            }
+        )
+
     if dist_dir.exists():
         # Mount static assets at /assets for CSS/JS bundles
         assets_dir = dist_dir / "assets"

@@ -826,6 +826,69 @@ def test_rerun_plan_uses_game_scoped_policy_for_material_pre_tip_changes(
     assert plan["target_game_ids"] == [1]
 
 
+def test_rerun_plan_honors_manual_target_override(tmp_path: Path) -> None:
+    current = {
+        "summary": {"slate_game_count": 2},
+        "per_game": {
+            "1": {"game_id": 1, "minutes_to_tip": 25.0, "is_live_game": True, "sources": {}},
+            "2": {"game_id": 2, "minutes_to_tip": 240.0, "is_live_game": True, "sources": {}},
+        },
+    }
+    selector = tmp_path / "selector.json"
+    selector.write_text("{}", encoding="utf-8")
+    previous_manifest = {
+        "run_id": "prev_run",
+        "minutes_current_run_path": str(selector),
+        "rates_current_run_path": str(selector),
+        "v3": {"bundle_hash": "bundle123"},
+    }
+    plan = _build_rerun_plan(
+        game_date="2026-02-24",
+        input_change_set={"changed_games": [], "new_game_ids": [], "removed_game_ids": []},
+        current_source_freshness=current,
+        previous_manifest_payload=previous_manifest,
+        current_bundle_hash="bundle123",
+        current_minutes_selector_path=selector,
+        current_rates_selector_path=selector,
+        manual_target_game_ids=[2],
+    )
+    assert plan["mode"] == "game_scoped"
+    assert plan["reason"] == "manual_operator_trigger"
+    assert plan["target_game_ids"] == [2]
+    assert plan["manual_trigger"]["applied_game_ids"] == [2]
+
+
+def test_rerun_plan_skips_when_manual_targets_not_on_slate(tmp_path: Path) -> None:
+    current = {
+        "summary": {"slate_game_count": 1},
+        "per_game": {
+            "1": {"game_id": 1, "minutes_to_tip": 45.0, "is_live_game": True, "sources": {}},
+        },
+    }
+    selector = tmp_path / "selector.json"
+    selector.write_text("{}", encoding="utf-8")
+    previous_manifest = {
+        "run_id": "prev_run",
+        "minutes_current_run_path": str(selector),
+        "rates_current_run_path": str(selector),
+        "v3": {"bundle_hash": "bundle123"},
+    }
+    plan = _build_rerun_plan(
+        game_date="2026-02-24",
+        input_change_set={"changed_games": [], "new_game_ids": [], "removed_game_ids": []},
+        current_source_freshness=current,
+        previous_manifest_payload=previous_manifest,
+        current_bundle_hash="bundle123",
+        current_minutes_selector_path=selector,
+        current_rates_selector_path=selector,
+        manual_target_game_ids=[999],
+    )
+    assert plan["mode"] == "skip"
+    assert plan["reason"] == "manual_targets_not_on_slate"
+    assert plan["target_game_ids"] == []
+    assert plan["manual_trigger"]["invalid_game_ids"] == [999]
+
+
 def test_publish_superseded_report_flags_newer_current_pointer(tmp_path: Path) -> None:
     manifest_path = tmp_path / "artifacts" / "runs" / "nba_live" / "game_date=2026-02-24" / "run=candidate" / "manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)

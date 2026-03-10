@@ -83,6 +83,15 @@ export type LiveSlateAnalyticsResponse = {
   }
 }
 
+export type TriggerGameRerunResponse = {
+  status: string
+  deployment: string
+  game_date: string
+  target_game_ids: number[]
+  flow_run_id: string
+  validation_warning?: string | null
+}
+
 export async function fetchLiveStatus(date: string): Promise<LiveStatusResponse> {
   const res = await fetch(apiUrl(`/api/live/status?date=${encodeURIComponent(date)}`))
   if (!res.ok) {
@@ -106,4 +115,22 @@ export async function fetchLiveSlateAnalytics(
     throw new Error((body as { detail?: string }).detail || `Failed to fetch live slate analytics: ${res.status}`)
   }
   return (await res.json()) as LiveSlateAnalyticsResponse
+}
+
+export async function triggerLiveGameRerun(
+  date: string,
+  gameId: string | number,
+): Promise<TriggerGameRerunResponse> {
+  const params = new URLSearchParams({
+    date,
+    game_id: String(gameId),
+  })
+  const res = await fetch(apiUrl(`/api/trigger/game?${params.toString()}`), {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error((body as { detail?: string }).detail || `Failed to trigger game rerun: ${res.status}`)
+  }
+  return (await res.json()) as TriggerGameRerunResponse
 }
