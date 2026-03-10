@@ -303,6 +303,71 @@ def test_summarize_worlds_to_projections_emits_contract_columns_and_semantics() 
     assert row["minutes_sim_uncond_mean"] == 15.0
 
 
+def test_summarize_worlds_to_projections_handles_sparse_index_and_null_key_rows() -> None:
+    worlds = pd.DataFrame(
+        [
+            {
+                "world_idx": 0,
+                "game_date": "2026-01-18",
+                "game_id": 1001,
+                "team_id": 10,
+                "player_id": 101,
+                "active": 1,
+                "minutes": 30.0,
+                "dk_fpts": 40.0,
+                "pts": 20.0,
+                "reb": 8.0,
+                "ast": 5.0,
+                "stl": 1.0,
+                "blk": 1.0,
+                "tov": 2.0,
+            },
+            {
+                "world_idx": 1,
+                "game_date": "2026-01-18",
+                "game_id": 1001,
+                "team_id": 10,
+                "player_id": 101,
+                "active": 0,
+                "minutes": 0.0,
+                "dk_fpts": 0.0,
+                "pts": 0.0,
+                "reb": 0.0,
+                "ast": 0.0,
+                "stl": 0.0,
+                "blk": 0.0,
+                "tov": 0.0,
+            },
+            {
+                "world_idx": 2,
+                "game_date": "2026-01-18",
+                "game_id": None,  # Should be dropped (matches pandas groupby(dropna=True) behavior).
+                "team_id": 10,
+                "player_id": 101,
+                "active": 1,
+                "minutes": 10.0,
+                "dk_fpts": 10.0,
+                "pts": 5.0,
+                "reb": 2.0,
+                "ast": 1.0,
+                "stl": 0.0,
+                "blk": 0.0,
+                "tov": 1.0,
+            },
+        ]
+    )
+    worlds.index = pd.Index([100, 300, 900])
+
+    df = summarize_worlds_to_projections(worlds, sim_profile="game_transformer_v2")
+
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["game_id"] == 1001
+    assert row["n_worlds"] == 2
+    assert row["sim_p_active"] == 0.5
+    assert row["dk_fpts_mean_uncond"] == 20.0
+
+
 def test_align_flow_backbone_beta_binomial_ft_only_preserves_fg_legacy_and_contracts() -> None:
     cols = list(FLOW_TARGET_COLUMNS_V1)
     flow = torch.zeros((1, 30, len(cols)), dtype=torch.float32)

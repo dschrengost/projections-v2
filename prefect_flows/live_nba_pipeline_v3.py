@@ -2007,6 +2007,114 @@ def _validate_parquet_key_contract(
     return report
 
 
+def _group_mean_by_keys_without_pandas_groupby(
+    df: pd.DataFrame,
+    *,
+    key_cols: Sequence[str],
+    value_cols: Sequence[str],
+    label: str,
+) -> pd.DataFrame:
+    """
+    Compute grouped means with NumPy to avoid pandas cython groupby crashes on
+    very large frames in long-running worker processes.
+    """
+    key_cols = tuple(str(col) for col in key_cols)
+    value_cols = [str(col) for col in value_cols]
+    missing_keys = [col for col in key_cols if col not in df.columns]
+    missing_values = [col for col in value_cols if col not in df.columns]
+    if missing_keys or missing_values:
+        raise RuntimeError(
+            f"{label} missing columns: key_missing={missing_keys} "
+            f"value_missing={missing_values}"
+        )
+
+    if df.empty:
+        return pd.DataFrame(columns=list(key_cols) + value_cols)
+
+    work = df.loc[:, list(key_cols) + value_cols].copy()
+    for col in key_cols:
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    work = work.dropna(subset=list(key_cols))
+    if work.empty:
+        return pd.DataFrame(columns=list(key_cols) + value_cols)
+    for col in key_cols:
+        work[col] = work[col].astype("int64", copy=False)
+
+    key_index = pd.MultiIndex.from_frame(work.loc[:, list(key_cols)], names=list(key_cols))
+    codes, uniques = pd.factorize(key_index, sort=False)
+    if isinstance(uniques, pd.MultiIndex):
+        out = uniques.to_frame(index=False)
+    else:
+        out = pd.DataFrame(list(uniques.tolist()), columns=list(key_cols))
+    if len(out.columns) == len(key_cols):
+        out.columns = list(key_cols)
+    group_count = int(len(out))
+    for col in value_cols:
+        values = pd.to_numeric(work[col], errors="coerce").to_numpy(dtype=float, copy=False)
+        valid = ~np.isnan(values)
+        sums = np.bincount(
+            codes[valid],
+            weights=values[valid],
+            minlength=group_count,
+        )
+        counts = np.bincount(codes[valid], minlength=group_count)
+        means = np.divide(
+            sums,
+            counts,
+            out=np.full(group_count, np.nan, dtype=float),
+            where=counts > 0,
+        )
+        out[col] = means
+    return out.reset_index(drop=True)
+
+
+def _team_minutes_sums_without_pandas_groupby(
+    *,
+    world_idx_col: pd.Series,
+    game_id_col: pd.Series,
+    team_id_col: pd.Series,
+    minutes_col: pd.Series,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute per-(world_idx, game_id, team_id) minute sums without pandas groupby.
+    """
+    world_raw = pd.to_numeric(world_idx_col, errors="coerce").to_numpy(dtype=float, copy=False)
+    game_raw = pd.to_numeric(game_id_col, errors="coerce").to_numpy(dtype=float, copy=False)
+    team_raw = pd.to_numeric(team_id_col, errors="coerce").to_numpy(dtype=float, copy=False)
+    minutes = pd.to_numeric(minutes_col, errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+    valid = np.isfinite(world_raw) & np.isfinite(game_raw) & np.isfinite(team_raw)
+    if not bool(np.any(valid)):
+        empty_int = np.array([], dtype=np.int64)
+        empty_float = np.array([], dtype=float)
+        return empty_int, empty_int, empty_int, empty_float
+
+    world_vals = world_raw[valid].astype(np.int64, copy=False)
+    game_vals = game_raw[valid].astype(np.int64, copy=False)
+    team_vals = team_raw[valid].astype(np.int64, copy=False)
+    minute_vals = minutes[valid]
+
+    key_index = pd.MultiIndex.from_arrays(
+        [world_vals, game_vals, team_vals],
+        names=["world_idx", "game_id", "team_id"],
+    )
+    group_codes, uniques = pd.factorize(key_index, sort=False)
+    if not isinstance(uniques, pd.MultiIndex) or len(uniques) <= 0:
+        empty_int = np.array([], dtype=np.int64)
+        empty_float = np.array([], dtype=float)
+        return empty_int, empty_int, empty_int, empty_float
+
+    group_count = int(len(uniques))
+    minute_sums = np.bincount(
+        group_codes,
+        weights=minute_vals,
+        minlength=group_count,
+    ).astype(float, copy=False)
+    uniq_world = uniques.get_level_values(0).to_numpy(dtype=np.int64, copy=False)
+    uniq_game = uniques.get_level_values(1).to_numpy(dtype=np.int64, copy=False)
+    uniq_team = uniques.get_level_values(2).to_numpy(dtype=np.int64, copy=False)
+    return uniq_world, uniq_game, uniq_team, minute_sums
+
+
 def _load_fallback_merge_baseline(
     *,
     current_path: Path,
@@ -2161,17 +2269,21 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
     if {"world_idx", "game_id", "team_id", "minutes"}.issubset(df.columns):
-        team_minutes = (
-            df.groupby(["world_idx", "game_id", "team_id"], dropna=False)["minutes"]
-            .sum()
-            .reset_index()
+        _, _, _, minute_sums = _team_minutes_sums_without_pandas_groupby(
+            world_idx_col=df["world_idx"],
+            game_id_col=df["game_id"],
+            team_id_col=df["team_id"],
+            minutes_col=df["minutes"],
         )
-        team_minute_delta = team_minutes["minutes"].sub(240.0).abs()
-        team_minutes_not_240 = int(
-            (team_minute_delta > _WORLD_CONTRACT_TOL).sum()
-        )
-        team_minutes_total_checks = int(len(team_minutes))
-        team_minutes_max_abs_drift = float(team_minute_delta.max()) if not team_minutes.empty else 0.0
+        if minute_sums.size > 0:
+            team_minute_delta = np.abs(minute_sums - 240.0)
+            team_minutes_not_240 = int(np.count_nonzero(team_minute_delta > _WORLD_CONTRACT_TOL))
+            team_minutes_total_checks = int(minute_sums.size)
+            team_minutes_max_abs_drift = float(np.max(team_minute_delta))
+        else:
+            team_minutes_not_240 = 0
+            team_minutes_total_checks = 0
+            team_minutes_max_abs_drift = 0.0
     else:
         team_minutes_not_240 = 0
         team_minutes_total_checks = 0
@@ -2349,42 +2461,43 @@ def _repair_world_frame_contract_fields(
             ).to_numpy(dtype=float)
 
     if {"world_idx", "game_id", "team_id", "minutes"}.issubset(out.columns):
-        world_idx = pd.to_numeric(out["world_idx"], errors="coerce").astype("Int64")
-        game_id = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
-        team_id = pd.to_numeric(out["team_id"], errors="coerce").astype("Int64")
-        minutes = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0)
-        group_frame = pd.DataFrame(
-            {
-                "world_idx": world_idx,
-                "game_id": game_id,
-                "team_id": team_id,
-                "minutes": minutes,
-            }
+        uniq_world, uniq_game, _, minute_sums = _team_minutes_sums_without_pandas_groupby(
+            world_idx_col=out["world_idx"],
+            game_id_col=out["game_id"],
+            team_id_col=out["team_id"],
+            minutes_col=out["minutes"],
         )
-        # Use dropna over boolean .loc indexing to avoid pandas index-alignment
-        # edge cases on large/sparse indices observed in production.
-        valid_group_frame = group_frame.dropna(subset=["world_idx", "game_id", "team_id"])
-        if not valid_group_frame.empty:
-            team_minutes = (
-                valid_group_frame
-                .groupby(["world_idx", "game_id", "team_id"], dropna=False)["minutes"]
-                .sum()
-                .reset_index()
+        bad_team_mask = np.abs(minute_sums - 240.0) > _WORLD_CONTRACT_TOL
+        if bool(np.any(bad_team_mask)):
+            pair_dtype = np.dtype([("world_idx", np.int64), ("game_id", np.int64)])
+            bad_pairs = np.empty(int(np.count_nonzero(bad_team_mask)), dtype=pair_dtype)
+            bad_pairs["world_idx"] = uniq_world[bad_team_mask]
+            bad_pairs["game_id"] = uniq_game[bad_team_mask]
+            bad_pairs = np.unique(bad_pairs)
+
+            row_world_raw = pd.to_numeric(out["world_idx"], errors="coerce").to_numpy(
+                dtype=float, copy=False
             )
-            bad_team_minutes = team_minutes.loc[
-                team_minutes["minutes"].sub(240.0).abs() > _WORLD_CONTRACT_TOL,
-                ["world_idx", "game_id"],
-            ].drop_duplicates()
-            if not bad_team_minutes.empty:
-                bad_pairs = pd.MultiIndex.from_frame(bad_team_minutes)
-                row_pairs = pd.MultiIndex.from_arrays([world_idx, game_id])
-                drop_mask = row_pairs.isin(bad_pairs)
-                dropped_rows = int(np.count_nonzero(drop_mask))
-                if 0 < dropped_rows < len(out):
-                    out = out.loc[~drop_mask].reset_index(drop=True)
-                    report["applied"] = True
-                    report["dropped_bad_world_game_pairs"] = int(len(bad_team_minutes))
-                    report["dropped_bad_world_rows"] = dropped_rows
+            row_game_raw = pd.to_numeric(out["game_id"], errors="coerce").to_numpy(
+                dtype=float, copy=False
+            )
+            valid_row_pairs = np.isfinite(row_world_raw) & np.isfinite(row_game_raw)
+            drop_mask = np.zeros(len(out), dtype=bool)
+            if bool(np.any(valid_row_pairs)):
+                row_pairs = np.empty(int(np.count_nonzero(valid_row_pairs)), dtype=pair_dtype)
+                row_pairs["world_idx"] = row_world_raw[valid_row_pairs].astype(
+                    np.int64, copy=False
+                )
+                row_pairs["game_id"] = row_game_raw[valid_row_pairs].astype(
+                    np.int64, copy=False
+                )
+                drop_mask[valid_row_pairs] = np.isin(row_pairs, bad_pairs)
+            dropped_rows = int(np.count_nonzero(drop_mask))
+            if 0 < dropped_rows < len(out):
+                out = out.loc[~drop_mask].reset_index(drop=True)
+                report["applied"] = True
+                report["dropped_bad_world_game_pairs"] = int(len(bad_pairs))
+                report["dropped_bad_world_rows"] = dropped_rows
 
     return out, report
 
@@ -2792,12 +2905,12 @@ def _apply_props_uplift_calibration_to_worlds(
     }
     key_cols = ["game_id", "team_id", "player_id"]
 
-    player_means = (
-        worlds_df.groupby(key_cols, dropna=False)[["pts", "reb", "ast"]]
-        .mean()
-        .reset_index()
-        .rename(columns={"pts": "pts_mean", "reb": "reb_mean", "ast": "ast_mean"})
-    )
+    player_means = _group_mean_by_keys_without_pandas_groupby(
+        worlds_df,
+        key_cols=key_cols,
+        value_cols=("pts", "reb", "ast"),
+        label="props_uplift/player_means",
+    ).rename(columns={"pts": "pts_mean", "reb": "reb_mean", "ast": "ast_mean"})
 
     feat_cols = list(key_cols)
     for cfg in stat_cfg.values():
@@ -2954,15 +3067,44 @@ def _apply_props_uplift_calibration_to_worlds(
             out["ast"] = np.where(active_mask, ast_new, x)
         out = out.drop(columns=["mu", "sf_mean", "sf_var", "line_gap", "player_name"], errors="ignore")
 
-        post_means = (
-            out.groupby(key_cols, dropna=False)[[stat_name]]
-            .mean()
-            .reset_index()
-            .rename(columns={stat_name: f"{stat_name}_mean_post"})
+        post_mean_col = f"{stat_name}_mean_post"
+        post_means = meta.loc[:, key_cols + [mean_col]].copy().rename(
+            columns={mean_col: post_mean_col}
         )
-        merged_gap = meta.merge(post_means, on=key_cols, how="left")
+        adjusted_keys = scale_df.loc[:, key_cols].drop_duplicates(ignore_index=True)
+        if not adjusted_keys.empty:
+            adjusted_out = out.loc[:, key_cols + [stat_name]].copy()
+            adjusted_out, _ = _sanitize_frame_to_expected_keys(
+                adjusted_out,
+                expected_keys_df=adjusted_keys,
+                key_cols=tuple(key_cols),
+                label=f"props_uplift/{stat_name}_adjusted_subset",
+            )
+            if not adjusted_out.empty:
+                post_delta = _group_mean_by_keys_without_pandas_groupby(
+                    adjusted_out,
+                    key_cols=key_cols,
+                    value_cols=(stat_name,),
+                    label=f"props_uplift/{stat_name}_post_means",
+                ).rename(columns={stat_name: post_mean_col})
+                post_means = _left_overlay_from_source_by_keys(
+                    post_means,
+                    source_df=post_delta.loc[:, key_cols + [post_mean_col]],
+                    key_cols=key_cols,
+                    value_cols=(post_mean_col,),
+                    label=f"props_uplift/{stat_name}_post_mean_overlay",
+                )
+
+        merged_gap = meta.loc[:, key_cols + [mean_col, line_col]].copy()
+        merged_gap = _left_overlay_from_source_by_keys(
+            merged_gap,
+            source_df=post_means.loc[:, key_cols + [post_mean_col]],
+            key_cols=key_cols,
+            value_cols=(post_mean_col,),
+            label=f"props_uplift/{stat_name}_gap_overlay",
+        )
         gap_pre = pd.to_numeric(merged_gap[mean_col], errors="coerce") - pd.to_numeric(merged_gap[line_col], errors="coerce")
-        gap_post = pd.to_numeric(merged_gap[f"{stat_name}_mean_post"], errors="coerce") - pd.to_numeric(
+        gap_post = pd.to_numeric(merged_gap[post_mean_col], errors="coerce") - pd.to_numeric(
             merged_gap[line_col], errors="coerce"
         )
         report["stats"][stat_name] = {

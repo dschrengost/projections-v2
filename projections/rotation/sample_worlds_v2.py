@@ -791,13 +791,54 @@ def summarize_worlds_to_projections(
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
 
     key_cols = ["game_date", "game_id", "team_id", "player_id"]
+    key_frame = df.loc[:, key_cols].copy()
+    for col in ("game_id", "team_id", "player_id"):
+        key_frame[col] = pd.to_numeric(key_frame[col], errors="coerce")
+    valid_keys = ~key_frame.loc[:, key_cols].isna().any(axis=1).to_numpy(dtype=bool, copy=False)
+    if not bool(np.any(valid_keys)):
+        out = add_canonical_projection_fields(pd.DataFrame())
+        return out
+
+    key_frame = key_frame.loc[valid_keys].reset_index(drop=True)
+    key_frame["game_date"] = key_frame["game_date"].astype(str)
+    work = df.loc[valid_keys].reset_index(drop=True)
+    key_index = pd.MultiIndex.from_frame(key_frame.loc[:, key_cols], names=key_cols)
+    group_codes, uniques = pd.factorize(key_index, sort=False)
+    if len(group_codes) <= 0:
+        out = add_canonical_projection_fields(pd.DataFrame())
+        return out
+
+    order = np.argsort(group_codes, kind="mergesort")
+    sorted_codes = group_codes[order]
+    starts = np.flatnonzero(
+        np.r_[True, sorted_codes[1:] != sorted_codes[:-1]]
+    )
+    ends = np.r_[starts[1:], len(order)]
+
+    minutes_all = work["minutes"].to_numpy(dtype=float, copy=False)
+    fpts_all = work["dk_fpts"].to_numpy(dtype=float, copy=False)
+    active_all = work["active"].to_numpy(dtype=bool, copy=False)
+    world_idx_all = pd.to_numeric(work["world_idx"], errors="coerce").to_numpy(
+        dtype=float, copy=False
+    )
+    stat_arrays: dict[str, np.ndarray] = {}
+    for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
+        if stat_name in work.columns:
+            stat_arrays[stat_name] = pd.to_numeric(
+                work[stat_name], errors="coerce"
+            ).fillna(0.0).to_numpy(dtype=float, copy=False)
+
     rows: list[dict[str, Any]] = []
-    for keys, grp in df.groupby(key_cols, sort=False):
-        game_date, game_id, team_id, player_id = keys
-        minutes = grp["minutes"].to_numpy(dtype=float, copy=False)
-        fpts = grp["dk_fpts"].to_numpy(dtype=float, copy=False)
-        active_mask = grp["active"].to_numpy(dtype=bool, copy=False)
-        n_worlds = int(max(1, grp["world_idx"].nunique()))
+    for start, end in zip(starts, ends, strict=False):
+        idx = order[start:end]
+        group_code = int(sorted_codes[start])
+        game_date, game_id, team_id, player_id = uniques[group_code]
+        minutes = minutes_all[idx]
+        fpts = fpts_all[idx]
+        active_mask = active_all[idx]
+        world_idx = world_idx_all[idx]
+        world_idx = world_idx[np.isfinite(world_idx)]
+        n_worlds = int(max(1, np.unique(world_idx.astype(np.int64, copy=False)).size))
 
         # Spec semantics: conditional moments are over active worlds.
         cond_mask = active_mask
@@ -880,12 +921,11 @@ def summarize_worlds_to_projections(
             "sim_minutes_sim_p90_uncond": _q(minutes, 0.90),
             "sim_minutes_sim_std_uncond": float(minutes.std(ddof=0)),
         }
-        for stat_name in ("pts", "reb", "ast", "stl", "blk", "tov"):
-            if stat_name in grp.columns:
-                vals = grp[stat_name].to_numpy(dtype=float, copy=False)
-                payload[f"{stat_name}_mean"] = float(vals[cond_mask].mean()) if cond_mask.any() else 0.0
-                payload[f"{stat_name}_mean_uncond"] = float(vals.mean())
-                payload[f"sim_{stat_name}_mean_uncond"] = float(vals.mean())
+        for stat_name, vals_all in stat_arrays.items():
+            vals = vals_all[idx]
+            payload[f"{stat_name}_mean"] = float(vals[cond_mask].mean()) if cond_mask.any() else 0.0
+            payload[f"{stat_name}_mean_uncond"] = float(vals.mean())
+            payload[f"sim_{stat_name}_mean_uncond"] = float(vals.mean())
 
         rows.append(payload)
 
