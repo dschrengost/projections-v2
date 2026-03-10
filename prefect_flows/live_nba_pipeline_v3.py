@@ -4247,7 +4247,7 @@ def score_gtv2_live_task(
             _atomic_write_validated_parquet(
                 game_features_df,
                 game_features_path,
-                required_cols=("game_date", "game_id", "team_id", "player_id"),
+                required_cols=("game_id", "team_id", "player_id"),
             )
             triton_request_count += 1
             try:

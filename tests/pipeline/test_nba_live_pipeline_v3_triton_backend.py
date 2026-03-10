@@ -43,7 +43,6 @@ def test_score_gtv2_live_task_triton_backend(
         features_path,
         pd.DataFrame(
             {
-                "game_date": [game_date],
                 "game_id": [22500999],
                 "team_id": [1610612747],
                 "player_id": [1234],
@@ -327,9 +326,8 @@ def test_score_gtv2_live_task_triton_backend_full_slate_runs_per_game_sequential
         game_features = pd.read_parquet(Path(str(request_payload["features_path"])))
         out_path = Path(str(request_payload["out_path"]))
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        scored = game_features[
-            ["game_date", "game_id", "team_id", "player_id"]
-        ].copy()
+        scored = game_features[["game_id", "team_id", "player_id"]].copy()
+        scored.insert(0, "game_date", game_date)
         scored["minutes_deterministic"] = 30.5
         scored["active_deterministic"] = 1
         scored["active_logit"] = 2.0
