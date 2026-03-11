@@ -55,9 +55,9 @@ deployments:
   schedules:
     - cron: "*/15 8-10 * * *"
       timezone: "America/New_York"
-    - cron: "*/5 11-21 * * *"
+    - cron: "*/15 11-21 * * *"
       timezone: "America/New_York"
-    - cron: "0,5,10,15,20,25,30 22 * * *"
+    - cron: "0,15,30 22 * * *"
       timezone: "America/New_York"
 
 - name: nba-live-pipeline-legacy

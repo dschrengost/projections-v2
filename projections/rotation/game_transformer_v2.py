@@ -80,6 +80,11 @@ class GameTransformerV2Config:
     flow_coupling_type: str = "affine"
     flow_num_blocks: int = 4
     flow_scale_clip: float = 3.0  # H1 fix: increased from 2.0 to reduce star under-projection
+    flow_rqs_num_bins: int = 8
+    flow_rqs_tail_bound: float = 40.0
+    flow_rqs_min_bin_width: float = 1e-3
+    flow_rqs_min_bin_height: float = 1e-3
+    flow_rqs_min_derivative: float = 1e-3
     flow_mean_ctx_weight: float = 1.0
     flow_context_mode: str = "attention"  # H2 fix: "attention" instead of "mean" for star concentration
     include_pf_in_flow_targets: bool = False
@@ -124,6 +129,16 @@ class GameTransformerV2Config:
         # If config doesn't have flow_scale_clip, use 2.0 (original default)
         if "flow_scale_clip" not in filtered:
             filtered["flow_scale_clip"] = 2.0
+        if "flow_rqs_num_bins" not in filtered:
+            filtered["flow_rqs_num_bins"] = 8
+        if "flow_rqs_tail_bound" not in filtered:
+            filtered["flow_rqs_tail_bound"] = 40.0
+        if "flow_rqs_min_bin_width" not in filtered:
+            filtered["flow_rqs_min_bin_width"] = 1e-3
+        if "flow_rqs_min_bin_height" not in filtered:
+            filtered["flow_rqs_min_bin_height"] = 1e-3
+        if "flow_rqs_min_derivative" not in filtered:
+            filtered["flow_rqs_min_derivative"] = 1e-3
         if "enable_efficiency_head" not in filtered:
             filtered["enable_efficiency_head"] = False
         if "efficiency_head_hidden" not in filtered:
@@ -684,6 +699,11 @@ class GameTransformerV2(nn.Module):
         flow_coupling_type: str = "affine",
         flow_num_blocks: int = 4,
         flow_scale_clip: float = 3.0,
+        flow_rqs_num_bins: int = 8,
+        flow_rqs_tail_bound: float = 40.0,
+        flow_rqs_min_bin_width: float = 1e-3,
+        flow_rqs_min_bin_height: float = 1e-3,
+        flow_rqs_min_derivative: float = 1e-3,
         flow_mean_ctx_weight: float = 1.0,
         flow_context_mode: str = "attention",
         include_pf_in_flow_targets: bool = False,
@@ -765,6 +785,11 @@ class GameTransformerV2(nn.Module):
             num_blocks=int(flow_num_blocks),
             coupling_type=str(flow_coupling_type),
             scale_clip=float(flow_scale_clip),
+            rqs_num_bins=int(flow_rqs_num_bins),
+            rqs_tail_bound=float(flow_rqs_tail_bound),
+            rqs_min_bin_width=float(flow_rqs_min_bin_width),
+            rqs_min_bin_height=float(flow_rqs_min_bin_height),
+            rqs_min_derivative=float(flow_rqs_min_derivative),
             mean_ctx_weight=float(flow_mean_ctx_weight),
             context_mode=str(flow_context_mode),
         )
@@ -1096,6 +1121,11 @@ def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransforme
         flow_coupling_type=str(config.flow_coupling_type),
         flow_num_blocks=int(config.flow_num_blocks),
         flow_scale_clip=float(config.flow_scale_clip),
+        flow_rqs_num_bins=int(getattr(config, "flow_rqs_num_bins", 8)),
+        flow_rqs_tail_bound=float(getattr(config, "flow_rqs_tail_bound", 40.0)),
+        flow_rqs_min_bin_width=float(getattr(config, "flow_rqs_min_bin_width", 1e-3)),
+        flow_rqs_min_bin_height=float(getattr(config, "flow_rqs_min_bin_height", 1e-3)),
+        flow_rqs_min_derivative=float(getattr(config, "flow_rqs_min_derivative", 1e-3)),
         flow_mean_ctx_weight=float(config.flow_mean_ctx_weight),
         flow_context_mode=str(getattr(config, "flow_context_mode", "mean")),
         include_pf_in_flow_targets=bool(config.include_pf_in_flow_targets),

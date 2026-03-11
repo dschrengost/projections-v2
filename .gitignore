@@ -53,6 +53,7 @@ tmp/
 local/
 reports/sim_audit/
 reports/parity_audit/
+reports/gtv2_*/
 handoffs/
 
 # -------------------------
@@ -85,3 +86,8 @@ data/
 /udo *
 /sudo *
 /systemctl *
+
+# -------------------------
+# GTv2 experiment artifacts
+# -------------------------
+/gtv2_*.json

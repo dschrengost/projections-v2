@@ -1,0 +1,27 @@
+[Unit]
+Description=Prefect Server (self-hosted)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=20
+
+[Service]
+Type=simple
+User=daniel
+WorkingDirectory=/home/daniel/prod/projections-v2
+EnvironmentFile=-/home/daniel/.config/projections/prefect-server.env
+Environment=PREFECT_PROFILE=selfhost
+Environment=PREFECT_UI_API_URL=http://100.78.180.34:4200/api
+Environment=PREFECT_UI_URL=http://100.78.180.34:4200
+Environment=PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:prefect@127.0.0.1:55432/prefect
+Environment=PREFECT_API_DATABASE_TIMEOUT=30.0
+Environment=PREFECT_API_DATABASE_CONNECTION_TIMEOUT=30.0
+Environment=PYTHONFAULTHANDLER=1
+ExecStart=/home/daniel/prod/projections-v2/.venv311/bin/python -m prefect server start --host 100.78.180.34 --port 4200
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

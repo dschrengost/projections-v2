@@ -31,15 +31,25 @@ def main(
         "--collision-strategy",
         help="What to do when concurrency is exhausted (e.g., CANCEL_NEW).",
     ),
+    concurrency_limit: int = typer.Option(
+        1,
+        "--concurrency-limit",
+        min=1,
+        help="Hard cap for concurrent runs on the deployment.",
+    ),
 ) -> None:
     with get_client(sync_client=True) as client:
         dep = client.read_deployment_by_name(deployment)
         update = DeploymentUpdate(
-            concurrency_options=ConcurrencyOptions(collision_strategy=collision_strategy)
+            concurrency_limit=concurrency_limit,
+            concurrency_options=ConcurrencyOptions(collision_strategy=collision_strategy),
         )
         client.update_deployment(deployment_id=dep.id, deployment=update)
         typer.echo(
-            f"[prefect] updated {deployment} concurrency_options.collision_strategy={collision_strategy}"
+            "[prefect] updated "
+            f"{deployment} "
+            f"concurrency_limit={concurrency_limit} "
+            f"concurrency_options.collision_strategy={collision_strategy}"
         )
 
 

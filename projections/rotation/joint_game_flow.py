@@ -1,4 +1,4 @@
-"""Joint game-level affine coupling flow over (players, stats) tensors."""
+"""Joint game-level coupling flow over (players, stats) tensors."""
 
 from __future__ import annotations
 
@@ -7,9 +7,15 @@ from dataclasses import dataclass
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 LOG_2PI = float(math.log(2.0 * math.pi))
+DEFAULT_RQS_NUM_BINS = 8
+DEFAULT_RQS_TAIL_BOUND = 40.0
+DEFAULT_RQS_MIN_BIN_WIDTH = 1e-3
+DEFAULT_RQS_MIN_BIN_HEIGHT = 1e-3
+DEFAULT_RQS_MIN_DERIVATIVE = 1e-3
 
 
 def _team_context_for_players(team_states: torch.Tensor, player_team_index: torch.Tensor) -> torch.Tensor:
@@ -39,6 +45,163 @@ def _masked_player_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tenso
 def _masked_team_mean(values: torch.Tensor, mask: torch.Tensor, team_index: torch.Tensor, team_id: int) -> torch.Tensor:
     team_mask = mask & (team_index == int(team_id))
     return _masked_player_mean(values, team_mask)
+
+
+def _rational_quadratic_spline(
+    inputs: torch.Tensor,
+    *,
+    unnormalized_widths: torch.Tensor,
+    unnormalized_heights: torch.Tensor,
+    unnormalized_derivatives: torch.Tensor,
+    inverse: bool,
+    tail_bound: float,
+    min_bin_width: float,
+    min_bin_height: float,
+    min_derivative: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Elementwise rational-quadratic spline with linear tails.
+
+    Args:
+        inputs: (N,) scalar inputs.
+        unnormalized_widths: (N,K) raw width logits.
+        unnormalized_heights: (N,K) raw height logits.
+        unnormalized_derivatives: (N,K+1) raw knot derivative params.
+        inverse: Whether to apply inverse transform.
+    Returns:
+        outputs: (N,) transformed values.
+        logabsdet: (N,) log|dy/dx| (forward) or log|dx/dy| (inverse).
+    """
+
+    if inputs.ndim != 1:
+        raise ValueError("inputs must be rank-1")
+    if unnormalized_widths.ndim != 2 or unnormalized_heights.ndim != 2 or unnormalized_derivatives.ndim != 2:
+        raise ValueError("spline parameter tensors must be rank-2")
+    if unnormalized_widths.shape != unnormalized_heights.shape:
+        raise ValueError("unnormalized_widths/heights shape mismatch")
+    if unnormalized_derivatives.shape[0] != unnormalized_widths.shape[0]:
+        raise ValueError("unnormalized_derivatives batch dimension mismatch")
+    num_bins = int(unnormalized_widths.shape[1])
+    if unnormalized_derivatives.shape[1] != num_bins + 1:
+        raise ValueError("unnormalized_derivatives must have K+1 columns")
+    if num_bins <= 1:
+        raise ValueError("num_bins must be > 1")
+    if float(min_bin_width) * float(num_bins) >= 1.0:
+        raise ValueError("min_bin_width * num_bins must be < 1")
+    if float(min_bin_height) * float(num_bins) >= 1.0:
+        raise ValueError("min_bin_height * num_bins must be < 1")
+    if float(tail_bound) <= 0.0:
+        raise ValueError("tail_bound must be > 0")
+
+    left = -float(tail_bound)
+    right = float(tail_bound)
+    bottom = -float(tail_bound)
+    top = float(tail_bound)
+
+    widths = F.softmax(unnormalized_widths, dim=-1)
+    widths = float(min_bin_width) + (1.0 - float(min_bin_width) * float(num_bins)) * widths
+    widths = widths * (right - left)
+
+    heights = F.softmax(unnormalized_heights, dim=-1)
+    heights = float(min_bin_height) + (1.0 - float(min_bin_height) * float(num_bins)) * heights
+    heights = heights * (top - bottom)
+
+    derivatives = float(min_derivative) + F.softplus(unnormalized_derivatives)
+
+    cumwidths = torch.cumsum(widths, dim=-1)
+    cumwidths = F.pad(cumwidths, (1, 0), mode="constant", value=0.0) + float(left)
+    cumwidths[..., -1] = float(right)
+
+    cumheights = torch.cumsum(heights, dim=-1)
+    cumheights = F.pad(cumheights, (1, 0), mode="constant", value=0.0) + float(bottom)
+    cumheights[..., -1] = float(top)
+
+    outputs = torch.empty_like(inputs)
+    logabsdet = torch.zeros_like(inputs)
+
+    below = inputs < float(left)
+    above = inputs > float(right)
+    inside = ~(below | above)
+
+    # Linear tails use endpoint derivatives from the spline knots.
+    left_d = derivatives[:, 0]
+    right_d = derivatives[:, -1]
+
+    if below.any():
+        if inverse:
+            outputs[below] = float(left) + (inputs[below] - float(bottom)) / left_d[below].clamp(min=1e-8)
+            logabsdet[below] = -torch.log(left_d[below].clamp(min=1e-8))
+        else:
+            outputs[below] = float(bottom) + left_d[below] * (inputs[below] - float(left))
+            logabsdet[below] = torch.log(left_d[below].clamp(min=1e-8))
+
+    if above.any():
+        if inverse:
+            outputs[above] = float(right) + (inputs[above] - float(top)) / right_d[above].clamp(min=1e-8)
+            logabsdet[above] = -torch.log(right_d[above].clamp(min=1e-8))
+        else:
+            outputs[above] = float(top) + right_d[above] * (inputs[above] - float(right))
+            logabsdet[above] = torch.log(right_d[above].clamp(min=1e-8))
+
+    if not inside.any():
+        return outputs, logabsdet
+
+    idx = torch.nonzero(inside, as_tuple=False).squeeze(-1)
+    x = inputs[idx]
+    widths_i = widths[idx]
+    heights_i = heights[idx]
+    deriv_i = derivatives[idx]
+    cumwidths_i = cumwidths[idx]
+    cumheights_i = cumheights[idx]
+
+    if inverse:
+        bin_idx = (x.unsqueeze(-1) >= cumheights_i[:, 1:]).to(dtype=torch.long).sum(dim=-1)
+    else:
+        bin_idx = (x.unsqueeze(-1) >= cumwidths_i[:, 1:]).to(dtype=torch.long).sum(dim=-1)
+    bin_idx = bin_idx.clamp(min=0, max=num_bins - 1)
+
+    gather_idx = bin_idx.unsqueeze(-1)
+    input_cumwidths = torch.gather(cumwidths_i, 1, gather_idx).squeeze(-1)
+    input_cumheights = torch.gather(cumheights_i, 1, gather_idx).squeeze(-1)
+    input_bin_widths = torch.gather(widths_i, 1, gather_idx).squeeze(-1)
+    input_bin_heights = torch.gather(heights_i, 1, gather_idx).squeeze(-1)
+    input_delta = input_bin_heights / input_bin_widths
+    input_der_left = torch.gather(deriv_i, 1, gather_idx).squeeze(-1)
+    input_der_right = torch.gather(deriv_i, 1, (bin_idx + 1).unsqueeze(-1)).squeeze(-1)
+
+    if inverse:
+        y_delta = x - input_cumheights
+        a = y_delta * (input_der_left + input_der_right - 2.0 * input_delta) + input_bin_heights * (
+            input_delta - input_der_left
+        )
+        b = input_bin_heights * input_der_left - y_delta * (input_der_left + input_der_right - 2.0 * input_delta)
+        c = -input_delta * y_delta
+
+        discriminant = (b * b - 4.0 * a * c).clamp(min=0.0)
+        sqrt_disc = torch.sqrt(discriminant + 1e-12)
+        denom = -b - sqrt_disc
+        theta = (2.0 * c) / torch.where(denom.abs() < 1e-8, torch.full_like(denom, -1e-8), denom)
+        theta = theta.clamp(min=0.0, max=1.0)
+
+        x_out = input_cumwidths + theta * input_bin_widths
+        outputs[idx] = x_out
+    else:
+        theta = (x - input_cumwidths) / input_bin_widths
+        numerator = input_bin_heights * (
+            input_delta * theta * theta + input_der_left * theta * (1.0 - theta)
+        )
+        denominator = input_delta + (
+            input_der_left + input_der_right - 2.0 * input_delta
+        ) * theta * (1.0 - theta)
+        y_out = input_cumheights + numerator / denominator.clamp(min=1e-8)
+        outputs[idx] = y_out
+
+    denominator = input_delta + (input_der_left + input_der_right - 2.0 * input_delta) * theta * (1.0 - theta)
+    derivative_numerator = (input_delta * input_delta) * (
+        input_der_right * theta * theta + 2.0 * input_delta * theta * (1.0 - theta) + input_der_left * (1.0 - theta) ** 2
+    )
+    forward_logabsdet = torch.log(derivative_numerator.clamp(min=1e-12)) - 2.0 * torch.log(denominator.clamp(min=1e-12))
+    logabsdet[idx] = -forward_logabsdet if inverse else forward_logabsdet
+    return outputs, logabsdet
 
 
 class _GatedTeamAttention(nn.Module):
@@ -209,8 +372,8 @@ class JointGameFlowOutputs:
         return self.nll_per_dim.mean()
 
 
-class _AffineCouplingConditioner(nn.Module):
-    """Conditioner network that produces shift/scale for affine coupling.
+class _CouplingConditioner(nn.Module):
+    """Conditioner network that produces coupling parameters.
 
     Supports two context modes:
     - "mean": Fixed mean-pooling over teammates/game (original, causes H2 issue)
@@ -222,13 +385,18 @@ class _AffineCouplingConditioner(nn.Module):
         *,
         d_model: int,
         num_stats: int,
+        output_dim_per_stat: int,
         hidden_dim: int,
         dropout: float,
         mean_ctx_weight: float,
         context_mode: str = "mean",
     ) -> None:
         super().__init__()
+        if int(output_dim_per_stat) <= 0:
+            raise ValueError("output_dim_per_stat must be > 0")
         cond_dim = int(3 * num_stats)
+        self.num_stats = int(num_stats)
+        self.output_dim_per_stat = int(output_dim_per_stat)
         self.mean_ctx_weight = float(mean_ctx_weight)
         self.context_mode = str(context_mode).lower()
 
@@ -249,7 +417,7 @@ class _AffineCouplingConditioner(nn.Module):
             nn.Linear(int(hidden_dim), int(hidden_dim)),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(int(hidden_dim), int(2 * num_stats)),
+            nn.Linear(int(hidden_dim), int(self.output_dim_per_stat * self.num_stats)),
         )
 
         # Attention modules for H2 fix (only created if context_mode == "attention")
@@ -277,7 +445,7 @@ class _AffineCouplingConditioner(nn.Module):
         game_state: torch.Tensor,
         player_team_index: torch.Tensor,
         valid_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         valid = valid_mask.to(dtype=torch.bool)
         team_index = player_team_index.to(dtype=torch.long)
 
@@ -313,8 +481,7 @@ class _AffineCouplingConditioner(nn.Module):
 
         fused = cond_h + player_h + team_h + game_h
         out = self.out(fused)
-        shift, log_scale = torch.chunk(out, chunks=2, dim=-1)
-        return shift, log_scale
+        return out.view(out.shape[0], out.shape[1], self.num_stats, self.output_dim_per_stat)
 
 
 class _AffineCouplingBlock(nn.Module):
@@ -333,9 +500,10 @@ class _AffineCouplingBlock(nn.Module):
         super().__init__()
         if stat_mask.ndim != 1 or stat_mask.shape[0] != int(num_stats):
             raise ValueError("stat_mask must be rank-1 with length=num_stats")
-        self.conditioner = _AffineCouplingConditioner(
+        self.conditioner = _CouplingConditioner(
             d_model=int(d_model),
             num_stats=int(num_stats),
+            output_dim_per_stat=2,
             hidden_dim=int(hidden_dim),
             dropout=float(dropout),
             mean_ctx_weight=float(mean_ctx_weight),
@@ -362,7 +530,7 @@ class _AffineCouplingBlock(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         cond_mask, xform_mask = self._transform_masks(y)
         y_cond = y * cond_mask.to(dtype=y.dtype)
-        shift, log_scale = self.conditioner(
+        params = self.conditioner(
             y_cond,
             player_states=player_states,
             team_states=team_states,
@@ -370,6 +538,8 @@ class _AffineCouplingBlock(nn.Module):
             player_team_index=player_team_index,
             valid_mask=valid_mask,
         )
+        shift = params[..., 0]
+        log_scale = params[..., 1]
         log_scale = torch.tanh(log_scale) * float(self.scale_clip)
         xform_float = xform_mask.to(dtype=y.dtype)
 
@@ -390,7 +560,7 @@ class _AffineCouplingBlock(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         cond_mask, xform_mask = self._transform_masks(y)
         y_cond = y * cond_mask.to(dtype=y.dtype)
-        shift, log_scale = self.conditioner(
+        params = self.conditioner(
             y_cond,
             player_states=player_states,
             team_states=team_states,
@@ -398,6 +568,8 @@ class _AffineCouplingBlock(nn.Module):
             player_team_index=player_team_index,
             valid_mask=valid_mask,
         )
+        shift = params[..., 0]
+        log_scale = params[..., 1]
         log_scale = torch.tanh(log_scale) * float(self.scale_clip)
         xform_float = xform_mask.to(dtype=y.dtype)
 
@@ -406,16 +578,176 @@ class _AffineCouplingBlock(nn.Module):
         return y_inv, log_det
 
 
+class _RQSCouplingBlock(nn.Module):
+    def __init__(
+        self,
+        *,
+        d_model: int,
+        num_stats: int,
+        hidden_dim: int,
+        dropout: float,
+        stat_mask: torch.Tensor,
+        num_bins: int,
+        tail_bound: float,
+        min_bin_width: float,
+        min_bin_height: float,
+        min_derivative: float,
+        mean_ctx_weight: float,
+        context_mode: str = "mean",
+    ) -> None:
+        super().__init__()
+        if stat_mask.ndim != 1 or stat_mask.shape[0] != int(num_stats):
+            raise ValueError("stat_mask must be rank-1 with length=num_stats")
+        if int(num_bins) <= 1:
+            raise ValueError("num_bins must be > 1")
+        if float(min_bin_width) * float(num_bins) >= 1.0:
+            raise ValueError("min_bin_width * num_bins must be < 1")
+        if float(min_bin_height) * float(num_bins) >= 1.0:
+            raise ValueError("min_bin_height * num_bins must be < 1")
+        if float(min_derivative) <= 0.0:
+            raise ValueError("min_derivative must be > 0")
+        if float(tail_bound) <= 0.0:
+            raise ValueError("tail_bound must be > 0")
+
+        self.num_bins = int(num_bins)
+        self.tail_bound = float(tail_bound)
+        self.min_bin_width = float(min_bin_width)
+        self.min_bin_height = float(min_bin_height)
+        self.min_derivative = float(min_derivative)
+        self.conditioner = _CouplingConditioner(
+            d_model=int(d_model),
+            num_stats=int(num_stats),
+            output_dim_per_stat=(3 * int(num_bins) + 1),
+            hidden_dim=int(hidden_dim),
+            dropout=float(dropout),
+            mean_ctx_weight=float(mean_ctx_weight),
+            context_mode=str(context_mode),
+        )
+        self.register_buffer("stat_mask", stat_mask.to(dtype=torch.bool), persistent=False)
+
+    def _transform_masks(self, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        cond_mask = self.stat_mask.view(1, 1, -1).to(device=y.device)
+        xform_mask = (~self.stat_mask).view(1, 1, -1).to(device=y.device)
+        return cond_mask, xform_mask
+
+    def _spline_transform(
+        self,
+        y: torch.Tensor,
+        *,
+        y_cond: torch.Tensor,
+        xform_mask: torch.Tensor,
+        player_states: torch.Tensor,
+        team_states: torch.Tensor,
+        game_state: torch.Tensor,
+        player_team_index: torch.Tensor,
+        valid_mask: torch.Tensor,
+        observed_mask: torch.Tensor,
+        inverse: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        params = self.conditioner(
+            y_cond,
+            player_states=player_states,
+            team_states=team_states,
+            game_state=game_state,
+            player_team_index=player_team_index,
+            valid_mask=valid_mask,
+        )
+
+        xform = xform_mask.expand_as(y)
+        xform_inputs = y[xform]
+        if xform_inputs.numel() == 0:
+            return y, torch.zeros((y.shape[0],), dtype=y.dtype, device=y.device)
+
+        flat_params = params[xform]
+        nb = int(self.num_bins)
+        unnorm_widths = flat_params[:, :nb]
+        unnorm_heights = flat_params[:, nb : (2 * nb)]
+        unnorm_derivatives = flat_params[:, (2 * nb) : (3 * nb + 1)]
+
+        xform_outputs, xform_log_det = _rational_quadratic_spline(
+            xform_inputs,
+            unnormalized_widths=unnorm_widths,
+            unnormalized_heights=unnorm_heights,
+            unnormalized_derivatives=unnorm_derivatives,
+            inverse=bool(inverse),
+            tail_bound=float(self.tail_bound),
+            min_bin_width=float(self.min_bin_width),
+            min_bin_height=float(self.min_bin_height),
+            min_derivative=float(self.min_derivative),
+        )
+
+        y_out = y.clone()
+        y_out[xform] = xform_outputs
+
+        log_det_elem = torch.zeros_like(y)
+        log_det_elem[xform] = xform_log_det
+        observed_float = (observed_mask.to(dtype=torch.bool) & xform).to(dtype=y.dtype)
+        log_det = (log_det_elem * observed_float).sum(dim=(1, 2))
+        return y_out, log_det
+
+    def forward(
+        self,
+        y: torch.Tensor,
+        *,
+        player_states: torch.Tensor,
+        team_states: torch.Tensor,
+        game_state: torch.Tensor,
+        player_team_index: torch.Tensor,
+        valid_mask: torch.Tensor,
+        observed_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        cond_mask, xform_mask = self._transform_masks(y)
+        y_cond = y * cond_mask.to(dtype=y.dtype)
+        return self._spline_transform(
+            y,
+            y_cond=y_cond,
+            xform_mask=xform_mask,
+            player_states=player_states,
+            team_states=team_states,
+            game_state=game_state,
+            player_team_index=player_team_index,
+            valid_mask=valid_mask,
+            observed_mask=observed_mask,
+            inverse=False,
+        )
+
+    def inverse(
+        self,
+        y: torch.Tensor,
+        *,
+        player_states: torch.Tensor,
+        team_states: torch.Tensor,
+        game_state: torch.Tensor,
+        player_team_index: torch.Tensor,
+        valid_mask: torch.Tensor,
+        observed_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        cond_mask, xform_mask = self._transform_masks(y)
+        y_cond = y * cond_mask.to(dtype=y.dtype)
+        return self._spline_transform(
+            y,
+            y_cond=y_cond,
+            xform_mask=xform_mask,
+            player_states=player_states,
+            team_states=team_states,
+            game_state=game_state,
+            player_team_index=player_team_index,
+            valid_mask=valid_mask,
+            observed_mask=observed_mask,
+            inverse=True,
+        )
+
+
 class JointGameFlow(nn.Module):
-    """Set-equivariant affine coupling flow for full-game stat tensors.
+    """Set-equivariant coupling flow for full-game stat tensors.
 
     Args:
         d_model: Dimension of player/team/game state embeddings.
         num_stats: Number of stats per player (y dimension).
         hidden_dim: Hidden dimension in conditioner MLPs.
         dropout: Dropout rate.
-        num_blocks: Number of affine coupling blocks.
-        coupling_type: Type of coupling ("affine" only for now).
+        num_blocks: Number of coupling blocks.
+        coupling_type: Type of coupling ("affine" or "rqs").
         scale_clip: Maximum absolute value for log_scale in coupling (H1 fix: use 3.0).
         mean_ctx_weight: Weight for mean-pooled context (only used in "mean" mode).
         context_mode: "mean" (original) or "attention" (H2 fix for star under-projection).
@@ -431,6 +763,11 @@ class JointGameFlow(nn.Module):
         num_blocks: int = 4,
         coupling_type: str = "affine",
         scale_clip: float = 2.0,
+        rqs_num_bins: int = DEFAULT_RQS_NUM_BINS,
+        rqs_tail_bound: float = DEFAULT_RQS_TAIL_BOUND,
+        rqs_min_bin_width: float = DEFAULT_RQS_MIN_BIN_WIDTH,
+        rqs_min_bin_height: float = DEFAULT_RQS_MIN_BIN_HEIGHT,
+        rqs_min_derivative: float = DEFAULT_RQS_MIN_DERIVATIVE,
         mean_ctx_weight: float = 1.0,
         context_mode: str = "mean",
     ) -> None:
@@ -439,35 +776,59 @@ class JointGameFlow(nn.Module):
             raise ValueError("num_stats must be > 0")
         if int(num_blocks) <= 0:
             raise ValueError("num_blocks must be > 0")
-        if str(coupling_type).lower() != "affine":
-            raise ValueError(f"Unsupported coupling_type={coupling_type!r}; only affine is implemented")
+        coupling_name = str(coupling_type).lower()
+        if coupling_name not in ("affine", "rqs"):
+            raise ValueError(f"Unsupported coupling_type={coupling_type!r}; expected 'affine' or 'rqs'")
         if str(context_mode).lower() not in ("mean", "attention"):
             raise ValueError(f"context_mode must be 'mean' or 'attention', got {context_mode!r}")
 
         self.num_stats = int(num_stats)
         self.num_blocks = int(num_blocks)
-        self.coupling_type = str(coupling_type).lower()
+        self.coupling_type = coupling_name
         self.mean_ctx_weight = float(mean_ctx_weight)
         self.context_mode = str(context_mode).lower()
+        self.rqs_num_bins = int(rqs_num_bins)
+        self.rqs_tail_bound = float(rqs_tail_bound)
+        self.rqs_min_bin_width = float(rqs_min_bin_width)
+        self.rqs_min_bin_height = float(rqs_min_bin_height)
+        self.rqs_min_derivative = float(rqs_min_derivative)
 
-        blocks: list[_AffineCouplingBlock] = []
+        blocks: list[nn.Module] = []
         for block_idx in range(self.num_blocks):
             mask = torch.tensor(
                 [((j + block_idx) % 2 == 0) for j in range(self.num_stats)],
                 dtype=torch.bool,
             )
-            blocks.append(
-                _AffineCouplingBlock(
-                    d_model=int(d_model),
-                    num_stats=self.num_stats,
-                    hidden_dim=int(hidden_dim),
-                    dropout=float(dropout),
-                    stat_mask=mask,
-                    scale_clip=float(scale_clip),
-                    mean_ctx_weight=float(mean_ctx_weight),
-                    context_mode=self.context_mode,
+            if self.coupling_type == "affine":
+                blocks.append(
+                    _AffineCouplingBlock(
+                        d_model=int(d_model),
+                        num_stats=self.num_stats,
+                        hidden_dim=int(hidden_dim),
+                        dropout=float(dropout),
+                        stat_mask=mask,
+                        scale_clip=float(scale_clip),
+                        mean_ctx_weight=float(mean_ctx_weight),
+                        context_mode=self.context_mode,
+                    )
                 )
-            )
+            else:
+                blocks.append(
+                    _RQSCouplingBlock(
+                        d_model=int(d_model),
+                        num_stats=self.num_stats,
+                        hidden_dim=int(hidden_dim),
+                        dropout=float(dropout),
+                        stat_mask=mask,
+                        num_bins=int(self.rqs_num_bins),
+                        tail_bound=float(self.rqs_tail_bound),
+                        min_bin_width=float(self.rqs_min_bin_width),
+                        min_bin_height=float(self.rqs_min_bin_height),
+                        min_derivative=float(self.rqs_min_derivative),
+                        mean_ctx_weight=float(mean_ctx_weight),
+                        context_mode=self.context_mode,
+                    )
+                )
         self.blocks = nn.ModuleList(blocks)
 
     def set_mean_ctx_weight(self, value: float) -> None:
@@ -484,7 +845,8 @@ class JointGameFlow(nn.Module):
         star stat projections.
         """
         for block in self.blocks:
-            block.scale_clip = float(value)
+            if hasattr(block, "scale_clip"):
+                block.scale_clip = float(value)
 
     def _resolve_observed_mask(
         self,

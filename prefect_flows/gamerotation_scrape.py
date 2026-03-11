@@ -28,6 +28,7 @@ def _run_gamerotation_scrape(
     data_root: Path,
     overwrite: bool,
     timeout_s: float,
+    subprocess_timeout_s: float | None,
 ) -> None:
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
@@ -45,13 +46,22 @@ def _run_gamerotation_scrape(
     if overwrite:
         cmd.append("--overwrite")
 
+    # The scrape iterates many game_ids per date and each game can retry on
+    # upstream 5xx/timeout responses; keep subprocess timeout decoupled from
+    # per-request timeout to avoid premature flow failures.
+    if subprocess_timeout_s is None:
+        effective_subprocess_timeout = max(600.0, float(timeout_s) * 40.0)
+    else:
+        raw_timeout = float(subprocess_timeout_s)
+        effective_subprocess_timeout = None if raw_timeout <= 0 else raw_timeout
+
     result = subprocess.run(
         cmd,
         cwd=str(PROJECT_ROOT),
         env=env,
         capture_output=True,
         text=True,
-        timeout=max(60.0, float(timeout_s) + 60.0),
+        timeout=effective_subprocess_timeout,
         check=False,
     )
     if result.stdout:
@@ -70,6 +80,7 @@ def gamerotation_scrape_task(
     end_date: str | None,
     overwrite: bool,
     timeout_s: float,
+    subprocess_timeout_s: float | None,
 ) -> dict[str, str]:
     logger = get_run_logger()
     data_root = paths.get_data_root()
@@ -84,12 +95,19 @@ def gamerotation_scrape_task(
         end_date = end_date or iso
 
     logger.info(
-        "[gamerotation] start_date=%s end_date=%s overwrite=%s data_root=%s timeout_s=%.1f",
+        "[gamerotation] start_date=%s end_date=%s overwrite=%s data_root=%s timeout_s=%.1f subprocess_timeout_s=%s",
         start_date,
         end_date,
         overwrite,
         data_root,
         float(timeout_s),
+        "auto"
+        if subprocess_timeout_s is None
+        else (
+            "disabled"
+            if float(subprocess_timeout_s) <= 0
+            else f"{float(subprocess_timeout_s):.1f}"
+        ),
     )
     _run_gamerotation_scrape(
         start_date=str(start_date),
@@ -97,6 +115,7 @@ def gamerotation_scrape_task(
         data_root=data_root,
         overwrite=overwrite,
         timeout_s=float(timeout_s),
+        subprocess_timeout_s=subprocess_timeout_s,
     )
     return {"start_date": str(start_date), "end_date": str(end_date)}
 
@@ -110,6 +129,7 @@ def gamerotation_scrape_flow(
     overwrite: bool = False,
     write_bronze_copy: bool = True,
     timeout_s: float = 20.0,
+    subprocess_timeout_s: float | None = 900.0,
     max_retries: int = 3,
 ) -> dict[str, str]:
     # Kept for backwards-compatible deployment params (write_bronze_copy/max_retries are unused).
@@ -120,4 +140,5 @@ def gamerotation_scrape_flow(
         end_date=end_date,
         overwrite=overwrite,
         timeout_s=timeout_s,
+        subprocess_timeout_s=subprocess_timeout_s,
     )

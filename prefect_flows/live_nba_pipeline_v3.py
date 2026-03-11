@@ -1818,9 +1818,10 @@ def _sanitize_frame_to_expected_keys(
     label: str,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     key_cols = tuple(str(col) for col in key_cols)
+    key_cols_list = list(key_cols)
     if df.empty:
         return (
-            df.copy(),
+            df.iloc[0:0].reset_index(drop=True),
             {
                 "label": str(label),
                 "rows_in": 0,
@@ -1840,25 +1841,25 @@ def _sanitize_frame_to_expected_keys(
             f"{label} expected-keys frame missing required columns: {missing_expected}"
         )
 
-    work = df.copy()
-    expected = expected_keys_df.loc[:, list(key_cols)].copy()
-    # Keep key columns as numeric until null filtering is complete; converting
-    # nullable pandas Int64 -> numpy int64 can raise intermittently in large
-    # frames when masks are present.
+    # Avoid deep-copying large heterogeneous frames; pandas block-level copies
+    # have crashed intermittently in production workers.
+    work_keys = pd.DataFrame(index=df.index)
     for col in key_cols:
-        work[col] = pd.to_numeric(work[col], errors="coerce")
+        work_keys[col] = pd.to_numeric(df[col], errors="coerce")
+
+    expected = expected_keys_df.loc[:, key_cols_list].copy()
+    for col in key_cols:
         expected[col] = pd.to_numeric(expected[col], errors="coerce")
 
-    rows_in = int(len(work))
-    null_mask = work.loc[:, list(key_cols)].isna().any(axis=1)
+    rows_in = int(len(df))
+    null_mask = work_keys.loc[:, key_cols_list].isna().any(axis=1)
     dropped_null_key_rows = int(null_mask.sum())
-    if dropped_null_key_rows:
-        work = work.loc[~null_mask].copy()
+    work_keys = work_keys.loc[~null_mask]
     for col in key_cols:
-        work[col] = work[col].astype("int64", copy=False)
+        work_keys[col] = work_keys[col].astype("int64", copy=False)
 
     expected = (
-        expected.dropna(subset=list(key_cols))
+        expected.dropna(subset=key_cols_list)
         .drop_duplicates(ignore_index=True)
         .reset_index(drop=True)
     )
@@ -1868,13 +1869,13 @@ def _sanitize_frame_to_expected_keys(
 
     if expected.empty:
         return (
-            work.iloc[0:0].copy(),
+            df.iloc[0:0].reset_index(drop=True),
             {
                 "label": str(label),
                 "rows_in": rows_in,
                 "rows_out": 0,
                 "dropped_null_key_rows": dropped_null_key_rows,
-                "dropped_unexpected_key_rows": int(len(work)),
+                "dropped_unexpected_key_rows": int(len(work_keys)),
                 "expected_distinct_keys": 0,
             },
         )
@@ -1882,23 +1883,18 @@ def _sanitize_frame_to_expected_keys(
     # NOTE: Avoid dataframe merge here. Large-key merges have intermittently
     # triggered low-level pandas segmentation faults in production workers.
     expected_key_index = pd.MultiIndex.from_frame(
-        expected.loc[:, list(key_cols)], names=list(key_cols)
+        expected.loc[:, key_cols_list], names=key_cols_list
     )
     work_key_index = pd.MultiIndex.from_frame(
-        work.loc[:, list(key_cols)], names=list(key_cols)
+        work_keys.loc[:, key_cols_list], names=key_cols_list
     )
     keep_mask = work_key_index.isin(expected_key_index)
     dropped_unexpected_key_rows = int((~keep_mask).sum())
-    merged = work.loc[keep_mask].copy().reset_index(drop=True)
+    kept_index = work_keys.index[keep_mask]
+    merged = df.loc[kept_index].reset_index(drop=True)
+    merged_keys = work_keys.loc[kept_index, key_cols_list].reset_index(drop=True)
     for col in key_cols:
-        merged[col] = pd.to_numeric(merged[col], errors="coerce")
-    post_filter_null_mask = merged.loc[:, list(key_cols)].isna().any(axis=1)
-    post_filter_null_rows = int(post_filter_null_mask.sum())
-    if post_filter_null_rows:
-        merged = merged.loc[~post_filter_null_mask].copy()
-        dropped_null_key_rows += post_filter_null_rows
-    for col in key_cols:
-        merged[col] = merged[col].astype("int64", copy=False)
+        merged[col] = merged_keys[col].astype("int64", copy=False)
 
     return (
         merged,
@@ -2815,8 +2811,18 @@ def _apply_props_uplift_calibration_to_worlds(
     worlds_df: pd.DataFrame,
     *,
     features_df: pd.DataFrame,
+    scope: str = "stars_only",
+    confidence_weighted: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Apply one-sided stat uplifts with tail broadening for undercalled prop-heavy players."""
+    resolved_scope = str(scope).strip().lower() or "stars_only"
+    if resolved_scope not in {"stars_only", "all_players"}:
+        return worlds_df, {
+            "applied": False,
+            "reason": "invalid_scope",
+            "scope": resolved_scope,
+            "valid_scopes": ["stars_only", "all_players"],
+        }
     if worlds_df.empty:
         return worlds_df, {"applied": False, "reason": "empty_worlds"}
 
@@ -2851,8 +2857,11 @@ def _apply_props_uplift_calibration_to_worlds(
         "pts": {
             "line_col": "an_pts_line",
             "has_col": "an_has_pts",
+            "books_col": "an_pts_books",
             "min_line": 20.0,
             "min_gap": 2.5,
+            "min_line_all": 8.0,
+            "min_gap_all": 1.0,
             "weight": 0.88,
             "max_scale": 2.0,
             "var_weight": 0.40,
@@ -2861,16 +2870,23 @@ def _apply_props_uplift_calibration_to_worlds(
             "line_anchor_frac": 0.93,
             "min_line_down": 12.0,
             "min_gap_down": 2.5,
+            "min_line_down_all": 6.0,
+            "min_gap_down_all": 1.0,
             "weight_down": 0.45,
             "min_scale_down": 0.70,
             "var_weight_down": 0.15,
             "min_var_scale_down": 0.80,
+            "line_quality_min": 8.0,
+            "line_quality_span": 18.0,
         },
         "reb": {
             "line_col": "an_reb_line",
             "has_col": "an_has_reb",
+            "books_col": "an_reb_books",
             "min_line": 7.0,
             "min_gap": 1.5,
+            "min_line_all": 3.0,
+            "min_gap_all": 0.8,
             "weight": 0.92,
             "max_scale": 2.2,
             "var_weight": 0.45,
@@ -2879,16 +2895,23 @@ def _apply_props_uplift_calibration_to_worlds(
             "line_anchor_frac": 0.92,
             "min_line_down": 3.0,
             "min_gap_down": 1.3,
+            "min_line_down_all": 2.0,
+            "min_gap_down_all": 0.8,
             "weight_down": 0.60,
             "min_scale_down": 0.55,
             "var_weight_down": 0.25,
             "min_var_scale_down": 0.75,
+            "line_quality_min": 3.0,
+            "line_quality_span": 7.0,
         },
         "ast": {
             "line_col": "an_ast_line",
             "has_col": "an_has_ast",
+            "books_col": "an_ast_books",
             "min_line": 5.5,
             "min_gap": 1.0,
+            "min_line_all": 2.0,
+            "min_gap_all": 0.75,
             "weight": 0.92,
             "max_scale": 2.2,
             "var_weight": 0.50,
@@ -2897,10 +2920,14 @@ def _apply_props_uplift_calibration_to_worlds(
             "line_anchor_frac": 0.92,
             "min_line_down": 1.5,
             "min_gap_down": 1.0,
+            "min_line_down_all": 1.0,
+            "min_gap_down_all": 0.75,
             "weight_down": 0.65,
             "min_scale_down": 0.50,
             "var_weight_down": 0.25,
             "min_var_scale_down": 0.72,
+            "line_quality_min": 2.0,
+            "line_quality_span": 6.0,
         },
     }
     key_cols = ["game_id", "team_id", "player_id"]
@@ -2913,13 +2940,18 @@ def _apply_props_uplift_calibration_to_worlds(
     ).rename(columns={"pts": "pts_mean", "reb": "reb_mean", "ast": "ast_mean"})
 
     feat_cols = list(key_cols)
+    if "an_props_market_count" in features_df.columns:
+        feat_cols.append("an_props_market_count")
     for cfg in stat_cfg.values():
         line_col = str(cfg["line_col"])
         has_col = str(cfg["has_col"])
+        books_col = str(cfg["books_col"])
         if line_col in features_df.columns:
             feat_cols.append(line_col)
         if has_col in features_df.columns:
             feat_cols.append(has_col)
+        if books_col in features_df.columns:
+            feat_cols.append(books_col)
     feat = features_df.loc[:, sorted(set(feat_cols), key=feat_cols.index)].copy()
 
     agg_dict: dict[str, str] = {}
@@ -2940,13 +2972,23 @@ def _apply_props_uplift_calibration_to_worlds(
     for cfg in stat_cfg.values():
         line_col = str(cfg["line_col"])
         has_col = str(cfg["has_col"])
+        books_col = str(cfg["books_col"])
         if line_col in meta.columns:
             meta[line_col] = pd.to_numeric(meta[line_col], errors="coerce")
         if has_col in meta.columns:
             meta[has_col] = pd.to_numeric(meta[has_col], errors="coerce").fillna(0.0)
+        if books_col in meta.columns:
+            meta[books_col] = pd.to_numeric(meta[books_col], errors="coerce")
+    if "an_props_market_count" in meta.columns:
+        meta["an_props_market_count"] = pd.to_numeric(meta["an_props_market_count"], errors="coerce")
 
     out = worlds_df.copy()
-    report: dict[str, Any] = {"applied": True, "stats": {}}
+    report: dict[str, Any] = {
+        "applied": True,
+        "scope": resolved_scope,
+        "confidence_weighted": bool(confidence_weighted),
+        "stats": {},
+    }
     adjusted_key_frames: list[pd.DataFrame] = []
 
     for stat_name, cfg in stat_cfg.items():
@@ -2964,19 +3006,54 @@ def _apply_props_uplift_calibration_to_worlds(
         mean = pd.to_numeric(meta[mean_col], errors="coerce")
         gap = line - mean
         denom = line.clip(lower=1.0)
+        min_line = float(cfg["min_line"] if resolved_scope == "stars_only" else cfg["min_line_all"])
+        min_gap = float(cfg["min_gap"] if resolved_scope == "stars_only" else cfg["min_gap_all"])
+        min_line_down = float(cfg["min_line_down"] if resolved_scope == "stars_only" else cfg["min_line_down_all"])
+        min_gap_down = float(cfg["min_gap_down"] if resolved_scope == "stars_only" else cfg["min_gap_down_all"])
         has_market = pd.Series(True, index=meta.index, dtype=bool)
         if has_col in meta.columns:
             has_market = pd.to_numeric(meta[has_col], errors="coerce").fillna(0.0).ge(0.5)
-        mask_up = line.ge(float(cfg["min_line"])) & gap.ge(float(cfg["min_gap"])) & mean.gt(0.0) & has_market
+        mask_up = line.ge(min_line) & gap.ge(min_gap) & mean.gt(0.0) & has_market
         over_gap = mean - line
         mask_down = (
-            line.ge(float(cfg["min_line_down"]))
-            & over_gap.ge(float(cfg["min_gap_down"]))
+            line.ge(min_line_down)
+            & over_gap.ge(min_gap_down)
             & mean.gt(0.0)
             & has_market
         )
 
-        target_up = mean + float(cfg["weight"]) * gap
+        confidence = pd.Series(1.0, index=meta.index, dtype=float)
+        if bool(confidence_weighted) and resolved_scope == "all_players":
+            line_quality = (
+                (line - float(cfg["line_quality_min"])) / float(cfg["line_quality_span"])
+            ).clip(lower=0.0, upper=1.0)
+            books_col = str(cfg["books_col"])
+            if books_col in meta.columns:
+                books = pd.to_numeric(meta[books_col], errors="coerce")
+                books_quality = ((books - 1.0) / 2.0).clip(lower=0.0, upper=1.0).fillna(0.5)
+            else:
+                books_quality = pd.Series(0.5, index=meta.index, dtype=float)
+            if "an_props_market_count" in meta.columns:
+                market_count = pd.to_numeric(meta["an_props_market_count"], errors="coerce")
+                market_quality = ((market_count - 1.0) / 6.0).clip(lower=0.0, upper=1.0).fillna(0.5)
+            else:
+                market_quality = pd.Series(0.5, index=meta.index, dtype=float)
+            confidence = (
+                0.55 * pd.to_numeric(line_quality, errors="coerce").fillna(0.0)
+                + 0.25 * pd.to_numeric(books_quality, errors="coerce").fillna(0.5)
+                + 0.20 * pd.to_numeric(market_quality, errors="coerce").fillna(0.5)
+            ).clip(lower=0.10, upper=1.0)
+
+        weight_up = float(cfg["weight"]) * confidence
+        weight_down = float(cfg["weight_down"]) * confidence
+        var_weight_up = float(cfg["var_weight"]) * confidence
+        var_weight_down = float(cfg["var_weight_down"]) * confidence
+        max_scale_eff = 1.0 + (float(cfg["max_scale"]) - 1.0) * confidence
+        max_var_scale_eff = 1.0 + (float(cfg["max_var_scale"]) - 1.0) * confidence
+        min_scale_down_eff = 1.0 - (1.0 - float(cfg["min_scale_down"])) * confidence
+        min_var_scale_down_eff = 1.0 - (1.0 - float(cfg["min_var_scale_down"])) * confidence
+
+        target_up = mean + weight_up * gap
         target_up = target_up.where(
             line.lt(float(cfg["line_anchor_min_line"])),
             np.maximum(
@@ -2984,18 +3061,18 @@ def _apply_props_uplift_calibration_to_worlds(
                 float(cfg["line_anchor_frac"]) * pd.to_numeric(line, errors="coerce").to_numpy(dtype=float),
             ),
         )
-        scale_up = (target_up / mean).clip(lower=1.0, upper=float(cfg["max_scale"]))
+        scale_up = (target_up / mean).clip(lower=1.0, upper=max_scale_eff)
         var_scale_up = (
-            1.0 + float(cfg["var_weight"]) * (gap / denom).clip(lower=0.0)
-        ).clip(lower=1.0, upper=float(cfg["max_var_scale"]))
-        target_down = mean - float(cfg["weight_down"]) * over_gap
+            1.0 + var_weight_up * (gap / denom).clip(lower=0.0)
+        ).clip(lower=1.0, upper=max_var_scale_eff)
+        target_down = mean - weight_down * over_gap
         scale_down = (target_down / mean).clip(
-            lower=float(cfg["min_scale_down"]),
+            lower=min_scale_down_eff,
             upper=1.0,
         )
         var_scale_down = (
-            1.0 - float(cfg["var_weight_down"]) * (over_gap / denom).clip(lower=0.0)
-        ).clip(lower=float(cfg["min_var_scale_down"]), upper=1.0)
+            1.0 - var_weight_down * (over_gap / denom).clip(lower=0.0)
+        ).clip(lower=min_var_scale_down_eff, upper=1.0)
 
         up_df = meta.loc[mask_up, key_cols].copy()
         down_df = meta.loc[mask_down, key_cols].copy()
@@ -3006,12 +3083,14 @@ def _apply_props_uplift_calibration_to_worlds(
         up_df["sf_mean"] = scale_up.loc[mask_up].astype(float).values
         up_df["sf_var"] = var_scale_up.loc[mask_up].astype(float).values
         up_df["line_gap"] = gap.loc[mask_up].astype(float).values
+        up_df["confidence"] = confidence.loc[mask_up].astype(float).values
         up_df["direction"] = "up"
 
         down_df["mu"] = mean.loc[mask_down].astype(float).values
         down_df["sf_mean"] = scale_down.loc[mask_down].astype(float).values
         down_df["sf_var"] = var_scale_down.loc[mask_down].astype(float).values
         down_df["line_gap"] = gap.loc[mask_down].astype(float).values
+        down_df["confidence"] = confidence.loc[mask_down].astype(float).values
         down_df["direction"] = "down"
 
         scale_df = pd.concat([up_df, down_df], ignore_index=True)
@@ -3114,12 +3193,19 @@ def _apply_props_uplift_calibration_to_worlds(
             "mean_gap_pre": float(gap_pre.mean()) if gap_pre.notna().any() else float("nan"),
             "mean_gap_post": float(gap_post.mean()) if gap_post.notna().any() else float("nan"),
             "median_gap_pre": float(gap_pre.median()) if gap_pre.notna().any() else float("nan"),
-            "median_gap_post": float(gap_post.median()) if gap_post.notna().any() else float("nan"),
-            "mean_scale_mean": float(scale_df["sf_mean"].mean()),
-            "mean_scale_p90": float(scale_df["sf_mean"].quantile(0.90)),
-            "var_scale_mean": float(scale_df["sf_var"].mean()),
-        }
-        top_cols = [c for c in ["player_name", "player_id", "direction", "line_gap", "sf_mean", "sf_var"] if c in scale_df.columns]
+                "median_gap_post": float(gap_post.median()) if gap_post.notna().any() else float("nan"),
+                "mean_scale_mean": float(scale_df["sf_mean"].mean()),
+                "mean_scale_p90": float(scale_df["sf_mean"].quantile(0.90)),
+                "var_scale_mean": float(scale_df["sf_var"].mean()),
+                "confidence_mean": float(pd.to_numeric(scale_df["confidence"], errors="coerce").mean()),
+                "confidence_p10": float(pd.to_numeric(scale_df["confidence"], errors="coerce").quantile(0.10)),
+                "confidence_p90": float(pd.to_numeric(scale_df["confidence"], errors="coerce").quantile(0.90)),
+            }
+        top_cols = [
+            c
+            for c in ["player_name", "player_id", "direction", "line_gap", "sf_mean", "sf_var", "confidence"]
+            if c in scale_df.columns
+        ]
         top_rows = (
             scale_df.loc[:, top_cols]
             .assign(abs_line_gap=lambda d: pd.to_numeric(d["line_gap"], errors="coerce").abs())
@@ -4562,6 +4648,8 @@ def generate_worlds_gtv2_live_task(
     make_model_mode: str = "beta_binomial_all",
     make_model_use_learned_efficiency: bool = True,
     apply_props_uplift: bool = True,
+    props_uplift_scope: str = "stars_only",
+    props_uplift_confidence_weighted: bool = True,
     apply_world_realism_controls: bool = True,
     world_realism_low_minutes_tail_damping_enabled: bool = True,
     world_realism_low_minutes_threshold: float = 12.0,
@@ -4839,6 +4927,8 @@ def generate_worlds_gtv2_live_task(
             worlds_df, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
                 worlds_df,
                 features_df=features_df,
+                scope=str(props_uplift_scope),
+                confidence_weighted=bool(props_uplift_confidence_weighted),
             )
             if bool(props_uplift_report.get("applied")):
                 logger.info("Applied props uplift calibration: %s", props_uplift_report)
@@ -5187,6 +5277,8 @@ def materialize_unified_run_artifacts_task(
     run_id: str,
     data_root: Path,
     target_game_ids: list[int],
+    props_uplift_scope: str = "stars_only",
+    props_uplift_confidence_weighted: bool = True,
     apply_world_realism_controls: bool = True,
     world_realism_low_minutes_tail_damping_enabled: bool = True,
     world_realism_low_minutes_threshold: float = 12.0,
@@ -5256,6 +5348,8 @@ def materialize_unified_run_artifacts_task(
     merged_worlds, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
         merged_worlds,
         features_df=merged_features,
+        scope=str(props_uplift_scope),
+        confidence_weighted=bool(props_uplift_confidence_weighted),
     )
     merged_worlds, world_realism_report = _apply_world_realism_controls_to_worlds(
         merged_worlds,
@@ -5553,6 +5647,8 @@ def nba_live_pipeline_v3_flow(
     gtv2_flow_scale_clip_override: float | None = None,
     gtv2_make_model_mode: str = "beta_binomial_all",
     gtv2_make_model_use_learned_efficiency: bool = True,
+    gtv2_props_uplift_scope: str = "stars_only",
+    gtv2_props_uplift_confidence_weighted: bool = True,
     gtv2_apply_world_realism_controls: bool = True,
     gtv2_world_realism_low_minutes_tail_damping_enabled: bool = True,
     gtv2_world_realism_low_minutes_threshold: float = 12.0,
@@ -5999,6 +6095,10 @@ def nba_live_pipeline_v3_flow(
                 gtv2_make_model_use_learned_efficiency
             ),
             apply_props_uplift=bool(rerun_plan.get("mode") == "full_slate"),
+            props_uplift_scope=str(gtv2_props_uplift_scope),
+            props_uplift_confidence_weighted=bool(
+                gtv2_props_uplift_confidence_weighted
+            ),
             apply_world_realism_controls=bool(gtv2_apply_world_realism_controls),
             world_realism_low_minutes_tail_damping_enabled=bool(
                 gtv2_world_realism_low_minutes_tail_damping_enabled
@@ -6042,6 +6142,10 @@ def nba_live_pipeline_v3_flow(
                 run_id=run_id,
                 data_root=data_root,
                 target_game_ids=target_game_ids,
+                props_uplift_scope=str(gtv2_props_uplift_scope),
+                props_uplift_confidence_weighted=bool(
+                    gtv2_props_uplift_confidence_weighted
+                ),
                 apply_world_realism_controls=bool(gtv2_apply_world_realism_controls),
                 world_realism_low_minutes_tail_damping_enabled=bool(
                     gtv2_world_realism_low_minutes_tail_damping_enabled
