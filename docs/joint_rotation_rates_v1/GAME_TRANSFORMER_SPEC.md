@@ -6517,3 +6517,749 @@ Rollout guidance:
 - Phase 1 (lowest risk): active-only priors + DNP-rate priors.
 - Phase 2: vacancy-conditioned deltas.
 - Phase 3: hierarchical regime fallback and calibration tuning.
+
+### 16.17 Status Update (2026-03-10, confidence-weighted props-line aux + tiered uplift scope)
+
+Implemented two concrete changes to move toward category robustness + market realism without hardwiring stars-only behavior:
+
+1. **Training: confidence-weighted all-player props-line auxiliary losses (off by default)**
+   - File: `scripts/rotation/train_game_transformer_v2.py`
+   - New optional losses:
+     - `--w-props-pts-aux`
+     - `--w-props-reb-aux`
+     - `--w-props-ast-aux`
+   - New scheduling/shape controls:
+     - `--props-aux-ramp-epochs`
+     - `--props-aux-start-scale`
+     - `--props-pts-target-scale`
+     - `--props-reb-target-scale`
+     - `--props-ast-target-scale`
+     - `--props-aux-huber-delta`
+     - `--props-aux-confidence-min`
+   - Loss implementation details:
+     - Uses emergent zero-latent flow means (`PTS/REB/AST`) vs Action lines.
+     - Per-row confidence weight combines line depth, books count, market count, and `prior_play_prob`.
+     - Metrics are emitted per epoch (`train/val_props_{pts,reb,ast}_aux`) and persisted in `history.json` / `summary.json`.
+   - Safety:
+     - all new weights default to `0.0`; production behavior unchanged unless explicitly enabled.
+
+2. **Live path: props uplift scope controls with confidence weighting**
+   - File: `prefect_flows/live_nba_pipeline_v3.py`
+   - `_apply_props_uplift_calibration_to_worlds(...)` now accepts:
+     - `scope`: `"stars_only"` (default) or `"all_players"`
+     - `confidence_weighted`: `True` (default)
+   - Added flow/task parameters:
+     - `gtv2_props_uplift_scope`
+     - `gtv2_props_uplift_confidence_weighted`
+   - Behavior:
+     - Default remains stars-only (safe parity with current production policy).
+     - All-player mode uses tiered thresholds + confidence-scaled mean/variance transforms.
+     - Report now includes scope and confidence diagnostics.
+
+#### 16.17.1 CUDA sweep results on new training knobs (seed 42)
+
+Primary sweep (12 epochs):
+
+- root: `/home/daniel/projections-data/training/runs/gtv2_robust_realism_sweep_20260310T_next`
+- trials file: `/home/daniel/projects/projections-v2/gtv2_robust_realism_trials_v1.json`
+- status: `4/4` completed, `0/4` promotion pass, `0/4` realism gate pass.
+
+Most informative candidate (`robust_props_aux_light`):
+
+- points/stars:
+  - `pts_mae`: `11.11` (still above production `9.82`)
+  - `star_mae_pts_25_34`: `10.30` (roughly equal to production `10.35`)
+  - `elite_mae_pts_35plus`: `18.37` (roughly equal to production `18.37`)
+- realism regressions persisted:
+  - `spread_mae_vs_vegas`: `8.19` (worse than production `5.25`)
+  - `spread_corr_vs_vegas`: `0.06` (worse than production `0.39`)
+  - `total_mae_vs_vegas`: `12.00` (worse than production `7.65`)
+  - `total_corr_vs_vegas`: `0.15` (worse than production `0.86`)
+- interpretation:
+  - light props aux can help star-level point allocation,
+  - but current weighting/ramp does not preserve game-level realism.
+
+Follow-up sweep (20 epochs, safer tiny weights):
+
+- root: `/home/daniel/projections-data/training/runs/gtv2_robust_realism_sweep_20260310T_v2`
+- trials file: `/home/daniel/projects/projections-v2/gtv2_robust_realism_trials_v2.json`
+- status: `3/3` completed, `0/3` promotion pass, `0/3` realism gate pass.
+- result:
+  - longer epochs with current recipe pushed models into heavy negative points bias and severe total/spread drift; not promotable.
+
+#### 16.17.2 Decision and next constrained search
+
+Current decision:
+
+- keep new props-line aux and all-player uplift scope **implemented but disabled by default**.
+- do **not** promote any run from 16.17 sweeps.
+
+Next run constraints (recommended):
+
+1. Keep props aux tiny (`pts <= 0.01`, `reb/ast <= 0.008`) with long ramp (`>=14` epochs, start scale `<=0.05`).
+2. Pair with explicit realism anchors only at low weight (`w_spread_aux/w_total_aux <= 0.015`) and stop immediately on rising total bias.
+3. Add hard early abort checks in sweep loop:
+   - `|pts_bias_mean| > 8` or
+   - `total_mae_vs_vegas > 14` or
+   - `spread_corr_vs_vegas < 0.05`.
+4. Keep multi-seed confirmation mandatory before any promotion, even for realism-positive seed-42 candidates.
+
+### 16.18 Tracking Context Into Joint Dataset (2026-03-11)
+
+Objective:
+
+- Ensure GTv2 training can actually consume tracking role priors (`track_*`) from the data lake,
+  with robust fallback behavior when exact game-key joins are sparse.
+
+Implemented in `scripts/rotation/build_joint_rotation_rates_dataset_v1.py`:
+
+1. **Retain tracking context from rates partitions**
+   - `_load_rates_labels(...)` now accepts requested context columns and preserves them
+     (instead of loading labels-only payloads).
+   - Requested defaults include all `track_*` role/creation/foul-drawing fields.
+
+2. **As-of fallback from `gold/tracking_roles`**
+   - New loader reads `tracking_roles.parquet` partitions in the output date window.
+   - For rows still missing tracking context, fallback applies by `(season, player_id)` with
+     `latest game_date <= target game_date` (pre-game safe).
+   - Existing non-null values from exact joins are never overwritten.
+
+3. **Missingness contract**
+   - Emits `<track_col>_missing` indicators after fallback so model behavior can
+     condition on data availability instead of conflating true zeros with missing.
+
+4. **Manifest diagnostics**
+   - Manifest now records:
+     - requested/present/missing tracking context columns from rates partitions,
+     - tracking roles load stats (partitions/rows/window),
+     - pre/post fallback coverage and rows filled.
+
+Rationale:
+
+- Prior behavior effectively prevented joint GTv2 features from seeing `track_*` context.
+- Exact-key joins are insufficiently robust in historical windows.
+- As-of fallback materially increases usable tracking coverage while preserving anti-leak guarantees.
+
+### 16.19 Autonomous CUDA Iteration Block (2026-03-11, post-tracking-context)
+
+Objective:
+
+- Continue fast CUDA iteration after flow-stability fixes, with explicit focus on:
+  - robustness across categories (`val_total_ex_possreg`, minutes MAE),
+  - market realism proxies (points/star/elite bias, tail calibration),
+  - stability (no Phase2 rollback/backoff).
+
+#### 16.19.1 Training sweeps executed
+
+Primary flow/weight sweeps (tracking dataset):
+
+- dataset: `/home/daniel/projections-data/training/datasets/joint_rotation_rates_v1_trackingctx_prodparity_20260311T044015Z`
+- notable runs:
+  - `gtv2_iter_flowstart_t4_reg05_flow003_ramps_20260311T051608Z`
+  - `gtv2_iter_t7_props_tiny_ramps_e24_20260311T052406Z`
+  - `gtv2_iter_t9_balance_reg035_flow004_ramps_e24_20260311T052732Z`
+- all completed with `phase2_backoff_count=0`, no rollback.
+
+Baseline-dataset cross-checks (no tracking context):
+
+- dataset: `/home/daniel/projections-data/training/datasets/joint_rotation_rates_v1_priors_contract_livefill_overflowpol_20260224T200110Z`
+- notable runs:
+  - `gtv2_iter_t10_props_tiny_baseline_ds_e24_20260311T053010Z`
+  - `gtv2_iter_t13_baseline_props_reg035_flow004_e24_20260311T053913Z`
+  - `gtv2_iter_t15_baseline_props_tiny_long32_20260311T054314Z`
+
+Sweep manifests:
+
+- `/home/daniel/projections-data/training/runs/gtv2_autonomous_sweep_20260311T052201Z/summary.json`
+- `/home/daniel/projections-data/training/runs/gtv2_autonomous_sweep2_20260311T053010Z/summary.json`
+- `/home/daniel/projections-data/training/runs/gtv2_autonomous_sweep3_20260311T053913Z/summary.json`
+
+#### 16.19.2 Realism evals (world sampling + make-rate calibration)
+
+Evaluation artifacts:
+
+- tracking-vs-baseline candidate realism block:
+  - `/home/daniel/projections-data/training/runs/gtv2_realism_eval_20260311T053703Z/summary.json`
+- production reference realism block:
+  - `/home/daniel/projections-data/training/runs/gtv2_realism_eval_prod_20260311T053809Z/prod_current_phase2_baseline_make_rate_calib_60g64w.json`
+- targeted add-ons:
+  - `/home/daniel/projections-data/training/runs/gtv2_realism_eval_t13_20260311T054250Z/t13_baseline_props_reg035_flow004_e24_make_rate_calib_60g64w.json`
+  - `/home/daniel/projections-data/training/runs/gtv2_realism_eval_t15_20260311T054534Z/t15_baseline_props_tiny_long32_make_rate_calib_60g64w.json`
+
+Consolidated comparison snapshot:
+
+- `/home/daniel/projections-data/training/runs/gtv2_autonomous_combined_report_20260311T0546.json`
+
+#### 16.19.3 Key outcomes
+
+1. **Tracking-context runs improved training objectives but degraded realism metrics**
+   - Best tracking `best_val_total` in this block: `t9` (`9.6428`), but with severe realism drift:
+     - `pts_mae=20.52`, `pts_bias_mean=-20.05`, large negative star/elite bias.
+   - `t7` improved training objective (`best_val_total=9.8923`) vs earlier tracking runs,
+     but still showed heavy negative points bias (`-13.96`) and weak realism.
+
+2. **Baseline dataset variants were materially better on realism**
+   - `t10` (props tiny baseline) produced the strongest realism profile among new runs:
+     - `pts_mae=10.88`, `pts_bias_mean=-2.68`, `star_bias=-10.23`, `elite_bias=-17.27`,
+       `p90_err=0.0033`, `p95_err=0.0050`.
+   - `t13` improved headline training objective (`best_val_total=10.4723`, `ex_at_best=9.0934`)
+     but worsened realism bias vs `t10` (more negative point/star/elite bias).
+   - `t15` reduced star/elite bias magnitude further (`star=-7.99`, `elite=-14.75`) but flipped
+     aggregate points bias positive (`+7.15`) and raised `pts_mae` (`12.93`).
+
+3. **Current production remains the best balanced realism anchor in this comparison**
+   - prod reference (`allloss_baseline`) on same baseline dataset:
+     - `pts_mae=10.65`, `pts_bias_mean=-5.41`, `star_bias=-10.31`, `elite_bias=-16.63`,
+       `p90_err=0.0067`, `p95_err=0.0078`.
+   - New baseline candidates can beat prod on individual sub-metrics, but no single run in this
+     block clearly dominates prod across both training objective + realism simultaneously.
+
+#### 16.19.4 Decision (current)
+
+- Do **not** promote any run from 16.19 yet.
+- Keep two active branches for next cycle:
+  1. **Tracking branch** (opt objective leader): `t7`/`t9` family.
+  2. **Baseline branch** (realism leader): `t10`/`t13`/`t15` family.
+
+Recommended next constrained experiments:
+
+1. For tracking branch, add explicit realism anchors at lower bias risk:
+   - keep props tiny;
+   - test milder spread/total anchors with tighter abort conditions on `|pts_bias_mean|`.
+2. For baseline branch, tune toward lower `best_val_total` without losing realism:
+   - small `w_poss_regression` grid around `0.30-0.37`;
+   - keep props tiny + ramp;
+   - early-stop on points bias sign flip.
+3. Promote only after a multi-seed realism check shows consistent gains over current production.
+
+### 16.20 Promotion Candidate (2026-03-11, baseline-branch + inference tuning)
+
+After additional autonomous iterations and inference-parameter sweeps, the strongest candidate found was:
+
+- **Model run**:
+  - `/home/daniel/projections-data/training/runs/gtv2_iter_t13_baseline_props_reg035_flow004_e24_20260311T053913Z`
+- **Inference config**:
+  - `active_temperature=1.8`
+  - `allocation_source=blend`
+  - `allocation_blend_alpha=0.45`
+  - `make_model=beta_binomial_all`
+
+Head-to-head evaluation artifact (same 60-game / 256-world protocol for prod and candidate):
+
+- `/home/daniel/projections-data/training/runs/gtv2_candidate_vs_prod_256w_20260311T064137Z/summary.json`
+- candidate single-run confirm:
+  - `/home/daniel/projections-data/training/runs/gtv2_candidate_check_a45_20260311T064247Z/cand_c.json`
+
+Observed comparison vs current production (`temp=0.9`, `emergent`, `legacy`) on this protocol:
+
+- Improved:
+  - `pts_mae`: `10.6673 -> 9.8683`
+  - `|pts_bias_mean|`: `5.4268 -> 4.5977`
+  - `|star_bias_pts_25_34|`: `10.2665 -> 9.2500`
+  - `|elite_bias_pts_35plus|`: `16.8224 -> 16.1731`
+  - `p90_calibration_error_abs`: `0.0039 -> 0.0006`
+  - `spread_mae_vs_vegas`: `5.5527 -> 4.7629`
+  - `total_mae_vs_vegas`: `8.5232 -> 6.7212`
+  - `|top1_share_bias_pts|`: `0.0273 -> 0.0043`
+  - `|top2_share_bias_pts|`: `0.0376 -> 0.0046`
+- Regressed:
+  - `p95_calibration_error_abs`: `0.0050 -> 0.0100`
+  - `|poss_bias_mean|`: `1.3809 -> 2.0822`
+
+Status:
+
+- This is the first candidate in the block with broad, multi-metric gains over production on
+  points, star/elite bias, concentration, and spread/total realism.
+- Remaining tradeoff is higher `p95` tail error and possession-bias drift.
+
+#### 16.20.1 Multi-seed robustness check (inference-level)
+
+We ran a 3-seed (`42,77,123`) check on the same `60 games x 256 worlds` protocol:
+
+- artifact: `/home/daniel/projections-data/training/runs/gtv2_multiseed_infer_gate_20260311T110003Z/summary.json`
+
+Configs compared:
+
+1. prod reference: `temp=0.9`, `emergent`, `legacy`
+2. candidate A: `temp=2.0`, `blend alpha=0.55`, `beta_binomial_all`
+3. candidate B: `temp=1.6`, `blend alpha=0.30`, `beta_binomial_all`
+
+Aggregate means (selected):
+
+- **Prod**:
+  - `pts_mae=10.4823`, `|pts_bias|=5.3521`, `|star_bias|=10.1770`, `|elite_bias|=16.6099`
+  - `p90=0.0030`, `p95=0.0022`
+  - `spread_mae_vs_vegas=5.2888`, `total_mae_vs_vegas=8.3188`
+  - `|top1_share_bias|=0.0274`, `|top2_share_bias|=0.0380`
+  - `|poss_bias|=1.4112`
+
+- **Candidate A (temp 2.0 / alpha 0.55 / beta)**:
+  - `pts_mae=9.8794`, `|pts_bias|=4.6304`, `|star_bias|=8.8553`, `|elite_bias|=15.7559`
+  - `p90=0.0015`, `p95=0.0117`
+  - `spread_mae_vs_vegas=4.6348`, `total_mae_vs_vegas=6.7726`
+  - `|top1_share_bias|=0.0037`, `|top2_share_bias|=0.0044`
+  - `|poss_bias|=2.1193`
+
+- **Candidate B (temp 1.6 / alpha 0.30 / beta)**:
+  - `pts_mae=10.0081`, `|pts_bias|=4.9047`, `|star_bias|=9.8704`, `|elite_bias|=17.1035`
+  - `p90=0.0087`, `p95=0.0017`
+  - `spread_mae_vs_vegas=4.5759`, `total_mae_vs_vegas=7.3164`
+  - `|top1_share_bias|=0.0084`, `|top2_share_bias|=0.0100`
+  - `|poss_bias|=2.1193`
+
+Interpretation:
+
+- Candidate A is the strongest overall realism/quality package, with broad gains over prod except
+  `p95` and possession-bias drift.
+- Candidate B is a tail-safer alternative (`p95`) but loses some elite-bias quality.
+
+#### 16.20.2 Should props uplift remain enabled for this candidate?
+
+We tested uplift A/B on both candidate and prod using the exact production function:
+
+- candidate uplift A/B:
+  - `/home/daniel/projections-data/training/runs/gtv2_candidate_uplift_ab_20260311T105648Z/summary.json`
+- prod uplift A/B:
+  - `/home/daniel/projections-data/training/runs/gtv2_prod_uplift_ab_20260311T105733Z/summary.json`
+
+Observed pattern (both models):
+
+- Uplift improves `star/elite` and usually improves `p95`.
+- Uplift worsens `p90`, increases concentration bias (`top1/top2`), and worsens possession bias.
+- `pts_mae` and global mean points bias were effectively unchanged in these checks.
+
+Decision guidance:
+
+- For the tuned candidate, default to **no props uplift** at promotion time.
+- Keep uplift as a fallback toggle for specific tail-risk slates only, or retune uplift strengths
+  before re-enabling globally.
+
+### 16.21 FPTS Guardrail + Full-Stat Direct Supervision (2026-03-11)
+
+Current risk status (why this is needed now):
+
+- Multi-seed offline checks show candidate inference settings that improve points realism can still
+  regress overall DK FPTS MAE versus production:
+  - artifact: `/home/daniel/projections-data/training/runs/gtv2_fpts_guard_multiseed_compare_20260311T_now.json`
+  - `temp1.6/alpha0.3`: `dk_fpts_delta_mae_mean=+0.3407`
+  - `temp2.0/alpha0.55`: `dk_fpts_delta_mae_mean=+0.3794`
+- Category regressions are concentrated in non-scoring stats (especially rebounds):
+  - artifacts:
+    - `/home/daniel/projections-data/training/runs/gtv2_candidate_statcats_compare_20260311T_now.json`
+    - `/home/daniel/projections-data/training/runs/gtv2_candidate_gap_diagnostics_20260311T_now.json`
+  - representative tuned delta vs prod: `reb +0.1213`, `ast +0.0103`, `stl +0.0247`, `blk +0.0084` MAE.
+
+Decision:
+
+- Add **direct full-stat supervision** on the emergent flow path as a first-class training option.
+- Supervise player-level `PTS/REB/AST/STL/BLK/TOV` directly against labels using normalized Huber
+  losses with:
+  1. independent per-stat weights,
+  2. per-stat normalization scales,
+  3. a long ramp-in to reduce phase-2 instability risk.
+
+Implementation (training script):
+
+- file: `scripts/rotation/train_game_transformer_v2.py`
+- new knobs (all default `0.0` / disabled):
+  - weights:
+    - `--w-direct-pts-aux`
+    - `--w-direct-reb-aux`
+    - `--w-direct-ast-aux`
+    - `--w-direct-stl-aux`
+    - `--w-direct-blk-aux`
+    - `--w-direct-tov-aux`
+  - ramp:
+    - `--direct-stat-aux-ramp-epochs`
+    - `--direct-stat-aux-start-scale`
+  - scales/delta:
+    - `--direct-pts-target-scale`
+    - `--direct-reb-target-scale`
+    - `--direct-ast-target-scale`
+    - `--direct-stl-target-scale`
+    - `--direct-blk-target-scale`
+    - `--direct-tov-target-scale`
+    - `--direct-stat-aux-huber-delta`
+- losses are only active with `--enable-phase2-flow` and are now tracked in epoch history/summary.
+
+Initial operating stance:
+
+- Yes: **direct losses for all fantasy-driving stats** are the right next step.
+- But keep initial weights small and ramped to avoid repeating earlier aux destabilization
+  (flow/backbone drift while optimizing side objectives).
+
+#### 16.21.1 First full-stat run (implemented + executed)
+
+Run launched from this spec update:
+
+- `/home/daniel/projections-data/training/runs/gtv2_iter_fullstat_direct_t1_20260311T121151Z`
+
+Config notes:
+
+- warm-start from `t13` checkpoint
+- direct-stat aux enabled with conservative ramp:
+  - `w_direct_pts=0.008`
+  - `w_direct_reb=0.020`
+  - `w_direct_ast=0.014`
+  - `w_direct_stl=0.012`
+  - `w_direct_blk=0.012`
+  - `w_direct_tov=0.010`
+  - `direct_stat_aux_ramp_epochs=14`, `start_scale=0.05`
+- prior AST/REB share/rate aux and props aux disabled for isolation.
+
+Training signal:
+
+- completed `24/24` epochs, no instability / skipped batches.
+- `best_val_total=9.1714` at epoch `24`.
+
+Quick seed-42 world checks vs prod (same 60-game/256-world slice):
+
+- `t=1.6, alpha=0.30`:
+  - eval file: `/home/daniel/projections-data/training/runs/gtv2_iter_fullstat_direct_t1_20260311T121151Z/stat_eval_vs_prod_seed42_t16a03.json`
+  - `dk_fpts_delta_mae=+0.2053` (still above prod, but improved vs prior t13 candidate at similar inference: `+0.3634`)
+- `t=1.3, alpha=0.15`:
+  - eval file: `/home/daniel/projections-data/training/runs/gtv2_iter_fullstat_direct_t1_20260311T121151Z/stat_eval_vs_prod_seed42_t13a015.json`
+  - `dk_fpts_delta_mae=+0.1691` (best of this first probe set so far)
+
+Interpretation:
+
+- Full-stat direct supervision appears to be moving in the right direction on aggregate FPTS risk,
+  but this first run is not yet clearly better than prod on DK FPTS MAE.
+- Next iteration should keep the same framework and tune:
+  1. lower REB bias (still the largest residual gap),
+  2. reduce STL/BLK bias drift,
+  3. recover minutes MAE slippage.
+
+#### 16.21.2 Continued inference iteration (measurable improvement checkpoint)
+
+After additional inference sweeps on the same full-stat run, the best operating point shifted to
+lower-temperature emergent allocation.
+
+Artifacts:
+
+- broad sweep:
+  - `/home/daniel/projections-data/training/runs/gtv2_fullstat_t1_infer_sweep_20260311T123158Z/summary.json`
+- low-temp sweep:
+  - `/home/daniel/projections-data/training/runs/gtv2_fullstat_t1_infer_sweep_lowtemp_20260311T123329Z/summary.json`
+- edge sweep:
+  - `/home/daniel/projections-data/training/runs/gtv2_fullstat_t1_infer_sweep_edge2_20260311T123740Z/summary.json`
+- 3-seed robustness check for selected point:
+  - `/home/daniel/projections-data/training/runs/gtv2_fullstat_t1_temp_multiseed_20260311T123927Z/summary.json`
+
+Selected inference point:
+
+- `active_temperature=0.45`
+- `allocation_source=emergent`
+- `make_model=legacy`
+
+3-seed (`42,77,123`) aggregate vs current prod (`temp0.9/emergent/legacy`):
+
+- `dk_fpts_delta_mae_mean = -0.0075` (improvement; std `0.0039`)
+- stat-category deltas (MAE, candidate minus prod):
+  - `PTS: -0.0149` (better)
+  - `REB: +0.0198` (worse)
+  - `AST: +0.0024` (slightly worse)
+  - `STL: -0.0134` (better)
+  - `BLK: +0.0115` (worse)
+  - `minutes: -0.1208` (better)
+
+Interpretation:
+
+- This is the first **measurable DK FPTS MAE improvement** over current production from the
+  full-stat direct-supervision branch.
+- Improvement margin is small, so this should be treated as a checkpoint rather than a promotion
+  decision until we either:
+  1. increase FPTS margin, or
+  2. reduce REB/BLK regressions while preserving the FPTS gain.
+
+#### 16.21.3 Follow-on iteration (t1.1/t1.2 training branches + tighter low-temp search)
+
+Training branch outcomes:
+
+- `t1.1` (`reb/blk upweight + tiny rebound structure aux`):
+  - run: `/home/daniel/projections-data/training/runs/gtv2_iter_fullstat_direct_t11_20260311T132043Z`
+  - quick eval (`t=0.45`, emergent/legacy): `dk_fpts_delta_mae=+0.0709` (worse than prod)
+  - category MAE improved, but points degradation dominated.
+- `t1.2` (`sparse-stat scale tightening`):
+  - run: `/home/daniel/projections-data/training/runs/gtv2_iter_fullstat_direct_t12_20260311T132332Z`
+  - quick eval (`t=0.45`, emergent/legacy): `dk_fpts_delta_mae=+0.0622` (worse than prod)
+  - same pattern: category help, insufficient overall FPTS tradeoff.
+
+Inference refinement on the stronger base (`t1`) produced a better checkpoint:
+
+- 3-seed low-temp sweep:
+  - `/home/daniel/projections-data/training/runs/gtv2_fullstat_t1_temp_multiseed_low2_20260311T132610Z/summary.json`
+- best point:
+  - `active_temperature=0.40`, `allocation_source=emergent`, `make_model=legacy`
+- aggregate vs prod (`42/77/123`):
+  - `dk_fpts_delta_mae_mean = -0.01235` (std `0.00240`)  ← stronger measurable gain
+  - `PTS delta MAE = -0.01525`
+  - `REB delta MAE = +0.01924`
+  - `AST delta MAE = +0.00184`
+  - `STL delta MAE = -0.01412`
+  - `BLK delta MAE = +0.01046`
+  - `minutes delta MAE = -0.12921`
+
+Interpretation:
+
+- We now have a clearer FPTS gain margin at inference.
+- Remaining blocker for “robust all categories” is REB/BLK non-regression.
+
+### 16.22 Status Update (2026-03-11, tracking-context + stability-tuned flow-on pass)
+
+#### 16.22.1 Tracking-context dataset + stability finding
+
+New dataset built with tracking context enabled:
+
+- dataset:
+  - `/home/daniel/projections-data/training/datasets/joint_rotation_rates_v1_trackingctx_20260311T135849Z`
+- build highlights:
+  - tracking coverage increased from `11.3%` to `92.0%` using as-of fallback
+  - `rates_context_cols=13`
+  - `track_*` + missing indicators present in feature contract
+
+Flow stability outcome:
+
+- direct-from-scratch tracking runs (`t2`, `stabA`, `stabB`) repeatedly rolled back when flow activated.
+- warm-starting from the full-stat flow-trained `t1` checkpoint stabilized training:
+  - run: `/home/daniel/projections-data/training/runs/gtv2_iter_trackingctx_t2_warmT1_20260311T140404Z`
+  - completed `20/20` epochs with no rollback.
+  - `best_val_total=9.3806` (epoch `14`).
+
+#### 16.22.2 Seed-42 eval on tracking dataset (60 games x 64 worlds)
+
+Evaluation root:
+
+- `/home/daniel/projections-data/training/runs/gtv2_tracking_eval_20260311T/`
+
+Primary comparison artifact:
+
+- `/home/daniel/projections-data/training/runs/gtv2_tracking_eval_20260311T/comparison_key_configs_seed42.csv`
+
+Key seed-42 result vs current prod (`prod_t09_seed42`):
+
+- best DK FPTS point remains the existing full-stat candidate (`t1`, emergent/legacy):
+  - `t1_t0.35_mlegacy_s42`
+  - `player_dk_fpts_mae`: `6.1652` vs prod `6.1917` (`delta=-0.0265`)
+  - category deltas (candidate minus prod):
+    - `PTS: -0.0383`
+    - `REB: +0.0206`
+    - `AST: -0.0023`
+    - `STL: -0.0140`
+    - `BLK: +0.0099`
+    - `minutes: -0.1526`
+
+Tracking run (`t2_warm`) did not beat prod on DK FPTS in emergent mode:
+
+- representative point (`t2_t0.45_mbeta_binomial_all_s42`):
+  - `player_dk_fpts_mae delta vs prod = +0.0628`
+  - while improving `PTS/AST/BLK/minutes`, REB regression remained material.
+
+#### 16.22.3 Inference allocation sweep on tracking run (`t2`)
+
+Expanded inference policy sweep (`emergent`, `usage_head`, `blend`) for `t2`:
+
+- best DK FPTS point among tracking policies:
+  - `t2x_t0.45_ausage_mbeta_binomial_all_s42`
+  - `player_dk_fpts_mae delta vs prod = +0.0244` (near parity but still worse)
+- realism trade-off was severe at this point:
+  - `p90_calibration_error_abs`: `+0.0694` vs prod
+  - `p95_calibration_error_abs`: `+0.0733` vs prod
+
+Interpretation:
+
+- usage/blend allocation can recover much of tracking run DK FPTS gap,
+  but at unacceptable tail calibration cost.
+
+#### 16.22.4 Follow-on training branches from tracking run
+
+Two additional branches were tested and rejected:
+
+- `t3_structaux`:
+  - `/home/daniel/projections-data/training/runs/gtv2_iter_trackingctx_t3_structaux_20260311T1430Z`
+  - added AST/REB structure + spread/total aux
+  - stable but `best_val_total=9.2902` at epoch 1; downstream DK FPTS worse than `t2`.
+- `t4_lowlr`:
+  - `/home/daniel/projections-data/training/runs/gtv2_iter_trackingctx_t4_lowlr_20260311T1435Z`
+  - lower LR + longer flow delay + partial encoder LR dampening
+  - `best_val_total=9.2392` but inference quality collapsed (`DK FPTS delta vs prod ≈ +0.27` at best tested point).
+
+#### 16.22.5 3-seed robustness on tracking dataset
+
+Artifact:
+
+- `/home/daniel/projections-data/training/runs/gtv2_tracking_eval_20260311T/multiseed_tracking_candidates_vs_prod.json`
+
+Aggregates (`seeds=42,77,123`, candidate minus prod):
+
+- `t1_legacy_t035`:
+  - `dk_fpts_delta_mae_mean = -0.0196` (std `0.0226`)
+  - `REB +0.0199`, `BLK +0.0100`, `minutes -0.1402`.
+- `t2_usage_beta_t045`:
+  - `dk_fpts_delta_mae_mean = -0.0021` (std `0.0342`)
+  - `p90/p95 error deltas = +0.0737 / +0.0743` (unacceptable tail regression).
+- `t2_blend04_beta_t045`:
+  - `dk_fpts_delta_mae_mean = +0.0158` (std `0.0366`)
+  - still worse DK FPTS than prod on average.
+
+#### 16.22.6 Decision from this pass
+
+1. Tracking-context signal is not yet yielding a promotable training branch under the current objective stack.
+2. The strongest robust candidate remains `t1` inference-tuned low-temperature emergent/legacy.
+3. For tracking branches, the largest gap is now objective alignment:
+   - better star/market mean alignment can be achieved with usage/blend policy,
+   - but p90/p95 calibration fails hard when doing so.
+
+### 16.23 Architecture Update: Optional RQS Coupling Path (2026-03-11)
+
+Implemented an architecture-level coupling option to test whether affine flow capacity
+is a bottleneck for heavy-tail and extreme-player calibration.
+
+Code-level changes:
+
+- `JointGameFlow` now supports `coupling_type in {"affine","rqs"}`.
+- Added elementwise Rational-Quadratic Spline coupling blocks with linear tails.
+- Kept affine as default for backward compatibility and stable production parity.
+- Added runtime/config/CLI knobs:
+  - `flow_rqs_num_bins`
+  - `flow_rqs_tail_bound`
+  - `flow_rqs_min_bin_width`
+  - `flow_rqs_min_bin_height`
+  - `flow_rqs_min_derivative`
+- Added validation guards in training CLI for invalid spline settings.
+
+Testing status:
+
+- unit tests pass for affine and attention paths.
+- added `rqs` round-trip + finite-NLL coverage in `tests/rotation/test_joint_game_flow.py`.
+- training script help and config wiring verified for new RQS args.
+
+Current decision:
+
+1. Keep **production** on affine coupling by default until RQS clears full promotion gates.
+2. Run targeted RQS experiments as controlled ablations against current best affine
+   candidate (`t1`) with identical data/features/loss weights.
+3. Promote RQS only if it improves category robustness (especially REB/BLK tails)
+   without degrading market realism and p90/p95 calibration.
+
+### 16.24 RQS Focus Decision (2026-03-11)
+
+After targeted training + tail diagnostics, we are shifting the **default modeling focus**
+to RQS coupling for upcoming experiments.
+
+Evidence from this pass:
+
+1. **Tail/concentration signal improved materially** on matched world eval
+   (`60 games x 64 worlds`, `active_temperature=0.35`, `allocation=emergent`, `make_model=legacy`):
+   - affine eval JSON:
+     - `/home/daniel/projections-data/training/runs/gtv2_iter_fullstat_direct_t1_20260311T121151Z/make_rate_tailcmp_t035_60g64w.json`
+   - RQS eval JSON:
+     - `/home/daniel/projections-data/training/runs/gtv2_iter_fullstat_direct_t1_rqs_stab2_nopossreg_20260311T160420Z/make_rate_tailcmp_t035_60g64w.json`
+   - key deltas (RQS minus affine):
+     - `high_usage_fga_share_mae_18plus`: `-0.03095`
+     - `ultra_usage_fga_share_mae_22plus`: `-0.03818`
+     - `top1_share_mae_pts`: `-0.04869`
+     - `top2_share_mae_pts`: `-0.06709`
+     - `elite_bias_pts_35plus`: improved by `+0.50467` toward zero
+     - `p90_calibration_error_abs`: improved (`0.04722 -> 0.02667`)
+2. **Flow-on stability under delayed schedule favored RQS** in the no-`poss_reg` regime:
+   - RQS run completed all 24 epochs:
+     - `/home/daniel/projections-data/training/runs/gtv2_iter_fullstat_direct_t1_rqs_stab2_nopossreg_20260311T160420Z`
+   - affine control with same stability recipe rolled back at flow-on epoch 9:
+     - `/home/daniel/projections-data/training/runs/gtv2_iter_fullstat_direct_t1_affine_stab2_nopossreg_20260311T161250Z`
+
+Open risk from current RQS checkpoint:
+
+- `p95_calibration_error_abs` regressed in this comparison (`0.01833 -> 0.03278`), so
+  RQS is not promotion-ready yet.
+
+Decision update:
+
+1. **Research default**: new architecture experiments should start from `flow_coupling_type=rqs`
+   unless a specific affine control is required.
+2. **Production default**: remains affine until RQS passes full promotion gates (including
+   `p95`, realism, and category robustness).
+
+### 16.25 Promotion-Gate Update: Production-Aligned Lineup Slice (2026-03-11)
+
+Follow-up sweeps on the current RQS control branch showed that the remaining blocker was no
+longer world realism but the legacy offline parity gate itself.
+
+Artifacts from this pass:
+
+- opportunity/control sweep:
+  - `/home/daniel/projects/projections-v2/reports/gtv2_rqs_focus_20260311/sweep_opportunity_v1/summary.json`
+- inference frontier on the control checkpoint:
+  - `/home/daniel/projects/projections-v2/reports/gtv2_rqs_focus_20260311/inference_frontier_ctrl_v1/summary.csv`
+- parity-focused continuation sweep:
+  - `/home/daniel/projects/projections-v2/reports/gtv2_rqs_focus_20260311/sweep_ctrl_parity_v1/summary.json`
+- production-like eval slice:
+  - `/home/daniel/projects/projections-v2/reports/gtv2_rqs_focus_20260311/prod_like_eval_v1/summary.json`
+
+Key findings:
+
+1. **Realism/tails were recovered by inference policy, not by more finetuning**
+   - best control inference point:
+     - checkpoint: `rqs_b4_noposs_ctrl_ft12`
+     - `allocation_source=emergent`
+     - `make_model=beta_binomial_all`
+     - `active_temperature=0.55`
+   - metrics on the main `60 games x 64 worlds` protocol:
+     - `pts_mae=9.3884`
+     - `spread_mae_vs_vegas=4.0335`
+     - `spread_corr_vs_vegas=0.7188`
+     - `total_mae_vs_vegas=5.7472`
+     - `p90=0.0206`
+     - `p95=0.0228`
+
+2. **Tiny parity-preserving continuation runs did not fix the remaining gate**
+   - all four low-LR anchored finetunes worsened `minutes_mae_gap_abs` versus the control
+     checkpoint (`0.5282`), landing in the `0.5362-0.5488` range.
+
+3. **The raw parity-gap regression was not a production-slice regression**
+   - historical 60d eval slice is only `3330 / 11910 = 27.96%` `lineup_available=1` rows.
+   - stable RQS baseline:
+     - `minutes_mae_lineup1 = 3.6106`
+     - `active_acc_lineup1 = 0.9144`
+   - control checkpoint:
+     - `minutes_mae_lineup1 = 3.2615`
+     - `active_acc_lineup1 = 0.9267`
+   - `lineup_available=0` also improved (`3.9176 -> 3.7897`).
+   - parity gap widened (`0.3070 -> 0.5282`) only because the `lineup_available=1` slice improved
+     much more than the `lineup_available=0` slice.
+
+4. **Production-like world slice strongly favored the control checkpoint**
+   - full-lineup game coverage in the sampled 60-game world eval: `22 / 60`.
+   - stable RQS baseline (`legacy`, `t=0.35`):
+     - `pts_mae=13.12`
+     - `spread_mae_vs_vegas=6.90`
+     - `spread_corr_vs_vegas=-0.021`
+     - `total_mae_vs_vegas=14.99`
+     - `p95=0.0303`
+   - control checkpoint (`beta_binomial_all`, `t=0.55`):
+     - `pts_mae=9.72`
+     - `spread_mae_vs_vegas=4.05`
+     - `spread_corr_vs_vegas=0.828`
+     - `total_mae_vs_vegas=6.27`
+     - `p95=0.0152`
+
+Decision:
+
+1. Update `scripts/rotation/sweep_game_transformer_v2_phase2.py` so the default promotion gate is
+   **production-aligned**:
+   - `promotion_gate_mode=prod_like` (new default)
+   - hard gates:
+     - `delta_minutes_mae_lineup1`
+     - `delta_active_acc_lineup1`
+     - `delta_active_count_mae`
+     - world/realism checks when enabled
+2. Keep `minutes_mae_gap_abs`, `lineup_available=0` minutes, and the raw parity slices in every
+   report/leaderboard, but demote them to **monitoring/guardrail metrics** rather than a sole
+   promotion blocker.
+3. Preserve the old gate as an explicit fallback mode:
+   - `promotion_gate_mode=parity_gap`
+4. Promotion readiness for RQS should now be judged primarily on:
+   - production-like lineup coverage slices,
+   - world realism / market alignment,
+   - FPTS/category robustness,
+   not on raw offline parity-gap minimization by itself.

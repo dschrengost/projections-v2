@@ -14,6 +14,7 @@ import math
 import os
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,8 @@ import pandas as pd
 import torch
 
 from projections import paths
+
+PYTHON_EXE = sys.executable
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,8 @@ class EvalMetrics:
     minutes_mae_lineup0: float
     minutes_mae_lineup1: float
     minutes_mae_gap_abs: float
+    active_acc_lineup0: float
+    active_acc_lineup1: float
     active_count_mae: float
     possessions_proxy_mae: float
 
@@ -354,6 +359,8 @@ def _load_eval_metrics(path: Path) -> EvalMetrics:
         minutes_mae_lineup0=_float_or_nan((parity.get("lineup_available_0", {}) or {}).get("minutes_mae")),
         minutes_mae_lineup1=_float_or_nan((parity.get("lineup_available_1", {}) or {}).get("minutes_mae")),
         minutes_mae_gap_abs=_float_or_nan(parity.get("minutes_mae_gap_abs")),
+        active_acc_lineup0=_float_or_nan((parity.get("lineup_available_0", {}) or {}).get("active_acc")),
+        active_acc_lineup1=_float_or_nan((parity.get("lineup_available_1", {}) or {}).get("active_acc")),
         active_count_mae=_float_or_nan(active_count.get("mae")),
         possessions_proxy_mae=_float_or_nan(poss.get("mae")),
     )
@@ -364,44 +371,58 @@ def _diff_metrics(candidate: EvalMetrics, baseline: EvalMetrics) -> dict[str, fl
         "delta_minutes_mae_lineup0": float(candidate.minutes_mae_lineup0 - baseline.minutes_mae_lineup0),
         "delta_minutes_mae_lineup1": float(candidate.minutes_mae_lineup1 - baseline.minutes_mae_lineup1),
         "delta_minutes_mae_gap_abs": float(candidate.minutes_mae_gap_abs - baseline.minutes_mae_gap_abs),
+        "delta_active_acc_lineup0": float(candidate.active_acc_lineup0 - baseline.active_acc_lineup0),
+        "delta_active_acc_lineup1": float(candidate.active_acc_lineup1 - baseline.active_acc_lineup1),
         "delta_active_count_mae": float(candidate.active_count_mae - baseline.active_count_mae),
         "delta_possessions_proxy_mae": float(candidate.possessions_proxy_mae - baseline.possessions_proxy_mae),
     }
 
 
-def _composite_score(deltas: dict[str, float]) -> float:
+def _composite_score(deltas: dict[str, float], *, promotion_gate_mode: str) -> float:
     d0 = max(0.0, float(deltas["delta_minutes_mae_lineup0"]))
     d1 = max(0.0, float(deltas["delta_minutes_mae_lineup1"]))
     dgap = max(0.0, float(deltas["delta_minutes_mae_gap_abs"]))
+    dacc0 = max(0.0, -float(deltas["delta_active_acc_lineup0"]))
+    dacc1 = max(0.0, -float(deltas["delta_active_acc_lineup1"]))
     dactive = max(0.0, float(deltas["delta_active_count_mae"]))
     dposs = max(0.0, float(deltas["delta_possessions_proxy_mae"]))
+    if str(promotion_gate_mode) == "prod_like":
+        return float(0.25 * d0 + 1.5 * d1 + 0.25 * dgap + 0.5 * dacc0 + 2.0 * dacc1 + 1.5 * dactive + 0.25 * dposs)
     return float(1.0 * d0 + 1.0 * d1 + 2.0 * dgap + 1.5 * dactive + 0.25 * dposs)
 
 
-def _is_finite_eval(m: EvalMetrics) -> bool:
-    return all(
-        math.isfinite(v)
-        for v in (
-            m.minutes_mae_lineup0,
-            m.minutes_mae_lineup1,
-            m.minutes_mae_gap_abs,
-            m.active_count_mae,
-            m.possessions_proxy_mae,
-        )
-    )
+def _is_finite_eval(m: EvalMetrics, *, require_active_acc: bool) -> bool:
+    values = [
+        m.minutes_mae_lineup0,
+        m.minutes_mae_lineup1,
+        m.minutes_mae_gap_abs,
+        m.active_count_mae,
+        m.possessions_proxy_mae,
+    ]
+    if require_active_acc:
+        values.extend([m.active_acc_lineup0, m.active_acc_lineup1])
+    return all(math.isfinite(v) for v in values)
 
 
 def _meets_promotion_gate(
     *,
     deltas: dict[str, float],
     rollback_triggered: bool,
+    promotion_gate_mode: str,
     max_delta_minutes_mae_lineup0: float,
     max_delta_minutes_mae_lineup1: float,
     max_delta_minutes_gap_abs: float,
+    min_delta_active_acc_lineup1: float,
     max_delta_active_count_mae: float,
 ) -> bool:
     if rollback_triggered:
         return False
+    if str(promotion_gate_mode) == "prod_like":
+        return bool(
+            float(deltas["delta_minutes_mae_lineup1"]) <= float(max_delta_minutes_mae_lineup1)
+            and float(deltas["delta_active_acc_lineup1"]) >= float(min_delta_active_acc_lineup1)
+            and float(deltas["delta_active_count_mae"]) <= float(max_delta_active_count_mae)
+        )
     return bool(
         float(deltas["delta_minutes_mae_lineup0"]) <= float(max_delta_minutes_mae_lineup0)
         and float(deltas["delta_minutes_mae_lineup1"]) <= float(max_delta_minutes_mae_lineup1)
@@ -450,6 +471,8 @@ def _mean_deltas(seed_rows: list[dict[str, Any]]) -> dict[str, float]:
         "delta_minutes_mae_lineup0",
         "delta_minutes_mae_lineup1",
         "delta_minutes_mae_gap_abs",
+        "delta_active_acc_lineup0",
+        "delta_active_acc_lineup1",
         "delta_active_count_mae",
         "delta_possessions_proxy_mae",
     ]
@@ -467,8 +490,10 @@ def _meets_multi_seed_promotion_gate(
     min_required: int,
     require_all_pass: bool,
     require_mean_gains: bool,
+    promotion_gate_mode: str,
     max_mean_delta_minutes_mae_lineup1: float,
     max_mean_delta_minutes_gap_abs: float,
+    min_mean_delta_active_acc_lineup1: float,
 ) -> bool:
     if not seed_rows:
         return False
@@ -486,11 +511,17 @@ def _meets_multi_seed_promotion_gate(
     mean_deltas = _mean_deltas(pass_rows)
     if not math.isfinite(float(mean_deltas["delta_minutes_mae_lineup1"])):
         return False
-    if not math.isfinite(float(mean_deltas["delta_minutes_mae_gap_abs"])):
+    if str(promotion_gate_mode) == "prod_like":
+        if not math.isfinite(float(mean_deltas["delta_active_acc_lineup1"])):
+            return False
+    elif not math.isfinite(float(mean_deltas["delta_minutes_mae_gap_abs"])):
         return False
     if float(mean_deltas["delta_minutes_mae_lineup1"]) > float(max_mean_delta_minutes_mae_lineup1):
         return False
-    if float(mean_deltas["delta_minutes_mae_gap_abs"]) > float(max_mean_delta_minutes_gap_abs):
+    if str(promotion_gate_mode) == "prod_like":
+        if float(mean_deltas["delta_active_acc_lineup1"]) < float(min_mean_delta_active_acc_lineup1):
+            return False
+    elif float(mean_deltas["delta_minutes_mae_gap_abs"]) > float(max_mean_delta_minutes_gap_abs):
         return False
 
     if bool(require_mean_gains):
@@ -569,9 +600,7 @@ def _build_train_cmd(
         params_effective.setdefault("enable_usage_share_head", True)
 
     train_cmd = [
-        "uv",
-        "run",
-        "python",
+        PYTHON_EXE,
         "-m",
         "scripts.rotation.train_game_transformer_v2",
         "--dataset-dir",
@@ -624,9 +653,7 @@ def _build_eval_cmd(
 ) -> list[str]:
     eval_batch_size = int(params.get("batch_size", int(args.batch_size)))
     eval_cmd = [
-        "uv",
-        "run",
-        "python",
+        PYTHON_EXE,
         "-m",
         "scripts.rotation.eval_game_transformer_v2",
         "--run-dir",
@@ -657,10 +684,8 @@ def _build_world_cmd(
     world_summary: Path,
     worlds_parquet: Path,
 ) -> list[str]:
-    return [
-        "uv",
-        "run",
-        "python",
+    cmd = [
+        PYTHON_EXE,
         "-m",
         "scripts.rotation.generate_worlds_game_transformer_v2",
         "--run-dir",
@@ -679,12 +704,26 @@ def _build_world_cmd(
         "0",
         "--device",
         str(args.device),
+        "--active-temperature",
+        str(float(args.world_active_temperature)),
+        "--make-model",
+        str(args.world_make_model),
+        "--allocation-source",
+        str(args.world_allocation_source),
         "--strict-contracts",
         "--out-parquet",
         str(worlds_parquet),
         "--out-summary-json",
         str(world_summary),
     ]
+    if str(args.world_allocation_source) == "blend":
+        cmd.extend(
+            [
+                "--allocation-blend-alpha",
+                str(float(args.world_allocation_blend_alpha)),
+            ]
+        )
+    return cmd
 
 
 def _build_realism_cmd(
@@ -695,9 +734,7 @@ def _build_realism_cmd(
     name: str,
 ) -> list[str]:
     return [
-        "uv",
-        "run",
-        "python",
+        PYTHON_EXE,
         "-m",
         "scripts.rotation.eval_make_rate_calibration",
         "--dataset-dir",
@@ -831,19 +868,21 @@ def _run_trial_once(
         return result
 
     metrics = _load_eval_metrics(eval_json)
-    if not _is_finite_eval(metrics):
+    if not _is_finite_eval(metrics, require_active_acc=bool(str(args.promotion_gate_mode) == "prod_like")):
         result["status"] = "eval_nonfinite"
         result["metrics"] = metrics.__dict__
         return result
 
     deltas = _diff_metrics(metrics, baseline)
-    score = _composite_score(deltas)
+    score = _composite_score(deltas, promotion_gate_mode=str(args.promotion_gate_mode))
     single_gate_pass = _meets_promotion_gate(
         deltas=deltas,
         rollback_triggered=rollback,
+        promotion_gate_mode=str(args.promotion_gate_mode),
         max_delta_minutes_mae_lineup0=float(args.max_delta_minutes_mae_lineup0),
         max_delta_minutes_mae_lineup1=float(args.max_delta_minutes_mae_lineup1),
         max_delta_minutes_gap_abs=float(args.max_delta_minutes_gap_abs),
+        min_delta_active_acc_lineup1=float(args.min_delta_active_acc_lineup1),
         max_delta_active_count_mae=float(args.max_delta_active_count_mae),
     )
 
@@ -966,9 +1005,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase2-nll-guard-consecutive-batches", type=int, default=2)
     parser.add_argument("--phase2-max-backoffs-before-rollback", type=int, default=3)
     parser.add_argument("--phase2-min-a2-scale", type=float, default=0.125)
+    parser.add_argument(
+        "--promotion-gate-mode",
+        type=str,
+        default="prod_like",
+        choices=["prod_like", "parity_gap"],
+        help="prod_like hard-gates the lineup_available=1 slice; parity_gap preserves the legacy raw parity-gap blocker.",
+    )
     parser.add_argument("--max-delta-minutes-mae-lineup0", type=float, default=0.12)
     parser.add_argument("--max-delta-minutes-mae-lineup1", type=float, default=0.15)
     parser.add_argument("--max-delta-minutes-gap-abs", type=float, default=0.05)
+    parser.add_argument("--min-delta-active-acc-lineup1", type=float, default=-0.01)
     parser.add_argument("--max-delta-active-count-mae", type=float, default=0.10)
     parser.add_argument("--skip-world-contract-check", action="store_true")
     parser.add_argument(
@@ -996,6 +1043,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--realism-max-top2-share-bias", type=float, default=None)
     parser.add_argument("--world-num-games", type=int, default=1)
     parser.add_argument("--world-num-worlds", type=int, default=64)
+    parser.add_argument("--world-active-temperature", type=float, default=1.0)
+    parser.add_argument(
+        "--world-make-model",
+        type=str,
+        default="legacy",
+        choices=["legacy", "beta_binomial_ft", "beta_binomial_fg", "beta_binomial_all"],
+    )
+    parser.add_argument(
+        "--world-allocation-source",
+        type=str,
+        default="emergent",
+        choices=["emergent", "usage_head", "blend"],
+    )
+    parser.add_argument("--world-allocation-blend-alpha", type=float, default=0.5)
     parser.add_argument("--multi-seed-top-k", type=int, default=0)
     parser.add_argument(
         "--multi-seed-list",
@@ -1008,6 +1069,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--multi-seed-require-mean-gains", action="store_true")
     parser.add_argument("--multi-seed-max-mean-delta-minutes-mae-lineup1", type=float, default=0.05)
     parser.add_argument("--multi-seed-max-mean-delta-minutes-gap-abs", type=float, default=0.05)
+    parser.add_argument("--multi-seed-min-mean-delta-active-acc-lineup1", type=float, default=-0.005)
     parser.add_argument("--auto-promote", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -1032,7 +1094,7 @@ def main() -> None:
     if not baseline_eval_path.exists():
         raise FileNotFoundError(f"baseline eval json not found: {baseline_eval_path}")
     baseline = _load_eval_metrics(baseline_eval_path)
-    if not _is_finite_eval(baseline):
+    if not _is_finite_eval(baseline, require_active_acc=bool(str(args.promotion_gate_mode) == "prod_like")):
         raise ValueError("baseline eval has non-finite metrics")
 
     root_default = paths.get_data_root() / "training" / "runs" / f"game_transformer_v2_phase2_sweep_{_utc_now_compact()}"
@@ -1074,9 +1136,11 @@ def main() -> None:
         "seed": int(args.seed),
         "init_model_pt": str(Path(args.init_model_pt).expanduser().resolve()) if args.init_model_pt else None,
         "promotion_gate": {
+            "mode": str(args.promotion_gate_mode),
             "max_delta_minutes_mae_lineup0": float(args.max_delta_minutes_mae_lineup0),
             "max_delta_minutes_mae_lineup1": float(args.max_delta_minutes_mae_lineup1),
             "max_delta_minutes_gap_abs": float(args.max_delta_minutes_gap_abs),
+            "min_delta_active_acc_lineup1": float(args.min_delta_active_acc_lineup1),
             "max_delta_active_count_mae": float(args.max_delta_active_count_mae),
         },
         "realism_gate": {
@@ -1102,9 +1166,14 @@ def main() -> None:
             "require_world_contract_check_all": bool(require_world_check_all),
             "world_num_games": int(args.world_num_games),
             "world_num_worlds": int(args.world_num_worlds),
+            "world_active_temperature": float(args.world_active_temperature),
+            "world_make_model": str(args.world_make_model),
+            "world_allocation_source": str(args.world_allocation_source),
+            "world_allocation_blend_alpha": float(args.world_allocation_blend_alpha),
         },
         "multi_seed": {
             "enabled": bool(multi_seed_enabled),
+            "promotion_gate_mode": str(args.promotion_gate_mode),
             "top_k": int(args.multi_seed_top_k),
             "seed_list": list(multi_seed_list),
             "min_seeds": int(args.multi_seed_min_seeds),
@@ -1112,6 +1181,7 @@ def main() -> None:
             "require_mean_gains": bool(args.multi_seed_require_mean_gains),
             "max_mean_delta_minutes_mae_lineup1": float(args.multi_seed_max_mean_delta_minutes_mae_lineup1),
             "max_mean_delta_minutes_gap_abs": float(args.multi_seed_max_mean_delta_minutes_gap_abs),
+            "min_mean_delta_active_acc_lineup1": float(args.multi_seed_min_mean_delta_active_acc_lineup1),
         },
         "trials": [{"name": t.name, "params": t.params} for t in trials],
     }
@@ -1155,10 +1225,14 @@ def main() -> None:
                 "minutes_mae_lineup0": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup0")),
                 "minutes_mae_lineup1": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup1")),
                 "minutes_mae_gap_abs": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_gap_abs")),
+                "active_acc_lineup0": _float_or_nan((r.get("metrics", {}) or {}).get("active_acc_lineup0")),
+                "active_acc_lineup1": _float_or_nan((r.get("metrics", {}) or {}).get("active_acc_lineup1")),
                 "active_count_mae": _float_or_nan((r.get("metrics", {}) or {}).get("active_count_mae")),
                 "delta_minutes_mae_lineup0": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup0")),
                 "delta_minutes_mae_lineup1": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup1")),
                 "delta_minutes_mae_gap_abs": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_gap_abs")),
+                "delta_active_acc_lineup0": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_active_acc_lineup0")),
+                "delta_active_acc_lineup1": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_active_acc_lineup1")),
                 "delta_active_count_mae": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_active_count_mae")),
                 "rollback_triggered": bool(r.get("rollback_triggered", False)),
                 "run_dir": str(r.get("run_dir", "")),
@@ -1218,8 +1292,10 @@ def main() -> None:
                 min_required=max(1, int(args.multi_seed_min_seeds)),
                 require_all_pass=bool(args.multi_seed_require_all_pass),
                 require_mean_gains=bool(args.multi_seed_require_mean_gains),
+                promotion_gate_mode=str(args.promotion_gate_mode),
                 max_mean_delta_minutes_mae_lineup1=float(args.multi_seed_max_mean_delta_minutes_mae_lineup1),
                 max_mean_delta_minutes_gap_abs=float(args.multi_seed_max_mean_delta_minutes_gap_abs),
+                min_mean_delta_active_acc_lineup1=float(args.multi_seed_min_mean_delta_active_acc_lineup1),
             )
 
             record = {
@@ -1257,6 +1333,7 @@ def main() -> None:
                     "mean_delta_minutes_mae_lineup0": _float_or_nan((r.get("mean_deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup0")),
                     "mean_delta_minutes_mae_lineup1": _float_or_nan((r.get("mean_deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_lineup1")),
                     "mean_delta_minutes_mae_gap_abs": _float_or_nan((r.get("mean_deltas_vs_baseline", {}) or {}).get("delta_minutes_mae_gap_abs")),
+                    "mean_delta_active_acc_lineup1": _float_or_nan((r.get("mean_deltas_vs_baseline", {}) or {}).get("delta_active_acc_lineup1")),
                     "mean_delta_active_count_mae": _float_or_nan((r.get("mean_deltas_vs_baseline", {}) or {}).get("delta_active_count_mae")),
                 }
                 for r in ms_rows
@@ -1333,6 +1410,7 @@ def main() -> None:
         "baseline_metrics": baseline.__dict__,
         "sweep_root": str(sweep_root),
         "trial_preset": str(args.trial_preset),
+        "promotion_gate_mode": str(args.promotion_gate_mode),
         "num_trials": int(len(trials)),
         "num_completed": int(len([r for r in results if r.get("status") == "ok"])),
         "num_promotion_pass": int(len([r for r in results if bool(r.get("promotion_gate_pass"))])),
