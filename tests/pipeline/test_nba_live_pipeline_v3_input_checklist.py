@@ -23,6 +23,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _sanitize_frame_to_expected_keys,
     _stream_validate_parquet,
     _summarize_world_contracts_from_frame,
+    _team_minutes_sums_without_pandas_groupby,
     _resolve_season_month,
     publish_atomic_task,
 )
@@ -1365,6 +1366,82 @@ def test_summarize_world_contracts_from_frame_tolerates_small_float_drift() -> N
     assert checks["team_minutes_not_240"] == 0
     assert checks["team_minutes_total_checks"] == 4
     assert checks["team_minutes_max_abs_drift"] == pytest.approx(0.00003)
+
+
+def test_team_minutes_sums_without_pandas_groupby_matches_groupby_reference() -> None:
+    world_count = 4096
+    game_ids = [22500901, 22500902, 22500903, 22500904]
+    team_ids = [1610612737, 1610612738]
+    player_slots = [1, 2, 3]
+
+    rows: list[dict[str, Any]] = []
+    for world_idx in range(world_count):
+        for game_id in game_ids:
+            for team_id in team_ids:
+                for slot in player_slots:
+                    rows.append(
+                        {
+                            "world_idx": world_idx,
+                            "game_id": str(game_id),  # object/string input is common in live merges
+                            "team_id": team_id,
+                            "player_id": int(team_id * 100 + slot),
+                            "minutes": 80.0,
+                        }
+                    )
+    worlds = pd.DataFrame(rows)
+    worlds.loc[0, "minutes"] = None
+    worlds = pd.concat(
+        [
+            worlds,
+            pd.DataFrame(
+                {
+                    "world_idx": [float("nan"), 12],
+                    "game_id": [22500901, None],
+                    "team_id": [1610612737, 1610612738],
+                    "player_id": [999001, 999002],
+                    "minutes": [31.0, 29.0],
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    uniq_world, uniq_game, uniq_team, sums = _team_minutes_sums_without_pandas_groupby(
+        world_idx_col=worlds["world_idx"],
+        game_id_col=worlds["game_id"],
+        team_id_col=worlds["team_id"],
+        minutes_col=worlds["minutes"],
+    )
+    actual = pd.DataFrame(
+        {
+            "world_idx": uniq_world.astype("int64", copy=False),
+            "game_id": uniq_game.astype("int64", copy=False),
+            "team_id": uniq_team.astype("int64", copy=False),
+            "minutes": sums,
+        }
+    ).sort_values(["world_idx", "game_id", "team_id"]).reset_index(drop=True)
+
+    ref = worlds.copy()
+    ref["world_idx"] = pd.to_numeric(ref["world_idx"], errors="coerce")
+    ref["game_id"] = pd.to_numeric(ref["game_id"], errors="coerce")
+    ref["team_id"] = pd.to_numeric(ref["team_id"], errors="coerce")
+    ref["minutes"] = pd.to_numeric(ref["minutes"], errors="coerce").fillna(0.0)
+    ref = ref.loc[
+        ref["world_idx"].notna() & ref["game_id"].notna() & ref["team_id"].notna()
+    ].copy()
+    ref["world_idx"] = ref["world_idx"].astype("int64", copy=False)
+    ref["game_id"] = ref["game_id"].astype("int64", copy=False)
+    ref["team_id"] = ref["team_id"].astype("int64", copy=False)
+    expected = (
+        ref.groupby(["world_idx", "game_id", "team_id"], as_index=False, sort=False)[
+            "minutes"
+        ]
+        .sum()
+        .sort_values(["world_idx", "game_id", "team_id"])
+        .reset_index(drop=True)
+    )
+
+    pd.testing.assert_frame_equal(actual, expected)
 
 
 def test_repair_world_frame_contract_fields_normalizes_game_id_and_makes() -> None:

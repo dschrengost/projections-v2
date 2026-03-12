@@ -2036,14 +2036,17 @@ def _group_mean_by_keys_without_pandas_groupby(
     for col in key_cols:
         work[col] = work[col].astype("int64", copy=False)
 
-    key_index = pd.MultiIndex.from_frame(work.loc[:, list(key_cols)], names=list(key_cols))
-    codes, uniques = pd.factorize(key_index, sort=False)
-    if isinstance(uniques, pd.MultiIndex):
-        out = uniques.to_frame(index=False)
-    else:
-        out = pd.DataFrame(list(uniques.tolist()), columns=list(key_cols))
-    if len(out.columns) == len(key_cols):
-        out.columns = list(key_cols)
+    key_arrays = [
+        work[col].to_numpy(dtype=np.int64, copy=False)
+        for col in key_cols
+    ]
+    codes, unique_key_arrays = _factorize_int_key_arrays_preserve_order(*key_arrays)
+    out = pd.DataFrame(
+        {
+            col: unique_key_arrays[idx]
+            for idx, col in enumerate(key_cols)
+        }
+    )
     group_count = int(len(out))
     for col in value_cols:
         values = pd.to_numeric(work[col], errors="coerce").to_numpy(dtype=float, copy=False)
@@ -2062,6 +2065,56 @@ def _group_mean_by_keys_without_pandas_groupby(
         )
         out[col] = means
     return out.reset_index(drop=True)
+
+
+def _factorize_int_key_arrays_preserve_order(
+    *key_arrays: np.ndarray,
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    """
+    Factorize integer key arrays with first-seen ordering using NumPy only.
+
+    Pandas MultiIndex factorization has shown instability on very large live
+    frames in long-running workers. This helper avoids that path.
+    """
+    if len(key_arrays) <= 0:
+        return np.array([], dtype=np.int64), []
+    row_count = int(len(key_arrays[0]))
+    if row_count <= 0:
+        empty_codes = np.array([], dtype=np.int64)
+        empty_uniques = [np.array([], dtype=np.int64) for _ in key_arrays]
+        return empty_codes, empty_uniques
+
+    for arr in key_arrays[1:]:
+        if len(arr) != row_count:
+            raise RuntimeError("key array lengths must match for factorization")
+
+    dtype = [(f"k{idx}", np.int64) for idx in range(len(key_arrays))]
+    key_struct = np.empty(row_count, dtype=dtype)
+    for idx, arr in enumerate(key_arrays):
+        key_struct[f"k{idx}"] = np.asarray(arr, dtype=np.int64)
+
+    uniques, first_idx, inverse = np.unique(
+        key_struct,
+        return_index=True,
+        return_inverse=True,
+    )
+    if len(uniques) <= 0:
+        empty_codes = np.array([], dtype=np.int64)
+        empty_uniques = [np.array([], dtype=np.int64) for _ in key_arrays]
+        return empty_codes, empty_uniques
+
+    order = np.argsort(first_idx, kind="mergesort")
+    if not np.array_equal(order, np.arange(len(order))):
+        remap = np.empty(len(order), dtype=np.int64)
+        remap[order] = np.arange(len(order), dtype=np.int64)
+        inverse = remap[inverse]
+        uniques = uniques[order]
+
+    unique_key_arrays = [
+        uniques[f"k{idx}"].astype(np.int64, copy=False)
+        for idx in range(len(key_arrays))
+    ]
+    return inverse.astype(np.int64, copy=False), unique_key_arrays
 
 
 def _team_minutes_sums_without_pandas_groupby(
@@ -2088,26 +2141,25 @@ def _team_minutes_sums_without_pandas_groupby(
     game_vals = game_raw[valid].astype(np.int64, copy=False)
     team_vals = team_raw[valid].astype(np.int64, copy=False)
     minute_vals = minutes[valid]
-
-    key_index = pd.MultiIndex.from_arrays(
-        [world_vals, game_vals, team_vals],
-        names=["world_idx", "game_id", "team_id"],
+    group_codes, unique_key_arrays = _factorize_int_key_arrays_preserve_order(
+        world_vals,
+        game_vals,
+        team_vals,
     )
-    group_codes, uniques = pd.factorize(key_index, sort=False)
-    if not isinstance(uniques, pd.MultiIndex) or len(uniques) <= 0:
+    if len(unique_key_arrays) < 3 or len(unique_key_arrays[0]) <= 0:
         empty_int = np.array([], dtype=np.int64)
         empty_float = np.array([], dtype=float)
         return empty_int, empty_int, empty_int, empty_float
 
-    group_count = int(len(uniques))
+    group_count = int(len(unique_key_arrays[0]))
     minute_sums = np.bincount(
         group_codes,
         weights=minute_vals,
         minlength=group_count,
     ).astype(float, copy=False)
-    uniq_world = uniques.get_level_values(0).to_numpy(dtype=np.int64, copy=False)
-    uniq_game = uniques.get_level_values(1).to_numpy(dtype=np.int64, copy=False)
-    uniq_team = uniques.get_level_values(2).to_numpy(dtype=np.int64, copy=False)
+    uniq_world = unique_key_arrays[0]
+    uniq_game = unique_key_arrays[1]
+    uniq_team = unique_key_arrays[2]
     return uniq_world, uniq_game, uniq_team, minute_sums
 
 
