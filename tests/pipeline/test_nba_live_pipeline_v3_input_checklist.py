@@ -1121,6 +1121,40 @@ def test_sanitize_frame_to_expected_keys_drops_invalid_world_rows_before_contrac
     assert cleaned["game_id"].tolist() == [1, 1]
 
 
+def test_sanitize_frame_to_expected_keys_handles_sparse_large_index_labels() -> None:
+    expected_keys = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 20],
+            "player_id": [100, 200],
+        }
+    )
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 0, 1],
+            "game_id": [1, 1, 9, 1],
+            "team_id": [10, 20, 10, 20],
+            "player_id": [100, 200, 100, 200],
+            "minutes": [240.0, 240.0, 17.0, 240.0],
+        }
+    )
+    worlds.index = pd.Index([0, 134224841, 223344556, 334455667], dtype="int64")
+
+    cleaned, report = _sanitize_frame_to_expected_keys(
+        worlds,
+        expected_keys_df=expected_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="unit-test sparse-index worlds",
+    )
+
+    assert report["rows_in"] == 4
+    assert report["rows_out"] == 3
+    assert report["dropped_null_key_rows"] == 0
+    assert report["dropped_unexpected_key_rows"] == 1
+    assert cleaned["game_id"].tolist() == [1, 1, 1]
+    assert cleaned["team_id"].tolist() == [10, 20, 20]
+
+
 def test_publish_atomic_task_rejects_corrupt_worlds_before_pointer_promotion(
     tmp_path: Path,
 ) -> None:

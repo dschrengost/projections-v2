@@ -1854,7 +1854,9 @@ def _sanitize_frame_to_expected_keys(
     rows_in = int(len(df))
     null_mask = work_keys.loc[:, key_cols_list].isna().any(axis=1)
     dropped_null_key_rows = int(null_mask.sum())
-    work_keys = work_keys.loc[~null_mask]
+    keep_non_null = ~null_mask.to_numpy(dtype=bool, copy=False)
+    non_null_df = df.iloc[keep_non_null]
+    work_keys = work_keys.iloc[keep_non_null]
     for col in key_cols:
         work_keys[col] = work_keys[col].astype("int64", copy=False)
 
@@ -1888,11 +1890,12 @@ def _sanitize_frame_to_expected_keys(
     work_key_index = pd.MultiIndex.from_frame(
         work_keys.loc[:, key_cols_list], names=key_cols_list
     )
-    keep_mask = work_key_index.isin(expected_key_index)
-    dropped_unexpected_key_rows = int((~keep_mask).sum())
-    kept_index = work_keys.index[keep_mask]
-    merged = df.loc[kept_index].reset_index(drop=True)
-    merged_keys = work_keys.loc[kept_index, key_cols_list].reset_index(drop=True)
+    keep_mask = np.asarray(work_key_index.isin(expected_key_index), dtype=bool)
+    dropped_unexpected_key_rows = int(np.count_nonzero(~keep_mask))
+    # Use positional masking to avoid pandas indexer edge cases on sparse/high
+    # integer labels observed in long-running worker processes.
+    merged = non_null_df.iloc[keep_mask].reset_index(drop=True)
+    merged_keys = work_keys.iloc[keep_mask].loc[:, key_cols_list].reset_index(drop=True)
     for col in key_cols:
         merged[col] = merged_keys[col].astype("int64", copy=False)
 
