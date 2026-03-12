@@ -5078,11 +5078,18 @@ def generate_worlds_gtv2_live_task(
                 game_date_normalization_report,
             )
         if raw_worlds_path is not None:
-            _atomic_write_validated_parquet(
-                worlds_df,
-                raw_worlds_path,
-                required_cols=("world_idx", "game_id", "team_id", "player_id"),
-            )
+            try:
+                _atomic_write_validated_parquet(
+                    worlds_df,
+                    raw_worlds_path,
+                    required_cols=("world_idx", "game_id", "team_id", "player_id"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to persist validated raw worlds parquet; continuing: path=%s error=%s",
+                    raw_worlds_path,
+                    exc,
+                )
         worlds_df, world_key_report = _sanitize_frame_to_expected_keys(
             worlds_df,
             expected_keys_df=features_df,
