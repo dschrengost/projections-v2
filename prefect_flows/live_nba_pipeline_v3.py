@@ -2152,6 +2152,9 @@ def _factorize_int_key_arrays_preserve_order(
     # This avoids O(n log n) full-row sorting and keeps large-world operations
     # bounded while bypassing pandas MultiIndex factorization.
     dense_max = int(os.environ.get("PROJECTIONS_MAX_DENSE_KEYSPACE", "8000000"))
+    # Guard against accidental giant keyspace settings that can trigger
+    # exabyte-scale bincount allocations in production.
+    dense_max = max(0, min(dense_max, 8_000_000))
     keyspace = 1
     per_col_codes: list[np.ndarray] = []
     per_col_uniques: list[np.ndarray] = []
