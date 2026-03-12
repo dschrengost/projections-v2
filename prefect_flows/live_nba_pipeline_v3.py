@@ -5145,6 +5145,24 @@ def generate_worlds_gtv2_live_task(
                 "Applied world contract field repair before publish: %s",
                 world_contract_repair_report,
             )
+        worlds_df, world_key_report_post = _sanitize_frame_to_expected_keys(
+            worlds_df,
+            expected_keys_df=features_df,
+            key_cols=("game_id", "team_id", "player_id"),
+            label="generated worlds post-repair",
+        )
+        if worlds_df.empty:
+            raise RuntimeError(
+                "GTV2 worlds generation produced zero valid rows after final key sanitization"
+            )
+        if (
+            world_key_report_post["dropped_null_key_rows"] > 0
+            or world_key_report_post["dropped_unexpected_key_rows"] > 0
+        ):
+            logger.warning(
+                "Dropped invalid world rows after repairs before publish: %s",
+                world_key_report_post,
+            )
         _atomic_write_validated_parquet(
             worlds_df,
             worlds_path,
@@ -5177,7 +5195,8 @@ def generate_worlds_gtv2_live_task(
             "device": device_for_summary,
             "inference_backend": backend,
             "key_sanitization": {
-                "worlds": world_key_report,
+                "worlds_pre_transforms": world_key_report,
+                "worlds_post_transforms": world_key_report_post,
                 "projections": projection_key_report,
             },
             "make_model": {
