@@ -79,6 +79,11 @@ data/
 !artifacts/**/.gitkeep
 !runs/**/.gitkeep
 
+# Keep code package files under projections/artifacts tracked.
+!projections/artifacts/
+!projections/artifacts/__init__.py
+!projections/artifacts/unified_projections.py
+
 # -------------------------
 # Command-paste accidents
 # Prevent files created by accidental terminal paste at repo root
