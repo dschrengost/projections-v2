@@ -13,6 +13,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _build_feature_input_checklist,
     _build_input_change_set,
     _build_publish_superseded_report,
+    _group_mean_by_keys_without_pandas_groupby,
     _build_rerun_plan,
     _compute_per_game_input_digests,
     _detect_stale_authoritative_inputs,
@@ -1472,6 +1473,45 @@ def test_team_minutes_sums_without_pandas_groupby_matches_groupby_reference() ->
         ]
         .sum()
         .sort_values(["world_idx", "game_id", "team_id"])
+        .reset_index(drop=True)
+    )
+
+    pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_group_mean_by_keys_without_pandas_groupby_matches_groupby_reference() -> None:
+    df = pd.DataFrame(
+        {
+            "game_id": ["1", "1", "2", "2", "2", None],
+            "team_id": [10, 10, 20, 20, 21, 21],
+            "player_id": [100, 100, 200, 200, 210, 210],
+            "pts": [10.0, 14.0, 20.0, 26.0, 7.0, 99.0],
+            "reb": [4.0, 6.0, 8.0, 10.0, 3.0, 99.0],
+            "ast": [2.0, 4.0, 5.0, 7.0, 1.0, 99.0],
+        }
+    )
+
+    actual = _group_mean_by_keys_without_pandas_groupby(
+        df,
+        key_cols=("game_id", "team_id", "player_id"),
+        value_cols=("pts", "reb", "ast"),
+        label="unit-test group means",
+    ).sort_values(["game_id", "team_id", "player_id"]).reset_index(drop=True)
+
+    ref = df.copy()
+    ref["game_id"] = pd.to_numeric(ref["game_id"], errors="coerce")
+    ref["team_id"] = pd.to_numeric(ref["team_id"], errors="coerce")
+    ref["player_id"] = pd.to_numeric(ref["player_id"], errors="coerce")
+    ref = ref.dropna(subset=["game_id", "team_id", "player_id"])
+    ref["game_id"] = ref["game_id"].astype("int64", copy=False)
+    ref["team_id"] = ref["team_id"].astype("int64", copy=False)
+    ref["player_id"] = ref["player_id"].astype("int64", copy=False)
+    expected = (
+        ref.groupby(["game_id", "team_id", "player_id"], as_index=False, sort=False)[
+            ["pts", "reb", "ast"]
+        ]
+        .mean()
+        .sort_values(["game_id", "team_id", "player_id"])
         .reset_index(drop=True)
     )
 

@@ -2074,7 +2074,7 @@ def _factorize_int_key_arrays_preserve_order(
     *key_arrays: np.ndarray,
 ) -> tuple[np.ndarray, list[np.ndarray]]:
     """
-    Factorize integer key arrays with first-seen ordering using NumPy only.
+    Factorize integer key arrays without pandas MultiIndex operations.
 
     Pandas MultiIndex factorization has shown instability on very large live
     frames in long-running workers. This helper avoids that path.
@@ -2087,14 +2087,71 @@ def _factorize_int_key_arrays_preserve_order(
         empty_uniques = [np.array([], dtype=np.int64) for _ in key_arrays]
         return empty_codes, empty_uniques
 
-    for arr in key_arrays[1:]:
+    arrays: list[np.ndarray] = []
+    for arr in key_arrays:
+        arrays.append(np.asarray(arr, dtype=np.int64))
+    for arr in arrays[1:]:
         if len(arr) != row_count:
             raise RuntimeError("key array lengths must match for factorization")
 
+    # Fast path: factorize per-column then compose a dense mixed-radix code.
+    # This avoids O(n log n) full-row sorting and keeps large-world operations
+    # bounded while bypassing pandas MultiIndex factorization.
+    dense_max = int(os.environ.get("PROJECTIONS_MAX_DENSE_KEYSPACE", "8000000"))
+    keyspace = 1
+    per_col_codes: list[np.ndarray] = []
+    per_col_uniques: list[np.ndarray] = []
+    dense_path_ok = dense_max > 0
+    if dense_path_ok:
+        for arr in arrays:
+            codes, uniques = pd.factorize(arr, sort=False)
+            if bool(np.any(codes < 0)):
+                dense_path_ok = False
+                break
+            uniq = np.asarray(uniques, dtype=np.int64)
+            if uniq.size <= 0:
+                dense_path_ok = False
+                break
+            if keyspace > (dense_max // int(uniq.size)):
+                dense_path_ok = False
+                break
+            keyspace *= int(uniq.size)
+            per_col_codes.append(codes.astype(np.int64, copy=False))
+            per_col_uniques.append(uniq)
+
+    if dense_path_ok and keyspace > 0:
+        composed = per_col_codes[0].copy()
+        stride = int(per_col_uniques[0].size)
+        for idx in range(1, len(per_col_codes)):
+            composed += per_col_codes[idx] * stride
+            stride *= int(per_col_uniques[idx].size)
+        present = np.flatnonzero(
+            np.bincount(composed, minlength=keyspace)
+        ).astype(np.int64, copy=False)
+        if present.size <= 0:
+            empty_codes = np.array([], dtype=np.int64)
+            empty_uniques = [np.array([], dtype=np.int64) for _ in arrays]
+            return empty_codes, empty_uniques
+        group_codes = np.searchsorted(present, composed).astype(np.int64, copy=False)
+
+        decoded_codes: list[np.ndarray] = []
+        remaining = present.copy()
+        for uniq in per_col_uniques:
+            base = int(uniq.size)
+            decoded_codes.append((remaining % base).astype(np.int64, copy=False))
+            remaining //= base
+        unique_key_arrays = [
+            per_col_uniques[idx][decoded_codes[idx]].astype(np.int64, copy=False)
+            for idx in range(len(per_col_uniques))
+        ]
+        return group_codes, unique_key_arrays
+
+    # Fallback for higher-cardinality cases where dense-key composition would
+    # allocate too much memory.
     dtype = [(f"k{idx}", np.int64) for idx in range(len(key_arrays))]
     key_struct = np.empty(row_count, dtype=dtype)
-    for idx, arr in enumerate(key_arrays):
-        key_struct[f"k{idx}"] = np.asarray(arr, dtype=np.int64)
+    for idx, arr in enumerate(arrays):
+        key_struct[f"k{idx}"] = arr
 
     uniques, first_idx, inverse = np.unique(
         key_struct,
