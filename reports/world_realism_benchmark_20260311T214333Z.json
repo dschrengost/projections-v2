@@ -1,0 +1,10 @@
+{
+  "raw_rows": 4500000,
+  "read_seconds": 0.6620650490003754,
+  "uplift_seconds": 8.424241759996221,
+  "realism_seconds": 3.6573985639988678,
+  "total_seconds": 12.743705372995464,
+  "uplift_total_adjusted_players": 70,
+  "bad_pair_count": 16227,
+  "replaced_pair_count": 16227
+}

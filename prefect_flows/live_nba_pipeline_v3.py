@@ -33,6 +33,7 @@ from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from prefect import flow, get_run_logger, task
@@ -1763,6 +1764,7 @@ def _atomic_write_validated_parquet(
     path: Path,
     *,
     required_cols: tuple[str, ...] = (),
+    compression: str | None = "snappy",
 ) -> dict[str, Any]:
     def _is_retryable_validation_error(exc: Exception) -> bool:
         text = str(exc).lower()
@@ -1772,14 +1774,20 @@ def _atomic_write_validated_parquet(
             or "failed to open parquet for validation" in text
         )
 
-    max_attempts = 3
+    compression_schedule: list[str | None] = [compression]
+    if compression == "snappy":
+        # Snappy corruption has appeared intermittently on large world-matrix writes
+        # in long-lived worker processes. Fall back to safer codecs before failing.
+        compression_schedule.extend(["zstd", None])
+    max_attempts = max(1, len(compression_schedule))
     path.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(1, max_attempts + 1):
+        current_compression = compression_schedule[min(attempt - 1, len(compression_schedule) - 1)]
         tmp = path.with_suffix(
             f".tmp.{control_plane.canonical_run_id()}.{os.getpid()}.{attempt}.parquet"
         )
         try:
-            df.to_parquet(tmp, index=False)
+            df.to_parquet(tmp, index=False, compression=current_compression)
             validation = _stream_validate_parquet(
                 tmp,
                 expected_rows=int(len(df)),
@@ -1797,6 +1805,12 @@ def _atomic_write_validated_parquet(
                 pass
             if (not retryable) or is_last_attempt:
                 raise
+            if current_compression != compression_schedule[min(attempt, len(compression_schedule) - 1)]:
+                print(
+                    "[parquet-write] retrying with fallback compression "
+                    f"{compression_schedule[min(attempt, len(compression_schedule) - 1)]} "
+                    f"for path={path}"
+                )
             time.sleep(0.2 * attempt)
 
     # Unreachable, loop either returns on success or raises on terminal failure.
@@ -2787,8 +2801,6 @@ def _resample_extreme_game_worlds(
         }
 
     out = worlds_df.copy()
-    key_cols = ["game_id", "team_id", "player_id"]
-    pair_cols = ["world_idx", "game_id"]
     max_iter = max(0, int(max_passes))
     if max_iter == 0:
         return out, {"applied": False, "reason": "disabled_max_passes"}
@@ -2796,114 +2808,138 @@ def _resample_extreme_game_worlds(
     rng = np.random.default_rng(int(random_seed))
     pass_reports: list[dict[str, Any]] = []
     total_replaced = 0
+    target_games = (
+        np.asarray(sorted(target_game_ids), dtype=np.int64)
+        if target_game_ids
+        else None
+    )
+
+    world_idx_arr = (
+        pd.to_numeric(out["world_idx"], errors="coerce").fillna(-1).to_numpy(dtype=np.int64, copy=False)
+    )
+    game_id_arr = (
+        pd.to_numeric(out["game_id"], errors="coerce").fillna(-1).to_numpy(dtype=np.int64, copy=False)
+    )
+    team_id_arr = (
+        pd.to_numeric(out["team_id"], errors="coerce").fillna(-1).to_numpy(dtype=np.int64, copy=False)
+    )
+    player_id_arr = (
+        pd.to_numeric(out["player_id"], errors="coerce").fillna(-1).to_numpy(dtype=np.int64, copy=False)
+    )
+
+    pair_index = pd.MultiIndex.from_arrays(
+        [world_idx_arr, game_id_arr],
+        names=["world_idx", "game_id"],
+    )
+    pair_codes, pair_uniques = pd.factorize(pair_index, sort=False)
+    n_pairs = int(len(pair_uniques))
+    if n_pairs <= 0:
+        return out, {"applied": False, "reason": "no_pairs"}
+
+    pair_game_id = np.asarray(pair_uniques.get_level_values(1), dtype=np.int64)
+    pair_in_scope = (
+        np.isin(pair_game_id, target_games)
+        if target_games is not None
+        else np.ones(n_pairs, dtype=bool)
+    )
+
+    row_order = np.lexsort((player_id_arr, team_id_arr, world_idx_arr, game_id_arr))
+    sorted_pair_codes = pair_codes[row_order]
+    pair_starts = np.full(n_pairs, -1, dtype=np.int64)
+    pair_ends = np.full(n_pairs, -1, dtype=np.int64)
+    starts = np.flatnonzero(np.r_[True, sorted_pair_codes[1:] != sorted_pair_codes[:-1]])
+    ends = np.r_[starts[1:], len(sorted_pair_codes)]
+    pair_starts[sorted_pair_codes[starts]] = starts
+    pair_ends[sorted_pair_codes[starts]] = ends
+    team_sorted = team_id_arr[row_order]
+    player_sorted = player_id_arr[row_order]
+
+    game_codes, _ = pd.factorize(pair_game_id, sort=False)
+    game_pair_order = np.argsort(game_codes, kind="mergesort")
+    sorted_game_codes = game_codes[game_pair_order]
+    game_starts = np.flatnonzero(np.r_[True, sorted_game_codes[1:] != sorted_game_codes[:-1]])
+    game_ends = np.r_[game_starts[1:], len(sorted_game_codes)]
+    replace_cols = [c for c in out.columns if c != "world_idx"]
 
     for pass_idx in range(max_iter):
-        minutes = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0)
-        dk = pd.to_numeric(out["dk_fpts"], errors="coerce").fillna(0.0)
-        pts = pd.to_numeric(out["pts"], errors="coerce").fillna(0.0)
-        game_id = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
+        minutes = (
+            pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        )
+        dk = (
+            pd.to_numeric(out["dk_fpts"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        )
+        pts = (
+            pd.to_numeric(out["pts"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        )
 
         row_spike = (minutes < float(short_minutes_threshold)) & (
             dk > float(short_minutes_dk_threshold)
         )
-        if target_game_ids:
-            row_spike = row_spike & game_id.isin(sorted(target_game_ids))
+        if target_games is not None:
+            row_spike &= np.isin(game_id_arr, target_games)
 
         pair_short = (
-            out.loc[row_spike, pair_cols]
-            .drop_duplicates()
-            .assign(short_spike=True)
+            np.bincount(pair_codes, weights=row_spike.astype(np.int8), minlength=n_pairs) > 0
         )
+        pair_game_pts = np.bincount(pair_codes, weights=pts, minlength=n_pairs)
+        pair_hi = pair_in_scope & (pair_game_pts > float(game_pts_max))
+        pair_lo = pair_in_scope & (pair_game_pts < float(game_pts_min))
+        pair_bad = pair_short | pair_hi | pair_lo
 
-        game_pts = (
-            out.assign(_pts=pts)
-            .groupby(pair_cols, dropna=False, as_index=False)
-            .agg(game_pts=("_pts", "sum"))
-        )
-        if target_game_ids:
-            game_pts = game_pts.loc[
-                pd.to_numeric(game_pts["game_id"], errors="coerce")
-                .astype("Int64")
-                .isin(sorted(target_game_ids))
-            ].copy()
-        pair_hi = game_pts.loc[
-            game_pts["game_pts"] > float(game_pts_max), pair_cols
-        ].drop_duplicates().assign(game_hi=True)
-        pair_lo = game_pts.loc[
-            game_pts["game_pts"] < float(game_pts_min), pair_cols
-        ].drop_duplicates().assign(game_lo=True)
-
-        pair_flags = (
-            game_pts.loc[:, pair_cols]
-            .drop_duplicates()
-            .merge(pair_short, on=pair_cols, how="left")
-            .merge(pair_hi, on=pair_cols, how="left")
-            .merge(pair_lo, on=pair_cols, how="left")
-        )
-        for flag_col in ("short_spike", "game_hi", "game_lo"):
-            if flag_col not in pair_flags.columns:
-                pair_flags[flag_col] = False
-            else:
-                pair_flags[flag_col] = pair_flags[flag_col].eq(True)
-        pair_flags["is_bad"] = (
-            pair_flags["short_spike"] | pair_flags["game_hi"] | pair_flags["game_lo"]
-        )
-
-        bad_pairs = pair_flags.loc[pair_flags["is_bad"], pair_cols].copy()
-        if bad_pairs.empty:
+        bad_pairs = np.flatnonzero(pair_bad)
+        if bad_pairs.size == 0:
             break
 
-        good_by_game: dict[int, list[int]] = {}
-        for gid, grp in pair_flags.groupby("game_id", dropna=False):
-            gid_i = int(gid)
-            goods = grp.loc[~grp["is_bad"], "world_idx"].astype(int).tolist()
-            good_by_game[gid_i] = goods
-
-        replaced_this_pass = 0
+        replacements: list[tuple[int, int, int, int]] = []
         skipped_no_donor = 0
         skipped_key_mismatch = 0
-        for row in bad_pairs.sort_values(pair_cols).itertuples(index=False):
-            target_world = int(row.world_idx)
-            gid = int(row.game_id)
-            donors = good_by_game.get(gid, [])
-            if not donors:
-                skipped_no_donor += 1
+        for game_start, game_end in zip(game_starts, game_ends, strict=False):
+            pair_idx = game_pair_order[game_start:game_end]
+            bad_pair_idx = pair_idx[pair_bad[pair_idx]]
+            if bad_pair_idx.size == 0:
                 continue
-            donor_world = int(rng.choice(donors))
-            target_rows = out.loc[
-                (pd.to_numeric(out["world_idx"], errors="coerce").astype("Int64") == target_world)
-                & (pd.to_numeric(out["game_id"], errors="coerce").astype("Int64") == gid)
-            ].copy()
-            donor_rows = out.loc[
-                (pd.to_numeric(out["world_idx"], errors="coerce").astype("Int64") == donor_world)
-                & (pd.to_numeric(out["game_id"], errors="coerce").astype("Int64") == gid)
-            ].copy()
-            if target_rows.empty or donor_rows.empty:
-                skipped_no_donor += 1
+            good_pair_idx = pair_idx[~pair_bad[pair_idx]]
+            if good_pair_idx.size == 0:
+                skipped_no_donor += int(bad_pair_idx.size)
                 continue
-            target_rows = target_rows.sort_values(key_cols)
-            donor_rows = donor_rows.sort_values(key_cols)
-            if (
-                len(target_rows) != len(donor_rows)
-                or not target_rows[key_cols].reset_index(drop=True).equals(
-                    donor_rows[key_cols].reset_index(drop=True)
-                )
-            ):
-                skipped_key_mismatch += 1
-                continue
-            replace_cols = [c for c in out.columns if c != "world_idx"]
-            target_idx = target_rows.index.to_numpy()
-            for col in replace_cols:
-                out.loc[target_idx, col] = donor_rows[col].to_numpy()
-            replaced_this_pass += 1
+            donor_pair_idx = rng.choice(good_pair_idx, size=bad_pair_idx.size, replace=True)
+            for target_pair, donor_pair in zip(bad_pair_idx, donor_pair_idx, strict=False):
+                target_start = int(pair_starts[target_pair])
+                target_end = int(pair_ends[target_pair])
+                donor_start = int(pair_starts[int(donor_pair)])
+                donor_end = int(pair_ends[int(donor_pair)])
+                if target_start < 0 or donor_start < 0:
+                    skipped_no_donor += 1
+                    continue
+                if (target_end - target_start) != (donor_end - donor_start):
+                    skipped_key_mismatch += 1
+                    continue
+                if not np.array_equal(
+                    team_sorted[target_start:target_end],
+                    team_sorted[donor_start:donor_end],
+                ) or not np.array_equal(
+                    player_sorted[target_start:target_end],
+                    player_sorted[donor_start:donor_end],
+                ):
+                    skipped_key_mismatch += 1
+                    continue
+                replacements.append((target_start, target_end, donor_start, donor_end))
+
+        for col in replace_cols:
+            values = out[col].to_numpy(copy=True)
+            for target_start, target_end, donor_start, donor_end in replacements:
+                values[row_order[target_start:target_end]] = values[row_order[donor_start:donor_end]]
+            out[col] = values
+
+        replaced_this_pass = len(replacements)
 
         pass_reports.append(
             {
                 "pass_idx": int(pass_idx + 1),
-                "bad_pair_count": int(len(bad_pairs)),
-                "bad_short_spike_count": int(pair_flags["short_spike"].sum()),
-                "bad_game_hi_count": int(pair_flags["game_hi"].sum()),
-                "bad_game_lo_count": int(pair_flags["game_lo"].sum()),
+                "bad_pair_count": int(bad_pairs.size),
+                "bad_short_spike_count": int(pair_short.sum()),
+                "bad_game_hi_count": int(pair_hi.sum()),
+                "bad_game_lo_count": int(pair_lo.sum()),
                 "replaced_pair_count": int(replaced_this_pass),
                 "skipped_no_donor": int(skipped_no_donor),
                 "skipped_key_mismatch": int(skipped_key_mismatch),
@@ -4967,54 +5003,83 @@ def generate_worlds_gtv2_live_task(
                     game_features_path,
                     required_cols=("game_id", "team_id", "player_id"),
                 )
-                triton_request_count += 1
-                try:
-                    response = infer_json_action(
-                        cfg=endpoint_cfg,
-                        request_payload={
-                            "action": "worlds",
-                            "game_date": str(game_date),
-                            "features_path": str(game_features_path),
-                            "out_path": str(game_worlds_path),
-                            "bundle_dir": str(bundle_dir),
-                            "random_seed": int(game_seed),
-                            "device": str(gtv2_device or ""),
-                            "num_worlds": int(sim_worlds),
-                            "world_chunk_size": int(world_chunk_size),
-                            "active_temperature": float(active_temperature),
-                            "strict_world_contracts": bool(strict_world_contracts),
-                            "flow_scale_clip_override": (
-                                float(flow_scale_clip_override)
-                                if flow_scale_clip_override is not None
-                                else None
-                            ),
-                            "make_model_mode": str(make_model_mode),
-                            "make_model_use_learned_efficiency": bool(
-                                make_model_use_learned_efficiency
-                            ),
-                        },
-                    )
-                except TritonInferenceError as exc:
+                request_payload = {
+                    "action": "worlds",
+                    "game_date": str(game_date),
+                    "features_path": str(game_features_path),
+                    "out_path": str(game_worlds_path),
+                    "bundle_dir": str(bundle_dir),
+                    "random_seed": int(game_seed),
+                    "device": str(gtv2_device or ""),
+                    "num_worlds": int(sim_worlds),
+                    "world_chunk_size": int(world_chunk_size),
+                    "active_temperature": float(active_temperature),
+                    "strict_world_contracts": bool(strict_world_contracts),
+                    "flow_scale_clip_override": (
+                        float(flow_scale_clip_override)
+                        if flow_scale_clip_override is not None
+                        else None
+                    ),
+                    "make_model_mode": str(make_model_mode),
+                    "make_model_use_learned_efficiency": bool(
+                        make_model_use_learned_efficiency
+                    ),
+                }
+                response: dict[str, Any] | None = None
+                game_worlds_df: pd.DataFrame | None = None
+                read_error: Exception | None = None
+                max_world_attempts = 3
+                for world_attempt in range(1, max_world_attempts + 1):
+                    triton_request_count += 1
+                    try:
+                        response = infer_json_action(
+                            cfg=endpoint_cfg,
+                            request_payload=request_payload,
+                        )
+                    except TritonInferenceError as exc:
+                        raise RuntimeError(
+                            f"triton worlds request failed for game_id={int(game_id_value)}: {exc}"
+                        ) from exc
+                    if not bool(response.get("ok")):
+                        raise RuntimeError(
+                            "triton worlds response indicated failure for "
+                            f"game_id={int(game_id_value)}: {response}"
+                        )
+                    if not game_worlds_path.exists():
+                        raise RuntimeError(
+                            "triton worlds response ok but output parquet missing for "
+                            f"game_id={int(game_id_value)}: {game_worlds_path}"
+                        )
+                    try:
+                        game_worlds_df = pd.read_parquet(game_worlds_path)
+                        read_error = None
+                        break
+                    except (OSError, pa.ArrowInvalid) as exc:
+                        read_error = exc
+                        if world_attempt >= max_world_attempts:
+                            break
+                        logger.warning(
+                            "Retrying triton worlds generation after unreadable parquet: "
+                            "game_id=%s attempt=%s/%s path=%s error=%s",
+                            int(game_id_value),
+                            world_attempt,
+                            max_world_attempts,
+                            game_worlds_path,
+                            exc,
+                        )
+                        game_worlds_path.unlink(missing_ok=True)
+                        time.sleep(0.2)
+                if game_worlds_df is None:
                     raise RuntimeError(
-                        f"triton worlds request failed for game_id={int(game_id_value)}: {exc}"
-                    ) from exc
-                if not bool(response.get("ok")):
-                    raise RuntimeError(
-                        "triton worlds response indicated failure for "
-                        f"game_id={int(game_id_value)}: {response}"
-                    )
-                if not game_worlds_path.exists():
-                    raise RuntimeError(
-                        "triton worlds response ok but output parquet missing for "
-                        f"game_id={int(game_id_value)}: {game_worlds_path}"
-                    )
-                game_worlds_df = pd.read_parquet(game_worlds_path)
+                        "triton worlds parquet unreadable after retries for "
+                        f"game_id={int(game_id_value)} path={game_worlds_path}: {read_error}"
+                    ) from read_error
                 if game_worlds_df.empty:
                     raise RuntimeError(
                         f"triton worlds generation produced zero rows for game_id={int(game_id_value)}"
                     )
                 world_frames.append(game_worlds_df)
-                raw_checks = response.get("contract_checks")
+                raw_checks = (response or {}).get("contract_checks")
                 if isinstance(raw_checks, dict):
                     for key, value in raw_checks.items():
                         try:
@@ -5477,6 +5542,100 @@ def finalize_projections_live_task(
     return out_dir
 
 
+def _postprocess_target_world_slice_for_game_scoped_merge(
+    *,
+    worlds_df: pd.DataFrame,
+    features_df: pd.DataFrame,
+    target_game_ids: list[int],
+    props_uplift_scope: str,
+    props_uplift_confidence_weighted: bool,
+    apply_world_realism_controls: bool,
+    world_realism_low_minutes_tail_damping_enabled: bool,
+    world_realism_low_minutes_threshold: float,
+    world_realism_low_minutes_min_scale: float,
+    world_realism_outlier_resample_enabled: bool,
+    world_realism_outlier_resample_max_passes: int,
+    random_seed: int,
+) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Post-process only target games when materializing game-scoped merges."""
+    target_ids = _normalize_game_ids(target_game_ids)
+    scope_report = {
+        "target_game_ids": target_ids,
+        "target_row_count_before": 0,
+        "target_row_count_after": 0,
+    }
+    if worlds_df.empty:
+        base = {"applied": False, "reason": "empty_worlds", **scope_report}
+        return worlds_df, dict(base), dict(base), dict(base)
+    if not target_ids:
+        base = {"applied": False, "reason": "no_target_games", **scope_report}
+        return worlds_df, dict(base), dict(base), dict(base)
+    if "game_id" not in worlds_df.columns:
+        base = {
+            "applied": False,
+            "reason": "missing_world_game_id",
+            **scope_report,
+        }
+        return worlds_df, dict(base), dict(base), dict(base)
+
+    world_game_ids = pd.to_numeric(worlds_df["game_id"], errors="coerce").astype("Int64")
+    target_mask = world_game_ids.isin(target_ids).to_numpy(dtype=bool)
+    target_rows_before = int(np.count_nonzero(target_mask))
+    scope_report["target_row_count_before"] = target_rows_before
+    if target_rows_before <= 0:
+        base = {"applied": False, "reason": "no_target_world_rows", **scope_report}
+        return worlds_df, dict(base), dict(base), dict(base)
+
+    untouched_worlds = worlds_df.loc[~target_mask].copy()
+    target_worlds = worlds_df.loc[target_mask].reset_index(drop=True).copy()
+    target_features = _filter_to_target_games(features_df, target_ids)
+
+    target_worlds, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
+        target_worlds,
+        features_df=target_features,
+        scope=str(props_uplift_scope),
+        confidence_weighted=bool(props_uplift_confidence_weighted),
+    )
+    target_worlds, world_realism_report = _apply_world_realism_controls_to_worlds(
+        target_worlds,
+        enabled=bool(apply_world_realism_controls),
+        random_seed=int(random_seed),
+        low_minutes_tail_damping_enabled=bool(
+            world_realism_low_minutes_tail_damping_enabled
+        ),
+        low_minutes_tail_minutes_threshold=float(world_realism_low_minutes_threshold),
+        low_minutes_tail_min_scale=float(world_realism_low_minutes_min_scale),
+        outlier_resample_enabled=bool(world_realism_outlier_resample_enabled),
+        outlier_resample_max_passes=int(world_realism_outlier_resample_max_passes),
+        target_game_ids=None,
+    )
+    target_worlds, world_contract_repair_report = _repair_world_frame_contract_fields(
+        target_worlds
+    )
+    scope_report["target_row_count_after"] = int(len(target_worlds))
+
+    merged_worlds = pd.concat(
+        [untouched_worlds, target_worlds], ignore_index=True, sort=False
+    )
+    merged_worlds = _sort_for_stable_write(merged_worlds)
+
+    def _annotate_scope(report: dict[str, Any]) -> dict[str, Any]:
+        out_report = dict(report or {})
+        out_report["target_game_ids"] = target_ids
+        out_report["target_row_count_before"] = int(
+            scope_report["target_row_count_before"]
+        )
+        out_report["target_row_count_after"] = int(scope_report["target_row_count_after"])
+        return out_report
+
+    return (
+        merged_worlds,
+        _annotate_scope(props_uplift_report),
+        _annotate_scope(world_realism_report),
+        _annotate_scope(world_contract_repair_report),
+    )
+
+
 @task(name="materialize-unified-run-artifacts", retries=0)
 def materialize_unified_run_artifacts_task(
     *,
@@ -5552,27 +5711,25 @@ def materialize_unified_run_artifacts_task(
         key_cols=("game_id", "team_id", "player_id"),
         label="merged worlds",
     )
-    merged_worlds, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
-        merged_worlds,
-        features_df=merged_features,
-        scope=str(props_uplift_scope),
-        confidence_weighted=bool(props_uplift_confidence_weighted),
-    )
-    merged_worlds, world_realism_report = _apply_world_realism_controls_to_worlds(
-        merged_worlds,
-        enabled=bool(apply_world_realism_controls),
-        random_seed=int(random_seed),
-        low_minutes_tail_damping_enabled=bool(
-            world_realism_low_minutes_tail_damping_enabled
-        ),
-        low_minutes_tail_minutes_threshold=float(world_realism_low_minutes_threshold),
-        low_minutes_tail_min_scale=float(world_realism_low_minutes_min_scale),
-        outlier_resample_enabled=bool(world_realism_outlier_resample_enabled),
-        outlier_resample_max_passes=int(world_realism_outlier_resample_max_passes),
-        target_game_ids=set(target_ids),
-    )
-    merged_worlds, world_contract_repair_report = _repair_world_frame_contract_fields(
-        merged_worlds
+    merged_worlds, props_uplift_report, world_realism_report, world_contract_repair_report = (
+        _postprocess_target_world_slice_for_game_scoped_merge(
+            worlds_df=merged_worlds,
+            features_df=merged_features,
+            target_game_ids=target_ids,
+            props_uplift_scope=str(props_uplift_scope),
+            props_uplift_confidence_weighted=bool(props_uplift_confidence_weighted),
+            apply_world_realism_controls=bool(apply_world_realism_controls),
+            world_realism_low_minutes_tail_damping_enabled=bool(
+                world_realism_low_minutes_tail_damping_enabled
+            ),
+            world_realism_low_minutes_threshold=float(world_realism_low_minutes_threshold),
+            world_realism_low_minutes_min_scale=float(world_realism_low_minutes_min_scale),
+            world_realism_outlier_resample_enabled=bool(world_realism_outlier_resample_enabled),
+            world_realism_outlier_resample_max_passes=int(
+                world_realism_outlier_resample_max_passes
+            ),
+            random_seed=int(random_seed),
+        )
     )
     _atomic_write_validated_parquet(
         merged_worlds,

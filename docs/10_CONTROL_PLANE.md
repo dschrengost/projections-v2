@@ -64,7 +64,7 @@ Rules:
 
 | Flow | Schedule | Purpose |
 |------|----------|---------|
-| `nba-live-pipeline` | Every 15 min from 8-10 AM ET, every 5 min from 11 AM-10:30 PM ET | Canonical v3 prediction pipeline |
+| `nba-live-pipeline` | Every 15 min from 8-10 AM ET, every 15 min from 11 AM-10:30 PM ET | Canonical v3 prediction pipeline |
 | `nba-live-pipeline-legacy` | Manual only (no schedule) | Rollback deployment (pre-v3 flow) |
 | `boxscores-etl` | 3:30 AM daily | Scrape previous-day boxscores to bronze + legacy labels |
 | `minutes-labels-refresh` | 3:40 AM daily | Materialize `gold/labels_minutes_v1` from boxscore raw partitions |
@@ -179,6 +179,21 @@ For any preflight/postflight hard failure, capture these artifacts in the incide
 ## Systemd Services
 
 Services live in `infra/systemd/` and are installed to `~/.config/systemd/user/`.
+
+### Prefect Hardening Baseline
+
+Production stability assumes:
+
+1. Prefect metadata DB is Postgres (`prefect-postgres` on `127.0.0.1:55432`), not default SQLite.
+2. Server runtime resolves to PROD checkout and Python 3.11 (`/home/daniel/prod/projections-v2/.venv311`).
+3. Worker concurrency remains `1` with deployment collision strategy `CANCEL_NEW`.
+4. Live deployment schedule runs every 15 minutes (not 5 minutes).
+
+Bootstrap command:
+
+```bash
+./scripts/deploy/harden_prefect_runtime.sh
+```
 
 ### Core Services
 

@@ -24,6 +24,11 @@ import pandas as pd
 import torch
 
 from projections import paths
+from projections.pipeline.gtv2_inference_runtime import (
+    load_gtv2_model,
+    resolve_torch_device,
+    score_gtv2_features_df,
+)
 
 PYTHON_EXE = sys.executable
 
@@ -349,6 +354,107 @@ def _resolve_dataset_dir(value: str | None) -> Path:
     return candidates[-1].resolve()
 
 
+def _load_snapshot_features(path: Path) -> pd.DataFrame:
+    df = pd.read_parquet(path)
+    if "game_date" not in df.columns:
+        try:
+            inferred_game_date = str(path.parents[1].name)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            raise ValueError(f"snapshot features missing game_date: {path}") from exc
+        df["game_date"] = inferred_game_date
+
+    for col in ("game_id", "team_id", "player_id"):
+        if col not in df.columns:
+            raise ValueError(f"snapshot features missing required column: {col}")
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+        if df[col].isna().any():
+            raise ValueError(f"snapshot features has invalid {col} rows")
+        df[col] = df[col].astype(int)
+    df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce").dt.date.astype(str)
+    return df
+
+
+def _deterministic_snapshot_metrics(
+    *,
+    bundle_dir: Path,
+    snapshot_features_df: pd.DataFrame,
+    device: torch.device,
+) -> dict[str, float]:
+    config, model = load_gtv2_model(bundle_dir, device=device)
+    game_date = str(pd.to_datetime(snapshot_features_df["game_date"], errors="coerce").dt.date.astype(str).iloc[0])
+    scores = score_gtv2_features_df(
+        features_df=snapshot_features_df,
+        game_date=game_date,
+        config=config,
+        model=model,
+        device=device,
+        batch_size=4,
+    )
+    meta_cols = [
+        "game_date",
+        "game_id",
+        "team_id",
+        "player_id",
+        "an_pts_line",
+        "an_implied_minutes",
+    ]
+    use_meta_cols = [c for c in meta_cols if c in snapshot_features_df.columns]
+    if use_meta_cols:
+        meta = snapshot_features_df.loc[:, use_meta_cols].drop_duplicates(
+            subset=["game_date", "game_id", "team_id", "player_id"]
+        )
+        score_meta = scores.merge(
+            meta,
+            on=["game_date", "game_id", "team_id", "player_id"],
+            how="left",
+        )
+    else:
+        score_meta = scores
+
+    star_mask = pd.Series(False, index=score_meta.index)
+    if "an_pts_line" in score_meta.columns:
+        star_mask |= pd.to_numeric(score_meta["an_pts_line"], errors="coerce").fillna(0.0).ge(20.0)
+    if "an_implied_minutes" in score_meta.columns:
+        star_mask |= pd.to_numeric(score_meta["an_implied_minutes"], errors="coerce").fillna(0.0).ge(30.0)
+
+    if "minutes_deterministic" not in score_meta.columns or "active_prob_proxy" not in score_meta.columns:
+        raise RuntimeError("score_gtv2_features_df missing minutes_deterministic/active_prob_proxy columns")
+    det_minutes = pd.to_numeric(score_meta["minutes_deterministic"], errors="coerce")
+    det_active_prob = pd.to_numeric(score_meta["active_prob_proxy"], errors="coerce")
+    return {
+        "det_minutes_mean": float(det_minutes.mean()),
+        "det_active_prob_mean": float(det_active_prob.mean()),
+        "det_prop_star_minutes_mean": float(det_minutes.loc[star_mask].mean()) if bool(star_mask.any()) else float("nan"),
+        "det_n_players": float(len(score_meta)),
+        "det_n_prop_stars": float(int(star_mask.sum())),
+    }
+
+
+def _meets_snapshot_guard(
+    *,
+    candidate: dict[str, float],
+    baseline: dict[str, float],
+    max_det_active_prob_delta: float,
+    min_det_prop_star_minutes_delta: float,
+) -> tuple[bool, list[str], dict[str, float]]:
+    delta_active_prob = float(candidate.get("det_active_prob_mean", float("nan"))) - float(
+        baseline.get("det_active_prob_mean", float("nan"))
+    )
+    delta_star_minutes = float(candidate.get("det_prop_star_minutes_mean", float("nan"))) - float(
+        baseline.get("det_prop_star_minutes_mean", float("nan"))
+    )
+    deltas = {
+        "delta_det_active_prob_mean": float(delta_active_prob),
+        "delta_det_prop_star_minutes_mean": float(delta_star_minutes),
+    }
+    failures: list[str] = []
+    if not math.isfinite(delta_active_prob) or delta_active_prob > float(max_det_active_prob_delta):
+        failures.append(f"delta_det_active_prob_mean>{float(max_det_active_prob_delta):.6f}")
+    if not math.isfinite(delta_star_minutes) or delta_star_minutes < float(min_det_prop_star_minutes_delta):
+        failures.append(f"delta_det_prop_star_minutes_mean<{float(min_det_prop_star_minutes_delta):.6f}")
+    return len(failures) == 0, failures, deltas
+
+
 def _load_eval_metrics(path: Path) -> EvalMetrics:
     payload = json.loads(path.read_text(encoding="utf-8"))
     parity = payload.get("lineup_state_parity", {}) or {}
@@ -652,6 +758,7 @@ def _build_eval_cmd(
     params: dict[str, Any],
 ) -> list[str]:
     eval_batch_size = int(params.get("batch_size", int(args.batch_size)))
+    eval_device = str(args.eval_device or args.device)
     eval_cmd = [
         PYTHON_EXE,
         "-m",
@@ -667,7 +774,7 @@ def _build_eval_cmd(
         "--num-workers",
         str(int(args.num_workers)),
         "--device",
-        str(args.device),
+        str(eval_device),
         "--active-threshold",
         "4.0",
         "--out-json",
@@ -807,6 +914,7 @@ def _run_trial_once(
     step_prefix: str,
     require_world_check: bool,
     dry_run: bool,
+    snapshot_guard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     run_dir = run_root / "run"
     eval_json = run_root / f"eval_slices_{int(args.eval_val_days)}d.json"
@@ -863,7 +971,30 @@ def _run_trial_once(
     _print_cmd(f"{step_prefix} eval", eval_cmd)
     eval_proc = _run(eval_cmd, log_path=run_root / "eval.log")
     result["eval_rc"] = int(eval_proc.returncode)
-    if eval_proc.returncode != 0 or not eval_json.exists():
+    result["eval_device"] = str(args.eval_device or args.device)
+    if (
+        eval_proc.returncode != 0
+        and bool(args.eval_retry_cpu_on_failure)
+        and str(args.eval_device or args.device).startswith("cuda")
+    ):
+        fallback_eval_json = run_root / f"eval_slices_{int(args.eval_val_days)}d_cpu_fallback.json"
+        fallback_cmd = _build_eval_cmd(
+            args=argparse.Namespace(**{**vars(args), "eval_device": "cpu"}),
+            dataset_dir=dataset_dir,
+            run_dir=run_dir,
+            eval_json=fallback_eval_json,
+            params=params,
+        )
+        _print_cmd(f"{step_prefix} eval-cpu-fallback", fallback_cmd)
+        fallback_proc = _run(fallback_cmd, log_path=run_root / "eval_cpu_fallback.log")
+        result["eval_cpu_fallback_rc"] = int(fallback_proc.returncode)
+        result["eval_cpu_fallback_json"] = str(fallback_eval_json)
+        if fallback_proc.returncode == 0 and fallback_eval_json.exists():
+            eval_json = fallback_eval_json
+            result["eval_json"] = str(eval_json)
+            result["eval_device"] = "cpu"
+            result["eval_rc"] = 0
+    if int(result.get("eval_rc", eval_proc.returncode)) != 0 or not eval_json.exists():
         result["status"] = "eval_failed"
         return result
 
@@ -940,11 +1071,31 @@ def _run_trial_once(
         result["realism_gate_pass"] = bool(realism_ok)
         result["realism_gate_failures"] = list(realism_failures)
 
+    snapshot_ok = True
+    if snapshot_guard is not None:
+        snapshot_metrics = _deterministic_snapshot_metrics(
+            bundle_dir=run_dir,
+            snapshot_features_df=snapshot_guard["features_df"],
+            device=snapshot_guard["device"],
+        )
+        snapshot_ok, snapshot_failures, snapshot_deltas = _meets_snapshot_guard(
+            candidate=snapshot_metrics,
+            baseline=snapshot_guard["baseline_metrics"],
+            max_det_active_prob_delta=float(snapshot_guard["max_det_active_prob_delta"]),
+            min_det_prop_star_minutes_delta=float(snapshot_guard["min_det_prop_star_minutes_delta"]),
+        )
+        result["snapshot_metrics"] = snapshot_metrics
+        result["snapshot_deltas_vs_baseline"] = snapshot_deltas
+        result["snapshot_guard_pass"] = bool(snapshot_ok)
+        result["snapshot_guard_failures"] = list(snapshot_failures)
+    else:
+        result["snapshot_guard_pass"] = True
+
     result["metrics"] = metrics.__dict__
     result["deltas_vs_baseline"] = deltas
     result["composite_score"] = float(score)
     result["single_run_gate_pass"] = bool(single_gate_pass)
-    result["promotion_gate_pass"] = bool(single_gate_pass and world_ok and realism_ok)
+    result["promotion_gate_pass"] = bool(single_gate_pass and world_ok and realism_ok and snapshot_ok)
     result["status"] = "ok"
     return result
 
@@ -996,6 +1147,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--eval-device", type=str, default=None)
+    parser.add_argument("--eval-retry-cpu-on-failure", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--phase2-anchor-start-weight", type=float, default=1.0)
     parser.add_argument("--w-minutes", type=float, default=1.0)
@@ -1071,6 +1224,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--multi-seed-max-mean-delta-minutes-gap-abs", type=float, default=0.05)
     parser.add_argument("--multi-seed-min-mean-delta-active-acc-lineup1", type=float, default=-0.005)
     parser.add_argument("--auto-promote", action="store_true")
+    parser.add_argument(
+        "--snapshot-features-parquet",
+        type=str,
+        default=None,
+        help="Optional live snapshot features parquet for deterministic same-snapshot guard checks.",
+    )
+    parser.add_argument(
+        "--snapshot-baseline-bundle-dir",
+        type=str,
+        default=None,
+        help="Baseline bundle/run dir used as the deterministic same-snapshot reference.",
+    )
+    parser.add_argument(
+        "--snapshot-max-det-active-prob-delta",
+        type=float,
+        default=0.02,
+        help="Maximum allowed candidate - baseline delta for det_active_prob_mean.",
+    )
+    parser.add_argument(
+        "--snapshot-min-det-prop-star-minutes-delta",
+        type=float,
+        default=-0.50,
+        help="Minimum allowed candidate - baseline delta for det_prop_star_minutes_mean.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -1096,6 +1273,43 @@ def main() -> None:
     baseline = _load_eval_metrics(baseline_eval_path)
     if not _is_finite_eval(baseline, require_active_acc=bool(str(args.promotion_gate_mode) == "prod_like")):
         raise ValueError("baseline eval has non-finite metrics")
+
+    snapshot_guard: dict[str, Any] | None = None
+    if args.snapshot_features_parquet or args.snapshot_baseline_bundle_dir:
+        if not args.snapshot_features_parquet or not args.snapshot_baseline_bundle_dir:
+            raise ValueError(
+                "--snapshot-features-parquet and --snapshot-baseline-bundle-dir must be provided together"
+            )
+        snapshot_features_path = Path(args.snapshot_features_parquet).expanduser().resolve()
+        if not snapshot_features_path.exists():
+            raise FileNotFoundError(f"snapshot features parquet not found: {snapshot_features_path}")
+        snapshot_baseline_dir = Path(args.snapshot_baseline_bundle_dir).expanduser().resolve()
+        if not snapshot_baseline_dir.exists():
+            raise FileNotFoundError(f"snapshot baseline bundle dir not found: {snapshot_baseline_dir}")
+        snapshot_features_df = _load_snapshot_features(snapshot_features_path)
+        snapshot_device = resolve_torch_device(str(args.eval_device or args.device))
+        snapshot_baseline_metrics = _deterministic_snapshot_metrics(
+            bundle_dir=snapshot_baseline_dir,
+            snapshot_features_df=snapshot_features_df,
+            device=snapshot_device,
+        )
+        snapshot_guard = {
+            "features_path": str(snapshot_features_path),
+            "baseline_bundle_dir": str(snapshot_baseline_dir),
+            "features_df": snapshot_features_df,
+            "device": snapshot_device,
+            "baseline_metrics": snapshot_baseline_metrics,
+            "max_det_active_prob_delta": float(args.snapshot_max_det_active_prob_delta),
+            "min_det_prop_star_minutes_delta": float(args.snapshot_min_det_prop_star_minutes_delta),
+        }
+        print(
+            (
+                "[snapshot_guard] enabled "
+                f"det_active_prob_mean_baseline={snapshot_baseline_metrics['det_active_prob_mean']:.6f} "
+                f"det_prop_star_minutes_mean_baseline={snapshot_baseline_metrics['det_prop_star_minutes_mean']:.6f}"
+            ),
+            flush=True,
+        )
 
     root_default = paths.get_data_root() / "training" / "runs" / f"game_transformer_v2_phase2_sweep_{_utc_now_compact()}"
     sweep_root = Path(args.sweep_root).expanduser().resolve() if args.sweep_root else root_default
@@ -1183,6 +1397,14 @@ def main() -> None:
             "max_mean_delta_minutes_gap_abs": float(args.multi_seed_max_mean_delta_minutes_gap_abs),
             "min_mean_delta_active_acc_lineup1": float(args.multi_seed_min_mean_delta_active_acc_lineup1),
         },
+        "snapshot_guard": {
+            "enabled": bool(snapshot_guard is not None),
+            "features_path": None if snapshot_guard is None else str(snapshot_guard["features_path"]),
+            "baseline_bundle_dir": None if snapshot_guard is None else str(snapshot_guard["baseline_bundle_dir"]),
+            "max_det_active_prob_delta": float(args.snapshot_max_det_active_prob_delta),
+            "min_det_prop_star_minutes_delta": float(args.snapshot_min_det_prop_star_minutes_delta),
+            "baseline_metrics": None if snapshot_guard is None else snapshot_guard["baseline_metrics"],
+        },
         "trials": [{"name": t.name, "params": t.params} for t in trials],
     }
     (sweep_root / "sweep_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -1203,6 +1425,7 @@ def main() -> None:
             step_prefix=f"[phase2_sweep] trial {idx}/{len(trials)} {trial.name}",
             require_world_check=bool(require_world_check_all and not args.skip_world_contract_check),
             dry_run=bool(args.dry_run),
+            snapshot_guard=snapshot_guard,
         )
         trial_result["trial_index"] = idx
         results.append(trial_result)
@@ -1221,6 +1444,7 @@ def main() -> None:
                 "single_run_gate_pass": bool(r.get("single_run_gate_pass", False)),
                 "world_contract_pass": bool(r.get("world_contract_pass", False)),
                 "realism_gate_pass": bool(r.get("realism_gate_pass", False)) if args.realism_gate else True,
+                "snapshot_guard_pass": bool(r.get("snapshot_guard_pass", True)),
                 "promotion_gate_pass": bool(r.get("promotion_gate_pass", False)),
                 "minutes_mae_lineup0": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup0")),
                 "minutes_mae_lineup1": _float_or_nan((r.get("metrics", {}) or {}).get("minutes_mae_lineup1")),
@@ -1234,6 +1458,12 @@ def main() -> None:
                 "delta_active_acc_lineup0": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_active_acc_lineup0")),
                 "delta_active_acc_lineup1": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_active_acc_lineup1")),
                 "delta_active_count_mae": _float_or_nan((r.get("deltas_vs_baseline", {}) or {}).get("delta_active_count_mae")),
+                "delta_det_active_prob_mean": _float_or_nan(
+                    (r.get("snapshot_deltas_vs_baseline", {}) or {}).get("delta_det_active_prob_mean")
+                ),
+                "delta_det_prop_star_minutes_mean": _float_or_nan(
+                    (r.get("snapshot_deltas_vs_baseline", {}) or {}).get("delta_det_prop_star_minutes_mean")
+                ),
                 "rollback_triggered": bool(r.get("rollback_triggered", False)),
                 "run_dir": str(r.get("run_dir", "")),
                 "eval_json": str(r.get("eval_json", "")),
@@ -1280,6 +1510,7 @@ def main() -> None:
                     step_prefix=f"[phase2_sweep][multiseed] {trial_name} seed={int(seed)}",
                     require_world_check=bool(not args.skip_world_contract_check),
                     dry_run=False,
+                    snapshot_guard=snapshot_guard,
                 )
                 seed_rows.append(seed_row)
 
@@ -1414,10 +1645,12 @@ def main() -> None:
         "num_trials": int(len(trials)),
         "num_completed": int(len([r for r in results if r.get("status") == "ok"])),
         "num_promotion_pass": int(len([r for r in results if bool(r.get("promotion_gate_pass"))])),
+        "num_snapshot_guard_pass": int(len([r for r in results if bool(r.get("snapshot_guard_pass", True))])),
         "num_realism_pass": int(len([r for r in results if bool(r.get("realism_gate_pass"))]))
         if bool(args.realism_gate)
         else int(len([r for r in results if r.get("status") == "ok"])),
         "realism_gate_enabled": bool(args.realism_gate),
+        "snapshot_guard_enabled": bool(snapshot_guard is not None),
         "world_check_all_candidates": bool(require_world_check_all and not args.skip_world_contract_check),
         "multi_seed": {
             "enabled": bool(multi_seed_enabled),

@@ -1,0 +1,526 @@
+{
+  "changed_player_count_raw_to_uplift": 168,
+  "concentration_means": {
+    "final_top1": 0.19740967015791744,
+    "final_top3": 0.476611153123673,
+    "final_top5": 0.6911765027062232,
+    "raw_top1": 0.16926861090522838,
+    "raw_top3": 0.44893444551447614,
+    "raw_top5": 0.6728800576239186,
+    "uplift_top1": 0.19695577429098268,
+    "uplift_top3": 0.47551708868380893,
+    "uplift_top5": 0.6895693361509662
+  },
+  "phase_market": {
+    "after_realism": {
+      "spread_bias_vs_vegas": -1.9008789396543584,
+      "spread_mae_vs_vegas": 2.8355265053845113,
+      "total_bias_vs_vegas": 6.339918998532942,
+      "total_mae_vs_vegas": 6.759655227466287
+    },
+    "after_repair": {
+      "spread_bias_vs_vegas": -1.9008789396543584,
+      "spread_mae_vs_vegas": 2.8355265053845113,
+      "total_bias_vs_vegas": 6.339918998532942,
+      "total_mae_vs_vegas": 6.759655227466287
+    },
+    "after_uplift": {
+      "spread_bias_vs_vegas": -2.1547282033967954,
+      "spread_mae_vs_vegas": 2.900123942704296,
+      "total_bias_vs_vegas": 6.889108118723722,
+      "total_mae_vs_vegas": 7.069813178355062
+    },
+    "final_saved": {
+      "spread_bias_vs_vegas": -1.9008789396543584,
+      "spread_mae_vs_vegas": 2.8355265053845113,
+      "total_bias_vs_vegas": 6.339918998532942,
+      "total_mae_vs_vegas": 6.759655227466287
+    },
+    "raw": {
+      "spread_bias_vs_vegas": 2.7084370851516724,
+      "spread_mae_vs_vegas": 4.832796275615692,
+      "total_bias_vs_vegas": -4.767954508463542,
+      "total_mae_vs_vegas": 4.767954508463542
+    }
+  },
+  "phase_total_mean_by_game": {
+    "after_realism": [
+      {
+        "away_team": "CLE",
+        "delta_total_vs_vegas": 6.515930716925936,
+        "game_id": 22500947,
+        "home_team": "ORL",
+        "pred_total_mean": 233.01593071692594
+      },
+      {
+        "away_team": "TOR",
+        "delta_total_vs_vegas": 2.7116690216585937,
+        "game_id": 22500948,
+        "home_team": "NOP",
+        "pred_total_mean": 237.2116690216586
+      },
+      {
+        "away_team": "NYK",
+        "delta_total_vs_vegas": 6.079301975061071,
+        "game_id": 22500949,
+        "home_team": "UTA",
+        "pred_total_mean": 236.57930197506107
+      },
+      {
+        "away_team": "HOU",
+        "delta_total_vs_vegas": 14.470672129523052,
+        "game_id": 22500950,
+        "home_team": "DEN",
+        "pred_total_mean": 245.47067212952305
+      },
+      {
+        "away_team": "CHA",
+        "delta_total_vs_vegas": -1.2592086868000365,
+        "game_id": 22500951,
+        "home_team": "SAC",
+        "pred_total_mean": 222.74079131319996
+      },
+      {
+        "away_team": "MIN",
+        "delta_total_vs_vegas": 9.521148834829035,
+        "game_id": 22500952,
+        "home_team": "LAC",
+        "pred_total_mean": 236.52114883482903
+      }
+    ],
+    "after_uplift": [
+      {
+        "away_team": "CLE",
+        "delta_total_vs_vegas": 6.84538950662278,
+        "game_id": 22500947,
+        "home_team": "ORL",
+        "pred_total_mean": 233.34538950662278
+      },
+      {
+        "away_team": "TOR",
+        "delta_total_vs_vegas": 3.607464121024492,
+        "game_id": 22500948,
+        "home_team": "NOP",
+        "pred_total_mean": 238.1074641210245
+      },
+      {
+        "away_team": "NYK",
+        "delta_total_vs_vegas": 6.206418956309079,
+        "game_id": 22500949,
+        "home_team": "UTA",
+        "pred_total_mean": 236.70641895630908
+      },
+      {
+        "away_team": "HOU",
+        "delta_total_vs_vegas": 14.784601276890157,
+        "game_id": 22500950,
+        "home_team": "DEN",
+        "pred_total_mean": 245.78460127689016
+      },
+      {
+        "away_team": "CHA",
+        "delta_total_vs_vegas": -0.5421151788940222,
+        "game_id": 22500951,
+        "home_team": "SAC",
+        "pred_total_mean": 223.45788482110598
+      },
+      {
+        "away_team": "MIN",
+        "delta_total_vs_vegas": 10.432890030389842,
+        "game_id": 22500952,
+        "home_team": "LAC",
+        "pred_total_mean": 237.43289003038984
+      }
+    ],
+    "final_saved": [
+      {
+        "away_team": "CLE",
+        "delta_total_vs_vegas": 6.515930716925936,
+        "game_id": 22500947,
+        "home_team": "ORL",
+        "pred_total_mean": 233.01593071692594
+      },
+      {
+        "away_team": "TOR",
+        "delta_total_vs_vegas": 2.7116690216585937,
+        "game_id": 22500948,
+        "home_team": "NOP",
+        "pred_total_mean": 237.2116690216586
+      },
+      {
+        "away_team": "NYK",
+        "delta_total_vs_vegas": 6.079301975061071,
+        "game_id": 22500949,
+        "home_team": "UTA",
+        "pred_total_mean": 236.57930197506107
+      },
+      {
+        "away_team": "HOU",
+        "delta_total_vs_vegas": 14.470672129523052,
+        "game_id": 22500950,
+        "home_team": "DEN",
+        "pred_total_mean": 245.47067212952305
+      },
+      {
+        "away_team": "CHA",
+        "delta_total_vs_vegas": -1.2592086868000365,
+        "game_id": 22500951,
+        "home_team": "SAC",
+        "pred_total_mean": 222.74079131319996
+      },
+      {
+        "away_team": "MIN",
+        "delta_total_vs_vegas": 9.521148834829035,
+        "game_id": 22500952,
+        "home_team": "LAC",
+        "pred_total_mean": 236.52114883482903
+      }
+    ],
+    "raw": [
+      {
+        "away_team": "CLE",
+        "delta_total_vs_vegas": -2.600677490234375,
+        "game_id": 22500947,
+        "home_team": "ORL",
+        "pred_total_mean": 223.89932250976562
+      },
+      {
+        "away_team": "TOR",
+        "delta_total_vs_vegas": -7.1349029541015625,
+        "game_id": 22500948,
+        "home_team": "NOP",
+        "pred_total_mean": 227.36509704589844
+      },
+      {
+        "away_team": "NYK",
+        "delta_total_vs_vegas": -5.03173828125,
+        "game_id": 22500949,
+        "home_team": "UTA",
+        "pred_total_mean": 225.46826171875
+      },
+      {
+        "away_team": "HOU",
+        "delta_total_vs_vegas": -2.9593048095703125,
+        "game_id": 22500950,
+        "home_team": "DEN",
+        "pred_total_mean": 228.0406951904297
+      },
+      {
+        "away_team": "CHA",
+        "delta_total_vs_vegas": -7.1781768798828125,
+        "game_id": 22500951,
+        "home_team": "SAC",
+        "pred_total_mean": 216.8218231201172
+      },
+      {
+        "away_team": "MIN",
+        "delta_total_vs_vegas": -3.7029266357421875,
+        "game_id": 22500952,
+        "home_team": "LAC",
+        "pred_total_mean": 223.2970733642578
+      }
+    ]
+  },
+  "realism_report": {
+    "applied": true,
+    "low_minutes_tail_damping": {
+      "affected_players": 70,
+      "affected_rows": 489161,
+      "applied": true,
+      "min_scale": 0.55,
+      "minutes_threshold": 12.0,
+      "scale_mean": 0.8943471327344602,
+      "scale_p10": 0.7881535708904267,
+      "scale_p90": 0.976121187210083,
+      "target_game_count": 0
+    },
+    "outlier_resample": {
+      "applied": true,
+      "game_pts_max": 340.0,
+      "game_pts_min": 110.0,
+      "max_passes": 1,
+      "passes": [
+        {
+          "bad_game_hi_count": 2,
+          "bad_game_lo_count": 1,
+          "bad_pair_count": 247,
+          "bad_short_spike_count": 244,
+          "pass_idx": 1,
+          "replaced_pair_count": 247,
+          "skipped_key_mismatch": 0,
+          "skipped_no_donor": 0
+        }
+      ],
+      "random_seed": 42,
+      "short_minutes_dk_threshold": 35.0,
+      "short_minutes_threshold": 12.0,
+      "target_game_count": 0,
+      "total_replaced_pairs": 247
+    }
+  },
+  "repair_report": {
+    "applied": false,
+    "dropped_bad_world_game_pairs": 0,
+    "dropped_bad_world_rows": 0,
+    "fg2m_clipped_to_fga2_rows": 0,
+    "fg3m_clipped_to_fga3_rows": 0,
+    "ftm_clipped_to_fta_rows": 0,
+    "game_id_from_norm_rows": 0
+  },
+  "sum_delta_dk_final_vs_raw": 71.22980778532369,
+  "sum_delta_dk_uplift_vs_raw": 79.20018137396966,
+  "sum_delta_pts_final_vs_raw": 66.64722258032785,
+  "sum_delta_pts_uplift_vs_raw": 69.94235730147253,
+  "uplift_report": {
+    "applied": true,
+    "confidence_weighted": true,
+    "scope": "stars_only",
+    "stats": {
+      "ast": {
+        "applied_player_count": 35,
+        "applied_player_count_down": 27,
+        "applied_player_count_up": 8,
+        "confidence_mean": 1.0,
+        "confidence_p10": 1.0,
+        "confidence_p90": 1.0,
+        "mean_gap_post": 0.4698639313349651,
+        "mean_gap_pre": 0.5412328180803723,
+        "mean_scale_mean": 0.9057622901417565,
+        "mean_scale_p90": 1.4068101982208165,
+        "median_gap_post": 0.46418491259574884,
+        "median_gap_pre": 0.5400586085224149,
+        "top_adjustments": [
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 3.3221642687034603,
+            "player_id": 1630163,
+            "sf_mean": 1.731572834305448,
+            "sf_var": 1.221477617913564
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 2.951219248113632,
+            "player_id": 203999,
+            "sf_mean": 1.4145995737424029,
+            "sf_var": 1.1553273288480859
+          },
+          {
+            "confidence": 1.0,
+            "direction": "down",
+            "line_gap": -2.5232693661657972,
+            "player_id": 1642875,
+            "sf_mean": 0.6235311775856149,
+            "sf_var": 0.72
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 2.4137474360847477,
+            "player_id": 1629636,
+            "sf_mean": 1.5434435601969374,
+            "sf_var": 1.1856728796988267
+          },
+          {
+            "confidence": 1.0,
+            "direction": "down",
+            "line_gap": -2.346235918502807,
+            "player_id": 1631095,
+            "sf_mean": 0.6276939665173781,
+            "sf_var": 0.72
+          },
+          {
+            "confidence": 1.0,
+            "direction": "down",
+            "line_gap": -2.3285374203681943,
+            "player_id": 1630162,
+            "sf_mean": 0.74032090487227,
+            "sf_var": 0.8336758985451289
+          },
+          {
+            "confidence": 1.0,
+            "direction": "down",
+            "line_gap": -2.3178646309471134,
+            "player_id": 1630180,
+            "sf_mean": 0.6701714845250923,
+            "sf_var": 0.7424594854503208
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 2.2840703418922423,
+            "player_id": 201566,
+            "sf_mean": 1.6534174991182138,
+            "sf_var": 1.2076427583538403
+          }
+        ],
+        "var_scale_mean": 0.9053804983193409
+      },
+      "pts": {
+        "applied_player_count": 12,
+        "applied_player_count_down": 0,
+        "applied_player_count_up": 12,
+        "confidence_mean": 1.0,
+        "confidence_p10": 1.0,
+        "confidence_p90": 1.0,
+        "mean_gap_post": 1.4685258261796816,
+        "mean_gap_pre": 1.0799571709709892,
+        "mean_scale_mean": 1.3327983416479385,
+        "mean_scale_p90": 1.4700677487825153,
+        "median_gap_post": 1.017769889485649,
+        "median_gap_pre": 1.017769889485649,
+        "top_adjustments": [
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 10.734163072059154,
+            "player_id": 1628378,
+            "sf_mean": 1.5316981992869674,
+            "sf_var": 1.1506549203096021
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 8.91480885752678,
+            "player_id": 1630162,
+            "sf_mean": 1.4221119779981768,
+            "sf_var": 1.1296699470185714
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 7.540981633223593,
+            "player_id": 1641706,
+            "sf_mean": 1.475396167758553,
+            "sf_var": 1.1402973327111365
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 7.460372537035941,
+            "player_id": 203999,
+            "sf_mean": 1.3120363154788832,
+            "sf_var": 1.104706982975943
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 7.359324954547482,
+            "player_id": 1628973,
+            "sf_mean": 1.3413198640326625,
+            "sf_var": 1.1117872144994554
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 7.269612462460994,
+            "player_id": 201142,
+            "sf_mean": 1.3712777181028737,
+            "sf_var": 1.1186875504075264
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 7.14862090278983,
+            "player_id": 202695,
+            "sf_mean": 1.3091086046015137,
+            "sf_var": 1.1039799404042157
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 5.549258911762584,
+            "player_id": 1629628,
+            "sf_mean": 1.3093844917303112,
+            "sf_var": 1.1040486045955484
+          }
+        ],
+        "var_scale_mean": 1.1075504300969823
+      },
+      "reb": {
+        "applied_player_count": 19,
+        "applied_player_count_down": 9,
+        "applied_player_count_up": 10,
+        "confidence_mean": 1.0,
+        "confidence_p10": 1.0,
+        "confidence_p90": 1.0,
+        "mean_gap_post": 0.7176198220616172,
+        "mean_gap_pre": 0.598442666387477,
+        "mean_scale_mean": 1.1877503540909717,
+        "mean_scale_p90": 1.7543146539061243,
+        "median_gap_post": 0.558198935536435,
+        "median_gap_pre": 0.5884588734955125,
+        "top_adjustments": [
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 5.947105975259095,
+            "player_id": 1626157,
+            "sf_mean": 1.8349497911275467,
+            "sf_var": 1.2140958151093275
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 5.42821781458307,
+            "player_id": 203497,
+            "sf_mean": 1.8224867488512364,
+            "sf_var": 1.2124085231793376
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 4.749856057029069,
+            "player_id": 203999,
+            "sf_mean": 1.5638434078930932,
+            "sf_var": 1.1709948180530465
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 4.226271879097889,
+            "player_id": 1631217,
+            "sf_mean": 1.7372716301698463,
+            "sf_var": 1.2001918258520052
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 2.9161287077288334,
+            "player_id": 1630596,
+            "sf_mean": 1.4804620792072944,
+            "sf_var": 1.1543832845268205
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 2.7692138201267786,
+            "player_id": 1629011,
+            "sf_mean": 1.5385313598309596,
+            "sf_var": 1.1661528292076067
+          },
+          {
+            "confidence": 1.0,
+            "direction": "up",
+            "line_gap": 2.758538328384235,
+            "player_id": 1642271,
+            "sf_mean": 1.442022503548176,
+            "sf_var": 1.1460402644438712
+          },
+          {
+            "confidence": 1.0,
+            "direction": "down",
+            "line_gap": -2.403347136332105,
+            "player_id": 1629627,
+            "sf_mean": 0.8284007243298686,
+            "sf_var": 0.8998605359861623
+          }
+        ],
+        "var_scale_mean": 1.0276712519339877
+      }
+    },
+    "total_adjusted_players": 42,
+    "total_adjustment_events": 66
+  }
+}

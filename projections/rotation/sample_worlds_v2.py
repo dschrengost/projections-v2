@@ -29,6 +29,8 @@ from projections.rotation.game_transformer_v2 import (
     build_game_level_examples,
     build_game_transformer_v2,
     collate_game_level_examples,
+    flow_contract_columns,
+    reconstruct_flow_to_contract,
 )
 from projections.rotation.set_model import zfill_game_id_series
 
@@ -81,7 +83,12 @@ def _coerce_join_keys(df: pd.DataFrame, *, name: str) -> pd.DataFrame:
         out[col] = pd.to_numeric(out[col], errors="coerce").astype("Int64")
     if "game_date" not in out.columns:
         raise ValueError(f"{name} missing key column: game_date")
-    out["game_date"] = pd.to_datetime(out["game_date"], errors="coerce").dt.normalize()
+    game_date = out["game_date"]
+    if pd.api.types.is_datetime64_any_dtype(game_date):
+        normalized = pd.Series(game_date, copy=False)
+    else:
+        normalized = pd.to_datetime(game_date.astype("string"), errors="coerce")
+    out["game_date"] = pd.Series(normalized, copy=False).dt.normalize()
 
     invalid = out[["game_id", "team_id", "player_id", "game_date"]].isna().any(axis=1)
     if invalid.any():
@@ -129,22 +136,25 @@ def _flow_idx(flow_target_columns: list[str], name: str) -> int:
         raise KeyError(f"Missing flow target column: {name}") from exc
 
 
-def project_flow_stats_to_contract(flow_values: torch.Tensor, *, flow_target_columns: list[str]) -> torch.Tensor:
-    """Apply minimal numeric cleanup for v1 count-stat contracts."""
+def project_flow_stats_to_contract(
+    flow_values: torch.Tensor,
+    *,
+    flow_target_columns: list[str],
+    flow_contract_columns: list[str] | None = None,
+    fg2_rate: torch.Tensor | float | None = None,
+    fg3_rate: torch.Tensor | float | None = None,
+    ft_rate: torch.Tensor | float | None = None,
+) -> torch.Tensor:
+    """Project model flow outputs to contract stats used by worlds and diagnostics."""
 
-    y = torch.clamp(flow_values, min=0.0)
-    fg2m_idx = _flow_idx(flow_target_columns, "fg2m")
-    fga2_idx = _flow_idx(flow_target_columns, "fga2")
-    fg3m_idx = _flow_idx(flow_target_columns, "fg3m")
-    fga3_idx = _flow_idx(flow_target_columns, "fga3")
-    ftm_idx = _flow_idx(flow_target_columns, "ftm")
-    fta_idx = _flow_idx(flow_target_columns, "fta")
-
-    y = y.clone()
-    y[..., fg2m_idx] = torch.minimum(y[..., fg2m_idx], y[..., fga2_idx])
-    y[..., fg3m_idx] = torch.minimum(y[..., fg3m_idx], y[..., fga3_idx])
-    y[..., ftm_idx] = torch.minimum(y[..., ftm_idx], y[..., fta_idx])
-    return y
+    return reconstruct_flow_to_contract(
+        flow_values,
+        flow_target_columns=flow_target_columns,
+        contract_columns=flow_contract_columns,
+        fg2_rate=fg2_rate,
+        fg3_rate=fg3_rate,
+        ft_rate=ft_rate,
+    )
 
 
 def _normalize_alloc_weights(
@@ -959,7 +969,8 @@ def sample_worlds_for_batch(
     if not hasattr(model, "flow_head") or model.flow_head is None:  # type: ignore[attr-defined]
         raise RuntimeError("Model does not expose flow_head for inverse flow sampling")
 
-    flow_target_columns = list(model.flow_target_columns)  # type: ignore[attr-defined]
+    model_flow_target_columns = list(model.flow_target_columns)  # type: ignore[attr-defined]
+    contract_flow_target_columns = flow_contract_columns(include_pf=("pf" in model_flow_target_columns))
     bsz = int(batch["player_features"].shape[0])  # type: ignore[index]
     if str(attempt_conditioning_mode) == "predicted_attempts":
         flow_targets_batch = batch.get("flow_targets")
@@ -1032,7 +1043,7 @@ def sample_worlds_for_batch(
             if out.flow is not None:
                 raise RuntimeError("label leakage guard failed: sampler forward returned flow outputs")
             z = torch.randn(
-                (rep_player_features.shape[0], out.player_states.shape[1], len(flow_target_columns)),
+                (rep_player_features.shape[0], out.player_states.shape[1], len(model_flow_target_columns)),
                 device=device,
                 dtype=out.player_states.dtype,
             )
@@ -1043,10 +1054,15 @@ def sample_worlds_for_batch(
                 game_state=out.game_state,
                 player_team_index=out.player_team_index,
                 valid_mask=out.player_valid_mask,
+                minutes_context=out.minutes.minutes,
             )
             flow_projected = project_flow_stats_to_contract(
                 flow_raw,
-                flow_target_columns=flow_target_columns,
+                flow_target_columns=model_flow_target_columns,
+                flow_contract_columns=contract_flow_target_columns,
+                fg2_rate=out.efficiency.mean_fg2 if out.efficiency is not None else None,
+                fg3_rate=out.efficiency.mean_fg3 if out.efficiency is not None else None,
+                ft_rate=out.efficiency.mean_ft if out.efficiency is not None else None,
             )
             forced_active_flat = (
                 rep_forced_active_worlds.reshape(rep_forced_active_worlds.shape[0], -1)
@@ -1108,15 +1124,15 @@ def sample_worlds_for_batch(
                             "attempt_conditioning_mode=true_attempts_upper_bound requires flow_targets in batch",
                         )
                     flow_targets_true = batch["flow_targets"].to(device=device)  # type: ignore[index]
-                    if flow_targets_true.ndim != 4 or int(flow_targets_true.shape[-1]) < len(flow_target_columns):
+                    if flow_targets_true.ndim != 4 or int(flow_targets_true.shape[-1]) < len(contract_flow_target_columns):
                         raise RuntimeError(
                             "true_attempts_upper_bound requires observed flow_targets with expected stat columns",
                         )
-                    fga2_idx = _flow_idx(flow_target_columns, "fga2")
-                    fga3_idx = _flow_idx(flow_target_columns, "fga3")
-                    fta_idx = _flow_idx(flow_target_columns, "fta")
-                    tov_idx = _flow_idx(flow_target_columns, "tov")
-                    oreb_idx = _flow_idx(flow_target_columns, "oreb")
+                    fga2_idx = _flow_idx(contract_flow_target_columns, "fga2")
+                    fga3_idx = _flow_idx(contract_flow_target_columns, "fga3")
+                    fta_idx = _flow_idx(contract_flow_target_columns, "fta")
+                    tov_idx = _flow_idx(contract_flow_target_columns, "tov")
+                    oreb_idx = _flow_idx(contract_flow_target_columns, "oreb")
                     true_fga2 = flow_targets_true[:, :, :, fga2_idx].sum(dim=2)
                     true_fga3 = flow_targets_true[:, :, :, fga3_idx].sum(dim=2)
                     true_fta = flow_targets_true[:, :, :, fta_idx].sum(dim=2)
@@ -1138,7 +1154,7 @@ def sample_worlds_for_batch(
                     valid_mask=out.player_valid_mask,
                     team_index=out.player_team_index,
                     active_mask=sampled_active_mask,
-                    flow_target_columns=flow_target_columns,
+                    flow_target_columns=contract_flow_target_columns,
                     backbone_fga=budget_fga,
                     backbone_fta=budget_fta,
                     backbone_tov=budget_tov,
@@ -1158,7 +1174,12 @@ def sample_worlds_for_batch(
 
         minutes = sampled_minutes.reshape(bsz, n_worlds_chunk, -1)
         active = sampled_active_mask.reshape(bsz, n_worlds_chunk, -1)
-        flow_vals = flow_projected.reshape(bsz, n_worlds_chunk, out.player_states.shape[1], len(flow_target_columns))
+        flow_vals = flow_projected.reshape(
+            bsz,
+            n_worlds_chunk,
+            out.player_states.shape[1],
+            len(contract_flow_target_columns),
+        )
         valid_flat = out.player_valid_mask.reshape(bsz, n_worlds_chunk, -1)
         team_flat = out.player_team_index.reshape(bsz, n_worlds_chunk, -1)
 
@@ -1167,7 +1188,7 @@ def sample_worlds_for_batch(
             flow_values=flow_vals.reshape(-1, flow_vals.shape[-2], flow_vals.shape[-1]),
             valid_mask=valid_flat.reshape(-1, valid_flat.shape[-1]),
             team_index=team_flat.reshape(-1, team_flat.shape[-1]),
-            flow_target_columns=flow_target_columns,
+            flow_target_columns=contract_flow_target_columns,
             active_mask=active.reshape(-1, active.shape[-1]),
         )
         contract_counter.update(checks)
@@ -1186,7 +1207,7 @@ def sample_worlds_for_batch(
             minutes=minutes,
             active_mask=active,
             flow_values=flow_vals,
-            flow_target_columns=flow_target_columns,
+            flow_target_columns=contract_flow_target_columns,
         )
         if not chunk_df.empty:
             frames.append(chunk_df)
@@ -1200,7 +1221,7 @@ def sample_worlds_for_batch(
             flow_values=all_flow,
             valid_mask=all_valid,
             team_index=all_team,
-            flow_target_columns=flow_target_columns,
+            flow_target_columns=contract_flow_target_columns,
         )
         logger.info(
             "possession symmetry: home=%.1f  away=%.1f  |delta| mean=%.2f  p95=%.2f  max=%.2f",
@@ -1369,6 +1390,8 @@ def main() -> None:
     device = torch.device(str(args.device))
     model = model.to(device=device)
     model.eval()
+    flow_model_target_columns = list(model.flow_target_columns)  # type: ignore[attr-defined]
+    flow_contract_target_columns = flow_contract_columns(include_pf=("pf" in flow_model_target_columns))
     make_model_config = MakeModelConfig(
         mode=str(args.make_model),
         use_learned_efficiency=bool(int(args.bb_use_learned_efficiency)),
@@ -1410,7 +1433,9 @@ def main() -> None:
         feature_std=np.asarray(config.feature_std, dtype=np.float32),
         game_feature_columns=list(config.game_feature_columns),
         team_feature_columns=list(config.team_feature_columns),
-        flow_label_columns=list(model.flow_target_columns) if str(args.attempt_conditioning_mode) == "true_attempts_upper_bound" else None,  # type: ignore[attr-defined]
+        flow_label_columns=flow_contract_target_columns
+        if str(args.attempt_conditioning_mode) == "true_attempts_upper_bound"
+        else None,
         minutes_label_col="minutes_label" if "minutes_label" in val_df.columns else "minutes",
         overflow_protected_prior_play_prob_floor=float(config.overflow_protected_prior_play_prob_floor),
         overflow_protected_prior_minutes_floor=float(config.overflow_protected_prior_minutes_floor),
@@ -1479,7 +1504,8 @@ def main() -> None:
             else getattr(model.flow_head, "mean_ctx_weight", float("nan"))  # type: ignore[attr-defined]
         ),
         "rows": int(len(worlds_df)),
-        "flow_target_columns": list(model.flow_target_columns),  # type: ignore[attr-defined]
+        "flow_target_columns": flow_contract_target_columns,
+        "flow_model_target_columns": flow_model_target_columns,
         "attempt_conditioning_mode": str(args.attempt_conditioning_mode),
         "allocation": {
             "source": str(args.allocation_source),

@@ -1,0 +1,45 @@
+{
+  "bench_like_minutes_lt20_prev_or_curr": {
+    "count": 113,
+    "dk_delta": -61.51497480521517,
+    "pts_delta": -13.952509257319017,
+    "pts_delta_share": 0.4703751177904722
+  },
+  "current_pts_uplift_candidate": {
+    "count": 0,
+    "dk_delta": 0.0,
+    "pts_delta": 0.0,
+    "pts_delta_share": -0.0
+  },
+  "non_star_line_lt20": {
+    "count": 169,
+    "dk_delta": -92.88014143088935,
+    "pts_delta": -27.117948164089306,
+    "pts_delta_share": 0.9142160615466544
+  },
+  "rank1": {
+    "count": 12,
+    "dk_delta": -6.730376561176897,
+    "pts_delta": -0.46171587586890084,
+    "pts_delta_share": 0.015565634502886292
+  },
+  "rank2_3": {
+    "count": 24,
+    "dk_delta": -34.25675171583771,
+    "pts_delta": -16.81225323307416,
+    "pts_delta_share": 0.5667844721681299
+  },
+  "rank4plus": {
+    "count": 150,
+    "dk_delta": -65.77565903707634,
+    "pts_delta": -12.3885464655609,
+    "pts_delta_share": 0.41764989332898383
+  },
+  "star_line20": {
+    "count": 17,
+    "dk_delta": -13.882645883201583,
+    "pts_delta": -2.5445674104146647,
+    "pts_delta_share": 0.08578393845334599
+  },
+  "total_delta_pts": -29.66251557450396
+}

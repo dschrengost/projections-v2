@@ -1,5 +1,10 @@
 ## Late Swap Implementation Plan (DK NBA Classic)
 
+> [!NOTE]
+> This file captures the original phase-1 late swap plan.
+> The detailed redesign and portfolio-aware target architecture now live in
+> `docs/late-swap/LATE_SWAP_V2_SPEC.md`.
+
 ### Goals
 - Support late swap for DraftKings NBA Classic using the existing optimizer.
 - Start with per-entry optimization (independent entries, no exposure constraints).

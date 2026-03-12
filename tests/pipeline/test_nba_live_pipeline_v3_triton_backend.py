@@ -294,6 +294,139 @@ def test_generate_worlds_gtv2_live_task_triton_backend(
     assert summary["device"] == "cuda:0"
 
 
+def test_generate_worlds_gtv2_live_task_triton_backend_retries_corrupt_game_parquet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    game_date = "2026-03-10"
+    run_id = "testrun"
+    features_path = tmp_path / "features.parquet"
+    _write(
+        features_path,
+        pd.DataFrame(
+            {
+                "game_date": [game_date],
+                "game_id": [22500999],
+                "team_id": [1610612747],
+                "player_id": [1234],
+                "lineup_starter_announced": [1],
+            }
+        ),
+    )
+    scores_path = tmp_path / "scores.parquet"
+    _write(
+        scores_path,
+        pd.DataFrame(
+            {
+                "game_date": [game_date],
+                "game_id": [22500999],
+                "team_id": [1610612747],
+                "player_id": [1234],
+                "minutes_deterministic": [31.2],
+            }
+        ),
+    )
+
+    monkeypatch.setattr(
+        live_nba_pipeline_v3,
+        "check_triton_health",
+        lambda endpoint, timeout_seconds: (True, "ok"),
+    )
+    monkeypatch.setattr(
+        live_nba_pipeline_v3,
+        "get_run_logger",
+        lambda: logging.getLogger("test-gtv2-triton-worlds-retry"),
+    )
+    monkeypatch.setattr(live_nba_pipeline_v3.time, "sleep", lambda _: None)
+
+    call_count = 0
+
+    def _fake_infer(*, cfg, request_payload):
+        nonlocal call_count
+        call_count += 1
+        out_path = Path(str(request_payload["out_path"]))
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        if call_count == 1:
+            out_path.write_bytes(b"corrupt")
+        else:
+            pd.DataFrame(
+                {
+                    "world_idx": [0],
+                    "game_date": [game_date],
+                    "game_id": [22500999],
+                    "team_id": [1610612747],
+                    "player_id": [1234],
+                    "minutes": [30.0],
+                    "fga2": [5.0],
+                    "fg2m": [3.0],
+                    "fga3": [4.0],
+                    "fg3m": [1.0],
+                    "fta": [2.0],
+                    "ftm": [2.0],
+                    "oreb": [1.0],
+                    "dreb": [3.0],
+                    "ast": [4.0],
+                    "stl": [1.0],
+                    "blk": [0.0],
+                    "tov": [2.0],
+                    "pts": [11.0],
+                    "reb": [4.0],
+                    "dk_fpts": [24.0],
+                    "active": [1],
+                }
+            ).to_parquet(out_path, index=False)
+        return {
+            "ok": True,
+            "device": "cuda:0",
+            "contract_checks": {"team_minutes_not_240": 0},
+        }
+
+    monkeypatch.setattr(live_nba_pipeline_v3, "infer_json_action", _fake_infer)
+    monkeypatch.setattr(
+        live_nba_pipeline_v3,
+        "summarize_worlds_to_projections",
+        lambda worlds_df, sim_profile: pd.DataFrame(
+            {
+                "game_date": [game_date],
+                "game_id": [22500999],
+                "team_id": [1610612747],
+                "player_id": [1234],
+            }
+        ),
+    )
+
+    outputs = live_nba_pipeline_v3.generate_worlds_gtv2_live_task.fn(
+        game_date=game_date,
+        run_id=run_id,
+        run_as_of_ts="2026-03-10T18:00:00Z",
+        features_path=features_path,
+        scores_path=scores_path,
+        bundle_dir=tmp_path / "bundle",
+        data_root=tmp_path,
+        sim_worlds=32,
+        placeholder_mode=False,
+        inference_backend="triton",
+        triton_endpoint="localhost:8000",
+        triton_model_name="gtv2_scorer",
+        triton_model_version="1",
+        triton_timeout_seconds=30.0,
+        triton_healthcheck_timeout_seconds=1.0,
+        gtv2_device="cuda:0",
+        world_chunk_size=8,
+        active_temperature=1.0,
+        random_seed=42,
+        strict_world_contracts=True,
+        apply_props_uplift=False,
+        apply_world_realism_controls=False,
+    )
+
+    summary_path = Path(outputs["world_contract_summary_path"])
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["inference_backend"] == "triton"
+    assert summary["triton_request_count"] == 2
+    assert call_count == 2
+
+
 def test_score_gtv2_live_task_triton_backend_full_slate_runs_per_game_sequentially(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

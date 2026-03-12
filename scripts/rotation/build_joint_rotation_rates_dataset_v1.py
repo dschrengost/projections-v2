@@ -81,6 +81,22 @@ EFFICIENCY_LABEL_COLS = [
 ]
 RATES_LABEL_COLS = ["minutes_actual", *RATE_TARGET_COLS, *EFFICIENCY_LABEL_COLS]
 
+TRACKING_CONTEXT_COLS = [
+    "track_touches_per_min_szn",
+    "track_sec_per_touch_szn",
+    "track_pot_ast_per_min_szn",
+    "track_drives_per_min_szn",
+    "track_drive_fta_per_min_szn",
+    "track_drive_pf_per_min_szn",
+    "track_paint_touches_per_min_szn",
+    "track_fta_per_drive_szn",
+    "track_catch_shoot_fg3a_per_min_szn",
+    "track_pull_up_fg3a_per_min_szn",
+    "track_pull_up_3pa_share_szn",
+    "track_role_cluster",
+    "track_role_is_low_minutes",
+]
+
 DEFAULT_ROTATION_PREFIX = "rotation_train_v1"
 DEFAULT_OUT_PREFIX = "joint_rotation_rates_v1"
 DEFAULT_MINUTES_FOR_RATES_LOSS = 4.0
@@ -114,6 +130,30 @@ def _git_sha() -> str | None:
 
 def _season_for_date(day: pd.Timestamp) -> int:
     return int(day.year) if int(day.month) >= 8 else int(day.year) - 1
+
+
+def _coerce_season_key(
+    series: pd.Series | None,
+    *,
+    game_date: pd.Series | None = None,
+) -> pd.Series:
+    if series is None:
+        if game_date is None:
+            base = pd.Series(dtype="Float64")
+        else:
+            base = pd.Series(pd.NA, index=game_date.index, dtype="Int64")
+    else:
+        raw = series.astype("string").str.strip()
+        numeric = pd.to_numeric(raw, errors="coerce")
+        prefix = pd.to_numeric(raw.str.extract(r"^(\d{4})", expand=False), errors="coerce")
+        base = numeric.where(numeric.notna(), prefix).astype("Float64")
+
+    if game_date is not None:
+        dates = pd.to_datetime(game_date, errors="coerce").dt.normalize()
+        derived = dates.map(lambda d: _season_for_date(pd.Timestamp(d)) if pd.notna(d) else pd.NA)
+        base = base.where(base.notna(), pd.to_numeric(derived, errors="coerce"))
+
+    return pd.to_numeric(base, errors="coerce").astype("Int64")
 
 
 def _zfill_game_id(series: pd.Series) -> pd.Series:
@@ -298,10 +338,22 @@ def _resolve_rates_partition_paths(
 
 def _load_rates_labels(
     partition_paths: list[Path],
+    *,
+    context_cols: list[str] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
+    requested_context = [str(c) for c in (context_cols or [])]
     if not partition_paths:
-        return pd.DataFrame(columns=JOIN_KEYS + RATES_LABEL_COLS), {"partition_count": 0, "rows_loaded": 0}
-
+        return (
+            pd.DataFrame(columns=JOIN_KEYS + RATES_LABEL_COLS + requested_context),
+            {
+                "partition_count": 0,
+                "rows_loaded": 0,
+                "rows_after_dedupe": 0,
+                "requested_context_cols": requested_context,
+                "context_cols_present": [],
+                "context_cols_missing": requested_context,
+            },
+        )
     frames: list[pd.DataFrame] = []
     for path in partition_paths:
         frame = pd.read_parquet(path)
@@ -317,7 +369,11 @@ def _load_rates_labels(
             else:
                 raise ValueError(f"Rates partition {path} missing game_date and not parseable from path")
 
-        keep = [c for c in JOIN_KEYS + RATES_LABEL_COLS + ["feature_as_of_ts", "tip_ts"] if c in frame.columns]
+        keep = [
+            c
+            for c in JOIN_KEYS + RATES_LABEL_COLS + ["feature_as_of_ts", "tip_ts"] + requested_context
+            if c in frame.columns
+        ]
         frames.append(frame.loc[:, keep].copy())
 
     rates = pd.concat(frames, ignore_index=True)
@@ -333,6 +389,9 @@ def _load_rates_labels(
         "partition_count": int(len(partition_paths)),
         "rows_loaded": pre_dedupe_rows,
         "rows_after_dedupe": int(len(rates)),
+        "requested_context_cols": requested_context,
+        "context_cols_present": [c for c in requested_context if c in rates.columns],
+        "context_cols_missing": [c for c in requested_context if c not in rates.columns],
     }
     return rates, meta
 
@@ -359,6 +418,195 @@ def _append_rates_context_columns(
     for col in rates_ctx_cols:
         out[col] = merged[col].to_numpy()
     return out, rates_ctx_cols
+
+
+def _load_tracking_roles_window(
+    tracking_root: Path,
+    *,
+    start_day: pd.Timestamp,
+    end_day: pd.Timestamp,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    base_cols = ["season", "game_date", "player_id", *TRACKING_CONTEXT_COLS]
+    if not tracking_root.exists():
+        return (
+            pd.DataFrame(columns=base_cols),
+            {
+                "enabled": True,
+                "tracking_root": str(tracking_root),
+                "rows_loaded": 0,
+                "partitions_loaded": 0,
+                "warning": "tracking_roles root missing",
+            },
+        )
+
+    frames: list[pd.DataFrame] = []
+    partitions_loaded = 0
+    for season_dir in sorted(tracking_root.glob("season=*")):
+        for day_dir in sorted(season_dir.glob("game_date=*")):
+            token = day_dir.name.split("=", 1)[-1]
+            try:
+                day = pd.Timestamp(token).normalize()
+            except Exception:
+                continue
+            if day < start_day or day > end_day:
+                continue
+            path = day_dir / "tracking_roles.parquet"
+            if not path.exists():
+                continue
+            frame = pd.read_parquet(path)
+            keep = [c for c in base_cols if c in frame.columns]
+            frames.append(frame.loc[:, keep].copy())
+            partitions_loaded += 1
+
+    if not frames:
+        return (
+            pd.DataFrame(columns=base_cols),
+            {
+                "enabled": True,
+                "tracking_root": str(tracking_root),
+                "rows_loaded": 0,
+                "partitions_loaded": int(partitions_loaded),
+                "window_start": str(start_day.date()),
+                "window_end": str(end_day.date()),
+                "warning": "no tracking_roles partitions in date window",
+            },
+        )
+
+    tracking = pd.concat(frames, ignore_index=True)
+    tracking["game_date"] = pd.to_datetime(tracking["game_date"], errors="coerce").dt.normalize()
+    if "season" in tracking.columns:
+        tracking["season"] = _coerce_season_key(tracking["season"], game_date=tracking["game_date"])
+    else:
+        tracking["season"] = _coerce_season_key(None, game_date=tracking["game_date"])
+    tracking["player_id"] = pd.to_numeric(tracking["player_id"], errors="coerce").astype("Int64")
+    for col in TRACKING_CONTEXT_COLS:
+        if col not in tracking.columns:
+            tracking[col] = np.nan
+        tracking[col] = pd.to_numeric(tracking[col], errors="coerce")
+
+    tracking = tracking.dropna(subset=["season", "player_id", "game_date"]).copy()
+    tracking = tracking.sort_values(["season", "player_id", "game_date"])
+    tracking = tracking.drop_duplicates(subset=["season", "player_id", "game_date"], keep="last")
+
+    meta = {
+        "enabled": True,
+        "tracking_root": str(tracking_root),
+        "window_start": str(start_day.date()),
+        "window_end": str(end_day.date()),
+        "partitions_loaded": int(partitions_loaded),
+        "rows_loaded": int(len(tracking)),
+        "unique_player_dates": int(tracking[["season", "player_id", "game_date"]].drop_duplicates().shape[0]),
+        "context_cols_present": [c for c in TRACKING_CONTEXT_COLS if c in tracking.columns],
+    }
+    return tracking, meta
+
+
+def _apply_tracking_context_asof_fallback(
+    features_df: pd.DataFrame,
+    tracking_roles_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    available_cols = [
+        c
+        for c in TRACKING_CONTEXT_COLS
+        if c in features_df.columns or c in tracking_roles_df.columns
+    ]
+    out = features_df.copy()
+    if not available_cols:
+        return out, {"enabled": False, "reason": "no tracking context columns present"}
+
+    for col in available_cols:
+        if col not in out.columns:
+            out[col] = np.nan
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+    before_cov = {col: float(out[col].notna().mean()) for col in available_cols}
+    before_any = float(out[available_cols].notna().any(axis=1).mean())
+
+    if tracking_roles_df.empty:
+        for col in available_cols:
+            out[f"{col}_missing"] = out[col].isna().astype("int8")
+        return out, {
+            "enabled": True,
+            "rows_total": int(len(out)),
+            "before_coverage_any_tracking": before_any,
+            "after_coverage_any_tracking": before_any,
+            "coverage_by_column_before": before_cov,
+            "coverage_by_column_after": before_cov,
+            "rows_filled_any_tracking": 0,
+            "warning": "tracking_roles source empty; missing flags emitted only",
+        }
+
+    if "game_date" not in out.columns or "player_id" not in out.columns:
+        raise ValueError("features_df missing required columns for tracking as-of fallback: game_date/player_id")
+
+    spine = out.loc[:, ["game_date", "player_id"]].copy()
+    spine["game_date"] = pd.to_datetime(spine["game_date"], errors="coerce").dt.normalize().astype("datetime64[ns]")
+    spine["player_id"] = pd.to_numeric(spine["player_id"], errors="coerce").astype("Int64")
+    if "season" in out.columns:
+        spine["season"] = _coerce_season_key(out["season"], game_date=spine["game_date"])
+    else:
+        spine["season"] = _coerce_season_key(None, game_date=spine["game_date"])
+    spine["_row_idx"] = np.arange(len(spine), dtype=np.int64)
+    spine_valid = spine.dropna(subset=["season", "player_id", "game_date"]).copy()
+
+    hist = tracking_roles_df.copy()
+    hist["season"] = _coerce_season_key(hist.get("season"), game_date=hist.get("game_date"))
+    hist["player_id"] = pd.to_numeric(hist["player_id"], errors="coerce").astype("Int64")
+    hist["game_date"] = pd.to_datetime(hist["game_date"], errors="coerce").dt.normalize().astype("datetime64[ns]")
+    hist = hist.dropna(subset=["season", "player_id", "game_date"]).copy()
+    hist = hist.sort_values(["season", "player_id", "game_date"])
+    hist = hist.drop_duplicates(subset=["season", "player_id", "game_date"], keep="last")
+    for col in available_cols:
+        if col not in hist.columns:
+            hist[col] = np.nan
+        hist[col] = pd.to_numeric(hist[col], errors="coerce")
+
+    filled_parts: list[pd.DataFrame] = []
+    hist_groups = {(int(k[0]), int(k[1])): g for k, g in hist.groupby(["season", "player_id"], sort=False)}
+    for key, group in spine_valid.groupby(["season", "player_id"], sort=False):
+        season_val = int(key[0])
+        player_val = int(key[1])
+        left = group.loc[:, ["game_date", "_row_idx"]].sort_values("game_date")
+        left["game_date"] = left["game_date"].astype("datetime64[ns]")
+        right = hist_groups.get((season_val, player_val))
+        if right is None or right.empty:
+            tmp = left.copy()
+            for col in available_cols:
+                tmp[col] = np.nan
+        else:
+            right_min = right.loc[:, ["game_date", *available_cols]].sort_values("game_date")
+            right_min["game_date"] = pd.to_datetime(right_min["game_date"], errors="coerce").astype("datetime64[ns]")
+            tmp = pd.merge_asof(left, right_min, on="game_date", direction="backward")
+        filled_parts.append(tmp.loc[:, ["_row_idx", *available_cols]])
+
+    if filled_parts:
+        filled = pd.concat(filled_parts, ignore_index=True).set_index("_row_idx")
+        filled = filled.reindex(pd.Index(np.arange(len(out), dtype=np.int64)))
+    else:
+        filled = pd.DataFrame(index=pd.Index(np.arange(len(out), dtype=np.int64)), columns=available_cols)
+
+    for col in available_cols:
+        out[col] = out[col].where(out[col].notna(), pd.to_numeric(filled[col], errors="coerce").to_numpy())
+        out[f"{col}_missing"] = out[col].isna().astype("int8")
+
+    after_cov = {col: float(out[col].notna().mean()) for col in available_cols}
+    after_any = float(out[available_cols].notna().any(axis=1).mean())
+    rows_filled_any = int(
+        ((~features_df.loc[:, [c for c in available_cols if c in features_df.columns]].notna().any(axis=1)) & out[available_cols].notna().any(axis=1))
+        .sum()
+    ) if any(c in features_df.columns for c in available_cols) else int(out[available_cols].notna().any(axis=1).sum())
+    meta = {
+        "enabled": True,
+        "rows_total": int(len(out)),
+        "available_columns": available_cols,
+        "source_rows": int(len(hist)),
+        "source_player_dates": int(hist[["season", "player_id", "game_date"]].drop_duplicates().shape[0]),
+        "before_coverage_any_tracking": before_any,
+        "after_coverage_any_tracking": after_any,
+        "coverage_by_column_before": before_cov,
+        "coverage_by_column_after": after_cov,
+        "rows_filled_any_tracking": int(max(rows_filled_any, 0)),
+    }
+    return out, meta
 
 
 def _align_rates_labels_to_features(
@@ -641,11 +889,12 @@ def _align_boxscore_count_labels_to_features(
         anchor_col = cols_present[0]
         missing_mask = aligned[anchor_col].isna()
         if missing_mask.any():
+            missing_idx = np.flatnonzero(missing_mask.to_numpy())
             counts_by_id = (
                 counts_df.loc[:, KEY_COLS + cols_present]
                 .drop_duplicates(subset=KEY_COLS, keep="last")
             )
-            fallback_spine = features_df.loc[missing_mask, KEY_COLS].copy()
+            fallback_spine = features_df.iloc[missing_idx].loc[:, KEY_COLS].copy()
             fallback = fallback_spine.merge(counts_by_id, on=KEY_COLS, how="left", sort=False)
             for col in cols_present:
                 aligned.loc[missing_mask, col] = aligned.loc[missing_mask, col].where(
@@ -693,6 +942,8 @@ def _write_manifest(
     labels_boxscore_counts_df: pd.DataFrame,
     team_game_index_df: pd.DataFrame,
     rates_meta: dict[str, Any],
+    tracking_roles_meta: dict[str, Any],
+    tracking_asof_meta: dict[str, Any],
     alignment_meta: dict[str, Any],
     boxscore_counts_meta: dict[str, Any],
     game_context_meta: dict[str, Any],
@@ -765,6 +1016,10 @@ def _write_manifest(
         "game_context_feature_contract": game_context_meta,
         "alignment": alignment_meta,
         "features_appended_from_rates_context": appended_rates_context_cols,
+        "tracking_context": {
+            "tracking_roles_load": tracking_roles_meta,
+            "tracking_asof_fallback": tracking_asof_meta,
+        },
         "args": args_dict,
     }
     (out_dir / "manifest.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -787,6 +1042,12 @@ def main() -> None:
         type=str,
         default=None,
         help="Root for rates training base partitions (default: $PROJECTIONS_DATA_ROOT/gold/rates_training_base).",
+    )
+    parser.add_argument(
+        "--tracking-roles-root",
+        type=str,
+        default=None,
+        help="Root for tracking_roles partitions (default: $PROJECTIONS_DATA_ROOT/gold/tracking_roles).",
     )
     parser.add_argument(
         "--boxscore-counts-dir",
@@ -873,6 +1134,11 @@ def main() -> None:
         if args.rates_training_base_root
         else (data_root / "gold" / "rates_training_base").resolve()
     )
+    tracking_roles_root = (
+        Path(args.tracking_roles_root).expanduser().resolve()
+        if args.tracking_roles_root
+        else (data_root / "gold" / "tracking_roles").resolve()
+    )
     counts_path = (
         Path(args.boxscore_counts_dir).expanduser().resolve() / "labels_boxscore_counts.parquet"
         if args.boxscore_counts_dir
@@ -894,6 +1160,7 @@ def main() -> None:
     print(f"[joint_dataset] data_root={data_root}")
     print(f"[joint_dataset] rotation_dataset_dir={rotation_dataset_dir}")
     print(f"[joint_dataset] rates_training_base_root={rates_root}")
+    print(f"[joint_dataset] tracking_roles_root={tracking_roles_root}")
     print(f"[joint_dataset] boxscore_counts_path={counts_path}")
     if start_day is not None or end_day is not None:
         print(f"[joint_dataset] date_window start={start_day} end={end_day}")
@@ -954,11 +1221,38 @@ def main() -> None:
         f"found_partitions={len(rates_partition_paths)}",
         f"missing_dates={len(missing_rates_dates)}",
     )
-    rates_df, rates_meta = _load_rates_labels(rates_partition_paths)
+    rates_df, rates_meta = _load_rates_labels(
+        rates_partition_paths,
+        context_cols=TRACKING_CONTEXT_COLS,
+    )
     if not rates_df.empty:
         _assert_unique_keys(rates_df, name="rates_labels(deduped)", keys=JOIN_KEYS)
 
     features_aug_df, appended_rates_context_cols = _append_rates_context_columns(features_df, rates_df)
+    tracking_roles_meta: dict[str, Any] = {
+        "enabled": False,
+        "reason": "no feature dates available",
+    }
+    tracking_asof_meta: dict[str, Any] = {
+        "enabled": False,
+        "reason": "tracking fallback not attempted",
+    }
+    if unique_days:
+        unique_min_day = pd.Timestamp(min(unique_days)).normalize()
+        unique_max_day = pd.Timestamp(max(unique_days)).normalize()
+        tracking_df, tracking_roles_meta = _load_tracking_roles_window(
+            tracking_roles_root,
+            start_day=(unique_min_day - pd.Timedelta(days=365)).normalize(),
+            end_day=unique_max_day,
+        )
+        features_aug_df, tracking_asof_meta = _apply_tracking_context_asof_fallback(features_aug_df, tracking_df)
+        print(
+            "[joint_dataset] tracking context:",
+            f"rates_context_cols={len([c for c in appended_rates_context_cols if c.startswith('track_')])}",
+            f"coverage_before={tracking_asof_meta.get('before_coverage_any_tracking', 0.0):.1%}",
+            f"coverage_after={tracking_asof_meta.get('after_coverage_any_tracking', 0.0):.1%}",
+            f"rows_filled={tracking_asof_meta.get('rows_filled_any_tracking', 0)}",
+        )
     labels_rates_df = _align_rates_labels_to_features(
         features_aug_df,
         rates_df,
@@ -1079,6 +1373,8 @@ def main() -> None:
         labels_boxscore_counts_df=labels_boxscore_counts_df,
         team_game_index_df=team_game_index_df,
         rates_meta=rates_meta,
+        tracking_roles_meta=tracking_roles_meta,
+        tracking_asof_meta=tracking_asof_meta,
         alignment_meta=alignment_meta,
         boxscore_counts_meta=boxscore_counts_meta,
         game_context_meta=game_context_meta,
@@ -1086,6 +1382,7 @@ def main() -> None:
         args_dict={
             "rotation_dataset_dir": args.rotation_dataset_dir,
             "rates_training_base_root": args.rates_training_base_root,
+            "tracking_roles_root": args.tracking_roles_root,
             "boxscore_counts_dir": args.boxscore_counts_dir,
             "out_dir": args.out_dir,
             "start_date": args.start_date,

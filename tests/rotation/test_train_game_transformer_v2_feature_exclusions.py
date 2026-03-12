@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from scripts.rotation.train_game_transformer_v2 import _infer_feature_columns
+from scripts.rotation.train_game_transformer_v2 import _coerce_join_keys, _infer_feature_columns
 
 
 def test_infer_feature_columns_excludes_same_game_rotation_leak_fields() -> None:
@@ -45,3 +45,19 @@ def test_infer_feature_columns_excludes_same_game_rotation_leak_fields() -> None
     assert 'lineup_available' in cols
     assert 'lineup_starter_announced' in cols
     assert 'prior_play_prob' in cols
+
+
+def test_coerce_join_keys_handles_datetime64_game_date_without_pandas_index_error() -> None:
+    df = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 10],
+            "player_id": [101, 102],
+            "game_date": pd.to_datetime(["2026-01-01 19:00:00", "2026-01-01 21:30:00"]),
+        }
+    )
+
+    out = _coerce_join_keys(df, name="unit")
+
+    assert out["game_date"].dt.hour.eq(0).all()
+    assert out["game_date"].dt.date.nunique() == 1

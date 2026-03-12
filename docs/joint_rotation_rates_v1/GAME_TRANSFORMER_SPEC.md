@@ -6546,13 +6546,13 @@ Implemented two concrete changes to move toward category robustness + market rea
 2. **Live path: props uplift scope controls with confidence weighting**
    - File: `prefect_flows/live_nba_pipeline_v3.py`
    - `_apply_props_uplift_calibration_to_worlds(...)` now accepts:
-     - `scope`: `"stars_only"` (default) or `"all_players"`
+     - `scope`: `"all_players"` (default) or `"stars_only"`
      - `confidence_weighted`: `True` (default)
    - Added flow/task parameters:
      - `gtv2_props_uplift_scope`
      - `gtv2_props_uplift_confidence_weighted`
    - Behavior:
-     - Default remains stars-only (safe parity with current production policy).
+     - Default is all-players with confidence weighting.
      - All-player mode uses tiered thresholds + confidence-scaled mean/variance transforms.
      - Report now includes scope and confidence diagnostics.
 
@@ -7263,3 +7263,542 @@ Decision:
    - world realism / market alignment,
    - FPTS/category robustness,
    not on raw offline parity-gap minimization by itself.
+
+### 16.26 Post-Promotion Rollback: Minutes/Allocation Disconnect (2026-03-11)
+
+After the RQS control candidate was promoted live, first-slate inspection showed that the core
+problem was not just hot totals or props uplift. The promoted bundle was materially changing the
+**minutes allocation itself** on the exact same live feature snapshot, and uplift was then masking
+part of that upstream miss by forcing star scoring rates higher.
+
+Artifacts from this diagnosis:
+
+- exact no-uplift shadow on the published promoted run:
+  - `/home/daniel/projects/projections-v2/reports/live_shadow_no_uplift_20260311T200354Z/summary.json`
+- live run A/B (`prev prod` vs `promoted`) on published outputs:
+  - `/home/daniel/projects/projections-v2/reports/minutes_ab_20260311_prev_vs_cur/summary.json`
+- exact same-snapshot bundle-only A/B on
+  `/home/daniel/projections-data/live/features_gtv2_v1/2026-03-11/run=20260311T200354Z/features.parquet`:
+  - `/home/daniel/projects/projections-v2/reports/gtv2_same_snapshot_ab_20260311T200354Z/summary.json`
+  - `/home/daniel/projects/projections-v2/reports/gtv2_same_snapshot_ab_20260311T200354Z/star_minutes_compare.csv`
+- rollback target bundle (restored live selector):
+  - `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/phase3_game_transformer_v2_phase3_candidate_from_confirm_baseline_vs_flowup_20260303T022935Z_run_20260303T145119Z`
+
+Key findings:
+
+1. **No-uplift shadow proved the post-model layer was compensating for an upstream miss**
+   - promoted published run:
+     - `total_bias_vs_vegas = +6.34`
+     - `total_mae_vs_vegas = 6.76`
+   - exact same-worlds shadow with uplift disabled:
+     - `total_bias_vs_vegas = -5.32`
+     - `total_mae_vs_vegas = 5.32`
+   - but spread alignment worsened sharply:
+     - `spread_mae_vs_vegas = 2.84 -> 4.96`
+   - interpretation:
+     - full `PTS` uplift was too strong,
+     - but removing uplift entirely did **not** restore a clean model;
+       it exposed that star opportunity/minutes were too low upstream.
+
+2. **Published-run A/B suggested stars were losing minutes under the promoted bundle**
+   - same-slate live comparison (`20260311T181256Z` old prod vs `20260311T200354Z` promoted):
+     - star/high-opportunity subset mean minutes:
+       - `34.06 -> 31.09` (`delta = -2.97`)
+   - examples:
+     - Nikola Jokic: `38.11 -> 29.49`
+     - Anthony Edwards: `36.73 -> 30.21`
+     - Kevin Durant: `35.44 -> 31.47`
+     - Jalen Brunson: `34.86 -> 31.60`
+   - this comparison still contained some live input drift / player-universe churn, so it was
+     treated as a directional warning rather than the final proof.
+
+3. **Same-snapshot bundle-only A/B confirmed the issue is the bundle, not live input drift**
+   - exact same feature snapshot: `run=20260311T200354Z`
+   - old bundle vs new bundle:
+     - mean minutes unchanged at team level (`~16.0` per player; exact team totals remain `240`)
+     - per-player minutes MAE delta: `3.08`
+     - `80` players moved by `>=2` minutes
+     - `38` players moved by `>=5` minutes
+   - star/high-minutes subset:
+     - old bundle mean minutes: `33.57`
+     - new bundle mean minutes: `30.30`
+     - mean delta: `-3.26`
+     - `21` players moved by `>=3` minutes
+     - `8` players moved by `>=5` minutes
+   - examples on identical inputs:
+     - Nikola Jokic: `38.67 -> 28.42`
+     - Jamal Murray: `38.26 -> 28.76`
+     - Anthony Edwards: `37.77 -> 29.65`
+     - Alperen Sengun: `33.85 -> 26.67`
+     - Kevin Durant: `36.44 -> 30.94`
+   - where the minutes went:
+     - Russell Westbrook: `0.00 -> 27.28`
+     - Kevin Love: `0.00 -> 19.19`
+     - Tyus Jones: `0.00 -> 12.43`
+     - Zeke Nnaji: `0.00 -> 12.12`
+     - Jonas Valanciunas: `0.00 -> 11.97`
+   - active probability also rose materially:
+     - mean `active_prob_proxy`: `0.653 -> 0.775`
+   - interpretation:
+     - the promoted bundle was broadening the active set and flattening the rotation,
+       not failing to satisfy the team-minute sum.
+
+4. **Likely architectural disconnect: train-time minutes use true active masks, inference uses sampled masks**
+   - in training, the minutes head is fed the target active mask:
+     - `target_active_mask=...`
+     - `minutes_use_target_active=True`
+     - `scripts/rotation/train_game_transformer_v2.py`
+   - in inference / world generation, the minutes head uses the model-sampled active mask instead:
+     - `sample_active=True`
+     - `minutes_use_target_active=False`
+     - `projections/rotation/game_transformer_v2.py`
+   - consequence:
+     - if active-set calibration becomes too broad at inference, the minutes head is forced to
+       spread `240` minutes across too many players, and stars lose opportunity immediately.
+
+5. **The downstream stat path is not tightly enough bottlenecked by sampled minutes**
+   - the flow head is conditioned on encoder/player/team/game states, not sampled minutes directly:
+     - `projections/rotation/joint_game_flow.py`
+   - in worlds, stats are sampled/projected after the active/minutes draw, then aligned to backbone
+     team budgets:
+     - `projections/rotation/sample_worlds_v2.py`
+   - this means a bundle can look better on allocation realism / spreads while still having a bad
+     rotation partition:
+     - old bundle: better `active/minutes`
+     - new bundle: better downstream allocation/world realism
+     - uplift then masked part of the star-opportunity miss by inflating `PTS` on top.
+
+Decision / operational note:
+
+1. **Rollback executed**
+   - live selector `bundle_current` was restored to the prior production bundle above.
+2. **Do not repromote the current RQS control bundle**
+   until the active/minutes coupling issue is isolated and fixed.
+3. **Next debugging focus**
+   - separate the problem into:
+     - active-set calibration error,
+     - minutes-head behavior conditional on active membership,
+     - downstream allocation / efficiency behavior conditional on minutes.
+4. **Most likely high-leverage fix direction**
+   - preserve the improved downstream allocation path,
+   - but repair the inference-time `active -> minutes` coupling
+     (or reduce the train/infer mismatch around target-active forcing)
+   before any future live promotion.
+
+### 16.27 Mixed-Mask Granularity Follow-Up (2026-03-11 / 2026-03-12)
+
+After the rollback diagnosis above, the next experiments focused on reducing the
+`active -> minutes` train/infer mismatch directly.
+
+Artifacts:
+
+- batch-level mixed-mask v2 sweep:
+  - `/home/daniel/projects/projections-v2/reports/gtv2_mixedmask_v2_20260311/leaderboard.csv`
+- per-example / per-team mixed-mask sweep:
+  - `/home/daniel/projects/projections-v2/reports/gtv2_mixedmask_modes_20260311/leaderboard.csv`
+  - `/home/daniel/projects/projections-v2/reports/gtv2_mixedmask_modes_20260311/trial_results.json`
+- exact live-snapshot deterministic compare:
+  - `/home/daniel/projects/projections-v2/reports/gtv2_mixedmask_modes_20260311/same_snapshot_deterministic_compare_full.csv`
+
+Implementation note:
+
+- the trainer originally applied one Bernoulli draw per batch:
+  - either all examples used target active masks for minutes, or all examples used
+    predicted active masks
+- this was moved into `GameTransformerV2.forward(...)` so the minutes-conditioning
+  mask can now be mixed at:
+  - `batch`
+  - `example`
+  - `team`
+
+What worked:
+
+1. **Batch-level mixed-mask remained directionally useful**
+   - best stable batch-level runs (`end_prob ~ 0.3 to 0.5`, `ramp=4`, `bs=16`) improved
+     the historical prod-like slice vs the raw RQS control candidate:
+     - lower `minutes_mae_lineup0`
+     - lower `minutes_mae_lineup1`
+     - lower `active_count_mae`
+   - exact live snapshot (`run=20260311T214333Z`) still improved only partially:
+     - old prod:
+       - `det_active_prob_mean = 0.650`
+       - `det_prop_star_minutes_mean = 33.87`
+     - raw RQS control candidate:
+       - `0.763`
+       - `30.69`
+     - best prior batch-level mixed-mask:
+       - `~0.746`
+       - `31.06 - 31.18`
+
+What did **not** work:
+
+2. **Per-example and per-team mixed-mask improved 60d historical metrics, but not the failing live snapshot**
+   - completed runs:
+     - `example_end030_ramp4_bs16`
+     - `example_end050_ramp4_bs16`
+     - `team_end050_ramp4_bs16`
+   - historical 60d slice improved versus the raw RQS control candidate:
+     - `minutes_mae_lineup0 ~ 3.726 - 3.741`
+     - `minutes_mae_lineup1 ~ 3.211 - 3.230`
+     - `active_count_mae ~ 0.387 - 0.392`
+   - however, on the exact live snapshot they were **worse than the prior batch-level
+     mixed-mask runs**:
+     - `example_end030`:
+       - `det_active_prob_mean = 0.760`
+       - `det_prop_star_minutes_mean = 30.74`
+     - `example_end050`:
+       - `0.760`
+       - `30.74`
+     - `team_end050`:
+       - `0.759`
+       - `30.66`
+   - interpretation:
+     - finer-grained masking did not improve the exact live star-minute flattening failure;
+       it improved the historical slice while moving the deterministic live snapshot in the
+       wrong direction versus the best batch-level mixed-mask runs.
+
+3. **The model-side refactor itself appears to have altered the batch-level training path slightly**
+   - rerun batch controls after moving mask mixing into the model had historical metrics
+     similar to the earlier batch-level runs, but worse exact live-snapshot deterministic
+     outputs:
+     - earlier batch-level mixed-mask:
+       - `det_active_prob_mean ~ 0.746`
+       - `det_prop_star_minutes_mean ~ 31.06 - 31.18`
+     - rerun batch controls under the new in-model mixing path:
+       - `~0.748 - 0.754`
+       - `30.65 - 30.66`
+   - this suggests the location of the stochastic mask-selection logic itself may matter,
+     or the training path remains sensitive enough that same-config reruns can move the
+     exact live snapshot meaningfully.
+
+Operational conclusion:
+
+1. **Do not promote any per-example/per-team mixed-mask variant**
+   based on the current evidence.
+2. **Best current research branch remains the earlier stable batch-level mixed-mask family,**
+   not the newer `example` or `team` modes.
+3. **Next experiments should not keep broadening the mixing granularity blindly.**
+   The higher-leverage next step is to add an explicit same-snapshot guardrail
+   (`det_active_prob_mean`, `det_prop_star_minutes_mean`) to the sweep loop, then test:
+   - stronger batch-level schedules, or
+   - explicit penalties/anchors on over-broad active probabilities and star-minute loss.
+
+### 16.28 Production Bundle Verification on Live Slate (2026-03-12)
+
+To rule out selector drift as the cause of the rebound undercalls observed later on the
+March 11, 2026 live slate, the earliest live run and the current live/latest run were
+compared directly at the manifest level.
+
+Runs checked:
+
+- earliest live run:
+  - `/home/daniel/projections-data/artifacts/runs/nba_live/game_date=2026-03-11/run=20260311T152348Z/manifest.json`
+- current live/latest run:
+  - `/home/daniel/projections-data/artifacts/projections/2026-03-11/latest_run.json`
+  - `/home/daniel/projections-data/artifacts/runs/nba_live/game_date=2026-03-11/run=20260312T004502Z/manifest.json`
+
+Exact match confirmed:
+
+- `bundle_dir`:
+  - `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/phase3_game_transformer_v2_phase3_candidate_from_confirm_baseline_vs_flowup_20260303T022935Z_run_20260303T145119Z`
+- `bundle_hash`:
+  - `98c7bfa360e46aad9f19f20d9b6f67cb7159cf8170010bb95212d313667f70d5`
+- `selected_props_source = rotowire`
+
+Interpretation:
+
+1. The live rollback held; the current production GTv2 selector did **not** drift to the
+   rejected RQS bundle.
+2. Any output differences observed across the slate between the early run and the later
+   current/latest run are therefore **not** explained by a bundle swap.
+3. The rebound undercalls seen later in the slate should be investigated as:
+   - live input/state changes,
+   - postprocessing behavior,
+   - or base-model raw rebound calibration,
+   not model-selector drift.
+
+---
+
+## 17. Architectural Review and Experiment Synthesis (2026-03-11)
+
+### Diagnosis: What's Actually Going On
+
+You're hitting a **three-way tension** that no single loss function or hyperparameter sweep can resolve. The three competing objectives are:
+
+1. **Historical minutes parity** (lineup_available=0 vs =1 gap)
+2. **Downstream world realism** (spread/total/tail calibration)
+3. **Live star-player projection accuracy** (deterministic minutes for high-usage players)
+
+Every experiment today improved one at the expense of another. That's not bad luck — it's a structural signal.
+
+### Where the Real Bottleneck Is
+
+#### 1. The flow is not learning what you need it to learn
+
+The flow head models `p(Y | A, M, X)` — raw box-score counts conditioned on minutes. But the flow's coupling conditioner gets its cross-player context from **mean-pooled stat values** (or attention over them). At training time, `Y` is ground truth. At inference time, `Y` starts as Gaussian noise and gets transformed. The conditioner is seeing very different distributions in training vs. inference.
+
+This is the classic normalizing flow train/test distribution mismatch. The affine coupling blocks are particularly brittle here because they have limited capacity to model the heavy-tailed, zero-inflated nature of basketball stats. RQS helps mechanically (it can model non-linear transforms) but doesn't fix the fundamental conditioning mismatch.
+
+**The smoking gun**: your plain continuation checkpoint (`rqs_b4_noposs_ctrl_ft12`) improved realism dramatically just by training longer — not because it learned better stat distributions, but because the backbone representations drifted into a regime where the flow's noise-to-data mapping happened to produce more realistic game totals. That's fragile.
+
+#### 2. The allocation bottleneck at inference time
+
+Look at `_align_flow_to_backbone_budgets` — this is doing **enormous** post-hoc surgery on the flow output. It takes the flow's sampled player-level stats and redistributes them to match backbone team budgets for FGA, FTA, TOV, OREB. Then it independently resamples makes from attempts via beta-binomial.
+
+This means the flow's learned covariance structure — the entire reason you built a joint model — is being **partially destroyed** at inference time. The flow learns correlated `(fga2, fg2m, fga3, fg3m, fta, ftm)` jointly, but then you replace the attempts with budget-allocated values and independently resample makes. The correlations between a player's FGA and their teammate's FGA that the flow learned? Gone. Replaced by a linear share-based allocation.
+
+This is why `beta_binomial_all` "solves" realism on the control checkpoint: it's adding the right kind of variance back into the makes that the budget allocation stripped out. But that's a band-aid over a structural disconnect.
+
+#### 3. The targets themselves are the wrong level of abstraction
+
+The flow models 12 raw count stats per player. But DFS scoring is:
+```
+dk_fpts = pts + 1.25*reb + 1.5*ast + 2*stl + 2*blk - 0.5*tov + bonuses
+```
+
+Most of your DFS-relevant variance comes from **3-4 stats** (pts, reb, ast, and the rare-event premium from stl/blk). Yet the flow is spending equal capacity on all 12 dimensions, many of which are highly correlated by construction (fga2/fg2m, fga3/fg3m, fta/ftm are attempt/make pairs). Six of your 12 flow dimensions are devoted to "how many makes given attempts" — but then you override that with beta-binomial resampling at inference anyway.
+
+The flow is effectively learning a 6-dimensional model (attempts + oreb + dreb + ast + stl + blk + tov — actually about 7-8 independent degrees of freedom) but parameterized in a 12-dimensional space with redundant pairs, then having half its output replaced post-hoc.
+
+#### 4. The lineup parity gap is an artifact of the training data, not a modeling failure
+
+Your 60d eval has only 28% `lineup_available=1` coverage. The model gets much more gradient signal from `lineup_available=0` rows. When you fine-tune, the `lineup_available=1` regime (which is your production regime) improves faster because it has more distinct signal, widening the gap. You already correctly diagnosed this and switched to `prod_like` gating — but the underlying issue is that your training signal is dominated by a regime you don't care about in production.
+
+### What I Think Is Missing
+
+#### Signal gap: Game-state conditioning is too weak
+
+The `H_game` token carries `vegas_total`, `vegas_spread`, `estimated_possessions`. These are the **only** direct game-volume signals. But basketball stat distributions are heavily shaped by:
+
+- **Pace** (possessions per 48 min) — you have `estimated_possessions`, but it's a single scalar pre-game estimate, not a learned latent
+- **Blowout dynamics** — a 20-point spread game has very different star minute distributions than a close game, and your flow sees this only through `vegas_spread` as a scalar feature, not as a conditioning regime
+- **Roster composition interactions** — when Player A and Player B are both on the floor, their stat distributions shift (e.g., two high-usage guards competing for shots). The backbone has cross-attention for this, but the flow's conditioner doesn't have a mechanism to model **pair-specific** stat trade-offs
+
+The DET/Cade-out diagnosis is a concrete example: the model distributes minutes across many players rather than concentrating into the backup PG. This suggests the backbone's cross-player attention isn't learning strong enough **role-conditional** redistribution patterns.
+
+#### Modeling decision gap: The factorization is fighting itself
+
+Your factorization is:
+```
+p(A, M, Y | X) = p(A | X) · p(M | A, X) · p_flow(Y | A, M, X)
+```
+
+The problem: `M` (minutes) is the strongest predictor of `Y` (stats). A player's FGA is roughly proportional to their minutes and usage rate. By conditioning the flow on observed `M` during training, the flow can "cheat" by learning `Y ≈ f(M)` — a per-player scaling of minutes — rather than learning the joint stat covariance you actually need.
+
+At inference, `M` comes from the minutes head (which is the capped-simplex projection). If the minutes head is slightly off, the flow's `Y` will be scaled wrong in a correlated way for all stats. This amplifies minutes errors into stat errors, which is exactly what you see in the star under-projection issue.
+
+#### Loss function gap: No direct game-volume supervision on the flow
+
+The flow's NLL loss encourages it to assign high likelihood to the observed box-score tensor. But NLL doesn't care about **aggregate** properties of the distribution — it cares about pointwise density. You can have a perfect NLL score while consistently under-generating team totals in samples, because the flow learned a sharp distribution around the conditional mean rather than capturing the right variance.
+
+Your `L_team_energy` and `L_crps_fpts` are in the right direction but they operate on **sampled** outputs, which means they require through-flow gradient, which is noisy and hard to scale. The usage-share/aux losses you tried today all collapsed downstream totals — this is the NLL-vs-sample-loss gradient conflict in action.
+
+### Concrete Suggestions
+
+#### Near-term (within current architecture)
+
+1. **Reduce flow target to ~6 independent dimensions**: Model `(fga, fta, oreb, dreb, ast, stl, blk, tov)` — 8 stats. Derive `fga2`/`fga3` split from backbone `three_pa_share` and makes from beta-binomial at inference. This eliminates the redundant attempt/make pairs from the flow and removes the contradiction between flow-learned makes and inference-overridden makes.
+
+2. **Add game-total as a first-class latent variable**: Before sampling player stats, sample `team_total_pts` from the backbone (conditioned on vegas_total). Then condition the flow on `team_total_pts` alongside `A` and `M`. This gives the flow the budget signal it currently lacks and addresses Open Question #2 in Section 12.
+
+3. **Curriculum on `lineup_available=1` rows**: Upweight `lineup_available=1` examples by 2-3x in training. Your production regime is under-represented in training data, and that's where all your eval regressions concentrate.
+
+#### Medium-term (architectural)
+
+4. **Consider a two-stage flow**: Stage 1 models team-level budgets `(team_fga, team_fta, team_reb, team_ast, team_stl, team_blk, team_tov)` jointly for both teams. Stage 2 models player shares within those budgets. This explicitly separates "how much total action" from "who gets it" — matching the structure of the sport. Your current `_align_flow_to_backbone_budgets` is already doing this split at inference time; making it part of the generative model would align training and inference.
+
+5. **Replace flow conditioning on ground-truth `M` with noisy/sampled `M`**: During training, some fraction of the time, feed the flow `M_pred` (minutes head output) instead of `M_true`. This is essentially the mixed-mask idea you tested today, but you should apply it to the flow conditioning, not just the minutes supervision. Your `mmask_end050_ramp4` result showed this direction helps — it just needs to go further.
+
+6. **Explicit pairwise/role-conditional features in the conditioner**: The `_CouplingConditioner` currently fuses `cond_h + player_h + team_h + game_h` with additive combination. There's no mechanism for the conditioner to learn "Player A's FGA distribution shifts based on Player B's minutes." Adding a lightweight cross-player attention layer within the conditioner (not just mean-pooling) would give the flow the pair-interaction capacity it needs. You have `context_mode="attention"` implemented but the memories suggest it wasn't the breakthrough — possibly because it operates on stat values `y_cond` rather than on player identity/role embeddings.
+
+#### What I'd prioritize
+
+If I had to pick one thing: **#1 (reduce flow dimensions) + #2 (team-total latent)**. The current 12-dim flow with 6 redundant make/attempt pairs, getting half its output replaced at inference, is the biggest structural mismatch. Fixing that alignment between what the flow learns and what inference actually uses would make every other experiment you run more informative, because you'd stop fighting the train-test disconnect in the attempt/make channels.
+
+The usage-share and aux-loss sweeps keep failing not because the ideas are wrong, but because they're trying to supervise a model whose inference pathway ignores half of what it learned. Fix the inference alignment first, then the supervision signals will land.
+
+### 17.1 Implementation Start: Lineup-Availability Curriculum (2026-03-11)
+
+Implemented a first near-term audit recommendation in the GTv2 trainer:
+
+- Added `--lineup-available-sample-weight` to `scripts/rotation/train_game_transformer_v2.py`.
+- When set `> 1.0`, train sampling uses a weighted sampler where each game example's
+  sampling weight is:
+  - `1 + (target_weight - 1) * lineup_available_fraction`
+  - `lineup_available_fraction` is computed over valid player rows in that game example.
+- This upweights examples from the production-like lineup-confirmed regime without
+  changing model architecture or label contracts.
+
+Initial intent: improve signal density for `lineup_available=1` during optimization while
+keeping default behavior unchanged at `1.0`.
+
+### 17.2 Status Update (2026-03-12, Flow-Minutes Conditioning Audit Pass)
+
+Implemented the next near-term audit suggestion as an **opt-in** model path:
+
+- Added optional flow conditioning on per-player minutes (`M`) in GTv2 flow coupling:
+  - model config: `flow_use_minutes_conditioning` (default `false`)
+  - train CLI:
+    - `--flow-use-minutes-conditioning`
+    - `--flow-minutes-teacher-forcing-prob-start`
+    - `--flow-minutes-teacher-forcing-prob-end`
+    - `--flow-minutes-teacher-forcing-ramp-epochs`
+    - `--flow-minutes-teacher-forcing-mode {batch,example,team}`
+- Wiring is train/inference-safe:
+  - when disabled (default), behavior is unchanged
+  - when enabled, flow sees mixed target/predicted minutes during training
+  - sampler/decision paths pass minutes context for enabled runs
+- Tests and lint passed after implementation:
+  - `tests/rotation/test_game_transformer_v2.py`
+  - `tests/rotation/test_train_game_transformer_v2_phase2_stability.py`
+  - `tests/rotation/test_sweep_game_transformer_v2_phase2.py`
+
+Focused experiment loops (same 60d eval + same live snapshot guard):
+
+- initial broad A/B attempts:
+  - `/home/daniel/projects/projections-v2/reports/gtv2_flow_minutes_conditioning_sweep_20260312`
+  - `/home/daniel/projects/projections-v2/reports/gtv2_flow_minutes_conditioning_sweep_20260312_frominit`
+  - these were invalid for comparison due an accidental `train_val_days=60` mismatch versus the winning recipe.
+- corrected continuation A/B (`train_val_days=14`, low-LR from prior winning checkpoint):
+  - `/home/daniel/projects/projections-v2/reports/gtv2_flow_minutes_conditioning_continue_20260312_tv14`
+  - baseline checkpoint:
+    `/home/daniel/projects/projections-v2/reports/gtv2_lineup_curriculum_sweep_20260311/trials/mmask_end030_ramp4_bs16_wlineup15/run/model.pt`
+
+Observed outcome on corrected A/B:
+
+- **control continuation** (no flow-minutes conditioning) passed gates:
+  - `minutes_mae_lineup0`: `3.7361 -> 3.7225` (improved)
+  - `minutes_mae_lineup1`: `3.2279 -> 3.2083` (improved)
+  - `active_count_mae`: `0.4093 -> 0.3892` (improved)
+  - snapshot deltas vs production baseline:
+    - `delta_det_active_prob_mean = +0.0909`
+    - `delta_det_prop_star_minutes_mean = -2.7387`
+  - `promotion_gate_pass = true`
+- **flow-minutes conditioning variants** (batch/team) were not promotable:
+  - single-run gate passed, but snapshot guard failed
+  - dominant failure: `delta_det_prop_star_minutes_mean ~ -3.19` (below `-2.8` floor)
+  - additional mild variant (`end=0.9`) still failed snapshot guard:
+    `/home/daniel/projects/projections-v2/reports/gtv2_flow_minutes_conditioning_continue_20260312_tv14_flowmin_end090`
+
+Decision from this pass:
+
+1. Keep `flow_use_minutes_conditioning` **disabled by default**.
+2. Do not promote any current flow-minutes-conditioning variant.
+3. Retain the implementation as an experimental branch for future guarded tuning.
+
+### 17.3 Implementation Start: Flow Target Schema Alignment (`v2`) (2026-03-12)
+
+Implemented the first pass of train/inference alignment for flow targets:
+
+- Added `flow_target_schema` support in `GameTransformerV2Config` (`v1` default, `v2` opt-in).
+- `v2` flow schema models independent count channels:
+  - `fga2, fga3, fta, oreb, dreb, ast, stl, blk, tov`
+- Added shared helpers in `projections/rotation/game_transformer_v2.py`:
+  - `select_flow_columns(...)`
+  - `reconstruct_flow_to_contract(...)`
+  - `flow_target_columns(..., schema=...)`
+  - `flow_contract_columns(...)`
+
+Training path updates:
+
+- Trainer always loads full box-score labels (`v1` contract columns) for supervision/aux losses.
+- Flow likelihood inputs are projected to model schema (`v1` or `v2`) before `run_flow`.
+- Decision and emergent-flow auxiliary paths reconstruct sampled flow outputs through the shared reconstruction function, so training and inference use the same stat reconstruction.
+
+Inference path updates:
+
+- `sample_worlds_v2` now reconstructs sampled flow outputs via the same shared function.
+- World contracts/diagnostics continue to run on the canonical contract columns.
+
+Rollout note:
+
+- New CLI flag in training: `--flow-target-schema {v1,v2}`.
+- Default remains `v1` for safety; `v2` is currently experimental behind the flag.
+
+Initial A/B continuation results (same checkpoint/splits/guards as 17.2):
+
+- Sweep root:
+  `/home/daniel/projects/projections-v2/reports/gtv2_flow_schema_v2_continue_20260312`
+- `continue_control_v1_lr5e5` (promotable):
+  - `delta_minutes_mae_lineup0 = -0.0123`
+  - `delta_minutes_mae_lineup1 = -0.0263`
+  - `delta_active_count_mae = -0.0189`
+  - `delta_det_prop_star_minutes_mean = -2.7392` (passes `-2.8` floor)
+- `continue_schema_v2_lr5e5` (gate pass but weaker than control):
+  - `delta_minutes_mae_lineup0 = +0.0130`
+  - `delta_minutes_mae_lineup1 = -0.0044`
+  - `delta_active_count_mae = -0.0050`
+  - `delta_det_prop_star_minutes_mean = -2.7919` (near floor)
+
+Follow-up `v2` tuning sweep:
+
+- Sweep root:
+  `/home/daniel/projects/projections-v2/reports/gtv2_flow_schema_v2_tune_20260312`
+- `schema_v2_lr3e5`: gate pass but still weaker than control.
+- `schema_v2_wflow010`: failed snapshot guard (`delta_det_prop_star_minutes_mean = -2.8162`).
+
+Status:
+
+1. Implementation is complete and test-covered.
+2. `v2` schema is not yet an improvement over the current best `v1` continuation.
+3. Keep `v2` as an experimental path and continue guarded tuning before promotion.
+
+### 17.4 Production Regression: `chunk`-vs-`view` Reshape Bug in Coupling Conditioner (2026-03-12)
+
+**Severity:** P0 — stat-level distortion affecting all live projections from 2026-03-11 onward.
+
+**Symptom:** Rebounds (oreb + dreb) extremely depressed, steals and blocks inflated,
+with downstream DK FPTS distortion across all players. Issue appeared after the 3-11
+deploy (`3eaaf16b`) and was absent on the 3-10 slate.
+
+**Root cause:** Commit `3eaaf16b` refactored `_AffineCouplingConditioner` into the
+more general `_CouplingConditioner` to support both affine and RQS coupling types.
+The conditioner's `forward` method was changed from:
+
+```python
+# OLD (correct for affine models trained with chunk):
+shift, log_scale = torch.chunk(out, chunks=2, dim=-1)
+return shift, log_scale
+```
+
+to:
+
+```python
+# NEW (BROKEN for affine models):
+return out.view(B, P, num_stats, output_dim_per_stat)
+# then in the coupling block:
+shift = params[..., 0]
+log_scale = params[..., 1]
+```
+
+The linear output layer produces `(B, P, D*S)` where `D=output_dim_per_stat` and
+`S=num_stats`. For an affine model trained with `torch.chunk`, the memory layout is
+**contiguous blocks per parameter**:
+
+    [shift_stat0, shift_stat1, ..., shift_statN, scale_stat0, ..., scale_statN]
+
+`torch.chunk(out, 2, dim=-1)` correctly splits at the midpoint.
+
+`out.view(B, P, S, D)` instead treats the layout as **interleaved pairs**:
+
+    [shift_stat0, scale_stat0, shift_stat1, scale_stat1, ...]
+
+This scrambled every stat's shift and scale values. For example, what should have
+been the rebound shift was instead receiving the log-scale value from an adjacent
+stat (stl or blk), causing rebounds to be squashed and steals/blocks to be inflated.
+
+**Fix:** Changed `_CouplingConditioner.forward` to reshape as
+`out.view(B, P, D, S).permute(0, 1, 3, 2)` which correctly maps contiguous-block
+layout to `(B, P, S, D)` shape. Verified numerically equivalent to `torch.chunk`
+for `D=2`.
+
+**Impact window:** 2026-03-11 ~15:15 ET (deploy) through 2026-03-12 fix.
+All GTv2 world-generation runs in this window produced distorted stat distributions.
+The production model bundle (`phase3_...20260303T145119Z`) and its weights were not
+affected — the bug was purely in the inference-time reshape.
+
+**Lesson:** When refactoring tensor layout operations for generality, always verify
+equivalence with the *training-time* convention. `torch.chunk` (contiguous split)
+and `Tensor.view` (interleaved reshape) produce different index mappings for the
+same flat buffer. Add a regression test that asserts `chunk` and `view+permute`
+equivalence for the affine case.

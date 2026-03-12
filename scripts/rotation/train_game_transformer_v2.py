@@ -17,12 +17,13 @@ import pandas as pd
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from projections import paths
 from projections.rotation.game_transformer_v2 import (
     FLOW_TARGET_COLUMNS_V1,
     FLOW_TARGET_COLUMNS_WITH_PF,
+    FLOW_TARGET_SCHEMA_DEFAULT,
     GameLevelDataset,
     GameTransformerV2Config,
     OVERFLOW_KEEP_WEIGHT_PRIOR_MINUTES,
@@ -35,6 +36,10 @@ from projections.rotation.game_transformer_v2 import (
     build_game_level_examples,
     build_game_transformer_v2,
     collate_game_level_examples,
+    flow_target_columns,
+    normalize_flow_target_schema,
+    reconstruct_flow_to_contract,
+    select_flow_columns,
 )
 from projections.rotation.joint_active_set import (
     build_active_set_labels,
@@ -115,6 +120,8 @@ class EpochMetrics:
     phase2_flow_warmup: float
     phase2_anchor_weight: float
     phase2_a2_scale: float
+    minutes_teacher_forcing_prob: float
+    flow_minutes_teacher_forcing_prob: float
     phase2_backoff_count: int
     train_skipped_batches: int
     train_instability_events: int
@@ -139,6 +146,15 @@ class EpochMetrics:
     train_reb_opportunity_rate_aux: float = 0.0
     train_spread_aux: float = 0.0
     train_total_aux: float = 0.0
+    train_props_pts_aux: float = 0.0
+    train_props_reb_aux: float = 0.0
+    train_props_ast_aux: float = 0.0
+    train_direct_pts_aux: float = 0.0
+    train_direct_reb_aux: float = 0.0
+    train_direct_ast_aux: float = 0.0
+    train_direct_stl_aux: float = 0.0
+    train_direct_blk_aux: float = 0.0
+    train_direct_tov_aux: float = 0.0
     train_efficiency_mean_aux: float = 0.0
     val_total: float = 0.0
     val_minutes_mae: float = 0.0
@@ -161,6 +177,15 @@ class EpochMetrics:
     val_reb_opportunity_rate_aux: float = 0.0
     val_spread_aux: float = 0.0
     val_total_aux: float = 0.0
+    val_props_pts_aux: float = 0.0
+    val_props_reb_aux: float = 0.0
+    val_props_ast_aux: float = 0.0
+    val_direct_pts_aux: float = 0.0
+    val_direct_reb_aux: float = 0.0
+    val_direct_ast_aux: float = 0.0
+    val_direct_stl_aux: float = 0.0
+    val_direct_blk_aux: float = 0.0
+    val_direct_tov_aux: float = 0.0
     val_efficiency_mean_aux: float = 0.0
     val_total_ex_possreg: float = 0.0
     train_poss_regression: float = 0.0
@@ -272,7 +297,12 @@ def _coerce_join_keys(df: pd.DataFrame, *, name: str) -> pd.DataFrame:
         out[col] = pd.to_numeric(out[col], errors="coerce").astype("Int64")
     if "game_date" not in out.columns:
         raise ValueError(f"{name} missing key column: game_date")
-    out["game_date"] = pd.to_datetime(out["game_date"], errors="coerce").dt.normalize()
+    game_date = out["game_date"]
+    if pd.api.types.is_datetime64_any_dtype(game_date):
+        normalized = pd.Series(game_date, copy=False)
+    else:
+        normalized = pd.to_datetime(game_date.astype("string"), errors="coerce")
+    out["game_date"] = pd.Series(normalized, copy=False).dt.normalize()
 
     invalid_keys = out[["game_id", "team_id", "player_id", "game_date"]].isna().any(axis=1)
     if invalid_keys.any():
@@ -354,6 +384,55 @@ def _split_train_val(df: pd.DataFrame, *, val_days: int) -> tuple[pd.DataFrame, 
         "val_max_date": str(pd.to_datetime(val["game_date"]).max().date()),
     }
     return train, val, meta
+
+
+def _build_lineup_available_example_sampling_weights(
+    examples: list[Any],
+    *,
+    lineup_available_weight: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Build per-example train sampling weights from lineup-available coverage."""
+    if not examples:
+        return (
+            torch.ones((0,), dtype=torch.double),
+            {
+                "lineup_weight_target": float(max(1.0, float(lineup_available_weight))),
+                "lineup_fraction_mean": 0.0,
+                "lineup_fraction_min": 0.0,
+                "lineup_fraction_max": 0.0,
+                "sample_weight_mean": 1.0,
+                "sample_weight_min": 1.0,
+                "sample_weight_max": 1.0,
+            },
+        )
+
+    target_weight = float(max(1.0, float(lineup_available_weight)))
+    lineup_fraction = np.zeros((len(examples),), dtype=np.float64)
+
+    for idx, ex in enumerate(examples):
+        valid = np.asarray(ex.player_valid_mask, dtype=bool)
+        if valid.size == 0:
+            continue
+        lineup = np.asarray(ex.lineup_available, dtype=bool)
+        if lineup.shape != valid.shape:
+            raise ValueError("lineup_available shape must match player_valid_mask per example")
+        valid_count = int(valid.sum())
+        if valid_count <= 0:
+            continue
+        lineup_count = int(np.logical_and(lineup, valid).sum())
+        lineup_fraction[idx] = float(lineup_count) / float(valid_count)
+
+    sample_weights = 1.0 + (target_weight - 1.0) * lineup_fraction
+    meta = {
+        "lineup_weight_target": target_weight,
+        "lineup_fraction_mean": float(lineup_fraction.mean()),
+        "lineup_fraction_min": float(lineup_fraction.min()),
+        "lineup_fraction_max": float(lineup_fraction.max()),
+        "sample_weight_mean": float(sample_weights.mean()),
+        "sample_weight_min": float(sample_weights.min()),
+        "sample_weight_max": float(sample_weights.max()),
+    }
+    return torch.as_tensor(sample_weights, dtype=torch.double), meta
 
 
 def _flatten_side(x: torch.Tensor) -> torch.Tensor:
@@ -565,26 +644,19 @@ def _project_flow_stats_to_contract(
     flow_values: torch.Tensor,
     *,
     flow_target_columns: list[str],
+    flow_contract_columns: list[str] | None = None,
+    fg2_rate: torch.Tensor | float | None = None,
+    fg3_rate: torch.Tensor | float | None = None,
+    ft_rate: torch.Tensor | float | None = None,
 ) -> torch.Tensor:
-    fg2m_idx = _flow_index(flow_target_columns, "fg2m")
-    fga2_idx = _flow_index(flow_target_columns, "fga2")
-    fg3m_idx = _flow_index(flow_target_columns, "fg3m")
-    fga3_idx = _flow_index(flow_target_columns, "fga3")
-    ftm_idx = _flow_index(flow_target_columns, "ftm")
-    fta_idx = _flow_index(flow_target_columns, "fta")
-    y_pos = torch.clamp(flow_values, min=0.0)
-
-    cols: list[torch.Tensor] = []
-    for idx in range(y_pos.shape[-1]):
-        col = y_pos[..., idx]
-        if idx == fg2m_idx:
-            col = torch.minimum(col, y_pos[..., fga2_idx])
-        elif idx == fg3m_idx:
-            col = torch.minimum(col, y_pos[..., fga3_idx])
-        elif idx == ftm_idx:
-            col = torch.minimum(col, y_pos[..., fta_idx])
-        cols.append(col.unsqueeze(-1))
-    return torch.cat(cols, dim=-1)
+    return reconstruct_flow_to_contract(
+        flow_values,
+        flow_target_columns=flow_target_columns,
+        contract_columns=flow_contract_columns,
+        fg2_rate=fg2_rate,
+        fg3_rate=fg3_rate,
+        ft_rate=ft_rate,
+    )
 
 
 def _compute_dk_fpts_from_flow(
@@ -627,6 +699,7 @@ def _sample_decision_fpts(
     context_out: Any,
     num_samples: int,
     active_temperature: float,
+    flow_contract_columns: list[str],
 ) -> torch.Tensor:
     if int(num_samples) <= 0:
         raise ValueError("num_samples must be > 0")
@@ -638,7 +711,7 @@ def _sample_decision_fpts(
     # Reuse one context pass from the caller, then sample worlds from active/minutes/flow heads.
     ctx = context_out
     flow_head = model.flow_head  # type: ignore[attr-defined]
-    flow_target_columns: list[str] = list(model.flow_target_columns)  # type: ignore[attr-defined]
+    flow_model_target_columns: list[str] = list(model.flow_target_columns)  # type: ignore[attr-defined]
     valid_flat = ctx.player_valid_mask.to(dtype=torch.bool)
 
     worlds: list[torch.Tensor] = []
@@ -656,7 +729,7 @@ def _sample_decision_fpts(
             (
                 ctx.player_states.shape[0],
                 ctx.player_states.shape[1],
-                len(flow_target_columns),
+                len(flow_model_target_columns),
             ),
             dtype=ctx.player_states.dtype,
             device=ctx.player_states.device,
@@ -669,17 +742,25 @@ def _sample_decision_fpts(
             player_team_index=ctx.player_team_index,
             valid_mask=valid_flat,
             observed_mask=valid_flat.unsqueeze(-1).expand_as(z),
+            minutes_context=ctx.minutes.minutes,
         )
+        fg2_rate = ctx.efficiency.mean_fg2 if getattr(ctx, "efficiency", None) is not None else None
+        fg3_rate = ctx.efficiency.mean_fg3 if getattr(ctx, "efficiency", None) is not None else None
+        ft_rate = ctx.efficiency.mean_ft if getattr(ctx, "efficiency", None) is not None else None
         flow_samples = _project_flow_stats_to_contract(
             flow_samples,
-            flow_target_columns=flow_target_columns,
+            flow_target_columns=flow_model_target_columns,
+            flow_contract_columns=flow_contract_columns,
+            fg2_rate=fg2_rate,
+            fg3_rate=fg3_rate,
+            ft_rate=ft_rate,
         )
         flow_samples = flow_samples * active_out.active_mask.unsqueeze(-1).to(dtype=flow_samples.dtype)
         worlds.append(
             torch.nan_to_num(
                 _compute_dk_fpts_from_flow(
                     flow_samples,
-                    flow_target_columns=flow_target_columns,
+                    flow_target_columns=flow_contract_columns,
                 ),
                 nan=0.0,
                 posinf=200.0,
@@ -753,6 +834,103 @@ def _resolve_ramped_loss_scale(
     return float(start_scale + (1.0 - float(start_scale)) * progress)
 
 
+def _resolve_minutes_teacher_forcing_prob(
+    *,
+    epoch: int,
+    start_prob: float,
+    end_prob: float,
+    ramp_epochs: int,
+) -> float:
+    if int(epoch) <= 0:
+        raise ValueError("epoch must be >= 1")
+    start = float(min(1.0, max(0.0, start_prob)))
+    end = float(min(1.0, max(0.0, end_prob)))
+    if int(ramp_epochs) <= 1:
+        return end
+    progress = min(1.0, float(int(epoch) - 1) / float(int(ramp_epochs) - 1))
+    return float(start + (end - start) * progress)
+
+
+def _parse_prefix_csv(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    parts = [str(part).strip() for part in str(value).split(",")]
+    return tuple(part for part in parts if part)
+
+
+def _matches_prefix(name: str, prefixes: tuple[str, ...]) -> bool:
+    return bool(prefixes) and any(name.startswith(prefix) for prefix in prefixes)
+
+
+def _apply_partial_checkpoint(
+    *,
+    model: nn.Module,
+    checkpoint_path: Path,
+    device: torch.device,
+    prefixes: tuple[str, ...],
+    label: str,
+) -> None:
+    if not prefixes:
+        raise ValueError(f"{label} requires at least one parameter prefix")
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"{label} checkpoint not found: {checkpoint_path}")
+    raw_state = torch.load(checkpoint_path, map_location=device)
+    model_state = model.state_dict()
+    graft_state: dict[str, torch.Tensor] = {}
+    shape_mismatched: list[str] = []
+    missing_in_model: list[str] = []
+    for key, value in raw_state.items():
+        if not _matches_prefix(str(key), prefixes):
+            continue
+        if key not in model_state:
+            missing_in_model.append(str(key))
+            continue
+        if model_state[key].shape != value.shape:
+            shape_mismatched.append(str(key))
+            continue
+        graft_state[str(key)] = value
+    if not graft_state:
+        raise RuntimeError(
+            f"{label} checkpoint {checkpoint_path} had no compatible parameters for prefixes {list(prefixes)}"
+        )
+    missing, unexpected = model.load_state_dict(graft_state, strict=False)
+    if unexpected:
+        raise RuntimeError(f"{label} produced unexpected keys from {checkpoint_path}: {unexpected}")
+    loaded_keys = sorted(graft_state.keys())
+    print(
+        f"[{label}] loaded {len(loaded_keys)} tensors from {checkpoint_path} using prefixes {list(prefixes)}",
+        flush=True,
+    )
+    if shape_mismatched:
+        print(
+            f"[{label}] shape-mismatched keys skipped ({len(shape_mismatched)}): {shape_mismatched}",
+            flush=True,
+        )
+    if missing_in_model:
+        print(
+            f"[{label}] keys absent from target model skipped ({len(missing_in_model)}): {missing_in_model}",
+            flush=True,
+        )
+    relevant_missing = [name for name in missing if _matches_prefix(str(name), prefixes)]
+    if relevant_missing:
+        raise RuntimeError(f"{label} failed to load requested prefixes from {checkpoint_path}: {relevant_missing}")
+
+
+def _freeze_parameter_prefixes(model: nn.Module, *, prefixes: tuple[str, ...], label: str) -> None:
+    if not prefixes:
+        return
+    frozen = 0
+    total = 0
+    for name, param in model.named_parameters():
+        if _matches_prefix(str(name), prefixes):
+            total += 1
+            param.requires_grad = False
+            frozen += 1
+    if frozen == 0:
+        raise RuntimeError(f"{label} requested freeze prefixes {list(prefixes)} but matched no parameters")
+    print(f"[{label}] froze {frozen} parameter tensors for prefixes {list(prefixes)}", flush=True)
+
+
 def _masked_scaled_huber_loss(
     *,
     pred: torch.Tensor,
@@ -779,6 +957,38 @@ def _masked_scaled_huber_loss(
     loss = F.huber_loss(pred_scaled, target_scaled, reduction="none", delta=float(delta))
     mask_f = mask_b.to(dtype=loss.dtype)
     return (loss * mask_f).sum() / mask_f.sum().clamp(min=1.0)
+
+
+def _weighted_masked_scaled_huber_loss(
+    *,
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    scale: float,
+    delta: float,
+    weights: torch.Tensor,
+) -> torch.Tensor:
+    """Weighted Huber loss on normalized errors, averaged over mask-selected rows."""
+    if pred.shape != target.shape:
+        raise ValueError("pred and target must have the same shape")
+    if mask.shape != pred.shape:
+        raise ValueError("mask must match pred shape")
+    if weights.shape != pred.shape:
+        raise ValueError("weights must match pred shape")
+    if float(scale) <= 0.0:
+        raise ValueError("scale must be > 0")
+    if float(delta) <= 0.0:
+        raise ValueError("delta must be > 0")
+
+    mask_b = mask.to(dtype=torch.bool)
+    if not bool(mask_b.any()):
+        return pred.new_zeros(())
+    pred_scaled = pred / float(scale)
+    target_scaled = target / float(scale)
+    loss = F.huber_loss(pred_scaled, target_scaled, reduction="none", delta=float(delta))
+    w = torch.where(mask_b, torch.clamp(weights.to(dtype=loss.dtype), min=0.0), torch.zeros_like(loss))
+    denom = w.sum().clamp(min=1e-6)
+    return (loss * w).sum() / denom
 
 
 def _resolve_backbone_epoch_weights(
@@ -1052,6 +1262,7 @@ def _run_epoch(
     active_threshold: float,
     min_active_count: int,
     max_active_count: int,
+    flow_label_columns: list[str],
     run_phase2_flow: bool,
     run_phase3_decision: bool,
     w_minutes: float,
@@ -1085,13 +1296,51 @@ def _run_epoch(
     w_reb_opportunity_rate_aux: float = 0.0,
     w_spread_aux: float = 0.0,
     w_total_aux: float = 0.0,
+    w_props_pts_aux: float = 0.0,
+    w_props_reb_aux: float = 0.0,
+    w_props_ast_aux: float = 0.0,
+    w_direct_pts_aux: float = 0.0,
+    w_direct_reb_aux: float = 0.0,
+    w_direct_ast_aux: float = 0.0,
+    w_direct_stl_aux: float = 0.0,
+    w_direct_blk_aux: float = 0.0,
+    w_direct_tov_aux: float = 0.0,
     spread_total_aux_ramp_epochs: int = 0,
     spread_total_aux_start_scale: float = 1.0,
+    props_aux_ramp_epochs: int = 0,
+    props_aux_start_scale: float = 1.0,
+    direct_stat_aux_ramp_epochs: int = 0,
+    direct_stat_aux_start_scale: float = 1.0,
     spread_aux_target_scale: float = 10.0,
     total_aux_target_scale: float = 25.0,
+    props_pts_target_scale: float = 8.0,
+    props_reb_target_scale: float = 4.0,
+    props_ast_target_scale: float = 3.0,
+    direct_pts_target_scale: float = 8.0,
+    direct_reb_target_scale: float = 4.0,
+    direct_ast_target_scale: float = 3.0,
+    direct_stl_target_scale: float = 1.5,
+    direct_blk_target_scale: float = 1.5,
+    direct_tov_target_scale: float = 2.0,
     spread_aux_huber_delta: float = 1.0,
     total_aux_huber_delta: float = 1.0,
+    props_aux_huber_delta: float = 1.0,
+    direct_stat_aux_huber_delta: float = 1.0,
+    props_aux_confidence_min: float = 0.05,
     w_efficiency_mean_aux: float = 0.0,
+    feature_mean: np.ndarray | None = None,
+    feature_std: np.ndarray | None = None,
+    an_pts_line_idx: int = -1,
+    an_reb_line_idx: int = -1,
+    an_ast_line_idx: int = -1,
+    an_has_pts_idx: int = -1,
+    an_has_reb_idx: int = -1,
+    an_has_ast_idx: int = -1,
+    an_pts_books_idx: int = -1,
+    an_reb_books_idx: int = -1,
+    an_ast_books_idx: int = -1,
+    an_props_market_count_idx: int = -1,
+    prior_play_prob_idx: int = -1,
     vegas_total_idx: int = -1,
     vegas_spread_idx: int = -1,
     vegas_total_missing_idx: int = -1,
@@ -1102,9 +1351,15 @@ def _run_epoch(
     detach_backbone: bool = True,
     phase2_stability_config: Phase2StabilityConfig | None = None,
     phase2_stability_state: Phase2StabilityState | None = None,
+    minutes_teacher_forcing_prob: float = 1.0,
+    minutes_teacher_forcing_mode: str = "batch",
+    flow_minutes_teacher_forcing_prob: float = 1.0,
+    flow_minutes_teacher_forcing_mode: str = "batch",
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(training)
+    minutes_teacher_forcing_prob = float(min(1.0, max(0.0, minutes_teacher_forcing_prob)))
+    flow_minutes_teacher_forcing_prob = float(min(1.0, max(0.0, flow_minutes_teacher_forcing_prob)))
     spread_total_aux_ramp = _resolve_ramped_loss_scale(
         epoch=int(epoch_index),
         ramp_epochs=int(spread_total_aux_ramp_epochs),
@@ -1112,6 +1367,33 @@ def _run_epoch(
     )
     w_spread_aux_eff = float(w_spread_aux) * float(spread_total_aux_ramp)
     w_total_aux_eff = float(w_total_aux) * float(spread_total_aux_ramp)
+    props_aux_ramp = _resolve_ramped_loss_scale(
+        epoch=int(epoch_index),
+        ramp_epochs=int(props_aux_ramp_epochs),
+        start_scale=float(props_aux_start_scale),
+    )
+    w_props_pts_aux_eff = float(w_props_pts_aux) * float(props_aux_ramp)
+    w_props_reb_aux_eff = float(w_props_reb_aux) * float(props_aux_ramp)
+    w_props_ast_aux_eff = float(w_props_ast_aux) * float(props_aux_ramp)
+    direct_stat_aux_ramp = _resolve_ramped_loss_scale(
+        epoch=int(epoch_index),
+        ramp_epochs=int(direct_stat_aux_ramp_epochs),
+        start_scale=float(direct_stat_aux_start_scale),
+    )
+    w_direct_pts_aux_eff = float(w_direct_pts_aux) * float(direct_stat_aux_ramp)
+    w_direct_reb_aux_eff = float(w_direct_reb_aux) * float(direct_stat_aux_ramp)
+    w_direct_ast_aux_eff = float(w_direct_ast_aux) * float(direct_stat_aux_ramp)
+    w_direct_stl_aux_eff = float(w_direct_stl_aux) * float(direct_stat_aux_ramp)
+    w_direct_blk_aux_eff = float(w_direct_blk_aux) * float(direct_stat_aux_ramp)
+    w_direct_tov_aux_eff = float(w_direct_tov_aux) * float(direct_stat_aux_ramp)
+    feature_mean_arr = np.asarray(feature_mean, dtype=np.float32) if feature_mean is not None else None
+    feature_std_arr = np.asarray(feature_std, dtype=np.float32) if feature_std is not None else None
+    if not hasattr(model, "flow_target_columns"):
+        raise RuntimeError("_run_epoch requires model.flow_target_columns")
+    flow_model_columns: list[str] = list(model.flow_target_columns)  # type: ignore[attr-defined]
+    flow_label_columns_full = list(flow_label_columns)
+    if bool(run_phase2_flow) and not flow_label_columns_full:
+        raise RuntimeError("run_phase2_flow=True requires non-empty flow_label_columns")
 
     totals = {
         "total": 0.0,
@@ -1136,6 +1418,15 @@ def _run_epoch(
         "reb_opportunity_rate_aux": 0.0,
         "spread_aux": 0.0,
         "total_aux": 0.0,
+        "props_pts_aux": 0.0,
+        "props_reb_aux": 0.0,
+        "props_ast_aux": 0.0,
+        "direct_pts_aux": 0.0,
+        "direct_reb_aux": 0.0,
+        "direct_ast_aux": 0.0,
+        "direct_stl_aux": 0.0,
+        "direct_blk_aux": 0.0,
+        "direct_tov_aux": 0.0,
         "efficiency_mean_aux": 0.0,
         "steps": 0,
         "skipped_batches": 0,
@@ -1160,12 +1451,30 @@ def _run_epoch(
 
     for batch_idx, batch in enumerate(loader, start=1):
         player_features = batch["player_features"].to(device=device)
+        player_features_flat = torch.cat([player_features[:, 0], player_features[:, 1]], dim=1)
         player_valid_mask = batch["player_valid_mask"].to(device=device)
         y_minutes = batch["y_minutes"].to(device=device)
-        flow_targets = batch["flow_targets"].to(device=device)
-        flow_observed_mask = batch["flow_observed_mask"].to(device=device)
+        flow_targets_full = batch["flow_targets"].to(device=device)
+        flow_observed_mask_full = batch["flow_observed_mask"].to(device=device)
         game_features = batch["game_features"].to(device=device)
         team_features = batch["team_features"].to(device=device)
+        if int(flow_targets_full.shape[-1]) != int(len(flow_label_columns_full)):
+            raise RuntimeError(
+                "Batch flow label width does not match configured flow_label_columns: "
+                f"shape[-1]={flow_targets_full.shape[-1]} columns={len(flow_label_columns_full)}"
+            )
+        flow_targets_model = select_flow_columns(
+            flow_targets_full,
+            source_columns=flow_label_columns_full,
+            target_columns=flow_model_columns,
+            fill_value=0.0,
+        )
+        flow_observed_model = select_flow_columns(
+            flow_observed_mask_full,
+            source_columns=flow_label_columns_full,
+            target_columns=flow_model_columns,
+            fill_value=False,
+        ).to(dtype=torch.bool)
 
         y_flat = _flatten_side(y_minutes)
         valid_flat = _flatten_side(player_valid_mask)
@@ -1181,13 +1490,13 @@ def _run_epoch(
         )
         target_active_mask_2d = label_targets.active_mask.view(y_minutes.shape[0], 2, y_minutes.shape[2])
 
-        flow_mask = flow_observed_mask
+        flow_mask_model = flow_observed_model
         if bool(run_phase2_flow):
             # No flow likelihood terms for DNP rows; only score rows with observed count labels.
             dnp_mask = (y_minutes > 0.0).unsqueeze(-1)
-            flow_mask = flow_mask & player_valid_mask.unsqueeze(-1) & dnp_mask
-        flow_target_flat = torch.cat([flow_targets[:, 0], flow_targets[:, 1]], dim=1)
-        flow_observed_flat = torch.cat([flow_observed_mask[:, 0], flow_observed_mask[:, 1]], dim=1)
+            flow_mask_model = flow_mask_model & player_valid_mask.unsqueeze(-1) & dnp_mask
+        flow_target_flat = torch.cat([flow_targets_full[:, 0], flow_targets_full[:, 1]], dim=1)
+        flow_observed_flat = torch.cat([flow_observed_mask_full[:, 0], flow_observed_mask_full[:, 1]], dim=1)
 
         with torch.set_grad_enabled(training):
             out = model(
@@ -1198,10 +1507,15 @@ def _run_epoch(
                 sample_active=False,
                 active_temperature=1.0,
                 target_active_mask=target_active_mask_2d,
-                minutes_use_target_active=True,
+                minutes_use_target_active=False,
+                minutes_teacher_forcing_prob=float(minutes_teacher_forcing_prob),
+                minutes_teacher_forcing_mode=str(minutes_teacher_forcing_mode),
                 run_flow=bool(run_phase2_flow),
-                flow_targets=flow_targets if bool(run_phase2_flow) else None,
-                flow_observed_mask=flow_mask if bool(run_phase2_flow) else None,
+                flow_targets=flow_targets_model if bool(run_phase2_flow) else None,
+                flow_observed_mask=flow_mask_model if bool(run_phase2_flow) else None,
+                flow_minutes_target=y_minutes if bool(run_phase2_flow) else None,
+                flow_minutes_teacher_forcing_prob=float(flow_minutes_teacher_forcing_prob),
+                flow_minutes_teacher_forcing_mode=str(flow_minutes_teacher_forcing_mode),
                 detach_backbone=bool(detach_backbone),
             )
             active_losses = compute_active_set_losses(
@@ -1230,24 +1544,23 @@ def _run_epoch(
             if bool(run_phase3_decision):
                 if not bool(run_phase2_flow):
                     raise RuntimeError("run_phase3_decision=True requires run_phase2_flow=True")
-                if not hasattr(model, "flow_target_columns"):
-                    raise RuntimeError("run_phase3_decision=True requires model.flow_target_columns")
-                flow_target_columns: list[str] = list(model.flow_target_columns)  # type: ignore[attr-defined]
                 sampled_fpts = _sample_decision_fpts(
                     model,
                     context_out=out,
                     num_samples=int(phase3_num_samples),
                     active_temperature=float(phase3_active_temperature),
+                    flow_contract_columns=flow_label_columns_full,
                 )
                 if bool(phase3_stop_grad):
                     sampled_fpts = sampled_fpts.detach()
                 target_flow = _project_flow_stats_to_contract(
                     flow_target_flat,
-                    flow_target_columns=flow_target_columns,
+                    flow_target_columns=flow_label_columns_full,
+                    flow_contract_columns=flow_label_columns_full,
                 )
                 target_fpts = _compute_dk_fpts_from_flow(
                     target_flow,
-                    flow_target_columns=flow_target_columns,
+                    flow_target_columns=flow_label_columns_full,
                 )
                 decision_mask = flow_observed_flat.all(dim=-1) & out.player_valid_mask
                 crps_fpts = compute_crps_loss(sampled_fpts, target_fpts, decision_mask)
@@ -1272,7 +1585,7 @@ def _run_epoch(
             if bool(enable_possession_backbone) and out.possession is not None and out.backbone is not None:
                 # Extract team-level truth counts from flow_targets (B, 2, 15, S)
                 # Sum across players per team to get team totals
-                ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
+                ftc = flow_label_columns_full
                 required_cols = ["fga2", "fga3", "fta", "oreb", "tov"]
                 missing_required_cols = [name for name in required_cols if name not in ftc]
                 if missing_required_cols:
@@ -1285,15 +1598,15 @@ def _run_epoch(
                 oreb_i = _flow_index(ftc, "oreb")
                 tov_i = _flow_index(ftc, "tov")
                 max_required_idx = max(fga2_i, fga3_i, fta_i, oreb_i, tov_i)
-                if flow_targets.ndim != 4 or int(flow_targets.shape[-1]) <= int(max_required_idx):
+                if flow_targets_full.ndim != 4 or int(flow_targets_full.shape[-1]) <= int(max_required_idx):
                     raise RuntimeError(
                         "Possession backbone requires populated flow_targets stats. "
-                        f"Got flow_targets shape={tuple(flow_targets.shape)} with required index={max_required_idx}. "
+                        f"Got flow_targets shape={tuple(flow_targets_full.shape)} with required index={max_required_idx}. "
                         "Use --enable-phase2-flow so labels_boxscore_counts are loaded.",
                     )
 
                 # flow_targets is (B, 2, 15, S); valid players mask is player_valid_mask (B, 2, 15)
-                ft = flow_targets  # (B, 2, 15, S)
+                ft = flow_targets_full  # (B, 2, 15, S)
                 vm = player_valid_mask.unsqueeze(-1).to(dtype=ft.dtype)  # (B, 2, 15, 1)
                 ft_masked = ft * vm
 
@@ -1304,7 +1617,7 @@ def _run_epoch(
                 tov_team = ft_masked[:, :, :, tov_i].sum(dim=2)
 
                 # Only compute losses where flow labels are observed
-                flow_obs_any = flow_observed_mask.any(dim=-1)  # (B, 2, 15) -> any stat observed
+                flow_obs_any = flow_observed_mask_full.any(dim=-1)  # (B, 2, 15) -> any stat observed
                 team_has_labels = flow_obs_any.any(dim=2)  # (B, 2) -> team has at least one observed player
                 game_has_labels = team_has_labels.all(dim=1)  # (B,) -> both teams have labels
 
@@ -1353,7 +1666,7 @@ def _run_epoch(
             efficiency_nll_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             efficiency_mean_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             if bool(enable_efficiency_head) and out.efficiency is not None:
-                ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
+                ftc = flow_label_columns_full
                 required_cols = ["fga2", "fg2m", "fga3", "fg3m", "fta", "ftm"]
                 missing_required_cols = [name for name in required_cols if name not in ftc]
                 if missing_required_cols:
@@ -1367,10 +1680,10 @@ def _run_epoch(
                 fta_i = _flow_index(ftc, "fta")
                 ftm_i = _flow_index(ftc, "ftm")
                 max_required_idx = max(fga2_i, fg2m_i, fga3_i, fg3m_i, fta_i, ftm_i)
-                if flow_targets.ndim != 4 or int(flow_targets.shape[-1]) <= int(max_required_idx):
+                if flow_targets_full.ndim != 4 or int(flow_targets_full.shape[-1]) <= int(max_required_idx):
                     raise RuntimeError(
                         "Efficiency head loss requires populated flow_targets stats. "
-                        f"Got flow_targets shape={tuple(flow_targets.shape)} with required index={max_required_idx}. "
+                        f"Got flow_targets shape={tuple(flow_targets_full.shape)} with required index={max_required_idx}. "
                         "Use --enable-phase2-flow so labels_boxscore_counts are loaded.",
                     )
 
@@ -1429,8 +1742,17 @@ def _run_epoch(
             reb_opportunity_rate_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             spread_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             total_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            props_pts_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            props_reb_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            props_ast_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            direct_pts_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            direct_reb_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            direct_ast_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            direct_stl_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            direct_blk_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            direct_tov_aux_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             if bool(run_phase2_flow):
-                ftc = list(model.flow_target_columns)  # type: ignore[attr-defined]
+                ftc = flow_label_columns_full
                 fga2_i = _flow_index(ftc, "fga2")
                 fg2m_i = _flow_index(ftc, "fg2m")
                 fga3_i = _flow_index(ftc, "fga3")
@@ -1440,6 +1762,8 @@ def _run_epoch(
                 oreb_i = _flow_index(ftc, "oreb")
                 dreb_i = _flow_index(ftc, "dreb")
                 ast_i = _flow_index(ftc, "ast")
+                stl_i = _flow_index(ftc, "stl")
+                blk_i = _flow_index(ftc, "blk")
                 tov_i = _flow_index(ftc, "tov")
 
                 fga_true = flow_target_flat[..., fga2_i] + flow_target_flat[..., fga3_i]
@@ -1449,6 +1773,8 @@ def _run_epoch(
                 oreb_true = flow_target_flat[..., oreb_i]
                 dreb_true = flow_target_flat[..., dreb_i]
                 ast_true = flow_target_flat[..., ast_i]
+                stl_true = flow_target_flat[..., stl_i]
+                blk_true = flow_target_flat[..., blk_i]
                 tov_true = flow_target_flat[..., tov_i]
 
                 fga_obs = flow_observed_flat[..., fga2_i] & flow_observed_flat[..., fga3_i]
@@ -1463,6 +1789,8 @@ def _run_epoch(
                 oreb_obs = flow_observed_flat[..., oreb_i]
                 dreb_obs = flow_observed_flat[..., dreb_i]
                 ast_obs = flow_observed_flat[..., ast_i]
+                stl_obs = flow_observed_flat[..., stl_i]
+                blk_obs = flow_observed_flat[..., blk_i]
                 tov_obs = flow_observed_flat[..., tov_i]
 
                 if bool(enable_usage_share_head) and out.usage_share is not None:
@@ -1497,12 +1825,21 @@ def _run_epoch(
                     or float(w_reb_opportunity_rate_aux) > 0.0
                     or float(w_spread_aux) > 0.0
                     or float(w_total_aux) > 0.0
+                    or float(w_props_pts_aux) > 0.0
+                    or float(w_props_reb_aux) > 0.0
+                    or float(w_props_ast_aux) > 0.0
+                    or float(w_direct_pts_aux) > 0.0
+                    or float(w_direct_reb_aux) > 0.0
+                    or float(w_direct_ast_aux) > 0.0
+                    or float(w_direct_stl_aux) > 0.0
+                    or float(w_direct_blk_aux) > 0.0
+                    or float(w_direct_tov_aux) > 0.0
                 ):
                     z0 = torch.zeros(
                         (
                             out.player_states.shape[0],
                             out.player_states.shape[1],
-                            len(ftc),
+                            len(flow_model_columns),
                         ),
                         dtype=out.player_states.dtype,
                         device=out.player_states.device,
@@ -1515,10 +1852,15 @@ def _run_epoch(
                         player_team_index=out.player_team_index,
                         valid_mask=out.player_valid_mask,
                         observed_mask=out.player_valid_mask.unsqueeze(-1).expand_as(z0),
+                        minutes_context=out.minutes.minutes,
                     )
                     emergent_flow = _project_flow_stats_to_contract(
                         emergent_flow,
-                        flow_target_columns=ftc,
+                        flow_target_columns=flow_model_columns,
+                        flow_contract_columns=ftc,
+                        fg2_rate=out.efficiency.mean_fg2 if out.efficiency is not None else None,
+                        fg3_rate=out.efficiency.mean_fg3 if out.efficiency is not None else None,
+                        ft_rate=out.efficiency.mean_ft if out.efficiency is not None else None,
                     )
                     fg2m_em = emergent_flow[..., fg2m_i]
                     fg3m_em = emergent_flow[..., fg3m_i]
@@ -1528,7 +1870,109 @@ def _run_epoch(
                     oreb_em = emergent_flow[..., oreb_i]
                     dreb_em = emergent_flow[..., dreb_i]
                     ast_em = emergent_flow[..., ast_i]
+                    stl_em = emergent_flow[..., stl_i]
+                    blk_em = emergent_flow[..., blk_i]
                     tov_em = emergent_flow[..., tov_i]
+                    pts_em = 2.0 * fg2m_em + 3.0 * fg3m_em + ftm_em
+                    reb_em = oreb_em + dreb_em
+
+                    def _raw_player_feature(feature_idx: int) -> torch.Tensor | None:
+                        if int(feature_idx) < 0:
+                            return None
+                        if int(feature_idx) >= int(player_features_flat.shape[-1]):
+                            return None
+                        val = player_features_flat[..., int(feature_idx)]
+                        if feature_mean_arr is None or feature_std_arr is None:
+                            return val
+                        mean_i = float(feature_mean_arr[int(feature_idx)])
+                        std_i = float(feature_std_arr[int(feature_idx)])
+                        if not math.isfinite(std_i) or std_i <= 1e-6:
+                            std_i = 1.0
+                        return val * std_i + mean_i
+
+                    if (
+                        float(w_props_pts_aux) > 0.0
+                        or float(w_props_reb_aux) > 0.0
+                        or float(w_props_ast_aux) > 0.0
+                    ):
+                        market_count_raw = _raw_player_feature(int(an_props_market_count_idx))
+                        prior_play_prob_raw = _raw_player_feature(int(prior_play_prob_idx))
+                        if prior_play_prob_raw is None:
+                            prior_play_prob_raw = torch.ones_like(pts_em)
+                        prior_play_prob_raw = torch.clamp(prior_play_prob_raw, min=0.0, max=1.0)
+
+                        def _prop_aux_loss(
+                            *,
+                            pred: torch.Tensor,
+                            line_idx: int,
+                            has_idx: int,
+                            books_idx: int,
+                            line_center: float,
+                            line_scale: float,
+                            target_scale: float,
+                        ) -> torch.Tensor:
+                            line_raw = _raw_player_feature(int(line_idx))
+                            if line_raw is None:
+                                return torch.zeros((), dtype=pred.dtype, device=pred.device)
+                            has_raw = _raw_player_feature(int(has_idx))
+                            has_market = line_raw.gt(0.0) if has_raw is None else has_raw.ge(0.5)
+                            line_ok = torch.isfinite(line_raw) & line_raw.gt(0.0)
+                            mask = out.player_valid_mask & has_market & line_ok
+                            if not bool(mask.any()):
+                                return torch.zeros((), dtype=pred.dtype, device=pred.device)
+
+                            books_raw = _raw_player_feature(int(books_idx))
+                            if books_raw is None:
+                                books_strength = torch.full_like(line_raw, 0.5)
+                            else:
+                                books_strength = torch.clamp((books_raw - 1.0) / 2.0, min=0.0, max=1.0)
+                            if market_count_raw is None:
+                                market_strength = torch.full_like(line_raw, 0.5)
+                            else:
+                                market_strength = torch.clamp((market_count_raw - 1.0) / 6.0, min=0.0, max=1.0)
+                            line_strength = torch.sigmoid((line_raw - float(line_center)) / max(float(line_scale), 1e-6))
+                            conf = 0.60 * line_strength + 0.20 * books_strength + 0.20 * market_strength
+                            conf = torch.clamp(conf * prior_play_prob_raw, min=float(props_aux_confidence_min), max=1.0)
+                            return _weighted_masked_scaled_huber_loss(
+                                pred=pred,
+                                target=line_raw,
+                                mask=mask,
+                                scale=float(target_scale),
+                                delta=float(props_aux_huber_delta),
+                                weights=conf,
+                            )
+
+                        if float(w_props_pts_aux) > 0.0:
+                            props_pts_aux_loss = _prop_aux_loss(
+                                pred=pts_em,
+                                line_idx=int(an_pts_line_idx),
+                                has_idx=int(an_has_pts_idx),
+                                books_idx=int(an_pts_books_idx),
+                                line_center=16.0,
+                                line_scale=6.0,
+                                target_scale=float(props_pts_target_scale),
+                            )
+                        if float(w_props_reb_aux) > 0.0:
+                            props_reb_aux_loss = _prop_aux_loss(
+                                pred=reb_em,
+                                line_idx=int(an_reb_line_idx),
+                                has_idx=int(an_has_reb_idx),
+                                books_idx=int(an_reb_books_idx),
+                                line_center=6.0,
+                                line_scale=2.5,
+                                target_scale=float(props_reb_target_scale),
+                            )
+                        if float(w_props_ast_aux) > 0.0:
+                            props_ast_aux_loss = _prop_aux_loss(
+                                pred=ast_em,
+                                line_idx=int(an_ast_line_idx),
+                                has_idx=int(an_has_ast_idx),
+                                books_idx=int(an_ast_books_idx),
+                                line_center=4.0,
+                                line_scale=2.0,
+                                target_scale=float(props_ast_target_scale),
+                            )
+
                     if float(w_spread_aux) > 0.0 or float(w_total_aux) > 0.0:
                         if float(w_spread_aux) > 0.0 and int(vegas_spread_idx) < 0:
                             raise RuntimeError(
@@ -1539,7 +1983,6 @@ def _run_epoch(
                                 "w_total_aux > 0 requires vegas_total in --game-feature-cols",
                             )
 
-                        pts_em = 2.0 * fg2m_em + 3.0 * fg3m_em + ftm_em
                         def _team_sum(values: torch.Tensor, team_id: int) -> torch.Tensor:
                             mask = out.player_valid_mask & (out.player_team_index == int(team_id))
                             return (values * mask.to(dtype=values.dtype)).sum(dim=1)
@@ -1714,6 +2157,64 @@ def _run_epoch(
                         )
                         reb_opportunity_rate_aux_loss = (loss_oreb_rate + loss_dreb_rate) / 2.0
 
+                    direct_mask_base = out.player_valid_mask
+                    if float(w_direct_pts_aux) > 0.0:
+                        pts_true = 2.0 * flow_target_flat[..., fg2m_i] + 3.0 * flow_target_flat[..., fg3m_i] + flow_target_flat[..., ftm_i]
+                        pts_obs = (
+                            flow_observed_flat[..., fg2m_i]
+                            & flow_observed_flat[..., fg3m_i]
+                            & flow_observed_flat[..., ftm_i]
+                        )
+                        direct_pts_aux_loss = _masked_scaled_huber_loss(
+                            pred=pts_em,
+                            target=pts_true,
+                            mask=direct_mask_base & pts_obs,
+                            scale=float(direct_pts_target_scale),
+                            delta=float(direct_stat_aux_huber_delta),
+                        )
+                    if float(w_direct_reb_aux) > 0.0:
+                        reb_true = flow_target_flat[..., oreb_i] + flow_target_flat[..., dreb_i]
+                        reb_obs = flow_observed_flat[..., oreb_i] & flow_observed_flat[..., dreb_i]
+                        direct_reb_aux_loss = _masked_scaled_huber_loss(
+                            pred=reb_em,
+                            target=reb_true,
+                            mask=direct_mask_base & reb_obs,
+                            scale=float(direct_reb_target_scale),
+                            delta=float(direct_stat_aux_huber_delta),
+                        )
+                    if float(w_direct_ast_aux) > 0.0:
+                        direct_ast_aux_loss = _masked_scaled_huber_loss(
+                            pred=ast_em,
+                            target=ast_true,
+                            mask=direct_mask_base & ast_obs,
+                            scale=float(direct_ast_target_scale),
+                            delta=float(direct_stat_aux_huber_delta),
+                        )
+                    if float(w_direct_stl_aux) > 0.0:
+                        direct_stl_aux_loss = _masked_scaled_huber_loss(
+                            pred=stl_em,
+                            target=stl_true,
+                            mask=direct_mask_base & stl_obs,
+                            scale=float(direct_stl_target_scale),
+                            delta=float(direct_stat_aux_huber_delta),
+                        )
+                    if float(w_direct_blk_aux) > 0.0:
+                        direct_blk_aux_loss = _masked_scaled_huber_loss(
+                            pred=blk_em,
+                            target=blk_true,
+                            mask=direct_mask_base & blk_obs,
+                            scale=float(direct_blk_target_scale),
+                            delta=float(direct_stat_aux_huber_delta),
+                        )
+                    if float(w_direct_tov_aux) > 0.0:
+                        direct_tov_aux_loss = _masked_scaled_huber_loss(
+                            pred=tov_em,
+                            target=tov_true,
+                            mask=direct_mask_base & tov_obs,
+                            scale=float(direct_tov_target_scale),
+                            delta=float(direct_stat_aux_huber_delta),
+                        )
+
             total_loss = (
                 float(w_minutes) * minutes_mae
                 + float(w_count) * active_losses["count_loss"]
@@ -1735,6 +2236,15 @@ def _run_epoch(
                 + float(w_reb_opportunity_rate_aux) * reb_opportunity_rate_aux_loss
                 + float(w_spread_aux_eff) * spread_aux_loss
                 + float(w_total_aux_eff) * total_aux_loss
+                + float(w_props_pts_aux_eff) * props_pts_aux_loss
+                + float(w_props_reb_aux_eff) * props_reb_aux_loss
+                + float(w_props_ast_aux_eff) * props_ast_aux_loss
+                + float(w_direct_pts_aux_eff) * direct_pts_aux_loss
+                + float(w_direct_reb_aux_eff) * direct_reb_aux_loss
+                + float(w_direct_ast_aux_eff) * direct_ast_aux_loss
+                + float(w_direct_stl_aux_eff) * direct_stl_aux_loss
+                + float(w_direct_blk_aux_eff) * direct_blk_aux_loss
+                + float(w_direct_tov_aux_eff) * direct_tov_aux_loss
                 + float(w_efficiency_mean_aux) * efficiency_mean_aux_loss
             )
 
@@ -1849,6 +2359,15 @@ def _run_epoch(
             totals["reb_opportunity_rate_aux"] += float(reb_opportunity_rate_aux_loss.item())
             totals["spread_aux"] += float(spread_aux_loss.item())
             totals["total_aux"] += float(total_aux_loss.item())
+            totals["props_pts_aux"] += float(props_pts_aux_loss.item())
+            totals["props_reb_aux"] += float(props_reb_aux_loss.item())
+            totals["props_ast_aux"] += float(props_ast_aux_loss.item())
+            totals["direct_pts_aux"] += float(direct_pts_aux_loss.item())
+            totals["direct_reb_aux"] += float(direct_reb_aux_loss.item())
+            totals["direct_ast_aux"] += float(direct_ast_aux_loss.item())
+            totals["direct_stl_aux"] += float(direct_stl_aux_loss.item())
+            totals["direct_blk_aux"] += float(direct_blk_aux_loss.item())
+            totals["direct_tov_aux"] += float(direct_tov_aux_loss.item())
             totals["efficiency_mean_aux"] += float(efficiency_mean_aux_loss.item())
             totals["steps"] += 1
         if phase2_stability_state is not None and bool(phase2_stability_state.rollback_requested):
@@ -1878,6 +2397,15 @@ def _run_epoch(
         "reb_opportunity_rate_aux": totals["reb_opportunity_rate_aux"] / denom,
         "spread_aux": totals["spread_aux"] / denom,
         "total_aux": totals["total_aux"] / denom,
+        "props_pts_aux": totals["props_pts_aux"] / denom,
+        "props_reb_aux": totals["props_reb_aux"] / denom,
+        "props_ast_aux": totals["props_ast_aux"] / denom,
+        "direct_pts_aux": totals["direct_pts_aux"] / denom,
+        "direct_reb_aux": totals["direct_reb_aux"] / denom,
+        "direct_ast_aux": totals["direct_ast_aux"] / denom,
+        "direct_stl_aux": totals["direct_stl_aux"] / denom,
+        "direct_blk_aux": totals["direct_blk_aux"] / denom,
+        "direct_tov_aux": totals["direct_tov_aux"] / denom,
         "efficiency_mean_aux": totals["efficiency_mean_aux"] / denom,
         "skipped_batches": float(totals["skipped_batches"]),
         "instability_events": float(totals["instability_events"]),
@@ -1911,6 +2439,24 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Optional checkpoint path for warm-start (for example Phase 1 model.pt).",
+    )
+    parser.add_argument(
+        "--graft-model-pt",
+        type=str,
+        default=None,
+        help="Optional secondary checkpoint used to overwrite selected parameter prefixes after --init-model-pt.",
+    )
+    parser.add_argument(
+        "--graft-prefixes",
+        type=str,
+        default="",
+        help="Comma-separated parameter prefixes to copy from --graft-model-pt.",
+    )
+    parser.add_argument(
+        "--freeze-prefixes",
+        type=str,
+        default="",
+        help="Comma-separated parameter prefixes to freeze after warm-start/graft loading.",
     )
     parser.add_argument("--val-days", type=int, default=14)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -1973,6 +2519,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--w-flow-nll", type=float, default=1.0)
     parser.add_argument("--minutes-nll-sigma", type=float, default=6.0)
     parser.add_argument("--active-positive-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--lineup-available-sample-weight",
+        type=float,
+        default=1.0,
+        help=(
+            "Train sampler upweight for lineup_available=1 coverage. "
+            "1.0 disables; values >1.0 oversample examples with higher lineup coverage."
+        ),
+    )
     parser.add_argument("--enable-phase2-flow", action="store_true")
     parser.add_argument("--phase2-flow-warmup-epochs", type=int, default=4)
     parser.add_argument(
@@ -1985,6 +2540,29 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--phase2-anchor-start-weight", type=float, default=1.0)
     parser.add_argument("--phase2-anchor-end-weight", type=float, default=0.5)
+    parser.add_argument("--minutes-teacher-forcing-prob-start", type=float, default=1.0)
+    parser.add_argument("--minutes-teacher-forcing-prob-end", type=float, default=1.0)
+    parser.add_argument("--minutes-teacher-forcing-ramp-epochs", type=int, default=1)
+    parser.add_argument(
+        "--minutes-teacher-forcing-mode",
+        type=str,
+        default="batch",
+        choices=("batch", "example", "team"),
+    )
+    parser.add_argument(
+        "--flow-use-minutes-conditioning",
+        action="store_true",
+        help="Condition flow coupling blocks on per-player minutes.",
+    )
+    parser.add_argument("--flow-minutes-teacher-forcing-prob-start", type=float, default=1.0)
+    parser.add_argument("--flow-minutes-teacher-forcing-prob-end", type=float, default=1.0)
+    parser.add_argument("--flow-minutes-teacher-forcing-ramp-epochs", type=int, default=1)
+    parser.add_argument(
+        "--flow-minutes-teacher-forcing-mode",
+        type=str,
+        default="batch",
+        choices=("batch", "example", "team"),
+    )
     parser.add_argument("--phase2-nll-guard-ratio", type=float, default=3.0)
     parser.add_argument("--phase2-nll-guard-abs", type=float, default=25.0)
     parser.add_argument("--phase2-nll-guard-ema-alpha", type=float, default=0.1)
@@ -2022,9 +2600,22 @@ def parse_args() -> argparse.Namespace:
         choices=["val_total", "val_total_ex_possreg"],
         help="Validation metric used for early stopping.",
     )
+    parser.add_argument("--flow-coupling-type", type=str, default="affine", choices=["affine", "rqs"])
     parser.add_argument("--flow-num-blocks", type=int, default=4)
     parser.add_argument("--flow-scale-clip", type=float, default=3.0)  # H1 fix: 2.0 → 3.0
+    parser.add_argument("--flow-rqs-num-bins", type=int, default=8)
+    parser.add_argument("--flow-rqs-tail-bound", type=float, default=40.0)
+    parser.add_argument("--flow-rqs-min-bin-width", type=float, default=1e-3)
+    parser.add_argument("--flow-rqs-min-bin-height", type=float, default=1e-3)
+    parser.add_argument("--flow-rqs-min-derivative", type=float, default=1e-3)
     parser.add_argument("--flow-context-mode", type=str, default="attention", choices=["mean", "attention"])  # H2 fix
+    parser.add_argument(
+        "--flow-target-schema",
+        type=str,
+        default=FLOW_TARGET_SCHEMA_DEFAULT,
+        choices=["v1", "v2"],
+        help="Flow training target schema: v1 includes make columns; v2 models attempts/other stats and reconstructs makes.",
+    )
     parser.add_argument("--backbone-grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--flow-grad-clip-norm", type=float, default=5.0)
     parser.add_argument(
@@ -2122,6 +2713,60 @@ def parse_args() -> argparse.Namespace:
         help="Auxiliary normalized Huber loss on game total vs vegas_total using emergent zero-latent flow points.",
     )
     parser.add_argument(
+        "--w-props-pts-aux",
+        type=float,
+        default=0.0,
+        help="Confidence-weighted auxiliary normalized Huber loss on emergent player points vs AN points line.",
+    )
+    parser.add_argument(
+        "--w-props-reb-aux",
+        type=float,
+        default=0.0,
+        help="Confidence-weighted auxiliary normalized Huber loss on emergent player rebounds vs AN rebounds line.",
+    )
+    parser.add_argument(
+        "--w-props-ast-aux",
+        type=float,
+        default=0.0,
+        help="Confidence-weighted auxiliary normalized Huber loss on emergent player assists vs AN assists line.",
+    )
+    parser.add_argument(
+        "--w-direct-pts-aux",
+        type=float,
+        default=0.0,
+        help="Direct normalized Huber loss on emergent player points vs observed points labels.",
+    )
+    parser.add_argument(
+        "--w-direct-reb-aux",
+        type=float,
+        default=0.0,
+        help="Direct normalized Huber loss on emergent player rebounds vs observed rebound labels.",
+    )
+    parser.add_argument(
+        "--w-direct-ast-aux",
+        type=float,
+        default=0.0,
+        help="Direct normalized Huber loss on emergent player assists vs observed assist labels.",
+    )
+    parser.add_argument(
+        "--w-direct-stl-aux",
+        type=float,
+        default=0.0,
+        help="Direct normalized Huber loss on emergent player steals vs observed steal labels.",
+    )
+    parser.add_argument(
+        "--w-direct-blk-aux",
+        type=float,
+        default=0.0,
+        help="Direct normalized Huber loss on emergent player blocks vs observed block labels.",
+    )
+    parser.add_argument(
+        "--w-direct-tov-aux",
+        type=float,
+        default=0.0,
+        help="Direct normalized Huber loss on emergent player turnovers vs observed turnover labels.",
+    )
+    parser.add_argument(
         "--spread-total-aux-ramp-epochs",
         type=int,
         default=0,
@@ -2132,6 +2777,30 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Initial scale for spread/total aux weight ramp in [0,1].",
+    )
+    parser.add_argument(
+        "--props-aux-ramp-epochs",
+        type=int,
+        default=0,
+        help="Linearly ramp props-line aux weights over N epochs (0 disables).",
+    )
+    parser.add_argument(
+        "--props-aux-start-scale",
+        type=float,
+        default=1.0,
+        help="Initial scale for props-line aux weight ramp in [0,1].",
+    )
+    parser.add_argument(
+        "--direct-stat-aux-ramp-epochs",
+        type=int,
+        default=0,
+        help="Linearly ramp direct stat aux weights over N epochs (0 disables).",
+    )
+    parser.add_argument(
+        "--direct-stat-aux-start-scale",
+        type=float,
+        default=1.0,
+        help="Initial scale for direct stat aux weight ramp in [0,1].",
     )
     parser.add_argument(
         "--spread-aux-target-scale",
@@ -2146,6 +2815,60 @@ def parse_args() -> argparse.Namespace:
         help="Normalization scale (points) for total aux error before Huber loss.",
     )
     parser.add_argument(
+        "--props-pts-target-scale",
+        type=float,
+        default=8.0,
+        help="Normalization scale (points) for points props aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--props-reb-target-scale",
+        type=float,
+        default=4.0,
+        help="Normalization scale (rebounds) for rebound props aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--props-ast-target-scale",
+        type=float,
+        default=3.0,
+        help="Normalization scale (assists) for assist props aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--direct-pts-target-scale",
+        type=float,
+        default=8.0,
+        help="Normalization scale (points) for direct points aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--direct-reb-target-scale",
+        type=float,
+        default=4.0,
+        help="Normalization scale (rebounds) for direct rebound aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--direct-ast-target-scale",
+        type=float,
+        default=3.0,
+        help="Normalization scale (assists) for direct assist aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--direct-stl-target-scale",
+        type=float,
+        default=1.5,
+        help="Normalization scale (steals) for direct steal aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--direct-blk-target-scale",
+        type=float,
+        default=1.5,
+        help="Normalization scale (blocks) for direct block aux error before Huber loss.",
+    )
+    parser.add_argument(
+        "--direct-tov-target-scale",
+        type=float,
+        default=2.0,
+        help="Normalization scale (turnovers) for direct turnover aux error before Huber loss.",
+    )
+    parser.add_argument(
         "--spread-aux-huber-delta",
         type=float,
         default=1.0,
@@ -2156,6 +2879,24 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Huber delta on normalized total error.",
+    )
+    parser.add_argument(
+        "--props-aux-huber-delta",
+        type=float,
+        default=1.0,
+        help="Huber delta on normalized props aux error.",
+    )
+    parser.add_argument(
+        "--direct-stat-aux-huber-delta",
+        type=float,
+        default=1.0,
+        help="Huber delta on normalized direct stat aux errors.",
+    )
+    parser.add_argument(
+        "--props-aux-confidence-min",
+        type=float,
+        default=0.05,
+        help="Minimum confidence weight in [0,1] for rows included in props aux losses.",
     )
     parser.add_argument(
         "--w-efficiency-mean-aux",
@@ -2245,6 +2986,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     _set_seed(int(args.seed))
+    flow_target_schema = normalize_flow_target_schema(str(args.flow_target_schema))
     if bool(args.enable_phase3_decision) and not bool(args.enable_phase2_flow):
         raise ValueError("--enable-phase3-decision requires --enable-phase2-flow")
     if bool(args.enable_efficiency_head) and not bool(args.enable_phase2_flow):
@@ -2264,6 +3006,24 @@ def main() -> None:
         )
     if bool(args.enable_three_pa_share) and not bool(args.enable_possession_backbone):
         raise ValueError("--enable-three-pa-share requires --enable-possession-backbone")
+    if int(args.flow_num_blocks) <= 0:
+        raise ValueError("--flow-num-blocks must be > 0")
+    if float(args.flow_scale_clip) <= 0.0:
+        raise ValueError("--flow-scale-clip must be > 0")
+    if int(args.flow_rqs_num_bins) <= 1:
+        raise ValueError("--flow-rqs-num-bins must be > 1")
+    if float(args.flow_rqs_tail_bound) <= 0.0:
+        raise ValueError("--flow-rqs-tail-bound must be > 0")
+    if float(args.flow_rqs_min_bin_width) <= 0.0:
+        raise ValueError("--flow-rqs-min-bin-width must be > 0")
+    if float(args.flow_rqs_min_bin_height) <= 0.0:
+        raise ValueError("--flow-rqs-min-bin-height must be > 0")
+    if float(args.flow_rqs_min_derivative) <= 0.0:
+        raise ValueError("--flow-rqs-min-derivative must be > 0")
+    if float(args.flow_rqs_min_bin_width) * float(args.flow_rqs_num_bins) >= 1.0:
+        raise ValueError("--flow-rqs-min-bin-width * --flow-rqs-num-bins must be < 1")
+    if float(args.flow_rqs_min_bin_height) * float(args.flow_rqs_num_bins) >= 1.0:
+        raise ValueError("--flow-rqs-min-bin-height * --flow-rqs-num-bins must be < 1")
     if int(args.phase3_num_samples) <= 0:
         raise ValueError("--phase3-num-samples must be > 0")
     if float(args.phase3_active_temperature) <= 0:
@@ -2310,6 +3070,16 @@ def main() -> None:
         raise ValueError("--efficiency-fg2-prior-strength must be > 0")
     if float(args.efficiency_fg3_prior_strength) <= 0.0:
         raise ValueError("--efficiency-fg3-prior-strength must be > 0")
+    if float(args.lineup_available_sample_weight) < 1.0:
+        raise ValueError("--lineup-available-sample-weight must be >= 1.0")
+    if bool(args.flow_use_minutes_conditioning) and not bool(args.enable_phase2_flow):
+        raise ValueError("--flow-use-minutes-conditioning requires --enable-phase2-flow")
+    if float(args.flow_minutes_teacher_forcing_prob_start) < 0.0 or float(args.flow_minutes_teacher_forcing_prob_start) > 1.0:
+        raise ValueError("--flow-minutes-teacher-forcing-prob-start must be in [0, 1]")
+    if float(args.flow_minutes_teacher_forcing_prob_end) < 0.0 or float(args.flow_minutes_teacher_forcing_prob_end) > 1.0:
+        raise ValueError("--flow-minutes-teacher-forcing-prob-end must be in [0, 1]")
+    if int(args.flow_minutes_teacher_forcing_ramp_epochs) < 1:
+        raise ValueError("--flow-minutes-teacher-forcing-ramp-epochs must be >= 1")
     if float(args.w_efficiency_nll) < 0.0:
         raise ValueError("--w-efficiency-nll must be >= 0")
     if float(args.w_usage_share_nll) < 0.0:
@@ -2328,18 +3098,68 @@ def main() -> None:
         raise ValueError("--w-spread-aux must be >= 0")
     if float(args.w_total_aux) < 0.0:
         raise ValueError("--w-total-aux must be >= 0")
+    if float(args.w_props_pts_aux) < 0.0:
+        raise ValueError("--w-props-pts-aux must be >= 0")
+    if float(args.w_props_reb_aux) < 0.0:
+        raise ValueError("--w-props-reb-aux must be >= 0")
+    if float(args.w_props_ast_aux) < 0.0:
+        raise ValueError("--w-props-ast-aux must be >= 0")
+    if float(args.w_direct_pts_aux) < 0.0:
+        raise ValueError("--w-direct-pts-aux must be >= 0")
+    if float(args.w_direct_reb_aux) < 0.0:
+        raise ValueError("--w-direct-reb-aux must be >= 0")
+    if float(args.w_direct_ast_aux) < 0.0:
+        raise ValueError("--w-direct-ast-aux must be >= 0")
+    if float(args.w_direct_stl_aux) < 0.0:
+        raise ValueError("--w-direct-stl-aux must be >= 0")
+    if float(args.w_direct_blk_aux) < 0.0:
+        raise ValueError("--w-direct-blk-aux must be >= 0")
+    if float(args.w_direct_tov_aux) < 0.0:
+        raise ValueError("--w-direct-tov-aux must be >= 0")
     if int(args.spread_total_aux_ramp_epochs) < 0:
         raise ValueError("--spread-total-aux-ramp-epochs must be >= 0")
     if float(args.spread_total_aux_start_scale) < 0.0 or float(args.spread_total_aux_start_scale) > 1.0:
         raise ValueError("--spread-total-aux-start-scale must be in [0, 1]")
+    if int(args.props_aux_ramp_epochs) < 0:
+        raise ValueError("--props-aux-ramp-epochs must be >= 0")
+    if float(args.props_aux_start_scale) < 0.0 or float(args.props_aux_start_scale) > 1.0:
+        raise ValueError("--props-aux-start-scale must be in [0, 1]")
+    if int(args.direct_stat_aux_ramp_epochs) < 0:
+        raise ValueError("--direct-stat-aux-ramp-epochs must be >= 0")
+    if float(args.direct_stat_aux_start_scale) < 0.0 or float(args.direct_stat_aux_start_scale) > 1.0:
+        raise ValueError("--direct-stat-aux-start-scale must be in [0, 1]")
     if float(args.spread_aux_target_scale) <= 0.0:
         raise ValueError("--spread-aux-target-scale must be > 0")
     if float(args.total_aux_target_scale) <= 0.0:
         raise ValueError("--total-aux-target-scale must be > 0")
+    if float(args.props_pts_target_scale) <= 0.0:
+        raise ValueError("--props-pts-target-scale must be > 0")
+    if float(args.props_reb_target_scale) <= 0.0:
+        raise ValueError("--props-reb-target-scale must be > 0")
+    if float(args.props_ast_target_scale) <= 0.0:
+        raise ValueError("--props-ast-target-scale must be > 0")
+    if float(args.direct_pts_target_scale) <= 0.0:
+        raise ValueError("--direct-pts-target-scale must be > 0")
+    if float(args.direct_reb_target_scale) <= 0.0:
+        raise ValueError("--direct-reb-target-scale must be > 0")
+    if float(args.direct_ast_target_scale) <= 0.0:
+        raise ValueError("--direct-ast-target-scale must be > 0")
+    if float(args.direct_stl_target_scale) <= 0.0:
+        raise ValueError("--direct-stl-target-scale must be > 0")
+    if float(args.direct_blk_target_scale) <= 0.0:
+        raise ValueError("--direct-blk-target-scale must be > 0")
+    if float(args.direct_tov_target_scale) <= 0.0:
+        raise ValueError("--direct-tov-target-scale must be > 0")
     if float(args.spread_aux_huber_delta) <= 0.0:
         raise ValueError("--spread-aux-huber-delta must be > 0")
     if float(args.total_aux_huber_delta) <= 0.0:
         raise ValueError("--total-aux-huber-delta must be > 0")
+    if float(args.props_aux_huber_delta) <= 0.0:
+        raise ValueError("--props-aux-huber-delta must be > 0")
+    if float(args.direct_stat_aux_huber_delta) <= 0.0:
+        raise ValueError("--direct-stat-aux-huber-delta must be > 0")
+    if float(args.props_aux_confidence_min) < 0.0 or float(args.props_aux_confidence_min) > 1.0:
+        raise ValueError("--props-aux-confidence-min must be in [0, 1]")
     if float(args.w_efficiency_mean_aux) < 0.0:
         raise ValueError("--w-efficiency-mean-aux must be >= 0")
     if float(args.w_emergent_share_aux) > 0.0 and not bool(args.enable_phase2_flow):
@@ -2353,6 +3173,21 @@ def main() -> None:
         raise ValueError("AST/REB structure auxiliary losses require --enable-phase2-flow")
     if (float(args.w_spread_aux) > 0.0 or float(args.w_total_aux) > 0.0) and not bool(args.enable_phase2_flow):
         raise ValueError("--w-spread-aux/--w-total-aux require --enable-phase2-flow")
+    if (
+        float(args.w_props_pts_aux) > 0.0
+        or float(args.w_props_reb_aux) > 0.0
+        or float(args.w_props_ast_aux) > 0.0
+    ) and not bool(args.enable_phase2_flow):
+        raise ValueError("--w-props-*-aux requires --enable-phase2-flow")
+    if (
+        float(args.w_direct_pts_aux) > 0.0
+        or float(args.w_direct_reb_aux) > 0.0
+        or float(args.w_direct_ast_aux) > 0.0
+        or float(args.w_direct_stl_aux) > 0.0
+        or float(args.w_direct_blk_aux) > 0.0
+        or float(args.w_direct_tov_aux) > 0.0
+    ) and not bool(args.enable_phase2_flow):
+        raise ValueError("--w-direct-*-aux requires --enable-phase2-flow")
     if float(args.w_efficiency_mean_aux) > 0.0 and not bool(args.enable_efficiency_head):
         raise ValueError("--w-efficiency-mean-aux requires --enable-efficiency-head")
     if float(args.overflow_protected_prior_play_prob_floor) < 0.0 or float(args.overflow_protected_prior_play_prob_floor) > 1.0:
@@ -2415,6 +3250,18 @@ def main() -> None:
     train_df, val_df, split_meta = _split_train_val(merged, val_days=int(args.val_days))
 
     feature_mean, feature_std = _compute_feature_norm(train_df, feature_cols)
+    feature_index = {col: idx for idx, col in enumerate(feature_cols)}
+    an_pts_line_idx = int(feature_index.get("an_pts_line", -1))
+    an_reb_line_idx = int(feature_index.get("an_reb_line", -1))
+    an_ast_line_idx = int(feature_index.get("an_ast_line", -1))
+    an_has_pts_idx = int(feature_index.get("an_has_pts", -1))
+    an_has_reb_idx = int(feature_index.get("an_has_reb", -1))
+    an_has_ast_idx = int(feature_index.get("an_has_ast", -1))
+    an_pts_books_idx = int(feature_index.get("an_pts_books", -1))
+    an_reb_books_idx = int(feature_index.get("an_reb_books", -1))
+    an_ast_books_idx = int(feature_index.get("an_ast_books", -1))
+    an_props_market_count_idx = int(feature_index.get("an_props_market_count", -1))
+    prior_play_prob_idx = int(feature_index.get("prior_play_prob", -1))
     game_feature_cols = [c.strip() for c in str(args.game_feature_cols).split(",") if c.strip()]
     team_feature_cols = [c.strip() for c in str(args.team_feature_cols).split(",") if c.strip()]
 
@@ -2437,6 +3284,12 @@ def main() -> None:
         raise ValueError("--w-total-aux > 0 requires 'vegas_total' in --game-feature-cols")
     if float(args.w_spread_aux) > 0.0 and vegas_spread_idx < 0:
         raise ValueError("--w-spread-aux > 0 requires 'vegas_spread' in --game-feature-cols")
+    if float(args.w_props_pts_aux) > 0.0 and an_pts_line_idx < 0:
+        raise ValueError("--w-props-pts-aux > 0 requires feature column 'an_pts_line'")
+    if float(args.w_props_reb_aux) > 0.0 and an_reb_line_idx < 0:
+        raise ValueError("--w-props-reb-aux > 0 requires feature column 'an_reb_line'")
+    if float(args.w_props_ast_aux) > 0.0 and an_ast_line_idx < 0:
+        raise ValueError("--w-props-ast-aux > 0 requires feature column 'an_ast_line'")
 
     train_examples = build_game_level_examples(
         train_df,
@@ -2489,10 +3342,34 @@ def main() -> None:
         loader_kwargs["persistent_workers"] = True
         loader_kwargs["prefetch_factor"] = 2
 
+    train_dataset = GameLevelDataset(train_examples)
+    train_sampler: WeightedRandomSampler | None = None
+    if float(args.lineup_available_sample_weight) > 1.0:
+        sample_weights, sampling_meta = _build_lineup_available_example_sampling_weights(
+            train_examples,
+            lineup_available_weight=float(args.lineup_available_sample_weight),
+        )
+        train_sampler = WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(train_dataset),
+            replacement=True,
+        )
+        print(
+            (
+                "[train_gtv2] lineup curriculum sampler enabled: "
+                f"target_weight={sampling_meta['lineup_weight_target']:.3f} "
+                f"lineup_fraction_mean={sampling_meta['lineup_fraction_mean']:.3f} "
+                f"sample_weight_range=[{sampling_meta['sample_weight_min']:.3f}, "
+                f"{sampling_meta['sample_weight_max']:.3f}]"
+            ),
+            flush=True,
+        )
+
     train_loader = DataLoader(
-        GameLevelDataset(train_examples),
+        train_dataset,
         batch_size=max(1, int(args.batch_size)),
-        shuffle=True,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
         num_workers=max(0, int(args.num_workers)),
         collate_fn=collate_game_level_examples,
         **loader_kwargs,
@@ -2527,9 +3404,17 @@ def main() -> None:
         max_active_count=int(args.max_active_count),
         active_threshold_minutes=float(args.active_threshold),
         include_pf_in_flow_targets=bool(include_pf_in_flow_targets),
+        flow_coupling_type=str(args.flow_coupling_type),
         flow_num_blocks=int(args.flow_num_blocks),
         flow_scale_clip=float(args.flow_scale_clip),
+        flow_rqs_num_bins=int(args.flow_rqs_num_bins),
+        flow_rqs_tail_bound=float(args.flow_rqs_tail_bound),
+        flow_rqs_min_bin_width=float(args.flow_rqs_min_bin_width),
+        flow_rqs_min_bin_height=float(args.flow_rqs_min_bin_height),
+        flow_rqs_min_derivative=float(args.flow_rqs_min_derivative),
         flow_context_mode=str(args.flow_context_mode),
+        flow_target_schema=str(flow_target_schema),
+        flow_use_minutes_conditioning=bool(args.flow_use_minutes_conditioning),
         enable_efficiency_head=bool(args.enable_efficiency_head),
         efficiency_head_hidden=int(args.efficiency_head_hidden),
         efficiency_ft_prior_mean=float(args.efficiency_ft_prior_mean),
@@ -2555,6 +3440,9 @@ def main() -> None:
 
     model = build_game_transformer_v2(config).to(device=device)
     init_model_pt = Path(args.init_model_pt).expanduser().resolve() if args.init_model_pt else None
+    graft_model_pt = Path(args.graft_model_pt).expanduser().resolve() if args.graft_model_pt else None
+    graft_prefixes = _parse_prefix_csv(args.graft_prefixes)
+    freeze_prefixes = _parse_prefix_csv(args.freeze_prefixes)
     if init_model_pt is not None:
         if not init_model_pt.exists():
             raise FileNotFoundError(f"init checkpoint not found: {init_model_pt}")
@@ -2582,6 +3470,20 @@ def main() -> None:
                 flush=True,
             )
         print(f"[warm-start] loaded init checkpoint: {init_model_pt}", flush=True)
+    if graft_model_pt is not None:
+        _apply_partial_checkpoint(
+            model=model,
+            checkpoint_path=graft_model_pt,
+            device=device,
+            prefixes=graft_prefixes,
+            label="graft",
+        )
+    if freeze_prefixes:
+        _freeze_parameter_prefixes(
+            model,
+            prefixes=freeze_prefixes,
+            label="freeze",
+        )
     if bool(args.efficiency_head_only):
         n_trainable = 0
         n_total = 0
@@ -2697,6 +3599,18 @@ def main() -> None:
     phase2_guard_state = Phase2StabilityState(a2_scale=1.0)
 
     for epoch in range(1, int(args.epochs) + 1):
+        minutes_teacher_forcing_prob = _resolve_minutes_teacher_forcing_prob(
+            epoch=int(epoch),
+            start_prob=float(args.minutes_teacher_forcing_prob_start),
+            end_prob=float(args.minutes_teacher_forcing_prob_end),
+            ramp_epochs=int(args.minutes_teacher_forcing_ramp_epochs),
+        )
+        flow_minutes_teacher_forcing_prob = _resolve_minutes_teacher_forcing_prob(
+            epoch=int(epoch),
+            start_prob=float(args.flow_minutes_teacher_forcing_prob_start),
+            end_prob=float(args.flow_minutes_teacher_forcing_prob_end),
+            ramp_epochs=int(args.flow_minutes_teacher_forcing_ramp_epochs),
+        )
         phase2_weights = _resolve_phase2_epoch_weights(
             epoch=int(epoch),
             enable_phase2_flow=bool(args.enable_phase2_flow),
@@ -2742,6 +3656,7 @@ def main() -> None:
             active_threshold=float(args.active_threshold),
             min_active_count=int(args.min_active_count),
             max_active_count=int(args.max_active_count),
+            flow_label_columns=flow_label_cols,
             run_phase2_flow=bool(phase2_weights.run_phase2_flow),
             run_phase3_decision=bool(phase2_weights.run_phase3_decision),
             w_minutes=float(phase2_weights.w_minutes),
@@ -2773,13 +3688,51 @@ def main() -> None:
             w_reb_opportunity_rate_aux=float(args.w_reb_opportunity_rate_aux),
             w_spread_aux=float(args.w_spread_aux),
             w_total_aux=float(args.w_total_aux),
+            w_props_pts_aux=float(args.w_props_pts_aux),
+            w_props_reb_aux=float(args.w_props_reb_aux),
+            w_props_ast_aux=float(args.w_props_ast_aux),
+            w_direct_pts_aux=float(args.w_direct_pts_aux),
+            w_direct_reb_aux=float(args.w_direct_reb_aux),
+            w_direct_ast_aux=float(args.w_direct_ast_aux),
+            w_direct_stl_aux=float(args.w_direct_stl_aux),
+            w_direct_blk_aux=float(args.w_direct_blk_aux),
+            w_direct_tov_aux=float(args.w_direct_tov_aux),
             spread_total_aux_ramp_epochs=int(args.spread_total_aux_ramp_epochs),
             spread_total_aux_start_scale=float(args.spread_total_aux_start_scale),
+            props_aux_ramp_epochs=int(args.props_aux_ramp_epochs),
+            props_aux_start_scale=float(args.props_aux_start_scale),
+            direct_stat_aux_ramp_epochs=int(args.direct_stat_aux_ramp_epochs),
+            direct_stat_aux_start_scale=float(args.direct_stat_aux_start_scale),
             spread_aux_target_scale=float(args.spread_aux_target_scale),
             total_aux_target_scale=float(args.total_aux_target_scale),
+            props_pts_target_scale=float(args.props_pts_target_scale),
+            props_reb_target_scale=float(args.props_reb_target_scale),
+            props_ast_target_scale=float(args.props_ast_target_scale),
+            direct_pts_target_scale=float(args.direct_pts_target_scale),
+            direct_reb_target_scale=float(args.direct_reb_target_scale),
+            direct_ast_target_scale=float(args.direct_ast_target_scale),
+            direct_stl_target_scale=float(args.direct_stl_target_scale),
+            direct_blk_target_scale=float(args.direct_blk_target_scale),
+            direct_tov_target_scale=float(args.direct_tov_target_scale),
             spread_aux_huber_delta=float(args.spread_aux_huber_delta),
             total_aux_huber_delta=float(args.total_aux_huber_delta),
+            props_aux_huber_delta=float(args.props_aux_huber_delta),
+            direct_stat_aux_huber_delta=float(args.direct_stat_aux_huber_delta),
+            props_aux_confidence_min=float(args.props_aux_confidence_min),
             w_efficiency_mean_aux=float(args.w_efficiency_mean_aux),
+            feature_mean=feature_mean,
+            feature_std=feature_std,
+            an_pts_line_idx=int(an_pts_line_idx),
+            an_reb_line_idx=int(an_reb_line_idx),
+            an_ast_line_idx=int(an_ast_line_idx),
+            an_has_pts_idx=int(an_has_pts_idx),
+            an_has_reb_idx=int(an_has_reb_idx),
+            an_has_ast_idx=int(an_has_ast_idx),
+            an_pts_books_idx=int(an_pts_books_idx),
+            an_reb_books_idx=int(an_reb_books_idx),
+            an_ast_books_idx=int(an_ast_books_idx),
+            an_props_market_count_idx=int(an_props_market_count_idx),
+            prior_play_prob_idx=int(prior_play_prob_idx),
             vegas_total_idx=int(vegas_total_idx),
             vegas_spread_idx=int(vegas_spread_idx),
             vegas_total_missing_idx=int(vegas_total_missing_idx),
@@ -2792,6 +3745,10 @@ def main() -> None:
             phase2_stability_state=phase2_guard_state if bool(args.enable_phase2_flow) else None,
             w_poss_regression=float(backbone_weights.w_poss_regression),
             estimated_possessions_idx=int(estimated_possessions_idx),
+            minutes_teacher_forcing_prob=float(minutes_teacher_forcing_prob),
+            minutes_teacher_forcing_mode=str(args.minutes_teacher_forcing_mode),
+            flow_minutes_teacher_forcing_prob=float(flow_minutes_teacher_forcing_prob),
+            flow_minutes_teacher_forcing_mode=str(args.flow_minutes_teacher_forcing_mode),
         )
         rollback_requested = bool(train_stats.get("rollback_requested", 0.0) > 0.0)
         if rollback_requested:
@@ -2820,6 +3777,18 @@ def main() -> None:
                 "reb_share_aux": float("nan"),
                 "ast_team_rate_aux": float("nan"),
                 "reb_opportunity_rate_aux": float("nan"),
+                "spread_aux": float("nan"),
+                "total_aux": float("nan"),
+                "props_pts_aux": float("nan"),
+                "props_reb_aux": float("nan"),
+                "props_ast_aux": float("nan"),
+                "direct_pts_aux": float("nan"),
+                "direct_reb_aux": float("nan"),
+                "direct_ast_aux": float("nan"),
+                "direct_stl_aux": float("nan"),
+                "direct_blk_aux": float("nan"),
+                "direct_tov_aux": float("nan"),
+                "efficiency_mean_aux": float("nan"),
                 "poss_regression": float("nan"),
                 "skipped_batches": 0.0,
                 "instability_events": 0.0,
@@ -2834,6 +3803,7 @@ def main() -> None:
                 active_threshold=float(args.active_threshold),
                 min_active_count=int(args.min_active_count),
                 max_active_count=int(args.max_active_count),
+                flow_label_columns=flow_label_cols,
                 run_phase2_flow=bool(phase2_weights.run_phase2_flow),
                 run_phase3_decision=bool(phase2_weights.run_phase3_decision),
                 w_minutes=float(phase2_weights.w_minutes),
@@ -2865,13 +3835,51 @@ def main() -> None:
                 w_reb_opportunity_rate_aux=float(args.w_reb_opportunity_rate_aux),
                 w_spread_aux=float(args.w_spread_aux),
                 w_total_aux=float(args.w_total_aux),
+                w_props_pts_aux=float(args.w_props_pts_aux),
+                w_props_reb_aux=float(args.w_props_reb_aux),
+                w_props_ast_aux=float(args.w_props_ast_aux),
+                w_direct_pts_aux=float(args.w_direct_pts_aux),
+                w_direct_reb_aux=float(args.w_direct_reb_aux),
+                w_direct_ast_aux=float(args.w_direct_ast_aux),
+                w_direct_stl_aux=float(args.w_direct_stl_aux),
+                w_direct_blk_aux=float(args.w_direct_blk_aux),
+                w_direct_tov_aux=float(args.w_direct_tov_aux),
                 spread_total_aux_ramp_epochs=int(args.spread_total_aux_ramp_epochs),
                 spread_total_aux_start_scale=float(args.spread_total_aux_start_scale),
+                props_aux_ramp_epochs=int(args.props_aux_ramp_epochs),
+                props_aux_start_scale=float(args.props_aux_start_scale),
+                direct_stat_aux_ramp_epochs=int(args.direct_stat_aux_ramp_epochs),
+                direct_stat_aux_start_scale=float(args.direct_stat_aux_start_scale),
                 spread_aux_target_scale=float(args.spread_aux_target_scale),
                 total_aux_target_scale=float(args.total_aux_target_scale),
+                props_pts_target_scale=float(args.props_pts_target_scale),
+                props_reb_target_scale=float(args.props_reb_target_scale),
+                props_ast_target_scale=float(args.props_ast_target_scale),
+                direct_pts_target_scale=float(args.direct_pts_target_scale),
+                direct_reb_target_scale=float(args.direct_reb_target_scale),
+                direct_ast_target_scale=float(args.direct_ast_target_scale),
+                direct_stl_target_scale=float(args.direct_stl_target_scale),
+                direct_blk_target_scale=float(args.direct_blk_target_scale),
+                direct_tov_target_scale=float(args.direct_tov_target_scale),
                 spread_aux_huber_delta=float(args.spread_aux_huber_delta),
                 total_aux_huber_delta=float(args.total_aux_huber_delta),
+                props_aux_huber_delta=float(args.props_aux_huber_delta),
+                direct_stat_aux_huber_delta=float(args.direct_stat_aux_huber_delta),
+                props_aux_confidence_min=float(args.props_aux_confidence_min),
                 w_efficiency_mean_aux=float(args.w_efficiency_mean_aux),
+                feature_mean=feature_mean,
+                feature_std=feature_std,
+                an_pts_line_idx=int(an_pts_line_idx),
+                an_reb_line_idx=int(an_reb_line_idx),
+                an_ast_line_idx=int(an_ast_line_idx),
+                an_has_pts_idx=int(an_has_pts_idx),
+                an_has_reb_idx=int(an_has_reb_idx),
+                an_has_ast_idx=int(an_has_ast_idx),
+                an_pts_books_idx=int(an_pts_books_idx),
+                an_reb_books_idx=int(an_reb_books_idx),
+                an_ast_books_idx=int(an_ast_books_idx),
+                an_props_market_count_idx=int(an_props_market_count_idx),
+                prior_play_prob_idx=int(prior_play_prob_idx),
                 vegas_total_idx=int(vegas_total_idx),
                 vegas_spread_idx=int(vegas_spread_idx),
                 vegas_total_missing_idx=int(vegas_total_missing_idx),
@@ -2882,6 +3890,10 @@ def main() -> None:
                 detach_backbone=bool(int(epoch) < int(args.backbone_detach_until_epoch)),
                 w_poss_regression=float(backbone_weights.w_poss_regression),
                 estimated_possessions_idx=int(estimated_possessions_idx),
+                minutes_teacher_forcing_prob=1.0,
+                minutes_teacher_forcing_mode=str(args.minutes_teacher_forcing_mode),
+                flow_minutes_teacher_forcing_prob=0.0 if bool(args.flow_use_minutes_conditioning) else 1.0,
+                flow_minutes_teacher_forcing_mode=str(args.flow_minutes_teacher_forcing_mode),
             )
 
         val_total_ex_possreg = _resolve_early_stop_metric_value(
@@ -2895,6 +3907,8 @@ def main() -> None:
             phase2_flow_warmup=float(phase2_weights.flow_warmup),
             phase2_anchor_weight=float(phase2_weights.anchor_weight),
             phase2_a2_scale=float(phase2_guard_state.a2_scale),
+            minutes_teacher_forcing_prob=float(minutes_teacher_forcing_prob),
+            flow_minutes_teacher_forcing_prob=float(flow_minutes_teacher_forcing_prob),
             phase2_backoff_count=int(phase2_guard_state.backoff_count),
             train_skipped_batches=int(train_stats.get("skipped_batches", 0.0)),
             train_instability_events=int(train_stats.get("instability_events", 0.0)),
@@ -2919,6 +3933,15 @@ def main() -> None:
             train_reb_opportunity_rate_aux=train_stats.get("reb_opportunity_rate_aux", 0.0),
             train_spread_aux=train_stats.get("spread_aux", 0.0),
             train_total_aux=train_stats.get("total_aux", 0.0),
+            train_props_pts_aux=train_stats.get("props_pts_aux", 0.0),
+            train_props_reb_aux=train_stats.get("props_reb_aux", 0.0),
+            train_props_ast_aux=train_stats.get("props_ast_aux", 0.0),
+            train_direct_pts_aux=train_stats.get("direct_pts_aux", 0.0),
+            train_direct_reb_aux=train_stats.get("direct_reb_aux", 0.0),
+            train_direct_ast_aux=train_stats.get("direct_ast_aux", 0.0),
+            train_direct_stl_aux=train_stats.get("direct_stl_aux", 0.0),
+            train_direct_blk_aux=train_stats.get("direct_blk_aux", 0.0),
+            train_direct_tov_aux=train_stats.get("direct_tov_aux", 0.0),
             train_efficiency_mean_aux=train_stats.get("efficiency_mean_aux", 0.0),
             train_poss_regression=train_stats.get("poss_regression", 0.0),
             val_total=val_stats["total"],
@@ -2942,6 +3965,15 @@ def main() -> None:
             val_reb_opportunity_rate_aux=val_stats.get("reb_opportunity_rate_aux", 0.0),
             val_spread_aux=val_stats.get("spread_aux", 0.0),
             val_total_aux=val_stats.get("total_aux", 0.0),
+            val_props_pts_aux=val_stats.get("props_pts_aux", 0.0),
+            val_props_reb_aux=val_stats.get("props_reb_aux", 0.0),
+            val_props_ast_aux=val_stats.get("props_ast_aux", 0.0),
+            val_direct_pts_aux=val_stats.get("direct_pts_aux", 0.0),
+            val_direct_reb_aux=val_stats.get("direct_reb_aux", 0.0),
+            val_direct_ast_aux=val_stats.get("direct_ast_aux", 0.0),
+            val_direct_stl_aux=val_stats.get("direct_stl_aux", 0.0),
+            val_direct_blk_aux=val_stats.get("direct_blk_aux", 0.0),
+            val_direct_tov_aux=val_stats.get("direct_tov_aux", 0.0),
             val_efficiency_mean_aux=val_stats.get("efficiency_mean_aux", 0.0),
             val_total_ex_possreg=float(val_total_ex_possreg),
             val_poss_regression=val_stats.get("poss_regression", 0.0),
@@ -2955,6 +3987,8 @@ def main() -> None:
             f"phase2_warmup={metrics.phase2_flow_warmup:.3f} "
             f"anchor={metrics.phase2_anchor_weight:.3f} a2={metrics.phase2_a2_scale:.3f}"
         )
+        if bool(args.flow_use_minutes_conditioning):
+            msg = f"{msg} flow_mtf={metrics.flow_minutes_teacher_forcing_prob:.3f}"
         if bool(args.enable_phase2_flow):
             msg = (
                 f"{msg} "
@@ -2987,6 +4021,29 @@ def main() -> None:
             msg = f"{msg} val_spread_aux={metrics.val_spread_aux:.4f}"
         if float(args.w_total_aux) > 0.0:
             msg = f"{msg} val_total_aux={metrics.val_total_aux:.4f}"
+        if float(args.w_props_pts_aux) > 0.0:
+            msg = f"{msg} val_props_pts_aux={metrics.val_props_pts_aux:.4f}"
+        if float(args.w_props_reb_aux) > 0.0:
+            msg = f"{msg} val_props_reb_aux={metrics.val_props_reb_aux:.4f}"
+        if float(args.w_props_ast_aux) > 0.0:
+            msg = f"{msg} val_props_ast_aux={metrics.val_props_ast_aux:.4f}"
+        if (
+            float(args.w_direct_pts_aux) > 0.0
+            or float(args.w_direct_reb_aux) > 0.0
+            or float(args.w_direct_ast_aux) > 0.0
+            or float(args.w_direct_stl_aux) > 0.0
+            or float(args.w_direct_blk_aux) > 0.0
+            or float(args.w_direct_tov_aux) > 0.0
+        ):
+            msg = (
+                f"{msg} "
+                f"val_direct_pts_aux={metrics.val_direct_pts_aux:.4f} "
+                f"val_direct_reb_aux={metrics.val_direct_reb_aux:.4f} "
+                f"val_direct_ast_aux={metrics.val_direct_ast_aux:.4f} "
+                f"val_direct_stl_aux={metrics.val_direct_stl_aux:.4f} "
+                f"val_direct_blk_aux={metrics.val_direct_blk_aux:.4f} "
+                f"val_direct_tov_aux={metrics.val_direct_tov_aux:.4f}"
+            )
         if float(args.w_efficiency_mean_aux) > 0.0:
             msg = f"{msg} val_eff_mean_aux={metrics.val_efficiency_mean_aux:.4f}"
         if bool(args.enable_possession_backbone):
@@ -3100,7 +4157,16 @@ def main() -> None:
         "labels_minutes_path": str(labels_minutes_path),
         "labels_boxscore_counts_path": str(labels_boxscore_counts_path) if bool(args.enable_phase2_flow) else None,
         "num_feature_columns": int(len(feature_cols)),
+        "flow_target_schema": str(flow_target_schema),
         "flow_target_columns": flow_label_cols,
+        "flow_model_target_columns": (
+            flow_target_columns(
+                include_pf=bool(include_pf_in_flow_targets),
+                schema=str(flow_target_schema),
+            )
+            if bool(args.enable_phase2_flow)
+            else []
+        ),
         "phase2_flow_enabled": bool(args.enable_phase2_flow),
         "efficiency_head_enabled": bool(args.enable_efficiency_head),
         "efficiency_head_only": bool(args.efficiency_head_only),
@@ -3121,6 +4187,50 @@ def main() -> None:
             "total_target_scale": float(args.total_aux_target_scale),
             "spread_huber_delta": float(args.spread_aux_huber_delta),
             "total_huber_delta": float(args.total_aux_huber_delta),
+        },
+        "props_line_aux": {
+            "w_props_pts_aux": float(args.w_props_pts_aux),
+            "w_props_reb_aux": float(args.w_props_reb_aux),
+            "w_props_ast_aux": float(args.w_props_ast_aux),
+            "ramp_epochs": int(args.props_aux_ramp_epochs),
+            "start_scale": float(args.props_aux_start_scale),
+            "props_pts_target_scale": float(args.props_pts_target_scale),
+            "props_reb_target_scale": float(args.props_reb_target_scale),
+            "props_ast_target_scale": float(args.props_ast_target_scale),
+            "props_aux_huber_delta": float(args.props_aux_huber_delta),
+            "props_aux_confidence_min": float(args.props_aux_confidence_min),
+            "feature_indices": {
+                "an_pts_line_idx": int(an_pts_line_idx),
+                "an_reb_line_idx": int(an_reb_line_idx),
+                "an_ast_line_idx": int(an_ast_line_idx),
+                "an_has_pts_idx": int(an_has_pts_idx),
+                "an_has_reb_idx": int(an_has_reb_idx),
+                "an_has_ast_idx": int(an_has_ast_idx),
+                "an_pts_books_idx": int(an_pts_books_idx),
+                "an_reb_books_idx": int(an_reb_books_idx),
+                "an_ast_books_idx": int(an_ast_books_idx),
+                "an_props_market_count_idx": int(an_props_market_count_idx),
+                "prior_play_prob_idx": int(prior_play_prob_idx),
+            },
+        },
+        "direct_stat_aux": {
+            "w_direct_pts_aux": float(args.w_direct_pts_aux),
+            "w_direct_reb_aux": float(args.w_direct_reb_aux),
+            "w_direct_ast_aux": float(args.w_direct_ast_aux),
+            "w_direct_stl_aux": float(args.w_direct_stl_aux),
+            "w_direct_blk_aux": float(args.w_direct_blk_aux),
+            "w_direct_tov_aux": float(args.w_direct_tov_aux),
+            "ramp_epochs": int(args.direct_stat_aux_ramp_epochs),
+            "start_scale": float(args.direct_stat_aux_start_scale),
+            "target_scales": {
+                "pts": float(args.direct_pts_target_scale),
+                "reb": float(args.direct_reb_target_scale),
+                "ast": float(args.direct_ast_target_scale),
+                "stl": float(args.direct_stl_target_scale),
+                "blk": float(args.direct_blk_target_scale),
+                "tov": float(args.direct_tov_target_scale),
+            },
+            "huber_delta": float(args.direct_stat_aux_huber_delta),
         },
         "efficiency_mean_aux": {
             "w_efficiency_mean_aux": float(args.w_efficiency_mean_aux),

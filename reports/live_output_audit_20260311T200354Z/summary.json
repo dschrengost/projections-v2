@@ -1,0 +1,334 @@
+{
+  "baseline_run_id": "20260311T181256Z",
+  "concentration_summary": {
+    "top1_share_mean_current": 0.18330073700894667,
+    "top1_share_mean_prev": 0.18268349637922945,
+    "top2_share_mean_current": 0.32515626349685933,
+    "top2_share_mean_prev": 0.333293456280414
+  },
+  "current_market_alignment": {
+    "poss_bias_vs_est": -2.072983847050478,
+    "poss_mae_vs_est": 2.072983847050478,
+    "spread_bias_vs_vegas": -1.9008789396543584,
+    "spread_corr_vs_vegas": 0.930589354160093,
+    "spread_mae_vs_vegas": 2.8355265053845113,
+    "total_bias_vs_vegas": 6.339918998532942,
+    "total_corr_vs_vegas": 0.706046896088498,
+    "total_mae_vs_vegas": 6.759655227466287
+  },
+  "current_run_id": "20260311T200354Z",
+  "largest_game_total_deltas": [
+    {
+      "away_team": "HOU",
+      "delta_pred_spread_mean": 4.316072773313498,
+      "delta_pred_total_mean": 14.271230893702352,
+      "game_id": 22500950,
+      "home_team": "DEN",
+      "pred_spread_mean": 6.0668379916308615,
+      "pred_spread_mean_prev": 1.7507652183173639,
+      "pred_total_mean": 245.47067212952305,
+      "pred_total_mean_prev": 231.1994412358207
+    },
+    {
+      "away_team": "NYK",
+      "delta_pred_spread_mean": -9.736717485870418,
+      "delta_pred_total_mean": 4.624765819169681,
+      "game_id": 22500949,
+      "home_team": "UTA",
+      "pred_spread_mean": -15.867199699009575,
+      "pred_spread_mean_prev": -6.130482213139156,
+      "pred_total_mean": 236.57930197506107,
+      "pred_total_mean_prev": 231.9545361558914
+    },
+    {
+      "away_team": "TOR",
+      "delta_pred_spread_mean": -9.918068377345,
+      "delta_pred_total_mean": 3.626062275050316,
+      "game_id": 22500948,
+      "home_team": "NOP",
+      "pred_spread_mean": -6.0817505681941935,
+      "pred_spread_mean_prev": 3.836317809150806,
+      "pred_total_mean": 237.2116690216586,
+      "pred_total_mean_prev": 233.58560674660828
+    },
+    {
+      "away_team": "MIN",
+      "delta_pred_spread_mean": -1.3906763245799945,
+      "delta_pred_total_mean": 3.157809867735182,
+      "game_id": 22500952,
+      "home_team": "LAC",
+      "pred_spread_mean": -0.1679329866102774,
+      "pred_spread_mean_prev": 1.222743337969717,
+      "pred_total_mean": 236.52114883482903,
+      "pred_total_mean_prev": 233.36333896709385
+    },
+    {
+      "away_team": "CLE",
+      "delta_pred_spread_mean": -5.287947858629478,
+      "delta_pred_total_mean": 2.4633083615331657,
+      "game_id": 22500947,
+      "home_team": "ORL",
+      "pred_spread_mean": -9.659171072933425,
+      "pred_spread_mean_prev": -4.371223214303948,
+      "pred_total_mean": 233.01593071692594,
+      "pred_total_mean_prev": 230.55262235539277
+    },
+    {
+      "away_team": "CHA",
+      "delta_pred_spread_mean": -4.741510394545944,
+      "delta_pred_total_mean": 1.4568008686150904,
+      "game_id": 22500951,
+      "home_team": "SAC",
+      "pred_spread_mean": -9.69605730280954,
+      "pred_spread_mean_prev": -4.9545469082635964,
+      "pred_total_mean": 222.74079131319996,
+      "pred_total_mean_prev": 221.28399044458487
+    }
+  ],
+  "largest_player_fallers": [
+    {
+      "delta_dk_fpts_mean": -35.35735738265805,
+      "delta_minutes_mean": -31.710862437286377,
+      "delta_pts_mean": -18.015855745583067,
+      "player_name": "Russell Westbrook",
+      "team_tricode": "SAC"
+    },
+    {
+      "delta_dk_fpts_mean": -13.16165377663372,
+      "delta_minutes_mean": -12.635451111755371,
+      "delta_pts_mean": -6.505075042882757,
+      "player_name": "Devin Carter",
+      "team_tricode": "SAC"
+    },
+    {
+      "delta_dk_fpts_mean": -12.58583751752365,
+      "delta_minutes_mean": -16.07144965007782,
+      "delta_pts_mean": -5.595994551101139,
+      "player_name": "Dorian Finney-Smith",
+      "team_tricode": "HOU"
+    },
+    {
+      "delta_dk_fpts_mean": -11.763600648628872,
+      "delta_minutes_mean": -3.6427925619125365,
+      "delta_pts_mean": -5.539128566358227,
+      "player_name": "Domantas Sabonis",
+      "team_tricode": "SAC"
+    },
+    {
+      "delta_dk_fpts_mean": -11.681002502121768,
+      "delta_minutes_mean": -4.606100480957031,
+      "delta_pts_mean": -5.523706592649962,
+      "player_name": "Zach LaVine",
+      "team_tricode": "SAC"
+    },
+    {
+      "delta_dk_fpts_mean": -8.635770776899252,
+      "delta_minutes_mean": -8.885021763229371,
+      "delta_pts_mean": -3.9881813609223506,
+      "player_name": "Isaiah Jackson",
+      "team_tricode": "LAC"
+    },
+    {
+      "delta_dk_fpts_mean": -7.8217630655832036,
+      "delta_minutes_mean": -8.061510547523499,
+      "delta_pts_mean": -3.75214426500526,
+      "player_name": "Moritz Wagner",
+      "team_tricode": "ORL"
+    },
+    {
+      "delta_dk_fpts_mean": -7.543117453706952,
+      "delta_minutes_mean": -4.587807332229616,
+      "delta_pts_mean": -4.590090637599575,
+      "player_name": "Julius Randle",
+      "team_tricode": "MIN"
+    },
+    {
+      "delta_dk_fpts_mean": -7.4267043179810095,
+      "delta_minutes_mean": -2.6584506540870665,
+      "delta_pts_mean": -2.918701955139221,
+      "player_name": "Steven Adams",
+      "team_tricode": "HOU"
+    },
+    {
+      "delta_dk_fpts_mean": -6.811635478016022,
+      "delta_minutes_mean": -1.784946934661864,
+      "delta_pts_mean": -3.2305513550025697,
+      "player_name": "Bennedict Mathurin",
+      "team_tricode": "LAC"
+    }
+  ],
+  "largest_player_risers": [
+    {
+      "delta_dk_fpts_mean": 6.898963600875879,
+      "delta_minutes_mean": 8.47120442653656,
+      "delta_pts_mean": 3.2038779028286024,
+      "player_name": "Killian Hayes",
+      "team_tricode": "SAC"
+    },
+    {
+      "delta_dk_fpts_mean": 6.8121042998099846,
+      "delta_minutes_mean": 2.7937108946990996,
+      "delta_pts_mean": 2.6808063782081017,
+      "player_name": "DeMar DeRozan",
+      "team_tricode": "SAC"
+    },
+    {
+      "delta_dk_fpts_mean": 6.594827498825143,
+      "delta_minutes_mean": 8.081956386375428,
+      "delta_pts_mean": 3.4512023453760836,
+      "player_name": "Ariel Hukporti",
+      "team_tricode": "NYK"
+    },
+    {
+      "delta_dk_fpts_mean": 6.450409253435673,
+      "delta_minutes_mean": 4.20895333000183,
+      "delta_pts_mean": 3.8830799151478708,
+      "player_name": "Kris Dunn",
+      "team_tricode": "LAC"
+    },
+    {
+      "delta_dk_fpts_mean": 6.336295447732899,
+      "delta_minutes_mean": 6.167479114685056,
+      "delta_pts_mean": 3.192097140144919,
+      "player_name": "Dean Wade",
+      "team_tricode": "CLE"
+    },
+    {
+      "delta_dk_fpts_mean": 6.077041314033832,
+      "delta_minutes_mean": 2.7629964705467223,
+      "delta_pts_mean": 3.208604152995846,
+      "player_name": "Kevin McCullar Jr.",
+      "team_tricode": "NYK"
+    },
+    {
+      "delta_dk_fpts_mean": 6.051451115557425,
+      "delta_minutes_mean": 5.954073186531066,
+      "delta_pts_mean": 3.4725997132094175,
+      "player_name": "Jordan Clarkson",
+      "team_tricode": "NYK"
+    },
+    {
+      "delta_dk_fpts_mean": 5.583575108437733,
+      "delta_minutes_mean": 7.527904843559263,
+      "delta_pts_mean": 2.7080489151634772,
+      "player_name": "Josh Okogie",
+      "team_tricode": "HOU"
+    },
+    {
+      "delta_dk_fpts_mean": 5.45015280076975,
+      "delta_minutes_mean": 4.940228370666505,
+      "delta_pts_mean": 2.424973812110646,
+      "player_name": "Spencer Jones",
+      "team_tricode": "DEN"
+    },
+    {
+      "delta_dk_fpts_mean": 5.086124518229903,
+      "delta_minutes_mean": 3.725100037879944,
+      "delta_pts_mean": 2.620367452495849,
+      "player_name": "Jeremy Sochan",
+      "team_tricode": "NYK"
+    }
+  ],
+  "player_distribution": {
+    "dk_fpts_mean": {
+      "max": 60.58174270751597,
+      "mean": 17.315125999126547,
+      "median": 14.730443368465973,
+      "p10": 1.985446353940918,
+      "p90": 34.20210409746705,
+      "p95": 38.51082029022066
+    },
+    "dk_fpts_p90": {
+      "max": 80.30619584566561,
+      "mean": 26.912085431965114,
+      "median": 24.53662436082959,
+      "p10": 4.95230631879492,
+      "p90": 49.988771609636714,
+      "p95": 55.049650919056866
+    },
+    "dk_fpts_p95": {
+      "max": 86.58124380224261,
+      "mean": 30.274228077874916,
+      "median": 28.076503165066242,
+      "p10": 6.01995822683218,
+      "p90": 54.98202310752952,
+      "p95": 60.525465309840094
+    },
+    "dk_fpts_std": {
+      "max": 15.025065206367591,
+      "mean": 7.122528018672228,
+      "median": 7.266938800615164,
+      "p10": 2.0651042553541283,
+      "p90": 11.787902470726397,
+      "p95": 12.268537788013242
+    },
+    "minutes_mean": {
+      "max": 36.05819493438721,
+      "mean": 15.745669217087611,
+      "median": 14.96318412279129,
+      "p10": 0.01056957442903519,
+      "p90": 30.75313942435455,
+      "p95": 31.694216748542782
+    },
+    "play_prob": {
+      "max": 1.0,
+      "mean": 0.705003111111111,
+      "median": 0.9586600000000001,
+      "p10": 0.004532000000000004,
+      "p90": 1.0,
+      "p95": 1.0
+    }
+  },
+  "previous_market_alignment": {
+    "poss_bias_vs_est": -1.2980617446461526,
+    "poss_mae_vs_est": 1.3682229838445987,
+    "spread_bias_vs_vegas": 2.4755956716218646,
+    "spread_corr_vs_vegas": 0.7858300171409334,
+    "spread_mae_vs_vegas": 4.774833890960821,
+    "total_bias_vs_vegas": 1.5732559842319773,
+    "total_corr_vs_vegas": 0.6916658619297713,
+    "total_mae_vs_vegas": 2.7833902538342605
+  },
+  "rows": {
+    "games": 6,
+    "n_worlds": 25000,
+    "players": 180,
+    "teams": 12,
+    "world_rows": 4500000
+  },
+  "threshold_counts": {
+    "players_dk_mean_ge_50": 1,
+    "players_dk_mean_ge_60": 1,
+    "players_dk_p95_ge_50": 30,
+    "players_dk_p95_ge_60": 10,
+    "players_dk_p95_ge_70": 1,
+    "players_minutes_mean_ge_30": 27,
+    "players_minutes_mean_ge_36": 1
+  },
+  "world_tail_distribution": {
+    "max_game_total_per_world": {
+      "max": 335.3961923374527,
+      "mean": 264.8617049442794,
+      "median": 263.78883322309827,
+      "p10": 246.33407257111259,
+      "p90": 284.67913469760583,
+      "p95": 291.64325592575113
+    },
+    "max_player_dk_fpts_per_world": {
+      "max": 125.81576210262398,
+      "mean": 70.641825359068,
+      "median": 69.28364018864829,
+      "p10": 59.754650179377734,
+      "p90": 83.3956818266927,
+      "p95": 88.66136240923203
+    },
+    "min_game_total_per_world": {
+      "max": 256.09013918182427,
+      "mean": 206.26912403262833,
+      "median": 207.0006854318108,
+      "p10": 187.98104824654675,
+      "p90": 223.62602624529225,
+      "p95": 228.01430093884315
+    }
+  }
+}

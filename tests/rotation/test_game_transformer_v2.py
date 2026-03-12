@@ -3,13 +3,22 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
 from projections.rotation.game_transformer_v2 import (
+    FLOW_TARGET_COLUMNS_V1,
+    FLOW_TARGET_COLUMNS_V2,
     MAX_PLAYERS_PER_TEAM,
     GameTransformerV2Config,
+    _resolve_flow_conditioning_minutes,
+    _resolve_minutes_active_mask,
     build_game_level_examples,
     build_game_transformer_v2,
     collate_game_level_examples,
+    flow_contract_columns,
+    flow_target_columns,
+    reconstruct_flow_to_contract,
+    select_flow_columns,
 )
 
 
@@ -228,6 +237,172 @@ def test_game_transformer_v2_forward_shapes_and_team_minute_constraints() -> Non
     assert float(minutes[~valid].abs().max().item()) == pytest.approx(0.0, abs=1e-6)
 
 
+def test_resolve_minutes_active_mask_returns_predicted_mask_when_prob_zero() -> None:
+    predicted = torch.tensor([[True, False, True, False]], dtype=torch.bool)
+    target = torch.tensor([[False, True, False, True]], dtype=torch.bool)
+    team_index = torch.tensor([[0, 0, 1, 1]], dtype=torch.long)
+
+    out = _resolve_minutes_active_mask(
+        predicted,
+        target_active_mask=target,
+        player_team_index=team_index,
+        minutes_teacher_forcing_prob=0.0,
+        minutes_teacher_forcing_mode="team",
+    )
+
+    assert torch.equal(out, predicted)
+
+
+def test_resolve_minutes_active_mask_returns_target_mask_when_prob_one() -> None:
+    predicted = torch.tensor([[True, False, True, False]], dtype=torch.bool)
+    target = torch.tensor([[False, True, False, True]], dtype=torch.bool)
+    team_index = torch.tensor([[0, 0, 1, 1]], dtype=torch.long)
+
+    out = _resolve_minutes_active_mask(
+        predicted,
+        target_active_mask=target,
+        player_team_index=team_index,
+        minutes_teacher_forcing_prob=1.0,
+        minutes_teacher_forcing_mode="team",
+    )
+
+    assert torch.equal(out, target)
+
+
+def test_resolve_minutes_active_mask_example_mode_mixes_per_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    predicted = torch.tensor(
+        [
+            [True, True, False, False],
+            [False, False, True, True],
+        ],
+        dtype=torch.bool,
+    )
+    target = ~predicted
+    team_index = torch.tensor(
+        [
+            [0, 0, 1, 1],
+            [0, 0, 1, 1],
+        ],
+        dtype=torch.long,
+    )
+
+    def fake_rand(shape: tuple[int, ...] | torch.Size, device: torch.device | None = None) -> torch.Tensor:
+        assert tuple(shape) == (2, 1)
+        return torch.tensor([[0.2], [0.8]], dtype=torch.float32, device=device)
+
+    monkeypatch.setattr(torch, "rand", fake_rand)
+    out = _resolve_minutes_active_mask(
+        predicted,
+        target_active_mask=target,
+        player_team_index=team_index,
+        minutes_teacher_forcing_prob=0.5,
+        minutes_teacher_forcing_mode="example",
+    )
+
+    expected = torch.stack([target[0], predicted[1]], dim=0)
+    assert torch.equal(out, expected)
+
+
+def test_resolve_minutes_active_mask_team_mode_mixes_home_and_away_independently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    predicted = torch.tensor(
+        [
+            [True, True, False, False],
+            [False, False, True, True],
+        ],
+        dtype=torch.bool,
+    )
+    target = ~predicted
+    team_index = torch.tensor(
+        [
+            [0, 0, 1, 1],
+            [0, 0, 1, 1],
+        ],
+        dtype=torch.long,
+    )
+
+    def fake_rand(shape: tuple[int, ...] | torch.Size, device: torch.device | None = None) -> torch.Tensor:
+        assert tuple(shape) == (2, 2)
+        return torch.tensor([[0.2, 0.8], [0.9, 0.1]], dtype=torch.float32, device=device)
+
+    monkeypatch.setattr(torch, "rand", fake_rand)
+    out = _resolve_minutes_active_mask(
+        predicted,
+        target_active_mask=target,
+        player_team_index=team_index,
+        minutes_teacher_forcing_prob=0.5,
+        minutes_teacher_forcing_mode="team",
+    )
+
+    expected = torch.tensor(
+        [
+            [False, False, False, False],
+            [False, False, False, False],
+        ],
+        dtype=torch.bool,
+    )
+    expected[0, :2] = target[0, :2]
+    expected[0, 2:] = predicted[0, 2:]
+    expected[1, :2] = predicted[1, :2]
+    expected[1, 2:] = target[1, 2:]
+    assert torch.equal(out, expected)
+
+
+def test_resolve_flow_conditioning_minutes_returns_predicted_when_prob_zero() -> None:
+    predicted = torch.tensor([[30.0, 28.0, 12.0, 10.0]], dtype=torch.float32)
+    target = torch.tensor([[31.0, 27.0, 11.0, 9.0]], dtype=torch.float32)
+    team_index = torch.tensor([[0, 0, 1, 1]], dtype=torch.long)
+
+    out = _resolve_flow_conditioning_minutes(
+        predicted,
+        target_minutes=target,
+        player_team_index=team_index,
+        teacher_forcing_prob=0.0,
+        teacher_forcing_mode="team",
+    )
+
+    assert torch.equal(out, predicted)
+
+
+def test_resolve_flow_conditioning_minutes_team_mode_mixes_by_team(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    predicted = torch.tensor(
+        [
+            [30.0, 28.0, 12.0, 10.0],
+            [32.0, 26.0, 11.0, 9.0],
+        ],
+        dtype=torch.float32,
+    )
+    target = predicted + 1.0
+    team_index = torch.tensor(
+        [
+            [0, 0, 1, 1],
+            [0, 0, 1, 1],
+        ],
+        dtype=torch.long,
+    )
+
+    def fake_rand(shape: tuple[int, ...] | torch.Size, device: torch.device | None = None) -> torch.Tensor:
+        assert tuple(shape) == (2, 2)
+        return torch.tensor([[0.2, 0.8], [0.9, 0.1]], dtype=torch.float32, device=device)
+
+    monkeypatch.setattr(torch, "rand", fake_rand)
+    out = _resolve_flow_conditioning_minutes(
+        predicted,
+        target_minutes=target,
+        player_team_index=team_index,
+        teacher_forcing_prob=0.5,
+        teacher_forcing_mode="team",
+    )
+
+    expected = predicted.clone()
+    expected[0, :2] = target[0, :2]
+    expected[1, 2:] = target[1, 2:]
+    assert torch.equal(out, expected)
+
+
 def test_game_transformer_v2_config_defaults_match_locked_decisions() -> None:
     config = GameTransformerV2Config(
         feature_columns=["f1"],
@@ -241,6 +416,8 @@ def test_game_transformer_v2_config_defaults_match_locked_decisions() -> None:
     assert config.flow_num_blocks == 4
     assert config.flow_scale_clip == pytest.approx(3.0)  # H1 fix: increased from 2.0
     assert config.flow_context_mode == "attention"  # H2 fix: gated attention instead of mean pooling
+    assert config.flow_target_schema == "v1"
+    assert config.flow_use_minutes_conditioning is False
     assert config.include_pf_in_flow_targets is False
     assert config.overflow_protected_prior_play_prob_floor == pytest.approx(0.938507)
     assert config.overflow_protected_prior_minutes_floor == pytest.approx(29.520922)
@@ -249,6 +426,45 @@ def test_game_transformer_v2_config_defaults_match_locked_decisions() -> None:
     assert config.overflow_risk_weight_inactive_streak_len == pytest.approx(0.117685)
     assert config.overflow_keep_weight_prior_play_prob == pytest.approx(2.202986)
     assert config.overflow_keep_weight_prior_minutes == pytest.approx(0.051353)
+
+
+def test_flow_target_schema_v2_columns_and_reconstruction() -> None:
+    src_cols = list(FLOW_TARGET_COLUMNS_V1)
+    tgt_cols = flow_target_columns(include_pf=False, schema="v2")
+    assert tgt_cols == list(FLOW_TARGET_COLUMNS_V2)
+    assert "fg2m" not in tgt_cols
+    assert "fg3m" not in tgt_cols
+    assert "ftm" not in tgt_cols
+
+    full = torch.zeros((1, 2, len(src_cols)), dtype=torch.float32)
+    full[..., src_cols.index("fga2")] = 8.0
+    full[..., src_cols.index("fga3")] = 5.0
+    full[..., src_cols.index("fta")] = 6.0
+    full[..., src_cols.index("oreb")] = 2.0
+    full[..., src_cols.index("dreb")] = 4.0
+    full[..., src_cols.index("ast")] = 7.0
+    full[..., src_cols.index("stl")] = 1.0
+    full[..., src_cols.index("blk")] = 1.0
+    full[..., src_cols.index("tov")] = 3.0
+
+    flow_v2 = select_flow_columns(
+        full,
+        source_columns=src_cols,
+        target_columns=tgt_cols,
+        fill_value=0.0,
+    )
+    recon = reconstruct_flow_to_contract(
+        flow_v2,
+        flow_target_columns=tgt_cols,
+        contract_columns=flow_contract_columns(include_pf=False),
+        fg2_rate=0.5,
+        fg3_rate=0.4,
+        ft_rate=0.75,
+    )
+    assert recon.shape[-1] == len(FLOW_TARGET_COLUMNS_V1)
+    assert torch.allclose(recon[..., src_cols.index("fg2m")], torch.full((1, 2), 4.0))
+    assert torch.allclose(recon[..., src_cols.index("fg3m")], torch.full((1, 2), 2.0))
+    assert torch.allclose(recon[..., src_cols.index("ftm")], torch.full((1, 2), 4.5))
 
 
 def test_game_transformer_v2_forward_with_flow_targets_returns_flow_outputs() -> None:
@@ -295,6 +511,69 @@ def test_game_transformer_v2_forward_with_flow_targets_returns_flow_outputs() ->
     assert out.flow is not None
     assert out.flow.z.shape == (1, 30, len(flow_cols))
     assert out.flow.nll_mean.item() > 0.0
+
+
+def test_flow_head_sample_requires_minutes_context_when_enabled() -> None:
+    df = _toy_frame()
+    flow_cols = ["fga2", "fg2m", "fga3", "fg3m", "fta", "ftm", "oreb", "dreb", "ast", "stl", "blk", "tov"]
+    for idx, col in enumerate(flow_cols):
+        df[col] = float(idx + 1)
+
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        flow_use_minutes_conditioning=True,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        flow_label_columns=flow_cols,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+    )
+
+    z = torch.zeros((1, 30, len(flow_cols)), dtype=out.player_states.dtype)
+    with pytest.raises(ValueError, match="minutes_context"):
+        model.flow_head.sample(  # type: ignore[attr-defined]
+            z,
+            player_states=out.player_states,
+            team_states=out.team_states,
+            game_state=out.game_state,
+            player_team_index=out.player_team_index,
+            valid_mask=out.player_valid_mask,
+        )
+
+    sampled = model.flow_head.sample(  # type: ignore[attr-defined]
+        z,
+        player_states=out.player_states,
+        team_states=out.team_states,
+        game_state=out.game_state,
+        player_team_index=out.player_team_index,
+        valid_mask=out.player_valid_mask,
+        minutes_context=out.minutes.minutes,
+    )
+    assert sampled.shape == (1, 30, len(flow_cols))
 
 
 def test_game_transformer_v2_forward_emits_efficiency_outputs_when_enabled() -> None:

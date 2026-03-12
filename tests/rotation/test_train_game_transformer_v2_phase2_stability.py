@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
+from torch import nn
 
 from scripts.rotation.train_game_transformer_v2 import (
     BackboneEpochWeights,
@@ -10,14 +12,20 @@ from scripts.rotation.train_game_transformer_v2 import (
     Phase2StabilityConfig,
     Phase2StabilityState,
     _count_backbone_coupled_epochs,
+    _build_lineup_available_example_sampling_weights,
+    _freeze_parameter_prefixes,
+    _matches_prefix,
+    _parse_prefix_csv,
     _resolve_backbone_epoch_weights,
     _resolve_early_stop_metric_value,
+    _resolve_minutes_teacher_forcing_prob,
     _resolve_phase2_epoch_weights,
     _team_fixed_opportunity_rate_mse_loss,
     _team_ratio_mse_loss,
     _team_sum_by_side,
     _update_early_stop,
     _update_phase2_nll_guard,
+    _weighted_masked_scaled_huber_loss,
 )
 
 
@@ -47,6 +55,97 @@ def test_resolve_phase2_epoch_weights_applies_warmup_and_anchor_schedule() -> No
     assert weights.w_flow_nll == pytest.approx(0.5)
     assert weights.w_crps_fpts == pytest.approx(0.0)
     assert weights.w_team_energy == pytest.approx(0.0)
+
+
+def test_resolve_minutes_teacher_forcing_prob_applies_linear_schedule() -> None:
+    assert _resolve_minutes_teacher_forcing_prob(
+        epoch=1,
+        start_prob=1.0,
+        end_prob=0.5,
+        ramp_epochs=4,
+    ) == pytest.approx(1.0)
+    assert _resolve_minutes_teacher_forcing_prob(
+        epoch=3,
+        start_prob=1.0,
+        end_prob=0.5,
+        ramp_epochs=4,
+    ) == pytest.approx(2.0 / 3.0)
+    assert _resolve_minutes_teacher_forcing_prob(
+        epoch=4,
+        start_prob=1.0,
+        end_prob=0.5,
+        ramp_epochs=4,
+    ) == pytest.approx(0.5)
+
+
+def test_parse_prefix_csv_and_matches_prefix() -> None:
+    prefixes = _parse_prefix_csv("active_head., minutes_head.,,encoder.")
+    assert prefixes == ("active_head.", "minutes_head.", "encoder.")
+    assert _matches_prefix("active_head.player_logits.weight", prefixes) is True
+    assert _matches_prefix("flow_head.blocks.0.weight", prefixes) is False
+
+
+def test_build_lineup_available_example_sampling_weights_scales_with_coverage() -> None:
+    class _Ex:
+        def __init__(self, valid: np.ndarray, lineup: np.ndarray) -> None:
+            self.player_valid_mask = valid
+            self.lineup_available = lineup
+
+    examples = [
+        _Ex(
+            valid=np.array([[1, 1], [1, 1]], dtype=bool),
+            lineup=np.array([[0, 0], [0, 0]], dtype=bool),
+        ),
+        _Ex(
+            valid=np.array([[1, 1], [1, 1]], dtype=bool),
+            lineup=np.array([[1, 0], [1, 0]], dtype=bool),
+        ),
+        _Ex(
+            valid=np.array([[1, 1], [1, 1]], dtype=bool),
+            lineup=np.array([[1, 1], [1, 1]], dtype=bool),
+        ),
+    ]
+
+    weights, meta = _build_lineup_available_example_sampling_weights(
+        examples,
+        lineup_available_weight=3.0,
+    )
+
+    assert weights.dtype == torch.double
+    assert weights.tolist() == pytest.approx([1.0, 2.0, 3.0])
+    assert meta["lineup_fraction_mean"] == pytest.approx(0.5)
+    assert meta["sample_weight_min"] == pytest.approx(1.0)
+    assert meta["sample_weight_max"] == pytest.approx(3.0)
+
+
+def test_build_lineup_available_example_sampling_weights_handles_empty_examples() -> None:
+    weights, meta = _build_lineup_available_example_sampling_weights(
+        [],
+        lineup_available_weight=2.5,
+    )
+    assert tuple(weights.shape) == (0,)
+    assert weights.dtype == torch.double
+    assert meta["sample_weight_mean"] == pytest.approx(1.0)
+    assert meta["lineup_weight_target"] == pytest.approx(2.5)
+
+
+def test_freeze_parameter_prefixes_freezes_only_matching_tensors() -> None:
+    model = nn.Module()
+    model.active_head = nn.Linear(3, 2)
+    model.minutes_head = nn.Linear(3, 2)
+    model.flow_head = nn.Linear(3, 2)
+
+    _freeze_parameter_prefixes(
+        model,
+        prefixes=("active_head.", "minutes_head."),
+        label="unit-test",
+    )
+
+    for name, param in model.named_parameters():
+        if name.startswith(("active_head.", "minutes_head.")):
+            assert param.requires_grad is False
+        else:
+            assert param.requires_grad is True
 
 
 def test_update_phase2_nll_guard_halves_a2_after_two_consecutive_explosions() -> None:
@@ -310,3 +409,36 @@ def test_team_fixed_opportunity_rate_mse_loss_uses_true_budget_and_caps_overflow
     # Row 1 side 0 clips from 1.2 to 1.0 against a true rate of 0.7.
     expected = (((1.0 - 0.7) ** 2) + ((3.0 / 8.0 - 4.0 / 8.0) ** 2)) / 2.0
     assert loss.item() == pytest.approx(expected)
+
+
+def test_weighted_masked_scaled_huber_loss_matches_unweighted_with_unit_weights() -> None:
+    pred = torch.tensor([1.0, 3.0, 2.0], dtype=torch.float32)
+    target = torch.tensor([2.0, 1.0, 2.0], dtype=torch.float32)
+    mask = torch.tensor([True, True, False])
+    weights = torch.ones_like(pred)
+    loss = _weighted_masked_scaled_huber_loss(
+        pred=pred,
+        target=target,
+        mask=mask,
+        scale=1.0,
+        delta=1.0,
+        weights=weights,
+    )
+    # Huber(delta=1): errors [1,2] -> [0.5, 1.5], mean = 1.0
+    assert loss.item() == pytest.approx(1.0)
+
+
+def test_weighted_masked_scaled_huber_loss_returns_zero_when_mask_empty() -> None:
+    pred = torch.tensor([1.0, 2.0], dtype=torch.float32)
+    target = torch.tensor([1.5, 2.5], dtype=torch.float32)
+    mask = torch.tensor([False, False])
+    weights = torch.tensor([0.2, 0.8], dtype=torch.float32)
+    loss = _weighted_masked_scaled_huber_loss(
+        pred=pred,
+        target=target,
+        mask=mask,
+        scale=2.0,
+        delta=1.0,
+        weights=weights,
+    )
+    assert loss.item() == pytest.approx(0.0)

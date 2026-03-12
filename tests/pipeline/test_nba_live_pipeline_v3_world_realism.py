@@ -84,3 +84,42 @@ def test_resample_extreme_game_worlds_replaces_bad_pair() -> None:
         ["team_id", "player_id"]
     )
     pd.testing.assert_frame_equal(out_w0.reset_index(drop=True), out_w1.reset_index(drop=True))
+
+
+def test_resample_extreme_game_worlds_replaces_multiple_bad_pairs_from_same_donor() -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 1, 1, 2, 2],
+            "game_id": [33, 33, 33, 33, 33, 33],
+            "team_id": [301, 302, 301, 302, 301, 302],
+            "player_id": [3001, 3002, 3001, 3002, 3001, 3002],
+            "minutes": [9.0, 30.0, 11.0, 29.0, 28.0, 30.0],
+            "pts": [31.0, 18.0, 29.0, 16.0, 12.0, 14.0],
+            "reb": [4.0, 6.0, 3.0, 5.0, 5.0, 7.0],
+            "ast": [3.0, 4.0, 2.0, 4.0, 5.0, 6.0],
+            "stl": [1.0, 1.0, 0.0, 1.0, 1.0, 1.0],
+            "blk": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "tov": [1.0, 2.0, 1.0, 2.0, 2.0, 2.0],
+            "dk_fpts": [38.0, 24.0, 36.0, 22.0, 18.0, 24.0],
+        }
+    )
+
+    out, report = _resample_extreme_game_worlds(
+        worlds,
+        random_seed=11,
+        max_passes=1,
+        game_pts_max=500.0,
+        game_pts_min=0.0,
+    )
+
+    assert report["applied"] is True
+    assert report["total_replaced_pairs"] == 2
+    donor = out.loc[out["world_idx"] == 2, ["team_id", "player_id", "minutes", "pts", "dk_fpts"]].sort_values(
+        ["team_id", "player_id"]
+    )
+    for world_idx in (0, 1):
+        replaced = out.loc[
+            out["world_idx"] == world_idx,
+            ["team_id", "player_id", "minutes", "pts", "dk_fpts"],
+        ].sort_values(["team_id", "player_id"])
+        pd.testing.assert_frame_equal(replaced.reset_index(drop=True), donor.reset_index(drop=True))

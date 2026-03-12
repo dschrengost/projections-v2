@@ -1,0 +1,113 @@
+{
+  "run_prev": "20260311T181256Z",
+  "run_cur": "20260311T200354Z",
+  "players_prev": 180,
+  "players_cur": 180,
+  "matched_players": 174,
+  "added_players": 6,
+  "removed_players": 6,
+  "minutes": {
+    "mean_prev": 15.944969672438834,
+    "mean_cur": 15.745669217087611,
+    "mean_delta": -0.04018913198232653,
+    "median_delta": 0.0,
+    "mae_delta": 2.7172585827509836,
+    "p90_abs_delta": 5.91640960274315,
+    "players_abs_delta_ge_1": 115,
+    "players_abs_delta_ge_2": 81,
+    "players_abs_delta_ge_5": 25
+  },
+  "stats": {
+    "dk_mean_mae_delta": 2.6072972345712713,
+    "pts_mean_mae_delta": 1.435257758959654
+  },
+  "feature_drift": {
+    "lineup_available": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 0,
+      "mean_delta": 0.0,
+      "mae_delta": 0.0
+    },
+    "lineup_starter_announced": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 4,
+      "mean_delta": 0.0,
+      "mae_delta": 0.018867924528301886
+    },
+    "prior_play_prob": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 19,
+      "mean_delta": -0.08235849056603774,
+      "mae_delta": 0.08235849056603774
+    },
+    "an_pts_line": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 36,
+      "mean_delta": 0.015015723270440245,
+      "mae_delta": 0.10479559748427672
+    },
+    "an_reb_line": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 23,
+      "mean_delta": 0.016273584905660377,
+      "mae_delta": 0.05369496855345911
+    },
+    "an_ast_line": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 40,
+      "mean_delta": 0.025393081761006287,
+      "mae_delta": 0.06643081761006289
+    },
+    "an_has_pts": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 1,
+      "mean_delta": 0.0047169811320754715,
+      "mae_delta": 0.0047169811320754715
+    },
+    "an_has_reb": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 2,
+      "mean_delta": 0.009433962264150943,
+      "mae_delta": 0.009433962264150943
+    },
+    "an_has_ast": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 2,
+      "mean_delta": 0.009433962264150943,
+      "mae_delta": 0.009433962264150943
+    },
+    "an_implied_minutes": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 49,
+      "mean_delta": -0.142864595117103,
+      "mae_delta": 0.5727844038889557
+    },
+    "an_has_implied_minutes": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 5,
+      "mean_delta": -0.0047169811320754715,
+      "mae_delta": 0.02358490566037736
+    },
+    "vegas_total": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 35,
+      "mean_delta": 0.1650943396226415,
+      "mae_delta": 0.1650943396226415
+    },
+    "vegas_spread": {
+      "matched_rows": 212,
+      "changed_rows_gt_0": 36,
+      "mean_delta": 0.08490566037735849,
+      "mae_delta": 0.08490566037735849
+    }
+  },
+  "star_subset": {
+    "count": 19,
+    "mean_minutes_prev": 34.05631165714064,
+    "mean_minutes_cur": 31.088180465557702,
+    "mean_delta_minutes": -2.9681311915829305,
+    "mae_delta_minutes": 3.0392449477587244,
+    "players_abs_delta_ge_3": 8,
+    "players_abs_delta_ge_5": 3
+  }
+}

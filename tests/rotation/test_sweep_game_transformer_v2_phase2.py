@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from argparse import Namespace
+from pathlib import Path
 
 from scripts.rotation.sweep_game_transformer_v2_phase2 import (
     EvalMetrics,
+    _build_eval_cmd,
     _composite_score,
     _diff_metrics,
     _load_eval_metrics,
@@ -309,3 +312,24 @@ def test_multi_seed_prod_like_gate_uses_lineup1_active_accuracy() -> None:
         max_mean_delta_minutes_gap_abs=0.05,
         min_mean_delta_active_acc_lineup1=-0.005,
     )
+
+
+def test_build_eval_cmd_uses_eval_device_override() -> None:
+    args = Namespace(
+        eval_val_days=60,
+        batch_size=32,
+        num_workers=0,
+        device="cuda",
+        eval_device="cpu",
+    )
+
+    cmd = _build_eval_cmd(
+        args=args,
+        dataset_dir=Path("/tmp/dataset"),
+        run_dir=Path("/tmp/run"),
+        eval_json=Path("/tmp/eval.json"),
+        params={},
+    )
+
+    device_idx = cmd.index("--device")
+    assert cmd[device_idx + 1] == "cpu"

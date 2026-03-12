@@ -39,7 +39,12 @@ def _coerce_join_keys(df: pd.DataFrame, *, name: str) -> pd.DataFrame:
         out[col] = pd.to_numeric(out[col], errors="coerce").astype("Int64")
     if "game_date" not in out.columns:
         raise ValueError(f"{name} missing key column: game_date")
-    out["game_date"] = pd.to_datetime(out["game_date"], errors="coerce").dt.normalize()
+    game_date = out["game_date"]
+    if pd.api.types.is_datetime64_any_dtype(game_date):
+        normalized = pd.Series(game_date, copy=False)
+    else:
+        normalized = pd.to_datetime(game_date.astype("string"), errors="coerce")
+    out["game_date"] = pd.Series(normalized, copy=False).dt.normalize()
 
     invalid = out[["game_id", "team_id", "player_id", "game_date"]].isna().any(axis=1)
     if invalid.any():

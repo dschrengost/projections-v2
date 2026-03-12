@@ -52,11 +52,268 @@ FLOW_TARGET_COLUMNS_V1 = [
     "blk",
     "tov",
 ]
+FLOW_TARGET_COLUMNS_V2 = [
+    "fga2",
+    "fga3",
+    "fta",
+    "oreb",
+    "dreb",
+    "ast",
+    "stl",
+    "blk",
+    "tov",
+]
 FLOW_TARGET_COLUMNS_WITH_PF = [*FLOW_TARGET_COLUMNS_V1, "pf"]
+FLOW_TARGET_COLUMNS_V2_WITH_PF = [*FLOW_TARGET_COLUMNS_V2, "pf"]
+FLOW_TARGET_SCHEMA_V1 = "v1"
+FLOW_TARGET_SCHEMA_V2 = "v2"
+FLOW_TARGET_SCHEMA_DEFAULT = FLOW_TARGET_SCHEMA_V1
+FLOW_TARGET_SCHEMAS = (FLOW_TARGET_SCHEMA_V1, FLOW_TARGET_SCHEMA_V2)
 
 
-def flow_target_columns(*, include_pf: bool) -> list[str]:
+def normalize_flow_target_schema(schema: str) -> str:
+    value = str(schema).strip().lower()
+    if value not in FLOW_TARGET_SCHEMAS:
+        raise ValueError(f"Unsupported flow_target_schema={schema!r}. Expected one of {FLOW_TARGET_SCHEMAS}")
+    return value
+
+
+def flow_contract_columns(*, include_pf: bool) -> list[str]:
     return list(FLOW_TARGET_COLUMNS_WITH_PF if include_pf else FLOW_TARGET_COLUMNS_V1)
+
+
+def flow_target_columns(*, include_pf: bool, schema: str = FLOW_TARGET_SCHEMA_DEFAULT) -> list[str]:
+    schema_norm = normalize_flow_target_schema(schema)
+    if schema_norm == FLOW_TARGET_SCHEMA_V1:
+        return list(FLOW_TARGET_COLUMNS_WITH_PF if include_pf else FLOW_TARGET_COLUMNS_V1)
+    return list(FLOW_TARGET_COLUMNS_V2_WITH_PF if include_pf else FLOW_TARGET_COLUMNS_V2)
+
+
+def select_flow_columns(
+    flow_values: torch.Tensor,
+    *,
+    source_columns: list[str],
+    target_columns: list[str],
+    fill_value: float | bool = 0.0,
+) -> torch.Tensor:
+    if flow_values.ndim < 1:
+        raise ValueError("flow_values must have at least one dimension")
+    if int(flow_values.shape[-1]) != int(len(source_columns)):
+        raise ValueError(
+            f"flow_values last dim ({flow_values.shape[-1]}) must match source_columns ({len(source_columns)})"
+        )
+    if not target_columns:
+        return flow_values[..., :0]
+
+    source_idx = {name: idx for idx, name in enumerate(source_columns)}
+    if int(flow_values.shape[-1]) > 0:
+        base = flow_values[..., :1]
+    else:
+        base = torch.zeros(
+            (*flow_values.shape[:-1], 1),
+            dtype=flow_values.dtype,
+            device=flow_values.device,
+        )
+    cols: list[torch.Tensor] = []
+    for name in target_columns:
+        idx = source_idx.get(name)
+        if idx is None:
+            cols.append(torch.full_like(base, fill_value))
+        else:
+            cols.append(flow_values[..., idx:idx + 1])
+    return torch.cat(cols, dim=-1)
+
+
+def _resolve_rate_tensor(
+    rate: torch.Tensor | float | None,
+    *,
+    reference: torch.Tensor,
+    default: float,
+) -> torch.Tensor:
+    if rate is None:
+        out = torch.full_like(reference, float(default))
+    elif isinstance(rate, torch.Tensor):
+        if rate.shape != reference.shape:
+            raise ValueError(f"rate tensor shape {tuple(rate.shape)} must match reference shape {tuple(reference.shape)}")
+        out = rate.to(device=reference.device, dtype=reference.dtype)
+    else:
+        out = torch.full_like(reference, float(rate))
+    return torch.clamp(out, min=0.0, max=1.0)
+
+
+def reconstruct_flow_to_contract(
+    flow_values: torch.Tensor,
+    *,
+    flow_target_columns: list[str],
+    contract_columns: list[str] | None = None,
+    fg2_rate: torch.Tensor | float | None = None,
+    fg3_rate: torch.Tensor | float | None = None,
+    ft_rate: torch.Tensor | float | None = None,
+    fg2_rate_default: float = 0.54,
+    fg3_rate_default: float = 0.36,
+    ft_rate_default: float = 0.77,
+) -> torch.Tensor:
+    if flow_values.ndim < 1:
+        raise ValueError("flow_values must have at least one dimension")
+    if int(flow_values.shape[-1]) != int(len(flow_target_columns)):
+        raise ValueError(
+            f"flow_values last dim ({flow_values.shape[-1]}) must match flow_target_columns ({len(flow_target_columns)})"
+        )
+
+    cleaned = torch.clamp(flow_values, min=0.0)
+    idx = {name: i for i, name in enumerate(flow_target_columns)}
+    zero = (
+        torch.zeros(cleaned.shape[:-1], dtype=cleaned.dtype, device=cleaned.device)
+        if int(cleaned.shape[-1]) == 0
+        else torch.zeros_like(cleaned[..., 0])
+    )
+
+    def _col(name: str) -> torch.Tensor:
+        col_idx = idx.get(name)
+        if col_idx is None:
+            return zero
+        return cleaned[..., col_idx]
+
+    fga2 = _col("fga2")
+    fga3 = _col("fga3")
+    fta = _col("fta")
+    oreb = _col("oreb")
+    dreb = _col("dreb")
+    ast = _col("ast")
+    stl = _col("stl")
+    blk = _col("blk")
+    tov = _col("tov")
+    pf = _col("pf")
+
+    if "fg2m" in idx:
+        fg2m = torch.minimum(_col("fg2m"), fga2)
+    else:
+        fg2m = fga2 * _resolve_rate_tensor(fg2_rate, reference=fga2, default=float(fg2_rate_default))
+    if "fg3m" in idx:
+        fg3m = torch.minimum(_col("fg3m"), fga3)
+    else:
+        fg3m = fga3 * _resolve_rate_tensor(fg3_rate, reference=fga3, default=float(fg3_rate_default))
+    if "ftm" in idx:
+        ftm = torch.minimum(_col("ftm"), fta)
+    else:
+        ftm = fta * _resolve_rate_tensor(ft_rate, reference=fta, default=float(ft_rate_default))
+
+    out_cols = list(contract_columns) if contract_columns is not None else flow_contract_columns(include_pf=("pf" in idx))
+    values = {
+        "fga2": fga2,
+        "fg2m": fg2m,
+        "fga3": fga3,
+        "fg3m": fg3m,
+        "fta": fta,
+        "ftm": ftm,
+        "oreb": oreb,
+        "dreb": dreb,
+        "ast": ast,
+        "stl": stl,
+        "blk": blk,
+        "tov": tov,
+        "pf": pf,
+    }
+    missing = [name for name in out_cols if name not in values]
+    if missing:
+        raise ValueError(f"Unsupported contract columns requested: {missing}")
+    return torch.cat([values[name].unsqueeze(-1) for name in out_cols], dim=-1)
+
+
+def _resolve_minutes_active_mask(
+    predicted_active_mask: torch.Tensor,
+    *,
+    target_active_mask: torch.Tensor | None = None,
+    player_team_index: torch.Tensor | None = None,
+    minutes_use_target_active: bool = False,
+    minutes_teacher_forcing_prob: float = 1.0,
+    minutes_teacher_forcing_mode: str = "batch",
+) -> torch.Tensor:
+    """Choose the minutes-conditioning active mask.
+
+    Supports training-time exposure to predicted active masks at batch, example,
+    or team granularity while leaving inference behavior unchanged.
+    """
+
+    pred_mask = predicted_active_mask.to(dtype=torch.bool)
+    if bool(minutes_use_target_active):
+        if target_active_mask is None:
+            raise ValueError("minutes_use_target_active=True requires target_active_mask")
+        return target_active_mask.to(dtype=torch.bool)
+
+    if target_active_mask is None:
+        return pred_mask
+
+    target_mask = target_active_mask.to(dtype=torch.bool)
+    prob = float(min(1.0, max(0.0, minutes_teacher_forcing_prob)))
+    if prob <= 0.0:
+        return pred_mask
+    if prob >= 1.0:
+        return target_mask
+
+    mode = str(minutes_teacher_forcing_mode).strip().lower()
+    device = pred_mask.device
+    if mode == "batch":
+        use_target = bool(torch.rand((), device=device).item() < prob)
+        return target_mask if use_target else pred_mask
+    if mode == "example":
+        mix_mask = (torch.rand((pred_mask.shape[0], 1), device=device) < prob).expand_as(pred_mask)
+        return torch.where(mix_mask, target_mask, pred_mask)
+    if mode == "team":
+        if player_team_index is None:
+            raise ValueError("minutes_teacher_forcing_mode='team' requires player_team_index")
+        if player_team_index.shape != pred_mask.shape:
+            raise ValueError("player_team_index must match active mask shape for team mixing")
+        team_mix = torch.rand((pred_mask.shape[0], 2), device=device) < prob
+        mix_mask = torch.gather(team_mix, dim=1, index=player_team_index.to(dtype=torch.long))
+        return torch.where(mix_mask, target_mask, pred_mask)
+
+    raise ValueError(f"Unsupported minutes_teacher_forcing_mode={minutes_teacher_forcing_mode!r}")
+
+
+def _resolve_flow_conditioning_minutes(
+    predicted_minutes: torch.Tensor,
+    *,
+    target_minutes: torch.Tensor | None = None,
+    player_team_index: torch.Tensor | None = None,
+    teacher_forcing_prob: float = 1.0,
+    teacher_forcing_mode: str = "batch",
+) -> torch.Tensor:
+    """Choose flow-conditioning minutes source.
+
+    This mirrors minutes teacher-forcing behavior and allows batch/example/team
+    granularity mixing between target and predicted minutes during training.
+    """
+
+    pred = predicted_minutes.to(dtype=torch.float32)
+    if target_minutes is None:
+        return pred
+
+    target = target_minutes.to(dtype=pred.dtype)
+    prob = float(min(1.0, max(0.0, teacher_forcing_prob)))
+    if prob <= 0.0:
+        return pred
+    if prob >= 1.0:
+        return target
+
+    mode = str(teacher_forcing_mode).strip().lower()
+    device = pred.device
+    if mode == "batch":
+        use_target = bool(torch.rand((), device=device).item() < prob)
+        return target if use_target else pred
+    if mode == "example":
+        mix_mask = (torch.rand((pred.shape[0], 1), device=device) < prob).expand_as(pred)
+        return torch.where(mix_mask, target, pred)
+    if mode == "team":
+        if player_team_index is None:
+            raise ValueError("teacher_forcing_mode='team' requires player_team_index")
+        if player_team_index.shape != pred.shape:
+            raise ValueError("player_team_index must match minutes shape for team mixing")
+        team_mix = torch.rand((pred.shape[0], 2), device=device) < prob
+        mix_mask = torch.gather(team_mix, dim=1, index=player_team_index.to(dtype=torch.long))
+        return torch.where(mix_mask, target, pred)
+
+    raise ValueError(f"Unsupported teacher_forcing_mode={teacher_forcing_mode!r}")
 
 
 @dataclass(frozen=True)
@@ -87,6 +344,8 @@ class GameTransformerV2Config:
     flow_rqs_min_derivative: float = 1e-3
     flow_mean_ctx_weight: float = 1.0
     flow_context_mode: str = "attention"  # H2 fix: "attention" instead of "mean" for star concentration
+    flow_target_schema: str = FLOW_TARGET_SCHEMA_DEFAULT
+    flow_use_minutes_conditioning: bool = False
     include_pf_in_flow_targets: bool = False
     enable_efficiency_head: bool = False
     efficiency_head_hidden: int = 128
@@ -139,6 +398,10 @@ class GameTransformerV2Config:
             filtered["flow_rqs_min_bin_height"] = 1e-3
         if "flow_rqs_min_derivative" not in filtered:
             filtered["flow_rqs_min_derivative"] = 1e-3
+        if "flow_target_schema" not in filtered:
+            filtered["flow_target_schema"] = FLOW_TARGET_SCHEMA_DEFAULT
+        else:
+            filtered["flow_target_schema"] = normalize_flow_target_schema(str(filtered["flow_target_schema"]))
         if "enable_efficiency_head" not in filtered:
             filtered["enable_efficiency_head"] = False
         if "efficiency_head_hidden" not in filtered:
@@ -706,6 +969,8 @@ class GameTransformerV2(nn.Module):
         flow_rqs_min_derivative: float = 1e-3,
         flow_mean_ctx_weight: float = 1.0,
         flow_context_mode: str = "attention",
+        flow_target_schema: str = FLOW_TARGET_SCHEMA_DEFAULT,
+        flow_use_minutes_conditioning: bool = False,
         include_pf_in_flow_targets: bool = False,
         enable_efficiency_head: bool = False,
         efficiency_head_hidden: int = 128,
@@ -735,8 +1000,13 @@ class GameTransformerV2(nn.Module):
         self.num_game_features = int(num_game_features)
         self.num_team_features = int(num_team_features)
         self.d_model = int(d_model)
-        self.flow_target_columns = flow_target_columns(include_pf=bool(include_pf_in_flow_targets))
+        self.flow_target_schema = normalize_flow_target_schema(flow_target_schema)
+        self.flow_target_columns = flow_target_columns(
+            include_pf=bool(include_pf_in_flow_targets),
+            schema=self.flow_target_schema,
+        )
         self.num_flow_stats = int(len(self.flow_target_columns))
+        self.flow_use_minutes_conditioning = bool(flow_use_minutes_conditioning)
 
         self.player_proj = nn.Linear(int(num_player_features), int(d_model))
         self.game_proj = nn.Linear(int(num_game_features), int(d_model)) if int(num_game_features) > 0 else None
@@ -792,6 +1062,7 @@ class GameTransformerV2(nn.Module):
             rqs_min_derivative=float(flow_rqs_min_derivative),
             mean_ctx_weight=float(flow_mean_ctx_weight),
             context_mode=str(flow_context_mode),
+            use_minutes_context=bool(flow_use_minutes_conditioning),
         )
         self.enable_efficiency_head = bool(enable_efficiency_head)
         self.efficiency_head: EfficiencyHead | None = None
@@ -918,9 +1189,14 @@ class GameTransformerV2(nn.Module):
         target_active_mask: torch.Tensor | None = None,
         use_target_active_mask: bool = False,
         minutes_use_target_active: bool = False,
+        minutes_teacher_forcing_prob: float = 1.0,
+        minutes_teacher_forcing_mode: str = "batch",
         run_flow: bool = False,
         flow_targets: torch.Tensor | None = None,
         flow_observed_mask: torch.Tensor | None = None,
+        flow_minutes_target: torch.Tensor | None = None,
+        flow_minutes_teacher_forcing_prob: float = 1.0,
+        flow_minutes_teacher_forcing_mode: str = "batch",
         sample_backbone: bool = False,
         detach_backbone: bool = True,
     ) -> GameTransformerV2Outputs:
@@ -977,12 +1253,14 @@ class GameTransformerV2(nn.Module):
             use_target_active_mask=bool(use_target_active_mask),
         )
 
-        if bool(minutes_use_target_active):
-            if target_active_flat is None:
-                raise ValueError("minutes_use_target_active=True requires target_active_mask")
-            minutes_active_mask = target_active_flat
-        else:
-            minutes_active_mask = active_out.active_mask
+        minutes_active_mask = _resolve_minutes_active_mask(
+            active_out.active_mask,
+            target_active_mask=target_active_flat,
+            player_team_index=player_team_index,
+            minutes_use_target_active=bool(minutes_use_target_active),
+            minutes_teacher_forcing_prob=float(minutes_teacher_forcing_prob),
+            minutes_teacher_forcing_mode=str(minutes_teacher_forcing_mode),
+        )
 
         minutes_out = self.minutes_head(
             player_states,
@@ -1017,6 +1295,23 @@ class GameTransformerV2(nn.Module):
                     ],
                     dim=1,
                 )
+            flow_minutes_flat: torch.Tensor | None = None
+            if bool(self.flow_use_minutes_conditioning):
+                target_minutes_flat: torch.Tensor | None = None
+                if flow_minutes_target is not None:
+                    if flow_minutes_target.shape != player_valid_mask.shape:
+                        raise ValueError("flow_minutes_target must have shape (B,2,15)")
+                    target_minutes_flat = torch.cat(
+                        [flow_minutes_target[:, 0], flow_minutes_target[:, 1]],
+                        dim=1,
+                    )
+                flow_minutes_flat = _resolve_flow_conditioning_minutes(
+                    minutes_out.minutes,
+                    target_minutes=target_minutes_flat,
+                    player_team_index=player_team_index,
+                    teacher_forcing_prob=float(flow_minutes_teacher_forcing_prob),
+                    teacher_forcing_mode=str(flow_minutes_teacher_forcing_mode),
+                )
 
             flow_out = self.flow_head(
                 flow_flat,
@@ -1026,6 +1321,7 @@ class GameTransformerV2(nn.Module):
                 player_team_index=player_team_index,
                 valid_mask=valid_flat,
                 observed_mask=flow_obs_flat,
+                minutes_context=flow_minutes_flat,
             )
 
         efficiency_out: EfficiencyHeadOutputs | None = None
@@ -1128,6 +1424,8 @@ def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransforme
         flow_rqs_min_derivative=float(getattr(config, "flow_rqs_min_derivative", 1e-3)),
         flow_mean_ctx_weight=float(config.flow_mean_ctx_weight),
         flow_context_mode=str(getattr(config, "flow_context_mode", "mean")),
+        flow_target_schema=str(getattr(config, "flow_target_schema", FLOW_TARGET_SCHEMA_DEFAULT)),
+        flow_use_minutes_conditioning=bool(getattr(config, "flow_use_minutes_conditioning", False)),
         include_pf_in_flow_targets=bool(config.include_pf_in_flow_targets),
         enable_efficiency_head=bool(getattr(config, "enable_efficiency_head", False)),
         efficiency_head_hidden=int(getattr(config, "efficiency_head_hidden", 128)),
