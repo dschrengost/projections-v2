@@ -1810,6 +1810,60 @@ def _distinct_game_count(df: pd.DataFrame) -> int:
     return int(gids.dropna().nunique())
 
 
+def _coerce_world_game_date(
+    worlds_df: pd.DataFrame,
+    *,
+    game_date: str,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Force a canonical slate date on generated world rows."""
+    try:
+        canonical_game_date = pd.Timestamp(str(game_date)).date().isoformat()
+    except Exception:
+        canonical_game_date = str(game_date)
+
+    if worlds_df.empty:
+        return worlds_df, {
+            "applied": False,
+            "reason": "empty_worlds",
+            "canonical_game_date": canonical_game_date,
+            "rows": 0,
+            "normalized_rows": 0,
+        }
+
+    out = worlds_df
+    row_count = int(len(out))
+    had_game_date_column = "game_date" in out.columns
+    sample_noncanonical_values: list[str] = []
+    unique_input_values = 0
+    normalized_rows = row_count
+
+    if had_game_date_column:
+        game_date_series = out["game_date"]
+        canonical_mask = game_date_series.eq(canonical_game_date)
+        null_mask = game_date_series.isna()
+        noncanonical_mask = (~canonical_mask) | null_mask
+        normalized_rows = int(noncanonical_mask.sum())
+        unique_input_values = int(game_date_series.nunique(dropna=False))
+        if normalized_rows > 0:
+            sample_noncanonical_values = [
+                str(value)
+                for value in game_date_series.loc[noncanonical_mask]
+                .head(5)
+                .tolist()
+            ]
+    out["game_date"] = canonical_game_date
+
+    return out, {
+        "applied": bool((not had_game_date_column) or normalized_rows > 0),
+        "canonical_game_date": canonical_game_date,
+        "rows": row_count,
+        "had_game_date_column": bool(had_game_date_column),
+        "normalized_rows": int(normalized_rows),
+        "unique_input_values": int(unique_input_values),
+        "sample_noncanonical_values": sample_noncanonical_values,
+    }
+
+
 def _sanitize_frame_to_expected_keys(
     df: pd.DataFrame,
     *,
@@ -4865,6 +4919,7 @@ def generate_worlds_gtv2_live_task(
         logger.info("Applied force-active world guardrails: %s", force_active_diag)
         contract_checks_seed: dict[str, Any]
         triton_request_count = 0
+        raw_worlds_path: Path | None = None
         if backend == "triton":
             if not triton_endpoint:
                 raise RuntimeError(
@@ -4965,11 +5020,6 @@ def generate_worlds_gtv2_live_task(
                             continue
                 last_response = dict(response)
             worlds_df = pd.concat(world_frames, ignore_index=True)
-            _atomic_write_validated_parquet(
-                worlds_df,
-                raw_worlds_path,
-                required_cols=("world_idx", "game_id", "team_id", "player_id"),
-            )
             contract_checks_seed = dict(contract_counter)
             device_for_summary = str(
                 last_response.get("device")
@@ -5018,6 +5068,21 @@ def generate_worlds_gtv2_live_task(
 
         if worlds_df.empty:
             raise RuntimeError("GTV2 worlds generation produced zero rows")
+        worlds_df, game_date_normalization_report = _coerce_world_game_date(
+            worlds_df,
+            game_date=game_date,
+        )
+        if bool(game_date_normalization_report.get("applied")):
+            logger.warning(
+                "Normalized generated world game_date values: %s",
+                game_date_normalization_report,
+            )
+        if raw_worlds_path is not None:
+            _atomic_write_validated_parquet(
+                worlds_df,
+                raw_worlds_path,
+                required_cols=("world_idx", "game_id", "team_id", "player_id"),
+            )
         worlds_df, world_key_report = _sanitize_frame_to_expected_keys(
             worlds_df,
             expected_keys_df=features_df,
@@ -5114,6 +5179,7 @@ def generate_worlds_gtv2_live_task(
             },
             "triton_request_count": int(triton_request_count),
             "force_active_guardrails": force_active_diag,
+            "game_date_normalization": game_date_normalization_report,
             "props_uplift_calibration": props_uplift_report,
             "world_realism_controls": world_realism_report,
             "world_contract_field_repair": world_contract_repair_report,

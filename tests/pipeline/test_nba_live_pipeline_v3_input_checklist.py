@@ -13,6 +13,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _build_feature_input_checklist,
     _build_input_change_set,
     _build_publish_superseded_report,
+    _coerce_world_game_date,
     _group_mean_by_keys_without_pandas_groupby,
     _build_rerun_plan,
     _compute_per_game_input_digests,
@@ -1154,6 +1155,25 @@ def test_sanitize_frame_to_expected_keys_handles_sparse_large_index_labels() -> 
     assert report["dropped_unexpected_key_rows"] == 1
     assert cleaned["game_id"].tolist() == [1, 1, 1]
     assert cleaned["team_id"].tolist() == [10, 20, 20]
+
+
+def test_coerce_world_game_date_normalizes_noncanonical_values() -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 1, 2, 3],
+            "game_date": ["2026-03%12", "2026-03-12", None, "2026-03-12 "],
+            "game_id": [1, 1, 1, 1],
+            "team_id": [10, 10, 10, 10],
+            "player_id": [100, 100, 100, 100],
+        }
+    )
+
+    normalized, report = _coerce_world_game_date(worlds, game_date="2026-03-12")
+
+    assert report["applied"] is True
+    assert report["normalized_rows"] == 3
+    assert report["canonical_game_date"] == "2026-03-12"
+    assert normalized["game_date"].eq("2026-03-12").all()
 
 
 def test_publish_atomic_task_rejects_corrupt_worlds_before_pointer_promotion(
