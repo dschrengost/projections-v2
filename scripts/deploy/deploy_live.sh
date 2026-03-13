@@ -96,6 +96,8 @@ rsync -av --delete $DRY_RUN \
     --exclude='*.egg-info' \
     --exclude='node_modules' \
     --exclude='web/minutes-dashboard/dist' \
+    --exclude='artifacts' \
+    --exclude='reports' \
     --exclude='mlruns' \
     --exclude='runs' \
     --exclude='scratch' \
