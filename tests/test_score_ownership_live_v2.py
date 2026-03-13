@@ -235,6 +235,92 @@ def test_score_ownership_live_v2_scores_with_missing_gtv2_fallback(
     assert float(pd.to_numeric(out["pred_own_pct_raw"], errors="coerce").sum()) == pytest.approx(100.0, abs=1e-6)
 
 
+def test_score_ownership_live_v2_uses_live_features_mapping_when_minutes_daily_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    game_date = date(2026, 3, 13)
+    run_id = "20260313T191758Z"
+    model_run = "ownership_xfmr_test_v2_mapping"
+    feature_columns = [
+        "proj_fpts",
+        "salary",
+        "value_per_k",
+        "salary_rank",
+        "proj_fpts_rank",
+        "proj_fpts_zscore",
+    ]
+    _write_v2_artifact(
+        data_root=tmp_path,
+        run_id=model_run,
+        feature_columns=feature_columns,
+        target_sum_pct=800.0,
+    )
+
+    live_features_dir = (
+        tmp_path
+        / "live"
+        / "features_minutes_v1"
+        / game_date.isoformat()
+        / f"run={run_id}"
+    )
+    live_features_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "player_id": 101,
+                "player_name": "Mapped Guard",
+                "team_id": 1,
+                "team_tricode": "AAA",
+                "status": "Q",
+            },
+            {
+                "player_id": 202,
+                "player_name": "Mapped Center",
+                "team_id": 2,
+                "team_tricode": "BBB",
+                "status": "P",
+            },
+        ]
+    ).to_parquet(live_features_dir / "features.parquet", index=False)
+
+    slate = pd.DataFrame(
+        [
+            {"player_id": 11, "player_name": "Mapped Guard", "salary": 9200, "pos": "PG", "team": "AAA"},
+            {"player_id": 22, "player_name": "Mapped Center", "salary": 6800, "pos": "C", "team": "BBB"},
+        ]
+    )
+    fpts = pd.DataFrame(
+        [
+            {"player_id": 101, "pred_fpts": 44.0},
+            {"player_id": 202, "pred_fpts": 36.5},
+        ]
+    )
+    monkeypatch.setattr(score_ownership_live, "_load_fpts_predictions", lambda *args, **kwargs: fpts)
+    monkeypatch.setattr(
+        score_ownership_live,
+        "_load_calibration_config",
+        lambda: {"playable_filter": {"enabled": False}, "normalization": {"enabled": False}},
+    )
+
+    out = score_ownership_live.score_ownership(
+        slate_df=slate,
+        draft_group_id="123456",
+        game_date=game_date,
+        run_id=run_id,
+        data_root=tmp_path,
+        model_run=model_run,
+        model_family="ownership_v2",
+        injuries_cutoff_ts=None,
+    )
+
+    assert out is not None
+    by_name = out.set_index("player_name")
+    assert by_name.loc["Mapped Guard", "proj_fpts"] == pytest.approx(44.0)
+    assert by_name.loc["Mapped Center", "proj_fpts"] == pytest.approx(36.5)
+    assert by_name.loc["Mapped Guard", "proj_fpts"] != pytest.approx(9200 / 200.0)
+    assert by_name.loc["Mapped Center", "proj_fpts"] != pytest.approx(6800 / 200.0)
+
+
 def test_write_ownership_health_summary_reports_warnings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

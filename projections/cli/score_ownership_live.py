@@ -1127,10 +1127,10 @@ def score_ownership(
             injuries_cutoff_ts=injuries_cutoff_ts,
         )
     else:
-        # Load minutes to get player_name -> NBA player_id mapping
-        # This bridges DK's display_name to sim's player_id
+        # Load player_name -> NBA player_id mapping. Prefer minutes_v1 daily
+        # artifacts, then fall back to live minutes features (v3 flow path).
         import json
-        
+
         minutes_root = data_root / "artifacts" / "minutes_v1" / "daily" / str(game_date)
         latest_pointer = minutes_root / "latest_run.json"
 
@@ -1152,6 +1152,50 @@ def score_ownership(
         player_id_map = None
         team_id_to_tricode: dict[int, str] | None = None
         status_map = None
+
+        def _load_mapping_frame(frame: pd.DataFrame, source_label: str) -> bool:
+            nonlocal player_id_map, team_id_to_tricode, status_map
+            if frame.empty or "player_name" not in frame.columns or "player_id" not in frame.columns:
+                return False
+
+            work = frame.copy()
+            work["player_id"] = pd.to_numeric(work["player_id"], errors="coerce")
+            work = work[work["player_id"].notna()].copy()
+            if work.empty:
+                return False
+            work["player_id"] = work["player_id"].astype(int)
+
+            cols_to_load = ["player_id", "player_name"]
+            if "status" in work.columns:
+                cols_to_load.append("status")
+            if "team_id" in work.columns:
+                cols_to_load.append("team_id")
+            if "team_tricode" in work.columns:
+                cols_to_load.append("team_tricode")
+            work = work[[c for c in cols_to_load if c in work.columns]].copy()
+
+            work["_name_norm"] = work["player_name"].apply(_normalize_name)
+            player_id_map = (
+                work[work["_name_norm"].ne("")]
+                .drop_duplicates("_name_norm")
+                .set_index("_name_norm")["player_id"]
+            )
+            if player_id_map.empty:
+                player_id_map = None
+                return False
+
+            if "status" in work.columns:
+                status_map = work.drop_duplicates("player_id").set_index("player_id")["status"]
+            if {"team_id", "team_tricode"}.issubset(work.columns):
+                team_id_to_tricode = (
+                    work[["team_id", "team_tricode"]]
+                    .dropna()
+                    .drop_duplicates("team_id")
+                    .set_index("team_id")["team_tricode"]
+                    .to_dict()
+                )
+            print(f"[ownership] Loaded {len(player_id_map)} player mappings from {source_label}")
+            return True
 
         chosen_minutes_run: str | None = None
         # Prefer explicit run_id when minutes artifacts exist for it (production).
@@ -1184,37 +1228,69 @@ def score_ownership(
             try:
                 minutes_path = minutes_root / f"run={chosen_minutes_run}" / "minutes.parquet"
                 if minutes_path.exists():
-                    # Load player_id, player_name, and status (for OUT filtering)
-                    cols_to_load = ["player_id", "player_name"]
                     minutes_df = pd.read_parquet(minutes_path)
-                    # Add status column if it exists (for OUT filtering)
-                    if "status" in minutes_df.columns:
-                        cols_to_load.append("status")
-                    if "team_id" in minutes_df.columns:
-                        cols_to_load.append("team_id")
-                    if "team_tricode" in minutes_df.columns:
-                        cols_to_load.append("team_tricode")
-                    minutes_df = minutes_df[[c for c in cols_to_load if c in minutes_df.columns]].copy()
-
-                    # Create name -> player_id mapping using normalized names
-                    # This handles European characters like Dončić -> doncic
-                    minutes_df["_name_norm"] = minutes_df["player_name"].apply(_normalize_name)
-                    player_id_map = minutes_df.drop_duplicates("_name_norm").set_index("_name_norm")["player_id"]
-
-                    # Also create player_id -> status map for OUT filtering
-                    if "status" in minutes_df.columns:
-                        status_map = minutes_df.drop_duplicates("player_id").set_index("player_id")["status"]
-                    if {"team_id", "team_tricode"}.issubset(minutes_df.columns):
-                        team_id_to_tricode = (
-                            minutes_df[["team_id", "team_tricode"]]
-                            .dropna()
-                            .drop_duplicates("team_id")
-                            .set_index("team_id")["team_tricode"]
-                            .to_dict()
-                        )
-                    print(f"[ownership] Loaded {len(player_id_map)} player mappings from minutes")
+                    _load_mapping_frame(
+                        minutes_df,
+                        f"minutes_v1_daily(run={chosen_minutes_run})",
+                    )
             except Exception as e:
                 print(f"[ownership] Failed to load minutes for mapping: {e}")
+
+        if player_id_map is None:
+            features_root = data_root / "live" / "features_minutes_v1" / str(game_date)
+            features_pointer = features_root / "latest_run.json"
+            chosen_features_run: str | None = None
+
+            explicit_features_path = features_root / f"run={run_id}" / "features.parquet"
+            if explicit_features_path.exists():
+                chosen_features_run = run_id
+            elif cutoff_ts_utc is not None and features_root.exists():
+                best_dt: datetime | None = None
+                for p in features_root.iterdir():
+                    if not p.is_dir() or not p.name.startswith("run="):
+                        continue
+                    rid = p.name.split("run=", 1)[1]
+                    try:
+                        dt = datetime.strptime(rid, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+                    except ValueError:
+                        continue
+                    if dt <= cutoff_ts_utc and (best_dt is None or dt > best_dt):
+                        best_dt = dt
+                        chosen_features_run = rid
+
+            if chosen_features_run is None and features_pointer.exists():
+                try:
+                    with open(features_pointer) as f:
+                        chosen_features_run = json.load(f).get("run_id")
+                except Exception as e:
+                    print(f"[ownership] Failed to load live features pointer for mapping: {e}")
+
+            if chosen_features_run is None and features_root.exists():
+                run_dirs = sorted(
+                    [p for p in features_root.iterdir() if p.is_dir() and p.name.startswith("run=")],
+                    reverse=True,
+                )
+                if run_dirs:
+                    chosen_features_run = run_dirs[0].name.split("run=", 1)[1]
+
+            try:
+                features_path = (
+                    features_root / f"run={chosen_features_run}" / "features.parquet"
+                    if chosen_features_run
+                    else features_root / "features.parquet"
+                )
+                if features_path.exists():
+                    features_df = pd.read_parquet(features_path)
+                    _load_mapping_frame(
+                        features_df,
+                        (
+                            f"live_features_minutes_v1(run={chosen_features_run})"
+                            if chosen_features_run
+                            else "live_features_minutes_v1"
+                        ),
+                    )
+            except Exception as e:
+                print(f"[ownership] Failed to load live features for mapping: {e}")
         
         if player_id_map is not None:
             # Map DK display_name -> NBA player_id using normalized names
