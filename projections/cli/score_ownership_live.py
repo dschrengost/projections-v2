@@ -645,6 +645,51 @@ def _load_fpts_predictions(
     return None
 
 
+def _resolve_previous_projection_run_id(
+    *,
+    game_date: date,
+    run_id: str,
+    data_root: Path,
+) -> str | None:
+    """Find the newest projection run ID before `run_id` for the same slate date."""
+
+    try:
+        current_dt = datetime.strptime(run_id, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+    day_iso = game_date.isoformat()
+    base_dirs = [
+        data_root / "artifacts" / "gtv2_worlds" / f"game_date={day_iso}",
+        data_root / "artifacts" / "gtv2_worlds" / f"date={day_iso}",
+        data_root / "artifacts" / "gtv2_worlds" / day_iso,
+        data_root / "artifacts" / "projections" / day_iso,
+        data_root / "artifacts" / "projections" / f"game_date={day_iso}",
+        data_root / "artifacts" / "projections" / f"date={day_iso}",
+    ]
+
+    best: tuple[datetime, str] | None = None
+    for base in base_dirs:
+        if not base.exists() or not base.is_dir():
+            continue
+        for entry in base.iterdir():
+            if not entry.is_dir() or not entry.name.startswith("run="):
+                continue
+            candidate_run_id = entry.name.split("run=", 1)[1]
+            try:
+                candidate_dt = datetime.strptime(candidate_run_id, "%Y%m%dT%H%M%SZ").replace(
+                    tzinfo=UTC
+                )
+            except ValueError:
+                continue
+            if candidate_dt >= current_dt:
+                continue
+            if best is None or candidate_dt > best[0]:
+                best = (candidate_dt, candidate_run_id)
+
+    return best[1] if best is not None else None
+
+
 def _ensure_v2_base_feature_defaults(salaries: pd.DataFrame) -> pd.DataFrame:
     """Ensure transformer baseline feature columns exist with safe defaults."""
 
@@ -1306,6 +1351,78 @@ def score_ownership(
                 suffixes=("", "_sim")
             )
             salaries = salaries.drop(columns=["player_id_sim"], errors="ignore")
+
+            missing_proj_fpts_before = int(salaries["proj_fpts"].isna().sum())
+            # Game-scoped runs can briefly expose partial world projections for the
+            # current run. Backfill only missing mapped players from the previous run.
+            if missing_proj_fpts_before > 0:
+                previous_run_id = _resolve_previous_projection_run_id(
+                    game_date=game_date,
+                    run_id=run_id,
+                    data_root=data_root,
+                )
+                if previous_run_id is not None:
+                    previous_fpts = _load_fpts_predictions(
+                        game_date,
+                        previous_run_id,
+                        data_root,
+                        cutoff_ts=None,
+                    )
+                    if previous_fpts is not None and not previous_fpts.empty:
+                        prev_merge_cols = [
+                            "player_id",
+                            *[
+                                col
+                                for col in (
+                                    "pred_fpts",
+                                    "minutes_mean",
+                                    "dk_fpts_p90",
+                                    "dk_fpts_p50",
+                                    "minutes_sim_mean",
+                                    "sim_p_active",
+                                    "play_prob_eff",
+                                )
+                                if col in previous_fpts.columns
+                            ],
+                        ]
+                        previous_fpts_df = previous_fpts[prev_merge_cols].rename(
+                            columns={"pred_fpts": "proj_fpts"}
+                        )
+                        salaries = salaries.merge(
+                            previous_fpts_df,
+                            left_on="nba_player_id",
+                            right_on="player_id",
+                            how="left",
+                            suffixes=("", "_prev"),
+                        )
+                        salaries = salaries.drop(columns=["player_id_prev"], errors="ignore")
+                        for col in (
+                            "proj_fpts",
+                            "minutes_mean",
+                            "dk_fpts_p90",
+                            "dk_fpts_p50",
+                            "minutes_sim_mean",
+                            "sim_p_active",
+                            "play_prob_eff",
+                        ):
+                            prev_col = f"{col}_prev"
+                            if prev_col not in salaries.columns:
+                                continue
+                            base_vals = (
+                                pd.to_numeric(salaries[col], errors="coerce")
+                                if col in salaries.columns
+                                else pd.Series(float("nan"), index=salaries.index, dtype=float)
+                            )
+                            prev_vals = pd.to_numeric(salaries[prev_col], errors="coerce")
+                            salaries[col] = base_vals.where(base_vals.notna(), prev_vals)
+                            salaries = salaries.drop(columns=[prev_col], errors="ignore")
+                        missing_proj_fpts_after = int(salaries["proj_fpts"].isna().sum())
+                        recovered = missing_proj_fpts_before - missing_proj_fpts_after
+                        if recovered > 0:
+                            print(
+                                "[ownership] Backfilled missing FPTS from previous run "
+                                f"(run={previous_run_id}, recovered={recovered})"
+                            )
             
             # Add injury status from minutes predictions for OUT filtering
             if status_map is not None:

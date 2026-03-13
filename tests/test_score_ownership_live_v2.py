@@ -321,6 +321,116 @@ def test_score_ownership_live_v2_uses_live_features_mapping_when_minutes_daily_m
     assert by_name.loc["Mapped Center", "proj_fpts"] != pytest.approx(6800 / 200.0)
 
 
+def test_score_ownership_live_v2_backfills_missing_proj_fpts_from_previous_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    game_date = date(2026, 3, 13)
+    previous_run_id = "20260313T193405Z"
+    run_id = "20260313T193621Z"
+    model_run = "ownership_xfmr_test_v2_previous_backfill"
+    feature_columns = [
+        "proj_fpts",
+        "salary",
+        "value_per_k",
+        "salary_rank",
+        "proj_fpts_rank",
+        "proj_fpts_zscore",
+    ]
+    _write_v2_artifact(
+        data_root=tmp_path,
+        run_id=model_run,
+        feature_columns=feature_columns,
+        target_sum_pct=800.0,
+    )
+
+    current_proj_dir = (
+        tmp_path
+        / "artifacts"
+        / "gtv2_worlds"
+        / f"game_date={game_date.isoformat()}"
+        / f"run={run_id}"
+    )
+    current_proj_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"player_id": 101, "dk_fpts_mean": 44.0},
+        ]
+    ).to_parquet(current_proj_dir / "projections.parquet", index=False)
+
+    previous_proj_dir = (
+        tmp_path
+        / "artifacts"
+        / "gtv2_worlds"
+        / f"game_date={game_date.isoformat()}"
+        / f"run={previous_run_id}"
+    )
+    previous_proj_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"player_id": 101, "dk_fpts_mean": 41.0},
+            {"player_id": 202, "dk_fpts_mean": 36.5},
+        ]
+    ).to_parquet(previous_proj_dir / "projections.parquet", index=False)
+
+    live_features_dir = (
+        tmp_path
+        / "live"
+        / "features_minutes_v1"
+        / game_date.isoformat()
+        / f"run={run_id}"
+    )
+    live_features_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "player_id": 101,
+                "player_name": "Mapped Guard",
+                "team_id": 1,
+                "team_tricode": "AAA",
+                "status": "Q",
+            },
+            {
+                "player_id": 202,
+                "player_name": "Mapped Center",
+                "team_id": 2,
+                "team_tricode": "BBB",
+                "status": "P",
+            },
+        ]
+    ).to_parquet(live_features_dir / "features.parquet", index=False)
+
+    slate = pd.DataFrame(
+        [
+            {"player_id": 11, "player_name": "Mapped Guard", "salary": 9200, "pos": "PG", "team": "AAA"},
+            {"player_id": 22, "player_name": "Mapped Center", "salary": 6800, "pos": "C", "team": "BBB"},
+        ]
+    )
+    monkeypatch.setattr(
+        score_ownership_live,
+        "_load_calibration_config",
+        lambda: {"playable_filter": {"enabled": False}, "normalization": {"enabled": False}},
+    )
+
+    out = score_ownership_live.score_ownership(
+        slate_df=slate,
+        draft_group_id="123456",
+        game_date=game_date,
+        run_id=run_id,
+        data_root=tmp_path,
+        model_run=model_run,
+        model_family="ownership_v2",
+        injuries_cutoff_ts=None,
+    )
+
+    assert out is not None
+    by_name = out.set_index("player_name")
+    # Current run value should win when present.
+    assert by_name.loc["Mapped Guard", "proj_fpts"] == pytest.approx(44.0)
+    # Missing current-run player should be backfilled from previous run (not salary fallback).
+    assert by_name.loc["Mapped Center", "proj_fpts"] == pytest.approx(36.5)
+    assert by_name.loc["Mapped Center", "proj_fpts"] != pytest.approx(6800 / 200.0)
+
+
 def test_write_ownership_health_summary_reports_warnings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
