@@ -3134,15 +3134,73 @@ def _apply_props_uplift_calibration_to_worlds(
             "line_quality_min": 2.0,
             "line_quality_span": 6.0,
         },
+        "stl": {
+            "line_col": "an_stl_line",
+            "has_col": "an_has_stl",
+            "books_col": "an_stl_books",
+            "min_line": 1.0,
+            "min_gap": 0.40,
+            "min_line_all": 0.5,
+            "min_gap_all": 0.25,
+            "weight": 0.55,
+            "max_scale": 1.75,
+            "var_weight": 0.20,
+            "max_var_scale": 1.25,
+            "line_anchor_min_line": 1.5,
+            "line_anchor_frac": 0.90,
+            "min_line_down": 0.75,
+            "min_gap_down": 0.35,
+            "min_line_down_all": 0.5,
+            "min_gap_down_all": 0.25,
+            "weight_down": 0.35,
+            "min_scale_down": 0.70,
+            "var_weight_down": 0.10,
+            "min_var_scale_down": 0.85,
+            "line_quality_min": 0.5,
+            "line_quality_span": 1.5,
+        },
+        "blk": {
+            "line_col": "an_blk_line",
+            "has_col": "an_has_blk",
+            "books_col": "an_blk_books",
+            "min_line": 1.0,
+            "min_gap": 0.40,
+            "min_line_all": 0.5,
+            "min_gap_all": 0.25,
+            "weight": 0.60,
+            "max_scale": 1.85,
+            "var_weight": 0.22,
+            "max_var_scale": 1.28,
+            "line_anchor_min_line": 1.5,
+            "line_anchor_frac": 0.90,
+            "min_line_down": 0.75,
+            "min_gap_down": 0.35,
+            "min_line_down_all": 0.5,
+            "min_gap_down_all": 0.25,
+            "weight_down": 0.38,
+            "min_scale_down": 0.68,
+            "var_weight_down": 0.12,
+            "min_var_scale_down": 0.84,
+            "line_quality_min": 0.5,
+            "line_quality_span": 1.5,
+        },
     }
     key_cols = ["game_id", "team_id", "player_id"]
 
     player_means = _group_mean_by_keys_without_pandas_groupby(
         worlds_df,
         key_cols=key_cols,
-        value_cols=("pts", "reb", "ast"),
+        value_cols=("pts", "reb", "ast", "stl", "blk"),
         label="props_uplift/player_means",
-    ).rename(columns={"pts": "pts_mean", "reb": "reb_mean", "ast": "ast_mean"})
+    ).rename(
+        columns={
+            "pts": "pts_mean",
+            "reb": "reb_mean",
+            "ast": "ast_mean",
+            "stl": "stl_mean",
+            "blk": "blk_mean",
+        }
+    )
 
     feat_cols = list(key_cols)
     if "an_props_market_count" in features_df.columns:
@@ -3349,6 +3407,14 @@ def _apply_props_uplift_calibration_to_worlds(
             x = pd.to_numeric(out["ast"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
             ast_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
             out["ast"] = np.where(active_mask, ast_new, x)
+        elif stat_name == "stl":
+            x = pd.to_numeric(out["stl"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            stl_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            out["stl"] = np.where(active_mask, stl_new, x)
+        elif stat_name == "blk":
+            x = pd.to_numeric(out["blk"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            blk_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            out["blk"] = np.where(active_mask, blk_new, x)
         out = out.drop(columns=["mu", "sf_mean", "sf_var", "line_gap", "player_name"], errors="ignore")
 
         post_mean_col = f"{stat_name}_mean_post"

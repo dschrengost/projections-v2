@@ -156,3 +156,57 @@ def test_props_uplift_avoids_pandas_groupby_mean(
 
     assert report["applied"] is True
     assert len(out) == len(worlds_df)
+
+
+def test_props_uplift_adjusts_stocks_bidirectionally() -> None:
+    worlds_df = pd.DataFrame(
+        {
+            "world_idx": [0, 1, 0, 1],
+            "game_id": [1, 1, 1, 1],
+            "team_id": [10, 10, 20, 20],
+            "player_id": [100, 100, 200, 200],
+            "minutes": [32.0, 32.0, 28.0, 28.0],
+            "pts": [20.0, 20.0, 16.0, 16.0],
+            "reb": [8.0, 8.0, 6.0, 6.0],
+            "ast": [4.0, 4.0, 3.0, 3.0],
+            "stl": [0.8, 0.8, 1.8, 1.8],
+            "blk": [2.0, 2.0, 0.9, 0.9],
+            "tov": [2.0, 2.0, 1.0, 1.0],
+            "dk_fpts": [38.6, 38.6, 31.6, 31.6],
+        }
+    )
+    features_df = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 20],
+            "player_id": [100, 200],
+            "player_name": ["Victor Wembanyama", "Dyson Daniels"],
+            "an_stl_line": [1.4, 1.1],
+            "an_has_stl": [1.0, 1.0],
+            "an_stl_books": [5.0, 4.0],
+            "an_blk_line": [3.2, 0.5],
+            "an_has_blk": [1.0, 1.0],
+            "an_blk_books": [5.0, 4.0],
+            "an_props_market_count": [6.0, 5.0],
+        }
+    )
+
+    out, report = _apply_props_uplift_calibration_to_worlds(
+        worlds_df,
+        features_df=features_df,
+        scope="all_players",
+        confidence_weighted=True,
+    )
+
+    assert report["applied"] is True
+    assert report["stats"]["stl"]["applied_player_count_up"] == 1
+    assert report["stats"]["stl"]["applied_player_count_down"] == 1
+    assert report["stats"]["blk"]["applied_player_count_up"] == 1
+    assert report["stats"]["blk"]["applied_player_count_down"] == 1
+
+    wemby = out[out["player_id"] == 100]
+    dyson = out[out["player_id"] == 200]
+    assert wemby["stl"].mean() > 0.8
+    assert wemby["blk"].mean() > 2.0
+    assert dyson["stl"].mean() < 1.8
+    assert dyson["blk"].mean() < 0.9

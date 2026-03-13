@@ -110,21 +110,23 @@ def test_load_action_props_long_from_bronze_clamps_stale_fetched_at(tmp_path) ->
 def test_build_action_props_feature_snapshots_pivots_markets() -> None:
     long_df = pd.DataFrame(
         {
-            "game_date": [pd.Timestamp("2025-01-01"), pd.Timestamp("2025-01-01")],
-            "team_tricode": ["NYK", "NYK"],
-            "player_name": ["Jalen Brunson", "Jalen Brunson"],
-            "player_name_norm": ["jalen brunson", "jalen brunson"],
-            "prop_key": ["pts", "ast"],
-            "line": [25.5, 7.5],
-            "p_over": [0.51, 0.49],
-            "line_std": [0.3, 0.2],
-            "books": [4.0, 3.0],
+            "game_date": [pd.Timestamp("2025-01-01")] * 4,
+            "team_tricode": ["NYK"] * 4,
+            "player_name": ["Jalen Brunson"] * 4,
+            "player_name_norm": ["jalen brunson"] * 4,
+            "prop_key": ["pts", "ast", "stl", "blk"],
+            "line": [25.5, 7.5, 1.5, 0.5],
+            "p_over": [0.51, 0.49, 0.53, 0.47],
+            "line_std": [0.3, 0.2, 0.1, 0.1],
+            "books": [4.0, 3.0, 2.0, 2.0],
             "action_props_as_of_ts": [
                 pd.Timestamp("2025-01-01T20:00:00Z"),
                 pd.Timestamp("2025-01-01T20:00:00Z"),
+                pd.Timestamp("2025-01-01T20:00:00Z"),
+                pd.Timestamp("2025-01-01T20:00:00Z"),
             ],
-            "action_game_id": [123456, 123456],
-            "source_file": ["a.json", "a.json"],
+            "action_game_id": [123456] * 4,
+            "source_file": ["a.json"] * 4,
         }
     )
 
@@ -134,9 +136,13 @@ def test_build_action_props_feature_snapshots_pivots_markets() -> None:
     assert int(row["an_has_any_props"]) == 1
     assert int(row["an_has_pts"]) == 1
     assert int(row["an_has_ast"]) == 1
+    assert int(row["an_has_stl"]) == 1
+    assert int(row["an_has_blk"]) == 1
     assert float(row["an_pts_line"]) == 25.5
     assert float(row["an_ast_line"]) == 7.5
-    assert float(row["an_props_market_count"]) == 2
+    assert float(row["an_stl_line"]) == 1.5
+    assert float(row["an_blk_line"]) == 0.5
+    assert float(row["an_props_market_count"]) == 4
     assert "an_reb_line" in out.columns
     assert float(row["an_reb_line"]) == 0.0
 
@@ -321,19 +327,21 @@ def test_load_rotowire_props_long_from_bronze_maps_supported_markets(tmp_path) -
     day = "2025-01-01"
     frame = pd.DataFrame(
         {
-            "player_id": ["1", "1", "1"],
-            "player_name": ["Jalen Brunson", "Jalen Brunson", "Jalen Brunson"],
-            "team": ["NYK", "NYK", "NYK"],
-            "opponent": ["BOS", "BOS", "BOS"],
-            "game_id": ["999", "999", "999"],
-            "book": ["draftkings", "fanduel", "draftkings"],
-            "prop_type": ["pts", "pts", "ptsrebast"],
-            "line": [25.5, 26.0, 36.5],
-            "over_odds": [-110, -105, -115],
-            "under_odds": [-110, -115, -105],
-            "implied_over_prob": [0.5, 0.5122, 0.5349],
-            "implied_under_prob": [0.5, 0.4878, 0.4651],
+            "player_id": ["1", "1", "1", "1", "1"],
+            "player_name": ["Jalen Brunson"] * 5,
+            "team": ["NYK"] * 5,
+            "opponent": ["BOS"] * 5,
+            "game_id": ["999"] * 5,
+            "book": ["draftkings", "fanduel", "draftkings", "draftkings", "fanduel"],
+            "prop_type": ["pts", "pts", "ptsrebast", "stl", "stlblk"],
+            "line": [25.5, 26.0, 36.5, 1.5, 2.5],
+            "over_odds": [-110, -105, -115, -120, 105],
+            "under_odds": [-110, -115, -105, -110, -135],
+            "implied_over_prob": [0.5, 0.5122, 0.5349, 0.5455, 0.4878],
+            "implied_under_prob": [0.5, 0.4878, 0.4651, 0.4762, 0.5122],
             "scraped_at": [
+                "2025-01-01T20:00:00Z",
+                "2025-01-01T20:00:00Z",
                 "2025-01-01T20:00:00Z",
                 "2025-01-01T20:00:00Z",
                 "2025-01-01T20:00:00Z",
@@ -348,8 +356,8 @@ def test_load_rotowire_props_long_from_bronze_maps_supported_markets(tmp_path) -
         rotowire_props_root=tmp_path,
         game_date=pd.Timestamp(day),
     )
-    assert len(out) == 2
-    assert sorted(out["prop_key"].tolist()) == ["pra", "pts"]
+    assert len(out) == 4
+    assert sorted(out["prop_key"].tolist()) == ["pra", "pts", "stl", "stlblk"]
     assert int(out.loc[out["prop_key"] == "pts", "books"].iloc[0]) == 2
 
 

@@ -19,7 +19,19 @@ _TEAM_ABBR_TO_NBA: dict[str, str] = {
     "NY": "NYK",
 }
 
-_SUPPORTED_PROP_KEYS: tuple[str, ...] = ("pts", "reb", "ast", "3pm", "pra", "pr", "pa", "ra")
+_SUPPORTED_PROP_KEYS: tuple[str, ...] = (
+    "pts",
+    "reb",
+    "ast",
+    "stl",
+    "blk",
+    "stlblk",
+    "3pm",
+    "pra",
+    "pr",
+    "pa",
+    "ra",
+)
 _NAME_SUFFIXES: set[str] = {"jr", "sr", "ii", "iii", "iv", "v"}
 _ACTION_PROPS_LONG_COLUMNS: tuple[str, ...] = (
     "game_date",
@@ -89,6 +101,13 @@ def _canonical_prop_key(raw_name: object) -> str | None:
         "rebounds": "reb",
         "ast": "ast",
         "assists": "ast",
+        "stl": "stl",
+        "steals": "stl",
+        "blk": "blk",
+        "blocks": "blk",
+        "stl+blk": "stlblk",
+        "steals+blocks": "stlblk",
+        "stocks": "stlblk",
         "3ptm": "3pm",
         "3pm": "3pm",
         "threesmade": "3pm",
@@ -482,6 +501,9 @@ def _canonical_rotowire_prop_key(raw_name: object) -> str | None:
         "pts": "pts",
         "reb": "reb",
         "ast": "ast",
+        "stl": "stl",
+        "blk": "blk",
+        "stlblk": "stlblk",
         "threes": "3pm",
         "ptsrebast": "pra",
         "ptsreb": "pr",
