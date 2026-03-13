@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -192,3 +193,145 @@ def test_minutes_api_filters_to_selected_slate_and_uses_matching_ownership(
     assert meta.status_code == 200
     meta_payload = meta.json()
     assert meta_payload["counts"] == {"rows": 1, "players": 1, "teams": 1}
+
+
+def test_ownership_api_default_prefers_main_slate_over_larger_night_slate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_root = tmp_path / "projections-data"
+    monkeypatch.setenv("PROJECTIONS_DATA_ROOT", str(data_root))
+
+    day = "2026-02-28"
+    run_id = "20260228T183000Z"
+    own_dir = data_root / "silver" / "ownership_predictions" / day / f"run={run_id}"
+
+    main_dg = "111111"
+    night_dg = "222222"
+
+    _write_parquet(
+        own_dir / f"{main_dg}.parquet",
+        pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "player_name": "Main Guard",
+                    "team": "AAA",
+                    "salary": 8400,
+                    "pred_own_pct": 21.0,
+                    "draft_group_id": main_dg,
+                }
+            ]
+        ),
+    )
+    _write_parquet(
+        own_dir / f"{night_dg}.parquet",
+        pd.DataFrame(
+            [
+                {
+                    "player_id": idx,
+                    "player_name": f"Night Player {idx}",
+                    "team": "BBB",
+                    "salary": 5000 + idx,
+                    "pred_own_pct": 10.0 + idx,
+                    "draft_group_id": night_dg,
+                }
+                for idx in range(1, 6)
+            ]
+        ),
+    )
+
+    draftables_dir = data_root / "bronze" / "dk" / "draftables"
+    draftables_dir.mkdir(parents=True, exist_ok=True)
+    (draftables_dir / f"draftables_raw_{main_dg}.json").write_text(
+        json.dumps({"Contests": [{"n": "NBA Main Slate"}]}),
+        encoding="utf-8",
+    )
+    (draftables_dir / f"draftables_raw_{night_dg}.json").write_text(
+        json.dumps({"Contests": [{"n": "NBA Night Slate"}]}),
+        encoding="utf-8",
+    )
+
+    app = create_app(
+        daily_root=data_root / "artifacts" / "minutes_v1" / "daily",
+        dashboard_dist=tmp_path / "does-not-exist",
+        fpts_root=data_root / "gold" / "projections_fpts_v1",
+        sim_root=data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2",
+    )
+    client = TestClient(app)
+
+    resp = client.get("/api/ownership", params={"date": day, "run_id": run_id})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["draft_group_id"] == main_dg
+    assert payload["count"] == 1
+
+
+def test_ownership_api_default_prefers_night_when_main_absent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_root = tmp_path / "projections-data"
+    monkeypatch.setenv("PROJECTIONS_DATA_ROOT", str(data_root))
+
+    day = "2026-02-28"
+    run_id = "20260228T184500Z"
+    own_dir = data_root / "silver" / "ownership_predictions" / day / f"run={run_id}"
+
+    night_dg = "333333"
+    showdown_dg = "444444"
+
+    _write_parquet(
+        own_dir / f"{night_dg}.parquet",
+        pd.DataFrame(
+            [
+                {
+                    "player_id": 7,
+                    "player_name": "Night Core",
+                    "team": "CCC",
+                    "salary": 7800,
+                    "pred_own_pct": 24.0,
+                    "draft_group_id": night_dg,
+                }
+            ]
+        ),
+    )
+    _write_parquet(
+        own_dir / f"{showdown_dg}.parquet",
+        pd.DataFrame(
+            [
+                {
+                    "player_id": idx,
+                    "player_name": f"Showdown {idx}",
+                    "team": "DDD",
+                    "salary": 4000 + idx,
+                    "pred_own_pct": 5.0 + idx,
+                    "draft_group_id": showdown_dg,
+                }
+                for idx in range(1, 8)
+            ]
+        ),
+    )
+
+    draftables_dir = data_root / "bronze" / "dk" / "draftables"
+    draftables_dir.mkdir(parents=True, exist_ok=True)
+    (draftables_dir / f"draftables_raw_{night_dg}.json").write_text(
+        json.dumps({"Contests": [{"n": "NBA Night Slate"}]}),
+        encoding="utf-8",
+    )
+    (draftables_dir / f"draftables_raw_{showdown_dg}.json").write_text(
+        json.dumps({"Contests": [{"n": "NBA Showdown"}]}),
+        encoding="utf-8",
+    )
+
+    app = create_app(
+        daily_root=data_root / "artifacts" / "minutes_v1" / "daily",
+        dashboard_dist=tmp_path / "does-not-exist",
+        fpts_root=data_root / "gold" / "projections_fpts_v1",
+        sim_root=data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2",
+    )
+    client = TestClient(app)
+
+    resp = client.get("/api/ownership", params={"date": day, "run_id": run_id})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["draft_group_id"] == night_dg
+    assert payload["count"] == 1

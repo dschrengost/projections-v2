@@ -521,17 +521,21 @@ def _load_fpts_predictions(
             ("unified_projections", unified_root / f"date={day_iso}"),
         ]
 
-    def _load_live_projections(
+    def _iter_live_projection_candidates(
         day: date,
         desired_run_id: str | None,
-    ) -> tuple[pd.DataFrame | None, str | None, Path | None]:
+    ) -> list[tuple[pd.DataFrame, str, Path]]:
         cutoff_ts_utc = _coerce_cutoff_ts_utc(cutoff_ts)
+        seen_paths: set[Path] = set()
+        loaded: list[tuple[pd.DataFrame, str, Path]] = []
         for source_label, base in _iter_projection_bases(day):
             if not base.exists():
                 continue
             if base.is_file() and base.suffix == ".parquet":
                 try:
-                    return pd.read_parquet(base), source_label, base
+                    if base not in seen_paths:
+                        loaded.append((pd.read_parquet(base), source_label, base))
+                        seen_paths.add(base)
                 except Exception:
                     continue
 
@@ -545,7 +549,9 @@ def _load_fpts_predictions(
                     direct = base / "projections.parquet"
                     if direct.exists():
                         try:
-                            return pd.read_parquet(direct), source_label, direct
+                            if direct not in seen_paths:
+                                loaded.append((pd.read_parquet(direct), source_label, direct))
+                                seen_paths.add(direct)
                         except Exception:
                             pass
 
@@ -557,22 +563,25 @@ def _load_fpts_predictions(
                 )
                 if run_dir is None:
                     continue
-            candidates: list[Path] = []
+            candidate_paths: list[Path] = []
             if run_dir.is_file() and run_dir.suffix == ".parquet":
-                candidates.append(run_dir)
+                candidate_paths.append(run_dir)
             else:
-                candidates.append(run_dir / "projections.parquet")
-            for candidate in candidates:
+                candidate_paths.append(run_dir / "projections.parquet")
+            for candidate in candidate_paths:
                 if not candidate.exists():
                     continue
+                if candidate in seen_paths:
+                    continue
                 try:
-                    return pd.read_parquet(candidate), source_label, candidate
+                    loaded.append((pd.read_parquet(candidate), source_label, candidate))
+                    seen_paths.add(candidate)
                 except Exception:
                     continue
-        return None, None, None
+        return loaded
 
-    df, source, source_path = _load_live_projections(game_date, run_id)
-    if df is None or df.empty:
+    projection_candidates = _iter_live_projection_candidates(game_date, run_id)
+    if not projection_candidates:
         print(
             "[ownership] No live projections found under "
             f"{data_root / 'artifacts' / 'gtv2_worlds'} or {data_root / 'artifacts' / 'projections'} "
@@ -580,45 +589,60 @@ def _load_fpts_predictions(
         )
         return None
 
-    # Use dk_fpts_mean from live GTV2/unified projections.
-    if "dk_fpts_mean" not in df.columns:
+    attempted: list[str] = []
+    for df, source, source_path in projection_candidates:
+        attempted.append(f"{source}:{source_path}")
+        if df.empty:
+            print(f"[ownership] live projections empty (source={source}, path={source_path})")
+            continue
+
+        if "dk_fpts_mean" not in df.columns:
+            print(
+                "[ownership] live projections missing dk_fpts_mean column "
+                f"(source={source}, path={source_path})"
+            )
+            continue
+
+        work = df.copy()
+        work["dk_fpts_mean"] = pd.to_numeric(work["dk_fpts_mean"], errors="coerce")
+        valid_fpts = work["dk_fpts_mean"].notna() & work["dk_fpts_mean"].between(0.0, 300.0)
+        dropped = int((~valid_fpts).sum())
+        if dropped:
+            print(
+                "[ownership] Dropping rows with invalid dk_fpts_mean "
+                f"(source={source}, path={source_path}, dropped={dropped})"
+            )
+            work = work.loc[valid_fpts].copy()
+        if work.empty:
+            print(
+                "[ownership] No valid dk_fpts_mean rows after filtering; trying next source "
+                f"(source={source}, path={source_path})"
+            )
+            continue
+
         print(
-            "[ownership] live projections missing dk_fpts_mean column "
+            f"[ownership] Loaded {len(work)} players from live projections "
             f"(source={source}, path={source_path})"
         )
-        return None
 
-    df = df.copy()
-    df["dk_fpts_mean"] = pd.to_numeric(df["dk_fpts_mean"], errors="coerce")
-    valid_fpts = df["dk_fpts_mean"].notna() & df["dk_fpts_mean"].between(0.0, 300.0)
-    dropped = int((~valid_fpts).sum())
-    if dropped:
-        print(
-            "[ownership] Dropping rows with invalid dk_fpts_mean "
-            f"(source={source}, dropped={dropped})"
-        )
-        df = df.loc[valid_fpts].copy()
-    if df.empty:
-        print("[ownership] No valid dk_fpts_mean rows in live projections after filtering")
-        return None
+        # Return core + optional distributional features when available.
+        # Note: projections use NBA player_id; we map to DK names later.
+        optional_cols = [
+            "minutes_mean",
+            "dk_fpts_p90",
+            "dk_fpts_p50",
+            "minutes_sim_mean",
+            "sim_p_active",
+            "play_prob_eff",
+        ]
+        cols = ["player_id", "dk_fpts_mean", *[c for c in optional_cols if c in work.columns]]
+        return work[cols].rename(columns={"dk_fpts_mean": "pred_fpts"})
 
     print(
-        f"[ownership] Loaded {len(df)} players from live projections "
-        f"(source={source}, path={source_path})"
+        "[ownership] No valid dk_fpts_mean rows in live projections after filtering "
+        f"(attempted={attempted})"
     )
-
-    # Return core + optional distributional features when available.
-    # Note: projections use NBA player_id; we map to DK names later.
-    optional_cols = [
-        "minutes_mean",
-        "dk_fpts_p90",
-        "dk_fpts_p50",
-        "minutes_sim_mean",
-        "sim_p_active",
-        "play_prob_eff",
-    ]
-    cols = ["player_id", "dk_fpts_mean", *[c for c in optional_cols if c in df.columns]]
-    return df[cols].rename(columns={"dk_fpts_mean": "pred_fpts"})
+    return None
 
 
 def _ensure_v2_base_feature_defaults(salaries: pd.DataFrame) -> pd.DataFrame:

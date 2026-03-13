@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -1974,11 +1975,11 @@ def _discover_slates_from_disk(game_date: str, slate_type: str = "all") -> List[
 def _infer_slate_type(name: str) -> str:
     """Infer slate type from contest name."""
     name_lower = name.lower()
-    if "turbo" in name_lower:
+    if re.search(r"\bturbo\b", name_lower):
         return "turbo"
-    if "late" in name_lower or "night" in name_lower:
+    if re.search(r"\b(late|night)\b", name_lower):
         return "night"
-    if "early" in name_lower:
+    if re.search(r"\bearly\b", name_lower):
         return "early"
     if "showdown" in name_lower or "single game" in name_lower:
         return "showdown"

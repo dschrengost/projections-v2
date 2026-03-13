@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 from datetime import date, datetime
@@ -673,6 +674,122 @@ def _resolve_ownership_run_dir(base_dir: Path, run_id: str | None) -> Path | Non
     return None
 
 
+def _parse_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _infer_slate_type_from_name(name: str) -> str:
+    name_lower = name.lower()
+    if re.search(r"\bturbo\b", name_lower):
+        return "turbo"
+    if re.search(r"\b(late|night)\b", name_lower):
+        return "night"
+    if re.search(r"\bearly\b", name_lower):
+        return "early"
+    if "showdown" in name_lower or "single game" in name_lower:
+        return "showdown"
+    return "main"
+
+
+def _infer_slate_type_from_draft_group(
+    data_root_str: str,
+    draft_group_id: str,
+) -> str | None:
+    draftables_path = (
+        Path(data_root_str)
+        / "bronze"
+        / "dk"
+        / "draftables"
+        / f"draftables_raw_{draft_group_id}.json"
+    )
+    if not draftables_path.exists():
+        return None
+
+    try:
+        payload = json.loads(draftables_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    contests = []
+    if isinstance(payload, dict):
+        raw_contests = payload.get("Contests", payload.get("contests", []))
+        if isinstance(raw_contests, list):
+            contests = [c for c in raw_contests if isinstance(c, dict)]
+
+    if not contests:
+        return None
+
+    first = contests[0]
+    contest_name = str(first.get("n", first.get("ContestName", ""))).strip()
+    if not contest_name:
+        return None
+    return _infer_slate_type_from_name(contest_name)
+
+
+def _load_ownership_slates_meta(*, slate_dir: Path, base_dir: Path) -> dict[str, dict[str, Any]]:
+    candidates = [slate_dir / "slates.json"]
+    if base_dir != slate_dir:
+        candidates.append(base_dir / "slates.json")
+
+    for meta_path in candidates:
+        if not meta_path.exists():
+            continue
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            return {
+                str(dg_id): info
+                for dg_id, info in payload.items()
+                if isinstance(info, dict)
+            }
+    return {}
+
+
+def _pick_default_ownership_slate_file(
+    *,
+    slate_files: list[Path],
+    data_root: Path,
+    slates_meta: dict[str, dict[str, Any]],
+) -> Path:
+    if len(slate_files) == 1:
+        return slate_files[0]
+
+    slate_type_rank = {
+        "main": 0,
+        "night": 1,
+        "early": 2,
+        "turbo": 3,
+        "showdown": 4,
+    }
+
+    def _sort_key(path: Path) -> tuple[int, int, int, float, int, int]:
+        dg_id = path.stem
+        meta = slates_meta.get(dg_id, {})
+        inferred_type = _infer_slate_type_from_draft_group(str(data_root), dg_id) or ""
+        slate_type = str(meta.get("slate_type", inferred_type)).strip().lower()
+        player_count = _parse_int(meta.get("player_count"), default=0)
+        n_contests = _parse_int(meta.get("n_contests"), default=0)
+        first_game_time = pd.to_datetime(meta.get("first_game_time"), utc=True, errors="coerce")
+        first_game_sort = float(first_game_time.value) if pd.notna(first_game_time) else float("inf")
+        file_size = path.stat().st_size
+        dg_sort = _parse_int(dg_id, default=-1)
+        return (
+            slate_type_rank.get(slate_type, 5),
+            -n_contests,
+            -player_count,
+            first_game_sort,
+            -file_size,
+            -dg_sort,
+        )
+
+    return sorted(slate_files, key=_sort_key)[0]
+
+
 def _load_ownership_predictions(
     day: date,
     data_root: Path,
@@ -680,7 +797,7 @@ def _load_ownership_predictions(
     run_id: str | None = None,
     draft_group_id: str | None = None,
 ) -> pd.DataFrame | None:
-    """Load ownership predictions for a date, returning the main slate."""
+    """Load ownership predictions for a date, defaulting to main/night slate precedence."""
     base_dir = data_root / "silver" / "ownership_predictions" / str(day)
     slate_dir = _resolve_ownership_run_dir(base_dir, run_id) or base_dir
 
@@ -696,8 +813,12 @@ def _load_ownership_predictions(
         slate_files = list(slate_dir.glob("*.parquet"))
         slate_files = [f for f in slate_files if not f.name.endswith("_locked.parquet")]
         if slate_files:
-            # Use largest slate (main slate)
-            own_path = max(slate_files, key=lambda f: f.stat().st_size)
+            slates_meta = _load_ownership_slates_meta(slate_dir=slate_dir, base_dir=base_dir)
+            own_path = _pick_default_ownership_slate_file(
+                slate_files=slate_files,
+                data_root=data_root,
+                slates_meta=slates_meta,
+            )
             try:
                 return pd.read_parquet(own_path)
             except Exception:
@@ -1790,7 +1911,7 @@ def create_app(
         """Return ownership predictions for a date.
         
         If draft_group_id specified, returns that slate's predictions.
-        Otherwise, returns the main slate (largest by player count).
+        Otherwise, prefers `main`, then `night`, then the largest remaining slate.
         """
         slate_day = _parse_date(date)
         data_root = paths.data_path()
@@ -1819,8 +1940,12 @@ def create_app(
                     if not own_path.exists():
                         raise HTTPException(status_code=404, detail=f"No predictions for slate {draft_group_id}")
                 else:
-                    # Find main slate (largest by file size as proxy for player count)
-                    own_path = max(slate_files, key=lambda f: f.stat().st_size)
+                    slates_meta = _load_ownership_slates_meta(slate_dir=slate_dir, base_dir=base_dir)
+                    own_path = _pick_default_ownership_slate_file(
+                        slate_files=slate_files,
+                        data_root=data_root,
+                        slates_meta=slates_meta,
+                    )
             else:
                 own_path = None
         else:
@@ -1914,6 +2039,16 @@ def create_app(
                 })
         
         # Sort by player count descending (main slate first)
+        for slate in slates:
+            dg_id = str(slate.get("draft_group_id", "")).strip()
+            if not dg_id:
+                continue
+            if "slate_type" in slate and str(slate["slate_type"]).strip():
+                continue
+            inferred_type = _infer_slate_type_from_draft_group(str(data_root), dg_id)
+            if inferred_type:
+                slate["slate_type"] = inferred_type
+
         slates.sort(key=lambda x: x.get("player_count", 0), reverse=True)
         
         return JSONResponse({

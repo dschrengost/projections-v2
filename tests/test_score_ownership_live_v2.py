@@ -60,6 +60,53 @@ def test_load_fpts_predictions_prefers_gtv2_worlds_over_unified(tmp_path: Path) 
     assert by_player.loc[2, "pred_fpts"] == pytest.approx(33.5)
 
 
+def test_load_fpts_predictions_falls_back_when_primary_source_invalid(tmp_path: Path) -> None:
+    game_date = date(2026, 1, 2)
+    run_id = "20260102T190000Z"
+
+    gtv2_run = (
+        tmp_path
+        / "artifacts"
+        / "gtv2_worlds"
+        / f"game_date={game_date.isoformat()}"
+        / f"run={run_id}"
+    )
+    gtv2_run.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "player_id": [1, 2],
+            "dk_fpts_mean": [1.5544067944846e39, 1.5544067944846e39],
+        }
+    ).to_parquet(gtv2_run / "projections.parquet", index=False)
+
+    unified_run = (
+        tmp_path
+        / "artifacts"
+        / "projections"
+        / game_date.isoformat()
+        / f"run={run_id}"
+    )
+    unified_run.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "player_id": [1, 2],
+            "dk_fpts_mean": [44.0, 37.0],
+            "minutes_sim_mean": [35.0, 33.0],
+        }
+    ).to_parquet(unified_run / "projections.parquet", index=False)
+
+    out = score_ownership_live._load_fpts_predictions(
+        game_date=game_date,
+        run_id=run_id,
+        data_root=tmp_path,
+    )
+
+    assert out is not None
+    by_player = out.set_index("player_id")
+    assert by_player.loc[1, "pred_fpts"] == pytest.approx(44.0)
+    assert by_player.loc[2, "pred_fpts"] == pytest.approx(37.0)
+
+
 def test_load_fpts_predictions_does_not_fallback_to_sim_v2(tmp_path: Path) -> None:
     game_date = date(2026, 1, 2)
     run_id = "20260102T190000Z"
