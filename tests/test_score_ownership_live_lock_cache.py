@@ -36,8 +36,11 @@ def test_score_ownership_live_lock_cache_written_only_after_lock(tmp_path: Path,
         run_id: str,
         data_root: Path,
         model_run: str,
+        model_family: str = "ownership_v1",
         injuries_cutoff_ts: datetime | None = None,
+        gtv2_features_path: Path | None = None,
     ) -> pd.DataFrame:
+        _ = gtv2_features_path
         if injuries_cutoff_ts is None:
             cutoff = pd.NaT
         else:
@@ -54,6 +57,8 @@ def test_score_ownership_live_lock_cache_written_only_after_lock(tmp_path: Path,
                     "pred_own_pct": 10.0,
                     "draft_group_id": draft_group_id,
                     "run_id": run_id,
+                    "model_run": model_run,
+                    "model_family": model_family,
                     "is_locked": False,
                     "injuries_cutoff_ts": cutoff,
                 }
@@ -62,7 +67,13 @@ def test_score_ownership_live_lock_cache_written_only_after_lock(tmp_path: Path,
 
     monkeypatch.setattr(ownership_live, "score_ownership", _fake_score_ownership)
 
-    locked_path = tmp_path / "silver" / "ownership_predictions" / str(game_date) / f"{dg_id}_locked.parquet"
+    scoped_locked_path, legacy_locked_path = ownership_live._lock_cache_paths(
+        game_date=game_date,
+        draft_group_id=dg_id,
+        data_root=tmp_path,
+        model_family="ownership_v1",
+        model_run=ownership_live.PRODUCTION_MODEL_RUN,
+    )
 
     # Before lock: do not create *_locked.parquet.
     ownership_live.score_all_slates(
@@ -71,10 +82,11 @@ def test_score_ownership_live_lock_cache_written_only_after_lock(tmp_path: Path,
         tmp_path,
         current_time=lock_ts - timedelta(minutes=10),
     )
-    assert not locked_path.exists()
+    assert not scoped_locked_path.exists()
+    assert not legacy_locked_path.exists()
 
     # If a stale lock cache exists, locked scoring should overwrite it.
-    locked_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_locked_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         [
             {
@@ -83,11 +95,13 @@ def test_score_ownership_live_lock_cache_written_only_after_lock(tmp_path: Path,
                 "pred_own_pct": 10.0,
                 "draft_group_id": dg_id,
                 "run_id": "stale",
+                "model_run": "stale",
+                "model_family": "ownership_v1",
                 "is_locked": True,
                 "injuries_cutoff_ts": pd.Timestamp(lock_ts - timedelta(hours=2)).tz_convert("UTC"),
             }
         ]
-    ).to_parquet(locked_path, index=False)
+    ).to_parquet(legacy_locked_path, index=False)
 
     ownership_live.score_all_slates(
         game_date,
@@ -96,8 +110,9 @@ def test_score_ownership_live_lock_cache_written_only_after_lock(tmp_path: Path,
         current_time=lock_ts + timedelta(minutes=1),
     )
 
-    assert locked_path.exists()
-    locked_df = pd.read_parquet(locked_path)
+    assert scoped_locked_path.exists()
+    assert legacy_locked_path.exists()
+    locked_df = pd.read_parquet(scoped_locked_path)
     assert bool(locked_df["is_locked"].iloc[0]) is True
     cutoff = pd.to_datetime(locked_df["injuries_cutoff_ts"], utc=True, errors="coerce").max()
     assert cutoff == pd.Timestamp(lock_ts)

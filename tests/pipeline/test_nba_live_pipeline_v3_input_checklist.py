@@ -814,6 +814,7 @@ def test_rerun_plan_uses_game_scoped_policy_for_material_pre_tip_changes(
         "run_id": "prev_run",
         "minutes_current_run_path": str(selector),
         "rates_current_run_path": str(selector),
+        "ownership_current_run_path": str(selector),
         "v3": {"bundle_hash": "bundle123"},
     }
     plan = _build_rerun_plan(
@@ -824,6 +825,7 @@ def test_rerun_plan_uses_game_scoped_policy_for_material_pre_tip_changes(
         current_bundle_hash="bundle123",
         current_minutes_selector_path=selector,
         current_rates_selector_path=selector,
+        current_ownership_selector_path=selector,
     )
     assert plan["mode"] == "game_scoped"
     assert plan["target_game_ids"] == [1]
@@ -843,6 +845,7 @@ def test_rerun_plan_honors_manual_target_override(tmp_path: Path) -> None:
         "run_id": "prev_run",
         "minutes_current_run_path": str(selector),
         "rates_current_run_path": str(selector),
+        "ownership_current_run_path": str(selector),
         "v3": {"bundle_hash": "bundle123"},
     }
     plan = _build_rerun_plan(
@@ -853,6 +856,7 @@ def test_rerun_plan_honors_manual_target_override(tmp_path: Path) -> None:
         current_bundle_hash="bundle123",
         current_minutes_selector_path=selector,
         current_rates_selector_path=selector,
+        current_ownership_selector_path=selector,
         manual_target_game_ids=[2],
     )
     assert plan["mode"] == "game_scoped"
@@ -874,6 +878,7 @@ def test_rerun_plan_skips_when_manual_targets_not_on_slate(tmp_path: Path) -> No
         "run_id": "prev_run",
         "minutes_current_run_path": str(selector),
         "rates_current_run_path": str(selector),
+        "ownership_current_run_path": str(selector),
         "v3": {"bundle_hash": "bundle123"},
     }
     plan = _build_rerun_plan(
@@ -884,12 +889,47 @@ def test_rerun_plan_skips_when_manual_targets_not_on_slate(tmp_path: Path) -> No
         current_bundle_hash="bundle123",
         current_minutes_selector_path=selector,
         current_rates_selector_path=selector,
+        current_ownership_selector_path=selector,
         manual_target_game_ids=[999],
     )
     assert plan["mode"] == "skip"
     assert plan["reason"] == "manual_targets_not_on_slate"
     assert plan["target_game_ids"] == []
     assert plan["manual_trigger"]["invalid_game_ids"] == [999]
+
+
+def test_rerun_plan_forces_full_slate_when_ownership_selector_changes(
+    tmp_path: Path,
+) -> None:
+    current = {
+        "summary": {"slate_game_count": 1},
+        "per_game": {
+            "1": {"game_id": 1, "minutes_to_tip": 45.0, "is_live_game": True, "sources": {}},
+        },
+    }
+    prev_selector = tmp_path / "selector_prev.json"
+    curr_selector = tmp_path / "selector_curr.json"
+    prev_selector.write_text("{}", encoding="utf-8")
+    curr_selector.write_text("{}", encoding="utf-8")
+    previous_manifest = {
+        "run_id": "prev_run",
+        "minutes_current_run_path": str(prev_selector),
+        "rates_current_run_path": str(prev_selector),
+        "ownership_current_run_path": str(prev_selector),
+        "v3": {"bundle_hash": "bundle123"},
+    }
+    plan = _build_rerun_plan(
+        game_date="2026-02-24",
+        input_change_set={"changed_games": [], "new_game_ids": [], "removed_game_ids": []},
+        current_source_freshness=current,
+        previous_manifest_payload=previous_manifest,
+        current_bundle_hash="bundle123",
+        current_minutes_selector_path=prev_selector,
+        current_rates_selector_path=prev_selector,
+        current_ownership_selector_path=curr_selector,
+    )
+    assert plan["mode"] == "full_slate"
+    assert plan["reason"] == "ownership_selector_changed"
 
 
 def test_publish_superseded_report_flags_newer_current_pointer(tmp_path: Path) -> None:
@@ -1202,6 +1242,11 @@ def test_publish_atomic_task_rejects_corrupt_worlds_before_pointer_promotion(
         required_cols=("game_id", "team_id", "player_id"),
     )
     _atomic_write_validated_parquet(
+        pd.DataFrame({"game_id": [1], "team_id": [10], "player_id": [100]}),
+        tmp_path / "live" / "features_minutes_v1" / game_date / f"run={run_id}" / "features.parquet",
+        required_cols=("game_id", "team_id", "player_id"),
+    )
+    _atomic_write_validated_parquet(
         pd.DataFrame(
             {"game_date": [game_date], "game_id": [1], "team_id": [10], "player_id": [100]}
         ),
@@ -1285,6 +1330,11 @@ def test_publish_atomic_task_rejects_world_key_contract_violation_before_pointer
     _atomic_write_validated_parquet(
         pd.DataFrame({"game_id": [1], "team_id": [10], "player_id": [100]}),
         tmp_path / "live" / "features_gtv2_v1" / game_date / f"run={run_id}" / "features.parquet",
+        required_cols=("game_id", "team_id", "player_id"),
+    )
+    _atomic_write_validated_parquet(
+        pd.DataFrame({"game_id": [1], "team_id": [10], "player_id": [100]}),
+        tmp_path / "live" / "features_minutes_v1" / game_date / f"run={run_id}" / "features.parquet",
         required_cols=("game_id", "team_id", "player_id"),
     )
     _atomic_write_validated_parquet(

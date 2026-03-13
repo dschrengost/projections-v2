@@ -2,7 +2,7 @@
 
 This evaluator joins:
   - DK actual ownership (bronze/dk_contests/ownership_by_slate/*.parquet)
-  - Live ownership predictions (silver/ownership_predictions/<date>/*.parquet)
+  - Live ownership predictions (silver/ownership_predictions/<date>/run=<run_id>/*.parquet)
 
 Because DK "slate_id" (from contest exports) is not the same as DK "draft_group_id"
 (from salary/draftables), we map slates by player-pool overlap before joining rows.
@@ -26,6 +26,10 @@ from projections.paths import data_path
 
 
 _SUFFIX_TOKENS = {"jr", "sr", "ii", "iii", "iv", "v"}
+_LOCKED_FILE_RE = re.compile(
+    r"^(?P<draft_group_id>\d+)_locked(?:__(?P<model_family>ownership_v1|ownership_v2)__(?P<model_run>.+))?\.parquet$"
+)
+_LIVE_FILE_RE = re.compile(r"^(?P<draft_group_id>\d+)\.parquet$")
 
 
 def normalize_name(val: object, *, strip_suffix: bool = False) -> str:
@@ -291,7 +295,86 @@ def _load_dk_actual_for_date(actual_root: Path, game_date: date) -> pd.DataFrame
     return df
 
 
-def _load_live_preds_for_date(pred_root: Path, game_date: date, *, snapshot: str = "locked") -> pd.DataFrame:
+def _resolve_pred_day_run_dir(
+    *,
+    day_dir: Path,
+    pred_run_id: str | None,
+) -> Path:
+    if pred_run_id:
+        candidate = day_dir / f"run={pred_run_id}"
+        return candidate if candidate.exists() else day_dir
+
+    latest_pointer = day_dir / "LATEST" / "current.json"
+    if latest_pointer.exists():
+        try:
+            payload = json.loads(latest_pointer.read_text(encoding="utf-8"))
+            latest_run = str(payload.get("run_id", "")).strip()
+            if latest_run:
+                candidate = day_dir / f"run={latest_run}"
+                if candidate.exists():
+                    return candidate
+        except Exception:
+            pass
+
+    legacy_pointer = day_dir / "latest_run.json"
+    if legacy_pointer.exists():
+        try:
+            payload = json.loads(legacy_pointer.read_text(encoding="utf-8"))
+            latest_run = str(payload.get("run_id", "")).strip()
+            if latest_run:
+                candidate = day_dir / f"run={latest_run}"
+                if candidate.exists():
+                    return candidate
+        except Exception:
+            pass
+
+    run_dirs = sorted(
+        [path for path in day_dir.glob("run=*") if path.is_dir()],
+        key=lambda p: p.name,
+    )
+    if run_dirs:
+        return run_dirs[-1]
+    return day_dir
+
+
+def _select_locked_file_for_dg(
+    *,
+    candidates: list[Path],
+    model_family: str | None,
+) -> Path | None:
+    if not candidates:
+        return None
+    parsed: list[tuple[Path, str | None]] = []
+    for path in candidates:
+        match = _LOCKED_FILE_RE.match(path.name)
+        family = match.group("model_family") if match else None
+        parsed.append((path, family))
+
+    if model_family:
+        exact = [path for path, family in parsed if family == model_family]
+        if exact:
+            return max(exact, key=lambda p: p.stat().st_mtime)
+        if model_family == "ownership_v1":
+            legacy = [path for path, family in parsed if family is None]
+            if legacy:
+                return max(legacy, key=lambda p: p.stat().st_mtime)
+        return None
+
+    # No model-family filter: prefer namespaced file over legacy when present.
+    namespaced = [path for path, family in parsed if family is not None]
+    if namespaced:
+        return max(namespaced, key=lambda p: p.stat().st_mtime)
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def _load_live_preds_for_date(
+    pred_root: Path,
+    game_date: date,
+    *,
+    snapshot: str = "locked",
+    pred_run_id: str | None = None,
+    model_family: str | None = None,
+) -> pd.DataFrame:
     day_dir = pred_root / game_date.isoformat()
     if day_dir.is_file() and day_dir.suffix == ".parquet":
         df = pd.read_parquet(day_dir)
@@ -305,31 +388,47 @@ def _load_live_preds_for_date(pred_root: Path, game_date: date, *, snapshot: str
     if not day_dir.exists():
         return pd.DataFrame()
 
-    parquet_files = sorted([p for p in day_dir.glob("*.parquet") if p.name != "slates.json"])
-    if not parquet_files:
+    run_dir = _resolve_pred_day_run_dir(day_dir=day_dir, pred_run_id=pred_run_id)
+    run_parquet_files = sorted(
+        [p for p in run_dir.glob("*.parquet") if p.is_file() and p.name != "slates.json"]
+    )
+    locked_parquet_files = sorted(
+        [p for p in day_dir.glob("*_locked*.parquet") if p.is_file()]
+    )
+    if not run_parquet_files and not locked_parquet_files:
         return pd.DataFrame()
 
-    # Prefer locked snapshot per draft_group_id when available.
-    chosen: dict[str, Path] = {}
-    for p in parquet_files:
-        name = p.name
-        locked = name.endswith("_locked.parquet")
-        if locked:
-            dg = name[: -len("_locked.parquet")]
-        else:
-            if not name.endswith(".parquet"):
-                continue
-            dg = name[: -len(".parquet")]
-        if not dg.isdigit():
+    latest_by_dg: dict[str, Path] = {}
+    for p in run_parquet_files:
+        match = _LIVE_FILE_RE.match(p.name)
+        if not match:
             continue
+        latest_by_dg[match.group("draft_group_id")] = p
+
+    locked_by_dg: dict[str, list[Path]] = {}
+    for p in locked_parquet_files:
+        match = _LOCKED_FILE_RE.match(p.name)
+        if not match:
+            continue
+        dg = match.group("draft_group_id")
+        locked_by_dg.setdefault(dg, []).append(p)
+
+    all_dgs = sorted(set(latest_by_dg) | set(locked_by_dg))
+    chosen: dict[str, Path] = {}
+    for dg in all_dgs:
         if snapshot == "locked":
-            if locked:
-                chosen[dg] = p
-            else:
-                chosen.setdefault(dg, p)
+            locked_choice = _select_locked_file_for_dg(
+                candidates=locked_by_dg.get(dg, []),
+                model_family=model_family,
+            )
+            if locked_choice is not None:
+                chosen[dg] = locked_choice
+                continue
+            if dg in latest_by_dg:
+                chosen[dg] = latest_by_dg[dg]
         else:
-            if not locked:
-                chosen[dg] = p
+            if dg in latest_by_dg:
+                chosen[dg] = latest_by_dg[dg]
 
     dfs: list[pd.DataFrame] = []
     for dg, path in sorted(chosen.items()):
@@ -339,6 +438,10 @@ def _load_live_preds_for_date(pred_root: Path, game_date: date, *, snapshot: str
         df["game_date"] = df.get("game_date", game_date).astype(str)
         if "pred_own_pct_raw" not in df.columns:
             df["pred_own_pct_raw"] = df["pred_own_pct"].astype(float)
+        if model_family and "model_family" in df.columns:
+            df = df[df["model_family"].astype(str).str.lower() == model_family].copy()
+            if df.empty:
+                continue
         df["player_name_norm"] = df["player_name"].map(lambda x: normalize_name(x, strip_suffix=False))
         df["player_name_norm_base"] = df["player_name"].map(lambda x: normalize_name(x, strip_suffix=True))
         dfs.append(df)
@@ -473,6 +576,17 @@ def main() -> None:
         help="Which actual DK slates to evaluate per date (default: largest_entries, approximates main slate).",
     )
     parser.add_argument("--pred-snapshot", choices=["locked", "latest"], default="locked")
+    parser.add_argument(
+        "--pred-run-id",
+        default=None,
+        help="Optional run_id to evaluate from silver/ownership_predictions/<date>/run=<run_id>.",
+    )
+    parser.add_argument(
+        "--model-family",
+        choices=["ownership_v1", "ownership_v2"],
+        default=None,
+        help="Optional model-family filter when locked cache has multiple namespaced variants.",
+    )
     parser.add_argument("--min-overlap-coeff", type=float, default=0.85)
     parser.add_argument("--min-intersection", type=int, default=50)
     parser.add_argument("--max-day-offset", type=int, default=0)
@@ -500,7 +614,13 @@ def main() -> None:
     d = start
     while d <= end:
         actual = _load_dk_actual_for_date(actual_root, d)
-        preds = _load_live_preds_for_date(pred_root, d, snapshot=args.pred_snapshot)
+        preds = _load_live_preds_for_date(
+            pred_root,
+            d,
+            snapshot=args.pred_snapshot,
+            pred_run_id=args.pred_run_id,
+            model_family=args.model_family,
+        )
         if actual.empty or preds.empty:
             d = d + timedelta(days=1)
             continue
@@ -582,6 +702,8 @@ def main() -> None:
         "target_sum_pct": float(args.target_sum_pct),
         "slate_selector": args.slate_selector,
         "pred_snapshot": args.pred_snapshot,
+        "pred_run_id": args.pred_run_id,
+        "model_family": args.model_family,
         "mapping": {
             "n_match_records": len(all_matches),
             "matches": [m.to_dict() for m in all_matches],

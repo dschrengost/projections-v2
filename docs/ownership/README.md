@@ -2,7 +2,9 @@
 
 This document describes the ownership prediction pipeline for DraftKings NBA slates.
 
-For training + evaluation details (fixed slice, feature sets, model artifacts), see `docs/ownership_model.md`.
+For training + evaluation details on the current `ownership_v1` stack, see `docs/ownership_model.md`.
+
+For the slate-level transformer replacement path, see [OWNERSHIP_TRANSFORMER_SPEC.md](./OWNERSHIP_TRANSFORMER_SPEC.md).
 
 ## Overview
 
@@ -78,10 +80,18 @@ Key features used by the model:
 Runs as part of the live pipeline to generate ownership predictions for upcoming slates.
 
 ```bash
+# ownership_v1 (default)
 uv run python projections/cli/score_ownership_live.py \
     --date 2025-12-08 \
     --run-id live_v1 \
     --model-run dk_only_v6_logit_chalk5_cleanbase_seed1337
+
+# ownership_v2 transformer
+uv run python -m projections.cli.score_ownership_live \
+    --date 2026-03-13 \
+    --run-id live_v2 \
+    --model-family ownership_v2 \
+    --model-run ownership_xfmr_v1_12ep_big
 ```
 
 #### Data Flow
@@ -98,6 +108,7 @@ uv run python projections/cli/score_ownership_live.py \
 
 Notes:
 - DK lock timing is derived from `bronze/dk/draftables/draftables_raw_<draft_group_id>.json` (`competitions[*].startTime`) so historical backtests don’t depend on partial schedule parquet coverage.
+- `--model-family` controls scorer family (`ownership_v1` or `ownership_v2`); `ownership_v2` supports optional `--gtv2-features-path` enrichment and safely zero-fills missing `gtv2_*` columns.
 - For historical rescoring/backtests: `uv run python -m projections.cli.score_ownership_live --date YYYY-MM-DD --run-id backtest --data-root ~/projections-data --ignore-lock-cache --no-write-lock-cache`
 
 ### 3. Playable Filter
@@ -177,7 +188,8 @@ logging:
 | File | Description |
 |------|-------------|
 | `silver/ownership_predictions/{date}/{draft_group_id}.parquet` | Per-slate predictions |
-| `silver/ownership_predictions/{date}/{draft_group_id}_locked.parquet` | First-run predictions for that slate (immutable) |
+| `silver/ownership_predictions/{date}/{draft_group_id}_locked__{model_family}__{model_run}.parquet` | Model-scoped lock cache for that slate |
+| `silver/ownership_predictions/{date}/{draft_group_id}_locked.parquet` | Legacy v1 compatibility lock cache |
 | `silver/ownership_predictions/{date}/slates.json` | Slate metadata for the date |
 
 ### Output Columns
@@ -192,6 +204,7 @@ logging:
 - `game_date`: Game date
 - `run_id`: Pipeline run ID
 - `model_run`: Ownership model run ID
+- `model_family`: Ownership scorer family (`ownership_v1` / `ownership_v2`)
 
 ## Known Limitations
 

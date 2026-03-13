@@ -10,15 +10,22 @@ Output: bronze/dk_contests/ownership_by_slate/{date}_{slate_id}.parquet
         bronze/dk_contests/ownership_by_slate/all_ownership.parquet
 """
 import pandas as pd
-import numpy as np
 from pathlib import Path
 import sys
-from typing import Optional, List, Dict, Tuple
-from collections import defaultdict
+import re
+from typing import Optional, List, Dict
 
 DATA_ROOT = Path.home() / "projections-data" / "bronze" / "dk_contests"
 INPUT_DIR = DATA_ROOT / "nba_gpp_data"
 OUTPUT_DIR = DATA_ROOT / "ownership_by_slate"
+
+EXCLUDED_CONTEST_NAME_RE = re.compile(
+    r"showdown|single[- ]?game|captain|tiers|pick ?6|"
+    r"double up|50/50|fifty fifty|head[- ]?to[- ]?head|h2h|"
+    r"satellite|qualifier|ticket|winner take all|winner takes all|wta|"
+    r"triple[- ]?up|quintuple[- ]?up|multiplier",
+    flags=re.IGNORECASE,
+)
 
 
 def parse_contest_file(csv_path: Path) -> Optional[pd.DataFrame]:
@@ -56,8 +63,53 @@ def parse_contest_file(csv_path: Path) -> Optional[pd.DataFrame]:
         
         return player_own
         
-    except Exception as e:
+    except Exception:
         return None
+
+
+def select_eligible_contest_ids(meta: pd.DataFrame) -> set[str]:
+    """Return contest_ids for classic GPP-style contests we want in ownership labels."""
+    if meta.empty or "contest_id" not in meta.columns:
+        return set()
+
+    working = meta.copy()
+    if "game_type" in working.columns:
+        working = working[working["game_type"].astype(str).str.lower() == "classic"].copy()
+    if working.empty:
+        return set()
+
+    if "contest_name" in working.columns:
+        names = working["contest_name"].astype(str)
+        working = working[~names.str.contains(EXCLUDED_CONTEST_NAME_RE, na=False)].copy()
+    if working.empty:
+        return set()
+
+    if "is_guaranteed" in working.columns:
+        guaranteed = working["is_guaranteed"]
+        if guaranteed.dtype == bool:
+            working = working[guaranteed].copy()
+        else:
+            working = working[guaranteed.astype(str).str.lower().isin(["true", "1", "yes"])].copy()
+    if working.empty:
+        return set()
+
+    contest_ids = pd.to_numeric(working["contest_id"], errors="coerce").dropna().astype(int)
+    return {str(cid) for cid in contest_ids.tolist()}
+
+
+def load_eligible_contest_ids(date_dir: Path) -> set[str] | None:
+    """Load contest metadata for a date and return eligible contest_ids.
+
+    Returns None when metadata is unavailable so callers can fall back to legacy behavior.
+    """
+    meta_path = date_dir / f"nba_gpp_{date_dir.name}.csv"
+    if not meta_path.exists():
+        return None
+    try:
+        meta = pd.read_csv(meta_path)
+    except Exception:
+        return None
+    return select_eligible_contest_ids(meta)
 
 
 def cluster_contests_by_slate(contest_data: Dict[str, pd.DataFrame]) -> List[List[str]]:
@@ -176,6 +228,16 @@ def process_date(date_dir: Path) -> List[pd.DataFrame]:
     contest_files = sorted(results_dir.glob("contest_*_results.csv"))
     if not contest_files:
         return []
+
+    eligible_contest_ids = load_eligible_contest_ids(date_dir)
+    if eligible_contest_ids is not None:
+        contest_files = [
+            path
+            for path in contest_files
+            if path.stem.replace('contest_', '').replace('_results', '') in eligible_contest_ids
+        ]
+        if not contest_files:
+            return []
     
     # Parse all contests
     contest_data = {}

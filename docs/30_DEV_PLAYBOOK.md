@@ -190,6 +190,56 @@ Legacy shell scripts (`scripts/run_live_*.sh`) are gated and will refuse to run
 unless `PROJECTIONS_ALLOW_LEGACY_SHELL_RUNNERS=1` is set. This gate exists to
 prevent accidental direct execution in production.
 
+### Ownership Live Selector And Rollback
+
+Ownership source/model selection is controlled by:
+- `config/ownership_current_run.json` (repo default)
+- `$PROJECTIONS_DATA_ROOT/control_plane/model_selectors/ownership_current_run.json` (runtime override)
+
+Example selector (internal transformer with v1 fallback):
+
+```bash
+cat > "$PROJECTIONS_DATA_ROOT/control_plane/model_selectors/ownership_current_run.json" <<'JSON'
+{
+  "source": "internal",
+  "model_family": "ownership_v2",
+  "model_run": "ownership_xfmr_v1_12ep_big",
+  "gtv2_features_path": null,
+  "fallback_source": "internal",
+  "fallback_model_family": "ownership_v1",
+  "fallback_model_run": "dk_only_v6_logit_chalk5_cleanbase_seed1337",
+  "fallback_gtv2_features_path": null
+}
+JSON
+```
+
+Quick rollback to LineStar:
+
+```bash
+uv run python - <<'PY'
+import json
+from pathlib import Path
+from projections.paths import data_path
+dst = data_path() / "control_plane" / "model_selectors" / "ownership_current_run.json"
+dst.parent.mkdir(parents=True, exist_ok=True)
+dst.write_text(json.dumps({"source":"linestar","model_family":"ownership_v1","model_run":None}, indent=2), encoding="utf-8")
+print(dst)
+PY
+```
+
+Canary replay eval (run-scoped preds, namespaced lock-cache aware):
+
+```bash
+uv run python scripts/ownership/evaluate_ownership_production_path.py \
+  --start-date 2026-02-01 \
+  --end-date 2026-03-10 \
+  --pred-snapshot locked \
+  --pred-run-id 20260313T210000Z \
+  --model-family ownership_v2 \
+  --out-json reports/ownership_eval_v2.json \
+  --out-md reports/ownership_eval_v2.md
+```
+
 ### Running Services Locally
 
 ```bash

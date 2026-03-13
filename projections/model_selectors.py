@@ -11,12 +11,13 @@ from typing import Literal
 
 from projections import paths
 
-SelectorName = Literal["minutes", "rates"]
+SelectorName = Literal["minutes", "rates", "ownership"]
 
 _RUNTIME_SELECTORS_REL = Path("control_plane") / "model_selectors"
 _SELECTOR_FILENAMES: dict[SelectorName, str] = {
     "minutes": "minutes_current_run.json",
     "rates": "rates_current_run.json",
+    "ownership": "ownership_current_run.json",
 }
 
 
@@ -72,3 +73,19 @@ def active_rates_selector_path(
     project_root: Path | None = None,
 ) -> Path:
     return active_selector_path("rates", data_root=data_root, project_root=project_root)
+
+
+def repo_ownership_selector_path(*, project_root: Path | None = None) -> Path:
+    return repo_selector_path("ownership", project_root=project_root)
+
+
+def runtime_ownership_selector_path(*, data_root: Path | None = None) -> Path:
+    return runtime_selector_path("ownership", data_root=data_root)
+
+
+def active_ownership_selector_path(
+    *,
+    data_root: Path | None = None,
+    project_root: Path | None = None,
+) -> Path:
+    return active_selector_path("ownership", data_root=data_root, project_root=project_root)

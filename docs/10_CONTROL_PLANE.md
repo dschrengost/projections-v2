@@ -26,6 +26,13 @@ The canonical scheduled pipeline is `nba_live_pipeline_v3_flow` in `prefect_flow
 5. Postflight gate (world contracts + projection schema/key sanity)
 6. Atomic pointer promotion via `projections.pipeline.control_plane.promote_run_pointer`
 
+Ownership scoring is selector-driven in both live flows:
+
+- `config/ownership_current_run.json` (or runtime copy under `$PROJECTIONS_DATA_ROOT/control_plane/model_selectors/ownership_current_run.json`)
+- `source`: `internal` (model-backed) or `linestar`
+- `model_family`: `ownership_v1` or `ownership_v2` (when `source=internal`)
+- optional fallback fields (`fallback_source`, `fallback_model_family`, `fallback_model_run`)
+
 Legacy flow remains available as manual rollback deployment: `nba-live-pipeline-legacy`.
 
 ### Deployment
@@ -59,6 +66,7 @@ Rules:
 - Do not point Prefect `pull_steps.set_working_directory` at `/home/daniel/projects/projections-v2` for live runs.
 - If runtime stamp paths show DEV during a live run, the deployment metadata is wrong and should be refreshed with `uv run prefect deploy --all`.
 - If the prod checkout is stale, rerun `./scripts/deploy/deploy_live.sh` before restarting the worker.
+- By default deploy preserves PROD selector pointers (`minutes_current_run.json`, `rates_current_run.json`, `ownership_current_run.json`) unless `--sync-pointers` is passed.
 
 ### Flow Schedules
 

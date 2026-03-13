@@ -37,6 +37,7 @@ def test_manifest_written_and_promoted_pointers_require_guard(tmp_path: Path) ->
         entrypoint="prefect",
         minutes_current_run_path=Path("config/minutes_current_run.json"),
         rates_current_run_path=Path("config/rates_current_run.json"),
+        ownership_current_run_path=Path("config/ownership_current_run.json"),
         slate={},
     )
     payload = json.loads(manifest.read_text(encoding="utf-8"))
@@ -44,6 +45,7 @@ def test_manifest_written_and_promoted_pointers_require_guard(tmp_path: Path) ->
     assert payload["game_date"] == game_date
     assert payload["sim_profile"] == "sim_v3"
     assert payload["entrypoint"] == "prefect"
+    assert payload["ownership_current_run_path"] == "config/ownership_current_run.json"
 
     dataset_dir = tmp_path / "gold" / "projections_minutes_v1" / f"game_date={game_date}"
     with pytest.raises(RuntimeError):
@@ -54,4 +56,3 @@ def test_manifest_written_and_promoted_pointers_require_guard(tmp_path: Path) ->
         assert pointer.exists()
         assert (dataset_dir / "latest_run.json").exists()
         assert (dataset_dir / "LATEST" / "current.json").exists()
-

@@ -5,14 +5,19 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from functools import lru_cache
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import pandas as pd
 
 from projections.names import normalize_player_name
+from projections.ownership_v2 import (
+    load_ownership_transformer_bundle,
+    predict_ownership_transformer_slate,
+)
 from projections.ownership_v1.calibration import (
     PowerCalibrator,
     SoftmaxCalibrator,
@@ -30,6 +35,8 @@ from projections.ownership_v1.score import (
     predict_ownership,
 )
 from projections.paths import data_path
+
+OwnershipModelFamily = Literal["ownership_v1", "ownership_v2"]
 
 
 def _normalize_name(value: str | None) -> str:
@@ -111,18 +118,27 @@ def _apply_postprocessing(
 
                 # Exclude OUT players (already filtered earlier, but double-check).
                 if struct_cfg.get("exclude_out", True) and "_injury_status" in salaries.columns:
-                    mask &= (salaries["_injury_status"].str.upper() != "OUT")
+                    injury_status = (
+                        salaries["_injury_status"]
+                        .astype("string")
+                        .fillna("")
+                        .str.upper()
+                    )
+                    mask &= injury_status.ne("OUT")
 
                 # Exclude zero-minute players - check if we have this info.
                 if struct_cfg.get("exclude_zero_minutes", True) and "proj_minutes" in result.columns:
-                    mask &= (result["proj_minutes"] > 0)
+                    proj_minutes = pd.to_numeric(result["proj_minutes"], errors="coerce").fillna(0.0)
+                    mask &= proj_minutes.gt(0.0)
 
                 # Exclude zero prediction (optional).
                 if struct_cfg.get("exclude_zero_prediction", False):
-                    mask &= (result["pred_own_pct"] > 0)
+                    pred_vals = pd.to_numeric(result["pred_own_pct"], errors="coerce").fillna(0.0)
+                    mask &= pred_vals.gt(0.0)
 
                 # Exclude unplayable players from calibration allocation.
                 mask &= ~unplayable_mask
+                mask = mask.fillna(False).astype(bool)
 
                 scores = result["pred_own_pct_raw"].values
                 if method == "softmax":
@@ -230,12 +246,60 @@ def _get_locked_teams(schedule: pd.DataFrame, current_time: datetime) -> set:
     return locked_teams
 
 
-def _load_locked_predictions(game_date: date, draft_group_id: str, data_root: Path) -> Optional[pd.DataFrame]:
+def _sanitize_lock_token(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip())
+    return token.strip("._") or "default"
+
+
+def _lock_cache_paths(
+    *,
+    game_date: date,
+    draft_group_id: str,
+    data_root: Path,
+    model_family: OwnershipModelFamily,
+    model_run: str,
+) -> tuple[Path, Path]:
+    out_dir = data_root / "silver" / "ownership_predictions" / str(game_date)
+    model_run_token = _sanitize_lock_token(model_run)
+    scoped = out_dir / f"{draft_group_id}_locked__{model_family}__{model_run_token}.parquet"
+    legacy = out_dir / f"{draft_group_id}_locked.parquet"
+    return scoped, legacy
+
+
+def _load_locked_predictions(
+    game_date: date,
+    draft_group_id: str,
+    data_root: Path,
+    *,
+    model_family: OwnershipModelFamily,
+    model_run: str,
+) -> Optional[pd.DataFrame]:
     """Load previously locked ownership predictions for a specific slate."""
-    locked_path = data_root / "silver" / "ownership_predictions" / str(game_date) / f"{draft_group_id}_locked.parquet"
-    if locked_path.exists():
-        return pd.read_parquet(locked_path)
-    return None
+
+    scoped_path, legacy_path = _lock_cache_paths(
+        game_date=game_date,
+        draft_group_id=draft_group_id,
+        data_root=data_root,
+        model_family=model_family,
+        model_run=model_run,
+    )
+    if scoped_path.exists():
+        return pd.read_parquet(scoped_path)
+
+    # Backwards compatibility for old v1 lock cache files.
+    if model_family != "ownership_v1" or not legacy_path.exists():
+        return None
+
+    legacy = pd.read_parquet(legacy_path)
+    if legacy.empty:
+        return None
+    legacy_model_run = str(legacy.get("model_run", pd.Series([""])).iloc[0]).strip()
+    legacy_model_family = str(legacy.get("model_family", pd.Series(["ownership_v1"])).iloc[0]).strip()
+    if legacy_model_run != str(model_run).strip():
+        return None
+    if legacy_model_family not in {"", "ownership_v1"}:
+        return None
+    return legacy
 
 
 def _save_locked_predictions(
@@ -244,18 +308,32 @@ def _save_locked_predictions(
     draft_group_id: str,
     data_root: Path,
     *,
+    model_family: OwnershipModelFamily,
+    model_run: str,
     overwrite: bool = False,
 ) -> None:
     """Save predictions to locked file for a specific slate."""
+
     out_dir = data_root / "silver" / "ownership_predictions" / str(game_date)
     out_dir.mkdir(parents=True, exist_ok=True)
-    locked_path = out_dir / f"{draft_group_id}_locked.parquet"
-    if overwrite or not locked_path.exists():
-        df.to_parquet(locked_path, index=False)
+    scoped_path, legacy_path = _lock_cache_paths(
+        game_date=game_date,
+        draft_group_id=draft_group_id,
+        data_root=data_root,
+        model_family=model_family,
+        model_run=model_run,
+    )
+    if overwrite or not scoped_path.exists():
+        df.to_parquet(scoped_path, index=False)
         print(f"[ownership] Saved locked predictions for slate {draft_group_id}: {len(df)} players")
+
+    # Keep legacy v1 cache writes for backward compatibility with older tooling.
+    if model_family == "ownership_v1" and (overwrite or not legacy_path.exists()):
+        df.to_parquet(legacy_path, index=False)
 
 
 PRODUCTION_MODEL_RUN = "dk_only_v6_logit_chalk5_cleanbase_seed1337"
+PRODUCTION_MODEL_RUN_V2 = "ownership_xfmr_v1_12ep_big"
 
 
 def _load_all_slates(
@@ -351,15 +429,36 @@ def _load_fpts_predictions(
     cutoff_ts: datetime | None = None,
 ) -> Optional[pd.DataFrame]:
     """
-    Load FPTS predictions from sim_v2 worlds output.
-    
-    The sim projections contain dk_fpts_mean from Monte Carlo worlds.
+    Load FPTS predictions from live GTV2 projections outputs.
+
+    Source priority:
+    1) artifacts/gtv2_worlds/.../projections.parquet (authoritative pre-finalize path)
+    2) artifacts/projections/.../projections.parquet (unified projections)
     """
-    import json
+    def _coerce_cutoff_ts_utc(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        cutoff_dt = value.to_pydatetime() if hasattr(value, "to_pydatetime") else value
+        if not isinstance(cutoff_dt, datetime):
+            return None
+        cutoff_dt = cutoff_dt if cutoff_dt.tzinfo is not None else cutoff_dt.replace(tzinfo=UTC)
+        return cutoff_dt.astimezone(UTC)
 
-    sim_root = data_root / "artifacts" / "sim_v2" / "worlds_fpts_v2"
+    def _read_pointer_run_id(base_dir: Path) -> str | None:
+        for pointer in (base_dir / "LATEST" / "current.json", base_dir / "latest_run.json"):
+            if not pointer.exists():
+                continue
+            try:
+                payload = json.loads(pointer.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict):
+                run_id_value = str(payload.get("run_id", "")).strip()
+                if run_id_value:
+                    return run_id_value
+        return None
 
-    def _resolve_sim_run_dir(
+    def _resolve_projection_run_dir(
         base_dir: Path,
         desired_run_id: str | None,
         *,
@@ -392,17 +491,11 @@ def _load_fpts_predictions(
                 return best_dir
 
         if desired_run_id is None:
-            pointer = base_dir / "latest_run.json"
-            if pointer.exists():
-                try:
-                    payload = json.loads(pointer.read_text(encoding="utf-8"))
-                    latest = payload.get("run_id")
-                    if latest:
-                        candidate = base_dir / f"run={latest}"
-                        if candidate.exists():
-                            return candidate
-                except json.JSONDecodeError:
-                    pass
+            promoted_run_id = _read_pointer_run_id(base_dir)
+            if promoted_run_id:
+                candidate = base_dir / f"run={promoted_run_id}"
+                if candidate.exists():
+                    return candidate
 
         if desired_run_id is None:
             run_dirs = sorted(
@@ -411,30 +504,34 @@ def _load_fpts_predictions(
             )
             if run_dirs:
                 return run_dirs[0]
-        if (base_dir / "sim_v2_projections.parquet").exists():
+        if desired_run_id is None and (base_dir / "projections.parquet").exists():
             return base_dir
         return None
 
-    def _load_sim_projections(day: date, desired_run_id: str | None) -> pd.DataFrame | None:
-        candidates = [
-            sim_root / f"game_date={day.isoformat()}",
-            sim_root / f"date={day.isoformat()}",
-            sim_root / day.isoformat(),
+    def _iter_projection_bases(day: date) -> list[tuple[str, Path]]:
+        day_iso = day.isoformat()
+        gtv2_root = data_root / "artifacts" / "gtv2_worlds"
+        unified_root = data_root / "artifacts" / "projections"
+        return [
+            ("gtv2_worlds", gtv2_root / f"game_date={day_iso}"),
+            ("gtv2_worlds", gtv2_root / f"date={day_iso}"),
+            ("gtv2_worlds", gtv2_root / day_iso),
+            ("unified_projections", unified_root / day_iso),
+            ("unified_projections", unified_root / f"game_date={day_iso}"),
+            ("unified_projections", unified_root / f"date={day_iso}"),
         ]
 
-        cutoff_ts_utc = None
-        if cutoff_ts is not None:
-            cutoff_dt = cutoff_ts.to_pydatetime() if hasattr(cutoff_ts, "to_pydatetime") else cutoff_ts
-            if isinstance(cutoff_dt, datetime):
-                cutoff_ts_utc = cutoff_dt if cutoff_dt.tzinfo is not None else cutoff_dt.replace(tzinfo=UTC)
-                cutoff_ts_utc = cutoff_ts_utc.astimezone(UTC)
-
-        for base in candidates:
+    def _load_live_projections(
+        day: date,
+        desired_run_id: str | None,
+    ) -> tuple[pd.DataFrame | None, str | None, Path | None]:
+        cutoff_ts_utc = _coerce_cutoff_ts_utc(cutoff_ts)
+        for source_label, base in _iter_projection_bases(day):
             if not base.exists():
                 continue
             if base.is_file() and base.suffix == ".parquet":
                 try:
-                    return pd.read_parquet(base)
+                    return pd.read_parquet(base), source_label, base
                 except Exception:
                     continue
 
@@ -448,43 +545,128 @@ def _load_fpts_predictions(
                     direct = base / "projections.parquet"
                     if direct.exists():
                         try:
-                            return pd.read_parquet(direct)
+                            return pd.read_parquet(direct), source_label, direct
                         except Exception:
                             pass
 
             if run_dir is None:
-                run_dir = _resolve_sim_run_dir(base, desired_run_id, cutoff_ts_utc=cutoff_ts_utc) if base.is_dir() else None
+                run_dir = (
+                    _resolve_projection_run_dir(base, desired_run_id, cutoff_ts_utc=cutoff_ts_utc)
+                    if base.is_dir()
+                    else None
+                )
                 if run_dir is None:
                     continue
-            candidates = []
+            candidates: list[Path] = []
             if run_dir.is_file() and run_dir.suffix == ".parquet":
                 candidates.append(run_dir)
             else:
-                candidates.extend([run_dir / "projections.parquet", run_dir / "sim_v2_projections.parquet"])
+                candidates.append(run_dir / "projections.parquet")
             for candidate in candidates:
                 if not candidate.exists():
                     continue
                 try:
-                    return pd.read_parquet(candidate)
+                    return pd.read_parquet(candidate), source_label, candidate
                 except Exception:
                     continue
+        return None, None, None
+
+    df, source, source_path = _load_live_projections(game_date, run_id)
+    if df is None or df.empty:
+        print(
+            "[ownership] No live projections found under "
+            f"{data_root / 'artifacts' / 'gtv2_worlds'} or {data_root / 'artifacts' / 'projections'} "
+            f"for {game_date} (run_id={run_id})"
+        )
         return None
 
-    df = _load_sim_projections(game_date, run_id)
-    if df is None or df.empty:
-        print(f"[ownership] No sim projections found under {sim_root} for {game_date} (run_id={run_id})")
-        return None
-    
-    # Use dk_fpts_mean from worlds
+    # Use dk_fpts_mean from live GTV2/unified projections.
     if "dk_fpts_mean" not in df.columns:
-        print("[ownership] sim projections missing dk_fpts_mean column")
+        print(
+            "[ownership] live projections missing dk_fpts_mean column "
+            f"(source={source}, path={source_path})"
+        )
         return None
-    
-    print(f"[ownership] Loaded {len(df)} players from sim projections")
-    
-    # Return player_id and dk_fpts_mean
-    # Note: sim uses NBA player_id, we'll need to map to DK later
-    return df[["player_id", "dk_fpts_mean"]].rename(columns={"dk_fpts_mean": "pred_fpts"})
+
+    df = df.copy()
+    df["dk_fpts_mean"] = pd.to_numeric(df["dk_fpts_mean"], errors="coerce")
+    valid_fpts = df["dk_fpts_mean"].notna() & df["dk_fpts_mean"].between(0.0, 300.0)
+    dropped = int((~valid_fpts).sum())
+    if dropped:
+        print(
+            "[ownership] Dropping rows with invalid dk_fpts_mean "
+            f"(source={source}, dropped={dropped})"
+        )
+        df = df.loc[valid_fpts].copy()
+    if df.empty:
+        print("[ownership] No valid dk_fpts_mean rows in live projections after filtering")
+        return None
+
+    print(
+        f"[ownership] Loaded {len(df)} players from live projections "
+        f"(source={source}, path={source_path})"
+    )
+
+    # Return core + optional distributional features when available.
+    # Note: projections use NBA player_id; we map to DK names later.
+    optional_cols = [
+        "minutes_mean",
+        "dk_fpts_p90",
+        "dk_fpts_p50",
+        "minutes_sim_mean",
+        "sim_p_active",
+        "play_prob_eff",
+    ]
+    cols = ["player_id", "dk_fpts_mean", *[c for c in optional_cols if c in df.columns]]
+    return df[cols].rename(columns={"dk_fpts_mean": "pred_fpts"})
+
+
+def _ensure_v2_base_feature_defaults(salaries: pd.DataFrame) -> pd.DataFrame:
+    """Ensure transformer baseline feature columns exist with safe defaults."""
+
+    working = salaries.copy()
+    proj_fpts = pd.to_numeric(working.get("proj_fpts"), errors="coerce").fillna(0.0)
+
+    def _numeric_series_or_na(column: str) -> pd.Series:
+        if column in working.columns:
+            return pd.to_numeric(working[column], errors="coerce")
+        return pd.Series(float("nan"), index=working.index, dtype=float)
+
+    if "proj_minutes" in working.columns:
+        minutes_proxy = pd.to_numeric(working["proj_minutes"], errors="coerce")
+    else:
+        # Backfill when minutes aren't present in joined live frame.
+        minutes_proxy = proj_fpts / 1.1
+    minutes_proxy = pd.to_numeric(minutes_proxy, errors="coerce").fillna(proj_fpts / 1.1)
+    minutes_proxy = minutes_proxy.clip(lower=0.0)
+
+    working["minutes_mean"] = (
+        _numeric_series_or_na("minutes_mean")
+        .fillna(minutes_proxy)
+        .clip(lower=0.0)
+    )
+    working["minutes_sim_mean"] = (
+        _numeric_series_or_na("minutes_sim_mean")
+        .fillna(working["minutes_mean"])
+        .clip(lower=0.0)
+    )
+    working["dk_fpts_p50"] = _numeric_series_or_na("dk_fpts_p50").fillna(proj_fpts)
+    working["dk_fpts_p90"] = (
+        _numeric_series_or_na("dk_fpts_p90")
+        .fillna(working["dk_fpts_p50"] * 1.25)
+        .clip(lower=working["dk_fpts_p50"])
+    )
+    working["sim_p_active"] = (
+        _numeric_series_or_na("sim_p_active")
+        .fillna(1.0)
+        .clip(0.0, 1.0)
+    )
+    working["play_prob_eff"] = (
+        _numeric_series_or_na("play_prob_eff")
+        .fillna(working["sim_p_active"])
+        .clip(0.0, 1.0)
+    )
+    return working
 
 
 def _load_injuries(
@@ -690,6 +872,171 @@ def _attach_live_ownership_enrichment(
     return working
 
 
+def _required_gtv2_feature_columns(feature_columns: list[str]) -> list[str]:
+    return sorted(
+        [
+            c
+            for c in feature_columns
+            if c.startswith("gtv2_")
+        ]
+    )
+
+
+def _read_gtv2_frame(path: Path) -> pd.DataFrame:
+    if path.suffix.lower() in {".csv", ".txt"}:
+        return pd.read_csv(path)
+    return pd.read_parquet(path)
+
+
+def _load_live_gtv2_feature_frame(
+    *,
+    game_date: date,
+    run_id: str,
+    data_root: Path,
+    gtv2_features_path: Path | None = None,
+) -> tuple[pd.DataFrame | None, str | None]:
+    """Best-effort load of live GTV2-derived features for ownership enrichment."""
+
+    candidates: list[Path] = []
+    if gtv2_features_path is not None:
+        user_path = Path(gtv2_features_path).expanduser().resolve()
+        if user_path.is_dir():
+            candidates.extend([user_path / "scores.parquet", user_path / "features.parquet"])
+        else:
+            candidates.append(user_path)
+
+    base = data_root / "artifacts" / "scores_gtv2" / f"game_date={game_date.isoformat()}"
+    if base.exists():
+        explicit = base / f"run={run_id}" / "scores.parquet"
+        candidates.append(explicit)
+
+        latest_pointer = base / "latest_run.json"
+        if latest_pointer.exists():
+            try:
+                latest_payload = json.loads(latest_pointer.read_text(encoding="utf-8"))
+                latest_run = str(latest_payload.get("run_id", "")).strip()
+                if latest_run:
+                    candidates.append(base / f"run={latest_run}" / "scores.parquet")
+            except json.JSONDecodeError:
+                pass
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            frame = _read_gtv2_frame(path)
+            if frame.empty:
+                continue
+            work = frame.copy()
+            rename_map = {
+                "minutes_deterministic": "gtv2_minutes_deterministic",
+                "active_logit": "gtv2_active_logit",
+                "active_prob_proxy": "gtv2_active_prob_proxy",
+            }
+            work = work.rename(columns=rename_map)
+            if "game_date" in work.columns:
+                work["game_date"] = pd.to_datetime(work["game_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+            if "player_id" in work.columns:
+                work["player_id"] = pd.to_numeric(work["player_id"], errors="coerce").astype("Int64")
+            if "player_name" in work.columns:
+                work["_name_norm"] = work["player_name"].astype(str).apply(_normalize_name)
+            return work, str(path)
+        except Exception as exc:
+            print(f"[ownership] Failed to load GTV2 live features from {path}: {exc}")
+
+    return None, None
+
+
+def _attach_live_gtv2_enrichment(
+    *,
+    feature_frame: pd.DataFrame,
+    salaries: pd.DataFrame,
+    required_gtv2_cols: list[str],
+    game_date: date,
+    run_id: str,
+    data_root: Path,
+    gtv2_features_path: Path | None,
+) -> pd.DataFrame:
+    """Attach optional GTV2 features to ownership feature frame with safe fallback."""
+
+    if not required_gtv2_cols:
+        return feature_frame
+
+    result = feature_frame.copy()
+    gtv2_frame, source = _load_live_gtv2_feature_frame(
+        game_date=game_date,
+        run_id=run_id,
+        data_root=data_root,
+        gtv2_features_path=gtv2_features_path,
+    )
+
+    if gtv2_frame is None or gtv2_frame.empty:
+        for col in required_gtv2_cols:
+            if col not in result.columns:
+                result[col] = 0.0
+        print(
+            "[ownership] GTV2 live enrichment unavailable; zero-filled "
+            f"{len(required_gtv2_cols)} gtv2_* feature columns"
+        )
+        return result
+
+    available_gtv2_cols = [c for c in required_gtv2_cols if c in gtv2_frame.columns]
+    if not available_gtv2_cols:
+        for col in required_gtv2_cols:
+            if col not in result.columns:
+                result[col] = 0.0
+        print(
+            "[ownership] GTV2 source loaded but no required columns present; zero-filled "
+            f"{len(required_gtv2_cols)} gtv2_* feature columns"
+        )
+        return result
+
+    matched_any = pd.Series(False, index=result.index)
+
+    if "player_id" in gtv2_frame.columns and "nba_player_id" in salaries.columns:
+        id_map_df = (
+            gtv2_frame.loc[gtv2_frame["player_id"].notna(), ["player_id", *available_gtv2_cols]]
+            .drop_duplicates(subset=["player_id"], keep="last")
+            .set_index("player_id")
+        )
+        nba_ids = pd.to_numeric(salaries["nba_player_id"], errors="coerce").astype("Int64")
+        for col in available_gtv2_cols:
+            mapped = nba_ids.map(id_map_df[col]) if col in id_map_df.columns else pd.Series(index=result.index, dtype=float)
+            result[col] = mapped
+            matched_any |= mapped.notna()
+
+    if "_name_norm" in gtv2_frame.columns:
+        name_map_df = (
+            gtv2_frame.loc[gtv2_frame["_name_norm"].ne(""), ["_name_norm", *available_gtv2_cols]]
+            .drop_duplicates(subset=["_name_norm"], keep="last")
+            .set_index("_name_norm")
+        )
+        name_norm = salaries["player_name"].astype(str).apply(_normalize_name)
+        for col in available_gtv2_cols:
+            mapped = name_norm.map(name_map_df[col]) if col in name_map_df.columns else pd.Series(index=result.index, dtype=float)
+            if col in result.columns:
+                result[col] = pd.to_numeric(result[col], errors="coerce")
+                result[col] = result[col].where(result[col].notna(), mapped)
+            else:
+                result[col] = mapped
+            matched_any |= mapped.notna()
+
+    for col in required_gtv2_cols:
+        if col in result.columns:
+            series = result[col]
+        else:
+            series = pd.Series(0.0, index=result.index)
+        result[col] = pd.to_numeric(series, errors="coerce").fillna(0.0)
+
+    coverage = float(matched_any.mean()) if len(matched_any) else 0.0
+    print(
+        "[ownership] Attached GTV2 live enrichment "
+        f"(source={source}, available_cols={len(available_gtv2_cols)}, "
+        f"required_cols={len(required_gtv2_cols)}, row_coverage={coverage:.3f})"
+    )
+    return result
+
+
 def score_ownership(
     slate_df: pd.DataFrame,
     draft_group_id: str,
@@ -697,7 +1044,9 @@ def score_ownership(
     run_id: str,
     data_root: Path,
     model_run: str = PRODUCTION_MODEL_RUN,
+    model_family: OwnershipModelFamily = "ownership_v1",
     injuries_cutoff_ts: datetime | None = None,
+    gtv2_features_path: Path | None = None,
 ) -> Optional[pd.DataFrame]:
     """
     Score ownership predictions for a single slate.
@@ -709,15 +1058,27 @@ def score_ownership(
         run_id: Run identifier
         data_root: Data root path
         model_run: Ownership model run ID
+        model_family: ownership model family ("ownership_v1" or "ownership_v2")
     
     Returns DataFrame with player ownership predictions or None if data unavailable.
     """
-    # Load model bundle
-    try:
-        bundle = load_ownership_bundle(model_run)
-    except FileNotFoundError as e:
-        print(f"[ownership] Model not found: {e}")
-        return None
+    bundle_v1 = None
+    bundle_v2 = None
+    if model_family == "ownership_v2":
+        try:
+            bundle_v2 = load_ownership_transformer_bundle(model_run, base_artifacts_root=data_root)
+        except FileNotFoundError as e:
+            print(f"[ownership] ownership_v2 model not found: {e}")
+            return None
+        except Exception as e:
+            print(f"[ownership] ownership_v2 model failed to load: {e}")
+            return None
+    else:
+        try:
+            bundle_v1 = load_ownership_bundle(model_run, base_artifacts_root=data_root)
+        except FileNotFoundError as e:
+            print(f"[ownership] Model not found: {e}")
+            return None
     
     # Use provided slate data
     salaries = slate_df.copy()
@@ -725,8 +1086,8 @@ def score_ownership(
         print(f"[ownership] Empty slate data for {draft_group_id}")
         return None
     
-    # Load FPTS predictions from sim. For backtests, use the slate cutoff time
-    # (usually the first tip) to avoid accidentally selecting post-lock runs.
+    # Load FPTS predictions from live projections artifacts. For backtests, use
+    # the slate cutoff time (usually first tip) to avoid post-lock runs.
     fpts = _load_fpts_predictions(game_date, run_id, data_root, cutoff_ts=injuries_cutoff_ts)
     
     if fpts is None or fpts.empty:
@@ -865,7 +1226,7 @@ def score_ownership(
                 nba_player_ids=salaries.get("nba_player_id"),
                 injuries_cutoff_ts=injuries_cutoff_ts,
             )
-            salaries = salaries.drop(columns=["_name_norm", "nba_player_id"], errors="ignore")
+            salaries = salaries.drop(columns=["_name_norm"], errors="ignore")
         else:
             # Fallback: use salary-based estimate
             print("[ownership] No player_id mapping available, using salary-based estimate")
@@ -881,18 +1242,25 @@ def score_ownership(
     
     # Fill missing FPTS
     salaries["proj_fpts"] = salaries["proj_fpts"].fillna(salaries["salary"] / 200.0)
+    if model_family == "ownership_v2":
+        salaries = _ensure_v2_base_feature_defaults(salaries)
     
-    # Filter OUT players BEFORE making predictions
-    # Players who are OUT won't be in DK contests, so shouldn't receive a prediction
+    # Keep OUT rows in the output contract, but force them to 0% ownership.
+    forced_out_mask = pd.Series(False, index=salaries.index)
     if "_injury_status" in salaries.columns:
-        out_mask = salaries["_injury_status"].str.upper() == "OUT"
-        out_count = out_mask.sum()
-        if out_count > 0:
-            out_names = salaries.loc[out_mask, "player_name"].tolist()
-            print(f"[ownership] Filtering {out_count} OUT players: {out_names[:5]}{'...' if out_count > 5 else ''}")
-            salaries = salaries[~out_mask].copy()
-        # Clean up the temp column
-        salaries = salaries.drop(columns=["_injury_status"], errors="ignore")
+        forced_out_mask |= salaries["_injury_status"].astype(str).str.upper().eq("OUT")
+    if "status" in salaries.columns:
+        status_upper = salaries["status"].astype(str).str.upper()
+        forced_out_mask |= status_upper.isin({"OUT", "O"})
+        if "_injury_status" not in salaries.columns:
+            salaries["_injury_status"] = status_upper
+    out_count = int(forced_out_mask.sum())
+    if out_count > 0:
+        out_names = salaries.loc[forced_out_mask, "player_name"].astype(str).tolist()
+        print(
+            "[ownership] Detected OUT players; forcing 0 ownership for "
+            f"{out_count} players: {out_names[:5]}{'...' if out_count > 5 else ''}"
+        )
     
     # Validate raw input
     missing = validate_raw_input(salaries)
@@ -912,28 +1280,55 @@ def score_ownership(
         slate_id_col=None,  # Treat as single slate
     )
     
-    # Prepare model input (strict feature selection)
-    try:
-        _ = prepare_model_input(features, bundle.feature_cols)
-    except KeyError as e:
-        print(f"[ownership] Feature mismatch: {e}")
-        return None
-    
-    # Predict
-    predictions = predict_ownership(features, bundle)
-    
+    pred_pct: pd.Series
+    pred_raw: pd.Series
+
+    if model_family == "ownership_v2":
+        assert bundle_v2 is not None  # narrowing for type checkers
+        required_gtv2_cols = _required_gtv2_feature_columns(bundle_v2.feature_columns)
+        features = _attach_live_gtv2_enrichment(
+            feature_frame=features,
+            salaries=salaries,
+            required_gtv2_cols=required_gtv2_cols,
+            game_date=game_date,
+            run_id=run_id,
+            data_root=data_root,
+            gtv2_features_path=gtv2_features_path,
+        )
+        missing_v2 = [c for c in bundle_v2.feature_columns if c not in features.columns]
+        if missing_v2:
+            print(f"[ownership] ownership_v2 feature mismatch: {missing_v2}")
+            return None
+        pred_df = predict_ownership_transformer_slate(features, bundle=bundle_v2)
+        pred_pct = pd.to_numeric(pred_df["pred_own_pct"], errors="coerce").fillna(0.0)
+        pred_raw = pd.to_numeric(pred_df["pred_own_pct_raw"], errors="coerce").fillna(0.0)
+    else:
+        assert bundle_v1 is not None  # narrowing for type checkers
+        # Prepare model input (strict feature selection)
+        try:
+            _ = prepare_model_input(features, bundle_v1.feature_cols)
+        except KeyError as e:
+            print(f"[ownership] Feature mismatch: {e}")
+            return None
+        pred_pct = predict_ownership(features, bundle_v1)
+        # Preserve raw model output prior to any filtering/normalization.
+        pred_raw = pred_pct.astype(float)
+
     # Build output DataFrame
     output_cols = ["player_id", "player_name", "salary", "pos", "team"]
     output = salaries[[c for c in output_cols if c in salaries.columns]].copy()
     output["proj_fpts"] = features["proj_fpts"]
-    output["pred_own_pct"] = predictions.values
+    output["pred_own_pct"] = pred_pct.values
+    output["pred_own_pct_raw"] = pred_raw.values
     output["game_date"] = game_date
     output["run_id"] = run_id
     output["model_run"] = model_run
+    output["model_family"] = model_family
 
-    # Preserve raw model output prior to any filtering/normalization.
-    output["pred_own_pct_raw"] = output["pred_own_pct"].astype(float)
-    
+    if forced_out_mask.any():
+        output.loc[forced_out_mask, "pred_own_pct"] = 0.0
+        output.loc[forced_out_mask, "pred_own_pct_raw"] = 0.0
+
     config = _load_calibration_config()
 
     output = _apply_postprocessing(output, salaries, config=config, data_root=data_root)
@@ -941,7 +1336,8 @@ def score_ownership(
     # Add draft_group_id to output
     output["draft_group_id"] = draft_group_id
     output["is_locked"] = False
-    
+    output = output.drop(columns=["nba_player_id"], errors="ignore")
+
     return output
 
 
@@ -950,7 +1346,9 @@ def score_all_slates(
     run_id: str,
     data_root: Path,
     model_run: str = PRODUCTION_MODEL_RUN,
+    model_family: OwnershipModelFamily = "ownership_v1",
     *,
+    gtv2_features_path: Path | None = None,
     ignore_lock_cache: bool = False,
     write_lock_cache: bool = True,
     current_time: datetime | None = None,
@@ -994,7 +1392,13 @@ def score_all_slates(
 
             if not ignore_lock_cache:
                 # Try to load cached predictions
-                cached = _load_locked_predictions(game_date, dg_id, data_root)
+                cached = _load_locked_predictions(
+                    game_date,
+                    dg_id,
+                    data_root,
+                    model_family=model_family,
+                    model_run=model_run,
+                )
                 if cached is not None and not cached.empty and slate_lock_ts is not None:
                     cutoff_col = cached.get("injuries_cutoff_ts")
                     cutoff = pd.to_datetime(cutoff_col, utc=True, errors="coerce").max() if cutoff_col is not None else pd.NaT
@@ -1020,7 +1424,9 @@ def score_all_slates(
             run_id=run_id,
             data_root=data_root,
             model_run=model_run,
+            model_family=model_family,
             injuries_cutoff_ts=cutoff_ts,
+            gtv2_features_path=gtv2_features_path,
         )
         
         if predictions is not None:
@@ -1031,7 +1437,15 @@ def score_all_slates(
             
             # Persist lock cache only after lock, to avoid freezing predictions pre-lock.
             if is_locked and write_lock_cache:
-                _save_locked_predictions(predictions, game_date, dg_id, data_root, overwrite=True)
+                _save_locked_predictions(
+                    predictions,
+                    game_date,
+                    dg_id,
+                    data_root,
+                    model_family=model_family,
+                    model_run=model_run,
+                    overwrite=True,
+                )
     
     return results
 
@@ -1073,12 +1487,187 @@ def _save_slates_metadata(
     _atomic_write_json(out_dir / "slates.json", slates_meta)
 
 
+def _compute_gtv2_match_coverage(
+    *,
+    results: dict[str, pd.DataFrame],
+    game_date: date,
+    run_id: str,
+    data_root: Path,
+    gtv2_features_path: Path | None,
+) -> tuple[str | None, dict[str, float]]:
+    frame, source = _load_live_gtv2_feature_frame(
+        game_date=game_date,
+        run_id=run_id,
+        data_root=data_root,
+        gtv2_features_path=gtv2_features_path,
+    )
+    if frame is None or frame.empty:
+        return source, {}
+
+    id_set: set[int] = set()
+    if "player_id" in frame.columns:
+        ids = pd.to_numeric(frame["player_id"], errors="coerce").dropna().astype(int)
+        id_set = set(ids.tolist())
+
+    name_set: set[str] = set()
+    if "_name_norm" in frame.columns:
+        name_set = set(
+            frame["_name_norm"].astype(str).map(str.strip).loc[lambda s: s.ne("")].tolist()
+        )
+
+    coverage: dict[str, float] = {}
+    for dg_id, df in results.items():
+        if df.empty:
+            coverage[dg_id] = 0.0
+            continue
+
+        matched = pd.Series(False, index=df.index)
+        if id_set and "player_id" in df.columns:
+            ids = pd.to_numeric(df["player_id"], errors="coerce").astype("Int64")
+            matched |= ids.map(lambda v: int(v) in id_set if pd.notna(v) else False)
+        if name_set and "player_name" in df.columns:
+            names = df["player_name"].astype(str).map(_normalize_name)
+            matched |= names.map(lambda n: n in name_set)
+        coverage[dg_id] = float(matched.mean()) if len(matched) else 0.0
+
+    return source, coverage
+
+
+def _write_ownership_health_summary(
+    *,
+    results: dict[str, pd.DataFrame],
+    game_date: date,
+    run_id: str,
+    data_root: Path,
+    model_family: OwnershipModelFamily,
+    model_run: str,
+    gtv2_features_path: Path | None,
+    write_lock_cache: bool,
+    ignore_lock_cache: bool,
+    out_dir: Path,
+) -> Path:
+    norm_cfg = _load_calibration_config().get("normalization", {})
+    target_sum_pct = float(norm_cfg.get("target_sum_pct", 800.0))
+    tol = max(5.0, target_sum_pct * 0.03)
+
+    gtv2_source: str | None = None
+    gtv2_coverage: dict[str, float] = {}
+    if model_family == "ownership_v2":
+        gtv2_source, gtv2_coverage = _compute_gtv2_match_coverage(
+            results=results,
+            game_date=game_date,
+            run_id=run_id,
+            data_root=data_root,
+            gtv2_features_path=gtv2_features_path,
+        )
+
+    slates: dict[str, dict[str, object]] = {}
+    warnings: list[str] = []
+    for dg_id, df in sorted(results.items(), key=lambda kv: kv[0]):
+        pred_series = pd.to_numeric(df.get("pred_own_pct"), errors="coerce")
+        raw_series = pd.to_numeric(df.get("pred_own_pct_raw"), errors="coerce")
+        pred_sum = float(pred_series.fillna(0.0).sum())
+        raw_sum = float(raw_series.fillna(0.0).sum())
+        zero_pred_count = int((pred_series.fillna(0.0) <= 0.0).sum())
+        is_locked = bool(df.get("is_locked", pd.Series(False)).astype(bool).any())
+
+        scoped_lock_path, legacy_lock_path = _lock_cache_paths(
+            game_date=game_date,
+            draft_group_id=str(dg_id),
+            data_root=data_root,
+            model_family=model_family,
+            model_run=model_run,
+        )
+        scoped_exists = scoped_lock_path.exists()
+        legacy_exists = legacy_lock_path.exists()
+
+        if abs(pred_sum - target_sum_pct) > tol:
+            warnings.append(
+                f"slate {dg_id}: pred_own_pct sum {pred_sum:.2f} outside target {target_sum_pct:.2f} +/- {tol:.2f}"
+            )
+        if pred_sum <= 0.0:
+            warnings.append(f"slate {dg_id}: pred_own_pct sum is non-positive ({pred_sum:.2f})")
+        if raw_sum <= 0.0:
+            warnings.append(f"slate {dg_id}: pred_own_pct_raw sum is non-positive ({raw_sum:.2f})")
+        if is_locked and write_lock_cache and (not ignore_lock_cache) and (not scoped_exists):
+            warnings.append(
+                f"slate {dg_id}: locked slate missing scoped lock cache file {scoped_lock_path.name}"
+            )
+
+        coverage = gtv2_coverage.get(dg_id)
+        if model_family == "ownership_v2":
+            if coverage is None:
+                warnings.append(f"slate {dg_id}: no computed GTV2 row coverage")
+            elif coverage < 0.25:
+                warnings.append(
+                    f"slate {dg_id}: low GTV2 row coverage ({coverage:.3f})"
+                )
+
+        slates[str(dg_id)] = {
+            "player_count": int(len(df)),
+            "is_locked": bool(is_locked),
+            "pred_own_pct_sum": pred_sum,
+            "pred_own_pct_raw_sum": raw_sum,
+            "zero_pred_count": zero_pred_count,
+            "scoped_lock_cache_path": str(scoped_lock_path),
+            "scoped_lock_cache_exists": bool(scoped_exists),
+            "legacy_lock_cache_path": str(legacy_lock_path),
+            "legacy_lock_cache_exists": bool(legacy_exists),
+            "gtv2_row_coverage": coverage,
+        }
+
+    if model_family == "ownership_v2" and not gtv2_coverage:
+        warnings.append("ownership_v2 selected but no GTV2 feature frame was available for coverage checks")
+
+    payload: dict[str, object] = {
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+        "game_date": str(game_date),
+        "run_id": str(run_id),
+        "model_family": str(model_family),
+        "model_run": str(model_run),
+        "target_sum_pct": float(target_sum_pct),
+        "sum_tolerance_pct": float(tol),
+        "write_lock_cache": bool(write_lock_cache),
+        "ignore_lock_cache": bool(ignore_lock_cache),
+        "gtv2_features_path": str(gtv2_features_path) if gtv2_features_path else None,
+        "gtv2_source": gtv2_source,
+        "slates": slates,
+        "warning_count": int(len(warnings)),
+        "warnings": warnings,
+    }
+    out_path = out_dir / "ownership_health_summary.json"
+    _atomic_write_json(out_path, payload)
+    if warnings:
+        print(f"[ownership] Health warnings: {len(warnings)} (see {out_path})")
+    else:
+        print(f"[ownership] Health summary OK -> {out_path}")
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="Score ownership predictions")
     parser.add_argument("--date", required=True, help="Game date (YYYY-MM-DD)")
     parser.add_argument("--run-id", required=True, help="Run identifier")
     parser.add_argument("--data-root", default=None, help="Data root path")
-    parser.add_argument("--model-run", default=PRODUCTION_MODEL_RUN, help="Model run ID")
+    parser.add_argument(
+        "--model-family",
+        choices=["ownership_v1", "ownership_v2"],
+        default="ownership_v1",
+        help="Ownership model family.",
+    )
+    parser.add_argument(
+        "--model-run",
+        default=None,
+        help="Model run ID (defaults per model family).",
+    )
+    parser.add_argument(
+        "--gtv2-features-path",
+        default=None,
+        help=(
+            "Optional parquet/csv path or directory with live GTV2 features for ownership_v2 enrichment "
+            "(zero-filled when unavailable)."
+        ),
+    )
     parser.add_argument(
         "--ignore-lock-cache",
         action="store_true",
@@ -1094,12 +1683,26 @@ def main():
     game_date = date.fromisoformat(args.date)
     root = Path(args.data_root) if args.data_root else data_path()
     
+    model_family: OwnershipModelFamily = str(args.model_family)
+    if args.model_run:
+        model_run = str(args.model_run)
+    else:
+        model_run = PRODUCTION_MODEL_RUN_V2 if model_family == "ownership_v2" else PRODUCTION_MODEL_RUN
+
+    gtv2_features_path = (
+        Path(str(args.gtv2_features_path)).expanduser().resolve()
+        if args.gtv2_features_path
+        else None
+    )
+
     # Score all slates
     results = score_all_slates(
         game_date,
         args.run_id,
         root,
-        args.model_run,
+        model_run,
+        model_family,
+        gtv2_features_path=gtv2_features_path,
         ignore_lock_cache=bool(args.ignore_lock_cache),
         write_lock_cache=not bool(args.no_write_lock_cache),
     )
@@ -1141,6 +1744,18 @@ def main():
     # Save slates metadata
     schedule = _load_schedule_with_times(game_date, root)
     _save_slates_metadata(results, game_date, schedule, root, out_dir=run_dir)
+    _write_ownership_health_summary(
+        results=results,
+        game_date=game_date,
+        run_id=str(args.run_id),
+        data_root=root,
+        model_family=model_family,
+        model_run=model_run,
+        gtv2_features_path=gtv2_features_path,
+        write_lock_cache=not bool(args.no_write_lock_cache),
+        ignore_lock_cache=bool(args.ignore_lock_cache),
+        out_dir=run_dir,
+    )
     
     # Print summary for largest slate
     main_dg = max(results.keys(), key=lambda k: len(results[k]))

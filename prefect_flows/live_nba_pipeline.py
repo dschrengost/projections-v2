@@ -49,7 +49,7 @@ from projections.features.action_props import (
     attach_action_props_features,
     load_action_props_feature_snapshots_for_date,
 )
-from projections import model_selectors
+from projections import model_selectors, ownership_selector
 from projections.minutes_v1.datasets import KEY_COLUMNS, deduplicate_latest
 from projections.pipeline import control_plane, writer_guard
 from projections.pipeline import effective_inputs, health
@@ -1001,26 +1001,141 @@ def run_sim_task(
 
 
 @task(name="score-ownership", retries=2, retry_delay_seconds=120)
-def score_ownership_task(*, game_date: str, run_id: str, data_root: Path) -> None:
-    """Score ownership using LineStar commercial projections.
+def score_ownership_task(
+    *,
+    game_date: str,
+    run_id: str,
+    data_root: Path,
+    source: str,
+    model_family: str | None,
+    model_run: str | None,
+    gtv2_features_path: str | None,
+    fallback_source: str | None,
+    fallback_model_family: str | None,
+    fallback_model_run: str | None,
+    fallback_gtv2_features_path: str | None,
+) -> dict[str, str | None]:
+    """Score ownership using selector-configured source with optional fallback."""
 
-    LineStar provides projected ownership % for all players on DK slates.
-    The CLI handles auto-refresh of session if premium session expires.
-    """
-    args = [
-        "--date",
-        game_date,
-        "--run-id",
-        run_id,
-        "--data-root",
-        str(data_root),
+    logger = get_run_logger()
+
+    def _module_and_args(
+        *,
+        source: str,
+        model_family: str | None,
+        model_run: str | None,
+        gtv2_features_path: str | None,
+    ) -> tuple[str, list[str]]:
+        if source == "linestar":
+            return (
+                "projections.cli.score_ownership_linestar",
+                [
+                    "--date",
+                    game_date,
+                    "--run-id",
+                    run_id,
+                    "--data-root",
+                    str(data_root),
+                ],
+            )
+        if source != "internal":
+            raise RuntimeError(f"Unsupported ownership source: {source}")
+        family = str(model_family or "ownership_v1")
+        args = [
+            "--date",
+            game_date,
+            "--run-id",
+            run_id,
+            "--data-root",
+            str(data_root),
+            "--model-family",
+            family,
+        ]
+        if model_run:
+            args.extend(["--model-run", str(model_run)])
+        if gtv2_features_path:
+            args.extend(["--gtv2-features-path", str(gtv2_features_path)])
+        return ("projections.cli.score_ownership_live", args)
+
+    attempts: list[dict[str, str | None]] = [
+        {
+            "source": source,
+            "model_family": model_family,
+            "model_run": model_run,
+            "gtv2_features_path": gtv2_features_path,
+        }
     ]
-    _run_python_module(
-        "projections.cli.score_ownership_linestar",
-        args,
-        data_root=data_root,
-        timeout_s=1200,
-    )
+    if fallback_source:
+        attempts.append(
+            {
+                "source": fallback_source,
+                "model_family": fallback_model_family,
+                "model_run": fallback_model_run,
+                "gtv2_features_path": fallback_gtv2_features_path,
+            }
+        )
+
+    for idx, attempt in enumerate(attempts):
+        module, args = _module_and_args(
+            source=str(attempt["source"] or ""),
+            model_family=(
+                str(attempt["model_family"])
+                if attempt.get("model_family")
+                else None
+            ),
+            model_run=str(attempt["model_run"]) if attempt.get("model_run") else None,
+            gtv2_features_path=(
+                str(attempt["gtv2_features_path"])
+                if attempt.get("gtv2_features_path")
+                else None
+            ),
+        )
+        try:
+            logger.info(
+                "[ownership] scoring source=%s model_family=%s model_run=%s attempt=%s/%s",
+                attempt.get("source"),
+                attempt.get("model_family"),
+                attempt.get("model_run"),
+                idx + 1,
+                len(attempts),
+            )
+            _run_python_module(
+                module,
+                args,
+                data_root=data_root,
+                timeout_s=1200,
+            )
+            return {
+                "source": str(attempt.get("source") or ""),
+                "model_family": (
+                    str(attempt.get("model_family"))
+                    if attempt.get("model_family")
+                    else None
+                ),
+                "model_run": (
+                    str(attempt.get("model_run"))
+                    if attempt.get("model_run")
+                    else None
+                ),
+                "gtv2_features_path": (
+                    str(attempt.get("gtv2_features_path"))
+                    if attempt.get("gtv2_features_path")
+                    else None
+                ),
+                "used_fallback": "true" if idx > 0 else "false",
+            }
+        except Exception as exc:
+            if idx + 1 >= len(attempts):
+                raise
+            logger.warning(
+                "[ownership] primary scoring failed (%s). Falling back to source=%s model_family=%s model_run=%s",
+                exc,
+                attempts[idx + 1].get("source"),
+                attempts[idx + 1].get("model_family"),
+                attempts[idx + 1].get("model_run"),
+            )
+
+    raise RuntimeError("ownership scoring failed unexpectedly without attempts")
 
 
 @task(name="select-main-draft-group")
@@ -1139,6 +1254,15 @@ def nba_live_pipeline_flow(
         data_root=data_root,
         project_root=PROJECT_ROOT,
     )
+    ownership_selector_path = model_selectors.active_ownership_selector_path(
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
+    ownership_cfg = ownership_selector.load_ownership_selector(
+        config_path=ownership_selector_path,
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
 
     # Runtime stamp - log what code/config is running at flow start
     enforce_clean_tree()  # Fail-fast if dirty tree in prod (set PROJECTIONS_ALLOW_DIRTY=1 to bypass)
@@ -1148,6 +1272,7 @@ def nba_live_pipeline_flow(
         config_paths={
             "minutes_current_run": minutes_selector_path,
             "rates_current_run": rates_selector_path,
+            "ownership_current_run": ownership_selector_path,
             "rotation_set_minutes_live": PROJECT_ROOT
             / "config/rotation_set_minutes_live.json",
             "sim_v2_profiles": PROJECT_ROOT / "config/sim_v2_profiles.json",
@@ -1179,6 +1304,7 @@ def nba_live_pipeline_flow(
             entrypoint="prefect",
             minutes_current_run_path=minutes_selector_path,
             rates_current_run_path=rates_selector_path,
+            ownership_current_run_path=ownership_selector_path,
             slate={},
         )
         if minutes_bundle_dir or rotshare_quantiles_mode:
@@ -1305,7 +1431,37 @@ def nba_live_pipeline_flow(
         control_plane.copy_manifest_to_dir(manifest_path, sim_dir)
 
         # Stage 7: ownership
-        score_ownership_task(game_date=game_date, run_id=run_id, data_root=data_root)
+        ownership_run = score_ownership_task(
+            game_date=game_date,
+            run_id=run_id,
+            data_root=data_root,
+            source=ownership_cfg.source,
+            model_family=ownership_cfg.model_family,
+            model_run=ownership_cfg.model_run,
+            gtv2_features_path=ownership_cfg.gtv2_features_path,
+            fallback_source=ownership_cfg.fallback_source,
+            fallback_model_family=ownership_cfg.fallback_model_family,
+            fallback_model_run=ownership_cfg.fallback_model_run,
+            fallback_gtv2_features_path=ownership_cfg.fallback_gtv2_features_path,
+        )
+        control_plane.atomic_update_json(
+            manifest_path,
+            {
+                "ownership": {
+                    "selector_path": str(ownership_selector_path),
+                    "selected_source": ownership_cfg.source,
+                    "selected_model_family": ownership_cfg.model_family,
+                    "selected_model_run": ownership_cfg.model_run,
+                    "fallback_source": ownership_cfg.fallback_source,
+                    "fallback_model_family": ownership_cfg.fallback_model_family,
+                    "fallback_model_run": ownership_cfg.fallback_model_run,
+                    "effective_source": ownership_run.get("source"),
+                    "effective_model_family": ownership_run.get("model_family"),
+                    "effective_model_run": ownership_run.get("model_run"),
+                    "used_fallback": ownership_run.get("used_fallback"),
+                }
+            },
+        )
         ownership_run_dir = (
             data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}"
         )

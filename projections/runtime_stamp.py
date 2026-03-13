@@ -31,6 +31,7 @@ from typing import Any
 DEFAULT_CONFIG_PATHS: dict[str, str] = {
     "minutes_current_run": "config/minutes_current_run.json",
     "rates_current_run": "config/rates_current_run.json",
+    "ownership_current_run": "config/ownership_current_run.json",
     "rotation_set_minutes_live": "config/rotation_set_minutes_live.json",
     "sim_v2_profiles": "config/sim_v2_profiles.json",
 }
@@ -218,6 +219,19 @@ def _extract_run_ids(config_paths: dict[str, Path]) -> dict[str, str | None]:
             data = json.loads(rotation_path.read_text(encoding="utf-8"))
             run_ids["rotation_set_enabled"] = str(data.get("enabled", False))
             run_ids["rotation_set_model_dir"] = data.get("model_dir")
+        except Exception:
+            pass
+
+    # ownership_current_run.json
+    ownership_path = config_paths.get("ownership_current_run")
+    if ownership_path and ownership_path.exists():
+        try:
+            data = json.loads(ownership_path.read_text(encoding="utf-8"))
+            run_ids["ownership_source"] = str(data.get("source", ""))
+            run_ids["ownership_model_family"] = str(data.get("model_family", ""))
+            run_ids["ownership_model_run"] = (
+                None if data.get("model_run") is None else str(data.get("model_run"))
+            )
         except Exception:
             pass
 
@@ -457,7 +471,7 @@ def log_runtime_stamp(
         project_root: Optional project root
         logger: Logger instance (or Prefect logger with .info method)
         validate_configs: Whether to validate config files exist
-        required_configs: List of required config names (default: ["minutes_current_run", "rates_current_run"])
+        required_configs: List of required config names (default: ["minutes_current_run", "rates_current_run", "ownership_current_run"])
 
     Returns:
         The collected RuntimeStamp
@@ -472,7 +486,7 @@ def log_runtime_stamp(
     if validate_configs and stamp.config_paths:
         resolved = {name: Path(path) for name, path in stamp.config_paths.items()}
         if required_configs is None:
-            required_configs = ["minutes_current_run", "rates_current_run"]
+            required_configs = ["minutes_current_run", "rates_current_run", "ownership_current_run"]
         warnings = validate_config_paths(resolved, required=required_configs)
         for warning in warnings:
             if logger:

@@ -1,0 +1,10 @@
+{
+  "source": "internal",
+  "model_family": "ownership_v2",
+  "model_run": "ownership_xfmr_v1_12ep_big",
+  "gtv2_features_path": null,
+  "fallback_source": "internal",
+  "fallback_model_family": "ownership_v1",
+  "fallback_model_run": "dk_only_v6_logit_chalk5_cleanbase_seed1337",
+  "fallback_gtv2_features_path": null
+}

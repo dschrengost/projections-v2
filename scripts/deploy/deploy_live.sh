@@ -72,6 +72,7 @@ if [[ "$SYNC_POINTERS" -eq 0 ]]; then
     echo "[deploy] Preserving PROD selector pointers (use --sync-pointers to overwrite):"
     echo "         - config/minutes_current_run.json"
     echo "         - config/rates_current_run.json"
+    echo "         - config/ownership_current_run.json"
 fi
 
 POINTER_EXCLUDES=()
@@ -79,6 +80,7 @@ if [[ "$SYNC_POINTERS" -eq 0 ]]; then
     POINTER_EXCLUDES+=(
         "--exclude=config/minutes_current_run.json"
         "--exclude=config/rates_current_run.json"
+        "--exclude=config/ownership_current_run.json"
     )
 fi
 
@@ -218,6 +220,7 @@ sync_selector() {
 
 sync_selector "minutes_current_run.json"
 sync_selector "rates_current_run.json"
+sync_selector "ownership_current_run.json"
 
 # --- Post-sync: deps ---
 echo "[deploy] Running uv sync --frozen in PROD..."

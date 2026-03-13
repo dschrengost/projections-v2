@@ -45,6 +45,8 @@ projections-v2/
 ## Configuration
 
 - `config/minutes_current_run.json` - Active minutes model bundle
+- `config/rates_current_run.json` - Active rates model run
+- `config/ownership_current_run.json` - Active ownership source/model selector (with fallback)
 - `config/rotation_set_minutes_live.json` - Rotation-set minutes (transformer) live scoring config
 - `config/sim_v2_profiles.json` - Simulation profiles
 - `prefect.yaml` - Prefect deployment configuration
@@ -62,4 +64,5 @@ Production data lives **outside this repo** at `/home/daniel/projections-data/`:
 - [10_CONTROL_PLANE.md](./10_CONTROL_PLANE.md) - Pipeline orchestration
 - [20_DATA_CONTRACTS.md](./20_DATA_CONTRACTS.md) - Data schemas
 - [30_DEV_PLAYBOOK.md](./30_DEV_PLAYBOOK.md) - Developer workflows
+- [ownership/README.md](./ownership/README.md) - Ownership system overview and related specs
 - [minutes/rotation_set_minutes_v1_rapid_iteration.md](./minutes/rotation_set_minutes_v1_rapid_iteration.md) - Retrain + promote rotation-set minutes quickly

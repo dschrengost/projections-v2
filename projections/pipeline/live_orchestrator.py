@@ -53,6 +53,9 @@ class PipelineConfig:
 
     # Ownership source: "internal" (LightGBM model) or "linestar" (commercial)
     ownership_source: str = "linestar"
+    ownership_model_family: str = "ownership_v1"
+    ownership_model_run: str | None = None
+    ownership_gtv2_features_path: str | None = None
 
     # Skip options
     skip_digest_check: bool = False
@@ -455,6 +458,11 @@ def step_score_ownership(cfg: PipelineConfig) -> StepResult:
             )
         else:
             logger.info("Using internal model for ownership projections")
+            args.extend(["--model-family", str(cfg.ownership_model_family)])
+            if cfg.ownership_model_run:
+                args.extend(["--model-run", str(cfg.ownership_model_run)])
+            if cfg.ownership_gtv2_features_path:
+                args.extend(["--gtv2-features-path", str(cfg.ownership_gtv2_features_path)])
             _run_python_module(
                 "projections.cli.score_ownership_live", args, cfg.data_root,
                 check=False  # ownership is optional
@@ -718,6 +726,22 @@ if __name__ == "__main__":
         default="linestar",
         help="Ownership source: 'linestar' (commercial) or 'internal' (LightGBM model)",
     )
+    parser.add_argument(
+        "--ownership-model-family",
+        choices=["ownership_v1", "ownership_v2"],
+        default="ownership_v1",
+        help="Ownership model family when --ownership-source=internal.",
+    )
+    parser.add_argument(
+        "--ownership-model-run",
+        default=None,
+        help="Ownership model run override when --ownership-source=internal.",
+    )
+    parser.add_argument(
+        "--ownership-gtv2-features-path",
+        default=None,
+        help="Optional GTV2 features path for ownership_v2 live enrichment.",
+    )
     args = parser.parse_args()
 
     result = run_live_pipeline(
@@ -727,6 +751,9 @@ if __name__ == "__main__":
         sim_profile=args.sim_profile,
         sim_worlds=args.sim_worlds,
         ownership_source=args.ownership_source,
+        ownership_model_family=args.ownership_model_family,
+        ownership_model_run=args.ownership_model_run,
+        ownership_gtv2_features_path=args.ownership_gtv2_features_path,
     )
 
     # Print summary

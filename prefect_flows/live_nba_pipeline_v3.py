@@ -35,22 +35,13 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import torch
 from prefect import flow, get_run_logger, task
-from torch.utils.data import DataLoader
 from zoneinfo import ZoneInfo
 
-from projections import model_selectors, paths
+from projections import model_selectors, ownership_selector, paths
 from projections.etl import storage as bronze_storage
 from projections.names import normalize_player_name
 from projections.pipeline import control_plane, writer_guard
-from projections.pipeline.gtv2_inference_runtime import (
-    build_gtv2_inference_examples as shared_build_gtv2_inference_examples,
-    load_gtv2_model as shared_load_gtv2_model,
-    resolve_torch_device as shared_resolve_torch_device,
-    score_gtv2_features_df as shared_score_gtv2_features_df,
-    set_inference_seed as shared_set_inference_seed,
-)
 from projections.pipeline.gtv2_live_features import (
     build_gtv2_live_features,
     load_gtv2_feature_spec,
@@ -72,16 +63,6 @@ from projections.pipeline.triton_inference_client import (
 from projections.pipeline.v3_postflight import run_postflight_gate
 from projections.pipeline.v3_preflight import run_preflight_gate
 from projections.ops.manual_availability import list_manual_overrides, manual_override_report
-from projections.rotation.game_transformer_v2 import (
-    GameLevelDataset,
-    GameTransformerV2Config,
-    collate_game_level_examples,
-)
-from projections.rotation.sample_worlds_v2 import (
-    MakeModelConfig,
-    sample_worlds_for_batch,
-    summarize_worlds_to_projections,
-)
 from projections.runtime_stamp import (
     enforce_clean_tree,
     enforce_prod_sanity,
@@ -164,6 +145,29 @@ _WORLD_CONTRACT_TOL = 1e-4
 _WORLD_REALISM_SHORT_MINUTES_DK_THRESHOLD = 35.0
 _WORLD_REALISM_GAME_PTS_MAX_THRESHOLD = 340.0
 _WORLD_REALISM_GAME_PTS_MIN_THRESHOLD = 110.0
+_WORLD_BASE_STAT_CAPS: dict[str, float] = {
+    "minutes": 60.0,
+    "fga2": 60.0,
+    "fg2m": 60.0,
+    "fga3": 45.0,
+    "fg3m": 30.0,
+    "fta": 45.0,
+    "ftm": 45.0,
+    "oreb": 25.0,
+    "dreb": 30.0,
+    "ast": 30.0,
+    "stl": 15.0,
+    "blk": 15.0,
+    "tov": 20.0,
+    "pf": 10.0,
+}
+_WORLD_DERIVED_STAT_CAPS: dict[str, float] = {
+    "fga": 90.0,
+    "fgm": 70.0,
+    "pts": 120.0,
+    "reb": 45.0,
+    "dk_fpts": 150.0,
+}
 _RETRYABLE_SUBPROCESS_EXIT_CODES = frozenset({-11, -6, 134, 139})
 _SUBPROCESS_CRASH_RETRY_ATTEMPTS = max(
     1,
@@ -174,6 +178,20 @@ _SUBPROCESS_CRASH_RETRY_DELAY_SECONDS = max(
     int(os.environ.get("PROJECTIONS_SUBPROCESS_CRASH_RETRY_DELAY_SECONDS", "3")),
 )
 _TORCH_RUNTIME_CONFIGURED = False
+
+
+def _gtv2_inference_runtime():
+    # Lazy import to avoid importing torch during Prefect flow load.
+    from projections.pipeline import gtv2_inference_runtime as runtime
+
+    return runtime
+
+
+def _gtv2_worlds_runtime():
+    # Lazy import to avoid importing torch during Prefect flow load.
+    from projections.rotation import sample_worlds_v2 as runtime
+
+    return runtime
 
 
 def _utc_now_iso() -> str:
@@ -421,7 +439,8 @@ def _bundle_artifact_hash(bundle_dir: Path) -> str:
 
 
 def _set_inference_seed(seed: int) -> None:
-    shared_set_inference_seed(int(seed))
+    runtime = _gtv2_inference_runtime()
+    runtime.set_inference_seed(int(seed))
 
 
 def _configure_torch_runtime_for_inference() -> None:
@@ -450,15 +469,21 @@ def _configure_torch_runtime_for_inference() -> None:
     )
 
     try:
+        import torch
+
         torch.set_num_threads(max(1, int(num_threads)))
     except Exception:
         pass
     try:
+        import torch
+
         torch.set_num_interop_threads(max(1, int(interop_threads)))
     except Exception:
         pass
     if disable_mkldnn:
         try:
+            import torch
+
             torch.backends.mkldnn.enabled = False
         except Exception:
             pass
@@ -466,17 +491,19 @@ def _configure_torch_runtime_for_inference() -> None:
     _TORCH_RUNTIME_CONFIGURED = True
 
 
-def _resolve_torch_device(device: str | None) -> torch.device:
-    return shared_resolve_torch_device(device)
+def _resolve_torch_device(device: str | None) -> Any:
+    runtime = _gtv2_inference_runtime()
+    return runtime.resolve_torch_device(device)
 
 
 def _load_gtv2_model(
     bundle_dir: Path,
     *,
-    device: torch.device,
+    device: Any,
     flow_scale_clip_override: float | None = None,
-) -> tuple[GameTransformerV2Config, torch.nn.Module]:
-    return shared_load_gtv2_model(
+) -> tuple[Any, Any]:
+    runtime = _gtv2_inference_runtime()
+    return runtime.load_gtv2_model(
         bundle_dir=Path(bundle_dir),
         device=device,
         flow_scale_clip_override=flow_scale_clip_override,
@@ -544,9 +571,10 @@ def _build_gtv2_inference_examples(
     *,
     features_df: pd.DataFrame,
     game_date: str,
-    config: GameTransformerV2Config,
+    config: Any,
 ) -> list[Any]:
-    return shared_build_gtv2_inference_examples(
+    runtime = _gtv2_inference_runtime()
+    return runtime.build_gtv2_inference_examples(
         features_df=features_df,
         game_date=game_date,
         config=config,
@@ -1441,6 +1469,7 @@ def _build_rerun_plan(
     current_bundle_hash: str,
     current_minutes_selector_path: Path,
     current_rates_selector_path: Path,
+    current_ownership_selector_path: Path,
     manual_target_game_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     current_games = dict((current_source_freshness or {}).get("per_game", {}))
@@ -1492,6 +1521,20 @@ def _build_rerun_plan(
             "game_date": game_date,
             "mode": "full_slate",
             "reason": "rates_selector_changed",
+            "target_game_ids": current_game_ids,
+            "ignored_changes": [],
+        }
+    if (
+        Path(
+            str(previous_manifest_payload.get("ownership_current_run_path", ""))
+        ).resolve()
+        != current_ownership_selector_path.resolve()
+    ):
+        return {
+            "policy_version": 1,
+            "game_date": game_date,
+            "mode": "full_slate",
+            "reason": "ownership_selector_changed",
             "target_game_ids": current_game_ids,
             "ignored_changes": [],
         }
@@ -1727,12 +1770,28 @@ def _stream_validate_parquet(
     expected_rows: int | None = None,
     required_cols: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    try:
-        parquet_file = pq.ParquetFile(path)
-    except Exception as exc:
-        raise RuntimeError(f"failed to open parquet for validation: {path}") from exc
+    def _is_retryable_validation_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return (
+            "unexpected end of stream" in text
+            or "end of stream" in text
+            or "corrupt snappy compressed data" in text
+            or "page was smaller than expected" in text
+        )
 
-    columns = tuple(str(name) for name in parquet_file.schema_arrow.names)
+    max_attempts = 3
+    columns: tuple[str, ...] = ()
+    for attempt in range(1, max_attempts + 1):
+        try:
+            parquet_file = pq.ParquetFile(path)
+            columns = tuple(str(name) for name in parquet_file.schema_arrow.names)
+            break
+        except Exception as exc:
+            if attempt < max_attempts and _is_retryable_validation_error(exc):
+                time.sleep(0.5 * attempt)
+                continue
+            raise RuntimeError(f"failed to open parquet for validation: {path}") from exc
+
     missing = [col for col in required_cols if col not in columns]
     if missing:
         raise RuntimeError(
@@ -1740,11 +1799,18 @@ def _stream_validate_parquet(
         )
 
     row_count = 0
-    try:
-        for batch in parquet_file.iter_batches(batch_size=65536):
-            row_count += int(batch.num_rows)
-    except Exception as exc:
-        raise RuntimeError(f"failed to stream-validate parquet contents: {path}") from exc
+    for attempt in range(1, max_attempts + 1):
+        row_count = 0
+        try:
+            parquet_file = pq.ParquetFile(path)
+            for batch in parquet_file.iter_batches(batch_size=65536):
+                row_count += int(batch.num_rows)
+            break
+        except Exception as exc:
+            if attempt < max_attempts and _is_retryable_validation_error(exc):
+                time.sleep(0.5 * attempt)
+                continue
+            raise RuntimeError(f"failed to stream-validate parquet contents: {path}") from exc
 
     if expected_rows is not None and row_count != int(expected_rows):
         raise RuntimeError(
@@ -1772,6 +1838,8 @@ def _atomic_write_validated_parquet(
             "corrupt snappy compressed data" in text
             or "failed to stream-validate parquet contents" in text
             or "failed to open parquet for validation" in text
+            or "unexpected end of stream" in text
+            or "end of stream" in text
         )
 
     compression_schedule: list[str | None] = [compression]
@@ -1987,6 +2055,7 @@ def _left_overlay_from_source_by_keys(
     key_cols: Sequence[str],
     value_cols: Sequence[str],
     label: str,
+    copy_base: bool = True,
 ) -> pd.DataFrame:
     key_cols = tuple(str(col) for col in key_cols)
     value_cols = [str(col) for col in value_cols if str(col) in source_df.columns]
@@ -2001,7 +2070,7 @@ def _left_overlay_from_source_by_keys(
             f"base_missing={missing_base} source_missing={missing_source}"
         )
 
-    base = base_df.copy()
+    base = base_df.copy() if bool(copy_base) else base_df
     source = source_df.loc[:, list(key_cols) + value_cols].copy()
     for col in key_cols:
         base[col] = pd.to_numeric(base[col], errors="coerce")
@@ -2024,17 +2093,36 @@ def _left_overlay_from_source_by_keys(
     for col in key_cols:
         base_keys_valid[col] = base_keys_valid[col].astype("int64", copy=False)
 
-    source_key_index = pd.MultiIndex.from_frame(
-        source.loc[:, list(key_cols)], names=list(key_cols)
-    )
-    base_key_index = pd.MultiIndex.from_frame(base_keys_valid, names=list(key_cols))
-    key_indexer = source_key_index.get_indexer(base_key_index)
-    hit_mask = key_indexer >= 0
+    source_key_arrays = [
+        source[col].to_numpy(dtype=np.int64, copy=False)
+        for col in key_cols
+    ]
+    base_key_arrays = [
+        base_keys_valid[col].to_numpy(dtype=np.int64, copy=False)
+        for col in key_cols
+    ]
+    n_source = int(len(source))
+    combined_key_arrays = [
+        np.concatenate([source_arr, base_arr])
+        for source_arr, base_arr in zip(source_key_arrays, base_key_arrays, strict=False)
+    ]
+    combined_codes, _ = _factorize_int_key_arrays_preserve_order(*combined_key_arrays)
+    source_codes = combined_codes[:n_source]
+    base_codes = combined_codes[n_source:]
+    if source_codes.size <= 0 or base_codes.size <= 0:
+        return base
+    max_code = int(max(int(source_codes.max(initial=-1)), int(base_codes.max(initial=-1))))
+    if max_code < 0:
+        return base
+    source_pos_by_code = np.full(max_code + 1, -1, dtype=np.int64)
+    source_pos_by_code[source_codes] = np.arange(n_source, dtype=np.int64)
+    source_positions_for_base = source_pos_by_code[base_codes]
+    hit_mask = source_positions_for_base >= 0
     if not bool(hit_mask.any()):
         return base
 
     hit_base_positions = base_valid_positions[hit_mask]
-    hit_source_positions = key_indexer[hit_mask]
+    hit_source_positions = source_positions_for_base[hit_mask]
 
     for col in value_cols:
         if col not in base.columns:
@@ -2423,6 +2511,8 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
             "ftm_gt_fta": 0,
             "inactive_nonzero_stats": 0,
             "inactive_nonzero_fpts_proxy": 0,
+            "max_abs_stat_value": 0.0,
+            "extreme_stat_rows_over_1e6": 0,
         }
     df = worlds_df.copy()
     numeric_cols = [
@@ -2447,6 +2537,14 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    present_numeric = [col for col in numeric_cols if col in df.columns]
+    if present_numeric:
+        numeric_frame = df.loc[:, present_numeric].abs()
+        max_abs_stat_value = float(numeric_frame.max().max())
+        extreme_stat_rows_over_1e6 = int((numeric_frame.max(axis=1) > 1e6).sum())
+    else:
+        max_abs_stat_value = 0.0
+        extreme_stat_rows_over_1e6 = 0
     if {"world_idx", "game_id", "team_id", "minutes"}.issubset(df.columns):
         _, _, _, minute_sums = _team_minutes_sums_without_pandas_groupby(
             world_idx_col=df["world_idx"],
@@ -2536,6 +2634,8 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
         ),
         "inactive_nonzero_stats": inactive_nonzero_stats,
         "inactive_nonzero_fpts_proxy": inactive_nonzero_fpts_proxy,
+        "max_abs_stat_value": max_abs_stat_value,
+        "extreme_stat_rows_over_1e6": extreme_stat_rows_over_1e6,
     }
 
 
@@ -2551,6 +2651,11 @@ def _repair_world_frame_contract_fields(
     report: dict[str, Any] = {
         "applied": False,
         "game_id_from_norm_rows": 0,
+        "nonfinite_stat_values_replaced": 0,
+        "base_stat_cap_clipped_rows": 0,
+        "base_stat_cap_clipped_rows_by_col": {},
+        "derived_stat_cap_clipped_rows": 0,
+        "derived_stat_cap_clipped_rows_by_col": {},
         "fg2m_clipped_to_fga2_rows": 0,
         "fg3m_clipped_to_fga3_rows": 0,
         "ftm_clipped_to_fta_rows": 0,
@@ -2568,6 +2673,45 @@ def _repair_world_frame_contract_fields(
             out["game_id"] = game_id.where(~replace_mask, game_id_norm)
             report["game_id_from_norm_rows"] = replaced
             report["applied"] = True
+
+    def _clip_numeric_with_cap(
+        col: str,
+        cap: float,
+        *,
+        report_key_total: str,
+        report_key_by_col: str,
+    ) -> None:
+        if col not in out.columns:
+            return
+        raw = pd.to_numeric(out[col], errors="coerce").to_numpy(dtype=float)
+        finite_mask = np.isfinite(raw)
+        nonfinite_rows = int(np.count_nonzero(~finite_mask))
+        safe = np.nan_to_num(raw, nan=0.0, posinf=float(cap), neginf=0.0)
+        clipped = np.clip(safe, a_min=0.0, a_max=float(cap))
+        changed_mask = (~finite_mask) | (
+            np.abs(clipped - raw) > _WORLD_CONTRACT_TOL
+        )
+        changed_rows = int(np.count_nonzero(changed_mask))
+        if changed_rows > 0:
+            out[col] = clipped
+            report["applied"] = True
+            report[report_key_total] = int(report.get(report_key_total, 0)) + changed_rows
+            per_col = dict(report.get(report_key_by_col) or {})
+            per_col[col] = int(per_col.get(col, 0)) + changed_rows
+            report[report_key_by_col] = per_col
+            stat_repair_mask[:] = stat_repair_mask | changed_mask
+        if nonfinite_rows > 0:
+            report["nonfinite_stat_values_replaced"] = int(
+                report.get("nonfinite_stat_values_replaced", 0)
+            ) + nonfinite_rows
+
+    for _col, _cap in _WORLD_BASE_STAT_CAPS.items():
+        _clip_numeric_with_cap(
+            _col,
+            _cap,
+            report_key_total="base_stat_cap_clipped_rows",
+            report_key_by_col="base_stat_cap_clipped_rows_by_col",
+        )
 
     def _clip_makes_to_attempts(
         attempts_col: str,
@@ -2638,6 +2782,14 @@ def _repair_world_frame_contract_fields(
             out.loc[stat_repair_mask, "dk_fpts"] = _recompute_dk_fpts(
                 out.loc[stat_repair_mask]
             ).to_numpy(dtype=float)
+
+    for _col, _cap in _WORLD_DERIVED_STAT_CAPS.items():
+        _clip_numeric_with_cap(
+            _col,
+            _cap,
+            report_key_total="derived_stat_cap_clipped_rows",
+            report_key_by_col="derived_stat_cap_clipped_rows_by_col",
+        )
 
     if {"world_idx", "game_id", "team_id", "minutes"}.issubset(out.columns):
         uniq_world, uniq_game, _, minute_sums = _team_minutes_sums_without_pandas_groupby(
@@ -3252,6 +3404,28 @@ def _apply_props_uplift_calibration_to_worlds(
         "confidence_weighted": bool(confidence_weighted),
         "stats": {},
     }
+    stat_sanitize_report: dict[str, int] = {}
+
+    def _sanitize_world_stat_column(*, frame: pd.DataFrame, col: str, cap: float) -> int:
+        if col not in frame.columns:
+            return 0
+        raw = pd.to_numeric(frame[col], errors="coerce").to_numpy(dtype=float, copy=False)
+        finite_mask = np.isfinite(raw)
+        safe = np.nan_to_num(raw, nan=0.0, posinf=float(cap), neginf=0.0)
+        clipped = np.clip(safe, a_min=0.0, a_max=float(cap))
+        changed = int((~finite_mask).sum())
+        if clipped.size > 0:
+            changed += int(np.count_nonzero(np.abs(clipped - safe) > _WORLD_CONTRACT_TOL))
+        frame[col] = clipped
+        return changed
+
+    for col_name, cap in {**_WORLD_BASE_STAT_CAPS, **_WORLD_DERIVED_STAT_CAPS}.items():
+        changed_rows = _sanitize_world_stat_column(frame=out, col=str(col_name), cap=float(cap))
+        if changed_rows > 0:
+            stat_sanitize_report[str(col_name)] = int(changed_rows)
+    if stat_sanitize_report:
+        report["pre_uplift_stat_sanitize"] = stat_sanitize_report
+
     adjusted_key_frames: list[pd.DataFrame] = []
 
     for stat_name, cfg in stat_cfg.items():
@@ -3378,42 +3552,85 @@ def _apply_props_uplift_calibration_to_worlds(
             key_cols=key_cols,
             value_cols=("mu", "sf_mean", "sf_var"),
             label=f"props_uplift/{stat_name}_scale_overlay",
+            copy_base=False,
         )
-        mu = pd.to_numeric(out["mu"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-        sf_mean = pd.to_numeric(out["sf_mean"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
-        sf_var = pd.to_numeric(out["sf_var"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
-        target_mu = mu * sf_mean
+        stat_cap = float(_WORLD_BASE_STAT_CAPS.get(stat_name, 1_000.0))
+        mu = pd.to_numeric(out["mu"], errors="coerce").to_numpy(dtype=float, copy=False)
+        mu = np.clip(np.nan_to_num(mu, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
+        sf_mean = pd.to_numeric(out["sf_mean"], errors="coerce").to_numpy(dtype=float, copy=False)
+        sf_mean = np.clip(np.nan_to_num(sf_mean, nan=1.0, posinf=1.0, neginf=1.0), 0.0, 3.0)
+        sf_var = pd.to_numeric(out["sf_var"], errors="coerce").to_numpy(dtype=float, copy=False)
+        sf_var = np.clip(np.nan_to_num(sf_var, nan=1.0, posinf=1.0, neginf=1.0), 0.0, 3.0)
+        target_mu = np.clip(mu * sf_mean, 0.0, stat_cap)
         if "minutes" in out.columns:
-            active_mask = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0.0
+            minutes_vals = pd.to_numeric(out["minutes"], errors="coerce").to_numpy(dtype=float, copy=False)
+            minutes_vals = np.clip(
+                np.nan_to_num(
+                    minutes_vals,
+                    nan=0.0,
+                    posinf=float(_WORLD_BASE_STAT_CAPS["minutes"]),
+                    neginf=0.0,
+                ),
+                0.0,
+                float(_WORLD_BASE_STAT_CAPS["minutes"]),
+            )
+            active_mask = minutes_vals > 0.0
         else:
-            active_mask = pd.to_numeric(out["dk_fpts"], errors="coerce").fillna(0.0).to_numpy(dtype=float) > 0.0
+            fpts_vals = pd.to_numeric(out["dk_fpts"], errors="coerce").to_numpy(dtype=float, copy=False)
+            fpts_vals = np.clip(
+                np.nan_to_num(
+                    fpts_vals,
+                    nan=0.0,
+                    posinf=float(_WORLD_DERIVED_STAT_CAPS["dk_fpts"]),
+                    neginf=0.0,
+                ),
+                0.0,
+                float(_WORLD_DERIVED_STAT_CAPS["dk_fpts"]),
+            )
+            active_mask = fpts_vals > 0.0
         if stat_name == "pts":
-            x = pd.to_numeric(out["pts"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-            pts_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            x = pd.to_numeric(out["pts"], errors="coerce").to_numpy(dtype=float, copy=False)
+            x = np.clip(np.nan_to_num(x, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
+            pts_raw = target_mu + sf_var * (x - mu)
+            pts_new = np.clip(np.nan_to_num(pts_raw, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
             out["pts"] = np.where(active_mask, pts_new, x)
         elif stat_name == "reb":
-            x = pd.to_numeric(out["reb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-            reb_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            x = pd.to_numeric(out["reb"], errors="coerce").to_numpy(dtype=float, copy=False)
+            x = np.clip(np.nan_to_num(x, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
+            reb_raw = target_mu + sf_var * (x - mu)
+            reb_new = np.clip(np.nan_to_num(reb_raw, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
             reb_new = np.where(active_mask, reb_new, x)
             if "oreb" in out.columns and "dreb" in out.columns:
-                oreb = pd.to_numeric(out["oreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-                dreb = pd.to_numeric(out["dreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                oreb_cap = float(_WORLD_BASE_STAT_CAPS.get("oreb", 25.0))
+                dreb_cap = float(_WORLD_BASE_STAT_CAPS.get("dreb", 30.0))
+                oreb = pd.to_numeric(out["oreb"], errors="coerce").to_numpy(dtype=float, copy=False)
+                oreb = np.clip(np.nan_to_num(oreb, nan=0.0, posinf=oreb_cap, neginf=0.0), 0.0, oreb_cap)
+                dreb = pd.to_numeric(out["dreb"], errors="coerce").to_numpy(dtype=float, copy=False)
+                dreb = np.clip(np.nan_to_num(dreb, nan=0.0, posinf=dreb_cap, neginf=0.0), 0.0, dreb_cap)
                 reb_split_sum = np.maximum(oreb + dreb, 1e-6)
                 oreb_share = np.divide(oreb, reb_split_sum)
-                out["oreb"] = np.where(active_mask, reb_new * oreb_share, oreb)
-                out["dreb"] = np.where(active_mask, reb_new * (1.0 - oreb_share), dreb)
+                oreb_new = np.clip(reb_new * oreb_share, 0.0, oreb_cap)
+                dreb_new = np.clip(reb_new * (1.0 - oreb_share), 0.0, dreb_cap)
+                out["oreb"] = np.where(active_mask, oreb_new, oreb)
+                out["dreb"] = np.where(active_mask, dreb_new, dreb)
             out["reb"] = reb_new
         elif stat_name == "ast":
-            x = pd.to_numeric(out["ast"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-            ast_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            x = pd.to_numeric(out["ast"], errors="coerce").to_numpy(dtype=float, copy=False)
+            x = np.clip(np.nan_to_num(x, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
+            ast_raw = target_mu + sf_var * (x - mu)
+            ast_new = np.clip(np.nan_to_num(ast_raw, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
             out["ast"] = np.where(active_mask, ast_new, x)
         elif stat_name == "stl":
-            x = pd.to_numeric(out["stl"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-            stl_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            x = pd.to_numeric(out["stl"], errors="coerce").to_numpy(dtype=float, copy=False)
+            x = np.clip(np.nan_to_num(x, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
+            stl_raw = target_mu + sf_var * (x - mu)
+            stl_new = np.clip(np.nan_to_num(stl_raw, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
             out["stl"] = np.where(active_mask, stl_new, x)
         elif stat_name == "blk":
-            x = pd.to_numeric(out["blk"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-            blk_new = np.clip(target_mu + sf_var * (x - mu), 0.0, None)
+            x = pd.to_numeric(out["blk"], errors="coerce").to_numpy(dtype=float, copy=False)
+            x = np.clip(np.nan_to_num(x, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
+            blk_raw = target_mu + sf_var * (x - mu)
+            blk_new = np.clip(np.nan_to_num(blk_raw, nan=0.0, posinf=stat_cap, neginf=0.0), 0.0, stat_cap)
             out["blk"] = np.where(active_mask, blk_new, x)
         out = out.drop(columns=["mu", "sf_mean", "sf_var", "line_gap", "player_name"], errors="ignore")
 
@@ -3488,7 +3705,9 @@ def _apply_props_uplift_calibration_to_worlds(
         )
         report["stats"][stat_name]["top_adjustments"] = top_rows.to_dict(orient="records")
 
-    out["dk_fpts"] = _recompute_dk_fpts(out)
+    dk_cap = float(_WORLD_DERIVED_STAT_CAPS.get("dk_fpts", 150.0))
+    dk_fpts = _recompute_dk_fpts(out).to_numpy(dtype=float, copy=False)
+    out["dk_fpts"] = np.clip(np.nan_to_num(dk_fpts, nan=0.0, posinf=dk_cap, neginf=0.0), 0.0, dk_cap)
 
     report["total_adjustment_events"] = int(
         sum(int((report["stats"].get(s) or {}).get("applied_player_count", 0)) for s in stat_cfg)
@@ -4302,13 +4521,21 @@ def scrape_core_inputs_task(
     return marker
 
 
-@task(name="score-ownership-linestar", retries=2, retry_delay_seconds=120)
-def score_ownership_linestar_task(
+@task(name="score-ownership", retries=2, retry_delay_seconds=120)
+def score_ownership_task(
     *,
     game_date: str,
     run_id: str,
     data_root: Path,
     placeholder_mode: bool,
+    source: str,
+    model_family: str | None,
+    model_run: str | None,
+    gtv2_features_path: str | None,
+    fallback_source: str | None,
+    fallback_model_family: str | None,
+    fallback_model_run: str | None,
+    fallback_gtv2_features_path: str | None,
 ) -> Path:
     out_dir = data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -4349,8 +4576,13 @@ def score_ownership_linestar_task(
                 }
             )
         placeholder_df["pred_own_pct"] = 0.05
-        placeholder_df["source"] = "linestar"
-        placeholder_df["model_run"] = "linestar_placeholder"
+        placeholder_df["source"] = source
+        placeholder_df["model_family"] = model_family or "ownership_v1"
+        placeholder_df["model_run"] = (
+            model_run
+            if model_run
+            else f"{source}_{model_family or 'ownership_v1'}_placeholder"
+        )
         _atomic_write_validated_parquet(
             placeholder_df,
             out_dir / "123.parquet",
@@ -4364,7 +4596,7 @@ def score_ownership_linestar_task(
                         "teams": [],
                         "first_game_time": None,
                         "is_locked": False,
-                        "source": "linestar",
+                        "source": source,
                     }
                 },
                 indent=2,
@@ -4374,19 +4606,105 @@ def score_ownership_linestar_task(
         )
         return out_dir
 
-    _run_python_module(
-        "projections.cli.score_ownership_linestar",
-        [
+    logger = get_run_logger()
+
+    def _module_and_args(
+        *,
+        source: str,
+        model_family: str | None,
+        model_run: str | None,
+        gtv2_features_path: str | None,
+    ) -> tuple[str, list[str]]:
+        if source == "linestar":
+            return (
+                "projections.cli.score_ownership_linestar",
+                [
+                    "--date",
+                    game_date,
+                    "--run-id",
+                    run_id,
+                    "--data-root",
+                    str(data_root),
+                ],
+            )
+        if source != "internal":
+            raise RuntimeError(f"Unsupported ownership source: {source}")
+        family = str(model_family or "ownership_v1")
+        args = [
             "--date",
             game_date,
             "--run-id",
             run_id,
             "--data-root",
             str(data_root),
-        ],
-        data_root=data_root,
-        timeout_s=1200,
-    )
+            "--model-family",
+            family,
+        ]
+        if model_run:
+            args.extend(["--model-run", str(model_run)])
+        if gtv2_features_path:
+            args.extend(["--gtv2-features-path", str(gtv2_features_path)])
+        return ("projections.cli.score_ownership_live", args)
+
+    attempts: list[dict[str, str | None]] = [
+        {
+            "source": source,
+            "model_family": model_family,
+            "model_run": model_run,
+            "gtv2_features_path": gtv2_features_path,
+        }
+    ]
+    if fallback_source:
+        attempts.append(
+            {
+                "source": fallback_source,
+                "model_family": fallback_model_family,
+                "model_run": fallback_model_run,
+                "gtv2_features_path": fallback_gtv2_features_path,
+            }
+        )
+
+    for idx, attempt in enumerate(attempts):
+        module, args = _module_and_args(
+            source=str(attempt["source"] or ""),
+            model_family=(
+                str(attempt["model_family"])
+                if attempt.get("model_family")
+                else None
+            ),
+            model_run=str(attempt["model_run"]) if attempt.get("model_run") else None,
+            gtv2_features_path=(
+                str(attempt["gtv2_features_path"])
+                if attempt.get("gtv2_features_path")
+                else None
+            ),
+        )
+        try:
+            logger.info(
+                "[ownership] scoring source=%s model_family=%s model_run=%s attempt=%s/%s",
+                attempt.get("source"),
+                attempt.get("model_family"),
+                attempt.get("model_run"),
+                idx + 1,
+                len(attempts),
+            )
+            _run_python_module(
+                module,
+                args,
+                data_root=data_root,
+                timeout_s=1200,
+            )
+            break
+        except Exception as exc:
+            if idx + 1 >= len(attempts):
+                raise
+            logger.warning(
+                "[ownership] primary scoring failed (%s). Falling back to source=%s model_family=%s model_run=%s",
+                exc,
+                attempts[idx + 1].get("source"),
+                attempts[idx + 1].get("model_family"),
+                attempts[idx + 1].get("model_run"),
+            )
     return out_dir
 
 
@@ -4398,6 +4716,7 @@ def freeze_run_inputs_task(
     as_of_ts: str,
     bundle_dir: Path,
     data_root: Path,
+    ownership_selector_path: Path,
     source_freshness: dict[str, Any] | None = None,
     freshness_gates: dict[str, Any] | None = None,
     bounded_wait: dict[str, Any] | None = None,
@@ -4411,7 +4730,6 @@ def freeze_run_inputs_task(
         data_root=data_root,
         project_root=PROJECT_ROOT,
     )
-
     manifest_path = control_plane.write_run_manifest_start(
         data_root=data_root,
         game_date=game_date,
@@ -4421,6 +4739,7 @@ def freeze_run_inputs_task(
         entrypoint="prefect-v3",
         minutes_current_run_path=minutes_selector_path,
         rates_current_run_path=rates_selector_path,
+        ownership_current_run_path=ownership_selector_path,
         slate={},
     )
 
@@ -4566,28 +4885,6 @@ def build_features_gtv2_live_task(
             encoding="utf-8",
         )
 
-        # Build canonical live minutes features first, then project to GTV2 model contract.
-        run_as_of_ts_cli = _cli_compatible_ts(run_as_of_ts)
-        _run_python_module(
-            "projections.cli.build_minutes_live",
-            [
-                "--date",
-                game_date,
-                "--run-id",
-                run_id,
-                "--run-as-of-ts",
-                run_as_of_ts_cli,
-                "--data-root",
-                str(data_root),
-                *(
-                    ["--allow-rotowire-props-fallback"]
-                    if allow_rotowire_fallback_cfg
-                    else []
-                ),
-            ],
-            data_root=data_root,
-            timeout_s=1200,
-        )
         base_minutes_path = (
             data_root
             / "live"
@@ -4596,6 +4893,63 @@ def build_features_gtv2_live_task(
             / f"run={run_id}"
             / "features.parquet"
         )
+        minutes_build_source = "fresh_build"
+        minutes_build_fallback_path: str | None = None
+        # Build canonical live minutes features first, then project to GTV2 model contract.
+        run_as_of_ts_cli = _cli_compatible_ts(run_as_of_ts)
+        try:
+            _run_python_module(
+                "projections.cli.build_minutes_live",
+                [
+                    "--date",
+                    game_date,
+                    "--run-id",
+                    run_id,
+                    "--run-as-of-ts",
+                    run_as_of_ts_cli,
+                    "--data-root",
+                    str(data_root),
+                    *(
+                        ["--allow-rotowire-props-fallback"]
+                        if allow_rotowire_fallback_cfg
+                        else []
+                    ),
+                ],
+                data_root=data_root,
+                timeout_s=1200,
+            )
+        except RuntimeError as exc:
+            error_text = str(exc)
+            if "exit_code=-11" not in error_text:
+                raise
+            fallback_minutes_path = _find_latest_readable_minutes_features_path(
+                data_root=data_root,
+                game_date=game_date,
+                exclude_run_id=run_id,
+            )
+            if fallback_minutes_path is None:
+                raise
+            logger = get_run_logger()
+            logger.warning(
+                "build_minutes_live crashed (exit_code=-11); using fallback minutes features: %s",
+                fallback_minutes_path,
+            )
+            fallback_df = pd.read_parquet(fallback_minutes_path)
+            fallback_df = _filter_to_target_games(fallback_df, target_game_ids)
+            if fallback_df.empty:
+                raise RuntimeError(
+                    "fallback minutes features are empty after applying target_game_ids: "
+                    f"{target_game_ids} (source={fallback_minutes_path})"
+                ) from exc
+            if "run_id" in fallback_df.columns:
+                fallback_df["run_id"] = str(run_id)
+            _atomic_write_validated_parquet(
+                fallback_df,
+                base_minutes_path,
+                required_cols=("game_id", "team_id", "player_id"),
+            )
+            minutes_build_source = "fallback_previous_minutes_run"
+            minutes_build_fallback_path = str(fallback_minutes_path)
         if not base_minutes_path.exists():
             raise RuntimeError(f"base minutes features not found: {base_minutes_path}")
 
@@ -4652,6 +5006,8 @@ def build_features_gtv2_live_task(
         )
         diagnostics["allow_rotowire_props_fallback"] = bool(allow_rotowire_fallback_cfg)
         diagnostics["target_game_ids"] = _normalize_game_ids(target_game_ids)
+        diagnostics["minutes_build_source"] = str(minutes_build_source)
+        diagnostics["minutes_build_fallback_path"] = minutes_build_fallback_path
 
     runtime_manifest_path.write_text(
         json.dumps(
@@ -4667,6 +5023,40 @@ def build_features_gtv2_live_task(
         encoding="utf-8",
     )
     return out_path
+
+
+def _find_latest_readable_minutes_features_path(
+    *,
+    data_root: Path,
+    game_date: str,
+    exclude_run_id: str | None = None,
+) -> Path | None:
+    """Find the newest readable minutes features parquet for a slate date."""
+    features_date_dir = data_root / "live" / "features_minutes_v1" / str(game_date)
+    if not features_date_dir.exists():
+        return None
+
+    for run_dir in sorted(features_date_dir.glob("run=*"), reverse=True):
+        if not run_dir.is_dir():
+            continue
+        run_token = str(run_dir.name).split("run=", 1)[-1]
+        if exclude_run_id and run_token == str(exclude_run_id):
+            continue
+        candidate = run_dir / "features.parquet"
+        if not candidate.exists():
+            continue
+        try:
+            _stream_validate_parquet(
+                candidate,
+                required_cols=("game_id", "team_id", "player_id"),
+            )
+            sample = pd.read_parquet(candidate, columns=["game_id", "team_id", "player_id"])
+        except Exception:  # noqa: BLE001
+            continue
+        if sample.empty:
+            continue
+        return candidate
+    return None
 
 
 @task(name="v3-preflight", retries=0)
@@ -4846,12 +5236,13 @@ def score_gtv2_live_task(
         _set_inference_seed(int(random_seed))
         device = _resolve_torch_device(gtv2_device)
         config, model = _load_gtv2_model(bundle_dir, device=device)
+        runtime = _gtv2_inference_runtime()
         game_frames = _split_frame_by_game(features_df)
         if not game_frames:
             raise RuntimeError("local scoring received no game rows")
         score_frames: list[pd.DataFrame] = []
         for _game_id_value, game_features_df in game_frames:
-            game_scores = shared_score_gtv2_features_df(
+            game_scores = runtime.score_gtv2_features_df(
                 features_df=game_features_df,
                 game_date=game_date,
                 config=config,
@@ -4999,7 +5390,8 @@ def generate_worlds_gtv2_live_task(
         _set_inference_seed(int(random_seed))
         device = _resolve_torch_device(gtv2_device)
         device_for_summary = str(device)
-        make_model_cfg = MakeModelConfig(
+        worlds_runtime = _gtv2_worlds_runtime()
+        make_model_cfg = worlds_runtime.MakeModelConfig(
             mode=str(make_model_mode),
             use_learned_efficiency=bool(make_model_use_learned_efficiency),
         )
@@ -5161,6 +5553,12 @@ def generate_worlds_gtv2_live_task(
                 or device
             )
         else:
+            from projections.rotation.game_transformer_v2 import (
+                GameLevelDataset,
+                collate_game_level_examples,
+            )
+            from torch.utils.data import DataLoader
+
             config, model = _load_gtv2_model(
                 bundle_dir,
                 device=device,
@@ -5181,7 +5579,7 @@ def generate_worlds_gtv2_live_task(
             world_frames: list[pd.DataFrame] = []
             contract_counter: Counter[str] = Counter()
             for batch in loader:
-                df_batch, checks = sample_worlds_for_batch(
+                df_batch, checks = worlds_runtime.sample_worlds_for_batch(
                     model,
                     batch,
                     device=device,
@@ -5303,7 +5701,7 @@ def generate_worlds_gtv2_live_task(
             required_cols=("world_idx", "game_id", "team_id", "player_id"),
         )
 
-        projections = summarize_worlds_to_projections(
+        projections = worlds_runtime.summarize_worlds_to_projections(
             worlds_df,
             sim_profile="game_transformer_v2",
         )
@@ -5803,7 +6201,8 @@ def materialize_unified_run_artifacts_task(
         required_cols=("world_idx", "game_id", "team_id", "player_id"),
     )
 
-    merged_world_projections = summarize_worlds_to_projections(
+    worlds_runtime = _gtv2_worlds_runtime()
+    merged_world_projections = worlds_runtime.summarize_worlds_to_projections(
         merged_worlds,
         sim_profile="game_transformer_v2",
     )
@@ -6101,6 +6500,15 @@ def nba_live_pipeline_v3_flow(
         data_root=data_root,
         project_root=PROJECT_ROOT,
     )
+    ownership_selector_path = model_selectors.active_ownership_selector_path(
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
+    ownership_cfg = ownership_selector.load_ownership_selector(
+        config_path=ownership_selector_path,
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
     bundle_dir = _resolve_bundle_dir(
         data_root=data_root, gtv2_bundle_dir=gtv2_bundle_dir
     )
@@ -6174,6 +6582,7 @@ def nba_live_pipeline_v3_flow(
     runtime_config_paths: dict[str, Path] = {
         "minutes_current_run": minutes_selector_path,
         "rates_current_run": rates_selector_path,
+        "ownership_current_run": ownership_selector_path,
         "gtv2_bundle_dir": bundle_dir,
     }
     inference_server_cfg_path = PROJECT_ROOT / "config" / "gtv2_inference_server.json"
@@ -6362,6 +6771,7 @@ def nba_live_pipeline_v3_flow(
             current_bundle_hash=bundle_hash,
             current_minutes_selector_path=minutes_selector_path,
             current_rates_selector_path=rates_selector_path,
+            current_ownership_selector_path=ownership_selector_path,
             manual_target_game_ids=manual_target_game_ids,
         )
         target_game_ids = _normalize_game_ids(rerun_plan.get("target_game_ids"))
@@ -6372,6 +6782,7 @@ def nba_live_pipeline_v3_flow(
             as_of_ts=as_of_ts,
             bundle_dir=bundle_dir,
             data_root=data_root,
+            ownership_selector_path=ownership_selector_path,
             source_freshness=dict(frozen_checklist.get("source_freshness", {})),
             freshness_gates=dict(frozen_checklist.get("freshness_gates", {})),
             bounded_wait=bounded_wait_report,
@@ -6547,14 +6958,37 @@ def nba_live_pipeline_v3_flow(
             ),
         )
 
-        ownership_dir = score_ownership_linestar_task(
+        ownership_dir = score_ownership_task(
             game_date=resolved_game_date,
             run_id=run_id,
             data_root=data_root,
             placeholder_mode=bool(placeholder_mode),
+            source=ownership_cfg.source,
+            model_family=ownership_cfg.model_family,
+            model_run=ownership_cfg.model_run,
+            gtv2_features_path=ownership_cfg.gtv2_features_path,
+            fallback_source=ownership_cfg.fallback_source,
+            fallback_model_family=ownership_cfg.fallback_model_family,
+            fallback_model_run=ownership_cfg.fallback_model_run,
+            fallback_gtv2_features_path=ownership_cfg.fallback_gtv2_features_path,
         )
         if ownership_dir.exists():
             control_plane.copy_manifest_to_dir(manifest_path, ownership_dir)
+        control_plane.atomic_update_json(
+            manifest_path,
+            {
+                "ownership": {
+                    "selector_path": str(ownership_selector_path),
+                    "selected_source": ownership_cfg.source,
+                    "selected_model_family": ownership_cfg.model_family,
+                    "selected_model_run": ownership_cfg.model_run,
+                    "fallback_source": ownership_cfg.fallback_source,
+                    "fallback_model_family": ownership_cfg.fallback_model_family,
+                    "fallback_model_run": ownership_cfg.fallback_model_run,
+                    "placeholder_mode": bool(placeholder_mode),
+                }
+            },
+        )
 
         projections_dir = finalize_projections_live_task(
             game_date=resolved_game_date,

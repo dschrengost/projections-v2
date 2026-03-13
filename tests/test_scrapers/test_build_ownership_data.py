@@ -91,3 +91,45 @@ def test_aggregate_slate_ownership_entry_weighting_uses_total_entries_denominato
     assert np.isclose(got["B"], 75.0)
     assert np.isclose(float(agg["own_pct"].sum()), 800.0)
 
+
+def test_select_eligible_contest_ids_keeps_classic_gpp_subslates():
+    mod = _load_module()
+
+    meta = pd.DataFrame(
+        {
+            "contest_id": [1, 2, 3, 4, 5, 6],
+            "contest_name": [
+                "NBA $200K Fadeaway [$50K to 1st]",
+                "NBA $70K Fadeaway [$20K to 1st] (Night)",
+                "NBA Showdown $40K And-One",
+                "NBA $50K Tiers",
+                "NBA Double Up",
+                "NBA $15K Fadeaway [$5K to 1st] (Late)",
+            ],
+            "game_type": ["Classic", "Classic", "Classic", "Classic", "Classic", "Classic"],
+            "is_guaranteed": [True, True, True, True, True, True],
+        }
+    )
+
+    got = mod.select_eligible_contest_ids(meta)
+    assert got == {"1", "2", "6"}
+
+
+def test_select_eligible_contest_ids_requires_classic_and_guaranteed():
+    mod = _load_module()
+
+    meta = pd.DataFrame(
+        {
+            "contest_id": [10, 11, 12],
+            "contest_name": [
+                "NBA $20K And-One",
+                "NBA $20K And-One",
+                "NBA Satellite",
+            ],
+            "game_type": ["Classic", "Showdown", "Classic"],
+            "is_guaranteed": [False, True, True],
+        }
+    )
+
+    got = mod.select_eligible_contest_ids(meta)
+    assert got == set()

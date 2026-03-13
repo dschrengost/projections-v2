@@ -337,10 +337,22 @@ fi
 # unlocked slates get fresh scoring. This allows main slates to score even after
 # early games have locked.
 echo "[live] Scoring ownership predictions for ${START_DATE}..."
-if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_ownership_live \
-  --date "${START_DATE}" \
-  --run-id "${LIVE_RUN_ID}" \
+OWNERSHIP_MODEL_FAMILY="${OWNERSHIP_MODEL_FAMILY:-ownership_v1}"
+OWNERSHIP_MODEL_RUN="${OWNERSHIP_MODEL_RUN:-}"
+OWNERSHIP_GTV2_FEATURES_PATH="${OWNERSHIP_GTV2_FEATURES_PATH:-}"
+OWNERSHIP_ARGS=(
+  --date "${START_DATE}"
+  --run-id "${LIVE_RUN_ID}"
   --data-root "${DATA_ROOT}"
+  --model-family "${OWNERSHIP_MODEL_FAMILY}"
+)
+if [[ -n "${OWNERSHIP_MODEL_RUN}" ]]; then
+  OWNERSHIP_ARGS+=(--model-run "${OWNERSHIP_MODEL_RUN}")
+fi
+if [[ -n "${OWNERSHIP_GTV2_FEATURES_PATH}" ]]; then
+  OWNERSHIP_ARGS+=(--gtv2-features-path "${OWNERSHIP_GTV2_FEATURES_PATH}")
+fi
+if ! /home/daniel/.local/bin/uv run python -m projections.cli.score_ownership_live "${OWNERSHIP_ARGS[@]}"
 then
   echo "[live] warning: Ownership scoring failed; continuing without ownership predictions." >&2
 fi

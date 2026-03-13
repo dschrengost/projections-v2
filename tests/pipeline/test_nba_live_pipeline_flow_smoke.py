@@ -70,7 +70,7 @@ def test_nba_live_pipeline_flow_smoke(tmp_path: Path, monkeypatch: pytest.Monkey
         if run_id is None:
             return
 
-        if module == "projections.cli.score_minutes_v1":
+        if module in {"projections.cli.score_minutes_v1", "projections.cli.score_minutes_rotation_set_v1"}:
             out = (
                 data_root
                 / "artifacts"
@@ -137,7 +137,7 @@ def test_nba_live_pipeline_flow_smoke(tmp_path: Path, monkeypatch: pytest.Monkey
             _write_parquet(out, df)
             return
 
-        if module == "projections.cli.score_ownership_live":
+        if module in {"projections.cli.score_ownership_live", "projections.cli.score_ownership_linestar"}:
             out = data_root / "silver" / "ownership_predictions" / game_date / f"run={run_id}" / "123.parquet"
             df = pd.DataFrame({"player_id": list(range(1, 21)), "pred_own_pct": [0.05] * 20})
             _write_parquet(out, df)
@@ -168,6 +168,9 @@ def test_nba_live_pipeline_flow_smoke(tmp_path: Path, monkeypatch: pytest.Monkey
         data_root=tmp_path
     )
     assert Path(manifest["rates_current_run_path"]).resolve() == model_selectors.active_rates_selector_path(
+        data_root=tmp_path
+    )
+    assert Path(manifest["ownership_current_run_path"]).resolve() == model_selectors.active_ownership_selector_path(
         data_root=tmp_path
     )
 

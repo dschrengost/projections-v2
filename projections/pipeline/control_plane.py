@@ -86,6 +86,7 @@ class RunManifest:
 
     minutes_current_run_path: str = "config/minutes_current_run.json"
     rates_current_run_path: str = "config/rates_current_run.json"
+    ownership_current_run_path: str = "config/ownership_current_run.json"
 
     created_at: str = field(default_factory=_utc_now_iso)
     version: int = RUN_MANIFEST_VERSION
@@ -134,6 +135,7 @@ def write_run_manifest_start(
     entrypoint: str,
     minutes_current_run_path: Path,
     rates_current_run_path: Path,
+    ownership_current_run_path: Path,
     slate: dict[str, Any] | None = None,
 ) -> Path:
     root = Path(data_root) if data_root is not None else paths.get_data_root()
@@ -149,6 +151,7 @@ def write_run_manifest_start(
         hostname=resolve_hostname(),
         minutes_current_run_path=str(minutes_current_run_path),
         rates_current_run_path=str(rates_current_run_path),
+        ownership_current_run_path=str(ownership_current_run_path),
         slate=slate or {},
     )
     atomic_write_json(manifest_path, manifest.to_dict())
