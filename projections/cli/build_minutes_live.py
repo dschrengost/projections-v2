@@ -1797,9 +1797,40 @@ def _build_minutes_live_logic(
                         )
                         if "tip_ts" in roster_df.columns:
                             tip_ts = pd.to_datetime(roster_df["tip_ts"], utc=True, errors="coerce")
-                            eligible = eligible & (rotowire_ts.isna() | (rotowire_ts <= tip_ts))
                         else:
-                            eligible = eligible & (rotowire_ts.isna() | (rotowire_ts <= run_ts))
+                            tip_ts = pd.Series(pd.NaT, index=roster_df.index, dtype="datetime64[ns, UTC]")
+                            if "game_id" in roster_df.columns and {"game_id", "tip_ts"}.issubset(schedule_df.columns):
+                                schedule_tip_lookup = (
+                                    schedule_df.loc[:, ["game_id", "tip_ts"]]
+                                    .dropna(subset=["game_id"])
+                                    .drop_duplicates(subset=["game_id"], keep="last")
+                                    .copy()
+                                )
+                                schedule_tip_lookup["game_id"] = pd.to_numeric(
+                                    schedule_tip_lookup["game_id"], errors="coerce"
+                                ).astype("Int64")
+                                schedule_tip_lookup["tip_ts"] = pd.to_datetime(
+                                    schedule_tip_lookup["tip_ts"], utc=True, errors="coerce"
+                                )
+                                roster_game_ids = pd.to_numeric(roster_df["game_id"], errors="coerce").astype("Int64")
+                                tip_ts = pd.to_datetime(
+                                    roster_game_ids.map(
+                                        schedule_tip_lookup.set_index("game_id")["tip_ts"]
+                                    ),
+                                    utc=True,
+                                    errors="coerce",
+                                )
+                        eligible = eligible & (
+                            rotowire_ts.isna()
+                            | (
+                                tip_ts.notna()
+                                & (rotowire_ts <= tip_ts)
+                            )
+                            | (
+                                tip_ts.isna()
+                                & (rotowire_ts <= run_ts)
+                            )
+                        )
 
                         # Avoid conflicts: do not mark players as starters if our other feeds already
                         # consider them inactive/out for the slate.
