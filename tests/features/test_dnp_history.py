@@ -366,6 +366,29 @@ class TestEdgeCases:
         result = compute_dnp_history_features(df, validate_pit=False, minutes_col="minutes")
         assert len(result) == 2
 
+    def test_unsorted_rows_and_missing_keys_keep_valid_history(self):
+        df = pd.DataFrame([
+            {"player_id": 1, "team_id": 100, "game_date": "2024-01-03", "is_out": 0, "minutes": 0.0},
+            {"player_id": None, "team_id": 100, "game_date": "2024-01-02", "is_out": 0, "minutes": 15.0},
+            {"player_id": 1, "team_id": 100, "game_date": "2024-01-01", "is_out": 0, "minutes": 20.0},
+            {"player_id": 1, "team_id": 100, "game_date": "2024-01-02", "is_out": 1, "minutes": 0.0},
+        ])
+        df["game_date"] = pd.to_datetime(df["game_date"])
+
+        result = compute_dnp_history_features(df, validate_pit=False)
+
+        valid = result[result["player_id"] == 1].reset_index(drop=True)
+        assert list(valid["game_date"].dt.strftime("%Y-%m-%d")) == [
+            "2024-01-01",
+            "2024-01-02",
+            "2024-01-03",
+        ]
+        assert valid.loc[2, "inactive_streak_len"] == 1
+
+        invalid = result[result["player_id"].isna()].iloc[0]
+        assert invalid["games_since_last_roster_active"] == 99
+        assert invalid["never_roster_active_before"] == 1
+
 
 class TestInjurySnapshotMissing:
     """Tests for injury_snapshot_missing handling.

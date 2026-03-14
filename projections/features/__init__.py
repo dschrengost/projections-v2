@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Iterable, Tuple
 
 import pandas as pd
-from sklearn.model_selection import train_test_split
 
 __all__: Tuple[str, ...] = (
     "add_rolling_features",
@@ -56,6 +55,8 @@ def stratified_split(
     random_state: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     """Split features and targets into train/test partitions."""
+
+    from sklearn.model_selection import train_test_split
 
     return train_test_split(
         features, target, test_size=test_size, random_state=random_state, stratify=None

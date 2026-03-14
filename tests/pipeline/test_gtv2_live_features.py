@@ -12,6 +12,7 @@ from projections.pipeline.gtv2_live_features import (
     build_gtv2_live_features,
     load_gtv2_feature_spec,
 )
+from projections.rotation.live_features_v1 import load_latest_rotation_priors_by_entity
 
 
 def _minutes_df() -> pd.DataFrame:
@@ -151,3 +152,57 @@ def test_build_gtv2_live_features_applies_training_contract_and_orders_columns()
     assert "game_context_contract" in result.transform_manifest
     assert result.transform_manifest["dnp_history"]["mode"] == "full_prior_history"
     assert result.transform_manifest["dnp_history"]["lookback_days"] is None
+
+
+def test_load_latest_rotation_priors_by_entity_uses_concat_path_and_latest_rows(tmp_path: Path) -> None:
+    data_root = tmp_path
+    team_root = data_root / "silver" / "rotation_priors_v1" / "team_game_priors" / "season=2025"
+    player_root = data_root / "silver" / "rotation_priors_v1" / "player_game_priors" / "season=2025"
+    team_root.mkdir(parents=True, exist_ok=True)
+    player_root.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {"team_id": 10, "game_date": "2026-01-10", "team_metric": 1.0},
+            {"team_id": 20, "game_date": "2026-01-10", "team_metric": 2.0},
+        ]
+    ).to_parquet(team_root / "game_id=0022500001.parquet", index=False)
+    pd.DataFrame(
+        [
+            {"team_id": 10, "game_date": "2026-01-12", "team_metric": 3.0},
+            {"team_id": 30, "game_date": "2026-01-12", "team_metric": 4.0},
+        ]
+    ).to_parquet(team_root / "game_id=0022500002.parquet", index=False)
+    pd.DataFrame(
+        [
+            {"team_id": 10, "game_date": "2026-02-14", "team_metric": 999.0},
+        ]
+    ).to_parquet(team_root / "game_id=0062500001.parquet", index=False)
+
+    pd.DataFrame(
+        [
+            {"person_id": 1, "game_date": "2026-01-10", "player_metric": 11.0},
+            {"person_id": 2, "game_date": "2026-01-10", "player_metric": 12.0},
+        ]
+    ).to_parquet(player_root / "game_id=0022500001.parquet", index=False)
+    pd.DataFrame(
+        [
+            {"person_id": 1, "game_date": "2026-01-12", "player_metric": 13.0},
+            {"person_id": 3, "game_date": "2026-01-12", "player_metric": 14.0},
+        ]
+    ).to_parquet(player_root / "game_id=0022500002.parquet", index=False)
+
+    team_priors, player_priors = load_latest_rotation_priors_by_entity(
+        data_root,
+        season=2025,
+        team_ids=[10, 20],
+        player_ids=[1, 2],
+    )
+
+    assert sorted(team_priors["team_id"].dropna().astype(int).tolist()) == [10, 20]
+    assert float(team_priors.loc[team_priors["team_id"] == 10, "team_metric"].iloc[0]) == 3.0
+    assert float(team_priors.loc[team_priors["team_id"] == 20, "team_metric"].iloc[0]) == 2.0
+
+    assert sorted(player_priors["person_id"].dropna().astype(int).tolist()) == [1, 2]
+    assert float(player_priors.loc[player_priors["person_id"] == 1, "player_metric"].iloc[0]) == 13.0
+    assert float(player_priors.loc[player_priors["person_id"] == 2, "player_metric"].iloc[0]) == 12.0

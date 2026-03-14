@@ -67,6 +67,7 @@ Rules:
 - If runtime stamp paths show DEV during a live run, the deployment metadata is wrong and should be refreshed with `uv run prefect deploy --all`.
 - If the prod checkout is stale, rerun `./scripts/deploy/deploy_live.sh` before restarting the worker.
 - By default deploy preserves PROD selector pointers (`minutes_current_run.json`, `rates_current_run.json`, `ownership_current_run.json`) unless `--sync-pointers` is passed.
+- `prefect-worker.service` runs a startup janitor that cancels stale deployment runs whose `infrastructure_pid` no longer exists, so dead runs do not keep the deployment concurrency slot occupied after a worker restart.
 
 ### Flow Schedules
 

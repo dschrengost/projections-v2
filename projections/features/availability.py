@@ -278,8 +278,9 @@ def attach_availability_features(
 
     # Missing injury rows become status="Ava" with an explicit available prior.
     no_row = ~has_row_mask
-    status = merged.get("status", pd.Series(pd.NA, index=merged.index))
-    status = status.where(~no_row, "Ava")
+    status = merged.get("status", pd.Series(pd.NA, index=merged.index)).copy()
+    if no_row.any():
+        status.loc[no_row] = "Ava"
     # Normalize statuses only for rows that have an injury-feed record.
     normalized = status.copy()
     if has_row_mask.any():

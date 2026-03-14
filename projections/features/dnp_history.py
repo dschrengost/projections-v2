@@ -239,109 +239,100 @@ def compute_dnp_history_features(
         (work["roster_active_pre_tip"] == 1) & (work["_minutes"] == 0)
     ).astype("int8")
 
-    # Sort by player, team, game_date for proper temporal ordering
-    sort_cols = [player_id_col, team_id_col, game_date_col]
-    work = work.sort_values(sort_cols, kind="mergesort")
+    valid_mask = (
+        work[player_id_col].notna().to_numpy(dtype=bool, copy=False)
+        & work[team_id_col].notna().to_numpy(dtype=bool, copy=False)
+        & work[game_date_col].notna().to_numpy(dtype=bool, copy=False)
+    )
+    valid_pos = np.flatnonzero(valid_mask)
+    invalid_pos = np.flatnonzero(~valid_mask)
+    if valid_pos.size:
+        player_keys = work.iloc[valid_pos][player_id_col].astype("int64").to_numpy()
+        team_keys = work.iloc[valid_pos][team_id_col].astype("int64").to_numpy()
+        date_keys = (
+            work.iloc[valid_pos][game_date_col]
+            .to_numpy(dtype="datetime64[ns]")
+            .astype(np.int64, copy=False)
+        )
+        stable_order = np.lexsort((valid_pos, date_keys, team_keys, player_keys))
+        ordered_pos = np.concatenate((valid_pos[stable_order], invalid_pos))
+        sorted_player_keys = player_keys[stable_order]
+        sorted_team_keys = team_keys[stable_order]
+    else:
+        ordered_pos = invalid_pos
+        sorted_player_keys = np.empty(0, dtype=np.int64)
+        sorted_team_keys = np.empty(0, dtype=np.int64)
 
-    # Initialize output columns
-    work["games_since_last_roster_active"] = config.games_since_cap
-    work["never_roster_active_before"] = 1
-    work["consecutive_active_dnp"] = 0
-    work["active_but_dnp_rate_last10"] = 0.5  # Prior mean
-    work["inactive_streak_len"] = 0
+    work = work.take(ordered_pos).copy()
 
-    # Process each (player_id, team_id) group
-    # NOTE: groupby().indices returns POSITIONAL indices, not DataFrame index values
-    for (pid, tid), group_pos_idx in work.groupby([player_id_col, team_id_col], sort=False).indices.items():
-        if len(group_pos_idx) == 0:
-            continue
+    n_rows = len(work)
+    prior_mean = config.alpha / (config.alpha + config.beta)
+    games_since = np.full(n_rows, config.games_since_cap, dtype=np.int32)
+    never_active = np.ones(n_rows, dtype=np.int8)
+    consec_dnp = np.zeros(n_rows, dtype=np.int32)
+    dnp_rate = np.full(n_rows, prior_mean, dtype=np.float64)
+    inactive_streak = np.zeros(n_rows, dtype=np.int32)
 
-        # IMPORTANT: Sort group by game_date to ensure temporal order
-        # Get actual DataFrame indices for this group
-        group = work.iloc[group_pos_idx].copy()
-        group = group.sort_values(game_date_col)
-        group_idx = group.index.tolist()  # Get the actual DataFrame index values (sorted)
-        active = group["roster_active_pre_tip"].values
-        active_dnp = group["_active_dnp"].values
+    active = pd.to_numeric(work["roster_active_pre_tip"], errors="coerce").fillna(0).to_numpy(dtype=np.int8)
+    active_dnp = pd.to_numeric(work["_active_dnp"], errors="coerce").fillna(0).to_numpy(dtype=np.int8)
 
-        n = len(group)
+    valid_count = valid_pos.size
+    if valid_count:
+        group_starts_mask = np.empty(valid_count, dtype=bool)
+        group_starts_mask[0] = True
+        group_starts_mask[1:] = (
+            (sorted_player_keys[1:] != sorted_player_keys[:-1])
+            | (sorted_team_keys[1:] != sorted_team_keys[:-1])
+        )
+        group_starts = np.flatnonzero(group_starts_mask)
+        group_ends = np.r_[group_starts[1:], valid_count]
 
-        # Arrays to store computed values
-        games_since = np.full(n, config.games_since_cap, dtype=np.int32)
-        never_active = np.ones(n, dtype=np.int8)
-        consec_dnp = np.zeros(n, dtype=np.int32)
-        dnp_rate = np.full(n, 0.5, dtype=np.float64)
-        inactive_streak = np.zeros(n, dtype=np.int32)
+        for start, end in zip(group_starts, group_ends, strict=False):
+            last_active_game_idx: int | None = None
+            current_dnp_streak = 0
+            current_inactive_streak = 0
+            recent_active_dnp: list[int] = []
 
-        # Tracking state for sequential computation
-        last_active_game_idx: int | None = None
-        current_dnp_streak = 0
-        current_inactive_streak = 0
-        active_history: list[tuple[int, int]] = []  # (game_idx, was_dnp)
+            for i in range(start, end):
+                local_i = i - start
 
-        for i in range(n):
-            # CRITICAL: Only use games PRIOR to current (j < i)
-            # All state variables track history up to but not including game i
+                if last_active_game_idx is not None:
+                    games_since[i] = local_i - last_active_game_idx
+                    never_active[i] = 0
 
-            # games_since_last_roster_active
-            if last_active_game_idx is not None:
-                # Count team games between last active and current
-                games_since[i] = i - last_active_game_idx
-                never_active[i] = 0
-            else:
-                games_since[i] = config.games_since_cap
-                never_active[i] = 1
+                consec_dnp[i] = current_dnp_streak
 
-            # consecutive_active_dnp: streak of active+DNP games immediately prior
-            consec_dnp[i] = current_dnp_streak
+                if recent_active_dnp:
+                    dnp_count = int(sum(recent_active_dnp))
+                    n_active = len(recent_active_dnp)
+                    if n_active >= config.min_opportunities:
+                        dnp_rate[i] = dnp_count / n_active
+                    else:
+                        dnp_rate[i] = (
+                            dnp_count + config.alpha
+                        ) / (n_active + config.alpha + config.beta)
 
-            # active_but_dnp_rate_last10: among last 10 active games, DNP rate
-            # Look at the last 10 entries in active_history (prior games where active)
-            recent_active = active_history[-10:] if active_history else []
-            if len(recent_active) >= config.min_opportunities:
-                dnp_count = sum(1 for _, was_dnp in recent_active if was_dnp)
-                n_active = len(recent_active)
-                # Raw rate
-                dnp_rate[i] = dnp_count / n_active
-            elif len(recent_active) > 0:
-                # Apply shrinkage with Empirical Bayes
-                dnp_count = sum(1 for _, was_dnp in recent_active if was_dnp)
-                n_active = len(recent_active)
-                # Shrunk estimate: (dnp + alpha) / (n + alpha + beta)
-                dnp_rate[i] = (dnp_count + config.alpha) / (n_active + config.alpha + config.beta)
-            else:
-                # No prior active games - use prior mean
-                dnp_rate[i] = config.alpha / (config.alpha + config.beta)
+                inactive_streak[i] = current_inactive_streak
 
-            # inactive_streak_len: consecutive games where NOT active (OUT)
-            inactive_streak[i] = current_inactive_streak
-
-            # NOW update state for the next iteration
-            if active[i] == 1:
-                last_active_game_idx = i
-                active_history.append((i, int(active_dnp[i])))
-
-                # Update DNP streak
-                if active_dnp[i] == 1:
-                    current_dnp_streak += 1
+                if active[i] == 1:
+                    last_active_game_idx = local_i
+                    recent_active_dnp.append(int(active_dnp[i]))
+                    if len(recent_active_dnp) > 10:
+                        recent_active_dnp.pop(0)
+                    if active_dnp[i] == 1:
+                        current_dnp_streak += 1
+                    else:
+                        current_dnp_streak = 0
+                    current_inactive_streak = 0
                 else:
+                    current_inactive_streak += 1
                     current_dnp_streak = 0
 
-                # Reset inactive streak
-                current_inactive_streak = 0
-            else:
-                # Player is OUT
-                current_inactive_streak += 1
-                current_dnp_streak = 0  # Reset DNP streak when OUT
-
-        # Write back to work DataFrame using the SORTED group indices
-        # group_idx is now a list after sorting, and the arrays are in sorted order
-        for i, idx in enumerate(group_idx):
-            work.loc[idx, "games_since_last_roster_active"] = games_since[i]
-            work.loc[idx, "never_roster_active_before"] = never_active[i]
-            work.loc[idx, "consecutive_active_dnp"] = consec_dnp[i]
-            work.loc[idx, "active_but_dnp_rate_last10"] = dnp_rate[i]
-            work.loc[idx, "inactive_streak_len"] = inactive_streak[i]
+    work["games_since_last_roster_active"] = games_since
+    work["never_roster_active_before"] = never_active
+    work["consecutive_active_dnp"] = consec_dnp
+    work["active_but_dnp_rate_last10"] = dnp_rate
+    work["inactive_streak_len"] = inactive_streak
 
     # Point-in-time validation if requested
     if validate_pit and tip_ts_col in work.columns:

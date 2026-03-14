@@ -15,6 +15,7 @@ Environment="MLFLOW_EXPERIMENT_NAME=projections-v2"
 Environment="PROJECTIONS_ALLOW_DIRTY=1"
 Environment="PROJECTIONS_SUBPROCESS_PYTHON=/home/daniel/prod/projections-v2/.venv311/bin/python"
 Environment="PYTHONFAULTHANDLER=1"
+ExecStartPre=-/home/daniel/prod/projections-v2/.venv311/bin/python /home/daniel/prod/projections-v2/tools/prefect_reconcile_stale_deployment_runs.py --deployment nba-live-pipeline-v3/nba-live-pipeline --max-age-minutes 10
 ExecStart=/home/daniel/prod/projections-v2/.venv311/bin/python -m prefect worker start --pool projections-local --type process --limit 1 --with-healthcheck
 Restart=always
 RestartSec=5

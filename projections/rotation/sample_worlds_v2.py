@@ -778,6 +778,36 @@ def _q(values: np.ndarray, q: float) -> float:
     return float(np.quantile(values, float(q)))
 
 
+def _group_boundaries_from_sorted_keys(
+    *key_arrays: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[np.ndarray]]:
+    """Group arbitrary key arrays via NumPy lexsort without pandas factorize."""
+    if len(key_arrays) <= 0:
+        empty = np.array([], dtype=np.int64)
+        return empty, empty, empty, []
+    row_count = int(len(key_arrays[0]))
+    if row_count <= 0:
+        empty = np.array([], dtype=np.int64)
+        return empty, empty, empty, [np.array([], dtype=arr.dtype) for arr in key_arrays]
+
+    arrays = [np.asarray(arr) for arr in key_arrays]
+    for arr in arrays[1:]:
+        if len(arr) != row_count:
+            raise RuntimeError("key array lengths must match for grouping")
+
+    order = np.lexsort(tuple(arr for arr in arrays[::-1]))
+    sorted_arrays = [arr[order] for arr in arrays]
+    group_starts_mask = np.ones(row_count, dtype=bool)
+    if row_count > 1:
+        group_starts_mask[1:] = False
+        for arr in sorted_arrays:
+            group_starts_mask[1:] |= arr[1:] != arr[:-1]
+    starts = np.flatnonzero(group_starts_mask)
+    ends = np.r_[starts[1:], row_count]
+    unique_key_arrays = [arr[starts] for arr in sorted_arrays]
+    return order.astype(np.int64, copy=False), starts, ends, unique_key_arrays
+
+
 def summarize_worlds_to_projections(
     worlds_df: pd.DataFrame,
     *,
@@ -812,18 +842,15 @@ def summarize_worlds_to_projections(
     key_frame = key_frame.loc[valid_keys].reset_index(drop=True)
     key_frame["game_date"] = key_frame["game_date"].astype(str)
     work = df.loc[valid_keys].reset_index(drop=True)
-    key_index = pd.MultiIndex.from_frame(key_frame.loc[:, key_cols], names=key_cols)
-    group_codes, uniques = pd.factorize(key_index, sort=False)
-    if len(group_codes) <= 0:
+    order, starts, ends, unique_key_arrays = _group_boundaries_from_sorted_keys(
+        key_frame["game_date"].to_numpy(dtype=str, copy=False),
+        key_frame["game_id"].to_numpy(dtype=np.int64, copy=False),
+        key_frame["team_id"].to_numpy(dtype=np.int64, copy=False),
+        key_frame["player_id"].to_numpy(dtype=np.int64, copy=False),
+    )
+    if len(order) <= 0:
         out = add_canonical_projection_fields(pd.DataFrame())
         return out
-
-    order = np.argsort(group_codes, kind="mergesort")
-    sorted_codes = group_codes[order]
-    starts = np.flatnonzero(
-        np.r_[True, sorted_codes[1:] != sorted_codes[:-1]]
-    )
-    ends = np.r_[starts[1:], len(order)]
 
     minutes_all = work["minutes"].to_numpy(dtype=float, copy=False)
     fpts_all = work["dk_fpts"].to_numpy(dtype=float, copy=False)
@@ -839,10 +866,12 @@ def summarize_worlds_to_projections(
             ).fillna(0.0).to_numpy(dtype=float, copy=False)
 
     rows: list[dict[str, Any]] = []
-    for start, end in zip(starts, ends, strict=False):
+    for group_idx, (start, end) in enumerate(zip(starts, ends, strict=False)):
         idx = order[start:end]
-        group_code = int(sorted_codes[start])
-        game_date, game_id, team_id, player_id = uniques[group_code]
+        game_date = str(unique_key_arrays[0][group_idx])
+        game_id = int(unique_key_arrays[1][group_idx])
+        team_id = int(unique_key_arrays[2][group_idx])
+        player_id = int(unique_key_arrays[3][group_idx])
         minutes = minutes_all[idx]
         fpts = fpts_all[idx]
         active_mask = active_all[idx]
@@ -858,10 +887,10 @@ def summarize_worlds_to_projections(
         mins_cond = minutes[cond_mask]
 
         payload: dict[str, Any] = {
-            "game_date": str(game_date),
-            "game_id": int(game_id),
-            "team_id": int(team_id),
-            "player_id": int(player_id),
+            "game_date": game_date,
+            "game_id": game_id,
+            "team_id": team_id,
+            "player_id": player_id,
             "play_prob": float(active_mask.mean()),
             "play_prob_raw": float(active_mask.mean()),
             "play_prob_eff": float(active_mask.mean()),

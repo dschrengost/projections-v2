@@ -68,7 +68,7 @@ class TritonPythonModel:
         project_root = _param(
             self._model_config,
             "project_root",
-            "/home/daniel/projects/projections-v2",
+            "/home/daniel/prod/projections-v2",
         )
         if project_root and project_root not in os.sys.path:
             os.sys.path.insert(0, project_root)

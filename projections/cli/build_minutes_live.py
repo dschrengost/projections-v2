@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import json
 import os
+import resource
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -58,6 +60,10 @@ from projections.ops.manual_availability import (
     apply_manual_overrides_to_frame,
     load_manual_overrides_df,
     manual_override_report,
+)
+from projections.features.dnp_history import (
+    DNP_HISTORY_FEATURE_COLUMNS,
+    compute_dnp_history_features_for_live,
 )
 from scrapers.nba_players import NbaPlayersScraper, PlayerProfile
 
@@ -107,6 +113,7 @@ REQUIRED_MINUTES_FEATURES: frozenset[str] = frozenset({
 _OUT_LIKE_STATUS_VALUES: set[str] = {"OUT", "O", "DOUBTFUL", "D", "INACTIVE"}
 
 app = typer.Typer(help=__doc__)
+_NAT_DAY_ORDINAL = np.iinfo(np.int64).min
 
 
 def _status_series_is_out_like(status_series: pd.Series) -> pd.Series:
@@ -124,6 +131,396 @@ def _status_series_is_out_like(status_series: pd.Series) -> pd.Series:
         | normalized.str.startswith("DOUBT")
         | normalized.str.startswith("INACT")
     ).fillna(False)
+
+
+def _datetime_day_ordinals(values: pd.Series | pd.Index | np.ndarray) -> np.ndarray:
+    return pd.to_datetime(values, errors="coerce").to_numpy(dtype="datetime64[D]").astype(np.int64, copy=False)
+
+
+def _timestamp_day_ordinal(value: pd.Timestamp) -> int:
+    return int(pd.Timestamp(value).normalize().to_datetime64().astype("datetime64[D]").astype(np.int64))
+
+
+def _sorted_group_slices(*keys: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if not keys:
+        raise ValueError("at least one key array is required")
+    if len(keys[0]) == 0:
+        empty = np.array([], dtype=np.int64)
+        return empty, empty, empty
+    order = np.lexsort(tuple(key for key in reversed(keys)))
+    starts_mask = np.ones(len(order), dtype=bool)
+    starts_mask[1:] = keys[0][order][1:] != keys[0][order][:-1]
+    for key in keys[1:]:
+        sorted_key = key[order]
+        starts_mask[1:] |= sorted_key[1:] != sorted_key[:-1]
+    starts = np.flatnonzero(starts_mask)
+    ends = np.r_[starts[1:], len(order)]
+    return order, starts, ends
+
+
+def _sum_float_by_keys(*, keys: list[np.ndarray], value_columns: dict[str, np.ndarray], key_names: list[str]) -> pd.DataFrame:
+    if not keys or not value_columns or len(keys[0]) == 0:
+        return pd.DataFrame(columns=[*key_names, *value_columns.keys()])
+    order, starts, _ = _sorted_group_slices(*keys)
+    data: dict[str, object] = {}
+    for name, key in zip(key_names, keys, strict=True):
+        data[name] = pd.Series(key[order][starts], dtype="Int64")
+    for name, values in value_columns.items():
+        data[name] = np.add.reduceat(values[order], starts).astype(float, copy=False)
+    return pd.DataFrame(data)
+
+
+def _compute_live_trend_frame(history_labels: pd.DataFrame, target_day: pd.Timestamp) -> pd.DataFrame:
+    columns = [
+        "player_id",
+        "min_last1",
+        "min_last3",
+        "min_last5",
+        "sum_min_7d",
+        "roll_mean_3",
+        "roll_mean_5",
+        "roll_mean_10",
+        "roll_iqr_5",
+        "z_vs_10",
+    ]
+    if history_labels.empty:
+        return pd.DataFrame(columns=columns)
+
+    working = history_labels.loc[:, ["player_id", "game_date", "minutes"]].copy()
+    player_id_series = pd.to_numeric(working["player_id"], errors="coerce")
+    day_ordinals = _datetime_day_ordinals(working["game_date"])
+    minutes = pd.to_numeric(working["minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    valid = player_id_series.notna().to_numpy() & (day_ordinals != _NAT_DAY_ORDINAL)
+    if not valid.any():
+        return pd.DataFrame(columns=columns)
+
+    player_ids = player_id_series.to_numpy(dtype=np.int64, na_value=-1)[valid]
+    day_ordinals = day_ordinals[valid]
+    minutes = minutes[valid]
+    order = np.lexsort((day_ordinals, player_ids))
+    sorted_player_ids = player_ids[order]
+    sorted_day_ordinals = day_ordinals[order]
+    sorted_minutes = minutes[order]
+    starts = np.flatnonzero(
+        np.r_[True, sorted_player_ids[1:] != sorted_player_ids[:-1]]
+    )
+    ends = np.r_[starts[1:], len(order)]
+    cutoff_7d = _timestamp_day_ordinal(target_day - pd.Timedelta(days=7))
+
+    size = len(starts)
+    min_last1 = np.zeros(size, dtype=float)
+    min_last3 = np.full(size, np.nan, dtype=float)
+    min_last5 = np.full(size, np.nan, dtype=float)
+    sum_min_7d = np.zeros(size, dtype=float)
+    roll_mean_3 = np.full(size, np.nan, dtype=float)
+    roll_mean_5 = np.full(size, np.nan, dtype=float)
+    roll_mean_10 = np.full(size, np.nan, dtype=float)
+    roll_iqr_5 = np.zeros(size, dtype=float)
+    z_vs_10 = np.zeros(size, dtype=float)
+
+    for idx, (start, end) in enumerate(zip(starts, ends, strict=True)):
+        group_minutes = sorted_minutes[start:end]
+        group_days = sorted_day_ordinals[start:end]
+        played_minutes = group_minutes[group_minutes > 0.0]
+        if played_minutes.size > 0:
+            last_minutes = float(played_minutes[-1])
+            last_3 = played_minutes[-3:]
+            last_5 = played_minutes[-5:]
+            last_10 = played_minutes[-10:]
+            min_last1[idx] = last_minutes
+            min_last3[idx] = float(last_3.mean())
+            min_last5[idx] = float(last_5.mean())
+            roll_mean_3[idx] = min_last3[idx]
+            roll_mean_5[idx] = min_last5[idx]
+            roll_mean_10[idx] = float(last_10.mean())
+            if last_5.size >= 2:
+                q25, q75 = np.quantile(last_5, [0.25, 0.75])
+                roll_iqr_5[idx] = float(q75 - q25)
+            mu10 = float(last_10.mean())
+            std10 = float(last_10.std(ddof=0))
+            if std10 > 0.0:
+                z_vs_10[idx] = float((last_minutes - mu10) / std10)
+        recent_window = group_minutes[group_days >= cutoff_7d]
+        if recent_window.size > 0:
+            sum_min_7d[idx] = float(recent_window.sum())
+
+    return pd.DataFrame(
+        {
+            "player_id": pd.Series(sorted_player_ids[starts], dtype="Int64"),
+            "min_last1": min_last1,
+            "min_last3": min_last3,
+            "min_last5": min_last5,
+            "sum_min_7d": sum_min_7d,
+            "roll_mean_3": roll_mean_3,
+            "roll_mean_5": roll_mean_5,
+            "roll_mean_10": roll_mean_10,
+            "roll_iqr_5": roll_iqr_5,
+            "z_vs_10": z_vs_10,
+        }
+    )
+
+
+def _compute_live_rest_frame(history_labels: pd.DataFrame, target_day: pd.Timestamp) -> pd.DataFrame:
+    columns = ["player_id", "days_since_last_recomp", "is_b2b_recomp", "is_3in4_recomp", "is_4in6_recomp"]
+    if history_labels.empty:
+        return pd.DataFrame(columns=columns)
+
+    working = history_labels.loc[:, ["player_id", "game_date"]].copy()
+    player_id_series = pd.to_numeric(working["player_id"], errors="coerce")
+    day_ordinals = _datetime_day_ordinals(working["game_date"])
+    target_ordinal = _timestamp_day_ordinal(target_day)
+    valid = player_id_series.notna().to_numpy() & (day_ordinals != _NAT_DAY_ORDINAL) & (day_ordinals < target_ordinal)
+    if not valid.any():
+        return pd.DataFrame(columns=columns)
+
+    player_ids = player_id_series.to_numpy(dtype=np.int64, na_value=-1)[valid]
+    day_ordinals = day_ordinals[valid]
+    order = np.lexsort((day_ordinals, player_ids))
+    sorted_player_ids = player_ids[order]
+    sorted_day_ordinals = day_ordinals[order]
+    starts = np.flatnonzero(
+        np.r_[True, sorted_player_ids[1:] != sorted_player_ids[:-1]]
+    )
+    ends = np.r_[starts[1:], len(order)]
+    size = len(starts)
+    days_since_last = np.zeros(size, dtype=float)
+    is_b2b = np.zeros(size, dtype=float)
+    is_3in4 = np.zeros(size, dtype=float)
+    is_4in6 = np.zeros(size, dtype=float)
+
+    for idx, (start, end) in enumerate(zip(starts, ends, strict=True)):
+        group_days = sorted_day_ordinals[start:end]
+        days_since = max(target_ordinal - int(group_days[-1]), 0)
+        days_since_last[idx] = float(days_since)
+        is_b2b[idx] = float(days_since == 1)
+        is_3in4[idx] = float(np.count_nonzero(group_days >= (target_ordinal - 4)) >= 2)
+        is_4in6[idx] = float(np.count_nonzero(group_days >= (target_ordinal - 6)) >= 3)
+
+    return pd.DataFrame(
+        {
+            "player_id": pd.Series(sorted_player_ids[starts], dtype="Int64"),
+            "days_since_last_recomp": days_since_last,
+            "is_b2b_recomp": is_b2b,
+            "is_3in4_recomp": is_3in4,
+            "is_4in6_recomp": is_4in6,
+        }
+    )
+
+
+def _select_recent_start_source(history_labels: pd.DataFrame) -> str | None:
+    if "starter_flag_label" in history_labels.columns:
+        sfl = pd.to_numeric(history_labels["starter_flag_label"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        if float(np.nanstd(sfl)) > 0.01:
+            return "starter_flag_label"
+    if "starter_flag" in history_labels.columns:
+        sf = pd.to_numeric(history_labels["starter_flag"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        if float(np.nanstd(sf)) > 0.01:
+            return "starter_flag"
+        if float(np.nanmean(sf)) > 0.95 and "starter_flag_label" in history_labels.columns:
+            return "starter_flag_label"
+    return None
+
+
+def _compute_recent_start_pct_frame(
+    history_labels: pd.DataFrame,
+    target_day: pd.Timestamp,
+    starter_col: str,
+) -> pd.DataFrame:
+    columns = ["player_id", "recent_start_pct_10_recomp"]
+    if history_labels.empty:
+        return pd.DataFrame(columns=columns)
+
+    working = history_labels.loc[:, ["player_id", "game_date", starter_col]].copy()
+    player_id_series = pd.to_numeric(working["player_id"], errors="coerce")
+    day_ordinals = _datetime_day_ordinals(working["game_date"])
+    starter_values = pd.to_numeric(working[starter_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    target_ordinal = _timestamp_day_ordinal(target_day)
+    valid = player_id_series.notna().to_numpy() & (day_ordinals != _NAT_DAY_ORDINAL) & (day_ordinals < target_ordinal)
+    if not valid.any():
+        return pd.DataFrame(columns=columns)
+
+    player_ids = player_id_series.to_numpy(dtype=np.int64, na_value=-1)[valid]
+    day_ordinals = day_ordinals[valid]
+    starter_values = starter_values[valid]
+    order = np.lexsort((day_ordinals, player_ids))
+    sorted_player_ids = player_ids[order]
+    sorted_starter_values = starter_values[order]
+    starts = np.flatnonzero(
+        np.r_[True, sorted_player_ids[1:] != sorted_player_ids[:-1]]
+    )
+    ends = np.r_[starts[1:], len(order)]
+    recent_start_pct = np.zeros(len(starts), dtype=float)
+
+    for idx, (start, end) in enumerate(zip(starts, ends, strict=True)):
+        recent_start_pct[idx] = float(sorted_starter_values[max(start, end - 10):end].mean())
+
+    return pd.DataFrame(
+        {
+            "player_id": pd.Series(sorted_player_ids[starts], dtype="Int64"),
+            "recent_start_pct_10_recomp": recent_start_pct,
+        }
+    )
+
+
+def _compute_live_role_history_frame(
+    history_labels: pd.DataFrame,
+    live_slice: pd.DataFrame,
+    target_day: pd.Timestamp,
+    starter_col: str | None,
+) -> pd.DataFrame:
+    columns = [
+        "player_id",
+        "team_id",
+        "season",
+        "starter_prev_game_asof",
+        "rotation_minutes_std_5g",
+        "role_change_rate_10g",
+        "season_phase",
+    ]
+    if live_slice.empty:
+        return pd.DataFrame(columns=columns)
+
+    live = live_slice.loc[:, ["player_id", "team_id", "season"]].copy()
+    live["player_id"] = pd.to_numeric(live["player_id"], errors="coerce").astype("Int64")
+    live["team_id"] = pd.to_numeric(live["team_id"], errors="coerce").astype("Int64")
+    live["season"] = live["season"].astype("string")
+    live["starter_prev_game_asof"] = 0.0
+    live["rotation_minutes_std_5g"] = 0.0
+    live["role_change_rate_10g"] = 0.0
+    live["season_phase"] = 0.0
+    if history_labels.empty:
+        return live
+
+    history = history_labels.loc[:, ["player_id", "team_id", "season", "game_date", "minutes"]].copy()
+    history["player_id"] = pd.to_numeric(history["player_id"], errors="coerce").astype("Int64")
+    history["team_id"] = pd.to_numeric(history["team_id"], errors="coerce").astype("Int64")
+    history["season"] = history["season"].astype("string")
+    history["game_date"] = pd.to_datetime(history["game_date"], errors="coerce")
+    history["minutes"] = pd.to_numeric(history["minutes"], errors="coerce").fillna(0.0)
+    if starter_col and starter_col in history_labels.columns:
+        history["starter_hist"] = pd.to_numeric(history_labels[starter_col], errors="coerce").fillna(0.0)
+    else:
+        history["starter_hist"] = 0.0
+
+    target_ordinal = _timestamp_day_ordinal(target_day)
+    live_starters = pd.to_numeric(live_slice.get("starter_flag"), errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    live_records: dict[tuple[int, int, str], tuple[int, float]] = {}
+    for pos, (idx, row) in enumerate(live.iterrows()):
+        if pd.isna(row["player_id"]) or pd.isna(row["team_id"]):
+            continue
+        key = (int(row["player_id"]), int(row["team_id"]), str(row["season"]))
+        live_records[key] = (idx, float(live_starters[pos]))
+
+    season_start_map: dict[str, int] = {}
+    history_valid = history.dropna(subset=["player_id", "team_id", "season", "game_date"]).copy()
+    if not history_valid.empty:
+        for season_value, group in history_valid.groupby("season", sort=False):
+            min_day = pd.to_datetime(group["game_date"], errors="coerce").min()
+            if pd.notna(min_day):
+                season_start_map[str(season_value)] = _timestamp_day_ordinal(pd.Timestamp(min_day))
+
+        history_valid["player_id"] = history_valid["player_id"].astype(int)
+        history_valid["team_id"] = history_valid["team_id"].astype(int)
+        history_valid["day_ordinal"] = _datetime_day_ordinals(history_valid["game_date"])
+        history_valid = history_valid[history_valid["day_ordinal"] < target_ordinal].copy()
+        if not history_valid.empty:
+            history_valid.sort_values(
+                ["player_id", "team_id", "season", "day_ordinal"],
+                kind="mergesort",
+                inplace=True,
+            )
+            for (player_id, team_id, season_value), group in history_valid.groupby(
+                ["player_id", "team_id", "season"], sort=False
+            ):
+                key = (int(player_id), int(team_id), str(season_value))
+                live_record = live_records.get(key)
+                if live_record is None:
+                    continue
+                out_idx, current_starter = live_record
+                hist_minutes = group["minutes"].to_numpy(dtype=float, copy=False)
+                hist_starters = group["starter_hist"].to_numpy(dtype=float, copy=False)
+
+                if hist_starters.size > 0:
+                    live.at[out_idx, "starter_prev_game_asof"] = float(hist_starters[-1])
+                    starter_window = hist_starters[-10:]
+                    starter_sequence = np.r_[starter_window, current_starter]
+                    if starter_sequence.size >= 2:
+                        changed = np.ones(starter_sequence.size, dtype=float)
+                        changed[1:] = starter_sequence[1:] != starter_sequence[:-1]
+                        live.at[out_idx, "role_change_rate_10g"] = float(
+                            changed[max(0, changed.size - 10):].mean()
+                        )
+
+                minutes_window = hist_minutes[-5:]
+                if minutes_window.size >= 3:
+                    live.at[out_idx, "rotation_minutes_std_5g"] = float(minutes_window.std(ddof=0))
+
+    for idx, season_value in live["season"].items():
+        season_start_ordinal = season_start_map.get(str(season_value))
+        if season_start_ordinal is None:
+            continue
+        days_since = max(target_ordinal - season_start_ordinal, 0)
+        live.at[idx, "season_phase"] = float(min(days_since / 180.0, 1.0))
+    return live
+
+
+def _compute_live_team_dispersion_prior_frame(
+    history_labels: pd.DataFrame,
+    target_day: pd.Timestamp,
+) -> pd.DataFrame:
+    columns = ["team_id", "team_minutes_dispersion_prior"]
+    if history_labels.empty:
+        return pd.DataFrame(columns=columns)
+
+    history = history_labels.loc[:, ["team_id", "game_id", "game_date", "minutes"]].copy()
+    history["team_id"] = pd.to_numeric(history["team_id"], errors="coerce").astype("Int64")
+    history["game_id"] = pd.to_numeric(history["game_id"], errors="coerce").astype("Int64")
+    history["game_date"] = pd.to_datetime(history["game_date"], errors="coerce")
+    history["minutes"] = pd.to_numeric(history["minutes"], errors="coerce")
+    history = history.dropna(subset=["team_id", "game_id", "game_date", "minutes"])
+    history = history[history["game_date"] < target_day].copy()
+    if history.empty:
+        return pd.DataFrame(columns=columns)
+
+    team_game = (
+        history.groupby(["team_id", "game_id", "game_date"], as_index=False)["minutes"]
+        .agg(lambda s: float(np.nanstd(s.to_numpy(dtype=float), ddof=0)))
+        .rename(columns={"minutes": "team_minutes_dispersion"})
+    )
+    if team_game.empty:
+        return pd.DataFrame(columns=columns)
+    team_game.sort_values(["team_id", "game_date"], kind="mergesort", inplace=True)
+    priors = (
+        team_game.groupby("team_id", as_index=False, sort=False)
+        .tail(1)
+        .loc[:, ["team_id", "team_minutes_dispersion"]]
+        .rename(columns={"team_minutes_dispersion": "team_minutes_dispersion_prior"})
+    )
+    priors["team_id"] = priors["team_id"].astype("Int64")
+    return priors
+
+
+def _maybe_log_memory_checkpoint(label: str, **frames: pd.DataFrame) -> None:
+    debug_flag = os.environ.get("PROJECTIONS_DEBUG_MEMORY", "").strip().lower()
+    if debug_flag not in {"1", "true", "yes", "on"}:
+        return
+    parts = [f"label={label}"]
+    try:
+        rss_mib = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) / 1024.0
+        parts.append(f"rss_mib={rss_mib:.1f}")
+    except Exception:
+        pass
+    for name, frame in frames.items():
+        if frame is None:
+            continue
+        try:
+            mem_mib = float(frame.memory_usage(index=True, deep=False).sum()) / (1024.0 * 1024.0)
+            parts.append(f"{name}_rows={len(frame)}")
+            parts.append(f"{name}_cols={len(frame.columns)}")
+            parts.append(f"{name}_mem_mib={mem_mib:.1f}")
+        except Exception:
+            parts.append(f"{name}_rows={len(frame)}")
+    typer.echo("[minutes-live][mem] " + " ".join(parts))
 
 
 def _verify_required_features(
@@ -317,28 +714,28 @@ def _player_hist_minutes_szn(
         return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
 
     working = labels.loc[:, ["player_id", "game_date", "minutes"]].copy()
-    working["game_date"] = pd.to_datetime(working["game_date"]).dt.normalize()
-    working = working.loc[working["game_date"] < target_day].copy()
-    if working.empty:
-        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
-
-    working["player_id"] = pd.to_numeric(working["player_id"], errors="coerce").astype("Int64")
-    working = working.dropna(subset=["player_id"])
-    if working.empty:
-        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
-
-    working = working.loc[working["player_id"].astype(int).isin(player_ids)].copy()
-    if working.empty:
-        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
-
-    working["minutes"] = pd.to_numeric(working["minutes"], errors="coerce").fillna(0.0).astype(float)
-    grouped = (
-        working.groupby("player_id", as_index=False)["minutes"]
-        .sum()
-        .rename(columns={"minutes": "hist_minutes_szn"})
+    player_id_series = pd.to_numeric(working["player_id"], errors="coerce")
+    game_day_ordinals = _datetime_day_ordinals(working["game_date"])
+    minutes = pd.to_numeric(working["minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    target_ordinal = _timestamp_day_ordinal(target_day)
+    valid = (
+        player_id_series.notna().to_numpy()
+        & (game_day_ordinals != _NAT_DAY_ORDINAL)
+        & (game_day_ordinals < target_ordinal)
     )
-    grouped["hist_minutes_szn"] = grouped["hist_minutes_szn"].astype(float)
-    return grouped
+    if not valid.any():
+        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
+
+    player_id_values = player_id_series.to_numpy(dtype=np.int64, na_value=-1)[valid]
+    in_scope = np.isin(player_id_values, np.fromiter(player_ids, dtype=np.int64))
+    if not in_scope.any():
+        return pd.DataFrame(columns=["player_id", "hist_minutes_szn"])
+
+    return _sum_float_by_keys(
+        keys=[player_id_values[in_scope]],
+        value_columns={"hist_minutes_szn": minutes[valid][in_scope]},
+        key_names=["player_id"],
+    )
 
 
 def _compute_vacancy_features(
@@ -372,8 +769,7 @@ def _compute_vacancy_features(
     injuries["as_of_ts"] = pd.to_datetime(injuries.get("as_of_ts"), utc=True, errors="coerce")
     injuries = (
         injuries.sort_values(["game_id", "player_id", "as_of_ts"], kind="mergesort")
-        .groupby(["game_id", "player_id"], as_index=False)
-        .tail(1)
+        .drop_duplicates(subset=["game_id", "player_id"], keep="last")
     )
 
     injuries = injuries.loc[_status_series_is_out_like(injuries["status"])].copy()
@@ -428,11 +824,18 @@ def _compute_vacancy_features(
     injuries["hist_minutes_wing_szn"] = injuries["hist_minutes_szn"].where(injuries["pos_bucket"] == "W", 0.0)
     injuries["hist_minutes_big_szn"] = injuries["hist_minutes_szn"].where(injuries["pos_bucket"] == "BIG", 0.0)
 
-    grouped = injuries.groupby(["game_id", "team_id"], as_index=False).agg(
-        vac_min_szn=("hist_minutes_szn", "sum"),
-        vac_min_guard_szn=("hist_minutes_guard_szn", "sum"),
-        vac_min_wing_szn=("hist_minutes_wing_szn", "sum"),
-        vac_min_big_szn=("hist_minutes_big_szn", "sum"),
+    grouped = _sum_float_by_keys(
+        keys=[
+            pd.to_numeric(injuries["game_id"], errors="coerce").to_numpy(dtype=np.int64, na_value=-1),
+            pd.to_numeric(injuries["team_id"], errors="coerce").to_numpy(dtype=np.int64, na_value=-1),
+        ],
+        value_columns={
+            "vac_min_szn": pd.to_numeric(injuries["hist_minutes_szn"], errors="coerce").fillna(0.0).to_numpy(dtype=float),
+            "vac_min_guard_szn": pd.to_numeric(injuries["hist_minutes_guard_szn"], errors="coerce").fillna(0.0).to_numpy(dtype=float),
+            "vac_min_wing_szn": pd.to_numeric(injuries["hist_minutes_wing_szn"], errors="coerce").fillna(0.0).to_numpy(dtype=float),
+            "vac_min_big_szn": pd.to_numeric(injuries["hist_minutes_big_szn"], errors="coerce").fillna(0.0).to_numpy(dtype=float),
+        },
+        key_names=["game_id", "team_id"],
     )
     for col in VACANCY_FEATURE_COLUMNS:
         grouped[col] = pd.to_numeric(grouped.get(col), errors="coerce").fillna(0.0).astype(float)
@@ -1373,7 +1776,6 @@ def _build_minutes_live_logic(
 
                     # Apply lineup status in roster_df based on Rotowire.
                     if not roster_df.empty and "player_name" in roster_df.columns:
-                        roster_df = roster_df.copy()
                         name_normalized = roster_df["player_name"].map(_normalize_name_for_matching)
                         tracked_names = rotowire_confirmed_names | rotowire_projected_names | rotowire_out_names
                         rotowire_match = name_normalized.isin(tracked_names)
@@ -1553,12 +1955,10 @@ def _build_minutes_live_logic(
     history_labels = labels_frame.copy()
     live_labels_working = live_labels.copy()
 
-    all_game_ids = pd.to_numeric(history_labels["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
     live_game_ids = pd.to_numeric(live_labels_working["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
-    schedule_slice = _filter_by_game_ids(schedule_df, all_game_ids + live_game_ids)
+    schedule_slice = _filter_by_game_ids(schedule_df, live_game_ids)
     if schedule_slice.empty:
         raise RuntimeError("Schedule slice is empty after filtering by requested game_ids.")
-    schedule_for_builder = schedule_slice.copy()
 
     allowed_live_ids = live_game_ids
     schedule_live = schedule_slice.copy()
@@ -1579,10 +1979,8 @@ def _build_minutes_live_logic(
         allowed_live_ids = pd.to_numeric(schedule_live["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
         live_labels_working = live_labels_working[live_labels_working["game_id"].isin(allowed_live_ids)].copy()
 
-    combined_labels = pd.concat([history_labels, live_labels_working], ignore_index=True, sort=False)
-    all_game_ids = pd.to_numeric(combined_labels["game_id"], errors="coerce").dropna().astype(int).unique().tolist()
-    if not all_game_ids:
-        raise RuntimeError("No game_ids available after combining historical labels and live stubs.")
+    if live_labels_working.empty or not allowed_live_ids:
+        raise RuntimeError("No live games remain after lock filtering.")
 
     tip_lookup = _per_game_tip_lookup(schedule_live)
 
@@ -1640,7 +2038,7 @@ def _build_minutes_live_logic(
         )
 
     builder = MinutesFeatureBuilder(
-        schedule=schedule_for_builder,
+        schedule=schedule_live.copy(),
         injuries_snapshot=injuries_slice,
         odds_snapshot=odds_slice,
         roster_nightly=roster_builder_slice,
@@ -1648,12 +2046,20 @@ def _build_minutes_live_logic(
         archetype_roles=roles_df,
         archetype_deltas=archetype_deltas_df,
     )
-    raw_features = builder.build(combined_labels)
+    _maybe_log_memory_checkpoint(
+        "pre_builder",
+        history_labels=history_labels,
+        live_labels=live_labels_working,
+        injuries_slice=injuries_slice,
+        roster_slice=roster_builder_slice,
+    )
+    raw_features = builder.build(live_labels_working)
+    _maybe_log_memory_checkpoint("post_builder", raw_features=raw_features)
     if "starter_flag" not in raw_features.columns and "starter_flag_label" in raw_features.columns:
         raw_features["starter_flag"] = raw_features["starter_flag_label"]
-    if "starter_flag" not in raw_features.columns and {"game_id", "player_id", "starter_flag"}.issubset(combined_labels.columns):
+    if "starter_flag" not in raw_features.columns and {"game_id", "player_id", "starter_flag"}.issubset(live_labels_working.columns):
         label_flags = (
-            combined_labels.loc[:, ["game_id", "player_id", "starter_flag"]]
+            live_labels_working.loc[:, ["game_id", "player_id", "starter_flag"]]
             .dropna(subset=["game_id", "player_id"])
             .drop_duplicates(subset=["game_id", "player_id"], keep="last")
         )
@@ -1670,6 +2076,7 @@ def _build_minutes_live_logic(
     # Guard against duplicate rows per player-game (multiple snapshots); keep latest feature_as_of_ts.
     live_slice = deduplicate_latest(live_slice, key_cols=KEY_COLUMNS, order_cols=["feature_as_of_ts"])
     live_slice = live_slice.drop_duplicates(subset=list(KEY_COLUMNS), keep="last").copy()
+    _maybe_log_memory_checkpoint("post_live_slice", aligned=aligned, live_slice=live_slice)
 
     # Recompute core trend features using history only (prior to target_day).
     trend_cols = [
@@ -1684,57 +2091,7 @@ def _build_minutes_live_logic(
         "z_vs_10",
     ]
     try:
-        history_work = history_labels.copy()
-        history_work["game_date"] = pd.to_datetime(history_work["game_date"]).dt.normalize()
-        history_work.sort_values(["player_id", "game_date"], inplace=True)
-        latest_by_player: list[dict[str, object]] = []
-        cutoff_7d = target_day - pd.Timedelta(days=7)
-        for pid, group in history_work.groupby("player_id"):
-            minutes = pd.to_numeric(group["minutes"], errors="coerce")
-            dates = pd.to_datetime(group["game_date"]).dt.normalize()
-            if minutes.empty:
-                continue
-            
-            # Filter out 0-minute games (DNP/injury) for rolling averages
-            # These should not count toward a player's baseline minutes expectation
-            played_mask = minutes > 0
-            played_minutes = minutes[played_mask]
-            
-            # Use last played game for min_last1 (not DNP games)
-            last_minutes = played_minutes.iloc[-1] if not played_minutes.empty else 0.0
-            
-            # Rolling averages over games actually played
-            last3 = played_minutes.tail(3).mean() if len(played_minutes) >= 1 else pd.NA
-            last5 = played_minutes.tail(5).mean() if len(played_minutes) >= 1 else pd.NA
-            mean3 = last3
-            mean5 = last5
-            mean10 = played_minutes.tail(10).mean() if len(played_minutes) >= 1 else pd.NA
-            iqr5 = played_minutes.tail(5).quantile(0.75) - played_minutes.tail(5).quantile(0.25) if len(played_minutes.tail(5)) >= 2 else 0.0
-            
-            # sum_min_7d uses all games in window (including DNPs, as it's schedule-aware)
-            recent_window = minutes[dates >= cutoff_7d]
-            sum7 = float(recent_window.sum()) if not recent_window.empty else 0.0
-            
-            # z-score over played games
-            last10_played = played_minutes.tail(10)
-            mu10 = last10_played.mean() if not last10_played.empty else 0.0
-            std10 = last10_played.std(ddof=0) if not last10_played.empty else 0.0
-            z10 = float((last_minutes - mu10) / std10) if std10 and std10 > 0 else 0.0
-            latest_by_player.append(
-                {
-                    "player_id": pid,
-                    "min_last1": float(last_minutes),
-                    "min_last3": float(last3) if pd.notna(last3) else pd.NA,
-                    "min_last5": float(last5) if pd.notna(last5) else pd.NA,
-                    "sum_min_7d": float(sum7),
-                    "roll_mean_3": float(mean3) if pd.notna(mean3) else pd.NA,
-                    "roll_mean_5": float(mean5) if pd.notna(mean5) else pd.NA,
-                    "roll_mean_10": float(mean10) if pd.notna(mean10) else pd.NA,
-                    "roll_iqr_5": float(iqr5) if pd.notna(iqr5) else 0.0,
-                    "z_vs_10": z10,
-                }
-            )
-        trend_frame = pd.DataFrame(latest_by_player)
+        trend_frame = _compute_live_trend_frame(history_labels, target_day)
         if not trend_frame.empty:
             live_slice = live_slice.merge(trend_frame, on="player_id", how="left", suffixes=("", "_recomp"))
             for col in trend_cols:
@@ -1745,54 +2102,35 @@ def _build_minutes_live_logic(
     except Exception as exc:  # pragma: no cover - defensive
         warnings.append(f"trend recompute failed: {exc}")
 
+    try:
+        dnp_frame = compute_dnp_history_features_for_live(
+            live_slice,
+            history_labels,
+            minutes_col="minutes",
+        )
+        for col in DNP_HISTORY_FEATURE_COLUMNS:
+            if col in dnp_frame.columns:
+                live_slice[col] = dnp_frame[col].to_numpy(copy=False)
+    except Exception as exc:  # pragma: no cover - defensive
+        warnings.append(f"dnp history recompute failed: {exc}")
+
     # ---------------------------------------------------------------------------
     # Recompute rest/schedule features from historical labels
     # These require per-player game history which the builder doesn't have in live mode
     # ---------------------------------------------------------------------------
     try:
-        history_work = history_labels.copy()
-        history_work["game_date"] = pd.to_datetime(history_work["game_date"]).dt.normalize()
-        history_work = history_work[history_work["game_date"] < target_day].copy()
-        if not history_work.empty:
-            history_work["player_id"] = pd.to_numeric(history_work["player_id"], errors="coerce").astype("Int64")
-            history_work = history_work.dropna(subset=["player_id"])
-            history_work.sort_values(["player_id", "game_date"], inplace=True)
-
-            rest_features: list[dict[str, object]] = []
-            for pid, group in history_work.groupby("player_id"):
-                dates = pd.to_datetime(group["game_date"]).dt.normalize().sort_values()
-                if dates.empty:
-                    continue
-
-                last_game_date = dates.iloc[-1]
-                days_since = (target_day - last_game_date).days
-
-                # Count games in last N days for is_3in4, is_4in6
-                games_in_4d = int((dates >= (target_day - pd.Timedelta(days=4))).sum())
-                games_in_6d = int((dates >= (target_day - pd.Timedelta(days=6))).sum())
-
-                rest_features.append({
-                    "player_id": pid,
-                    "days_since_last_recomp": float(days_since) if days_since >= 0 else 0.0,
-                    "is_b2b_recomp": int(days_since == 1),
-                    "is_3in4_recomp": int(games_in_4d >= 2),  # 3rd game in 4 days = already played 2
-                    "is_4in6_recomp": int(games_in_6d >= 3),  # 4th game in 6 days = already played 3
-                })
-
-            if rest_features:
-                rest_frame = pd.DataFrame(rest_features)
-                rest_frame["player_id"] = pd.to_numeric(rest_frame["player_id"], errors="coerce").astype("Int64")
-                live_slice = live_slice.merge(rest_frame, on="player_id", how="left")
-
-                for col in ["days_since_last", "is_b2b", "is_3in4", "is_4in6"]:
-                    recomp_col = f"{col}_recomp"
-                    if recomp_col in live_slice.columns:
-                        live_slice[col] = (
-                            pd.to_numeric(live_slice[recomp_col], errors="coerce")
-                            .combine_first(pd.to_numeric(live_slice.get(col), errors="coerce"))
-                            .fillna(0.0)
-                        )
-                        live_slice.drop(columns=[recomp_col], inplace=True)
+        rest_frame = _compute_live_rest_frame(history_labels, target_day)
+        if not rest_frame.empty:
+            live_slice = live_slice.merge(rest_frame, on="player_id", how="left")
+            for col in ["days_since_last", "is_b2b", "is_3in4", "is_4in6"]:
+                recomp_col = f"{col}_recomp"
+                if recomp_col in live_slice.columns:
+                    live_slice[col] = (
+                        pd.to_numeric(live_slice[recomp_col], errors="coerce")
+                        .combine_first(pd.to_numeric(live_slice.get(col), errors="coerce"))
+                        .fillna(0.0)
+                    )
+                    live_slice.drop(columns=[recomp_col], inplace=True)
     except Exception as exc:  # pragma: no cover - defensive
         warnings.append(f"rest feature recompute failed: {exc}")
 
@@ -1800,55 +2138,26 @@ def _build_minutes_live_logic(
     # Recompute recency features (recent_start_pct_10) from historical starter flags
     # NOTE: Use starter_flag_label as primary source; starter_flag may be corrupt (all 1s)
     # ---------------------------------------------------------------------------
+    starter_col: str | None = None
     try:
-        history_work = history_labels.copy()
-        history_work["game_date"] = pd.to_datetime(history_work["game_date"]).dt.normalize()
-        history_work = history_work[history_work["game_date"] < target_day].copy()
-        
-        # Determine the correct starter flag column to use
-        # Priority: starter_flag_label (ground truth) > starter_flag (may be corrupt)
-        starter_col = None
-        if "starter_flag_label" in history_work.columns:
-            # Check if starter_flag_label has valid variance
-            sfl = pd.to_numeric(history_work["starter_flag_label"], errors="coerce").fillna(0)
-            if sfl.std() > 0.01:  # Has variance (not all same value)
-                starter_col = "starter_flag_label"
-        
-        if starter_col is None and "starter_flag" in history_work.columns:
-            sf = pd.to_numeric(history_work["starter_flag"], errors="coerce").fillna(0)
-            # Check if starter_flag is corrupt (all 1s or all 0s)
-            if sf.std() > 0.01:  # Has variance
-                starter_col = "starter_flag"
-            elif sf.mean() > 0.95:  # All 1s - corrupt!
-                typer.echo(
-                    f"[minutes-live] WARNING: starter_flag is corrupt (all 1s, mean={sf.mean():.3f}). "
-                    "recent_start_pct_10 will use starter_flag_label fallback or default to 0."
-                )
-                warnings.append("starter_flag corrupt (all 1s); falling back to starter_flag_label")
-                # Try starter_flag_label even if variance check failed
-                if "starter_flag_label" in history_work.columns:
-                    starter_col = "starter_flag_label"
-        
-        if not history_work.empty and starter_col is not None:
-            history_work["player_id"] = pd.to_numeric(history_work["player_id"], errors="coerce").astype("Int64")
-            history_work["_starter_val"] = pd.to_numeric(history_work[starter_col], errors="coerce").fillna(0)
-            history_work = history_work.dropna(subset=["player_id"])
-            history_work.sort_values(["player_id", "game_date"], inplace=True)
+        corrupt_starter_flag = False
+        starter_flag_mean = 0.0
+        if "starter_flag" in history_labels.columns:
+            sf = pd.to_numeric(history_labels["starter_flag"], errors="coerce").fillna(0.0)
+            starter_flag_mean = float(sf.mean()) if len(sf) > 0 else 0.0
+            corrupt_starter_flag = starter_flag_mean > 0.95 and "starter_flag_label" in history_labels.columns
+        starter_col = _select_recent_start_source(history_labels)
+        if corrupt_starter_flag and starter_col == "starter_flag_label":
+            typer.echo(
+                f"[minutes-live] WARNING: starter_flag is corrupt (all 1s, mean={starter_flag_mean:.3f}). "
+                "recent_start_pct_10 will use starter_flag_label fallback or default to 0."
+            )
+            warnings.append("starter_flag corrupt (all 1s); falling back to starter_flag_label")
 
-            recency_features: list[dict[str, object]] = []
-            for pid, group in history_work.groupby("player_id"):
-                last_10 = group.tail(10)
-                start_pct = float(last_10["_starter_val"].mean()) if len(last_10) > 0 else 0.0
-                recency_features.append({
-                    "player_id": pid,
-                    "recent_start_pct_10_recomp": start_pct,
-                })
-
-            if recency_features:
-                recency_frame = pd.DataFrame(recency_features)
-                recency_frame["player_id"] = pd.to_numeric(recency_frame["player_id"], errors="coerce").astype("Int64")
+        if starter_col is not None:
+            recency_frame = _compute_recent_start_pct_frame(history_labels, target_day, starter_col)
+            if not recency_frame.empty:
                 live_slice = live_slice.merge(recency_frame, on="player_id", how="left")
-
                 if "recent_start_pct_10_recomp" in live_slice.columns:
                     live_slice["recent_start_pct_10"] = (
                         pd.to_numeric(live_slice["recent_start_pct_10_recomp"], errors="coerce")
@@ -1857,8 +2166,6 @@ def _build_minutes_live_logic(
                         .clip(0.0, 1.0)
                     )
                     live_slice.drop(columns=["recent_start_pct_10_recomp"], inplace=True)
-                    
-                    # Diagnostic: log distribution of recent_start_pct_10
                     rsp = live_slice["recent_start_pct_10"]
                     nonzero_count = int((rsp > 0).sum())
                     typer.echo(
@@ -1871,6 +2178,56 @@ def _build_minutes_live_logic(
                 typer.echo("[minutes-live] WARNING: No valid starter flag column found; recent_start_pct_10 will be 0")
     except Exception as exc:  # pragma: no cover - defensive
         warnings.append(f"recency feature recompute failed: {exc}")
+
+    try:
+        role_history_frame = _compute_live_role_history_frame(
+            history_labels,
+            live_slice,
+            target_day,
+            starter_col,
+        )
+        if not role_history_frame.empty:
+            live_slice = live_slice.merge(
+                role_history_frame,
+                on=["player_id", "team_id", "season"],
+                how="left",
+                suffixes=("", "_hist"),
+            )
+            for col in ("starter_prev_game_asof", "rotation_minutes_std_5g", "role_change_rate_10g", "season_phase"):
+                hist_col = f"{col}_hist"
+                if hist_col in live_slice.columns:
+                    live_slice[col] = (
+                        pd.to_numeric(live_slice[hist_col], errors="coerce")
+                        .combine_first(pd.to_numeric(live_slice.get(col), errors="coerce"))
+                        .fillna(0.0)
+                    )
+                    live_slice.drop(columns=[hist_col], inplace=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        warnings.append(f"role history recompute failed: {exc}")
+
+    try:
+        live_slice = builder._attach_within_team_rotation_ranks(live_slice)
+    except Exception as exc:  # pragma: no cover - defensive
+        warnings.append(f"rotation rank recompute failed: {exc}")
+
+    try:
+        team_dispersion_frame = _compute_live_team_dispersion_prior_frame(history_labels, target_day)
+        if not team_dispersion_frame.empty:
+            live_slice = live_slice.merge(
+                team_dispersion_frame,
+                on="team_id",
+                how="left",
+                suffixes=("", "_hist"),
+            )
+            if "team_minutes_dispersion_prior_hist" in live_slice.columns:
+                live_slice["team_minutes_dispersion_prior"] = (
+                    pd.to_numeric(live_slice["team_minutes_dispersion_prior_hist"], errors="coerce")
+                    .combine_first(pd.to_numeric(live_slice.get("team_minutes_dispersion_prior"), errors="coerce"))
+                    .fillna(0.0)
+                )
+                live_slice.drop(columns=["team_minutes_dispersion_prior_hist"], inplace=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        warnings.append(f"team dispersion recompute failed: {exc}")
 
     # Reinstate starter signals from roster slice if the builder dropped them.
     starter_cols = ["is_projected_starter", "is_confirmed_starter"]

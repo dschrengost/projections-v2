@@ -116,7 +116,12 @@ def attach_trend_features(df: pd.DataFrame) -> pd.DataFrame:
     rotation_std = team_groups["minutes"].apply(
         lambda s: s.shift(1).rolling(window=5, min_periods=3).std(ddof=0)
     )
-    working["rotation_minutes_std_5g"] = rotation_std.reindex(working.index).fillna(0.0)
+    if rotation_std.empty:
+        working["rotation_minutes_std_5g"] = 0.0
+    else:
+        if isinstance(rotation_std.index, pd.MultiIndex):
+            rotation_std = rotation_std.reset_index(level=list(range(rotation_std.index.nlevels - 1)), drop=True)
+        working["rotation_minutes_std_5g"] = rotation_std.reindex(working.index).fillna(0.0)
 
     starter_series = working.get("starter_flag")
     if starter_series is None:
@@ -130,7 +135,12 @@ def attach_trend_features(df: pd.DataFrame) -> pd.DataFrame:
         return changed.rolling(window=10, min_periods=2).mean().fillna(0.0)
 
     role_change = team_groups["starter_flag"].apply(_role_change)
-    working["role_change_rate_10g"] = role_change.reindex(working.index).fillna(0.0)
+    if role_change.empty:
+        working["role_change_rate_10g"] = 0.0
+    else:
+        if isinstance(role_change.index, pd.MultiIndex):
+            role_change = role_change.reset_index(level=list(range(role_change.index.nlevels - 1)), drop=True)
+        working["role_change_rate_10g"] = role_change.reindex(working.index).fillna(0.0)
 
     if {"season", "game_date"}.issubset(working.columns):
         game_dates = pd.to_datetime(working["game_date"]).dt.normalize()

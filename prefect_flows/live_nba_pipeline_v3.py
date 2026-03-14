@@ -42,10 +42,6 @@ from projections import model_selectors, ownership_selector, paths
 from projections.etl import storage as bronze_storage
 from projections.names import normalize_player_name
 from projections.pipeline import control_plane, writer_guard
-from projections.pipeline.gtv2_live_features import (
-    build_gtv2_live_features,
-    load_gtv2_feature_spec,
-)
 from projections.pipeline.parity_manifest import (
     build_parity_manifest,
     hash_paths,
@@ -168,7 +164,7 @@ _WORLD_DERIVED_STAT_CAPS: dict[str, float] = {
     "reb": 45.0,
     "dk_fpts": 150.0,
 }
-_RETRYABLE_SUBPROCESS_EXIT_CODES = frozenset({-11, -6, 134, 139})
+_RETRYABLE_SUBPROCESS_EXIT_CODES = frozenset({-11, -7, -6, 134, 135, 139})
 _SUBPROCESS_CRASH_RETRY_ATTEMPTS = max(
     1,
     int(os.environ.get("PROJECTIONS_SUBPROCESS_CRASH_RETRY_ATTEMPTS", "5")),
@@ -2250,63 +2246,9 @@ def _factorize_int_key_arrays_preserve_order(
         if len(arr) != row_count:
             raise RuntimeError("key array lengths must match for factorization")
 
-    # Fast path: factorize per-column then compose a dense mixed-radix code.
-    # This avoids O(n log n) full-row sorting and keeps large-world operations
-    # bounded while bypassing pandas MultiIndex factorization.
-    dense_max = int(os.environ.get("PROJECTIONS_MAX_DENSE_KEYSPACE", "8000000"))
-    # Guard against accidental giant keyspace settings that can trigger
-    # exabyte-scale bincount allocations in production.
-    dense_max = max(0, min(dense_max, 8_000_000))
-    keyspace = 1
-    per_col_codes: list[np.ndarray] = []
-    per_col_uniques: list[np.ndarray] = []
-    dense_path_ok = dense_max > 0
-    if dense_path_ok:
-        for arr in arrays:
-            codes, uniques = pd.factorize(arr, sort=False)
-            if bool(np.any(codes < 0)):
-                dense_path_ok = False
-                break
-            uniq = np.asarray(uniques, dtype=np.int64)
-            if uniq.size <= 0:
-                dense_path_ok = False
-                break
-            if keyspace > (dense_max // int(uniq.size)):
-                dense_path_ok = False
-                break
-            keyspace *= int(uniq.size)
-            per_col_codes.append(codes.astype(np.int64, copy=False))
-            per_col_uniques.append(uniq)
-
-    if dense_path_ok and keyspace > 0:
-        composed = per_col_codes[0].copy()
-        stride = int(per_col_uniques[0].size)
-        for idx in range(1, len(per_col_codes)):
-            composed += per_col_codes[idx] * stride
-            stride *= int(per_col_uniques[idx].size)
-        present = np.flatnonzero(
-            np.bincount(composed, minlength=keyspace)
-        ).astype(np.int64, copy=False)
-        if present.size <= 0:
-            empty_codes = np.array([], dtype=np.int64)
-            empty_uniques = [np.array([], dtype=np.int64) for _ in arrays]
-            return empty_codes, empty_uniques
-        group_codes = np.searchsorted(present, composed).astype(np.int64, copy=False)
-
-        decoded_codes: list[np.ndarray] = []
-        remaining = present.copy()
-        for uniq in per_col_uniques:
-            base = int(uniq.size)
-            decoded_codes.append((remaining % base).astype(np.int64, copy=False))
-            remaining //= base
-        unique_key_arrays = [
-            per_col_uniques[idx][decoded_codes[idx]].astype(np.int64, copy=False)
-            for idx in range(len(per_col_uniques))
-        ]
-        return group_codes, unique_key_arrays
-
-    # Fallback for higher-cardinality cases where dense-key composition would
-    # allocate too much memory.
+    # Use NumPy structured-array factorization directly. This stays fully
+    # vectorized, preserves first-seen group order, and avoids dense-keyspace
+    # composition that can overflow into pathological bincount allocations.
     dtype = [(f"k{idx}", np.int64) for idx in range(len(key_arrays))]
     key_struct = np.empty(row_count, dtype=dtype)
     for idx, arr in enumerate(arrays):
@@ -2336,6 +2278,28 @@ def _factorize_int_key_arrays_preserve_order(
     return inverse.astype(np.int64, copy=False), unique_key_arrays
 
 
+_INT64_FLOAT_MIN = float(np.iinfo(np.int64).min)
+_INT64_FLOAT_MAX = float(np.iinfo(np.int64).max)
+
+
+def _valid_int64_numeric_mask(values: np.ndarray) -> np.ndarray:
+    """Return rows that are finite, int64-bounded, and near-integral."""
+    valid = np.isfinite(values)
+    if not bool(np.any(valid)):
+        return valid
+    valid &= values >= _INT64_FLOAT_MIN
+    valid &= values <= _INT64_FLOAT_MAX
+    if not bool(np.any(valid)):
+        return valid
+    valid_positions = np.flatnonzero(valid)
+    rounded = np.rint(values[valid_positions])
+    integral = np.abs(values[valid_positions] - rounded) <= _WORLD_CONTRACT_TOL
+    if bool(np.all(integral)):
+        return valid
+    valid[valid_positions[~integral]] = False
+    return valid
+
+
 def _team_minutes_sums_without_pandas_groupby(
     *,
     world_idx_col: pd.Series,
@@ -2350,15 +2314,19 @@ def _team_minutes_sums_without_pandas_groupby(
     game_raw = pd.to_numeric(game_id_col, errors="coerce").to_numpy(dtype=float, copy=False)
     team_raw = pd.to_numeric(team_id_col, errors="coerce").to_numpy(dtype=float, copy=False)
     minutes = pd.to_numeric(minutes_col, errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
-    valid = np.isfinite(world_raw) & np.isfinite(game_raw) & np.isfinite(team_raw)
+    valid = (
+        _valid_int64_numeric_mask(world_raw)
+        & _valid_int64_numeric_mask(game_raw)
+        & _valid_int64_numeric_mask(team_raw)
+    )
     if not bool(np.any(valid)):
         empty_int = np.array([], dtype=np.int64)
         empty_float = np.array([], dtype=float)
         return empty_int, empty_int, empty_int, empty_float
 
-    world_vals = world_raw[valid].astype(np.int64, copy=False)
-    game_vals = game_raw[valid].astype(np.int64, copy=False)
-    team_vals = team_raw[valid].astype(np.int64, copy=False)
+    world_vals = np.rint(world_raw[valid]).astype(np.int64, copy=False)
+    game_vals = np.rint(game_raw[valid]).astype(np.int64, copy=False)
+    team_vals = np.rint(team_raw[valid]).astype(np.int64, copy=False)
     minute_vals = minutes[valid]
     group_codes, unique_key_arrays = _factorize_int_key_arrays_preserve_order(
         world_vals,
@@ -2706,6 +2674,8 @@ def _repair_world_frame_contract_fields(
             ) + nonfinite_rows
 
     for _col, _cap in _WORLD_BASE_STAT_CAPS.items():
+        if _col == "minutes":
+            continue
         _clip_numeric_with_cap(
             _col,
             _cap,
@@ -2812,20 +2782,25 @@ def _repair_world_frame_contract_fields(
             row_game_raw = pd.to_numeric(out["game_id"], errors="coerce").to_numpy(
                 dtype=float, copy=False
             )
-            valid_row_pairs = np.isfinite(row_world_raw) & np.isfinite(row_game_raw)
+            valid_row_pairs = _valid_int64_numeric_mask(row_world_raw) & _valid_int64_numeric_mask(
+                row_game_raw
+            )
             drop_mask = np.zeros(len(out), dtype=bool)
             if bool(np.any(valid_row_pairs)):
                 row_pairs = np.empty(int(np.count_nonzero(valid_row_pairs)), dtype=pair_dtype)
-                row_pairs["world_idx"] = row_world_raw[valid_row_pairs].astype(
+                row_pairs["world_idx"] = np.rint(row_world_raw[valid_row_pairs]).astype(
                     np.int64, copy=False
                 )
-                row_pairs["game_id"] = row_game_raw[valid_row_pairs].astype(
+                row_pairs["game_id"] = np.rint(row_game_raw[valid_row_pairs]).astype(
                     np.int64, copy=False
                 )
                 drop_mask[valid_row_pairs] = np.isin(row_pairs, bad_pairs)
+            if drop_mask.shape != (len(out),):
+                raise RuntimeError("world repair drop mask shape mismatch")
             dropped_rows = int(np.count_nonzero(drop_mask))
             if 0 < dropped_rows < len(out):
-                out = out.loc[~drop_mask].reset_index(drop=True)
+                keep_positions = np.flatnonzero(~drop_mask)
+                out = out.take(keep_positions).reset_index(drop=True)
                 report["applied"] = True
                 report["dropped_bad_world_game_pairs"] = int(len(bad_pairs))
                 report["dropped_bad_world_rows"] = dropped_rows
@@ -4952,6 +4927,11 @@ def build_features_gtv2_live_task(
             minutes_build_fallback_path = str(fallback_minutes_path)
         if not base_minutes_path.exists():
             raise RuntimeError(f"base minutes features not found: {base_minutes_path}")
+
+        from projections.pipeline.gtv2_live_features import (
+            build_gtv2_live_features,
+            load_gtv2_feature_spec,
+        )
 
         spec = load_gtv2_feature_spec(bundle_dir)
         base_df = pd.read_parquet(base_minutes_path)

@@ -30,7 +30,7 @@ instance_group [
 parameters [
   {
     key: "project_root"
-    value: { string_value: "/home/daniel/projects/projections-v2" }
+    value: { string_value: "/home/daniel/prod/projections-v2" }
   },
   {
     key: "bundle_dir"

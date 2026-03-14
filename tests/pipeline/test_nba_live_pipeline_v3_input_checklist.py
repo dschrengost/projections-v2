@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -14,6 +15,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _build_input_change_set,
     _build_publish_superseded_report,
     _coerce_world_game_date,
+    _factorize_int_key_arrays_preserve_order,
     _group_mean_by_keys_without_pandas_groupby,
     _build_rerun_plan,
     _compute_per_game_input_digests,
@@ -1586,6 +1588,23 @@ def test_group_mean_by_keys_without_pandas_groupby_matches_groupby_reference() -
     )
 
     pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_factorize_int_key_arrays_preserve_order_handles_large_sparse_keys() -> None:
+    game_ids = np.array(
+        [5_000_000_000_001, 5_000_000_000_001, 6_000_000_000_002, 5_000_000_000_001, 5_000_000_000_001],
+        dtype=np.int64,
+    )
+    team_ids = np.array([10, 10, 10, 11, 10], dtype=np.int64)
+    player_ids = np.array([100, 100, 100, 100, 100], dtype=np.int64)
+
+    codes, uniques = _factorize_int_key_arrays_preserve_order(game_ids, team_ids, player_ids)
+
+    assert codes.tolist() == [0, 0, 1, 2, 0]
+    assert len(uniques) == 3
+    assert uniques[0].tolist() == [5_000_000_000_001, 6_000_000_000_002, 5_000_000_000_001]
+    assert uniques[1].tolist() == [10, 10, 11]
+    assert uniques[2].tolist() == [100, 100, 100]
 
 
 def test_repair_world_frame_contract_fields_normalizes_game_id_and_makes() -> None:

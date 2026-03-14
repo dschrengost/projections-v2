@@ -7802,3 +7802,65 @@ equivalence with the *training-time* convention. `torch.chunk` (contiguous split
 and `Tensor.view` (interleaved reshape) produce different index mappings for the
 same flat buffer. Add a regression test that asserts `chunk` and `view+permute`
 equivalence for the affine case.
+
+### 17.5 Production Hardening: Live Minutes Feature Refactor (2026-03-13)
+
+**Severity:** P0 operational stability fix for `nba-live-pipeline-v3`.
+
+**Symptom:** repeated live failures in `build_minutes_live` with mixed native
+crashes (`exit_code=-11`, `exit_code=-7`) and eventual `earlyoom` kills. The
+live pipeline was often failing before GTv2 feature assembly could complete.
+
+**Root cause summary:**
+
+1. `projections/cli/build_minutes_live.py` was still running
+   `MinutesFeatureBuilder.build(...)` on the **full historical label frame**
+   plus live rows, then slicing back down to the target slate.
+2. The NumPy live-history recompute helpers introduced during hardening were
+   incorrectly grouping by `(player_id, game_date)` rather than `player_id`,
+   which could multiply the live merge cardinality and blow up memory.
+3. `projections/features/trend.py` had an empty-history edge case where
+   grouped volatility series hit a bad pandas `MultiIndex` reindex path.
+
+**Fix:**
+
+1. `build_minutes_live` now builds the base feature frame from **live rows only**.
+2. History-driven fields are reattached separately from narrow history scans:
+   - trend / rest / recent-start recomputes
+   - DNP history recompute
+   - starter / role history recompute
+   - team dispersion prior recompute
+   - within-team rotation ranks recompute
+3. Added optional RSS checkpoints gated by `PROJECTIONS_DEBUG_MEMORY=1`.
+4. Hardened `trend.py` so live-only/no-history groups fall back cleanly to zero
+   volatility / role-change signals instead of taking the pandas empty-MultiIndex path.
+
+**Verification:**
+
+- Targeted tests added/updated:
+  - `tests/test_build_minutes_features.py`
+  - `tests/test_minutes_features_volatility.py`
+  - `tests/features/test_availability_status_normalization.py`
+- Manual PROD flow run `boisterous-bird` (`run_id=20260314T022508Z`) completed
+  end to end after the refactor.
+- Measured live `build_minutes_live` RSS stayed roughly flat around
+  `541-672 MiB`, eliminating the previous 27-29 GiB growth and `earlyoom` terminations.
+
+**Rollback / bisect note:**
+
+- If a later regression appears in live minutes features, first inspect this
+  refactor in:
+  - `projections/cli/build_minutes_live.py`
+  - `projections/features/trend.py`
+- The intended rollback target is the pre-2026-03-13 live feature assembly path
+  where `MinutesFeatureBuilder.build(...)` consumed `combined_labels`
+  (history + live rows) directly.
+- Do **not** roll back blindly in production. If bisecting, replay a single
+  frozen live slate and compare:
+  - `recent_start_pct_10`
+  - `starter_prev_game_asof`
+  - `rotation_minutes_std_5g`
+  - `team_minutes_dispersion_prior`
+  - vacancy fields
+- The refactor was introduced for stability, not model-behavior experimentation,
+  so parity checks against frozen snapshots are the correct rollback gate.

@@ -54,6 +54,25 @@ def test_trend_features_handle_nullable_extension_dtypes() -> None:
     assert enriched["sum_min_7d"].notna().all()
 
 
+def test_trend_features_handle_live_only_rows_without_history() -> None:
+    df = pd.DataFrame(
+        {
+            "player_id": [1, 2],
+            "team_id": [7, 7],
+            "season": ["2025-26", "2025-26"],
+            "game_date": pd.to_datetime(["2025-03-01", "2025-03-01"]),
+            "minutes": [pd.NA, pd.NA],
+            "starter_flag": [1, 0],
+        }
+    )
+
+    enriched = trend_features.attach_trend_features(df)
+
+    assert len(enriched) == 2
+    assert enriched["rotation_minutes_std_5g"].eq(0.0).all()
+    assert enriched["role_change_rate_10g"].eq(0.0).all()
+
+
 def test_depth_same_pos_active_counts_active_teammates() -> None:
     base = pd.DataFrame(
         {

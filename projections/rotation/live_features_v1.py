@@ -251,7 +251,7 @@ def load_latest_rotation_priors_by_entity(
         if not root.exists():
             return pd.DataFrame()
 
-        records: list[dict] = []
+        frames: list[pd.DataFrame] = []
         skipped_paths: list[str] = []
         for path in sorted(root.glob("game_id=*.parquet")):
             # Skip non-regular-season games (All-Star, playoffs, etc.)
@@ -289,11 +289,17 @@ def load_latest_rotation_priors_by_entity(
                 skipped_paths.append(str(path))
                 continue
 
-            try:
-                records.extend(df.to_dict(orient="records"))
-            except Exception:
-                skipped_paths.append(str(path))
-                continue
+            if filter_ids:
+                try:
+                    entity_vals = pd.to_numeric(df[entity_col], errors="coerce")
+                    df = df.loc[entity_vals.isin(filter_ids)].copy()
+                except Exception:
+                    skipped_paths.append(str(path))
+                    continue
+                if df.empty:
+                    continue
+
+            frames.append(df)
 
         if skipped_paths:
             _logger.warning(
@@ -302,10 +308,10 @@ def load_latest_rotation_priors_by_entity(
                 root,
             )
 
-        if not records:
+        if not frames:
             return pd.DataFrame()
 
-        combined = pd.DataFrame.from_records(records)
+        combined = pd.concat(frames, ignore_index=True, copy=False)
         combined["game_date"] = pd.to_datetime(combined["game_date"], errors="coerce")
         combined[entity_col] = pd.to_numeric(combined[entity_col], errors="coerce").astype("Int64")
 
@@ -317,8 +323,8 @@ def load_latest_rotation_priors_by_entity(
             return pd.DataFrame()
 
         # Get the most recent row per entity
-        combined = combined.sort_values("game_date", ascending=False)
-        latest = combined.groupby(entity_col, dropna=False).first().reset_index()
+        combined = combined.sort_values("game_date", ascending=False, kind="stable", na_position="last")
+        latest = combined.drop_duplicates(subset=[entity_col], keep="first").reset_index(drop=True)
 
         return latest
 
