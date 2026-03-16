@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Sequence, Set, Tuple
 from uuid import uuid4
 
 import numpy as np
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from projections import paths
@@ -32,6 +32,207 @@ from projections.contest_sim.payout_generator import load_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+SUPPORTED_SITES = {"dk", "fd"}
+DK_ROSTER_SLOTS: Tuple[str, ...] = ("PG", "SG", "SF", "PF", "C", "G", "F", "UTIL")
+FD_ROSTER_SLOTS: Tuple[str, ...] = ("PG", "PG", "SG", "SG", "SF", "SF", "PF", "PF", "C")
+
+
+def _normalize_site(site: str | None) -> str:
+    site_norm = str(site or "dk").strip().lower()
+    if site_norm not in SUPPORTED_SITES:
+        raise ValueError(f"Unsupported site '{site}'. Expected one of {sorted(SUPPORTED_SITES)}")
+    return site_norm
+
+
+def _parse_position_tokens(raw: object) -> Set[str]:
+    tokens: List[str] = []
+    if isinstance(raw, (list, tuple, set)):
+        for item in raw:
+            text = str(item or "").strip()
+            if text:
+                tokens.append(text)
+    else:
+        text = str(raw or "").strip()
+        if text:
+            tokens.append(text)
+
+    out: Set[str] = set()
+    for token in tokens:
+        for piece in token.replace("|", "/").replace(",", "/").split("/"):
+            value = piece.strip().upper()
+            if value:
+                out.add(value)
+    return out
+
+
+def _is_position_eligible(site: str, slot: str, positions: Set[str]) -> bool:
+    slot_norm = str(slot or "").upper()
+    if site == "fd":
+        return slot_norm in positions
+
+    if slot_norm in {"PG", "SG", "SF", "PF", "C"}:
+        return slot_norm in positions
+    if slot_norm == "G":
+        return bool({"PG", "SG", "G"} & positions)
+    if slot_norm == "F":
+        return bool({"SF", "PF", "F"} & positions)
+    if slot_norm == "UTIL":
+        return bool({"PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"} & positions)
+    return False
+
+
+def _slots_for_site(site: str) -> Tuple[str, ...]:
+    return DK_ROSTER_SLOTS if site == "dk" else FD_ROSTER_SLOTS
+
+
+def _assign_lineup_slots(
+    lineup: Sequence[str],
+    *,
+    site: str,
+    positions_by_player: Dict[str, Set[str]],
+    lineup_idx: int,
+    context: str,
+) -> List[str]:
+    slots = _slots_for_site(site)
+    expected_size = len(slots)
+    players = [str(pid).strip() for pid in lineup if str(pid).strip()]
+
+    if len(players) != expected_size:
+        raise ValueError(
+            f"{context}[{lineup_idx}] must contain {expected_size} players for site={site}; got {len(players)}"
+        )
+    if len(set(players)) != expected_size:
+        raise ValueError(f"{context}[{lineup_idx}] contains duplicate players")
+
+    missing_positions = [pid for pid in players if pid not in positions_by_player]
+    if missing_positions:
+        raise ValueError(
+            f"{context}[{lineup_idx}] includes players missing slate positions for site={site}: {missing_positions[:6]}"
+        )
+
+    slot_candidates: List[List[str]] = []
+    for slot in slots:
+        elig_slot = ("C" if slot == "C" else slot[:2]) if site == "fd" else slot
+        cands = [
+            pid
+            for pid in players
+            if _is_position_eligible(site, elig_slot, positions_by_player[pid])
+        ]
+        if not cands:
+            raise ValueError(
+                f"{context}[{lineup_idx}] cannot satisfy slot '{slot}' for site={site}"
+            )
+        slot_candidates.append(cands)
+
+    assignment: List[str | None] = [None] * expected_size
+    used: Set[str] = set()
+    slot_order = sorted(range(expected_size), key=lambda idx: len(slot_candidates[idx]))
+
+    def backtrack(order_idx: int) -> bool:
+        if order_idx >= len(slot_order):
+            return True
+        slot_idx = slot_order[order_idx]
+        candidates = sorted(
+            (pid for pid in slot_candidates[slot_idx] if pid not in used),
+            key=lambda pid: (len(positions_by_player[pid]), pid),
+        )
+        for pid in candidates:
+            used.add(pid)
+            assignment[slot_idx] = pid
+            if backtrack(order_idx + 1):
+                return True
+            assignment[slot_idx] = None
+            used.remove(pid)
+        return False
+
+    if not backtrack(0):
+        raise ValueError(
+            f"{context}[{lineup_idx}] cannot be assigned to a valid {site.upper()} roster"
+        )
+
+    return [str(pid) for pid in assignment if pid is not None]
+
+
+def _build_positions_lookup(
+    *,
+    game_date: str,
+    draft_group_id: int,
+    site: str,
+    run_id: str | None,
+) -> Dict[str, Set[str]]:
+    player_pool = build_player_pool(
+        game_date=game_date,
+        draft_group_id=int(draft_group_id),
+        site=site,
+        run_id=run_id,
+        data_root=paths.data_path(),
+        include_unmatched_salaries=True,
+        allow_zero_projections=True,
+        exclude_inactive_players=False,
+        use_user_overrides=False,
+    )
+    out: Dict[str, Set[str]] = {}
+    for player in player_pool:
+        pid = str(player.get("player_id") or "").strip()
+        if not pid:
+            continue
+        positions = _parse_position_tokens(player.get("positions"))
+        if positions:
+            out[pid] = positions
+    return out
+
+
+def _normalize_lineups_for_site(
+    lineups: Sequence[Sequence[str]],
+    *,
+    game_date: str,
+    draft_group_id: int | None,
+    site: str,
+    run_id: str | None,
+    context: str,
+) -> List[List[str]]:
+    if not lineups:
+        return []
+
+    slots = _slots_for_site(site)
+    expected_size = len(slots)
+    for idx, lineup in enumerate(lineups):
+        n_players = len([str(pid).strip() for pid in lineup if str(pid).strip()])
+        if n_players != expected_size:
+            raise ValueError(
+                f"{context}[{idx}] must contain {expected_size} players for site={site}; got {n_players}"
+            )
+
+    if draft_group_id is None:
+        if site == "fd":
+            raise ValueError("draft_group_id is required for site=fd to validate FanDuel slot compliance")
+        # For DK, preserve existing behavior when slate metadata isn't provided.
+        return [[str(pid).strip() for pid in lineup if str(pid).strip()] for lineup in lineups]
+
+    positions_by_player = _build_positions_lookup(
+        game_date=game_date,
+        draft_group_id=int(draft_group_id),
+        site=site,
+        run_id=run_id,
+    )
+    if not positions_by_player:
+        raise ValueError(
+            f"Unable to load slate positions for {game_date} draft_group_id={draft_group_id} site={site}"
+        )
+
+    normalized: List[List[str]] = []
+    for idx, lineup in enumerate(lineups):
+        normalized.append(
+            _assign_lineup_slots(
+                lineup,
+                site=site,
+                positions_by_player=positions_by_player,
+                lineup_idx=idx,
+                context=context,
+            )
+        )
+    return normalized
 
 
 def _normalize_ownership_mode(mode: str | None) -> str:
@@ -105,6 +306,7 @@ def _list_sim_builds(game_date: str) -> List[Dict[str, object]]:
             builds.append({
                 "build_id": data.get("build_id", build_file.stem),
                 "game_date": data.get("game_date"),
+                "site": _normalize_site(str(data.get("site") or "dk")),
                 "draft_group_id": data.get("draft_group_id"),
                 "created_at": data.get("created_at"),
                 "lineups_count": data.get("lineups_count"),
@@ -121,16 +323,18 @@ def _list_sim_builds(game_date: str) -> List[Dict[str, object]]:
 def _load_player_ownership(
     game_date: str,
     *,
+    site: str = "dk",
     run_id: str | None = None,
     draft_group_id: int | None = None,
 ) -> Dict[str, float]:
     """Load player_id -> ownership % mapping for contest-sim dupe penalties."""
     if draft_group_id is not None:
         try:
+            site_norm = _normalize_site(site)
             pool = build_player_pool(
                 game_date=game_date,
                 draft_group_id=int(draft_group_id),
-                site="dk",
+                site=site_norm,
                 run_id=run_id,
                 data_root=paths.data_path(),
                 use_user_overrides=False,
@@ -356,6 +560,7 @@ class ContestSimRequest(BaseModel):
     """Request to run a contest simulation."""
 
     game_date: str = Field(..., description="Game date in YYYY-MM-DD format")
+    site: str = Field(default="dk", description="DFS site: dk or fd")
     run_id: Optional[str] = Field(default=None, description="Optional projections run_id (defaults to blessed/pinned/latest)")
     draft_group_id: Optional[int] = Field(default=None, description="Draft group ID")
     lineups: List[List[str]] = Field(..., description="List of lineups (each a list of player_ids)")
@@ -506,6 +711,7 @@ class ConfigResponse(BaseModel):
 class SavedSimBuildSummary(BaseModel):
     build_id: str
     game_date: str
+    site: str = "dk"
     draft_group_id: Optional[int] = None
     created_at: str
     lineups_count: int
@@ -517,6 +723,7 @@ class SavedSimBuildSummary(BaseModel):
 class SavedSimBuildDetail(BaseModel):
     build_id: str
     game_date: str
+    site: str = "dk"
     draft_group_id: Optional[int] = None
     created_at: str
     lineups_count: int
@@ -531,6 +738,7 @@ class SavedSimBuildDetail(BaseModel):
 
 class SaveSimLineupsRequest(BaseModel):
     game_date: str
+    site: str = "dk"
     draft_group_id: Optional[int] = None
     name: str
     lineups: List[List[str]]
@@ -552,6 +760,7 @@ class PortfolioExposureBoundsRequest(BaseModel):
 
 class PortfolioSelectionRequest(BaseModel):
     game_date: str
+    site: Optional[str] = None
     draft_group_id: Optional[int] = None
     source_build_id: str
     mode: Literal["greedy_constraints", "decorrelated_ev", "weighted_allocations"] = "decorrelated_ev"
@@ -593,6 +802,7 @@ class PortfolioSelectionRequest(BaseModel):
 
 
 class PortfolioSelectionResponse(BaseModel):
+    site: str = "dk"
     mode: str
     source_build_id: str
     candidate_count: int
@@ -609,6 +819,7 @@ class FieldLibrarySummaryResponse(BaseModel):
     """Summary of a cached field library."""
 
     version: str
+    site: str = "dk"
     path: str
     game_date: str
     draft_group_id: int
@@ -621,6 +832,7 @@ class FieldLibrarySummaryResponse(BaseModel):
 
 class BuildFieldLibraryRequest(BaseModel):
     game_date: str
+    site: str = "dk"
     draft_group_id: int
     version: str = "v0"
     k: int = 2500
@@ -648,6 +860,7 @@ async def run_simulation(request: ContestSimRequest):
     """
     try:
         try:
+            site_norm = _normalize_site(request.site)
             ownership_mode = _normalize_ownership_mode(request.ownership_mode)
             rank_mode = _normalize_rank_mode(request.rank_mode)
         except ValueError as exc:
@@ -669,11 +882,21 @@ async def run_simulation(request: ContestSimRequest):
         player_ownership = (
             _load_player_ownership(
                 request.game_date,
+                site=site_norm,
                 run_id=request.run_id,
                 draft_group_id=request.draft_group_id,
             )
             if use_dupe_ownership
             else {}
+        )
+
+        normalized_user_lineups = _normalize_lineups_for_site(
+            request.lineups,
+            game_date=request.game_date,
+            draft_group_id=request.draft_group_id,
+            site=site_norm,
+            run_id=request.run_id,
+            context="lineups",
         )
 
         field_lineups = None
@@ -698,6 +921,7 @@ async def run_simulation(request: ContestSimRequest):
             library, lib_path, built_now = load_or_build_field_library(
                 game_date=request.game_date,
                 draft_group_id=int(request.draft_group_id),
+                site=site_norm,
                 version=version,
                 k=int(request.field_library_k),
                 candidate_pool_size=int(request.field_candidate_pool_size),
@@ -705,9 +929,17 @@ async def run_simulation(request: ContestSimRequest):
                 rebuild_candidates=bool(request.field_library_rebuild_candidates),
                 use_ownership_features=use_field_ownership,
             )
-            field_lineups = library.lineups
+            field_lineups = _normalize_lineups_for_site(
+                library.lineups,
+                game_date=request.game_date,
+                draft_group_id=request.draft_group_id,
+                site=site_norm,
+                run_id=request.run_id,
+                context="field_lineups",
+            )
             field_weights = library.weights
             field_library_info = {
+                "site": site_norm,
                 "field_mode": request.field_mode,
                 "field_library_path": str(lib_path),
                 "field_library_built_now": built_now,
@@ -721,8 +953,9 @@ async def run_simulation(request: ContestSimRequest):
             }
         
         result = run_contest_simulation(
-            user_lineups=request.lineups,
+            user_lineups=normalized_user_lineups,
             game_date=request.game_date,
+            site=site_norm,
             draft_group_id=request.draft_group_id,
             run_id=request.run_id,
             archetype=request.archetype,
@@ -744,6 +977,7 @@ async def run_simulation(request: ContestSimRequest):
         else:
             result.stats.debug.update(
                 {
+                    "site": site_norm,
                     "ownership_mode": ownership_mode,
                     "rank_mode": rank_mode,
                     "worlds_source": request.worlds_source,
@@ -753,9 +987,10 @@ async def run_simulation(request: ContestSimRequest):
         build_data = {
             "build_id": str(uuid4()),
             "game_date": request.game_date,
+            "site": site_norm,
             "draft_group_id": request.draft_group_id,
             "created_at": datetime.utcnow().isoformat(),
-            "lineups_count": len(request.lineups),
+            "lineups_count": len(normalized_user_lineups),
             "kind": "run",
             "name": None,
             "config": {
@@ -767,7 +1002,7 @@ async def run_simulation(request: ContestSimRequest):
             },
             "stats": result.stats.to_dict(),
             "results": [r.to_dict() for r in result.results],
-            "lineups": request.lineups,
+            "lineups": normalized_user_lineups,
             "request": request.model_dump(),
         }
         build_id = _save_sim_build(request.game_date, build_data)
@@ -788,6 +1023,9 @@ async def run_simulation(request: ContestSimRequest):
             build_id=build_id,
         )
 
+    except ValueError as e:
+        logger.error("Contest simulation validation failed: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         logger.error(f"Worlds data not found: {e}")
         raise HTTPException(status_code=404, detail=str(e))
@@ -841,9 +1079,21 @@ async def get_config():
 async def list_saved_sim_builds(
     date: str,
     kind: Optional[str] = None,
+    site: Optional[str] = Query(default=None, description="Optional site filter: dk or fd"),
 ):
     """List saved contest sim builds for a date."""
     builds = _list_sim_builds(date)
+    if site is not None:
+        site_norm = _normalize_site(site)
+        filtered: List[Dict[str, object]] = []
+        for b in builds:
+            try:
+                build_site = _normalize_site(str(b.get("site") or "dk"))
+            except ValueError:
+                continue
+            if build_site == site_norm:
+                filtered.append(b)
+        builds = filtered
     if kind:
         builds = [b for b in builds if b.get("kind") == kind]
     return builds
@@ -896,6 +1146,7 @@ async def load_saved_sim_build(build_id: str, date: str):
     return SavedSimBuildDetail(
         build_id=data.get("build_id", build_id),
         game_date=data.get("game_date", date),
+        site=_normalize_site(str(data.get("site") or "dk")),
         draft_group_id=data.get("draft_group_id"),
         created_at=data.get("created_at", datetime.utcnow().isoformat()),
         lineups_count=data.get("lineups_count", 0),
@@ -912,69 +1163,93 @@ async def load_saved_sim_build(build_id: str, date: str):
 @router.post("/saved-lineups", response_model=SavedSimBuildSummary)
 async def save_sim_lineups(request: SaveSimLineupsRequest):
     """Save a named lineup set derived from contest sim results."""
-    if not request.lineups:
-        raise HTTPException(status_code=400, detail="No lineups provided")
-    if not request.results or not request.config or not request.stats:
-        raise HTTPException(status_code=400, detail="Snapshot results/config/stats are required to save sim lineups")
-    results_payload = [r.model_dump() for r in request.results] if request.results else None
-    if results_payload:
-        base_debug = (
-            request.stats.model_dump().get("debug", {})
-            if request.stats
-            else {}
-        )
-        stats_payload = _summary_stats_from_results(
-            results_payload,
-            worlds_count=request.stats.worlds_count if request.stats else 0,
-            debug=dict(base_debug),
-        )
-    else:
-        stats_payload = request.stats.model_dump() if request.stats else {}
-    if stats_payload:
-        debug_payload = dict(stats_payload.get("debug") or {})
-        if request.selection_mode:
-            debug_payload["selection_mode"] = request.selection_mode
-        if request.source_build_id:
-            debug_payload["source_build_id"] = request.source_build_id
-        if request.selection_config:
-            debug_payload["selection_config"] = request.selection_config
-        if request.selection_diagnostics:
-            debug_payload["selection"] = request.selection_diagnostics
-        if request.warnings:
-            debug_payload["selection_warnings"] = list(request.warnings)
-        stats_payload["debug"] = debug_payload
+    try:
+        site_norm = _normalize_site(request.site)
+        if not request.lineups:
+            raise HTTPException(status_code=400, detail="No lineups provided")
+        if not request.results or not request.config or not request.stats:
+            raise HTTPException(status_code=400, detail="Snapshot results/config/stats are required to save sim lineups")
 
-    build_data = {
-        "build_id": str(uuid4()),
-        "game_date": request.game_date,
-        "draft_group_id": request.draft_group_id,
-        "created_at": datetime.utcnow().isoformat(),
-        "lineups_count": len(request.lineups),
-        "kind": request.kind,
-        "name": request.name,
-        "stats": stats_payload,
-        "config": request.config.model_dump() if request.config else None,
-        "results": results_payload,
-        "lineups": request.lineups,
-        "request": {
-            "source_build_id": request.source_build_id,
-            "selection_mode": request.selection_mode,
-            "selection_config": request.selection_config,
-            "selection_diagnostics": request.selection_diagnostics,
-            "warnings": request.warnings,
-        },
-    }
-    build_id = _save_sim_build(request.game_date, build_data)
-    return SavedSimBuildSummary(
-        build_id=build_id,
-        game_date=request.game_date,
-        draft_group_id=request.draft_group_id,
-        created_at=build_data["created_at"],
-        lineups_count=len(request.lineups),
-        name=request.name,
-        kind=request.kind,
-        stats=build_data["stats"] or {},
-    )
+        if site_norm == "fd":
+            normalized_lineups = _normalize_lineups_for_site(
+                request.lineups,
+                game_date=request.game_date,
+                draft_group_id=request.draft_group_id,
+                site=site_norm,
+                run_id=None,
+                context="lineups",
+            )
+        else:
+            normalized_lineups = [
+                [str(pid).strip() for pid in lineup if str(pid).strip()]
+                for lineup in request.lineups
+            ]
+
+        results_payload = [r.model_dump() for r in request.results] if request.results else None
+        if results_payload:
+            base_debug = (
+                request.stats.model_dump().get("debug", {})
+                if request.stats
+                else {}
+            )
+            stats_payload = _summary_stats_from_results(
+                results_payload,
+                worlds_count=request.stats.worlds_count if request.stats else 0,
+                debug=dict(base_debug),
+            )
+        else:
+            stats_payload = request.stats.model_dump() if request.stats else {}
+        if stats_payload:
+            debug_payload = dict(stats_payload.get("debug") or {})
+            debug_payload["site"] = site_norm
+            if request.selection_mode:
+                debug_payload["selection_mode"] = request.selection_mode
+            if request.source_build_id:
+                debug_payload["source_build_id"] = request.source_build_id
+            if request.selection_config:
+                debug_payload["selection_config"] = request.selection_config
+            if request.selection_diagnostics:
+                debug_payload["selection"] = request.selection_diagnostics
+            if request.warnings:
+                debug_payload["selection_warnings"] = list(request.warnings)
+            stats_payload["debug"] = debug_payload
+
+        build_data = {
+            "build_id": str(uuid4()),
+            "game_date": request.game_date,
+            "site": site_norm,
+            "draft_group_id": request.draft_group_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "lineups_count": len(normalized_lineups),
+            "kind": request.kind,
+            "name": request.name,
+            "stats": stats_payload,
+            "config": request.config.model_dump() if request.config else None,
+            "results": results_payload,
+            "lineups": normalized_lineups,
+            "request": {
+                "site": site_norm,
+                "source_build_id": request.source_build_id,
+                "selection_mode": request.selection_mode,
+                "selection_config": request.selection_config,
+                "selection_diagnostics": request.selection_diagnostics,
+                "warnings": request.warnings,
+            },
+        }
+        build_id = _save_sim_build(request.game_date, build_data)
+        return SavedSimBuildSummary(
+            build_id=build_id,
+            game_date=request.game_date,
+            site=site_norm,
+            draft_group_id=request.draft_group_id,
+            created_at=build_data["created_at"],
+            lineups_count=len(normalized_lineups),
+            name=request.name,
+            kind=request.kind,
+            stats=build_data["stats"] or {},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/portfolio", response_model=PortfolioSelectionResponse)
@@ -1000,6 +1275,18 @@ async def select_portfolio(request: PortfolioSelectionRequest):
             detail="Source build does not contain contest-sim results",
         )
 
+    try:
+        source_site = _normalize_site(str(source_build.get("site") or "dk"))
+    except ValueError:
+        source_site = "dk"
+    if request.site is not None and _normalize_site(request.site) != source_site:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Portfolio request site={request.site} does not match source build site={source_site}"
+            ),
+        )
+
     run_request = source_build.get("request") or {}
     source_run_id = run_request.get("run_id")
     draft_group_id = (
@@ -1009,6 +1296,7 @@ async def select_portfolio(request: PortfolioSelectionRequest):
     )
     ownership = _load_player_ownership(
         request.game_date,
+        site=source_site,
         run_id=str(source_run_id) if source_run_id else None,
         draft_group_id=int(draft_group_id) if draft_group_id is not None else None,
     )
@@ -1085,6 +1373,7 @@ async def select_portfolio(request: PortfolioSelectionRequest):
             seed_lineup_ids.append(lineup_id)
 
     diagnostics: Dict[str, object] = {
+        "site": source_site,
         "mode": request.mode,
         "sort_key": request.sort_key,
         "sort_dir": request.sort_dir,
@@ -1244,14 +1533,31 @@ async def select_portfolio(request: PortfolioSelectionRequest):
         )
 
     selected_results = [result_by_id[c.lineup_id] for c in selection.selected]
+    selected_lineups_raw = [list(r.get("player_ids", [])) for r in selected_results]
+    if source_site == "fd":
+        try:
+            selected_lineups = _normalize_lineups_for_site(
+                selected_lineups_raw,
+                game_date=request.game_date,
+                draft_group_id=int(draft_group_id) if draft_group_id is not None else None,
+                site=source_site,
+                run_id=str(source_run_id) if source_run_id else None,
+                context="selected_lineups",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        selected_lineups = selected_lineups_raw
+
     return PortfolioSelectionResponse(
+        site=source_site,
         mode=request.mode,
         source_build_id=request.source_build_id,
         candidate_count=source_candidate_count,
         filtered_candidate_count=filtered_candidate_count,
         selected_lineup_ids=[c.lineup_id for c in selection.selected],
         selected_results=[LineupEVResultResponse(**r) for r in selected_results],
-        selected_lineups=[list(r.get("player_ids", [])) for r in selected_results],
+        selected_lineups=selected_lineups,
         diagnostics=diagnostics,
         warnings=warnings,
     )
@@ -1267,17 +1573,26 @@ async def delete_saved_sim_build(build_id: str, date: str):
 
 
 @router.get("/field-libraries", response_model=List[FieldLibrarySummaryResponse])
-async def list_field_libraries(date: str, draft_group_id: int):
+async def list_field_libraries(
+    date: str,
+    draft_group_id: int,
+    site: str = Query(default="dk", description="Site: dk or fd"),
+):
     """List cached field libraries for a slate."""
+    site_norm = _normalize_site(site)
     paths = list_field_library_paths(date, int(draft_group_id))
     summaries: List[FieldLibrarySummaryResponse] = []
     for path in paths:
         try:
             library = load_field_library(path)
+            lib_site = _normalize_site(str(library.meta.get("site") or "dk"))
+            if lib_site != site_norm:
+                continue
             version = path.stem.replace("field_library_", "")
             summaries.append(
                 FieldLibrarySummaryResponse(
                     version=version,
+                    site=lib_site,
                     path=str(path),
                     game_date=str(library.meta.get("game_date", date)),
                     draft_group_id=int(library.meta.get("draft_group_id", draft_group_id)),
@@ -1298,6 +1613,7 @@ async def list_field_libraries(date: str, draft_group_id: int):
 async def build_field_library(request: BuildFieldLibraryRequest):
     """Build (or rebuild) a cached field library for a slate."""
     try:
+        site_norm = _normalize_site(request.site)
         ownership_mode = _normalize_ownership_mode(request.ownership_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1311,6 +1627,7 @@ async def build_field_library(request: BuildFieldLibraryRequest):
     library, path, _built_now = load_or_build_field_library(
         game_date=request.game_date,
         draft_group_id=int(request.draft_group_id),
+        site=site_norm,
         version=version,
         k=int(request.k),
         candidate_pool_size=int(request.candidate_pool_size),
@@ -1321,6 +1638,7 @@ async def build_field_library(request: BuildFieldLibraryRequest):
     version = Path(path).stem.replace("field_library_", "")
     return FieldLibrarySummaryResponse(
         version=version,
+        site=site_norm,
         path=str(path),
         game_date=str(library.meta.get("game_date", request.game_date)),
         draft_group_id=int(library.meta.get("draft_group_id", request.draft_group_id)),

@@ -64,5 +64,6 @@ Production data lives **outside this repo** at `/home/daniel/projections-data/`:
 - [10_CONTROL_PLANE.md](./10_CONTROL_PLANE.md) - Pipeline orchestration
 - [20_DATA_CONTRACTS.md](./20_DATA_CONTRACTS.md) - Data schemas
 - [30_DEV_PLAYBOOK.md](./30_DEV_PLAYBOOK.md) - Developer workflows
+- [pipeline/FANDUEL_INTEGRATION_SPEC.md](./pipeline/FANDUEL_INTEGRATION_SPEC.md) - Living FanDuel integration roadmap
 - [ownership/README.md](./ownership/README.md) - Ownership system overview and related specs
 - [minutes/rotation_set_minutes_v1_rapid_iteration.md](./minutes/rotation_set_minutes_v1_rapid_iteration.md) - Retrain + promote rotation-set minutes quickly

@@ -495,6 +495,7 @@ def run_contest_simulation(
     *,
     user_lineups: List[List[str]],
     game_date: str,
+    site: str = "dk",
     draft_group_id: int | None = None,
     run_id: str | None = None,
     archetype: str = "medium",
@@ -912,6 +913,7 @@ def run_contest_simulation(
         )
 
     debug_payload: dict[str, object] = {
+        "site": str(site or "dk").strip().lower(),
         "user_total_entries": user_total_entries,
         "field_total_entries": int(sum(scaled_field_weights)),
         "total_entries": int(user_total_entries + sum(scaled_field_weights)),

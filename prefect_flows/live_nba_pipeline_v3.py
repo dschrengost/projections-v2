@@ -1987,8 +1987,9 @@ def _sanitize_frame_to_expected_keys(
     null_mask = work_keys.loc[:, key_cols_list].isna().any(axis=1)
     dropped_null_key_rows = int(null_mask.sum())
     keep_non_null = ~null_mask.to_numpy(dtype=bool, copy=False)
-    non_null_df = df.iloc[keep_non_null]
-    work_keys = work_keys.iloc[keep_non_null]
+    keep_non_null_positions = np.flatnonzero(keep_non_null)
+    non_null_df = df.take(keep_non_null_positions)
+    work_keys = work_keys.take(keep_non_null_positions)
     for col in key_cols:
         work_keys[col] = work_keys[col].astype("int64", copy=False)
 
@@ -2026,8 +2027,9 @@ def _sanitize_frame_to_expected_keys(
     dropped_unexpected_key_rows = int(np.count_nonzero(~keep_mask))
     # Use positional masking to avoid pandas indexer edge cases on sparse/high
     # integer labels observed in long-running worker processes.
-    merged = non_null_df.iloc[keep_mask].reset_index(drop=True)
-    merged_keys = work_keys.iloc[keep_mask].loc[:, key_cols_list].reset_index(drop=True)
+    keep_positions = np.flatnonzero(keep_mask)
+    merged = non_null_df.take(keep_positions).reset_index(drop=True)
+    merged_keys = work_keys.take(keep_positions).loc[:, key_cols_list].reset_index(drop=True)
     for col in key_cols:
         merged[col] = merged_keys[col].astype("int64", copy=False)
 
@@ -2246,34 +2248,37 @@ def _factorize_int_key_arrays_preserve_order(
         if len(arr) != row_count:
             raise RuntimeError("key array lengths must match for factorization")
 
-    # Use NumPy structured-array factorization directly. This stays fully
-    # vectorized, preserves first-seen group order, and avoids dense-keyspace
-    # composition that can overflow into pathological bincount allocations.
-    dtype = [(f"k{idx}", np.int64) for idx in range(len(key_arrays))]
-    key_struct = np.empty(row_count, dtype=dtype)
-    for idx, arr in enumerate(arrays):
-        key_struct[f"k{idx}"] = arr
+    # Build group ids from a stable lexicographic sort instead of relying on
+    # np.unique(..., return_inverse=True) for structured dtypes. That inverse
+    # path has produced corrupted indices intermittently on live worker data.
+    sort_order = np.lexsort(tuple(arrays[::-1]))
+    sorted_arrays = [arr[sort_order] for arr in arrays]
 
-    uniques, first_idx, inverse = np.unique(
-        key_struct,
-        return_index=True,
-        return_inverse=True,
-    )
-    if len(uniques) <= 0:
+    unique_mask = np.ones(row_count, dtype=bool)
+    for arr in sorted_arrays:
+        unique_mask[1:] &= arr[1:] == arr[:-1]
+    unique_mask = ~unique_mask
+    unique_mask[0] = True
+
+    group_starts = np.flatnonzero(unique_mask)
+    if len(group_starts) <= 0:
         empty_codes = np.array([], dtype=np.int64)
         empty_uniques = [np.array([], dtype=np.int64) for _ in key_arrays]
         return empty_codes, empty_uniques
 
-    order = np.argsort(first_idx, kind="mergesort")
-    if not np.array_equal(order, np.arange(len(order))):
-        remap = np.empty(len(order), dtype=np.int64)
-        remap[order] = np.arange(len(order), dtype=np.int64)
-        inverse = remap[inverse]
-        uniques = uniques[order]
+    sorted_codes = np.cumsum(unique_mask, dtype=np.int64) - 1
+    first_positions = np.minimum.reduceat(sort_order, group_starts)
+    first_seen_order = np.argsort(first_positions, kind="mergesort")
+
+    remap = np.empty(len(group_starts), dtype=np.int64)
+    remap[first_seen_order] = np.arange(len(group_starts), dtype=np.int64)
+
+    inverse = np.empty(row_count, dtype=np.int64)
+    inverse[sort_order] = remap[sorted_codes]
 
     unique_key_arrays = [
-        uniques[f"k{idx}"].astype(np.int64, copy=False)
-        for idx in range(len(key_arrays))
+        sorted_arrays[idx][group_starts][first_seen_order].astype(np.int64, copy=False)
+        for idx in range(len(arrays))
     ]
     return inverse.astype(np.int64, copy=False), unique_key_arrays
 
@@ -2507,9 +2512,18 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
     present_numeric = [col for col in numeric_cols if col in df.columns]
     if present_numeric:
-        numeric_frame = df.loc[:, present_numeric].abs()
-        max_abs_stat_value = float(numeric_frame.max().max())
-        extreme_stat_rows_over_1e6 = int((numeric_frame.max(axis=1) > 1e6).sum())
+        numeric_arrays = [
+            np.abs(pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float, copy=False))
+            for col in present_numeric
+        ]
+        if numeric_arrays:
+            stacked_numeric = np.column_stack(numeric_arrays)
+            row_max = stacked_numeric.max(axis=1) if stacked_numeric.size > 0 else np.array([], dtype=float)
+            max_abs_stat_value = float(row_max.max()) if row_max.size > 0 else 0.0
+            extreme_stat_rows_over_1e6 = int(np.count_nonzero(row_max > 1e6))
+        else:
+            max_abs_stat_value = 0.0
+            extreme_stat_rows_over_1e6 = 0
     else:
         max_abs_stat_value = 0.0
         extreme_stat_rows_over_1e6 = 0
@@ -2539,7 +2553,7 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
             negative_stats += int((df[col] < -_WORLD_CONTRACT_TOL).sum())
     if "active" in df.columns:
         inactive_mask = (
-            pd.to_numeric(df["active"], errors="coerce").fillna(0).astype(int) <= 0
+            pd.to_numeric(df["active"], errors="coerce").fillna(0).to_numpy(dtype=int, copy=False) <= 0
         )
         stat_cols = [
             c
@@ -2560,10 +2574,17 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
             if c in df.columns
         ]
         if stat_cols:
+            stat_arrays = [
+                np.abs(pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float, copy=False))
+                for col in stat_cols
+            ]
+            stacked_stats = np.column_stack(stat_arrays)
             nonzero_stats = (
-                df.loc[:, stat_cols].abs().sum(axis=1) > _WORLD_CONTRACT_TOL
+                stacked_stats.sum(axis=1) > _WORLD_CONTRACT_TOL
+                if stacked_stats.size > 0
+                else np.zeros(len(df), dtype=bool)
             )
-            inactive_nonzero_stats = int((inactive_mask & nonzero_stats).sum())
+            inactive_nonzero_stats = int(np.count_nonzero(inactive_mask & nonzero_stats))
         else:
             inactive_nonzero_stats = 0
         dk_nonzero = (
@@ -2573,7 +2594,9 @@ def _summarize_world_contracts_from_frame(worlds_df: pd.DataFrame) -> dict[str, 
             pd.to_numeric(df.get("minutes", 0), errors="coerce").fillna(0.0).abs()
             > _WORLD_CONTRACT_TOL
         )
-        inactive_nonzero_fpts_proxy = int((inactive_mask & dk_nonzero).sum())
+        inactive_nonzero_fpts_proxy = int(
+            np.count_nonzero(inactive_mask & np.asarray(dk_nonzero, dtype=bool))
+        )
     else:
         inactive_nonzero_stats = 0
         inactive_nonzero_fpts_proxy = 0

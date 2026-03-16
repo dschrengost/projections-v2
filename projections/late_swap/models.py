@@ -248,6 +248,7 @@ class LateSwapSession(BaseModel):
 
 class LateSwapSessionCreateRequest(BaseModel):
     date: str = Field(alias="game_date")
+    site: str = "dk"
     contest_ids: list[str]
     policy: LateSwapPolicy | None = None
 

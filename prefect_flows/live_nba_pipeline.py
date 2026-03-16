@@ -191,6 +191,37 @@ def dk_salaries_task(*, game_date: str, data_root: Path) -> None:
     )
 
 
+def _fd_salaries_enabled() -> bool:
+    return str(os.environ.get("PROJECTIONS_ENABLE_FD_SALARIES", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+@task(name="fd-salaries", retries=1, retry_delay_seconds=120)
+def fd_salaries_task(*, game_date: str, data_root: Path) -> None:
+    logger = get_run_logger()
+    if not _fd_salaries_enabled():
+        logger.info("[fd-salaries] skipped: PROJECTIONS_ENABLE_FD_SALARIES not enabled")
+        return
+
+    base = data_root / "gold" / "dk_salaries" / "site=fd" / f"game_date={game_date}"
+    if base.exists() and any(base.glob("draft_group_id=*/salaries.parquet")):
+        return
+
+    try:
+        _run_python_module(
+            "scripts.fd.run_daily_salaries",
+            ["--game-date", game_date],
+            data_root=data_root,
+            timeout_s=600,
+        )
+    except Exception as exc:
+        logger.warning("[fd-salaries] failed for %s (continuing): %s", game_date, exc)
+
+
 @task(name="scrape-props", retries=1, retry_delay_seconds=60)
 def scrape_props_task(*, game_date: str, data_root: Path) -> None:
     """Scrape player props for sidecar consumers and Action feature inputs.
@@ -1335,6 +1366,8 @@ def nba_live_pipeline_flow(
 
         # Stage 1.25: DK salaries (required for finalize)
         dk_salaries_task(game_date=game_date, data_root=data_root)
+        # Stage 1.3: Optional FD salaries (non-blocking, env-gated)
+        fd_salaries_task(game_date=game_date, data_root=data_root)
 
         # Stage 1.5: Scrape props (for props analysis tab)
         scrape_props_task(game_date=game_date, data_root=data_root)

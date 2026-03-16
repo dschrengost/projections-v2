@@ -59,3 +59,58 @@ def test_load_salaries_for_date_falls_back_to_bronze_draftables(tmp_path: Path):
     assert {"dk_player_id", "display_name", "positions", "salary", "team_abbrev"}.issubset(df.columns)
     assert gold_path.exists()
 
+
+def test_load_salaries_for_date_falls_back_to_bronze_fd_payloads(tmp_path: Path):
+    data_root = tmp_path
+    game_date = "2026-01-10"
+    draft_group_id = 555
+
+    bronze_dir = (
+        data_root
+        / "bronze"
+        / "fd"
+        / "fixture_lists"
+        / f"game_date={game_date}"
+        / f"draft_group_id={draft_group_id}"
+    )
+    bronze_dir.mkdir(parents=True, exist_ok=True)
+    (bronze_dir / "players.json").write_text(
+        json.dumps(
+            {
+                "players": [
+                    {
+                        "id": "127611-84680",
+                        "first_name": "Nikola",
+                        "last_name": "Jokic",
+                        "nickname": "Nikola Jokic",
+                        "position": "C",
+                        "salary": 12000,
+                        "team": 1,
+                        "fixture": 9001,
+                    }
+                ],
+                "fixtures": [
+                    {
+                        "id": 9001,
+                        "start_date": "2026-01-10T00:30:00Z",
+                        "home_team": 2,
+                        "away_team": 1,
+                    }
+                ],
+                "teams": [
+                    {"id": 1, "code": "DEN"},
+                    {"id": 2, "code": "LAL"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    gold_path = dk_salaries_gold_path(data_root, "fd", game_date, draft_group_id)
+    assert not gold_path.exists()
+
+    df = load_salaries_for_date(game_date, draft_group_id, site="fd", data_root=data_root)
+    assert isinstance(df, pd.DataFrame)
+    assert not df.empty
+    assert {"fd_player_id", "site_player_id", "display_name", "positions", "salary", "team_abbrev"}.issubset(df.columns)
+    assert gold_path.exists()

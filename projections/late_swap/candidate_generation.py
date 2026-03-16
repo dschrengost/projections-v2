@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -26,13 +27,14 @@ class CandidateGenerationInput:
     player_pool: list[dict[str, Any]]
     internal_to_dk_player_id: dict[str, int]
     internal_to_name: dict[str, str]
-    draftable_ids_by_player: dict[int, dict[str, int]]
+    draftable_ids_by_player: dict[int, dict[str, Any]]
     dk_names_by_player: dict[int, str]
     draftable_to_internal: dict[int, str]
     extract_draftable_id: Callable[[str], int | None]
     banned_ids_global: set[str]
     out_ids: set[str]
     only_out_lineups: bool
+    site: str
 
 
 def _lineup_hash(player_ids: list[str]) -> str:
@@ -64,19 +66,48 @@ def _slot_values_from_lineup_players(
     dk_slots: list[str],
     internal_to_dk_player_id: dict[str, int],
     internal_to_name: dict[str, str],
-    draftable_ids_by_player: dict[int, dict[str, int]],
+    draftable_ids_by_player: dict[int, dict[str, Any]],
     dk_names_by_player: dict[int, str],
 ) -> dict[str, str]:
     slot_values: dict[str, str] = {slot: "" for slot in dk_slots}
-    for player in lineup_players:
-        pid = str(getattr(player, "player_id", ""))
-        slot = str(getattr(player, "pos", ""))
+
+    fd_dup_re = re.compile(r"^(PG|SG|SF|PF)\d+$")
+
+    def slot_base(slot: str) -> str:
+        token = str(slot or "").strip().upper()
+        match = fd_dup_re.match(token)
+        if match:
+            return match.group(1)
+        return token
+
+    lineup_pairs = [
+        (str(getattr(player, "player_id", "")), str(getattr(player, "pos", "")))
+        for player in lineup_players
+    ]
+
+    assignments: list[tuple[str, str]] = []
+    if all(pos in slot_values for _pid, pos in lineup_pairs):
+        assignments = [(pid, pos) for pid, pos in lineup_pairs]
+    else:
+        used_slots: set[str] = set()
+        for pid, pos in lineup_pairs:
+            pos_base = slot_base(pos)
+            candidates = [slot for slot in dk_slots if slot not in used_slots and slot_base(slot) == pos_base]
+            if not candidates:
+                return {}
+            chosen = candidates[0]
+            used_slots.add(chosen)
+            assignments.append((pid, chosen))
+
+    for pid, slot in assignments:
         if slot not in slot_values:
             return {}
         dk_pid = internal_to_dk_player_id.get(pid)
         if dk_pid is None:
             return {}
         draftable_id = draftable_ids_by_player.get(dk_pid, {}).get(slot)
+        if draftable_id is None:
+            draftable_id = draftable_ids_by_player.get(dk_pid, {}).get(slot_base(slot))
         if draftable_id is None:
             return {}
         name = dk_names_by_player.get(dk_pid) or internal_to_name.get(pid) or pid
@@ -291,17 +322,17 @@ def generate_candidates_for_entries(
                 randomness_pct=float(randomness if stddev_available else 0.0),
                 min_salary=0,
             )
-            constraints.lock_slots = dict(locked_slot_map)
+            constraints.lock_slots = dict(locked_slot_map) if payload.site == "dk" else {}
             constraints.lock_ids = sorted(set(lock_state.locked_player_ids).union(extra_locks))
             constraints.ban_ids = sorted(started_or_banned.union(extra_bans))
             constraints.ownership_penalty = OwnershipPenaltySettings(enabled=own_penalty, mode="by_percent")
-            constraints.validate("dk", stddev_available=stddev_available)
+            constraints.validate(payload.site, stddev_available=stddev_available)
 
             solved_lineups, _diagnostics = solve_cpsat_iterative_counts(
                 payload.player_pool,
                 constraints,
                 seed=0,
-                site="dk",
+                site=payload.site,
             )
             summary.pass_counts[pass_name] = summary.pass_counts.get(pass_name, 0) + 1
             for lineup in solved_lineups:

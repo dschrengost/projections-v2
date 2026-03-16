@@ -73,7 +73,9 @@ class PoolPlayer(BaseModel):
     positions: List[str]
     salary: int
     proj: float
+    site_id: Optional[str] = None
     dk_id: Optional[str] = None
+    fd_id: Optional[str] = None
     own_proj: Optional[float] = None
     stddev: Optional[float] = None
     p90: Optional[float] = None
@@ -113,7 +115,7 @@ class QuickBuildRequest(BaseModel):
     max_pool: int = Field(default=10000, ge=100, le=200000, description="Max lineups in pool")
     builds: int = Field(default=22, ge=1, le=24, description="Number of parallel workers")
     per_build: int = Field(default=3000, ge=100, le=50000, description="Target lineups per worker")
-    min_uniq: int = Field(default=1, ge=0, le=8, description="Min unique players between lineups (0 = no constraint)")
+    min_uniq: int = Field(default=1, ge=0, le=9, description="Min unique players between lineups (0 = no constraint)")
     max_exposure_pct: Optional[float] = Field(
         default=None,
         ge=0.0,
@@ -213,7 +215,7 @@ class ExportLineupsRequest(BaseModel):
 
     date: str = Field(..., description="Game date YYYY-MM-DD")
     draft_group_id: int = Field(..., description="DraftKings draft group ID")
-    site: str = Field(default="dk", description="Site: dk")
+    site: str = Field(default="dk", description="Site: dk or fd")
     filename_prefix: Optional[str] = Field(default=None, description="Optional filename prefix")
     lineups: List[List[str]] = Field(..., description="List of lineups (each a list of player_ids)")
 
@@ -234,6 +236,7 @@ class SaveCustomBuildRequest(BaseModel):
 
 
 DK_NBA_SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
+FD_NBA_SLOTS = ["PG", "PG", "SG", "SG", "SF", "SF", "PF", "PF", "C"]
 
 # DraftKings rosterSlotId → DK CSV slot (NBA Classic)
 DK_NBA_ROSTER_SLOT_ID_TO_SLOT = {
@@ -254,6 +257,20 @@ def _safe_filename_part(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", value.strip())
     cleaned = re.sub(r"_+", "_", cleaned).strip("._-")
     return cleaned or "lineups"
+
+
+def _parse_position_tokens(raw: Any) -> set[str]:
+    if raw is None:
+        return set()
+    if isinstance(raw, str):
+        tokens = [p.strip().upper() for p in re.split(r"[/,|]", raw) if p.strip()]
+        return set(tokens)
+    if isinstance(raw, (list, tuple, set)):
+        out: set[str] = set()
+        for piece in raw:
+            out.update(_parse_position_tokens(piece))
+        return out
+    return set()
 
 
 def _load_dk_nba_draftable_ids_by_player(
@@ -428,6 +445,107 @@ def _export_lineups_to_dk_csv(
     return output.getvalue()
 
 
+def _assign_fd_lineup_to_slots(
+    player_ids: List[str],
+    positions_by_player: Dict[str, set[str]],
+) -> List[str] | None:
+    pids = [str(pid) for pid in player_ids]
+    if len(pids) != len(FD_NBA_SLOTS):
+        return None
+    if len(set(pids)) != len(FD_NBA_SLOTS):
+        return None
+
+    remaining = set(pids)
+    assigned: List[str] = []
+
+    def backtrack(slot_idx: int) -> bool:
+        if slot_idx >= len(FD_NBA_SLOTS):
+            return True
+        slot = FD_NBA_SLOTS[slot_idx]
+        candidates = sorted(
+            [pid for pid in remaining if slot in positions_by_player.get(pid, set())],
+            key=lambda pid: (len(positions_by_player.get(pid, set())), pid),
+        )
+        for pid in candidates:
+            remaining.remove(pid)
+            assigned.append(pid)
+            if backtrack(slot_idx + 1):
+                return True
+            assigned.pop()
+            remaining.add(pid)
+        return False
+
+    if not backtrack(0):
+        return None
+    return assigned
+
+
+def _export_lineups_to_fd_csv(
+    game_date: str,
+    draft_group_id: int,
+    site: str,
+    lineups: List[List[str]],
+) -> str:
+    """Render FD-upload CSV content for the given lineups."""
+    pool = build_player_pool(
+        game_date=game_date,
+        draft_group_id=draft_group_id,
+        site=site,
+    )
+    by_pid = {str(p.get("player_id")): p for p in pool}
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(FD_NBA_SLOTS)
+
+    for lineup in lineups:
+        pids = [str(pid) for pid in lineup]
+        positions_by_player: Dict[str, set[str]] = {
+            pid: _parse_position_tokens((by_pid.get(pid) or {}).get("positions"))
+            for pid in pids
+        }
+        assigned = _assign_fd_lineup_to_slots(pids, positions_by_player)
+        row: List[str] = []
+        for idx, slot in enumerate(FD_NBA_SLOTS):
+            pid = assigned[idx] if assigned and idx < len(assigned) else None
+            if not pid:
+                row.append("")
+                continue
+            payload = by_pid.get(pid) or {}
+            name = str(payload.get("name") or pid)
+            site_id = payload.get("fd_id") or payload.get("site_id")
+            if site_id is None or str(site_id).strip() == "":
+                row.append(name)
+            else:
+                row.append(f"{name} ({site_id})")
+        writer.writerow(row)
+
+    return output.getvalue()
+
+
+def _export_lineups_to_site_csv(
+    *,
+    game_date: str,
+    draft_group_id: int,
+    site: str,
+    lineups: List[List[str]],
+) -> str:
+    site_norm = str(site or "dk").strip().lower()
+    if site_norm == "fd":
+        return _export_lineups_to_fd_csv(
+            game_date=game_date,
+            draft_group_id=draft_group_id,
+            site=site_norm,
+            lineups=lineups,
+        )
+    return _export_lineups_to_dk_csv(
+        game_date=game_date,
+        draft_group_id=draft_group_id,
+        site=site_norm,
+        lineups=lineups,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -437,10 +555,11 @@ def _export_lineups_to_dk_csv(
 async def get_slates(
     date: str = Query(..., description="Game date YYYY-MM-DD"),
     slate_type: str = Query(default="all", description="Filter: main/night/turbo/early/showdown/all"),
+    site: str = Query(default="dk", description="Site: dk or fd"),
 ):
     """List available draft groups for a date."""
     try:
-        slates = get_slates_for_date(date, slate_type=slate_type)
+        slates = get_slates_for_date(date, slate_type=slate_type, site=site)
         # Convert datetime objects to strings
         for s in slates:
             for key in ["earliest_start", "latest_start", "game_date"]:
@@ -544,10 +663,19 @@ async def start_build(
         logger.exception("Failed to build player pool for job: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
-    if len(player_pool) < 8:
+    is_fd = request.site.lower() == "fd"
+    lineup_size = 9 if is_fd else 8
+    if request.min_uniq > lineup_size:
         raise HTTPException(
             status_code=400,
-            detail=f"Player pool too small ({len(player_pool)} players). Need at least 8.",
+            detail=f"min_uniq={request.min_uniq} exceeds lineup size {lineup_size} for site={request.site}.",
+        )
+
+    min_pool_size = lineup_size
+    if len(player_pool) < min_pool_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Player pool too small ({len(player_pool)} players). Need at least {min_pool_size}.",
         )
 
     # Create job
@@ -616,9 +744,9 @@ async def export_lineups_csv(
     job_id: str,
     date: Optional[str] = Query(default=None, description="Game date for pool lookup"),
 ):
-    """Export lineups as DraftKings-uploadable CSV.
+    """Export lineups as site-uploadable CSV.
     
-    Format: Each cell is "Player Name (draftableId)" in positional order.
+    Format is site-specific positional upload rows.
     """
     job = get_job_store().get(job_id)
     if not job:
@@ -632,7 +760,7 @@ async def export_lineups_csv(
 
     game_date = date or job.game_date
     try:
-        csv_content = _export_lineups_to_dk_csv(
+        csv_content = _export_lineups_to_site_csv(
             game_date=game_date,
             draft_group_id=job.draft_group_id,
             site=job.site,
@@ -641,7 +769,7 @@ async def export_lineups_csv(
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.exception("Failed to export DK CSV: %s", e)
+        logger.exception("Failed to export CSV: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
     filename = f"lineups_{job.game_date}_{job.job_id[:8]}.csv"
@@ -655,12 +783,12 @@ async def export_lineups_csv(
 
 @router.post("/export")
 async def export_custom_lineups_csv(request: ExportLineupsRequest):
-    """Export arbitrary lineups as DraftKings-uploadable CSV (draftableIds)."""
+    """Export arbitrary lineups as site-uploadable CSV."""
     if not request.lineups:
         raise HTTPException(status_code=400, detail="No lineups provided")
 
     try:
-        csv_content = _export_lineups_to_dk_csv(
+        csv_content = _export_lineups_to_site_csv(
             game_date=request.date,
             draft_group_id=request.draft_group_id,
             site=request.site,
@@ -669,7 +797,7 @@ async def export_custom_lineups_csv(request: ExportLineupsRequest):
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.exception("Failed to export DK CSV: %s", e)
+        logger.exception("Failed to export CSV: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
     prefix = _safe_filename_part(request.filename_prefix) if request.filename_prefix else "lineups"

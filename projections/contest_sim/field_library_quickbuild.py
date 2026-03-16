@@ -51,16 +51,26 @@ def build_quickbuild_field_library(
     qb_timeout: float = 0.6,
     qb_threads: int = 1,
     qb_seed: Optional[int] = None,
-    min_salary: int = 49000,
-    max_salary: int = 50000,
-    global_team_limit: int = 4,
+    min_salary: Optional[int] = None,
+    max_salary: Optional[int] = None,
+    global_team_limit: Optional[int] = None,
     randomness_pct: Optional[float] = None,
 ) -> FieldLibrary:
     """Generate a compressed opponent field library by sampling many QuickBuild lineups."""
+    site_norm = str(site or "dk").strip().lower()
+    if site_norm not in {"dk", "fd"}:
+        raise ValueError(f"Unsupported site for field library build: {site!r}")
+    if min_salary is None:
+        min_salary = 49000 if site_norm == "dk" else 59000
+    if max_salary is None:
+        max_salary = 50000 if site_norm == "dk" else 60000
+    if global_team_limit is None:
+        global_team_limit = 4
+
     player_pool = build_player_pool(
         game_date=game_date,
         draft_group_id=int(draft_group_id),
-        site=site,
+        site=site_norm,
         data_root=data_path(),
         use_user_overrides=False,
         ownership_mode="renormalize",
@@ -79,7 +89,7 @@ def build_quickbuild_field_library(
         seed=qb_seed,
         # Match optimizer page default (disabled); helps throughput for large pools.
         near_dup_jaccard=0.0,
-        lineup_size=8 if site == "dk" else 9,
+        lineup_size=8 if site_norm == "dk" else 9,
     )
 
     constraints: Dict[str, Any] = {
@@ -126,11 +136,11 @@ def build_quickbuild_field_library(
                     threads=int(qb_threads),
                     seed=qb_seed,
                     near_dup_jaccard=0.0,
-                    lineup_size=8 if site == "dk" else 9,
+                    lineup_size=8 if site_norm == "dk" else 9,
                 )
                 qb_result = quick_build_pool(
                     slate=player_pool,
-                    site=site,
+                    site=site_norm,
                     constraints=constraints,
                     qb_cfg=qb_cfg_needed,
                     run_id=run_id,
@@ -181,7 +191,7 @@ def build_quickbuild_field_library(
         run_id = f"fieldlib_{game_date.replace('-', '')}_dg{draft_group_id}_{int(time.time())}"
         qb_result = quick_build_pool(
             slate=player_pool,
-            site=site,
+            site=site_norm,
             constraints=constraints,
             qb_cfg=qb_cfg,
             run_id=run_id,
@@ -224,7 +234,7 @@ def build_quickbuild_field_library(
         lineup_counts = None
 
     params = {
-        "site": site,
+        "site": site_norm,
         "k": int(k),
         "candidate_pool_size": int(candidate_pool_size),
         "qb_cfg": qb_cfg.to_dict(),

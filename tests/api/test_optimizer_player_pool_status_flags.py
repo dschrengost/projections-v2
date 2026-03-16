@@ -87,6 +87,7 @@ def test_build_player_pool_derives_is_out_and_is_active_without_overrides(
         draft_group_id=12345,
         site="dk",
         use_user_overrides=False,
+        exclude_inactive_players=False,
     )
 
     by_id = {p["player_id"]: p for p in pool}

@@ -1,4 +1,4 @@
-"""FastAPI router for DraftKings entry management."""
+"""FastAPI router for DFS entry management (DraftKings + FanDuel)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import secrets
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from projections import paths
 from projections.api.optimizer_api import (
+    FD_NBA_SLOTS,
     DK_NBA_ROSTER_SLOT_ID_TO_SLOT,
     DK_NBA_SLOTS,
     _load_dk_nba_draftable_ids_by_player,
@@ -70,14 +72,32 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _EXPORT_ID_SUFFIX_BYTES = 3  # 6 hex chars
+SUPPORTED_SITES = {"dk", "fd"}
+FD_ENTRY_SLOT_KEYS = ["PG1", "PG2", "SG1", "SG2", "SF1", "SF2", "PF1", "PF2", "C"]
+FD_BASE_POSITIONS = {"PG", "SG", "SF", "PF", "C"}
+_FD_ID_PREFIX_RE = re.compile(r"^\s*(\d+-\d+)\s*:")
+_DRAFTABLE_ID_RE = re.compile(r"^\d+(?:-\d+)?$")
+_PAREN_CONTENT_RE = re.compile(r"\(([^)]+)\)")
 
 
-def _entries_dir(game_date: str) -> Path:
-    return paths.data_path() / "entries" / game_date / "dk"
+def _normalize_site(site: str | None) -> str:
+    site_norm = str(site or "dk").strip().lower()
+    if site_norm not in SUPPORTED_SITES:
+        raise HTTPException(status_code=400, detail=f"Unsupported site: {site}")
+    return site_norm
 
 
-def _entry_path(game_date: str, contest_id: str) -> Path:
-    return _entries_dir(game_date) / f"{contest_id}.json"
+def _entry_slots_for_site(site: str) -> list[str]:
+    site_norm = _normalize_site(site)
+    return list(DK_NBA_SLOTS if site_norm == "dk" else FD_ENTRY_SLOT_KEYS)
+
+
+def _entries_dir(game_date: str, site: str = "dk") -> Path:
+    return paths.data_path() / "entries" / game_date / _normalize_site(site)
+
+
+def _entry_path(game_date: str, contest_id: str, site: str = "dk") -> Path:
+    return _entries_dir(game_date, site=site) / f"{contest_id}.json"
 
 
 @dataclass
@@ -89,29 +109,120 @@ class EntryRow:
     slots: Dict[str, str]
 
 
-def _parse_entry_csv(content: str) -> tuple[List[str], List[EntryRow]]:
-    reader = csv.DictReader(io.StringIO(content))
-    rows: List[EntryRow] = []
-    if not reader.fieldnames:
+def _fd_slot_key(position: str, occurrence: int) -> str:
+    pos = str(position).strip().upper()
+    if pos == "C":
+        return "C"
+    return f"{pos}{occurrence}"
+
+
+def _fd_slot_indices_from_header(header: List[str]) -> list[tuple[str, int]]:
+    counts: dict[str, int] = defaultdict(int)
+    out: list[tuple[str, int]] = []
+    for idx, raw_col in enumerate(header[4:], start=4):
+        col = str(raw_col or "").strip().upper()
+        if col not in FD_BASE_POSITIONS:
+            break
+        counts[col] += 1
+        out.append((_fd_slot_key(col, counts[col]), idx))
+    return out
+
+
+def _csv_cell(row: list[str], idx: int) -> str:
+    if idx < 0 or idx >= len(row):
+        return ""
+    return str(row[idx] or "").strip()
+
+
+def _is_fd_nba_entry_header(header: List[str]) -> bool:
+    cols = [str(c or "").strip() for c in header]
+    if len(cols) < 13:
+        return False
+    leading = [c.lower() for c in cols[:4]]
+    if leading != ["entry_id", "contest_id", "contest_name", "entry_fee"]:
+        return False
+    slot_cols = [c.upper() for c in cols[4:13]]
+    return slot_cols == list(FD_NBA_SLOTS)
+
+
+def _detect_csv_site(header: List[str], site_hint: str | None = None) -> str:
+    hinted = _normalize_site(site_hint) if site_hint is not None else None
+    if _is_fd_nba_entry_header(header):
+        if hinted and hinted != "fd":
+            raise ValueError("CSV looks like FanDuel format but site='dk' was provided")
+        return "fd"
+    if _is_dk_nba_classic_entry_header(header):
+        if hinted and hinted != "dk":
+            raise ValueError("CSV looks like DraftKings format but site='fd' was provided")
+        return "dk"
+    if hinted:
+        return hinted
+    raise ValueError("Unsupported entry CSV header (expected DK or FD upload template)")
+
+
+def _parse_entry_csv(content: str, *, site_hint: str | None = None) -> tuple[List[str], List[EntryRow], str]:
+    reader = csv.reader(io.StringIO(content))
+    first = next(reader, None)
+    if first is None:
         raise ValueError("Missing CSV header")
-    header = reader.fieldnames
-    for row in reader:
-        if not row:
+    header = [str(col) if col is not None else "" for col in first]
+    site = _detect_csv_site(header, site_hint=site_hint)
+
+    rows: List[EntryRow] = []
+    if site == "fd":
+        normalized = {str(col or "").strip().lower(): idx for idx, col in enumerate(header)}
+        entry_id_idx = int(normalized.get("entry_id", -1))
+        contest_id_idx = int(normalized.get("contest_id", -1))
+        contest_name_idx = int(normalized.get("contest_name", -1))
+        entry_fee_idx = int(normalized.get("entry_fee", -1))
+        slot_indices = _fd_slot_indices_from_header(header)
+        if len(slot_indices) != len(FD_ENTRY_SLOT_KEYS):
+            raise ValueError("FanDuel CSV header does not include the expected 9 roster columns")
+        for raw_row in reader:
+            if not raw_row:
+                continue
+            contest_id = _csv_cell(raw_row, contest_id_idx)
+            if not contest_id:
+                continue
+            rows.append(
+                EntryRow(
+                    entry_id=_csv_cell(raw_row, entry_id_idx),
+                    contest_id=contest_id,
+                    contest_name=_csv_cell(raw_row, contest_name_idx),
+                    entry_fee=_csv_cell(raw_row, entry_fee_idx),
+                    slots={slot_key: _csv_cell(raw_row, col_idx) for slot_key, col_idx in slot_indices},
+                )
+            )
+        return header, rows, site
+
+    normalized = {str(col or "").strip().lower(): idx for idx, col in enumerate(header)}
+    entry_id_idx = int(normalized.get("entry id", -1))
+    contest_id_idx = int(normalized.get("contest id", -1))
+    contest_name_idx = int(normalized.get("contest name", -1))
+    entry_fee_idx = int(normalized.get("entry fee", -1))
+    slot_indices = {
+        slot: next(
+            (idx for idx, col in enumerate(header) if str(col or "").strip().upper() == slot),
+            -1,
+        )
+        for slot in DK_NBA_SLOTS
+    }
+    for raw_row in reader:
+        if not raw_row:
             continue
-        contest_id = str(row.get("Contest ID", "")).strip()
+        contest_id = _csv_cell(raw_row, contest_id_idx)
         if not contest_id:
             continue
-        entry_id = str(row.get("Entry ID", "")).strip()
         rows.append(
             EntryRow(
-                entry_id=entry_id,
+                entry_id=_csv_cell(raw_row, entry_id_idx),
                 contest_id=contest_id,
-                contest_name=str(row.get("Contest Name", "")).strip(),
-                entry_fee=str(row.get("Entry Fee", "")).strip(),
-                slots={slot: str(row.get(slot, "")).strip() for slot in DK_NBA_SLOTS},
+                contest_name=_csv_cell(raw_row, contest_name_idx),
+                entry_fee=_csv_cell(raw_row, entry_fee_idx),
+                slots={slot: _csv_cell(raw_row, slot_indices.get(slot, -1)) for slot in DK_NBA_SLOTS},
             )
         )
-    return header, rows
+    return header, rows, site
 
 
 def _is_dk_nba_classic_entry_header(header: List[str]) -> bool:
@@ -119,26 +230,71 @@ def _is_dk_nba_classic_entry_header(header: List[str]) -> bool:
     return all(slot in cols for slot in DK_NBA_SLOTS)
 
 
-def _export_header_for_entry_state(entry_state: "EntryFileState") -> List[str]:
-    header = [str(col) if col is not None else "" for col in (entry_state.header or [])]
-    if _is_dk_nba_classic_entry_header(header):
-        return header
+def _default_export_header_for_site(site: str) -> list[str]:
+    site_norm = _normalize_site(site)
+    if site_norm == "fd":
+        return ["entry_id", "contest_id", "contest_name", "entry_fee"] + list(FD_NBA_SLOTS)
     return ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
 
 
-def _export_row_for_header(entry: Dict[str, str], header: List[str]) -> List[str]:
+def _export_header_for_entry_state(entry_state: "EntryFileState") -> List[str]:
+    header = [str(col) if col is not None else "" for col in (entry_state.header or [])]
+    site = _normalize_site(entry_state.site)
+    if site == "fd":
+        if _is_fd_nba_entry_header(header):
+            return header
+        return _default_export_header_for_site(site)
+    if _is_dk_nba_classic_entry_header(header):
+        return header
+    return _default_export_header_for_site(site)
+
+
+def _extract_draftable_token(value: str) -> Optional[str]:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    prefixed = _FD_ID_PREFIX_RE.match(text)
+    if prefixed:
+        return prefixed.group(1)
+    for match in _PAREN_CONTENT_RE.finditer(text):
+        token = str(match.group(1) or "").strip()
+        if _DRAFTABLE_ID_RE.fullmatch(token):
+            return token
+    if _DRAFTABLE_ID_RE.fullmatch(text):
+        return text
+    return None
+
+
+def _fd_upload_cell_value(value: str) -> str:
+    token = _extract_draftable_token(value)
+    if token:
+        return token
+    return str(value or "").strip()
+
+
+def _export_row_for_header(entry: Dict[str, str], header: List[str], *, site: str) -> List[str]:
     row: List[str] = []
+    site_norm = _normalize_site(site)
+    fd_slot_counts: dict[str, int] = defaultdict(int)
     for col in header:
-        if col == "Entry ID":
+        normalized = str(col or "").strip()
+        if normalized in {"Entry ID", "entry_id"}:
             row.append(entry.get("entry_id", ""))
-        elif col == "Contest Name":
+        elif normalized in {"Contest Name", "contest_name"}:
             row.append(entry.get("contest_name", ""))
-        elif col == "Contest ID":
+        elif normalized in {"Contest ID", "contest_id"}:
             row.append(entry.get("contest_id", ""))
-        elif col == "Entry Fee":
+        elif normalized in {"Entry Fee", "entry_fee"}:
             row.append(entry.get("entry_fee", ""))
-        elif col in DK_NBA_SLOTS:
-            row.append(entry.get(col, ""))
+        elif site_norm == "fd" and normalized.upper() in FD_BASE_POSITIONS:
+            pos = normalized.upper()
+            fd_slot_counts[pos] += 1
+            slot_key = _fd_slot_key(pos, fd_slot_counts[pos])
+            row.append(_fd_upload_cell_value(entry.get(slot_key, "")))
+        elif site_norm == "dk" and normalized in DK_NBA_SLOTS:
+            row.append(entry.get(normalized, ""))
         else:
             row.append("")
     return row
@@ -175,6 +331,16 @@ def _draft_group_looks_like_dk_nba_classic(draft_group_id: int, *, game_date: st
         return looks_classic, len(draftables)
     except Exception:
         return False, 0
+
+
+def _infer_fd_draft_group_from_contest_id(contest_id: str) -> int | None:
+    match = re.match(r"^\s*(\d+)-", str(contest_id or ""))
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
 
 
 def _guess_best_classic_draft_group_id(*, game_date: str) -> int | None:
@@ -227,6 +393,58 @@ def _build_dk_maps(
 
     draftable_ids_by_player, dk_names_by_player = _load_dk_nba_draftable_ids_by_player(draft_group_id)
     return internal_to_dk_player_id, internal_to_name, draftable_ids_by_player, dk_names_by_player
+
+
+def _parse_position_tokens(raw: object) -> set[str]:
+    if raw is None:
+        return set()
+    if isinstance(raw, str):
+        return {p.strip().upper() for p in re.split(r"[/,|]", raw) if p and p.strip()}
+    if isinstance(raw, (list, tuple, set)):
+        out: set[str] = set()
+        for piece in raw:
+            out.update(_parse_position_tokens(piece))
+        return out
+    return set()
+
+
+def _build_fd_maps(
+    game_date: str,
+    draft_group_id: int,
+    player_pool: Optional[List[Dict[str, object]]] = None,
+) -> tuple[Dict[str, int], Dict[str, str], Dict[int, Dict[str, str]], Dict[int, str]]:
+    pool = player_pool or build_player_pool(
+        game_date=game_date, draft_group_id=draft_group_id, site="fd"
+    )
+
+    internal_to_fd_player_id: Dict[str, int] = {}
+    internal_to_name: Dict[str, str] = {}
+    draftable_ids_by_player: Dict[int, Dict[str, str]] = {}
+    fd_names_by_player: Dict[int, str] = {}
+
+    for p in pool:
+        pid = str(p.get("player_id"))
+        name = str(p.get("name") or pid)
+        internal_to_name[pid] = name
+
+        fd_raw = p.get("fd_id") or p.get("site_id")
+        fd_token = _extract_draftable_token(str(fd_raw or ""))
+        fd_canonical = _extract_draftable_id(str(fd_raw or ""))
+        if fd_canonical is None:
+            continue
+        fd_id_for_upload = str(fd_token or fd_canonical)
+
+        internal_to_fd_player_id[pid] = int(fd_canonical)
+        fd_names_by_player[int(fd_canonical)] = name
+
+        positions = _parse_position_tokens(p.get("positions"))
+        slot_map = draftable_ids_by_player.setdefault(int(fd_canonical), {})
+        for slot in FD_ENTRY_SLOT_KEYS:
+            base_pos = "C" if slot == "C" else slot[:2]
+            if base_pos in positions:
+                slot_map.setdefault(slot, fd_id_for_upload)
+
+    return internal_to_fd_player_id, internal_to_name, draftable_ids_by_player, fd_names_by_player
 
 
 def _assign_lineup_to_slots_with_maps(
@@ -310,6 +528,54 @@ def _assign_lineup_to_slots_with_maps(
     return slot_values
 
 
+def _assign_fd_lineup_to_slot_values(
+    lineup: List[str],
+    player_pool: List[Dict[str, object]],
+) -> Dict[str, str]:
+    pids = [str(pid) for pid in lineup]
+    if len(pids) != len(FD_ENTRY_SLOT_KEYS):
+        return {}
+
+    by_pid: dict[str, dict[str, object]] = {str(p.get("player_id")): p for p in player_pool}
+    remaining = set(pids)
+    assigned: list[str] = []
+
+    def _position_set(pid: str) -> set[str]:
+        return _parse_position_tokens((by_pid.get(pid) or {}).get("positions"))
+
+    def backtrack(slot_idx: int) -> bool:
+        if slot_idx >= len(FD_ENTRY_SLOT_KEYS):
+            return True
+        slot_key = FD_ENTRY_SLOT_KEYS[slot_idx]
+        base_pos = "C" if slot_key == "C" else slot_key[:2]
+        candidates = sorted(
+            [pid for pid in remaining if base_pos in _position_set(pid)],
+            key=lambda pid: (len(_position_set(pid)), pid),
+        )
+        for pid in candidates:
+            remaining.remove(pid)
+            assigned.append(pid)
+            if backtrack(slot_idx + 1):
+                return True
+            assigned.pop()
+            remaining.add(pid)
+        return False
+
+    if not backtrack(0):
+        return {}
+
+    slot_values: dict[str, str] = {}
+    for idx, slot_key in enumerate(FD_ENTRY_SLOT_KEYS):
+        pid = assigned[idx] if idx < len(assigned) else ""
+        payload = by_pid.get(pid, {}) if pid else {}
+        fd_value = _extract_draftable_token(str(payload.get("fd_id") or payload.get("site_id") or ""))
+        if fd_value:
+            slot_values[slot_key] = fd_value
+        else:
+            slot_values[slot_key] = str(payload.get("name") or pid)
+    return slot_values
+
+
 def _assign_lineup_to_slots(
     lineups: List[str],
     draft_group_id: int,
@@ -320,16 +586,12 @@ def _assign_lineup_to_slots(
 
 
 def _extract_draftable_id(value: str) -> Optional[int]:
-    if not value:
+    token = _extract_draftable_token(value)
+    if not token:
         return None
-    # Handle DK's "(LOCKED)" suffix during live slates
-    # Match the FIRST numeric-only parenthesized value (the draftable ID)
-    # e.g., "Moses Moody (41322706) (LOCKED)" -> 41322706
-    match = re.search(r"\((\d+)\)", value)
-    if not match:
-        return None
+    tail = str(token).strip().split("-")[-1]
     try:
-        return int(match.group(1))
+        return int(tail)
     except ValueError:
         return None
 
@@ -599,8 +861,9 @@ def _sample_entry_draftable_ids(entry_state: "EntryFileState", max_entries: int 
         return out
 
     seen: set[int] = set()
+    slots = _entry_slots_for_site(entry_state.site)
     for entry in entry_state.entries[:max_entries]:
-        for slot in DK_NBA_SLOTS:
+        for slot in slots:
             draftable_id = _extract_draftable_id(str(entry.get(slot, "")).strip())
             if draftable_id is None or draftable_id in seen:
                 continue
@@ -859,10 +1122,11 @@ def _split_scoped_entry_id(scoped_entry_id: str) -> tuple[str, str]:
     return contest_id, entry_key
 
 
-def _load_entry_states_for_contests(game_date: str, contest_ids: List[str]) -> List[EntryFileState]:
+def _load_entry_states_for_contests(game_date: str, contest_ids: List[str], *, site: str = "dk") -> List[EntryFileState]:
+    site_norm = _normalize_site(site)
     states: List[EntryFileState] = []
     for contest_id in contest_ids:
-        path = _entry_path(game_date, contest_id)
+        path = _entry_path(game_date, contest_id, site=site_norm)
         if not path.exists():
             raise HTTPException(
                 status_code=404,
@@ -938,9 +1202,22 @@ def _session_preview(
     session: LateSwapSession,
     request: LateSwapPreviewRequest,
 ) -> tuple[LateSwapSession, dict[str, list[LateSwapCandidate]]]:
-    entry_states = _load_entry_states_for_contests(session.game_date, session.contest_ids)
+    session_site = _normalize_site(session.site)
+    entry_states = _load_entry_states_for_contests(
+        session.game_date,
+        session.contest_ids,
+        site=session_site,
+    )
+    roster_slots = _entry_slots_for_site(session_site)
     stale_reasons: list[str] = []
     for state in entry_states:
+        if _normalize_site(state.site) != session_site:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Entry file {state.contest_id} site={state.site} does not match late-swap session site={session_site}"
+                ),
+            )
         expected_revision = int(session.source_entry_revisions.get(str(state.contest_id), -1))
         if expected_revision >= 0 and int(state.client_revision) != expected_revision:
             stale_reasons.append(
@@ -979,14 +1256,15 @@ def _session_preview(
 
     now_utc = datetime.now(timezone.utc)
     for draft_group_id, items in states_by_dg.items():
-        try:
-            _refresh_draftables_for_late_swap(draft_group_id)
-        except Exception:
-            pass
+        if session_site == "dk":
+            try:
+                _refresh_draftables_for_late_swap(draft_group_id)
+            except Exception:
+                pass
         player_pool = build_player_pool(
             game_date=session.game_date,
             draft_group_id=draft_group_id,
-            site="dk",
+            site=session_site,
             run_id=request.run_id,
             use_user_overrides=bool(request.use_user_overrides),
             ownership_mode=request.ownership_mode,
@@ -1000,12 +1278,20 @@ def _session_preview(
                 detail=f"Player pool too small for draft_group_id={draft_group_id}",
             )
 
-        (
-            internal_to_dk_player_id,
-            internal_to_name,
-            draftable_ids_by_player,
-            dk_names_by_player,
-        ) = _build_dk_maps(session.game_date, draft_group_id, player_pool)
+        if session_site == "dk":
+            (
+                internal_to_dk_player_id,
+                internal_to_name,
+                draftable_ids_by_player,
+                dk_names_by_player,
+            ) = _build_dk_maps(session.game_date, draft_group_id, player_pool)
+        else:
+            (
+                internal_to_dk_player_id,
+                internal_to_name,
+                draftable_ids_by_player,
+                dk_names_by_player,
+            ) = _build_fd_maps(session.game_date, draft_group_id, player_pool)
         dk_to_internal = {dk_id: pid for pid, dk_id in internal_to_dk_player_id.items()}
         draftable_to_internal: Dict[int, str] = {}
         for dk_id, slot_map in draftable_ids_by_player.items():
@@ -1013,7 +1299,9 @@ def _session_preview(
             if not internal_id:
                 continue
             for draftable_id in slot_map.values():
-                draftable_to_internal.setdefault(int(draftable_id), internal_id)
+                canonical_id = _extract_draftable_id(str(draftable_id))
+                if canonical_id is not None:
+                    draftable_to_internal.setdefault(int(canonical_id), internal_id)
 
         internal_start_times: Dict[str, Optional[datetime]] = {}
         banned_ids_global: set[str] = set()
@@ -1034,16 +1322,16 @@ def _session_preview(
                 out_ids.add(pid)
         out_ids_total.update(out_ids)
 
-        draftable_start_times = _load_draftable_start_times(draft_group_id)
+        draftable_start_times = _load_draftable_start_times(draft_group_id) if session_site == "dk" else {}
         group_entries = [entry for _state, _entry_id, entry in items]
         group_ids = [entry_id for _state, entry_id, _entry in items]
 
         lock_states, group_lock_summary = build_lock_state(
             entries=group_entries,
-            dk_slots=DK_NBA_SLOTS,
+            dk_slots=roster_slots,
             entry_id_resolver=lambda _entry, idx: group_ids[idx],
             extract_draftable_id=_extract_draftable_id,
-            is_dk_locked=_is_dk_locked,
+            is_dk_locked=_is_dk_locked if session_site == "dk" else (lambda _value: False),
             draftable_to_internal=draftable_to_internal,
             draftable_start_times=draftable_start_times,
             internal_start_times=internal_start_times,
@@ -1057,7 +1345,8 @@ def _session_preview(
                 contest_by_entry_id=contest_by_entry_id,
                 lock_state_by_entry_id=lock_state_by_id,
                 policy=session.policy,
-                dk_slots=DK_NBA_SLOTS,
+                dk_slots=roster_slots,
+                site=session_site,
                 player_pool=player_pool,
                 internal_to_dk_player_id=internal_to_dk_player_id,
                 internal_to_name=internal_to_name,
@@ -1092,7 +1381,7 @@ def _session_preview(
 
         current_counts = exposure_counts_from_entries(
             entries_by_entry_id={entry_id: entries_by_id[entry_id] for entry_id in group_ids},
-            dk_slots=DK_NBA_SLOTS,
+            dk_slots=roster_slots,
             extract_draftable_id=_extract_draftable_id,
             draftable_to_internal=draftable_to_internal,
         )
@@ -1189,7 +1478,7 @@ def _session_preview(
     lock_summary["locked_slots_pct"] = (
         100.0
         * float(lock_summary["locked_slots_total"])
-        / float(max(1, total_entries * len(DK_NBA_SLOTS)))
+        / float(max(1, total_entries * len(roster_slots)))
     )
 
     session.lock_state = LateSwapLockStateSummary.model_validate(lock_summary)
@@ -1204,21 +1493,30 @@ def _session_preview(
     return session, candidates_by_entry_id
 
 
-def _load_session_any_date(session_id: str) -> LateSwapSession:
+def _load_session_any_date(session_id: str, site: str | None = None) -> LateSwapSession:
     root = paths.data_path() / "late_swap"
     if not root.exists():
         raise FileNotFoundError(f"Late swap session not found: {session_id}")
+    sites_to_scan = [_normalize_site(site)] if site is not None else None
     for date_dir in sorted(root.iterdir(), reverse=True):
         if not date_dir.is_dir():
             continue
-        try:
-            return session_store.load_session(
-                game_date=str(date_dir.name),
-                session_id=session_id,
-                site="dk",
-            )
-        except Exception:
-            continue
+        date_sites: list[str]
+        if sites_to_scan is not None:
+            date_sites = list(sites_to_scan)
+        else:
+            date_sites = [p.name for p in sorted(date_dir.iterdir()) if p.is_dir()]
+            if not date_sites:
+                date_sites = ["dk"]
+        for site_name in date_sites:
+            try:
+                return session_store.load_session(
+                    game_date=str(date_dir.name),
+                    session_id=session_id,
+                    site=_normalize_site(site_name),
+                )
+            except Exception:
+                continue
     raise FileNotFoundError(f"Late swap session not found: {session_id}")
 
 
@@ -1260,8 +1558,12 @@ class ExportValidationResult(BaseModel):
 def _validate_entries_for_export(
     entries: List[Dict[str, str]],
     draft_group_id: int,
+    *,
+    site: str = "dk",
 ) -> ExportValidationResult:
     """Validate entries before export to catch issues early."""
+    _ = draft_group_id  # reserved for future salary validation enhancements
+    roster_slots = _entry_slots_for_site(site)
     issues: List[EntryValidationIssue] = []
     seen_lineups: Dict[str, str] = {}  # hash -> first entry_id that had it
 
@@ -1270,7 +1572,7 @@ def _validate_entries_for_export(
 
         # Check each slot
         slot_ids: List[int] = []
-        for slot in DK_NBA_SLOTS:
+        for slot in roster_slots:
             slot_value = entry.get(slot, "").strip()
 
             if not slot_value:
@@ -1296,7 +1598,7 @@ def _validate_entries_for_export(
                 slot_ids.append(draftable_id)
 
         # Check for duplicate lineups (same set of draftable IDs)
-        if len(slot_ids) == len(DK_NBA_SLOTS):
+        if len(slot_ids) == len(roster_slots):
             lineup_hash = ",".join(str(x) for x in sorted(slot_ids))
             if lineup_hash in seen_lineups:
                 issues.append(EntryValidationIssue(
@@ -1415,11 +1717,13 @@ def _compute_entry_projection(
 async def upload_entries(
     date: str,
     draft_group_id: int | None = Query(default=None),
+    site: str | None = Query(default=None, description="Site override: dk or fd"),
     file: UploadFile = File(...),
 ):
-    """Upload DK entry CSV and persist per-contest state."""
-    content = (await file.read()).decode("utf-8")
-    header, rows = _parse_entry_csv(content)
+    """Upload entry CSV and persist per-contest state."""
+    content = (await file.read()).decode("utf-8-sig")
+    header, rows, detected_site = _parse_entry_csv(content, site_hint=site)
+    site_norm = _normalize_site(detected_site)
     if not rows:
         raise HTTPException(status_code=400, detail="No entries found in CSV")
 
@@ -1428,47 +1732,65 @@ async def upload_entries(
         entries_by_contest.setdefault(row.contest_id, []).append(row)
 
     contest_dg_map: Dict[str, int] = {}
-    try:
-        contest_dg_map = build_contest_id_to_draft_group(date)
-    except Exception as exc:
-        logger.warning("Contest->draft_group map lookup failed for %s: %s", date, exc)
-
-    classic_entry = _is_dk_nba_classic_entry_header(header)
-    guessed_classic_dg = _guess_best_classic_draft_group_id(game_date=date) if classic_entry else None
+    guessed_classic_dg: int | None = None
+    if site_norm == "dk":
+        try:
+            contest_dg_map = build_contest_id_to_draft_group(date)
+        except Exception as exc:
+            logger.warning("Contest->draft_group map lookup failed for %s: %s", date, exc)
+        classic_entry = _is_dk_nba_classic_entry_header(header)
+        guessed_classic_dg = _guess_best_classic_draft_group_id(game_date=date) if classic_entry else None
 
     mapped_values = [contest_dg_map.get(str(cid)) for cid in entries_by_contest.keys()]
     mapped_unique = {dg for dg in mapped_values if dg is not None}
     fallback_mapped_dg = next(iter(mapped_unique)) if len(mapped_unique) == 1 else None
 
     upload_ts = datetime.utcnow().isoformat()
+    roster_slots = _entry_slots_for_site(site_norm)
     summaries: List[EntryFileSummary] = []
     for contest_id, contest_rows in entries_by_contest.items():
         contest_name = contest_rows[0].contest_name
         entry_fee = contest_rows[0].entry_fee
         requested_dg: int | None = int(draft_group_id) if draft_group_id is not None else None
-        mapped_dg = contest_dg_map.get(str(contest_id))
-        if mapped_dg is None and requested_dg is None and fallback_mapped_dg is not None:
-            logger.warning(
-                "Entry upload contest %s not found in lobby; falling back to mapped dg=%s from other contests in file",
-                contest_id,
-                fallback_mapped_dg,
-            )
-            mapped_dg = int(fallback_mapped_dg)
-        if mapped_dg is None and guessed_classic_dg is not None:
-            # Post-lock DK lobby may omit contests. If entry format is NBA Classic, prefer classic DG from disk.
-            looks_requested_classic = False
-            if requested_dg is not None:
-                looks_requested_classic, _ = _draft_group_looks_like_dk_nba_classic(
-                    int(requested_dg), game_date=date
+        mapped_dg: int | None
+        if site_norm == "fd":
+            mapped_dg = _infer_fd_draft_group_from_contest_id(contest_id)
+            if mapped_dg is None and requested_dg is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not determine FanDuel slate for contest {contest_id}. Pass draft_group_id.",
                 )
-            if requested_dg is None or not looks_requested_classic:
+            if mapped_dg is not None and requested_dg is not None and int(mapped_dg) != int(requested_dg):
                 logger.warning(
-                    "Entry upload contest %s using guessed classic dg=%s (requested=%s)",
+                    "FanDuel upload slate mismatch for contest %s: requested=%s inferred=%s; using inferred",
                     contest_id,
-                    guessed_classic_dg,
                     requested_dg,
+                    mapped_dg,
                 )
-                mapped_dg = int(guessed_classic_dg)
+        else:
+            mapped_dg = contest_dg_map.get(str(contest_id))
+            if mapped_dg is None and requested_dg is None and fallback_mapped_dg is not None:
+                logger.warning(
+                    "Entry upload contest %s not found in lobby; falling back to mapped dg=%s from other contests in file",
+                    contest_id,
+                    fallback_mapped_dg,
+                )
+                mapped_dg = int(fallback_mapped_dg)
+            if mapped_dg is None and guessed_classic_dg is not None:
+                # Post-lock DK lobby may omit contests. If entry format is NBA Classic, prefer classic DG from disk.
+                looks_requested_classic = False
+                if requested_dg is not None:
+                    looks_requested_classic, _ = _draft_group_looks_like_dk_nba_classic(
+                        int(requested_dg), game_date=date
+                    )
+                if requested_dg is None or not looks_requested_classic:
+                    logger.warning(
+                        "Entry upload contest %s using guessed classic dg=%s (requested=%s)",
+                        contest_id,
+                        guessed_classic_dg,
+                        requested_dg,
+                    )
+                    mapped_dg = int(guessed_classic_dg)
         resolved_dg: int | None = mapped_dg if mapped_dg is not None else requested_dg
         if mapped_dg is not None and requested_dg is not None and int(mapped_dg) != int(requested_dg):
             logger.warning(
@@ -1480,6 +1802,7 @@ async def upload_entries(
         entry_state = EntryFileState(
             game_date=date,
             draft_group_id=resolved_dg if resolved_dg is not None else -1,
+            site=site_norm,
             contest_id=contest_id,
             contest_name=contest_name,
             entry_fee=entry_fee,
@@ -1494,7 +1817,7 @@ async def upload_entries(
                     "contest_id": r.contest_id,
                     "contest_name": r.contest_name,
                     "entry_fee": r.entry_fee,
-                    **{slot: r.slots.get(slot, "") for slot in DK_NBA_SLOTS},
+                    **{slot: r.slots.get(slot, "") for slot in roster_slots},
                 }
                 for idx, r in enumerate(contest_rows)
             ],
@@ -1508,38 +1831,39 @@ async def upload_entries(
                     status_code=400,
                     detail=(
                         f"Could not determine slate for contest {contest_id}. "
-                        "Pick a slate and retry, or ensure DK contests are available for this date."
+                        "Pick a slate and retry."
                     ),
                 )
 
-            sample_ids = _sample_entry_draftable_ids(entry_state)
-            candidates = _detect_draft_group_candidates(sample_ids, game_date=date)
-            if mapped_dg is None and candidates:
-                detected = candidates[0].draft_group_id
-                if requested_dg is None:
-                    entry_state.draft_group_id = int(detected)
-                elif int(detected) != int(entry_state.draft_group_id):
-                    logger.warning(
-                        "Entry file %s draft_group_id override: %s -> %s (match_count=%s)",
-                        contest_id,
-                        entry_state.draft_group_id,
-                        detected,
-                        candidates[0].match_count,
+            if site_norm == "dk":
+                sample_ids = _sample_entry_draftable_ids(entry_state)
+                candidates = _detect_draft_group_candidates(sample_ids, game_date=date)
+                if mapped_dg is None and candidates:
+                    detected = candidates[0].draft_group_id
+                    if requested_dg is None:
+                        entry_state.draft_group_id = int(detected)
+                    elif int(detected) != int(entry_state.draft_group_id):
+                        logger.warning(
+                            "Entry file %s draft_group_id override: %s -> %s (match_count=%s)",
+                            contest_id,
+                            entry_state.draft_group_id,
+                            detected,
+                            candidates[0].match_count,
+                        )
+                        entry_state.draft_group_id = int(detected)
+                elif requested_dg is None and mapped_dg is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Could not auto-detect slate for contest {contest_id}. "
+                            "Pick a slate and retry, or ensure DK draftables are present for this date."
+                        ),
                     )
-                    entry_state.draft_group_id = int(detected)
-            elif requested_dg is None and mapped_dg is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Could not auto-detect slate for contest {contest_id}. "
-                        "Pick a slate and retry, or ensure DK draftables are present for this date."
-                    ),
-                )
         except Exception as exc:
             if isinstance(exc, HTTPException):
                 raise
             logger.warning("Entry file %s draft_group_id detection failed: %s", contest_id, exc)
-        path = _entry_path(date, contest_id)
+        path = _entry_path(date, contest_id, site=site_norm)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             f.write(entry_state.model_dump_json(indent=2))
@@ -1558,9 +1882,10 @@ async def upload_entries(
 
 
 @router.get("/entries", response_model=List[EntryFileSummary])
-async def list_entries(date: str):
+async def list_entries(date: str, site: str = Query(default="dk", description="Site: dk or fd")):
     """List entry files for a date."""
-    root = _entries_dir(date)
+    site_norm = _normalize_site(site)
+    root = _entries_dir(date, site=site_norm)
     if not root.exists():
         return []
     summaries: List[EntryFileSummary] = []
@@ -1584,9 +1909,12 @@ async def list_entries(date: str):
 
 
 @router.post("/entries/repair-dg", response_model=List[EntryFileSummary])
-async def repair_entries_draft_group_ids(date: str):
+async def repair_entries_draft_group_ids(date: str, site: str = Query(default="dk", description="Site: dk or fd")):
     """Repair stored entry file draft_group_id values using DK contest->dg mapping."""
-    root = _entries_dir(date)
+    site_norm = _normalize_site(site)
+    if site_norm != "dk":
+        raise HTTPException(status_code=400, detail="repair-dg is currently only supported for DraftKings")
+    root = _entries_dir(date, site=site_norm)
     if not root.exists():
         return []
 
@@ -1648,20 +1976,20 @@ async def repair_entries_draft_group_ids(date: str):
             updated += 1
 
     logger.info("Repaired %d entry files for %s", updated, date)
-    return await list_entries(date)
+    return await list_entries(date, site=site_norm)
 
 
 @router.get("/entries/{contest_id}", response_model=EntryFileState)
-async def get_entry_file(contest_id: str, date: str):
-    path = _entry_path(date, contest_id)
+async def get_entry_file(contest_id: str, date: str, site: str = Query(default="dk", description="Site: dk or fd")):
+    path = _entry_path(date, contest_id, site=_normalize_site(site))
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     return EntryFileState.model_validate_json(path.read_text())
 
 
 @router.delete("/entries/{contest_id}")
-async def delete_entry_file(contest_id: str, date: str):
-    path = _entry_path(date, contest_id)
+async def delete_entry_file(contest_id: str, date: str, site: str = Query(default="dk", description="Site: dk or fd")):
+    path = _entry_path(date, contest_id, site=_normalize_site(site))
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     path.unlink()
@@ -1669,8 +1997,14 @@ async def delete_entry_file(contest_id: str, date: str):
 
 
 @router.post("/entries/{contest_id}/apply-build", response_model=EntryFileState)
-async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
-    path = _entry_path(date, contest_id)
+async def apply_build(
+    contest_id: str,
+    date: str,
+    request: ApplyBuildRequest,
+    site: str = Query(default="dk", description="Site: dk or fd"),
+):
+    site_norm = _normalize_site(site)
+    path = _entry_path(date, contest_id, site=site_norm)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     entry_state = EntryFileState.model_validate_json(path.read_text())
@@ -1684,6 +2018,7 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
     entry_state.source_late_swap_session_id = None
     entry_state.source_late_swap_mode = None
     entry_state.source_late_swap_committed_at = None
+    entry_site = _normalize_site(entry_state.site)
 
     if request.lineups:
         lineups = request.lineups
@@ -1705,6 +2040,12 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
                     f"{build_draft_group_id} does not match entry draft_group_id "
                     f"{entry_state.draft_group_id}"
                 ),
+            )
+        build_site = _normalize_site(str(build.get("site") or "dk"))
+        if build_site != entry_site:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Optimizer build site={build_site} does not match entry site={entry_site}",
             )
         lineups = [lu["player_ids"] for lu in build["lineups"]]
         entry_state.source_build_source = "optimizer"
@@ -1731,6 +2072,12 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
                     f"{build_draft_group_id} does not match entry draft_group_id "
                     f"{entry_state.draft_group_id}"
                 ),
+            )
+        build_site = _normalize_site(str(build.get("site") or "dk"))
+        if build_site != entry_site:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Contest sim build site={build_site} does not match entry site={entry_site}",
             )
         lineups = build.get("lineups", [])
         entry_state.source_build_source = "contest-sim"
@@ -1761,54 +2108,93 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
     if len(lineups) < len(entry_state.entries):
         raise HTTPException(status_code=400, detail="Not enough lineups to populate entries")
 
-    # Refresh draftables to ensure we have current DK data (handles locked games)
-    try:
-        _refresh_draftables_for_late_swap(entry_state.draft_group_id)
-    except Exception as exc:
-        logger.warning("Failed to refresh draftables for apply_build: %s", exc)
-
-    # Pre-build maps once for all entries
-    try:
-        maps = _build_dk_maps(entry_state.game_date, entry_state.draft_group_id)
-        internal_to_dk, internal_to_name, draftable_ids_by_player, dk_names = maps
-        draftable_to_dk_player_id: Dict[int, int] = {}
-        for dk_player_id, slot_map in draftable_ids_by_player.items():
-            for draftable_id in slot_map.values():
-                draftable_to_dk_player_id.setdefault(int(draftable_id), int(dk_player_id))
-    except Exception as exc:
-        logger.exception("Failed to build DK maps for apply_build")
-        raise HTTPException(status_code=500, detail=f"Failed to map players to DK IDs: {exc}")
+    roster_slots = _entry_slots_for_site(entry_site)
+    dk_maps: tuple[
+        Dict[str, int],
+        Dict[str, str],
+        Dict[int, Dict[str, int]],
+        Dict[int, str],
+    ] | None = None
+    fd_pool: list[dict[str, object]] | None = None
+    if entry_site == "dk":
+        # Refresh draftables to ensure we have current DK data (handles locked games).
+        try:
+            _refresh_draftables_for_late_swap(entry_state.draft_group_id)
+        except Exception as exc:
+            logger.warning("Failed to refresh draftables for apply_build: %s", exc)
+        try:
+            maps = _build_dk_maps(entry_state.game_date, entry_state.draft_group_id)
+            internal_to_dk, internal_to_name, draftable_ids_by_player, dk_names = maps
+            draftable_to_dk_player_id: Dict[int, int] = {}
+            for dk_player_id, slot_map in draftable_ids_by_player.items():
+                for draftable_id in slot_map.values():
+                    canonical_id = _extract_draftable_id(str(draftable_id))
+                    if canonical_id is not None:
+                        draftable_to_dk_player_id.setdefault(int(canonical_id), int(dk_player_id))
+            dk_maps = (
+                internal_to_dk,
+                internal_to_name,
+                draftable_ids_by_player,
+                dk_names,
+            )
+        except Exception as exc:
+            logger.exception("Failed to build DK maps for apply_build")
+            raise HTTPException(status_code=500, detail=f"Failed to map players to DK IDs: {exc}")
+    else:
+        try:
+            fd_pool = build_player_pool(
+                game_date=entry_state.game_date,
+                draft_group_id=int(entry_state.draft_group_id),
+                site="fd",
+                include_unmatched_salaries=True,
+                allow_zero_projections=True,
+                exclude_inactive_players=False,
+            )
+        except Exception as exc:
+            logger.exception("Failed to build FD player pool for apply_build")
+            raise HTTPException(status_code=500, detail=f"Failed to map players to FD IDs: {exc}")
 
     unmapped_players: set[str] = set()
     updated_entries = []
     for idx, entry in enumerate(entry_state.entries):
         entry_key = entry.get("entry_key") or entry.get("entry_id") or f"row-{idx + 1}"
-        slot_values = _assign_lineup_to_slots_with_maps(
-            lineups[idx],
-            internal_to_dk,
-            internal_to_name,
-            draftable_ids_by_player,
-            dk_names,
-            draftable_to_dk_player_id,
-        )
-        # Track players that couldn't be mapped
-        for pid in lineups[idx]:
-            pid_str = str(pid)
-            dk_id = internal_to_dk.get(pid_str)
-            if dk_id is None:
-                try:
-                    numeric_pid = int(pid_str)
-                except (TypeError, ValueError):
-                    numeric_pid = None
-                if numeric_pid is not None and numeric_pid in draftable_ids_by_player:
-                    dk_id = numeric_pid
-                elif numeric_pid is not None:
-                    dk_id = draftable_to_dk_player_id.get(numeric_pid)
-            if dk_id is None:
-                unmapped_players.add(pid_str)
-                continue
-            if dk_id not in draftable_ids_by_player:
-                unmapped_players.add(f"{pid_str}(dk={dk_id})")
+        slot_values: dict[str, str]
+        if entry_site == "dk":
+            assert dk_maps is not None
+            internal_to_dk, internal_to_name, draftable_ids_by_player, dk_names = dk_maps
+            slot_values = _assign_lineup_to_slots_with_maps(
+                lineups[idx],
+                internal_to_dk,
+                internal_to_name,
+                draftable_ids_by_player,
+                dk_names,
+                draftable_to_dk_player_id,
+            )
+            for pid in lineups[idx]:
+                pid_str = str(pid)
+                dk_id = internal_to_dk.get(pid_str)
+                if dk_id is None:
+                    try:
+                        numeric_pid = int(pid_str)
+                    except (TypeError, ValueError):
+                        numeric_pid = None
+                    if numeric_pid is not None and numeric_pid in draftable_ids_by_player:
+                        dk_id = numeric_pid
+                    elif numeric_pid is not None:
+                        dk_id = draftable_to_dk_player_id.get(numeric_pid)
+                if dk_id is None:
+                    unmapped_players.add(pid_str)
+                    continue
+                if dk_id not in draftable_ids_by_player:
+                    unmapped_players.add(f"{pid_str}(dk={dk_id})")
+        else:
+            assert fd_pool is not None
+            slot_values = _assign_fd_lineup_to_slot_values(lineups[idx], fd_pool)
+            fd_pool_ids = {str(p.get("player_id")) for p in fd_pool}
+            for pid in lineups[idx]:
+                pid_str = str(pid)
+                if pid_str not in fd_pool_ids:
+                    unmapped_players.add(pid_str)
         updated_entries.append(
             {
                 "entry_id": entry.get("entry_id", ""),
@@ -1816,13 +2202,14 @@ async def apply_build(contest_id: str, date: str, request: ApplyBuildRequest):
                 "contest_id": entry_state.contest_id,
                 "contest_name": entry_state.contest_name,
                 "entry_fee": entry_state.entry_fee,
-                **{slot: slot_values.get(slot, "") for slot in DK_NBA_SLOTS},
+                **{slot: slot_values.get(slot, "") for slot in roster_slots},
             }
         )
 
     if unmapped_players:
         logger.warning(
-            "apply_build: %d players could not be mapped to DK draftable IDs: %s",
+            "apply_build (%s): %d players could not be mapped to site IDs: %s",
+            entry_site,
             len(unmapped_players),
             sorted(unmapped_players)[:20],  # Log first 20 to avoid spam
         )
@@ -1847,14 +2234,15 @@ def _build_preview_response(
 
 @router.post("/late-swap/sessions", response_model=LateSwapSession)
 async def create_late_swap_session(request: LateSwapSessionCreateRequest):
+    site_norm = _normalize_site(request.site)
     contest_ids = [str(cid) for cid in request.contest_ids if str(cid).strip()]
     if not contest_ids:
         raise HTTPException(status_code=400, detail="contest_ids cannot be empty")
-    entry_states = _load_entry_states_for_contests(request.date, contest_ids)
+    entry_states = _load_entry_states_for_contests(request.date, contest_ids, site=site_norm)
     session = LateSwapSession(
         session_id=_new_late_swap_session_id(),
         game_date=request.date,
-        site="dk",
+        site=site_norm,
         contest_ids=contest_ids,
         draft_group_ids=sorted({int(state.draft_group_id) for state in entry_states}),
         created_at=utc_now_iso(),
@@ -1875,17 +2263,26 @@ async def create_late_swap_session(request: LateSwapSessionCreateRequest):
 
 
 @router.get("/late-swap/sessions", response_model=List[LateSwapSession])
-async def list_late_swap_sessions(date: str, limit: int = 30):
-    return session_store.list_sessions(game_date=date, site="dk", limit=limit)
+async def list_late_swap_sessions(
+    date: str,
+    limit: int = 30,
+    site: str = Query(default="dk", description="Site: dk or fd"),
+):
+    return session_store.list_sessions(game_date=date, site=_normalize_site(site), limit=limit)
 
 
 @router.get("/late-swap/sessions/{session_id}", response_model=LateSwapPreviewResponse)
-async def get_late_swap_session(session_id: str, date: str | None = None):
+async def get_late_swap_session(
+    session_id: str,
+    date: str | None = None,
+    site: str | None = Query(default=None, description="Optional site filter: dk or fd"),
+):
     try:
+        site_norm = _normalize_site(site) if site is not None else None
         session = (
-            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            session_store.load_session(game_date=str(date), session_id=session_id, site=site_norm or "dk")
             if date
-            else _load_session_any_date(session_id)
+            else _load_session_any_date(session_id, site=site_norm)
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1901,13 +2298,15 @@ async def get_late_swap_session(session_id: str, date: str | None = None):
 async def preview_late_swap_session(
     session_id: str,
     date: str | None = None,
+    site: str | None = Query(default=None, description="Optional site filter: dk or fd"),
     request: LateSwapPreviewRequest = Body(default=LateSwapPreviewRequest()),
 ):
     try:
+        site_norm = _normalize_site(site) if site is not None else None
         session = (
-            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            session_store.load_session(game_date=str(date), session_id=session_id, site=site_norm or "dk")
             if date
-            else _load_session_any_date(session_id)
+            else _load_session_any_date(session_id, site=site_norm)
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1938,13 +2337,15 @@ async def preview_late_swap_session(
 async def pin_late_swap_candidates(
     session_id: str,
     date: str | None = None,
+    site: str | None = Query(default=None, description="Optional site filter: dk or fd"),
     request: LateSwapPinCandidatesRequest = Body(...),
 ):
     try:
+        site_norm = _normalize_site(site) if site is not None else None
         session = (
-            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            session_store.load_session(game_date=str(date), session_id=session_id, site=site_norm or "dk")
             if date
-            else _load_session_any_date(session_id)
+            else _load_session_any_date(session_id, site=site_norm)
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1986,13 +2387,15 @@ async def pin_late_swap_candidates(
 async def update_late_swap_policy(
     session_id: str,
     date: str | None = None,
+    site: str | None = Query(default=None, description="Optional site filter: dk or fd"),
     request: LateSwapPolicyUpdateRequest = Body(...),
 ):
     try:
+        site_norm = _normalize_site(site) if site is not None else None
         session = (
-            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            session_store.load_session(game_date=str(date), session_id=session_id, site=site_norm or "dk")
             if date
-            else _load_session_any_date(session_id)
+            else _load_session_any_date(session_id, site=site_norm)
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -2007,13 +2410,15 @@ async def update_late_swap_policy(
 async def commit_late_swap_session(
     session_id: str,
     date: str | None = None,
+    site: str | None = Query(default=None, description="Optional site filter: dk or fd"),
     request: LateSwapCommitRequest = Body(default=LateSwapCommitRequest()),
 ):
     try:
+        site_norm = _normalize_site(site) if site is not None else None
         session = (
-            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            session_store.load_session(game_date=str(date), session_id=session_id, site=site_norm or "dk")
             if date
-            else _load_session_any_date(session_id)
+            else _load_session_any_date(session_id, site=site_norm)
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -2032,10 +2437,15 @@ async def commit_late_swap_session(
 
     entry_states = {
         str(state.contest_id): state
-        for state in _load_entry_states_for_contests(session.game_date, session.contest_ids)
+        for state in _load_entry_states_for_contests(
+            session.game_date,
+            session.contest_ids,
+            site=session.site,
+        )
     }
     now_iso = utc_now_iso()
     updated_contests: set[str] = set()
+    roster_slots = _entry_slots_for_site(session.site)
     for scoped_entry_id, candidate_id in session.selected_candidates_by_entry_id.items():
         candidate = candidate_lookup.get(candidate_id)
         if candidate is None:
@@ -2048,7 +2458,7 @@ async def commit_late_swap_session(
             scoped = _entry_scoped_id(contest_id, entry, idx)
             if scoped != scoped_entry_id:
                 continue
-            for slot in DK_NBA_SLOTS:
+            for slot in roster_slots:
                 entry[slot] = str(candidate.slot_values.get(slot, entry.get(slot, "")))
             updated_contests.add(contest_id)
             break
@@ -2060,7 +2470,7 @@ async def commit_late_swap_session(
         state.source_late_swap_session_id = session.session_id
         state.source_late_swap_mode = session.policy.mode
         state.source_late_swap_committed_at = now_iso
-        _entry_path(session.game_date, contest_id).write_text(state.model_dump_json(indent=2))
+        _entry_path(session.game_date, contest_id, site=session.site).write_text(state.model_dump_json(indent=2))
         session.source_entry_revisions[contest_id] = int(state.client_revision)
 
     session.status = "committed"
@@ -2075,13 +2485,15 @@ async def commit_late_swap_session(
 async def export_late_swap_session(
     session_id: str,
     date: str | None = None,
+    site: str | None = Query(default=None, description="Optional site filter: dk or fd"),
     request: LateSwapExportRequest = Body(default=LateSwapExportRequest()),
 ):
     try:
+        site_norm = _normalize_site(site) if site is not None else None
         session = (
-            session_store.load_session(game_date=str(date), session_id=session_id, site="dk")
+            session_store.load_session(game_date=str(date), session_id=session_id, site=site_norm or "dk")
             if date
-            else _load_session_any_date(session_id)
+            else _load_session_any_date(session_id, site=site_norm)
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -2094,6 +2506,7 @@ async def export_late_swap_session(
         return await export_entries_batch(
             date=session.game_date,
             request=ExportEntriesRequest(contest_ids=contest_ids),
+            site=session.site,
             force=False,
         )
 
@@ -2107,7 +2520,7 @@ async def export_late_swap_session(
         for candidate in entry_candidates:
             candidate_lookup[candidate.candidate_id] = candidate
 
-    entry_states = _load_entry_states_for_contests(session.game_date, contest_ids)
+    entry_states = _load_entry_states_for_contests(session.game_date, contest_ids, site=session.site)
     output = io.StringIO()
     writer = csv.writer(output)
 
@@ -2115,6 +2528,7 @@ async def export_late_swap_session(
     writer.writerow(header)
     exported_entries = 0
     for state in entry_states:
+        roster_slots = _entry_slots_for_site(state.site)
         for idx, entry in enumerate(state.entries):
             scoped_id = _entry_scoped_id(str(state.contest_id), entry, idx)
             candidate_id = session.selected_candidates_by_entry_id.get(scoped_id)
@@ -2122,12 +2536,12 @@ async def export_late_swap_session(
                 candidate = candidate_lookup.get(candidate_id)
                 if candidate:
                     temp_entry = dict(entry)
-                    for slot in DK_NBA_SLOTS:
+                    for slot in roster_slots:
                         temp_entry[slot] = str(candidate.slot_values.get(slot, temp_entry.get(slot, "")))
-                    writer.writerow(_export_row_for_header(temp_entry, header))
+                    writer.writerow(_export_row_for_header(temp_entry, header, site=state.site))
                     exported_entries += 1
                     continue
-            writer.writerow(_export_row_for_header(entry, header))
+            writer.writerow(_export_row_for_header(entry, header, site=state.site))
             exported_entries += 1
 
     csv_text = output.getvalue()
@@ -2171,19 +2585,26 @@ async def export_late_swap_session(
 
 
 @router.post("/entries/{contest_id}/late-swap", response_model=LateSwapResult)
-async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest):
-    path = _entry_path(date, contest_id)
+async def late_swap_entries(
+    contest_id: str,
+    date: str,
+    request: LateSwapRequest,
+    site: str = Query(default="dk", description="Site: dk or fd"),
+):
+    site_norm = _normalize_site(site)
+    path = _entry_path(date, contest_id, site=site_norm)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
 
     entry_state_before = EntryFileState.model_validate_json(path.read_text())
+    entry_site = _normalize_site(entry_state_before.site)
     policy = LateSwapPolicy.with_mode_defaults("preserve_targets")
     policy.candidate_count_per_entry = max(6, min(20, int(request.n_alternatives) + 1))
 
     session = LateSwapSession(
         session_id=_new_late_swap_session_id(),
         game_date=date,
-        site="dk",
+        site=entry_site,
         contest_ids=[contest_id],
         draft_group_ids=[int(entry_state_before.draft_group_id)],
         created_at=utc_now_iso(),
@@ -2222,6 +2643,7 @@ async def late_swap_entries(contest_id: str, date: str, request: LateSwapRequest
     await commit_late_swap_session(
         session_id=session.session_id,
         date=session.game_date,
+        site=session.site,
         request=LateSwapCommitRequest(note="legacy_auto_commit"),
     )
     entry_state_after = EntryFileState.model_validate_json(path.read_text())
@@ -2287,13 +2709,15 @@ async def select_alternative(
     contest_id: str,
     date: str,
     request: SelectAlternativeRequest,
+    site: str = Query(default="dk", description="Site: dk or fd"),
 ):
     """Apply a specific alternative to an entry."""
-    path = _entry_path(date, contest_id)
+    path = _entry_path(date, contest_id, site=_normalize_site(site))
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
 
     entry_state = EntryFileState.model_validate_json(path.read_text())
+    roster_slots = _entry_slots_for_site(entry_state.site)
 
     # Find and update the specific entry
     updated = False
@@ -2306,7 +2730,7 @@ async def select_alternative(
                 "contest_id": entry_state.contest_id,
                 "contest_name": entry_state.contest_name,
                 "entry_fee": entry_state.entry_fee,
-                **{slot: request.slot_values.get(slot, "") for slot in DK_NBA_SLOTS},
+                **{slot: request.slot_values.get(slot, "") for slot in roster_slots},
             }
             updated = True
             break
@@ -2322,14 +2746,22 @@ async def select_alternative(
 
 
 @router.get("/entries/{contest_id}/validate", response_model=ExportValidationResult)
-async def validate_entry_file(contest_id: str, date: str):
+async def validate_entry_file(
+    contest_id: str,
+    date: str,
+    site: str = Query(default="dk", description="Site: dk or fd"),
+):
     """Validate entries before export - check for empty slots, invalid IDs, duplicates."""
-    path = _entry_path(date, contest_id)
+    path = _entry_path(date, contest_id, site=_normalize_site(site))
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     entry_state = EntryFileState.model_validate_json(path.read_text())
 
-    return _validate_entries_for_export(entry_state.entries, entry_state.draft_group_id)
+    return _validate_entries_for_export(
+        entry_state.entries,
+        entry_state.draft_group_id,
+        site=entry_state.site,
+    )
 
 
 @router.post("/entries/{contest_id}/export")
@@ -2337,6 +2769,7 @@ async def export_entry_file(
     contest_id: str,
     date: str,
     force: bool = False,
+    site: str = Query(default="dk", description="Site: dk or fd"),
     request: ExportEntrySelectionRequest | None = Body(default=None),
 ):
     """Export entries to CSV for DraftKings upload.
@@ -2346,7 +2779,7 @@ async def export_entry_file(
         date: Game date
         force: If True, export even with validation errors (default False)
     """
-    path = _entry_path(date, contest_id)
+    path = _entry_path(date, contest_id, site=_normalize_site(site))
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
     entry_state = EntryFileState.model_validate_json(path.read_text())
@@ -2366,7 +2799,7 @@ async def export_entry_file(
             raise HTTPException(status_code=400, detail="No selected entries found for export")
 
     # Validate before export
-    validation = _validate_entries_for_export(entries, entry_state.draft_group_id)
+    validation = _validate_entries_for_export(entries, entry_state.draft_group_id, site=entry_state.site)
     if not validation.valid and not force:
         error_details = "; ".join(f"{i.entry_id}: {i.message}" for i in validation.issues[:5])
         if len(validation.issues) > 5:
@@ -2392,7 +2825,7 @@ async def export_entry_file(
     export_header = _export_header_for_entry_state(entry_state)
     writer.writerow(export_header)
     for entry in entries:
-        writer.writerow(_export_row_for_header(entry, export_header))
+        writer.writerow(_export_row_for_header(entry, export_header, site=entry_state.site))
 
     csv_text = output.getvalue()
     export_csv_path = exports_dir / f"export_{export_id}.csv"
@@ -2477,7 +2910,12 @@ async def export_entry_file(
 
 
 @router.post("/entries/export")
-async def export_entries_batch(date: str, request: ExportEntriesRequest, force: bool = False):
+async def export_entries_batch(
+    date: str,
+    request: ExportEntriesRequest,
+    force: bool = False,
+    site: str = Query(default="dk", description="Site: dk or fd"),
+):
     """Export multiple contests into a single CSV.
 
     Args:
@@ -2494,8 +2932,9 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest, force: 
     draft_group_ids: set[int] = set()
     sites: set[str] = set()
     export_header: List[str] | None = None
+    site_norm = _normalize_site(site)
     for contest_id in request.contest_ids:
-        path = _entry_path(date, contest_id)
+        path = _entry_path(date, contest_id, site=site_norm)
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"Entry file {contest_id} not found for {date}")
         entry_state = EntryFileState.model_validate_json(path.read_text())
@@ -2504,14 +2943,17 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest, force: 
         if export_header is None:
             export_header = contest_header
         elif contest_header != export_header:
-            export_header = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
+            export_header = _default_export_header_for_site(site_norm)
         draft_group_ids.add(int(entry_state.draft_group_id))
         sites.add(str(entry_state.site or "dk"))
         all_entries.extend(entry_state.entries)
 
+    if len(sites) > 1:
+        raise HTTPException(status_code=400, detail="Mixed-site batch export is not supported")
+
     # Validate all entries
     draft_group_id: int | None = next(iter(draft_group_ids)) if len(draft_group_ids) == 1 else None
-    validation = _validate_entries_for_export(all_entries, draft_group_id or 0)
+    validation = _validate_entries_for_export(all_entries, draft_group_id or 0, site=site_norm)
     if not validation.valid and not force:
         error_details = "; ".join(f"{i.entry_id}: {i.message}" for i in validation.issues[:5])
         if len(validation.issues) > 5:
@@ -2524,16 +2966,16 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest, force: 
     # Second pass: write CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    resolved_header = export_header or ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"] + list(DK_NBA_SLOTS)
+    resolved_header = export_header or _default_export_header_for_site(site_norm)
     writer.writerow(resolved_header)
     total_entries = 0
     for entry in all_entries:
-        writer.writerow(_export_row_for_header(entry, resolved_header))
+        writer.writerow(_export_row_for_header(entry, resolved_header, site=site_norm))
         total_entries += 1
 
     export_id = _generate_export_id()
-    site = next(iter(sites)) if len(sites) == 1 else "dk"
-    contest_root = _contest_root_for_export(site=site, game_date=date, draft_group_id=draft_group_id)
+    site_for_export = next(iter(sites)) if len(sites) == 1 else site_norm
+    contest_root = _contest_root_for_export(site=site_for_export, game_date=date, draft_group_id=draft_group_id)
     exports_dir = contest_root / "exports"
     eval_dir = contest_root / "eval_pre" / f"export_{export_id}"
     exports_dir.mkdir(parents=True, exist_ok=True)
@@ -2549,7 +2991,7 @@ async def export_entries_batch(date: str, request: ExportEntriesRequest, force: 
     manifest: dict[str, object] = {
         "export_id": export_id,
         "created_at_utc": _utc_now_iso(),
-        "site": site,
+        "site": site_for_export,
         "game_date": date,
         "draft_group_id": int(draft_group_id) if draft_group_id is not None else None,
         "draft_group_id_candidates": sorted(draft_group_ids),

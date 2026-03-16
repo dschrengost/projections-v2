@@ -42,8 +42,8 @@ def test_get_slates_for_date_merges_disk_when_api_partial(monkeypatch):
     ]
 
     monkeypatch.setattr(optimizer_service, "list_draft_groups_for_date", lambda *_, **__: api_df)
-    monkeypatch.setattr(optimizer_service, "_discover_slates_from_disk", lambda *_: disk_slates)
-    monkeypatch.setattr(optimizer_service, "_discover_slates_from_bronze_draftables", lambda *_: [])
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_disk", lambda *_, **__: disk_slates)
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_bronze_draftables", lambda *_, **__: [])
 
     slates = optimizer_service.get_slates_for_date("2025-12-28", slate_type="all")
     by_dg = {int(s["draft_group_id"]): s for s in slates}
@@ -78,8 +78,8 @@ def test_get_slates_for_date_uses_disk_when_api_empty(monkeypatch):
     ]
 
     monkeypatch.setattr(optimizer_service, "list_draft_groups_for_date", lambda *_, **__: api_df)
-    monkeypatch.setattr(optimizer_service, "_discover_slates_from_disk", lambda *_: disk_slates)
-    monkeypatch.setattr(optimizer_service, "_discover_slates_from_bronze_draftables", lambda *_: [])
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_disk", lambda *_, **__: disk_slates)
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_bronze_draftables", lambda *_, **__: [])
 
     assert optimizer_service.get_slates_for_date("2025-12-28", slate_type="all") == disk_slates
 
@@ -117,7 +117,7 @@ def test_get_slates_for_date_refines_showdown_from_draftables(monkeypatch, tmp_p
     )
 
     monkeypatch.setattr(optimizer_service, "list_draft_groups_for_date", lambda *_, **__: api_df)
-    monkeypatch.setattr(optimizer_service, "_discover_slates_from_disk", lambda *_: [])
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_disk", lambda *_, **__: [])
     monkeypatch.setattr(optimizer_service, "get_data_root", lambda: tmp_path)
 
     slates = optimizer_service.get_slates_for_date("2025-12-28", slate_type="all")
@@ -168,3 +168,25 @@ def test_get_slates_for_date_uses_bronze_when_gold_missing(monkeypatch, tmp_path
 
     slates = optimizer_service.get_slates_for_date("2025-12-28", slate_type="all")
     assert any(int(s["draft_group_id"]) == 123 for s in slates)
+
+
+def test_get_slates_for_date_fd_uses_disk_only(monkeypatch):
+    disk_slates = [
+        {
+            "game_date": "2025-12-28",
+            "slate_type": "main",
+            "draft_group_id": 777,
+            "n_contests": 0,
+            "earliest_start": None,
+            "latest_start": None,
+            "example_contest_name": "FD Main",
+            "games": [{"matchup": "AAA@BBB"}],
+        }
+    ]
+
+    monkeypatch.setattr(optimizer_service, "list_draft_groups_for_date", lambda *_, **__: (_ for _ in ()).throw(RuntimeError("should not call dk api")))
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_disk", lambda *_, **__: disk_slates)
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_bronze_draftables", lambda *_, **__: [])
+
+    slates = optimizer_service.get_slates_for_date("2025-12-28", slate_type="all", site="fd")
+    assert slates == disk_slates

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -241,6 +242,37 @@ def step_dk_salaries(cfg: PipelineConfig) -> StepResult:
     except Exception as e:
         duration = (datetime.now(timezone.utc) - start).total_seconds()
         logger.warning(f"DK salaries failed (continuing): {e}")
+        return StepResult(name=name, success=True, duration_s=duration, error=str(e))
+
+
+def _fd_salaries_enabled() -> bool:
+    return str(os.environ.get("PROJECTIONS_ENABLE_FD_SALARIES", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def step_fd_salaries(cfg: PipelineConfig) -> StepResult:
+    """Step 1c: Fetch FanDuel salaries (non-blocking, env-gated)."""
+    start = datetime.now(timezone.utc)
+    name = "fd_salaries"
+
+    if not _fd_salaries_enabled():
+        duration = (datetime.now(timezone.utc) - start).total_seconds()
+        return StepResult(name=name, success=True, duration_s=duration, skipped=True)
+
+    try:
+        args = ["--game-date", cfg.game_date]
+        _run_python_module("scripts.fd.run_daily_salaries", args, cfg.data_root, check=False)
+
+        duration = (datetime.now(timezone.utc) - start).total_seconds()
+        return StepResult(name=name, success=True, duration_s=duration)
+
+    except Exception as e:
+        duration = (datetime.now(timezone.utc) - start).total_seconds()
+        logger.warning(f"FD salaries failed (continuing): {e}")
         return StepResult(name=name, success=True, duration_s=duration, error=str(e))
 
 
@@ -625,9 +657,14 @@ def run_live_pipeline(
     logger.info("STEP 0a: DK Salaries")
     result.add_step(step_dk_salaries(cfg))
 
-    # Step 0b: Scrape Props (non-blocking)
+    # Step 0b: FD Salaries (non-blocking, env-gated)
     logger.info("=" * 60)
-    logger.info("STEP 0b: Scrape Props")
+    logger.info("STEP 0b: FD Salaries")
+    result.add_step(step_fd_salaries(cfg))
+
+    # Step 0c: Scrape Props (non-blocking)
+    logger.info("=" * 60)
+    logger.info("STEP 0c: Scrape Props")
     result.add_step(step_scrape_props(cfg))
 
     # Step 1: Scrape

@@ -73,6 +73,42 @@ def _write_entry_state(data_root: Path, game_date: str, contest_id: str) -> None
     entry_path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
 
 
+def _write_fd_entry_state(data_root: Path, game_date: str, contest_id: str) -> None:
+    state = EntryFileState(
+        game_date=game_date,
+        draft_group_id=127613,
+        site="fd",
+        contest_id=contest_id,
+        contest_name="FD Contest A",
+        entry_fee="0.25",
+        created_at="2026-03-03T00:00:00Z",
+        updated_at="2026-03-03T00:00:00Z",
+        client_revision=1,
+        header=["entry_id", "contest_id", "contest_name", "entry_fee", "PG", "PG", "SG", "SG", "SF", "SF", "PF", "PF", "C"],
+        entries=[
+            {
+                "entry_id": "fd-e1",
+                "entry_key": "fd-e1",
+                "contest_id": contest_id,
+                "contest_name": "FD Contest A",
+                "entry_fee": "0.25",
+                "PG1": "127613-1001",
+                "PG2": "127613-1002",
+                "SG1": "127613-1003",
+                "SG2": "127613-1004",
+                "SF1": "127613-1005",
+                "SF2": "127613-1006",
+                "PF1": "127613-1007",
+                "PF2": "127613-1008",
+                "C": "127613-1009",
+            }
+        ],
+    )
+    entry_path = data_root / "entries" / game_date / "fd" / f"{contest_id}.json"
+    entry_path.parent.mkdir(parents=True, exist_ok=True)
+    entry_path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+
+
 def _patch_late_swap_dependencies(monkeypatch, *, data_root: Path, lock_pg: bool = False) -> None:
     import projections.api.entry_manager_api as entry_manager_api
     import projections.late_swap.candidate_generation as candidate_generation
@@ -196,6 +232,75 @@ def _patch_late_swap_dependencies(monkeypatch, *, data_root: Path, lock_pg: bool
         n = max(1, int(getattr(constraints, "N_lineups", 1)))
         base = [alt, hold]
         return (base[:n] if n <= len(base) else base + [hold] * (n - len(base))), {"status": "OPTIMAL"}
+
+    monkeypatch.setattr(candidate_generation, "solve_cpsat_iterative_counts", fake_solver)
+
+
+def _patch_late_swap_dependencies_fd(monkeypatch, *, data_root: Path) -> None:
+    import projections.api.entry_manager_api as entry_manager_api
+    import projections.late_swap.candidate_generation as candidate_generation
+
+    def fake_data_path(*parts: Any) -> Path:
+        return data_root.joinpath(*parts)
+
+    monkeypatch.setattr(paths, "data_path", fake_data_path)
+    monkeypatch.setattr(entry_manager_api, "_refresh_draftables_for_late_swap", lambda *_a, **_k: None)
+    monkeypatch.setattr(entry_manager_api, "_safe_git_sha", lambda: "deadbeef")
+    monkeypatch.setattr(entry_manager_api, "_resolve_latest_sim_v2_worlds", lambda **_: {})
+
+    def fake_popen(*_args, **_kwargs):
+        class DummyProc:
+            pass
+
+        return DummyProc()
+
+    monkeypatch.setattr(entry_manager_api.subprocess, "Popen", fake_popen)
+
+    players = [
+        {"player_id": "1", "name": "P1", "team": "A", "matchup": "A@B", "proj": 20.0, "pred_own_pct": 12.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["PG"], "fd_id": "127613-1001"},
+        {"player_id": "2", "name": "P2", "team": "A", "matchup": "A@B", "proj": 19.0, "pred_own_pct": 11.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["PG"], "fd_id": "127613-1002"},
+        {"player_id": "3", "name": "P3", "team": "A", "matchup": "A@B", "proj": 18.0, "pred_own_pct": 10.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["SG"], "fd_id": "127613-1003"},
+        {"player_id": "4", "name": "P4", "team": "B", "matchup": "A@B", "proj": 17.0, "pred_own_pct": 9.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["SG"], "fd_id": "127613-1004"},
+        {"player_id": "5", "name": "P5", "team": "B", "matchup": "A@B", "proj": 16.0, "pred_own_pct": 8.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["SF"], "fd_id": "127613-1005"},
+        {"player_id": "6", "name": "P6", "team": "C", "matchup": "C@D", "proj": 15.0, "pred_own_pct": 7.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["SF"], "fd_id": "127613-1006"},
+        {"player_id": "7", "name": "P7", "team": "C", "matchup": "C@D", "proj": 14.0, "pred_own_pct": 6.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["PF"], "fd_id": "127613-1007"},
+        {"player_id": "8", "name": "P8", "team": "D", "matchup": "C@D", "proj": 13.0, "pred_own_pct": 5.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["PF"], "fd_id": "127613-1008"},
+        {"player_id": "9", "name": "P9", "team": "D", "matchup": "C@D", "proj": 12.0, "pred_own_pct": 4.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["C"], "fd_id": "127613-1009"},
+        {"player_id": "10", "name": "P10", "team": "D", "matchup": "C@D", "proj": 25.0, "pred_own_pct": 3.0, "is_active": True, "is_out": False, "game_start_utc": "2026-03-03T23:30:00Z", "positions": ["C"], "fd_id": "127613-1010"},
+    ]
+    monkeypatch.setattr(entry_manager_api, "build_player_pool", lambda **_kwargs: players)
+
+    def fake_solver(players_pool, constraints, seed, site):
+        _ = players_pool, constraints, seed, site
+        hold = _FakeLineup(
+            players=[
+                _FakePlayer("1", "PG"),
+                _FakePlayer("2", "PG"),
+                _FakePlayer("3", "SG"),
+                _FakePlayer("4", "SG"),
+                _FakePlayer("5", "SF"),
+                _FakePlayer("6", "SF"),
+                _FakePlayer("7", "PF"),
+                _FakePlayer("8", "PF"),
+                _FakePlayer("9", "C"),
+            ],
+            total_proj=140.0,
+        )
+        alt = _FakeLineup(
+            players=[
+                _FakePlayer("1", "PG"),
+                _FakePlayer("2", "PG"),
+                _FakePlayer("3", "SG"),
+                _FakePlayer("4", "SG"),
+                _FakePlayer("5", "SF"),
+                _FakePlayer("6", "SF"),
+                _FakePlayer("7", "PF"),
+                _FakePlayer("8", "PF"),
+                _FakePlayer("10", "C"),
+            ],
+            total_proj=152.0,
+        )
+        return [alt, hold], {"status": "OPTIMAL"}
 
     monkeypatch.setattr(candidate_generation, "solve_cpsat_iterative_counts", fake_solver)
 
@@ -327,3 +432,69 @@ def test_late_swap_v2_forced_over_cap_by_locks(tmp_path: Path, monkeypatch) -> N
     ]
     assert forced_rows
     assert forced_rows[0]["forced_over_cap_by_locks"] is True
+
+
+def test_late_swap_v2_fd_session_lifecycle(tmp_path: Path, monkeypatch) -> None:
+    data_root = tmp_path / "data_root"
+    game_date = "2026-03-03"
+    contest_id = "127613-279208572"
+    _write_fd_entry_state(data_root, game_date, contest_id)
+    _patch_late_swap_dependencies_fd(monkeypatch, data_root=data_root)
+
+    app = create_app(daily_root=tmp_path, dashboard_dist=tmp_path, fpts_root=tmp_path)
+    client = TestClient(app)
+
+    create_resp = client.post(
+        "/api/entry-manager/late-swap/sessions",
+        json={"date": game_date, "site": "fd", "contest_ids": [contest_id]},
+    )
+    assert create_resp.status_code == 200
+    session = create_resp.json()
+    session_id = session["session_id"]
+    assert session["site"] == "fd"
+
+    preview_resp = client.post(
+        f"/api/entry-manager/late-swap/sessions/{session_id}/preview",
+        params={"date": game_date, "site": "fd"},
+        json={},
+    )
+    assert preview_resp.status_code == 200
+    preview = preview_resp.json()
+    assert preview["candidates_by_entry_id"]
+    scoped_entry_id = next(iter(preview["candidates_by_entry_id"].keys()))
+    entry_candidates = preview["candidates_by_entry_id"][scoped_entry_id]
+    candidate_ids = [c["candidate_id"] for c in entry_candidates]
+    assert candidate_ids
+    preferred_candidate = next(
+        (c["candidate_id"] for c in entry_candidates if c.get("generated_by") != "hold"),
+        candidate_ids[0],
+    )
+
+    pin_resp = client.post(
+        f"/api/entry-manager/late-swap/sessions/{session_id}/pin-candidates",
+        params={"date": game_date, "site": "fd"},
+        json={"pins": {scoped_entry_id: preferred_candidate}},
+    )
+    assert pin_resp.status_code == 200
+
+    commit_resp = client.post(
+        f"/api/entry-manager/late-swap/sessions/{session_id}/commit",
+        params={"date": game_date, "site": "fd"},
+        json={},
+    )
+    assert commit_resp.status_code == 200
+    committed_session = commit_resp.json()
+    assert committed_session["status"] == "committed"
+
+    state_path = data_root / "entries" / game_date / "fd" / f"{contest_id}.json"
+    committed_state = EntryFileState.model_validate_json(state_path.read_text(encoding="utf-8"))
+    assert committed_state.source_late_swap_session_id == session_id
+    assert committed_state.entries[0]["C"] in {"127613-1009", "127613-1010"}
+
+    export_resp = client.post(
+        f"/api/entry-manager/late-swap/sessions/{session_id}/export",
+        params={"date": game_date, "site": "fd"},
+        json={"include_uncommitted_preview": True},
+    )
+    assert export_resp.status_code == 200
+    assert "entry_id,contest_id,contest_name,entry_fee" in export_resp.text

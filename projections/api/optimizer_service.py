@@ -13,7 +13,9 @@ import os
 import re
 import threading
 import uuid
+import json
 from dataclasses import dataclass, field
+import datetime as dt
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -22,9 +24,16 @@ import pandas as pd
 import numpy as np
 import yaml
 
+from projections.dk.normalize import (
+    draftables_json_to_df,
+    normalize_draftables_to_salaries,
+    write_salaries_gold,
+)
 from projections.dk.salaries_schema import dk_salaries_gold_path, normalize_positions
 from projections.dk.slates import list_draft_groups_for_date
-from projections.fpts_v2.scoring import compute_dk_fpts
+from projections.fd.normalize import normalize_fd_players_to_salaries, players_json_to_df
+from projections.fd.slates import list_fixture_lists_for_date
+from projections.fpts_v2.scoring import compute_dk_fpts, compute_fd_fpts
 from projections.names import normalize_player_name
 from projections.pipeline import control_plane
 from projections.pipeline.effective_inputs import EFFECTIVE_MINUTES_FILENAME
@@ -45,6 +54,14 @@ from projections.optimizer.objective import (
 from projections.api.slate_analytics_service import load_or_compute_slate_player_analytics
 
 logger = logging.getLogger(__name__)
+SUPPORTED_SITES = {"dk", "fd"}
+
+
+def _normalize_site(site: str | None) -> str:
+    value = str(site or "dk").strip().lower()
+    if value not in SUPPORTED_SITES:
+        raise ValueError(f"Unsupported site '{site}'. Expected one of: {sorted(SUPPORTED_SITES)}")
+    return value
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -176,6 +193,8 @@ def _load_rates_v1_live(
 def _attach_rates_mean_fpts(
     minutes_df: pd.DataFrame,
     rates_df: pd.DataFrame,
+    *,
+    site: str = "dk",
 ) -> pd.DataFrame:
     """
     Compute deterministic mean DK FPTS from minutes + rates predictions and attach as `fpts_mean`.
@@ -292,7 +311,9 @@ def _attach_rates_mean_fpts(
         }
     )
 
-    merged["fpts_mean"] = compute_dk_fpts(scoring_frame).astype(float)
+    site_norm = _normalize_site(site)
+    scoring_fn = compute_fd_fpts if site_norm == "fd" else compute_dk_fpts
+    merged["fpts_mean"] = scoring_fn(scoring_frame).astype(float)
 
     # Keep the original columns; merge back onto the normalized copy to avoid dtype mismatches.
     out_cols = join_keys + ["fpts_mean"]
@@ -309,10 +330,37 @@ def _attach_rates_mean_fpts(
 # ---------------------------------------------------------------------------
 
 
+def _fpts_presence_candidates(site: str) -> list[str]:
+    site_norm = _normalize_site(site)
+    base = [
+        "fpts_sim_uncond_mean",
+        "fpts_sim_cond_mean",
+        "proj_fpts",
+        "fpts_mean",
+    ]
+    if site_norm == "fd":
+        return [
+            "sim_fd_fpts_mean_uncond",
+            "fd_fpts_mean_uncond",
+            "sim_fd_fpts_mean",
+            "fd_fpts_mean",
+            *base,
+        ]
+    return [
+        "sim_dk_fpts_mean_uncond",
+        "dk_fpts_mean_uncond",
+        "sim_dk_fpts_mean",
+        "dk_fpts_mean",
+        *base,
+    ]
+
+
 def load_projections_for_date(
     game_date: str,
     run_id: Optional[str] = None,
     data_root: Optional[Path] = None,
+    *,
+    site: str = "dk",
 ) -> pd.DataFrame:
     """Load projections from unified projections artifact or gold layer.
 
@@ -321,6 +369,7 @@ def load_projections_for_date(
     Returns DataFrame with columns:
         player_id, player_name, team_tricode, sim_dk_fpts_mean, pred_own_pct, etc.
     """
+    site_norm = _normalize_site(site)
     root = data_root or get_data_root()
     df: pd.DataFrame | None = None
 
@@ -372,14 +421,7 @@ def load_projections_for_date(
         raise FileNotFoundError(f"No projections found for {game_date}")
 
     # Check if we have FPTS data, if not try to merge from sim_v2
-    fpts_cols = [
-        "sim_dk_fpts_mean_uncond",
-        "dk_fpts_mean_uncond",
-        "sim_dk_fpts_mean",
-        "dk_fpts_mean",
-        "proj_fpts",
-        "fpts_mean",
-    ]
+    fpts_cols = _fpts_presence_candidates(site_norm)
     has_fpts = any(c in df.columns and df[c].notna().any() for c in fpts_cols)
 
     if not has_fpts:
@@ -404,7 +446,7 @@ def load_projections_for_date(
         rates_df, rates_run_id = _load_rates_v1_live(game_date, root, run_id=resolved_minutes_run_id)
         if rates_df is not None and not rates_df.empty:
             before = set(df.columns)
-            df = _attach_rates_mean_fpts(df, rates_df)
+            df = _attach_rates_mean_fpts(df, rates_df, site=site_norm)
             added = sorted(set(df.columns) - before)
             logger.info(
                 "Attached rates-derived fpts_mean for %s (rates_run=%s, added=%s)",
@@ -514,9 +556,6 @@ def _load_game_info_from_draftables(
     
     Returns dict mapping competition_id -> {matchup, start_time_utc}.
     """
-    import json
-    from datetime import datetime
-    
     bronze_path = data_root / "bronze" / "dk" / "draftables" / f"draftables_raw_{draft_group_id}.json"
     if not bronze_path.exists():
         logger.debug("No bronze draftables found at %s", bronze_path)
@@ -573,61 +612,279 @@ def _load_game_info_from_draftables(
     return game_info
 
 
-def load_salaries_for_date(
+def _load_or_build_dk_salaries_from_bronze(
+    *,
+    root: Path,
     game_date: str,
     draft_group_id: int,
+) -> Path | None:
+    bronze_path = root / "bronze" / "dk" / "draftables" / f"draftables_raw_{draft_group_id}.json"
+    if not bronze_path.exists():
+        return None
+
+    try:
+        payload = json.loads(bronze_path.read_text(encoding="utf-8"))
+        raw_df = draftables_json_to_df(payload, draft_group_id=draft_group_id)
+        salaries_df = normalize_draftables_to_salaries(
+            root=root,
+            site="dk",
+            game_date=game_date,
+            draft_group_id=draft_group_id,
+            df=raw_df,
+        )
+        written = write_salaries_gold(
+            root=root,
+            site="dk",
+            game_date=game_date,
+            draft_group_id=draft_group_id,
+            salaries_df=salaries_df,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to synthesize DK salaries from bronze draftables for %s/dg=%d: %s",
+            game_date,
+            draft_group_id,
+            exc,
+        )
+        return None
+
+    logger.info(
+        "Synthesized DK salaries from bronze draftables for %s/dg=%d -> %s",
+        game_date,
+        draft_group_id,
+        written,
+    )
+    return written
+
+
+def _fd_bronze_slate_dir(root: Path, game_date: str, draft_group_id: int | str) -> Path:
+    return (
+        root
+        / "bronze"
+        / "fd"
+        / "fixture_lists"
+        / f"game_date={game_date}"
+        / f"draft_group_id={draft_group_id}"
+    )
+
+
+def _load_or_build_fd_salaries_from_bronze(
+    *,
+    root: Path,
+    game_date: str,
+    draft_group_id: int | str,
+) -> Path | None:
+    slate_dir = _fd_bronze_slate_dir(root, game_date, draft_group_id)
+    players_path = slate_dir / "players.json"
+    if not players_path.exists():
+        return None
+
+    detail_path = slate_dir / "detail.json"
+    contests_path = slate_dir / "contests.json"
+
+    try:
+        players_payload = json.loads(players_path.read_text(encoding="utf-8"))
+        detail_payload = (
+            json.loads(detail_path.read_text(encoding="utf-8")) if detail_path.exists() else None
+        )
+        contests_payload = (
+            json.loads(contests_path.read_text(encoding="utf-8")) if contests_path.exists() else None
+        )
+
+        raw_df = players_json_to_df(
+            players_payload,
+            fixture_list_id=draft_group_id,
+            fixture_detail=detail_payload if isinstance(detail_payload, dict) else None,
+            contests_payload=contests_payload if isinstance(contests_payload, dict) else None,
+        )
+        salaries_df = normalize_fd_players_to_salaries(
+            root=root,
+            site="fd",
+            game_date=game_date,
+            draft_group_id=draft_group_id,
+            df=raw_df,
+        )
+        written = write_salaries_gold(
+            root=root,
+            site="fd",
+            game_date=game_date,
+            draft_group_id=draft_group_id,
+            salaries_df=salaries_df,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to synthesize FD salaries from bronze fixture payloads for %s/dg=%s: %s",
+            game_date,
+            draft_group_id,
+            exc,
+        )
+        return None
+
+    logger.info(
+        "Synthesized FD salaries from bronze payloads for %s/dg=%s -> %s",
+        game_date,
+        draft_group_id,
+        written,
+    )
+    return written
+
+
+def _safe_parse_timestamp(value: object) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        text = str(value).strip()
+    except Exception:
+        return None
+    if not text:
+        return None
+
+    # Try direct parse first.
+    try:
+        ts = pd.to_datetime(text, utc=True, errors="coerce")
+        if pd.notna(ts):
+            return ts.to_pydatetime()
+    except Exception:
+        pass
+
+    # Common fallback: "MM/DD/YYYY HH:MMAM ET"
+    cleaned = text.replace(" ET", "").replace("ET", "").strip()
+    try:
+        ts = datetime.strptime(cleaned, "%m/%d/%Y %I:%M%p")
+        return ts
+    except Exception:
+        return None
+
+
+def _coerce_competition_ids(raw: object) -> list[int]:
+    if raw is None:
+        return []
+    if isinstance(raw, np.ndarray):
+        raw = raw.tolist()
+    if not isinstance(raw, list):
+        return []
+    out: list[int] = []
+    for value in raw:
+        try:
+            out.append(int(value))
+        except Exception:
+            continue
+    return sorted(set(out))
+
+
+def _infer_game_matchup_from_text(raw: object) -> str | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    normalized = text.replace(" at ", "@").replace(" vs ", "@").replace("-", "@")
+    token = normalized.split(" ", 1)[0].upper()
+    if "@" in token and len(token.split("@")) == 2:
+        away, home = token.split("@")
+        if away and home:
+            return f"{away}@{home}"
+    return None
+
+
+def _add_game_columns_from_available_data(
+    *,
+    df: pd.DataFrame,
+    game_info: Dict[int, Dict[str, Any]] | None,
+) -> tuple[pd.Series, pd.Series]:
+    if game_info is None:
+        game_info = {}
+
+    if "raw_competition_ids" in df.columns and game_info:
+        comp_ids = df["raw_competition_ids"].apply(_coerce_competition_ids)
+        matchup = comp_ids.apply(
+            lambda ids: game_info.get(ids[0], {}).get("matchup") if ids else None
+        )
+        start = comp_ids.apply(
+            lambda ids: game_info.get(ids[0], {}).get("start_time_utc") if ids else None
+        )
+    else:
+        matchup = pd.Series([None] * len(df), index=df.index, dtype="object")
+        start = pd.Series([None] * len(df), index=df.index, dtype="object")
+
+    for col in ("game_matchup", "matchup", "game"):
+        if col in df.columns:
+            parsed = df[col].apply(_infer_game_matchup_from_text)
+            matchup = matchup.where(matchup.notna(), parsed)
+
+    for col in ("game_start_utc", "start_time_utc", "start_time", "lock_time"):
+        if col in df.columns:
+            parsed = df[col].apply(_safe_parse_timestamp)
+            start = start.where(start.notna(), parsed)
+
+    if "game_info" in df.columns:
+        parsed_start = df["game_info"].apply(
+            lambda v: _safe_parse_timestamp(str(v).split(" ", 1)[1] if isinstance(v, str) and " " in v else None)
+        )
+        start = start.where(start.notna(), parsed_start)
+        parsed_matchup = df["game_info"].apply(_infer_game_matchup_from_text)
+        matchup = matchup.where(matchup.notna(), parsed_matchup)
+
+    return matchup, start
+
+
+def load_salaries_for_date(
+    game_date: str,
+    draft_group_id: int | str,
     site: str = "dk",
     data_root: Optional[Path] = None,
 ) -> pd.DataFrame:
-    """Load DK salaries from gold layer.
+    """Load salaries from gold layer.
 
     Returns DataFrame with columns:
         dk_player_id, display_name, positions, salary, team_abbrev, status,
         game_matchup, game_start_utc
     """
+    site_norm = _normalize_site(site)
     root = data_root or get_data_root()
-    salaries_path = dk_salaries_gold_path(root, site, game_date, draft_group_id)
+    salaries_path = dk_salaries_gold_path(root, site_norm, game_date, draft_group_id)
 
     if not salaries_path.exists():
-        raise FileNotFoundError(f"Salaries not found: {salaries_path}")
+        if site_norm == "dk":
+            try:
+                dk_draft_group_id = int(draft_group_id)
+            except Exception as exc:
+                raise ValueError(f"DK draft_group_id must be an integer, got {draft_group_id!r}") from exc
+            synthesized = _load_or_build_dk_salaries_from_bronze(
+                root=root,
+                game_date=game_date,
+                draft_group_id=dk_draft_group_id,
+            )
+            if synthesized is not None and synthesized.exists():
+                salaries_path = synthesized
+        elif site_norm == "fd":
+            synthesized = _load_or_build_fd_salaries_from_bronze(
+                root=root,
+                game_date=game_date,
+                draft_group_id=draft_group_id,
+            )
+            if synthesized is not None and synthesized.exists():
+                salaries_path = synthesized
+        if not salaries_path.exists():
+            raise FileNotFoundError(f"Salaries not found: {salaries_path}")
 
     df = pd.read_parquet(salaries_path)
-    
-    # Load game info from bronze draftables
-    game_info = _load_game_info_from_draftables(draft_group_id, root)
-    
-    # Add game_matchup and game_start_utc columns
-    def get_game_matchup(comp_ids):
-        if not comp_ids or not game_info:
-            return None
-        # Take first competition ID
-        if isinstance(comp_ids, (list, np.ndarray)) and len(comp_ids) > 0:
-            comp_id = int(comp_ids[0])
-        else:
-            return None
-        info = game_info.get(comp_id)
-        return info["matchup"] if info else None
-    
-    def get_game_start(comp_ids):
-        if not comp_ids or not game_info:
-            return None
-        if isinstance(comp_ids, (list, np.ndarray)) and len(comp_ids) > 0:
-            comp_id = int(comp_ids[0])
-        else:
-            return None
-        info = game_info.get(comp_id)
-        return info["start_time_utc"] if info else None
-    
-    if "raw_competition_ids" in df.columns:
-        df["game_matchup"] = df["raw_competition_ids"].apply(get_game_matchup)
-        df["game_start_utc"] = df["raw_competition_ids"].apply(get_game_start)
+    if site_norm == "dk":
+        try:
+            dk_draft_group_id = int(draft_group_id)
+        except Exception as exc:
+            raise ValueError(f"DK draft_group_id must be an integer, got {draft_group_id!r}") from exc
+        game_info = _load_game_info_from_draftables(dk_draft_group_id, root)
     else:
-        df["game_matchup"] = None
-        df["game_start_utc"] = None
-    
+        game_info = {}
+    matchup, start = _add_game_columns_from_available_data(df=df, game_info=game_info)
+    df["game_matchup"] = matchup
+    df["game_start_utc"] = start
+
     logger.info(
-        "Loaded salaries for %s draft_group=%d (%d players, %d games)",
+        "Loaded salaries for %s site=%s draft_group=%s (%d players, %d games)",
         game_date,
+        site_norm,
         draft_group_id,
         len(df),
         len(game_info),
@@ -881,10 +1138,22 @@ def _extract_single_string_value(df: pd.DataFrame, column: str) -> str | None:
     return values[0] if len(values) == 1 else None
 
 
-def _projection_fpts_col(df: pd.DataFrame) -> Optional[str]:
-    return _find_projection_col(
-        df,
-        [
+def _projection_fpts_col(df: pd.DataFrame, site: str = "dk") -> Optional[str]:
+    site_norm = _normalize_site(site)
+    if site_norm == "fd":
+        candidates = [
+            "sim_fd_fpts_mean_uncond",
+            "fd_fpts_mean_uncond",
+            "fpts_sim_uncond_mean",
+            "sim_fd_fpts_mean",
+            "fd_fpts_mean",
+            "fpts_sim_cond_mean",
+            "proj_fpts",
+            "fpts_mean",
+            "proj",
+        ]
+    else:
+        candidates = [
             "fpts_sim_uncond_mean",
             "sim_dk_fpts_mean_uncond",
             "dk_fpts_mean_uncond",
@@ -894,8 +1163,8 @@ def _projection_fpts_col(df: pd.DataFrame) -> Optional[str]:
             "proj_fpts",
             "fpts_mean",
             "proj",
-        ],
-    )
+        ]
+    return _find_projection_col(df, candidates)
 
 
 def _projection_minutes_col(df: pd.DataFrame) -> Optional[str]:
@@ -921,6 +1190,8 @@ def _projection_minutes_col(df: pd.DataFrame) -> Optional[str]:
 
 def _build_model_value_maps(
     projection_df: pd.DataFrame,
+    *,
+    site: str = "dk",
 ) -> tuple[Dict[str, float], Dict[str, float]]:
     player_ids = projection_df.get("player_id")
     if player_ids is None:
@@ -932,7 +1203,7 @@ def _build_model_value_maps(
         return {}, {}
 
     base["player_id"] = base["player_id"].astype(str)
-    fpts_col = _projection_fpts_col(base)
+    fpts_col = _projection_fpts_col(base, site=site)
     minutes_col = _projection_minutes_col(base)
 
     model_fpts_by_player: Dict[str, float] = {}
@@ -944,6 +1215,86 @@ def _build_model_value_maps(
         minutes_series = pd.to_numeric(base[minutes_col], errors="coerce").fillna(0.0)
         model_minutes_by_player = dict(zip(base["player_id"], minutes_series.astype(float)))
     return model_fpts_by_player, model_minutes_by_player
+
+
+def _ensure_fd_projection_aliases(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+
+    def _num(col: str) -> pd.Series | None:
+        if col not in out.columns:
+            return None
+        return pd.to_numeric(out[col], errors="coerce")
+
+    def _fill_if_missing(target: str, source: str) -> None:
+        if source not in out.columns:
+            return
+        src = _num(source)
+        if src is None:
+            return
+        if target in out.columns:
+            dst = _num(target)
+            out[target] = dst.where(dst.notna(), src)
+        else:
+            out[target] = src
+
+    pts_un = _num("pts_mean_uncond")
+    reb_un = _num("reb_mean_uncond")
+    ast_un = _num("ast_mean_uncond")
+    stl_un = _num("stl_mean_uncond")
+    blk_un = _num("blk_mean_uncond")
+    tov_un = _num("tov_mean_uncond")
+    if all(v is not None for v in (pts_un, reb_un, ast_un, stl_un, blk_un, tov_un)):
+        fd_un = (
+            pts_un
+            + 1.2 * reb_un
+            + 1.5 * ast_un
+            + 3.0 * stl_un
+            + 3.0 * blk_un
+            - 1.0 * tov_un
+        )
+        if "fd_fpts_mean_uncond" in out.columns:
+            existing = _num("fd_fpts_mean_uncond")
+            out["fd_fpts_mean_uncond"] = existing.where(existing.notna(), fd_un)
+        else:
+            out["fd_fpts_mean_uncond"] = fd_un
+
+    pts_c = _num("pts_mean")
+    reb_c = _num("reb_mean")
+    ast_c = _num("ast_mean")
+    stl_c = _num("stl_mean")
+    blk_c = _num("blk_mean")
+    tov_c = _num("tov_mean")
+    if all(v is not None for v in (pts_c, reb_c, ast_c, stl_c, blk_c, tov_c)):
+        fd_c = (
+            pts_c
+            + 1.2 * reb_c
+            + 1.5 * ast_c
+            + 3.0 * stl_c
+            + 3.0 * blk_c
+            - 1.0 * tov_c
+        )
+        if "fd_fpts_mean" in out.columns:
+            existing = _num("fd_fpts_mean")
+            out["fd_fpts_mean"] = existing.where(existing.notna(), fd_c)
+        else:
+            out["fd_fpts_mean"] = fd_c
+
+    # Canonical fallback if stat means are unavailable.
+    _fill_if_missing("fd_fpts_mean_uncond", "fpts_sim_uncond_mean")
+    _fill_if_missing("fd_fpts_mean", "fpts_sim_cond_mean")
+    _fill_if_missing("fd_fpts_std_uncond", "fpts_sim_uncond_std")
+    _fill_if_missing("fd_fpts_std", "fpts_sim_cond_std")
+    _fill_if_missing("fd_fpts_p90_uncond", "fpts_sim_uncond_p90")
+    _fill_if_missing("fd_fpts_p90", "fpts_sim_cond_p90")
+
+    _fill_if_missing("sim_fd_fpts_mean_uncond", "fd_fpts_mean_uncond")
+    _fill_if_missing("sim_fd_fpts_mean", "fd_fpts_mean")
+    _fill_if_missing("sim_fd_fpts_std_uncond", "fd_fpts_std_uncond")
+    _fill_if_missing("sim_fd_fpts_std", "fd_fpts_std")
+    _fill_if_missing("sim_fd_fpts_p90_uncond", "fd_fpts_p90_uncond")
+    _fill_if_missing("sim_fd_fpts_p90", "fd_fpts_p90")
+
+    return out
 
 
 def build_player_pool(
@@ -986,11 +1337,14 @@ def build_player_pool(
         effective_own, effective_stddev, effective_p90, has_override,
         used_fppm_fallback, is_active, fppm
     """
+    site_norm = _normalize_site(site)
     root = data_root or get_data_root()
 
     # Load data sources
-    proj_df = load_projections_for_date(game_date, run_id=run_id, data_root=root)
-    sal_df = load_salaries_for_date(game_date, draft_group_id, site=site, data_root=root)
+    proj_df = load_projections_for_date(game_date, run_id=run_id, data_root=root, site=site_norm)
+    if site_norm == "fd":
+        proj_df = _ensure_fd_projection_aliases(proj_df)
+    sal_df = load_salaries_for_date(game_date, draft_group_id, site=site_norm, data_root=root)
 
     # Prepare join keys
     proj_df = proj_df.copy()
@@ -1109,7 +1463,10 @@ def build_player_pool(
         adjusted_summaries = None
         if slate_overrides.overrides:
             try:
-                model_fpts_by_player, model_minutes_by_player = _build_model_value_maps(proj_df)
+                model_fpts_by_player, model_minutes_by_player = _build_model_value_maps(
+                    proj_df,
+                    site=site_norm,
+                )
                 sim_run_id = _extract_single_string_value(proj_df, "sim_run_id")
                 player_worlds = load_player_worlds(
                     game_date,
@@ -1165,10 +1522,28 @@ def build_player_pool(
     # Prefer salary-derived columns when merge created conflicts
     salary_col = "salary_sal" if "salary_sal" in merged.columns else "salary"
     positions_col = "positions_sal" if "positions_sal" in merged.columns else "positions"
+    site_player_id_col = next(
+        (
+            col
+            for col in [
+                f"{site_norm}_player_id_sal",
+                "site_player_id_sal",
+                "dk_player_id_sal",
+                "fd_player_id_sal",
+                f"{site_norm}_player_id",
+                "site_player_id",
+                "dk_player_id",
+                "fd_player_id",
+            ]
+            if col in merged.columns
+        ),
+        None,
+    )
     dk_player_id_col = "dk_player_id_sal" if "dk_player_id_sal" in merged.columns else "dk_player_id"
+    fd_player_id_col = "fd_player_id_sal" if "fd_player_id_sal" in merged.columns else "fd_player_id"
 
     # Identify projection column
-    proj_col = _projection_fpts_col(merged)
+    proj_col = _projection_fpts_col(merged, site=site_norm)
     if not proj_col:
         raise ValueError("No projection column found in merged data")
     
@@ -1187,9 +1562,13 @@ def build_player_pool(
             c
             for c in [
                 "fpts_sim_uncond_std",
+                "sim_fd_fpts_std_uncond",
+                "fd_fpts_std_uncond",
                 "sim_dk_fpts_std_uncond",
                 "dk_fpts_std_uncond",
                 "fpts_sim_cond_std",
+                "sim_fd_fpts_std",
+                "fd_fpts_std",
                 "sim_dk_fpts_std",
                 "stddev",
                 "fpts_std",
@@ -1205,9 +1584,13 @@ def build_player_pool(
             c
             for c in [
                 "fpts_sim_uncond_p90",
+                "sim_fd_fpts_p90_uncond",
+                "fd_fpts_p90_uncond",
                 "sim_dk_fpts_p90_uncond",
                 "dk_fpts_p90_uncond",
                 "fpts_sim_cond_p90",
+                "sim_fd_fpts_p90",
+                "fd_fpts_p90",
                 "sim_dk_fpts_p90",
                 "dk_fpts_p90",
                 "fpts_p90",
@@ -1224,10 +1607,13 @@ def build_player_pool(
     disabled_col = "is_disabled_sal" if "is_disabled_sal" in merged.columns else "is_disabled"
 
     for _, row in merged.iterrows():
-        # Get player_id (prefer projection's player_id, fall back to dk_player_id)
+        # Get player_id (prefer projection's player_id, fall back to site player id)
         player_id = row.get("player_id")
         if player_id is None or pd.isna(player_id):
-            player_id = row.get(dk_player_id_col)
+            player_id = row.get(site_player_id_col) if site_player_id_col else None
+        if player_id is None or pd.isna(player_id):
+            logger.debug("Skipping row with no player_id or site id (site=%s)", site_norm)
+            continue
 
         # Get positions (from salaries - prefer _sal suffix if present from merge)
         positions_raw = row.get(positions_col)
@@ -1278,7 +1664,7 @@ def build_player_pool(
 
             # Back-compat guardrail: if we only have a conditional-on-playing mean, convert to an
             # unconditional (DNP=0) decision metric by multiplying by the best available play prob.
-            if proj_col in {"fpts_sim_cond_mean", "sim_dk_fpts_mean", "dk_fpts_mean"}:
+            if proj_col in {"fpts_sim_cond_mean", "sim_dk_fpts_mean", "dk_fpts_mean", "sim_fd_fpts_mean", "fd_fpts_mean"}:
                 try:
                     p_play = row.get("p_play_eff", row.get("minutes_sim_p_active", row.get("play_prob", 1.0)))
                     p_play_f = float(p_play)
@@ -1293,8 +1679,29 @@ def build_player_pool(
                 continue
             proj = 0.0
 
-        dk_player_id = row.get(dk_player_id_col)
-        dk_id = "" if dk_player_id is None or pd.isna(dk_player_id) else str(int(dk_player_id))
+        raw_site_player_id = row.get(site_player_id_col) if site_player_id_col else None
+        site_id = ""
+        if raw_site_player_id is not None and not pd.isna(raw_site_player_id):
+            try:
+                site_id = str(int(raw_site_player_id))
+            except Exception:
+                site_id = str(raw_site_player_id)
+
+        dk_player_id = row.get(dk_player_id_col) if dk_player_id_col in row.index else None
+        dk_id = ""
+        if dk_player_id is not None and not pd.isna(dk_player_id):
+            try:
+                dk_id = str(int(dk_player_id))
+            except Exception:
+                dk_id = str(dk_player_id)
+
+        fd_player_id = row.get(fd_player_id_col) if fd_player_id_col in row.index else None
+        fd_id = ""
+        if fd_player_id is not None and not pd.isna(fd_player_id):
+            try:
+                fd_id = str(int(fd_player_id))
+            except Exception:
+                fd_id = str(fd_player_id)
 
         player = {
             "player_id": str(player_id),
@@ -1307,8 +1714,12 @@ def build_player_pool(
             "positions": positions,
             "salary": int(salary),
             "proj": float(proj),
-            "dk_id": dk_id,
+            "site_id": site_id,
         }
+        if dk_id:
+            player["dk_id"] = dk_id
+        if fd_id:
+            player["fd_id"] = fd_id
 
         source_out = False
         try:
@@ -1862,114 +2273,309 @@ def run_quick_build(
         raise
 
 
-def get_slates_for_date(game_date: str, slate_type: str = "all") -> List[Dict[str, Any]]:
-    """Get available draft groups for a date.
-
-    First tries the live DK API, then falls back to disk-based discovery
-    from scraped gold salaries if API fails or returns empty (e.g., after games lock).
-    """
+def get_slates_for_date(
+    game_date: str,
+    slate_type: str = "all",
+    *,
+    site: str = "dk",
+) -> List[Dict[str, Any]]:
+    """Get available draft groups for a date and site."""
+    site_norm = _normalize_site(site)
     api_slates: List[Dict[str, Any]] = []
 
-    # Try live API first
+    if site_norm == "dk":
+        try:
+            df = list_draft_groups_for_date(game_date, slate_type=slate_type)  # type: ignore
+            if not df.empty:
+                api_slates = df.to_dict(orient="records")
+        except Exception as exc:
+            logger.warning("Failed to fetch live DK slates for %s: %s", game_date, exc)
+    elif site_norm == "fd":
+        try:
+            df = list_fixture_lists_for_date(game_date, slate_type=slate_type)  # type: ignore[arg-type]
+            if not df.empty:
+                api_slates = df.to_dict(orient="records")
+        except Exception as exc:
+            logger.warning("Failed to fetch live FD slates for %s: %s", game_date, exc)
+
+    disk_slates = _discover_slates_from_disk(game_date, slate_type=slate_type, site=site_norm)
+    bronze_slates = _discover_slates_from_bronze_draftables(
+        game_date,
+        slate_type=slate_type,
+        site=site_norm,
+    )
+
+    by_dg: dict[str, Dict[str, Any]] = {}
+    for slate in api_slates:
+        dg_key = _draft_group_key(slate.get("draft_group_id"))
+        if dg_key is None:
+            continue
+        by_dg[dg_key] = slate
+
+    for source in [disk_slates, bronze_slates]:
+        for slate in source:
+            dg_key = _draft_group_key(slate.get("draft_group_id"))
+            if dg_key is None:
+                continue
+            if dg_key not in by_dg:
+                by_dg[dg_key] = slate
+                continue
+
+            existing = by_dg[dg_key]
+            if (not existing.get("games")) and slate.get("games"):
+                existing["games"] = slate.get("games")
+            if (
+                str(existing.get("slate_type", "")).lower() != "showdown"
+                and str(slate.get("slate_type", "")).lower() == "showdown"
+            ):
+                existing["slate_type"] = "showdown"
+            if not existing.get("earliest_start") and slate.get("earliest_start"):
+                existing["earliest_start"] = slate.get("earliest_start")
+            if not existing.get("latest_start") and slate.get("latest_start"):
+                existing["latest_start"] = slate.get("latest_start")
+            if not existing.get("example_contest_name") and slate.get("example_contest_name"):
+                existing["example_contest_name"] = slate.get("example_contest_name")
+
+    return sorted(by_dg.values(), key=lambda s: _draft_group_sort_key(s.get("draft_group_id")))
+
+
+def _draft_group_key(raw: object) -> str | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    return text
+
+
+def _draft_group_sort_key(raw: object) -> tuple[int, int | str]:
+    key = _draft_group_key(raw)
+    if key is None:
+        return (2, "")
     try:
-        df = list_draft_groups_for_date(game_date, slate_type=slate_type)  # type: ignore
-        if not df.empty:
-            api_slates = df.to_dict(orient="records")
-    except Exception as exc:
-        logger.warning("Failed to fetch live slates for %s: %s", game_date, exc)
-
-    # Merge API slates with disk slates to include in-progress slates for late swap
-    disk_slates = _discover_slates_from_disk(game_date, slate_type)
-
-    # Build set of draft_group_ids from API
-    api_dg_ids = {s["draft_group_id"] for s in api_slates}
-
-    # Add disk slates that aren't in API (in-progress slates)
-    for ds in disk_slates:
-        if ds["draft_group_id"] not in api_dg_ids:
-            api_slates.append(ds)
-
-    return sorted(api_slates, key=lambda s: s["draft_group_id"])
+        return (0, int(key))
+    except ValueError:
+        return (1, key)
 
 
-def _discover_slates_from_disk(game_date: str, slate_type: str = "all") -> List[Dict[str, Any]]:
-    """Discover available slates from gold dk_salaries directory."""
+def _extract_games_from_salaries_df(df: pd.DataFrame) -> tuple[List[Dict[str, Any]], datetime | None, datetime | None]:
+    if df.empty:
+        return [], None, None
+
+    matchup_col = next((c for c in ("game_matchup", "matchup", "game", "game_info") if c in df.columns), None)
+    start_col = next((c for c in ("game_start_utc", "start_time_utc", "start_time", "lock_time") if c in df.columns), None)
+    if matchup_col is None:
+        return [], None, None
+
+    work = df.copy()
+    work["__matchup"] = work[matchup_col].apply(_infer_game_matchup_from_text)
+    if start_col is not None:
+        work["__start"] = work[start_col].apply(_safe_parse_timestamp)
+    else:
+        work["__start"] = None
+
+    if "__start" in work.columns and work["__start"].isna().all() and "game_info" in work.columns:
+        work["__start"] = work["game_info"].apply(
+            lambda v: _safe_parse_timestamp(str(v).split(" ", 1)[1] if isinstance(v, str) and " " in v else None)
+        )
+
+    work = work.dropna(subset=["__matchup"]).drop_duplicates(subset=["__matchup", "__start"], keep="first")
+    if work.empty:
+        return [], None, None
+
+    games: list[dict[str, Any]] = []
+    starts: list[datetime] = []
+    for _, row in work.iterrows():
+        entry: dict[str, Any] = {"matchup": str(row["__matchup"])}
+        start = row.get("__start")
+        if isinstance(start, datetime):
+            starts.append(start)
+            entry["start_time"] = start.isoformat()
+        games.append(entry)
+
+    games.sort(key=lambda g: g.get("start_time", ""))
+    earliest = min(starts) if starts else None
+    latest = max(starts) if starts else None
+    return games, earliest, latest
+
+
+def _discover_slates_from_disk(
+    game_date: str,
+    slate_type: str = "all",
+    *,
+    site: str = "dk",
+) -> List[Dict[str, Any]]:
+    """Discover available slates from gold salaries partitions."""
+    site_norm = _normalize_site(site)
     root = get_data_root()
-    salaries_base = root / "gold" / "dk_salaries" / "site=dk" / f"game_date={game_date}"
-    
+    salaries_base = root / "gold" / "dk_salaries" / f"site={site_norm}" / f"game_date={game_date}"
+
     if not salaries_base.exists():
-        logger.debug("No gold salaries directory for %s", game_date)
+        logger.debug("No gold salaries directory for %s site=%s", game_date, site_norm)
         return []
-    
+
     slates: List[Dict[str, Any]] = []
-    
     for dg_dir in salaries_base.iterdir():
         if not dg_dir.is_dir() or not dg_dir.name.startswith("draft_group_id="):
             continue
-        
-        try:
-            dg_id = int(dg_dir.name.split("=")[1])
-        except (ValueError, IndexError):
+        parts = dg_dir.name.split("=", 1)
+        if len(parts) != 2:
             continue
-        
+        dg_raw = parts[1].strip()
+        if not dg_raw:
+            continue
+        try:
+            dg_id: int | str = int(dg_raw)
+        except ValueError:
+            dg_id = dg_raw
+
         salaries_file = dg_dir / "salaries.parquet"
         if not salaries_file.exists():
             continue
-        
-        # Try to infer slate type and get games from the bronze draftables
-        inferred_type = "main"  # default
+
+        inferred_type = "main"
+        example_name = f"{site_norm.upper()} Draft Group {dg_raw}"
         games: List[Dict[str, Any]] = []
         earliest_start = None
         latest_start = None
-        example_name = f"Draft Group {dg_id}"
-        
-        game_info = _load_game_info_from_draftables(dg_id, root)
+
+        game_info = (
+            _load_game_info_from_draftables(int(dg_id), root)
+            if site_norm == "dk" and isinstance(dg_id, int)
+            else {}
+        )
         if game_info:
-            for comp_id, info in game_info.items():
+            for info in game_info.values():
                 game_entry = {"matchup": info["matchup"]}
                 start_time = info.get("start_time_utc")
-                if start_time:
+                if isinstance(start_time, datetime):
                     game_entry["start_time"] = start_time.isoformat()
-                    if earliest_start is None or start_time < earliest_start:
-                        earliest_start = start_time
-                    if latest_start is None or start_time > latest_start:
-                        latest_start = start_time
+                    earliest_start = start_time if earliest_start is None else min(earliest_start, start_time)
+                    latest_start = start_time if latest_start is None else max(latest_start, start_time)
                 games.append(game_entry)
-            # Sort games by start time
             games.sort(key=lambda g: g.get("start_time", ""))
-        
-        bronze_path = root / "bronze" / "dk" / "draftables" / f"draftables_raw_{dg_id}.json"
-        if bronze_path.exists():
+        else:
             try:
-                import json
-                with open(bronze_path) as f:
-                    payload = json.load(f)
-                # Try to get contest name from draftables
-                contests = payload.get("Contests", [])
-                if contests:
-                    name = contests[0].get("n", contests[0].get("ContestName", ""))
-                    if name:
-                        inferred_type = _infer_slate_type(name)
-                        example_name = name
+                salaries_df = pd.read_parquet(salaries_file)
+                games, earliest_start, latest_start = _extract_games_from_salaries_df(salaries_df)
             except Exception:
-                pass
-        
+                games = []
+
+        if site_norm == "dk" and isinstance(dg_id, int):
+            bronze_path = root / "bronze" / "dk" / "draftables" / f"draftables_raw_{dg_id}.json"
+            if bronze_path.exists():
+                try:
+                    payload = json.loads(bronze_path.read_text(encoding="utf-8"))
+                    contests = payload.get("Contests", [])
+                    if contests:
+                        name = contests[0].get("n", contests[0].get("ContestName", ""))
+                        if name:
+                            inferred_type = _infer_slate_type(name)
+                            example_name = name
+                except Exception:
+                    pass
+
+        if inferred_type == "main" and len(games) == 1:
+            inferred_type = "showdown"
+
         slate = {
             "game_date": game_date,
             "slate_type": inferred_type,
             "draft_group_id": dg_id,
-            "n_contests": 0,  # Unknown from disk
+            "n_contests": 0,
             "earliest_start": earliest_start.isoformat() if earliest_start else None,
             "latest_start": latest_start.isoformat() if latest_start else None,
             "example_contest_name": example_name,
             "games": games,
         }
-        
         if slate_type == "all" or inferred_type == slate_type:
             slates.append(slate)
-    
-    logger.info("Discovered %d slates from disk for %s", len(slates), game_date)
-    return sorted(slates, key=lambda s: s["draft_group_id"])
+
+    logger.info("Discovered %d slates from disk for %s site=%s", len(slates), game_date, site_norm)
+    return sorted(slates, key=lambda s: _draft_group_sort_key(s.get("draft_group_id")))
+
+
+def _discover_slates_from_bronze_draftables(
+    game_date: str,
+    slate_type: str = "all",
+    *,
+    site: str = "dk",
+) -> List[Dict[str, Any]]:
+    """Fallback discovery from bronze DK draftables when gold salaries are missing."""
+    from zoneinfo import ZoneInfo
+
+    site_norm = _normalize_site(site)
+    if site_norm != "dk":
+        return []
+
+    root = get_data_root()
+    bronze_dir = root / "bronze" / "dk" / "draftables"
+    if not bronze_dir.exists():
+        return []
+
+    try:
+        target_date = dt.date.fromisoformat(game_date)
+    except ValueError:
+        logger.warning("Invalid game_date format for bronze discovery: %s", game_date)
+        return []
+
+    eastern = ZoneInfo("America/New_York")
+    slates: list[dict[str, Any]] = []
+    for path in sorted(bronze_dir.glob("draftables_raw_*.json"), reverse=True):
+        m = re.search(r"draftables_raw_(\d+)\.json$", path.name)
+        if not m:
+            continue
+        dg_id = int(m.group(1))
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        competitions = payload.get("competitions", [])
+        games: list[dict[str, Any]] = []
+        starts: list[datetime] = []
+        for comp in competitions:
+            away = (comp.get("awayTeam") or {}).get("abbreviation")
+            home = (comp.get("homeTeam") or {}).get("abbreviation")
+            if not away or not home:
+                continue
+            game = {"matchup": f"{away}@{home}"}
+            start_ts = _safe_parse_timestamp(comp.get("startTime"))
+            if isinstance(start_ts, datetime):
+                game["start_time"] = start_ts.isoformat()
+                starts.append(start_ts)
+            games.append(game)
+
+        # Filter by game date: check if any game starts on the target date (in Eastern time)
+        if not starts:
+            continue
+        slate_dates = {s.astimezone(eastern).date() for s in starts}
+        if target_date not in slate_dates:
+            continue
+
+        contests = payload.get("Contests", [])
+        name = ""
+        if contests:
+            name = contests[0].get("n", contests[0].get("ContestName", "")) or ""
+        inferred_type = _infer_slate_type(name) if name else ("showdown" if len(games) == 1 else "main")
+
+        if slate_type != "all" and inferred_type != slate_type:
+            continue
+
+        slates.append(
+            {
+                "game_date": game_date,
+                "slate_type": inferred_type,
+                "draft_group_id": dg_id,
+                "n_contests": 0,
+                "earliest_start": min(starts).isoformat() if starts else None,
+                "latest_start": max(starts).isoformat() if starts else None,
+                "example_contest_name": name or f"Draft Group {dg_id}",
+                "games": games,
+            }
+        )
+
+    return sorted(slates, key=lambda s: _draft_group_sort_key(s.get("draft_group_id")))
 
 
 def _infer_slate_type(name: str) -> str:

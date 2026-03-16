@@ -61,4 +61,34 @@ def compute_dk_fpts(df: pd.DataFrame) -> pd.Series:
     return base + double_double_bonus + triple_double_bonus
 
 
-__all__ = ["compute_dk_fpts"]
+def compute_fd_fpts(df: pd.DataFrame) -> pd.Series:
+    """
+    Compute FanDuel fantasy points from boxscore-like columns.
+
+    Expected columns (per player-game):
+      - pts, fgm, fga, fg3m, fg3a, ftm, fta,
+      - reb, oreb, dreb, ast, stl, blk, tov, pf, plus_minus
+
+    FanDuel NBA classic scoring:
+      - 1.0 per point
+      - 1.2 per rebound
+      - 1.5 per assist
+      - 3.0 per steal
+      - 3.0 per block
+      - -1.0 per turnover
+    """
+    missing = EXPECTED_COLUMNS - set(df.columns)
+    if missing:
+        raise KeyError(f"Missing required columns for FD scoring: {sorted(missing)}")
+
+    pts = pd.to_numeric(df["pts"], errors="coerce")
+    reb = pd.to_numeric(df["reb"], errors="coerce")
+    ast = pd.to_numeric(df["ast"], errors="coerce")
+    stl = pd.to_numeric(df["stl"], errors="coerce")
+    blk = pd.to_numeric(df["blk"], errors="coerce")
+    tov = pd.to_numeric(df["tov"], errors="coerce")
+
+    return pts + 1.2 * reb + 1.5 * ast + 3.0 * stl + 3.0 * blk - 1.0 * tov
+
+
+__all__ = ["compute_dk_fpts", "compute_fd_fpts"]

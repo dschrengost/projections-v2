@@ -1475,6 +1475,35 @@ def test_summarize_world_contracts_from_frame_tolerates_small_float_drift() -> N
     assert checks["team_minutes_max_abs_drift"] == pytest.approx(0.00003)
 
 
+def test_summarize_world_contracts_from_frame_counts_inactive_nonzero_stats() -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 0],
+            "game_id": [1, 1, 1],
+            "team_id": [10, 10, 20],
+            "player_id": [100, 101, 200],
+            "active": [0, 0, 1],
+            "minutes": [0.0, 2.0, 238.0],
+            "fga2": [0.0, 1.0, 4.0],
+            "fg2m": [0.0, 1.0, 3.0],
+            "fga3": [0.0, 0.0, 1.0],
+            "fg3m": [0.0, 0.0, 1.0],
+            "fta": [0.0, 0.0, 2.0],
+            "ftm": [0.0, 0.0, 2.0],
+            "pts": [0.0, 2.0, 9.0],
+            "reb": [0.0, 1.0, 4.0],
+            "ast": [0.0, 0.0, 5.0],
+            "stl": [0.0, 0.0, 1.0],
+            "blk": [0.0, 0.0, 1.0],
+            "tov": [0.0, 0.0, 2.0],
+            "dk_fpts": [0.0, 5.0, 35.0],
+        }
+    )
+    checks = _summarize_world_contracts_from_frame(worlds)
+    assert checks["inactive_nonzero_stats"] == 1
+    assert checks["inactive_nonzero_fpts_proxy"] == 1
+
+
 def test_team_minutes_sums_without_pandas_groupby_matches_groupby_reference() -> None:
     world_count = 4096
     game_ids = [22500901, 22500902, 22500903, 22500904]
@@ -1605,6 +1634,37 @@ def test_factorize_int_key_arrays_preserve_order_handles_large_sparse_keys() -> 
     assert uniques[0].tolist() == [5_000_000_000_001, 6_000_000_000_002, 5_000_000_000_001]
     assert uniques[1].tolist() == [10, 10, 11]
     assert uniques[2].tolist() == [100, 100, 100]
+
+
+def test_factorize_int_key_arrays_preserve_order_stress_codes_stay_in_bounds() -> None:
+    rng = np.random.default_rng(42)
+    row_count = 20_000
+    game_ids = rng.choice(
+        np.array([22500963, 22500968, 5_000_000_000_001, 7_205_759_405_470_556], dtype=np.int64),
+        size=row_count,
+        replace=True,
+    )
+    team_ids = rng.choice(
+        np.array([1610612741, 1610612746, 1610612747, 1610612752], dtype=np.int64),
+        size=row_count,
+        replace=True,
+    )
+    player_ids = rng.integers(1000, 1600, size=row_count, dtype=np.int64)
+
+    codes, uniques = _factorize_int_key_arrays_preserve_order(game_ids, team_ids, player_ids)
+
+    assert len(codes) == row_count
+    assert len(uniques) == 3
+    group_count = len(uniques[0])
+    assert group_count > 0
+    assert int(codes.min()) >= 0
+    assert int(codes.max()) < group_count
+
+    first_seen: dict[tuple[int, int, int], int] = {}
+    for idx, key in enumerate(zip(game_ids.tolist(), team_ids.tolist(), player_ids.tolist(), strict=False)):
+        if key not in first_seen:
+            first_seen[key] = len(first_seen)
+        assert int(codes[idx]) == first_seen[key]
 
 
 def test_repair_world_frame_contract_fields_normalizes_game_id_and_makes() -> None:
